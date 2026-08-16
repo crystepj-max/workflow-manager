@@ -171,7 +171,9 @@ gh issue view <N> --json title,body,comments
    grill-with-docs` 已装入 `~/.agents/skills/` 公共池（2026-08-16 核实）；**DSH 会话的
    技能目录是启动时快照，新装技能需新会话方可 `skill()` 调用**；`to-questionnaire`
    未安装（需求沟通可选辅助，不阻塞主流程）。
-2. 单 provider：异源目前靠「不同角色 + 不同会话」弱保证。
+2. ~~单 provider~~（已解决 2026-08-16）：`deepseek-official`（v4-pro/v4-flash）与
+   `kimi-coding/k3` 双 provider 实测可用，推荐分配见「异源配置」；kimi `k2.7` 不在
+   pi-ai 内置 catalog，需要时在设置界面显式添加。
 3. workflow 前台执行：长循环会占用会话回合；断点续跑见「按返回状态驱动」。
 4. 跨仓库：目标仓库须为会话工作区（或在沙箱授权范围内）；多任务并行用
    git worktree + 各自会话。
@@ -191,3 +193,7 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
    属 DSH 自身卫生问题，与工作流逻辑无关。
 4. **schema 的 enum 必须带 type**：`{enum:[...]}` 需写成 `{type:'string',enum:[...]}`，
    否则 workflow 校验拒绝（首次启动即暴露，已修复）。
+5. **推送/建 PR 职责归属**（2026-08-16 用户决策）：从开发节点移至收口节点——开发只
+   提交到工作分支，收口统一 `git push` + `gh pr create --draft` + issue 评论回写；
+   禁止推送 base 分支、禁止合并 PR（合并是人工动作）。已回填 dev.md / closeout.md /
+   编排脚本，并在 issue #1 收口补跑中实测通过（Draft PR #2，由 deepseek-v4-flash 执行）。
