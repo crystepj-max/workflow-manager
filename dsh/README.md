@@ -168,34 +168,42 @@ gh issue view <N> --json title,body,comments
 备注：kimi `k2.7` 不在 pi-ai 内置 catalog（仅 `k3`/`k3-256k`），如需使用要在设置界面
 `llm-pi-ai → providers.kimi-coding` 的 models 中显式添加；不添加也能用上述三路由实现真异源。
 
-## 在其他项目中使用
+### kimi 额度耗尽时的兜底分配（DeepSeek-only）
 
-`dsh/` 目录自包含（角色 + 编排脚本 + 本 runbook），模型配置在宿主级（所有项目共享）。
-接入一个新项目只需三步：
+```json
+{
+  "dispatcher": { "provider": "deepseek-official", "model": "deepseek-v4-pro" },
+  "dev":        { "provider": "deepseek-official", "model": "deepseek-v4-pro" },
+  "test":       { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+  "review":     { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+  "accept":     { "provider": "deepseek-official", "model": "deepseek-v4-pro" },
+  "closeout":   { "provider": "deepseek-official", "model": "deepseek-v4-flash" }
+}
+```
 
-1. **复制 `dsh/` 进目标仓库根**并提交：
-   `git clone https://github.com/crystepj-max/workflow-manager.git /tmp/wm && cp -r /tmp/wm/dsh <目标仓库>/dsh`，
-   或用 `git submodule add` 挂为本仓库子模块（便于跟随上游更新）。
-2. **在目标仓库目录打开 DSH 会话**（会话工作区 = 目标仓库；沙箱按工作区授权，
-   角色文件与 run 产物都在仓库内，无跨目录访问）。
-3. **对主会话说「用开发工作流 2.0 跑 issue #N」**——主会话按本 README 的
-   runbook 装配 args（`gh issue view` 拉 issue → 调 workflow 工具 → 按返回状态驱动）。
+开发(v4-pro) / 审核(v4-flash) 不同模型 + 不同角色 = 弱异源（脚本会提示警告）；
+kimi 额度恢复后换回上面的推荐分配即恢复跨 provider 真异源。
 
-注意事项：
+## 在其他项目中使用（推荐：技能包，装一次全局可用）
 
-- 目标仓库需有 GitHub 远端且 `gh` 已登录（issue 驱动 + PR 收口）；无远端也能跑，
-  收口退化为「本地 commit 清单」。
-- `args.roleDir` 缺省 `dsh/roles`；角色放别处时覆盖此参数即可。
-- `args.models` 分配对所有项目通用（宿主级 provider：`kimi-coding` / `deepseek-official`）。
-- 多任务并行：每个 issue 一个会话，各自 git worktree/分支隔离。
-- 项目专属测试能力（如 STS2 真机回归）以技能形式存在于会话技能目录即可被测试节点使用。
+工作流已打包为 DSH 技能 `dev-workflow-2-0`，安装于公共池
+`~/.agents/skills/dev-workflow-2-0/`（SKILL.md + roles/ + workflow/ 自包含）。
+任何项目的 DSH 会话都能按触发词直接调用，**无需往项目里复制任何文件**。
 
-进阶（可选）：
+**在任意项目使用：**
 
-- **automation 自动触发**：对「待开发」label 的 issue 建定时轮询 automation，
-  命中即开跑（read-only 轮询 + 人工放行）。
-- **preset/插件化**：把工作流封装为 DSH agent preset 或 Cordis 插件（注册
-  `/dev-flow` 命令，免手工装配 args），适合多项目高频使用。
+1. 在目标仓库目录打开 DSH 会话（技能目录在会话启动时加载）。
+2. 直接说「用开发工作流 2.0 跑 issue #N」——技能触发后按 SKILL.md 的 runbook
+   装配 args 并驱动全流程（角色快照自动拷贝进 `.agent-runs/<task>/roles/` 满足留痕）。
+
+**更新/重装技能**：`./dsh/install-skill.sh`（公共池真源 = 本仓库 `dsh/`，改仓库即改全局）。
+
+**备选：仓库内置方式**——把 `dsh/` 目录复制进目标仓库（角色+脚本随仓库走，
+不依赖宿主技能池）。两种方式的编排脚本、角色、返回状态机完全一致。
+
+注意事项：目标仓库需 `gh` 已登录（无远端可跑，收口退化为本地 commit 清单）；
+模型分配宿主级共享（kimi 额度不足时用 DeepSeek 双模型兜底，见「异源配置」节）；
+多任务并行 = 每个 issue 一个会话 + 独立工作分支（`dev2/<taskId>`）。
 
 ## 已知缺口（P0 基线）
 
@@ -230,3 +238,7 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
    同日第二次决策：**合并 PR 与关闭 issue 也由收口节点执行**（squash 合并 + 删分支），
    唯一保留的人工动作是「验收裁决」；唯一禁止项是「绕过 PR 直接推送 base 分支」。
    已在 issue #1 上实测全链路闭环（PR #2 合并、issue 关闭、本地分支收束）。
+6. **技能化打包**（2026-08-16）：工作流打包为公共池技能 `dev-workflow-2-0`
+   （`~/.agents/skills/`，SKILL.md + roles + workflow + install-skill.sh），任何项目
+   会话按触发词调用；本会话技能目录热刷新后已验证可加载。遗留：公共池与工作区的
+   `.tmpdir` 原子写残留因安全删除守卫额度限制待下一轮清理（已 gitignore，无功能影响）。
