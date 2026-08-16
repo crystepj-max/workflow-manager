@@ -240,9 +240,9 @@ function closeoutPrompt() {
     + '1. 读取 ' + runDir + '/ 下全部报告终态（dev / test / review / accept / acceptance-summary）。\n'
     + '2. 一致性收口：代码/文档/规则对齐，确认无遗留死代码与格式漂移。\n'
     + '3. 写 ' + runDir + '/cleanup-report.md（按角色规定的模板），更新 STATE.md 为 done。\n'
-    + '4. 推送与合并请求：git push -u origin ' + workBranch + '，然后 gh pr create --draft --base ' + baseBranch + ' --head ' + workBranch + '（标题概括需求，正文汇总目标/验收结论/报告清单）；PR 已存在则跳过创建、改为补充评论。禁止推送 ' + baseBranch + '、禁止 gh pr merge（合并由人工完成）；无远端时记录本地 commit 清单。\n'
-    + (A.issueRef ? '5. 在 issue ' + A.issueRef + ' 下评论：验收通过结论 + Draft PR 链接 + run 产物位置。\n' : '')
-    + '6. 工作区收束：只处理本任务（' + workBranch + '）相关变更，不触碰无关文件与已有未提交改动；输出提交状态或待提交清单。';
+    + '4. 推送、合并与关闭：git push -u origin ' + workBranch + '；gh pr create --draft --base ' + baseBranch + ' --head ' + workBranch + '（已存在则复用；标题概括需求，正文汇总目标/验收结论/报告清单）；然后 gh pr ready + gh pr merge --squash --delete-branch；合并依据是「人工验收已通过」的前置决策，你只执行、不重新判定。禁止绕过 PR 直接推送 ' + baseBranch + '；无远端时记录本地 commit 清单。\n'
+    + (A.issueRef ? '5. gh issue close ' + A.issueRef.replace('#', '') + ' --comment：验收通过结论 + 合并 commit + run 产物位置。\n' : '')
+    + '6. 工作区收束：只处理本任务（' + workBranch + '）相关变更，不触碰无关文件与已有未提交改动；合并后 git checkout ' + baseBranch + ' && git pull && git branch -d ' + workBranch + '；输出提交状态或待提交清单。';
   return roleRef('closeout') + ctx('收口', extra);
 }
 

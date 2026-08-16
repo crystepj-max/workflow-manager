@@ -26,9 +26,12 @@ workflow 编排脚本（dsh/workflow/dev-workflow-2.0.mjs）
    │
    ▼
 主会话呈 acceptance-summary.md → ask_user_question 人工裁决（AI 不代签）
-   ├─ 通过 → workflow(entry=closeout) → 收口 agent（一致性收口 + 推送分支 + 建 Draft PR）→ DONE
+   ├─ 通过 → workflow(entry=closeout) → 收口 agent（一致性收口 + 推送/合并 PR + 关闭 issue）→ DONE
    └─ 不通过 → workflow(entry=dev, feedback=人工意见, startRound+1) → 继续开发循环
 ```
+
+- **人机职责边界**：人工只做两个决策——确认需求（issue 三要素）与验收裁决；
+  其余全是执行（开发/测试/审核/推送/合并/关闭 issue），由 AI 完成。
 
 - **流程编排**：`workflow` 工具的 JS 编排脚本即状态机；节点 = `agent()` 调用；
   结构化闸门 = `agent()` 的 `schema` 校验（替代 gold-band 的 output/messageId 机制）。
@@ -106,7 +109,7 @@ gh issue view <N> --json title,body,comments
 | `TECHNICAL_FAILURE` | agent 技术失败 | 检查模型/额度后重试该 entry |
 | `AWAITING_HUMAN_ACCEPTANCE` | 验收双报告已产出 | 呈 `acceptance-summary.md` + 人工确认卡：通过 → entry=closeout；不通过 → entry=dev + feedback + startRound+1 |
 | `FAILED_MAX_ROUNDS` | 9 轮超限 | 呈 reschedule（归因/拆分建议/人工介入建议）→ 人工决策：拆分后重新调度 |
-| `DONE` | 收口完成 | 呈 cleanup-report.md + Draft PR 链接，流程结束（PR 合并由人工在 GitHub 完成） |
+| `DONE` | 收口完成 | 呈 cleanup-report.md + 合并 commit + 已关闭 issue，流程结束 |
 
 人工确认卡建议字段：通过 / 不通过（附意见）。`accept.verdict` 是 AI 的核验结论，
 仅供参考，**裁决权在人工**。
@@ -158,12 +161,41 @@ gh issue view <N> --json title,body,comments
 | 测试 | `deepseek-official/deepseek-v4-flash` | 高速：证据采集与验证 |
 | 审核 | `kimi-coding/k3` | 高：与开发不同 provider，满足异源硬规则 |
 | 人工验收 | `kimi-coding/k3` | 中 |
-| 收口 | `deepseek-official/deepseek-v4-flash` | 低：机械整理 + 推送/建 PR |
+| 收口 | `deepseek-official/deepseek-v4-flash` | 低：机械整理 + 推送/合并/关闭 issue |
 
 传入方式：`args.models = { dispatcher: {provider,model}, dev: {...}, test: {...}, review: {...}, accept: {...}, closeout: {...} }`。
 
 备注：kimi `k2.7` 不在 pi-ai 内置 catalog（仅 `k3`/`k3-256k`），如需使用要在设置界面
 `llm-pi-ai → providers.kimi-coding` 的 models 中显式添加；不添加也能用上述三路由实现真异源。
+
+## 在其他项目中使用
+
+`dsh/` 目录自包含（角色 + 编排脚本 + 本 runbook），模型配置在宿主级（所有项目共享）。
+接入一个新项目只需三步：
+
+1. **复制 `dsh/` 进目标仓库根**并提交：
+   `git clone https://github.com/crystepj-max/workflow-manager.git /tmp/wm && cp -r /tmp/wm/dsh <目标仓库>/dsh`，
+   或用 `git submodule add` 挂为本仓库子模块（便于跟随上游更新）。
+2. **在目标仓库目录打开 DSH 会话**（会话工作区 = 目标仓库；沙箱按工作区授权，
+   角色文件与 run 产物都在仓库内，无跨目录访问）。
+3. **对主会话说「用开发工作流 2.0 跑 issue #N」**——主会话按本 README 的
+   runbook 装配 args（`gh issue view` 拉 issue → 调 workflow 工具 → 按返回状态驱动）。
+
+注意事项：
+
+- 目标仓库需有 GitHub 远端且 `gh` 已登录（issue 驱动 + PR 收口）；无远端也能跑，
+  收口退化为「本地 commit 清单」。
+- `args.roleDir` 缺省 `dsh/roles`；角色放别处时覆盖此参数即可。
+- `args.models` 分配对所有项目通用（宿主级 provider：`kimi-coding` / `deepseek-official`）。
+- 多任务并行：每个 issue 一个会话，各自 git worktree/分支隔离。
+- 项目专属测试能力（如 STS2 真机回归）以技能形式存在于会话技能目录即可被测试节点使用。
+
+进阶（可选）：
+
+- **automation 自动触发**：对「待开发」label 的 issue 建定时轮询 automation，
+  命中即开跑（read-only 轮询 + 人工放行）。
+- **preset/插件化**：把工作流封装为 DSH agent preset 或 Cordis 插件（注册
+  `/dev-flow` 命令，免手工装配 args），适合多项目高频使用。
 
 ## 已知缺口（P0 基线）
 
@@ -194,6 +226,7 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
 4. **schema 的 enum 必须带 type**：`{enum:[...]}` 需写成 `{type:'string',enum:[...]}`，
    否则 workflow 校验拒绝（首次启动即暴露，已修复）。
 5. **推送/建 PR 职责归属**（2026-08-16 用户决策）：从开发节点移至收口节点——开发只
-   提交到工作分支，收口统一 `git push` + `gh pr create --draft` + issue 评论回写；
-   禁止推送 base 分支、禁止合并 PR（合并是人工动作）。已回填 dev.md / closeout.md /
-   编排脚本，并在 issue #1 收口补跑中实测通过（Draft PR #2，由 deepseek-v4-flash 执行）。
+   提交到工作分支，收口统一 `git push` + `gh pr create --draft` + issue 评论回写。
+   同日第二次决策：**合并 PR 与关闭 issue 也由收口节点执行**（squash 合并 + 删分支），
+   唯一保留的人工动作是「验收裁决」；唯一禁止项是「绕过 PR 直接推送 base 分支」。
+   已在 issue #1 上实测全链路闭环（PR #2 合并、issue 关闭、本地分支收束）。
