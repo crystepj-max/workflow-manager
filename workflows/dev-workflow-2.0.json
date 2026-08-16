@@ -1,0 +1,238 @@
+{
+  "version": "0.1",
+  "id": "dev-workflow-2.0",
+  "entry": "调度",
+  "control": {
+    "max_attempts": 9,
+    "max_rounds": 12
+  },
+  "nodes": [
+    {
+      "type": "worker",
+      "id": "调度",
+      "provider": "kimi",
+      "model": "kimi-code/k3",
+      "profile": "pf2-dispatcher",
+      "goal": "调度判定（以 GitHub issue 为唯一输入）：① 校验需求三要素——任务目标（交付什么结果）、涉及范围（改动哪些文件/模块、明确不做哪些）、验收标准（可操作可验证的判定条件），任一缺失如实判定缺失，不自行编造；② 三要素齐全则判定是否需要集成测试；③ 复用 triage 分诊、grill-with-docs 澄清歧义（仅用于已确认需求的归档整理，不向用户追问）、to-tickets 拆带依赖顺序的任务清单、L 型先 wayfinder 拆地图并出 OpenSpec。产出 .agent-runs/<task-id>/task.yaml(size 字段) + STATE.md；结束前写 stage-handoff(S1)。人工门禁：需求确认。最后严格按 JSON 输出调度结论：complete=true 才进入开发，否则打回人工补齐 issue。",
+      "output": {
+        "kind": "json",
+        "artifact": "dispatch-result",
+        "schema": {
+          "complete": "boolean",
+          "missing": "String",
+          "need_integration_test": "boolean",
+          "reason": "String"
+        }
+      },
+      "success_condition": {
+        "expression": "$.complete == true"
+      },
+      "permission_mode": "yolo",
+      "manual_check": null,
+      "prompt_envelope": "runtime-managed",
+      "config_options": {
+        "thinking": "high"
+      }
+    },
+    {
+      "type": "worker",
+      "id": "开发",
+      "provider": "opencode",
+      "model": "kimi/k3",
+      "profile": "pf2-dev",
+      "goal": "开发实现：先基于 base_branch 拉取本任务独立 working_branch（命名规范见 task.yaml working_branch 字段），全程只在本分支提交，禁止改动其他分支/其他任务的工作区；按 task.yaml 用 implement 施工，tdd 先写失败测试。满足 QUALITY_GATES Gate1-4。本地 verify.sh 全绿后建 Draft PR，写 developer-handoff.md 与更新 STATE.md、stage-handoff(S2)。",
+      "output": null,
+      "success_condition": null,
+      "permission_mode": "bypassPermissions",
+      "manual_check": null,
+      "prompt_envelope": "runtime-managed",
+      "config_options": {
+        "effort": "max"
+      }
+    },
+    {
+      "type": "worker",
+      "id": "分流",
+      "provider": "kimi",
+      "model": "kimi-code/k3",
+      "profile": "pf2-dispatcher",
+      "goal": "分流判定：读取调度节点的 dispatch-result 结论，如实输出是否需要集成测试的判定 JSON，不重新分析三要素、不做开发。",
+      "output": {
+        "kind": "json",
+        "artifact": "route-result",
+        "schema": {
+          "need_integration_test": "boolean",
+          "reason": "String"
+        }
+      },
+      "success_condition": {
+        "expression": "$.need_integration_test == true"
+      },
+      "permission_mode": "yolo",
+      "manual_check": null,
+      "prompt_envelope": "runtime-managed",
+      "config_options": {
+        "thinking": "low"
+      }
+    },
+    {
+      "type": "worker",
+      "id": "测试",
+      "provider": "kimi",
+      "model": "kimi-code/kimi-for-coding-highspeed",
+      "profile": "pf2-test",
+      "goal": "测试与缺陷诊断：运行单测，diagnosing-bugs 修复逃逸/假测试（修复前必须有失败测试），resolving-merge-conflicts 解决冲突，涉及游戏内显示改动用 STS2-AUTOTEST 做 smoke test。写 test-report.md 与 stage-handoff(S3)。",
+      "output": {
+        "kind": "json",
+        "artifact": "test-result",
+        "schema": {
+          "reason": "String",
+          "result": "boolean"
+        }
+      },
+      "success_condition": {
+        "expression": "$.result == true"
+      },
+      "permission_mode": null,
+      "manual_check": null,
+      "prompt_envelope": "runtime-managed"
+    },
+    {
+      "type": "worker",
+      "id": "审核",
+      "provider": "kimi",
+      "model": "kimi-code/k3",
+      "profile": "pf2-review",
+      "goal": "独立审核：code-review 双轴并行审查（需求符合性 + 代码质量）。产出 review-report.md，结论 APPROVE/REQUEST_CHANGES/COMMENT_ONLY。有阻塞则回开发。写 stage-handoff(S4)。",
+      "output": {
+        "kind": "json",
+        "artifact": "审核-result",
+        "schema": {
+          "reason": "String",
+          "result": "boolean"
+        }
+      },
+      "success_condition": {
+        "expression": "$.result == true"
+      },
+      "permission_mode": "yolo",
+      "manual_check": null,
+      "prompt_envelope": "runtime-managed",
+      "config_options": {
+        "thinking": "high"
+      }
+    },
+    {
+      "type": "worker",
+      "id": "验收",
+      "provider": "claude-acp",
+      "model": "sonnet",
+      "profile": "pf2-accept",
+      "goal": "人工验收：汇总审核/测试证据，产出通俗验收报告 acceptance-summary.md（任务目标/达成情况/人工确认方式）与严格验收报告 accept-report.md，等待人工确认通过/不通过。验收通过进入收口，不通过打回开发。",
+      "output": null,
+      "success_condition": null,
+      "permission_mode": "bypassPermissions",
+      "manual_check": true,
+      "prompt_envelope": "runtime-managed",
+      "config_options": {
+        "effort": "max"
+      }
+    },
+    {
+      "type": "worker",
+      "id": "收口",
+      "provider": "claude-acp",
+      "model": "sonnet",
+      "profile": "pf2-closeout",
+      "goal": "收口：合并前一致性收口——用 neat-freak 做代码/文档/路线图/规则对齐，确认无遗留死代码与格式漂移；汇总交接产物 cleanup-report.md；清理临时工作区。收口不因 AI 判定打回，正常完成即进入结束。",
+      "output": null,
+      "success_condition": null,
+      "permission_mode": "bypassPermissions",
+      "manual_check": null,
+      "prompt_envelope": "runtime-managed",
+      "config_options": {
+        "effort": "high"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "调度",
+      "to": "开发",
+      "on": "success",
+      "session": "new"
+    },
+    {
+      "from": "调度",
+      "to": "$end",
+      "on": "failure",
+      "session": "new"
+    },
+    {
+      "from": "开发",
+      "to": "分流",
+      "on": "success",
+      "session": "new"
+    },
+    {
+      "from": "分流",
+      "to": "测试",
+      "on": "success",
+      "session": "new"
+    },
+    {
+      "from": "分流",
+      "to": "审核",
+      "on": "failure",
+      "session": "new"
+    },
+    {
+      "from": "测试",
+      "to": "审核",
+      "on": "success",
+      "session": "new"
+    },
+    {
+      "from": "测试",
+      "to": "开发",
+      "on": "failure",
+      "session": "new"
+    },
+    {
+      "from": "审核",
+      "to": "验收",
+      "on": "success",
+      "session": "new"
+    },
+    {
+      "from": "审核",
+      "to": "开发",
+      "on": "failure",
+      "session": "new"
+    },
+    {
+      "from": "收口",
+      "to": "$end",
+      "on": "success",
+      "session": "new"
+    },
+    {
+      "from": "收口",
+      "to": "开发",
+      "on": "failure",
+      "session": "new"
+    },
+    {
+      "from": "验收",
+      "to": "收口",
+      "on": "success",
+      "session": "new"
+    },
+    {
+      "from": "验收",
+      "to": "开发",
+      "on": "failure",
+      "session": "new"
+    }
+  ]
+}
