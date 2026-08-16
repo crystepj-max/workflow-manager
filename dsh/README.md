@@ -242,3 +242,72 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
    （`~/.agents/skills/`，SKILL.md + roles + workflow + install-skill.sh），任何项目
    会话按触发词调用；本会话技能目录热刷新后已验证可加载。遗留：公共池与工作区的
    `.tmpdir` 原子写残留因安全删除守卫额度限制待下一轮清理（已 gitignore，无功能影响）。
+
+## 可视化插件（vwf）使用说明
+
+「可视化工作流」（Visual Workflow，下文 vwf）把同一套「开发工作流 2.0」状态机做成图形化
+入口：在 Web UI 里选内置模板 → 看只读流程图 → 点「运行」，插件把 DSL 图编译成 workflow 脚本
+并交给 harness 引擎执行，全程零代码。需求基线见 `.scratch/dsh-visual-workflow-p0/requirements-analysis.md`。
+
+### 插件形态：动态原型 → P2 组合包
+
+- **P0 动态原型（当前形态）**：动态 Cordis 插件，host + client 两半、plain JS（无打包器/JSX/import）。
+  运行时用 `cordis_define` / `cordis_run` 定义并激活，进程内生效、重启即失效，不落盘。Host 半承载
+  DSL 校验器、DSL→script 编译器与内存运行状态；Client 半在 settings.section 注册「工作流」页
+  （内置模板列表 + 只读 SVG 流程图 + 运行按钮）。
+- **P2 组合包（目标形态）**：P0 验完语义后打包为组合包（`dsh plugin add` / cordis.yml preset），
+  随部署持久化，重启仍在、可跨会话复用。按 P0 需求分析的非目标清单：画布编辑、运行看板状态染色
+  归 P1；组合包打包、storageDomain 持久化、多工作流并行归 P2。
+
+### wf_run 工具：调用方式与参数表
+
+Host 半把 `wf_run` 注册为模型工具，主会话直接以工具调用驱动——把 `workflow` 工具的「手写脚本」
+换成「DSL 图编译」。首次运行从 `entry=dispatch` 起，跑到人工门禁节点即返回，裁决后再以对应
+`entry` 续跑。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `templateId` | 首次运行* | 内置模板 id（如 `vwf-dev-workflow-2-0`，对应「开发工作流 2.0」）；与 `dsl` 二选一 |
+| `dsl` | 首次运行* | 原始 DSL JSON（自定义/覆盖图）；与 `templateId` 二选一，两者同给以 `dsl` 为准 |
+| `taskId` | 必填 | 任务标识（如 `issue-7`） |
+| `runDir` | 必填 | run 产物目录（如 `.agent-runs/issue-7`） |
+| `entry` | 可选 | 起点/续跑点，缺省 `dispatch`；续跑时指向被暂停的门禁节点（如 `accept`）或打回起点 `dev` |
+| `approved` | 续跑 | 人工裁决结果：`true` 表「通过」，放行门禁节点走 success 出边 |
+| `feedback` | 续跑 | 打回/续跑意见（验收不通过或审核打回时回传） |
+| `startRound` | 续跑 | 续跑起始轮次，回传上次返回值以保持 9 轮计数连续 |
+| `history` | 续跑 | 前次打回历史，回传上次返回值以保持 9 轮计数连续 |
+
+\* `templateId` 与 `dsl` 至少提供其一。
+
+### 运行状态 AWAITING_HUMAN_* 的人工裁决续跑
+
+编译器把 `manualCheck: true` 节点编译为「运行到该节点即返回」，状态记为
+`AWAITING_HUMAN_<节点id>`（如 `AWAITING_HUMAN_accept`，等价于手写脚本的
+`AWAITING_HUMAN_ACCEPTANCE`）。返回体给出续跑所需参数（`entry` / `approved` / `startRound` /
+`history` / `feedback`），主会话据此呈 `acceptance-summary.md` + 发人工确认卡（AI 不代签）：
+
+- **通过**：以 `entry=<节点id>` + `approved=true` 续跑（并回传 `startRound` / `history` /
+  `feedback`），门禁节点走 success 出边进入收口，最终 `DONE`；
+- **不通过**：以 `entry=dev` + `feedback=人工意见` + `startRound=上次+1` + `history` 续跑，
+  回到开发循环继续（9 轮上限计数连续）。
+
+```jsonc
+// 首次运行：选内置模板，entry=dispatch 起（issue 为透传输入，与 workflow 工具同源）
+{ "templateId": "vwf-dev-workflow-2-0", "taskId": "issue-7",
+  "runDir": ".agent-runs/issue-7", "entry": "dispatch",
+  "issue": { "ref": "#7", "body": "..." } }
+
+// 收到 AWAITING_HUMAN_accept 后，人工裁决「通过」→ 放行进入收口
+{ "templateId": "vwf-dev-workflow-2-0", "taskId": "issue-7",
+  "runDir": ".agent-runs/issue-7", "entry": "accept", "approved": true,
+  "startRound": 1, "history": [], "feedback": "" }
+```
+
+### 与技能包 dev-workflow-2-0 的关系
+
+vwf 插件与技能包 `dev-workflow-2-0`（编排脚本版本控制源 = `dsh/workflow/dev-workflow-2.0.mjs`）
+是同一套工作流的两种入口：技能包走文本触发（主会话读 SKILL.md runbook，把脚本全文 + args 传给
+`workflow` 工具），vwf 插件走图形触发（把同一状态机画成 DSL 图、编译成脚本再交给同一引擎）。
+二者共享六角色（`dsh/roles/*.md`）、返回状态机（`AWAITING_HUMAN_*` / `DONE` / `FAILED_MAX_ROUNDS`
+等）、9 轮上限与异源模型分配；vwf 编译产物与手写脚本行为对齐（P0 任务 02 的对照验收）。差别只在
+入口与脚本来源：技能包脚本手写维护，vwf 脚本由 DSL 编译生成。
