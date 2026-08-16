@@ -1,0 +1,27 @@
+{
+  "name": "vwf-dev-workflow-2-0",
+  "description": "开发工作流 2.0",
+  "phases": [
+    {
+      "title": "调度"
+    },
+    {
+      "title": "开发"
+    },
+    {
+      "title": "分流"
+    },
+    {
+      "title": "测试"
+    },
+    {
+      "title": "审核"
+    },
+    {
+      "title": "人工验收"
+    },
+    {
+      "title": "收口"
+    }
+  ]
+}
