@@ -11,7 +11,10 @@
 //   - 结构化闸门由 agent() 的 schema 校验完成，与引擎流式协议无关；
 //   - 9 轮超限后自动回调度做失败归因与拆分建议（gold-band 需人工重新调度）；
 //   - 人工验收门禁在脚本外：本脚本跑到 AWAITING_HUMAN_ACCEPTANCE 即返回，
-//     由主会话呈报告、等人工裁决，再以 entry=closeout / entry=dev 续跑。
+//     由主会话呈报告、等人工裁决，再以 entry=closeout / entry=dev 续跑；
+//   - 多任务隔离用 git worktree 物理隔离：dev/test/review 在独立 worktree
+//     （<runDir>/worktree，分支 dev2/<taskId>）中作业，主工作区只承担 push/pr/merge/close，
+//     消除「main 被占用」与「共享工作区未提交改动被覆盖」两类互踩阻塞。
 // ============================================================================
 
 const A = args || {};
@@ -36,6 +39,7 @@ const runDir = A.runDir;
 const repoPath = A.repoPath || '当前会话工作区根目录';
 const baseBranch = A.baseBranch || 'main';
 const workBranch = 'dev2/' + taskId;
+const worktreePath = runDir + '/worktree';
 const models = A.models || {};
 const history = A.history || [];
 
@@ -164,6 +168,7 @@ function ctx(nodeName, extra) {
     + '- 目标仓库：' + repoPath + '\n'
     + '- run 产物目录：' + runDir + '/（不存在则创建；本节点只允许在该目录内写文件）\n'
     + '- base 分支：' + baseBranch + '；工作分支：' + workBranch + '\n'
+    + '- 工作区隔离（worktree）：作业在独立 worktree `' + worktreePath + '`（分支 `' + workBranch + '`）中进行；主工作区（' + repoPath + '）停在 ' + baseBranch + '，只承担 push/pr/merge/close。\n'
     + '- 当前节点：' + nodeName + '\n'
     + '- STATE.md：完成本节点后更新 ' + runDir + '/STATE.md（stage / round / status / updated 四行，时间用 `date -u +%FT%TZ` 获取）\n'
     + (extra ? '\n' + extra + '\n' : '')
@@ -189,9 +194,12 @@ function devPrompt(round, dispatch, feedback) {
     + '【当前轮次】第 ' + round + ' / ' + MAX_ROUNDS + ' 轮\n\n'
     + (feedback ? '【上轮打回反馈——必须逐条修复】\n' + feedback + '\n\n' : '')
     + '【本节点任务】\n'
-    + '1. 若工作分支不存在：git checkout -b ' + workBranch + '（基于 ' + baseBranch + '）；已存在则 git checkout ' + workBranch + '。\n'
-    + '2. 读取 ' + runDir + '/dispatch-result.json 与 STATE.md（如有），按调度结论施工（tdd：先写会失败的测试再写实现）。\n'
-    + '3. 本地验证全绿后，把实现提交到工作分支（不推送、不建 PR——推送与 Draft PR 由收口节点统一完成）。\n'
+    + '1. 建立/复用独立 worktree（作业区 = ' + worktreePath + '，分支 ' + workBranch + '）：\n'
+    + '   - 首次：git worktree add ' + worktreePath + ' -b ' + workBranch + ' ' + baseBranch + '（若分支已存在但 worktree 不在，则 git worktree add ' + worktreePath + ' ' + workBranch + '）。\n'
+    + '   - 续跑（' + worktreePath + ' 已存在）：直接复用，git -C ' + worktreePath + ' status 确认后继续。\n'
+    + '   全程只在 worktree 内读写与提交；不切换主工作区（' + repoPath + '）的分支、不触碰其它任务文件。\n'
+    + '2. 读取 ' + runDir + '/dispatch-result.json 与 STATE.md（如有），按调度结论施工（tdd：先写会失败的本地校验脚本再写实现）。\n'
+    + '3. 在 worktree 内本地验证全绿后提交（git -C ' + worktreePath + ' add . && git -C ' + worktreePath + ' commit；不推送、不建 PR——推送与 Draft PR 由收口节点统一完成）。\n'
     + '4. 写 ' + runDir + '/dev-report.md（按角色规定的模板），更新 STATE.md。\n'
     + '环境受阻（依赖缺失、命令不可用等）无法完成时，status 报 blocked 并在 summary 说明具体阻塞，不要硬撑。';
   return roleRef('dev') + ctx('开发', extra);
@@ -203,7 +211,7 @@ function testPrompt(round, dispatch) {
     + '【当前轮次】第 ' + round + ' / ' + MAX_ROUNDS + ' 轮\n\n'
     + '【本节点任务】\n'
     + '1. 读取 ' + runDir + '/dev-report.md、' + runDir + '/review-report.md（如有）与 dispatch-result.json。\n'
-    + '2. 在工作分支 ' + workBranch + ' 上执行运行态验证（单测/集测/类型检查/构建，按改动性质选择），逐项对照验收标准。\n'
+    + '2. 在 worktree（' + worktreePath + '，分支 ' + workBranch + '）内执行运行态验证（单测/集测/类型检查/构建，按改动性质选择），逐项对照验收标准。\n'
     + '3. 收集命令输出作为证据；环境无法验证时 result=BLOCKED 并写明阻塞原因。\n'
     + '4. 写 ' + runDir + '/test-report.md（按角色规定的模板），更新 STATE.md。';
   return roleRef('test') + ctx('测试', extra);
@@ -216,7 +224,7 @@ function reviewPrompt(round, dispatch, testRes) {
     + (testRes ? '【测试结论】' + testRes.result + '：' + testRes.reason + '\n' : '【测试环节】本轮无需集成测试（调度判定），无 test-report。\n')
     + '\n【本节点任务】\n'
     + '1. 读取 ' + runDir + '/dev-report.md、test-report.md（如有）、dispatch-result.json。\n'
-    + '2. 以 dev-report 列出的文件与行为审查范围（无则以 ' + workBranch + ' 相对 ' + baseBranch + ' 的 diff 为范围），双轴审查：需求符合性优先，代码质量其次。\n'
+    + '2. 以 dev-report 列出的文件与行为审查范围（无则以 ' + workBranch + ' 相对 ' + baseBranch + ' 的 diff 为范围：git diff ' + baseBranch + '...' + workBranch + '，或直接读 worktree ' + worktreePath + '），双轴审查：需求符合性优先，代码质量其次。\n'
     + '3. 对修改过的文件做类型诊断（如项目有类型系统）。\n'
     + '4. 写 ' + runDir + '/review-report.md（按角色规定的模板），更新 STATE.md。';
   return roleRef('review') + ctx('审核', extra);
@@ -242,7 +250,7 @@ function closeoutPrompt() {
     + '3. 写 ' + runDir + '/cleanup-report.md（按角色规定的模板），更新 STATE.md 为 done。\n'
     + '4. 推送、合并与关闭：git push -u origin ' + workBranch + '；gh pr create --draft --base ' + baseBranch + ' --head ' + workBranch + '（已存在则复用；标题概括需求，正文汇总目标/验收结论/报告清单）；然后 gh pr ready + gh pr merge --squash --delete-branch；合并依据是「人工验收已通过」的前置决策，你只执行、不重新判定。禁止绕过 PR 直接推送 ' + baseBranch + '；无远端时记录本地 commit 清单。\n'
     + (A.issueRef ? '5. gh issue close ' + A.issueRef.replace('#', '') + ' --comment：验收通过结论 + 合并 commit + run 产物位置。\n' : '')
-    + '6. 工作区收束：只处理本任务（' + workBranch + '）相关变更，不触碰无关文件与已有未提交改动；合并后 git checkout ' + baseBranch + ' && git pull && git branch -d ' + workBranch + '；输出提交状态或待提交清单。';
+    + '6. 工作区收束：只处理本任务（' + workBranch + '）相关变更，不触碰无关文件与已有未提交改动；合并后原子清理 worktree：git worktree remove ' + worktreePath + '（worktree 内有本任务遗留未提交/未跟踪文件时先确认归属再 git worktree remove --force ' + worktreePath + '），残留本地分支用 git branch -D ' + workBranch + '；主工作区（' + repoPath + '）停在 ' + baseBranch + '，如需同步 git pull；输出提交状态或待提交清单。';
   return roleRef('closeout') + ctx('收口', extra);
 }
 
