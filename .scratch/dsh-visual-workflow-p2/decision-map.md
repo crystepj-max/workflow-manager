@@ -4,25 +4,18 @@
 
 插件产品化：`dsh plugin add` 可安装、模板跨会话持久、支持动态拆解节点、多工作流并行互不串扰。
 
-## Decisions so far
+## Decisions so far（2026-08-16 全部决断）
 
-（暂无——决策工单见下）
+- ✅ D1 = **B 受限版「并行子任务节点」**（#9 关闭）：fan-out 节点声明 items 来源，编译为 pipeline/parallel；C 完整动态拆解保留扩展位（同构运行时）。
+- ✅ D2 = **阶段式 A→B→C**（#10 关闭）：开发期本地 link（`dsh plugin --profile web add link:`）；稳定后独立仓库 github: 分发；最终注册表。目标 profile=web。
+- ✅ D3 = **A storageDomain 宿主域**（#11 关闭）：workflow 域 backend:json（$HOME/.dsh/storages），tables={workflows,runs}。
+- ✅ D4 = **A+B 组合 + 三约束**（#12 关闭）：同图多 issue + 多图并行；人工门禁串行裁决、同 taskId 互斥、closeout 串行或 worktree。
+- ✅ D5 = **C vwf.script + 平台 workflow 工具**（#13 关闭）：正式执行路径；wf_run 条件注册保留；不实例化引擎。
 
-## Not yet specified（frontier，全部未阻塞可认领）
+## Not yet specified
 
-- [ ] D1 AiDynamic 节点的 DSH 映射与取舍
-- [ ] D2 组合包打包与分发形态
-- [ ] D3 模板/运行记录持久化模型
-- [ ] D4 多工作流并行语义与边界
-- [ ] D5 执行链路正式化（workflowEngine 服务挂载问题）
+（无——全部决断完成，转入 OpenSpec：specs/vwf-p2/proposal.md）
 
 ## Out of scope
 
-- 桌面客户端
-- 跨机器同步模板库
-- 修改 harness 核心代码
-- 拖拽画布/车道级布线（体验层，P2 不做，可另立）
-
-## 跟踪规则
-
-认领 = 在工单 issue 里 assign 自己；解决 = 工单评论记录「决定 + 理由 + 影响面」并关闭，同时在本文件 Decisions so far 追加一行索引。全部决断后：产出 OpenSpec 提案 → to-tickets 拆执行任务。
+- 桌面客户端；跨机器同步模板库；修改 harness 核心；拖拽画布/车道布线（体验层，后置）
