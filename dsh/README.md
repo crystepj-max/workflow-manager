@@ -45,7 +45,7 @@ workflow 编排脚本（dsh/workflow/dev-workflow-2.0.mjs）
 | 文件 | 说明 |
 |------|------|
 | `dsh/roles/dispatcher.md` | 调度角色提示词（含超限重调度分析；分流职责已由脚本承担） |
-| `dsh/roles/dev.md` | 开发角色（分支隔离 + tdd 施工 + dev-report.md） |
+| `dsh/roles/dev.md` | 开发角色（worktree 隔离 + tdd 施工 + dev-report.md） |
 | `dsh/roles/test.md` | 测试角色（证据驱动 + test-report.md） |
 | `dsh/roles/review.md` | 审核角色（双轴审查 + review-report.md） |
 | `dsh/roles/accept.md` | 验收角色（acceptance-summary.md + accept-report.md） |
@@ -128,6 +128,24 @@ gh issue view <N> --json title,body,comments
 | `cleanup-report.md` | 收口 | cleanup-report.md |
 | `STATE.md` | 每节点更新 | stage / round / status / updated |
 
+## 多任务隔离（git worktree）
+
+每个任务在物理独立的 git worktree 中作业，取代「共享主工作区 + git checkout 切分支」，
+消除两类互踩阻塞——「main 被其它 worktree 占用」与「共享工作区他人未提交改动被覆盖
+（would be overwritten）」：
+
+| 节点 | 工作区 |
+|------|--------|
+| 开发 / 测试 / 审核 | `<runDir>/worktree`（分支 `dev2/<taskId>`），只读写该 worktree |
+| 收口（push/pr/merge/close） | 主工作区（编排区，始终停在 base 分支） |
+
+- 开发节点用 `git worktree add <runDir>/worktree -b dev2/<taskId> <base>` 建立
+  （续跑时复用已有 worktree），施工与提交都在 worktree 内完成；
+- 收口节点合并后用 `git worktree remove <runDir>/worktree` 原子清理，残留本地分支
+  用 `git branch -D dev2/<taskId>` 删除；
+- 主工作区全程不切换分支、保持干净，只承担 `git push` / `gh pr create` /
+  `gh pr merge` / `gh issue close`。
+
 ## 与 gold-band DSL 概念对照
 
 | gold-band DSL | DSH 实现 |
@@ -203,7 +221,8 @@ kimi 额度恢复后换回上面的推荐分配即恢复跨 provider 真异源�
 
 注意事项：目标仓库需 `gh` 已登录（无远端可跑，收口退化为本地 commit 清单）；
 模型分配宿主级共享（kimi 额度不足时用 DeepSeek 双模型兜底，见「异源配置」节）；
-多任务并行 = 每个 issue 一个会话 + 独立工作分支（`dev2/<taskId>`）。
+多任务并行 = 每个 issue 一个会话 + 一个独立 git worktree（分支 `dev2/<taskId>` + 作业目录
+`.agent-runs/<taskId>/worktree`），物理隔离互不阻塞。
 
 ## 已知缺口（P0 基线）
 

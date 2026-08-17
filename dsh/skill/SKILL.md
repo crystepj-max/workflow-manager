@@ -96,7 +96,7 @@ cp -R <SKILL_DIR>/roles .agent-runs/$TASK/roles
 - 未获人工「通过」裁决前，禁止以 entry=closeout 续跑。
 - 续跑必须回传前次 `dispatch` / `history`，否则 9 轮上限计数会断。
 - 目标仓库必须在当前会话工作区内；不要跨工作区读写别的项目。
-- 每个 issue 独立会话 + 独立工作分支（脚本自动用 `dev2/<taskId>`）；多任务并行 = 多会话。
+- 每个 issue 独立会话 + 独立 git worktree（脚本自动建 `.agent-runs/<taskId>/worktree` + 分支 `dev2/<taskId>`）；多任务并行 = 多会话 + 多 worktree 物理隔离。
 
 ## 参考
 
