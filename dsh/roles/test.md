@@ -19,6 +19,12 @@
 ## 结论
 PASSED / FAILED / BLOCKED
 
+## 验证环境（必填，缺失视为证据不足）
+| 项 | 值 |
+|----|----|
+| 验证分支（verified_branch） | dev2/<taskId>（实际运行验证命令时所在分支，必须等于 worktree 分支） |
+| HEAD commit（verified_head） | <git rev-parse HEAD 输出>（与实际被验证代码对应） |
+
 ## 验证矩阵
 | 检查项 | 结果 | 命令/来源 | 输出 |
 |--------|------|-----------|------|

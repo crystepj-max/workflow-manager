@@ -86,6 +86,10 @@ cp -R <SKILL_DIR>/roles .agent-runs/$TASK/roles
 
 `AWAITING_HUMAN_ACCEPTANCE` 时：
 
+0. 先确认验证分支：核对 `<runDir>/acceptance-summary.md`（或 accept-report.md）记录的
+   verified_branch = dev2/<taskId>（worktree 分支）、verified_head 与 worktree HEAD 一致；
+   验收人若要亲手复现，先 `git -C <runDir>/worktree checkout dev2/<taskId>` 切到工作分支再动手，
+   避免在主工作区（停在 base 分支）上复现出相反结论。
 1. 向用户呈现 `<runDir>/acceptance-summary.md` 的核心内容（逐条 ✅/⚠️/❌ + 确认方式）；
 2. 用 ask_user_question 发起裁决：通过 / 不通过（附意见）；
 3. **通过** → 以 `entry=closeout` 续跑（收口会推送分支、合并 PR、关闭 issue、收束本地工作区）；
