@@ -145,6 +145,10 @@ gh issue view <N> --json title,body,comments
   用 `git branch -D dev2/<taskId>` 删除；
 - 主工作区全程不切换分支、保持干净，只承担 `git push` / `gh pr create` /
   `gh pr merge` / `gh issue close`。
+- 验证结论可信度闸门：test/review/accept 三节点开工先自检 worktree 分支 =
+  `dev2/<taskId>`、不在则先恢复，且三节点 schema 必填 `verified_branch`（实际验证分支）
+  与 `verified_head`（实际 HEAD commit），杜绝「验证跑在错误分支 → 结论不可信、
+  验收指引复现相反结果」。
 
 ## 与 gold-band DSL 概念对照
 

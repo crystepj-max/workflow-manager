@@ -110,8 +110,10 @@ const testSchema = {
     reason: { type: 'string' },
     evidence: { type: 'string' },
     failed_cases: { type: 'string' },
+    verified_branch: { type: 'string' },
+    verified_head: { type: 'string' },
   },
-  required: ['result', 'reason', 'evidence'],
+  required: ['result', 'reason', 'evidence', 'verified_branch', 'verified_head'],
   additionalProperties: false,
 };
 
@@ -122,8 +124,10 @@ const reviewSchema = {
     blockers: { type: 'string' },
     compliance: { type: 'string' },
     summary: { type: 'string' },
+    verified_branch: { type: 'string' },
+    verified_head: { type: 'string' },
   },
-  required: ['verdict', 'summary'],
+  required: ['verdict', 'summary', 'verified_branch', 'verified_head'],
   additionalProperties: false,
 };
 
@@ -133,8 +137,10 @@ const acceptSchema = {
     verdict: { type: 'string', enum: ['PASS', 'FAIL', 'INCOMPLETE'] },
     summary_for_human: { type: 'string' },
     details: { type: 'string' },
+    verified_branch: { type: 'string' },
+    verified_head: { type: 'string' },
   },
-  required: ['verdict', 'summary_for_human'],
+  required: ['verdict', 'summary_for_human', 'verified_branch', 'verified_head'],
   additionalProperties: false,
 };
 
@@ -177,6 +183,20 @@ function ctx(nodeName, extra) {
     + '不要复述报告全文，不要添加 schema 之外的字段。\n';
 }
 
+// ---------- 验证节点开工前置（分支自检） ----------
+// test/review/accept 的验证结论必须可信：开工先确认 worktree 分支 = 工作分支且 HEAD 一致，
+// 否则会复现「验证跑在错误分支 → 结论与证据不可信、验收指引复现相反结果」的事故。
+function verifyBranchStep() {
+  return '开工前置（强制，先于任何验证命令）：开工先确认 worktree 分支 = ' + workBranch + '，不在则先恢复——\n'
+    + '   - `git -C ' + worktreePath + ' rev-parse --abbrev-ref HEAD` 必须等于 ' + workBranch + '；\n'
+    + '   - `git -C ' + worktreePath + ' rev-parse HEAD` 的 HEAD 必须与 worktree 实际提交一致；\n'
+    + '   - 分支不在 ' + workBranch + '（或 worktree 缺失/脏）时先恢复：worktree 缺失用 `git worktree add '
+    + worktreePath + ' ' + workBranch + '`，分支错位用 `git -C ' + worktreePath + ' checkout ' + workBranch
+    + '`，恢复后再开工。\n'
+    + '   所有验证命令一律 `git -C ' + worktreePath + ' ...` 方式在该 worktree 内执行；'
+    + '验证结论必须记录 verified_branch（实际验证分支）与 verified_head（实际 HEAD commit）。';
+}
+
 // ---------- 各节点提示词 ----------
 function dispatcherPrompt(rescheduleRound) {
   const extra =
@@ -210,6 +230,7 @@ function testPrompt(round, dispatch) {
     '【验收标准（调度结论）】\n' + (dispatch.acceptance || '见 ' + runDir + '/dispatch-result.json') + '\n\n'
     + '【当前轮次】第 ' + round + ' / ' + MAX_ROUNDS + ' 轮\n\n'
     + '【本节点任务】\n'
+    + verifyBranchStep() + '\n'
     + '1. 读取 ' + runDir + '/dev-report.md、' + runDir + '/review-report.md（如有）与 dispatch-result.json。\n'
     + '2. 在 worktree（' + worktreePath + '，分支 ' + workBranch + '）内执行运行态验证（单测/集测/类型检查/构建，按改动性质选择），逐项对照验收标准。\n'
     + '3. 收集命令输出作为证据；环境无法验证时 result=BLOCKED 并写明阻塞原因。\n'
@@ -223,6 +244,7 @@ function reviewPrompt(round, dispatch, testRes) {
     + '【当前轮次】第 ' + round + ' / ' + MAX_ROUNDS + ' 轮\n'
     + (testRes ? '【测试结论】' + testRes.result + '：' + testRes.reason + '\n' : '【测试环节】本轮无需集成测试（调度判定），无 test-report。\n')
     + '\n【本节点任务】\n'
+    + verifyBranchStep() + '\n'
     + '1. 读取 ' + runDir + '/dev-report.md、test-report.md（如有）、dispatch-result.json。\n'
     + '2. 以 dev-report 列出的文件与行为审查范围（无则以 ' + workBranch + ' 相对 ' + baseBranch + ' 的 diff 为范围：git diff ' + baseBranch + '...' + workBranch + '，或直接读 worktree ' + worktreePath + '），双轴审查：需求符合性优先，代码质量其次。\n'
     + '3. 对修改过的文件做类型诊断（如项目有类型系统）。\n'
@@ -234,6 +256,7 @@ function acceptPrompt(dispatch) {
   const extra =
     '【调度结论】目标：' + (dispatch.objective || '') + '\n验收标准：' + (dispatch.acceptance || '') + '\n\n'
     + '【本节点任务】\n'
+    + verifyBranchStep() + '\n'
     + '1. 读取 ' + runDir + '/ 下全部报告（dev-report / test-report / review-report）与 dispatch-result.json。\n'
     + '2. 逐条核对验收标准达成情况；证据缺失/过期/矛盾时做针对性只读验证（只读，不改任何文件）。\n'
     + '3. 写 ' + runDir + '/acceptance-summary.md（通俗版）与 ' + runDir + '/accept-report.md（严格版），更新 STATE.md。\n'

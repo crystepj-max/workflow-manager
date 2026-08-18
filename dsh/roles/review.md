@@ -24,6 +24,8 @@
 
 **审查文件数：** X
 **问题总数：** Y
+**验证分支（verified_branch）：** dev2/<taskId>（实际审查/类型诊断所在分支，必须等于 worktree 分支）
+**HEAD commit（verified_head）：** <sha>（与实际被审查代码对应）
 
 ### 按严重程度
 - CRITICAL（严重）：X（必须修复）
