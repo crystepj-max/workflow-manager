@@ -51,6 +51,8 @@ workflow 编排脚本（dsh/workflow/dev-workflow-2.0.mjs）
 | `dsh/roles/accept.md` | 验收角色（acceptance-summary.md + accept-report.md） |
 | `dsh/roles/closeout.md` | 收口角色（cleanup-report.md） |
 | `dsh/workflow/dev-workflow-2.0.mjs` | 编排脚本（workflow 工具 script 参数的版本控制源） |
+| `dsh/skills/requirements-analysis/` | requirements-analysis 技能真源（SKILL.md + evals/ + references/，内联自洽版） |
+| `dsh/install-requirements-analysis.sh` | requirements-analysis 真源 → 公共池安装脚本（对齐 install-skill.sh 约定） |
 
 角色正文与 `profiles/*.md` 一致，仅 dev 角色有 3 处适配：task.yaml 引用改为
 「运行上下文注入」（DSH 侧调度结论直接进提示词与 dispatch-result.json，无 task.yaml）。
@@ -219,6 +221,26 @@ kimi 额度恢复后换回上面的推荐分配即恢复跨 provider 真异源�
    装配 args 并驱动全流程（角色快照自动拷贝进 `.agent-runs/<task>/roles/` 满足留痕）。
 
 **更新/重装技能**：`./dsh/install-skill.sh`（公共池真源 = 本仓库 `dsh/`，改仓库即改全局）。
+
+## 技能真源布局与安装脚本（仓库 = 真源）
+
+本仓库 `dsh/` 是多个公共池技能的**版本化真源**：改仓库 → 跑安装脚本 → 公共池生效（改仓库即改全局）。当前布局：
+
+| 技能 | 真源（本仓库） | 安装脚本 | 公共池目标 |
+|------|----------------|----------|------------|
+| dev-workflow-2-0 | `dsh/skill/` + `dsh/roles/` + `dsh/workflow/` | `dsh/install-skill.sh` | `~/.agents/skills/dev-workflow-2-0/` |
+| requirements-analysis | `dsh/skills/requirements-analysis/`（SKILL.md + evals/ + references/） | `dsh/install-requirements-analysis.sh` | `~/.agents/skills/requirements-analysis/` |
+
+**技能变更落地 GitHub 的同步流程：**
+
+1. 改真源文件（如 `dsh/skills/requirements-analysis/SKILL.md`）；
+2. 跑安装脚本部署公共池（`./dsh/install-requirements-analysis.sh`），并 diff 校验真源与线上生效版逐字节一致；
+3. 开分支 `dev2/<issue>` 提交推送 → PR → 合并 main（对齐本仓库历史约定，见「试跑发现与修复记录」第 5 条）。
+
+**requirements-analysis 为何是自洽（内联）版**：其编排依赖的 `triage` / `grill-with-docs` / `wayfinder` /
+`to-tickets` 是「仅限用户调用」的命令型 skill（frontmatter `disable-model-invocation: true`，刻意设计），
+模型不可通过 `skill` 工具调用；因此该 skill 将四者知识全部内联，**不调用任何子 skill**——这是
+issue #22 的持久修复，真源即内联自洽版。
 
 **备选：仓库内置方式**——把 `dsh/` 目录复制进目标仓库（角色+脚本随仓库走，
 不依赖宿主技能池）。两种方式的编排脚本、角色、返回状态机完全一致。
