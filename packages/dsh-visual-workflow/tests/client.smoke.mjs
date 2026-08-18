@@ -125,8 +125,6 @@ test('模板列表渲染并打开大抽屉编辑器', async () => {
   })
   const listItem = byText(container, '测试流')
   assert.ok(listItem, '模板列表渲染')
-  assert.ok(byText(container, '快速调整'), '默认选中快速调整 tab')
-  assert.ok(container.querySelector('svg.vwf-svg'), '快速调整内联画布渲染')
   await act(async () => {
     const editBtn = byText(container, '编辑')
     assert.ok(editBtn, '存在编辑按钮')

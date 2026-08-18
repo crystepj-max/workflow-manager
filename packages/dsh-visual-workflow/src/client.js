@@ -27,6 +27,14 @@
 //  宿主形态：设置→工作流 section 内为「模板库 + 运行看板」，点「编辑」弹出
 //  右侧大抽屉（≈1120px，对应 Gold-Band 的 Sheet 抽屉）承载编辑器。
 //
+//  pkg-4（视觉复核反馈修订）：
+//  - 撤销 pkg-3 的配置页内联画布编辑（快速调整 tab），恢复「已保存工作流列表
+//    → 点编辑弹抽屉」的原始形态
+//  - 纵向滚动条定位到画布内部（canvas-wrap overflow + 常显滚动条样式），
+//    取消页面级滚动容器
+//  - 保留：画布工具栏文档流一行（不遮挡入口节点）、边标签统一成功/失败
+//    （when 悬停 title 可见）
+//
 //  运行约束：动态客户端闭包（plain JS、无 JSX/import；React/host/styles 为
 //  注入符号；计时器走 ctx.timeout/ctx.interval——inject: ['slots','timer']）。
 // ─────────────────────────────────────────────────────────────────────────────
@@ -97,10 +105,6 @@ return {
       edgeFailure: '失败',
       templates: '模板库',
       dashboard: '运行看板',
-      quickEdit: '快速调整',
-      fineEdit: '精细编辑',
-      quickHint: '快速调整：选择模板即可直接连线、增删节点并保存；需要完整配置时点「精细编辑」打开大抽屉。',
-      quickNewDraft: '（新草稿未保存）',
       newTemplate: '新建模板',
       editTemplate: '编辑',
       deleteTemplate: '删除',
@@ -177,10 +181,6 @@ return {
       edgeFailure: 'Failure',
       templates: 'Templates',
       dashboard: 'Runs',
-      quickEdit: 'Quick Edit',
-      fineEdit: 'Fine-tune',
-      quickHint: 'Quick edit: pick a template to connect, add/remove nodes and save right here; open the large drawer with "Fine-tune" for full configuration.',
-      quickNewDraft: '(new unsaved draft)',
       newTemplate: 'New Template',
       editTemplate: 'Edit',
       deleteTemplate: 'Delete',
@@ -254,8 +254,6 @@ return {
 .vwf-drawer-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; }
 .vwf-editor { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:12px; align-items:start; }
 @media (max-width: 900px) { .vwf-editor { grid-template-columns:minmax(0,1fr); } }
-.vwf-editor.stack { grid-template-columns:minmax(0,1fr); }
-.vwf-editor.stack .vwf-inspector { position:static; max-height:none; overflow:visible; }
 .vwf-canvas-col { min-width:0; }
 .vwf-canvas-wrap { position:relative; height:560px; overflow:auto; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-base, #181818); }
 /* 画布工具栏：文档流内一行（不再悬浮遮挡入口节点） */
@@ -295,11 +293,10 @@ return {
 .vwf-handle-src:hover { fill:var(--dsw-alias-brand-primary, #4d9fff); }
 .vwf-entry-badge { fill:var(--dsw-alias-bg-layer-1, #1e1e1e); stroke:var(--dsw-alias-border-l3, #444); }
 .vwf-entry-badge-text { fill:var(--dsw-alias-label-secondary, #9a9a9a); font-size:10px; }
-/* ── 纵向滚动：设置页内容区 + 常显滚动条 ── */
-.vwf-page { max-height:calc(100vh - 150px); overflow-y:auto; padding-right:4px; }
-.vwf-canvas-wrap::-webkit-scrollbar, .vwf-drawer-body::-webkit-scrollbar, .vwf-page::-webkit-scrollbar, .vwf-inspector::-webkit-scrollbar, .vwf-dialog-issues::-webkit-scrollbar { width:10px; height:10px; }
-.vwf-canvas-wrap::-webkit-scrollbar-thumb, .vwf-drawer-body::-webkit-scrollbar-thumb, .vwf-page::-webkit-scrollbar-thumb, .vwf-inspector::-webkit-scrollbar-thumb, .vwf-dialog-issues::-webkit-scrollbar-thumb { background:var(--dsw-alias-border-l3, #444); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
-.vwf-canvas-wrap::-webkit-scrollbar-track, .vwf-drawer-body::-webkit-scrollbar-track, .vwf-page::-webkit-scrollbar-track, .vwf-inspector::-webkit-scrollbar-track, .vwf-dialog-issues::-webkit-scrollbar-track { background:transparent; }
+/* ── 滚动条常显样式（画布内纵向滚动 + 抽屉/面板/弹窗） ── */
+.vwf-canvas-wrap::-webkit-scrollbar, .vwf-drawer-body::-webkit-scrollbar, .vwf-inspector::-webkit-scrollbar, .vwf-dialog-issues::-webkit-scrollbar { width:10px; height:10px; }
+.vwf-canvas-wrap::-webkit-scrollbar-thumb, .vwf-drawer-body::-webkit-scrollbar-thumb, .vwf-inspector::-webkit-scrollbar-thumb, .vwf-dialog-issues::-webkit-scrollbar-thumb { background:var(--dsw-alias-border-l3, #444); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
+.vwf-canvas-wrap::-webkit-scrollbar-track, .vwf-drawer-body::-webkit-scrollbar-track, .vwf-inspector::-webkit-scrollbar-track, .vwf-dialog-issues::-webkit-scrollbar-track { background:transparent; }
 `)
 
     const h = React.createElement
@@ -1009,7 +1006,6 @@ return {
     function Editor(props) {
       const wf = props.wf
       const setWf = props.setWf
-      const compact = !!props.compact // 设置页内联快速调整模式（单列堆叠、无标题）
       const canvasHeight = props.canvasHeight || 560
       const [tab, setTab] = React.useState('canvas')
       const [selectedNodeId, setSelectedNodeId] = React.useState((wf.nodes[0] || {}).id || null)
@@ -1199,11 +1195,11 @@ return {
             )
           )
         ) : null,
-        h('div', { className: 'vwf-editor' + (compact ? ' stack' : '') },
+        h('div', { className: 'vwf-editor' },
           h('div', { className: 'vwf-canvas-col' },
             h('div', { className: 'vwf-card' },
               h('div', { className: 'vwf-card-head' },
-                compact ? null : h('div', null,
+                h('div', null,
                   h('div', { className: 'vwf-card-title' }, t('title')),
                   h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('subtitle'))
                 ),
@@ -1350,7 +1346,7 @@ return {
     }
 
     function Page() {
-      const [tab, setTab] = React.useState('quick')
+      const [tab, setTab] = React.useState('templates')
       const [list, setList] = React.useState(null)
       const [editId, setEditId] = React.useState(null) // 抽屉中的模板 id
       const [wf, setWf] = React.useState(null) // 抽屉中的工作流草稿
@@ -1359,8 +1355,6 @@ return {
       const [msg, setMsg] = React.useState(null)
       const [providers, setProviders] = React.useState([])
       const [roles, setRoles] = React.useState([])
-      const [quickId, setQuickId] = React.useState('') // 快速调整当前模板 id（空=新草稿）
-      const [quickWf, setQuickWf] = React.useState(null) // 快速调整工作流草稿
 
       const refresh = React.useCallback(() => host.call('vwf.workflows.list').then((l) => setList(l || [])).catch(() => setList([])), [])
       React.useEffect(() => { refresh() }, [])
@@ -1368,14 +1362,6 @@ return {
         host.call('vwf.models').then(r => { if (r && r.providers) setProviders(r.providers) }).catch(() => {})
         host.call('vwf.roles').then(r => { if (r && r.roles) setRoles(r.roles) }).catch(() => {})
       }, [])
-      // 快速调整：列表就绪后默认选中首个模板（用户新建/删除后跳过自动选择）
-      React.useEffect(() => {
-        if (quickWf !== null) return
-        const first = (list || [])[0]
-        if (!first) return
-        setQuickId(first.id)
-        setQuickWf(clone(first.dsl))
-      }, [list, quickWf])
 
       const openEditor = (id) => {
         const w = (list || []).find(x => x.id === id)
@@ -1402,80 +1388,18 @@ return {
         setMsg(t('saved') + id)
         refresh()
       }
-      const onScriptFor = (dsl) => {
-        if (!dsl) return
-        host.call('vwf.script', { dsl }).then(r => setMsg(r.ok ? ('✓ 编译通过 · 引擎可用：' + r.engineAvailable + '\n\n' + r.script) : JSON.stringify(r.errors))).catch(() => {})
-      }
-
-      // ── 快速调整（pkg-19 配置页内联编辑，整合进 pkg-20 页面）────────────────
-      const pickQuick = (id) => {
-        const w = (list || []).find(x => x.id === id)
-        if (!w) return
-        setQuickId(id)
-        setQuickWf(clone(w.dsl))
-      }
-      const onNewQuick = () => {
-        const d = Skeleton()
-        setQuickId('')
-        setQuickWf(d)
-        setMsg(t('unsavedDraft') + '：' + d.id)
-      }
-      const onRemoveQuick = () => {
-        const w = (list || []).find(x => x.id === quickId)
-        if (w && w.builtin) { setMsg(t('builtinReadonly')); return }
-        if (!quickId) { setQuickWf(null); return }
-        host.call('vwf.workflows.remove', { id: quickId }).then(() => {
-          setMsg(t('deleted') + quickId)
-          setQuickId('')
-          setQuickWf(null)
-          refresh()
-        }).catch(() => {})
-      }
-      const onSavedQuick = (id) => {
-        setMsg(t('saved') + id)
-        if (quickId !== id) setQuickId(id)
-        refresh()
-      }
-      const openQuickDrawer = () => {
-        if (!quickWf) return
-        setEditId(quickId || null)
-        setWf(clone(quickWf))
-        setDirty(!quickId)
+      const onScript = () => {
+        if (!wf) return
+        host.call('vwf.script', { dsl: wf }).then(r => setMsg(r.ok ? ('✓ 编译通过 · 引擎可用：' + r.engineAvailable + '\n\n' + r.script) : JSON.stringify(r.errors))).catch(() => {})
       }
 
       const editingBuiltin = !!(list || []).find(x => x.id === editId && x.builtin)
-      const quickBuiltin = !!(list || []).find(x => x.id === quickId && x.builtin)
 
-      return h('div', { className: 'vwf-page vwf-root' },
+      return h('div', { className: 'vwf-root' },
         h('div', { className: 'vwf-tabs' },
-          h('button', { className: 'vwf-tab' + (tab === 'quick' ? ' on' : ''), onClick: () => setTab('quick') }, t('quickEdit')),
           h('button', { className: 'vwf-tab' + (tab === 'templates' ? ' on' : ''), onClick: () => setTab('templates') }, t('templates')),
           h('button', { className: 'vwf-tab' + (tab === 'dashboard' ? ' on' : ''), onClick: () => setTab('dashboard') }, t('dashboard'))
         ),
-        tab === 'quick' ? h('div', { className: 'vwf-root' },
-          h('div', { className: 'vwf-row' },
-            h('select', {
-              className: 'vwf-select', style: { flex: 1, maxWidth: 360 },
-              value: quickId, onChange: (ev) => pickQuick(ev.target.value),
-            },
-              h('option', { value: '', disabled: true }, t('quickNewDraft')),
-              (list || []).map(w => h('option', { key: w.id, value: w.id }, (w.name || w.id) + (w.builtin ? '（' + t('builtinBadge') + '）' : '')))
-            ),
-            h('button', { className: 'vwf-btn sm', onClick: onNewQuick }, '＋ ' + t('newTemplate')),
-            h('button', { className: 'vwf-btn sm', disabled: !quickId || quickBuiltin, title: quickBuiltin ? t('builtinReadonly') : '', onClick: onRemoveQuick }, t('deleteTemplate')),
-            h('button', { className: 'vwf-btn sm', onClick: refresh }, t('refresh')),
-            !providers.length ? h('span', { className: 'vwf-muted-sm' }, t('noModels')) : null,
-            h('span', { className: 'vwf-spacer' }),
-            h('button', { className: 'vwf-btn sm primary', disabled: !quickWf, onClick: openQuickDrawer }, '✎ ' + t('fineEdit'))
-          ),
-          h('div', { className: 'vwf-muted-sm' }, t('quickHint')),
-          quickWf ? h(Editor, {
-            wf: quickWf, providers, roles, saving: false, compact: true, canvasHeight: 420,
-            setWf: (next) => setQuickWf(next),
-            onSaved: onSavedQuick,
-            onScript: () => onScriptFor(quickWf),
-          }) : null
-        ) : null,
         tab === 'templates' ? h('div', { className: 'vwf-root' },
           h('div', { className: 'vwf-row' },
             h('button', { className: 'vwf-btn', onClick: onNew }, '＋ ' + t('newTemplate')),
@@ -1492,7 +1416,6 @@ return {
                 ),
                 w.description ? h('div', { className: 'vwf-list-desc' }, w.description) : null
               ),
-              h('button', { className: 'vwf-btn sm', onClick: () => { setQuickId(w.id); setQuickWf(clone(w.dsl)); setTab('quick') } }, t('quickEdit')),
               h('button', { className: 'vwf-btn sm', onClick: () => openEditor(w.id) }, t('editTemplate')),
               h('button', { className: 'vwf-btn sm danger', disabled: !!w.builtin, title: w.builtin ? t('builtinReadonly') : '', onClick: () => onRemove(w.id) }, t('deleteTemplate'))
             )),
@@ -1517,7 +1440,7 @@ return {
                 wf, providers, roles, saving,
                 setWf: (next) => { setWf(next); setDirty(true) },
                 onSaved: (id) => { onSaved(id); if (!editId) setEditId(id) },
-                onScript: () => onScriptFor(wf),
+                onScript,
               })
             )
           )
