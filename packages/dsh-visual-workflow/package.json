@@ -1,0 +1,16 @@
+{
+  "name": "dsh-visual-workflow",
+  "version": "0.2.0",
+  "private": true,
+  "description": "DSH 可视化工作流插件（动态双半包）：host（DSL 校验/编译/RPC/wf_run）+ client（Gold-Band 对齐的可视化编辑器：拖拽连线画布 + 配置面板 + 校验弹窗 + 模板库大抽屉 + 运行看板）",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/host.test.mjs tests/client.smoke.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "jsdom": "^26.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

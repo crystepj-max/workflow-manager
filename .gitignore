@@ -6,3 +6,9 @@
 
 # DSH 原子写临时目录残留
 *.tmpdir/
+
+# 依赖
+node_modules/
+
+# 会话脚手架与参考副本（不入库）
+.scratch/
