@@ -1,0 +1,33 @@
+{
+  "skill_name": "requirements-analysis",
+  "evals": [
+    {
+      "id": 1,
+      "name": "s-size-raw-input-to-issue",
+      "prompt": "帮我把这个需求分析一下：我们 App 的个人中心里加一个『清除缓存』按钮，点击后清掉本地图片缓存，并显示『已清除 12.3 MB』的提示。",
+      "expected_output": "识别为原始输入→创建 issue 路径；size 判定为 sized-s；产出含任务目标/涉及范围/验收标准三要素；关键状态落盘（.scratch/ 下分析文档）；GitHub 不可用时自动降级本地落盘并提示",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "m-size-issue-to-tickets",
+      "prompt": "分析一下这个 issue 并把计划拆成任务清单：https://github.com/example-org/demo-app/issues/42 —— issue 内容为：支持微信扫码登录，需要新增后端鉴权接口、前端登录页二维码展示、回调处理与 token 续期，方案已有大致设计但涉及 3 个模块，预计需要 3-4 个任务依次完成。",
+      "expected_output": "识别为 GitHub issue→更新 issue 路径；size 判定为 sized-m；按内联拆解规则产出带依赖顺序的任务清单（垂直切片+阻塞边，落盘 .scratch/<slug>/issues/）；三要素齐全",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "l-size-foggy-to-decision-map-openspec",
+      "prompt": "帮我把这个需求分析一下：把我们的订单系统重构成微服务架构，拆成订单、支付、库存、物流四个服务。具体怎么拆、服务边界、数据一致性方案都还没定，团队也没做过微服务。",
+      "expected_output": "size 判定为 sized-l；按内联 wayfinder 规则拆决策地图（决策工单 + 阻塞边 + frontier）+ 产出 OpenSpec（references/openspec-template.md）；三要素齐全；明确禁止直接开工（不产出实现代码）；关键状态落盘",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "self-contained-no-subskill-invocation",
+      "prompt": "分析一下这个 issue：https://github.com/example-org/demo-app/issues/9 —— issue 内容为：iOS 上登录页白屏，控制台报 Uncaught TypeError: Cannot read properties of undefined (reading 'map')，机型 iPhone 15 / iOS 17。",
+      "expected_output": "全程不调用 skill 工具加载 triage/grill-with-docs/wayfinder/to-tickets（这四个为 disable-model-invocation 的 user-invoked 命令 skill）；即使它们不可模型调用也能完整产出：分诊结论（bug + ready-for-agent/needs-info）+ 三要素 + size 判定；发布内容带 AI 免责声明",
+      "files": []
+    }
+  ]
+}
