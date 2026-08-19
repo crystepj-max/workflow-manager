@@ -42,6 +42,15 @@ cp -R <SKILL_DIR>/roles .agent-runs/$TASK/roles
 
 角色快照进 run 目录而不是让节点 agent 读 skill 目录，原因有二：节点 agent 的文件沙箱按会话工作区授权，工作区外路径可能不可读；快照随 run 归档满足「全程留痕」——本次 run 用的角色版本可溯。
 
+**复制前先比对来源，防止旧模板静默进入 run**：`<SKILL_DIR>` 是安装副本，可能因旧安装而漂移。复制前先比对副本与仓库真源：
+
+```bash
+diff -r <SKILL_DIR>/roles <仓库>/dsh/roles/
+diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
+```
+
+比对不一致（尤其 roles 或 workflow 有差异）说明安装副本已过时——**先重装再快照**：执行 `<仓库>/dsh/install-skill.sh`；重装后仍不一致则**改源**，直接以仓库 `dsh/roles/` 作为快照源，并记录漂移原因。切忌把旧模板静默带进 run。
+
 ### 3. 调用 workflow 工具
 
 读取 `<SKILL_DIR>/workflow/dev-workflow-2.0.mjs` 全文，原样作为 `script` 参数；`meta` 与 `args` 如下：
