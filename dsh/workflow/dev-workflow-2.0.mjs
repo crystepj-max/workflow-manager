@@ -197,6 +197,20 @@ function verifyBranchStep() {
     + '验证结论必须记录 verified_branch（实际验证分支）与 verified_head（实际 HEAD commit）。';
 }
 
+// ---------- 验证结论硬校验（编排层，不依赖节点自觉） ----------
+// test/review/accept 的结论必须声称验证运行于真实工作分支：verified_branch 必须与工作分支
+// 纯字符串相等、verified_head 必须非空（否则结论不可信，会复现「验证跑在错误分支 → 结论与
+// 证据不可信」的事故）。此处只做纯字符串校验，不引入脚本层 git 执行。返回 null 表示通过，
+// 否则返回含实际值的失败原因字符串（由调用点组装为 TECHNICAL_FAILURE 打回）。
+function claimError(res, stage) {
+  const head = res && res.verified_head;
+  const headOk = typeof head === 'string' && head.trim().length > 0;
+  if (res && res.verified_branch === workBranch && headOk) return null;
+  return stage + ' 结论校验失败：verified_branch=' + JSON.stringify(res && res.verified_branch)
+    + '（应为 ' + workBranch + '），verified_head=' + JSON.stringify(head)
+    + '（应为非空 HEAD commit）';
+}
+
 // ---------- 各节点提示词 ----------
 function dispatcherPrompt(rescheduleRound) {
   const extra =
@@ -314,6 +328,8 @@ if (ENTRY === 'dispatch' || ENTRY === 'dev') {
     if (dispatch.need_integration_test) {
       testRes = await agent(testPrompt(round, dispatch), { label: '测试 R' + round, schema: testSchema, ...mo('test') });
       if (!testRes) return { status: 'TECHNICAL_FAILURE', stage: 'test', round, taskId, runDir, dispatch, history, detail: '测试 agent 未返回有效结果' };
+      const testClaimErr = claimError(testRes, 'test');
+      if (testClaimErr) return { status: 'TECHNICAL_FAILURE', stage: 'test', round, taskId, runDir, dispatch, history, detail: testClaimErr };
       if (testRes.result === 'BLOCKED') return { status: 'BLOCKED', stage: 'test', round, taskId, runDir, dispatch, history, detail: testRes };
       if (testRes.result === 'FAILED') {
         feedback = '【测试不通过 · 第 ' + round + ' 轮】' + testRes.reason + '\n失败用例：' + (testRes.failed_cases || '见 test-report.md') + '\n证据：' + testRes.evidence;
@@ -329,6 +345,8 @@ if (ENTRY === 'dispatch' || ENTRY === 'dev') {
 
     reviewRes = await agent(reviewPrompt(round, dispatch, testRes), { label: '审核 R' + round, schema: reviewSchema, ...mo('review') });
     if (!reviewRes) return { status: 'TECHNICAL_FAILURE', stage: 'review', round, taskId, runDir, dispatch, history, detail: '审核 agent 未返回有效结果' };
+    const reviewClaimErr = claimError(reviewRes, 'review');
+    if (reviewClaimErr) return { status: 'TECHNICAL_FAILURE', stage: 'review', round, taskId, runDir, dispatch, history, detail: reviewClaimErr };
     if (reviewRes.verdict === 'REQUEST_CHANGES') {
       feedback = '【审核打回 · 第 ' + round + ' 轮】阻塞问题：' + (reviewRes.blockers || '见 review-report.md') + '\n' + reviewRes.summary;
       history.push({ round, stage: 'review', verdict: 'REQUEST_CHANGES', reason: reviewRes.summary });
@@ -358,6 +376,8 @@ if (passedReview || ENTRY === 'accept') {
   phase('人工验收');
   const acceptRes = await agent(acceptPrompt(dispatch), { label: '验收核验', schema: acceptSchema, ...mo('accept') });
   if (!acceptRes) return { status: 'TECHNICAL_FAILURE', stage: 'accept', taskId, runDir, dispatch, history, detail: '验收 agent 未返回有效结果' };
+  const acceptClaimErr = claimError(acceptRes, 'accept');
+  if (acceptClaimErr) return { status: 'TECHNICAL_FAILURE', stage: 'accept', taskId, runDir, dispatch, history, detail: acceptClaimErr };
   return {
     status: 'AWAITING_HUMAN_ACCEPTANCE', taskId, runDir, round, dispatch, history,
     review: reviewRes, accept: acceptRes,
