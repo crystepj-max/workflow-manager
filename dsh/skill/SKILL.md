@@ -99,6 +99,10 @@ diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
    verified_branch = dev2/<taskId>（worktree 分支）、verified_head 与 worktree HEAD 一致；
    验收人若要亲手复现，先 `git -C <runDir>/worktree checkout dev2/<taskId>` 切到工作分支再动手，
    避免在主工作区（停在 base 分支）上复现出相反结论。
+   **worktree 缺失兜底**：若 `<runDir>/worktree` 已不存在（worktree 缺失），先恢复再继续，不要裸报错——
+   · 分支 dev2/<taskId> 也不存在时：`git worktree add <runDir>/worktree -b dev2/<taskId> <base分支>`；
+   · 分支仍在、仅 worktree 缺失时：`git worktree add <runDir>/worktree dev2/<taskId>`。
+   恢复后核对 `git -C <runDir>/worktree rev-parse --abbrev-ref HEAD` = dev2/<taskId> 再动手复现。
 1. 向用户呈现 `<runDir>/acceptance-summary.md` 的核心内容（逐条 ✅/⚠️/❌ + 确认方式）；
 2. 用 ask_user_question 发起裁决：通过 / 不通过（附意见）；
 3. **通过** → 以 `entry=closeout` 续跑（收口会推送分支、合并 PR、关闭 issue、收束本地工作区）；
