@@ -160,5 +160,24 @@ export function validateBlueprint(bp) {
   }
   if (bp.heteroCheck && (!ids.dev || !ids.review)) err('$.heteroCheck', 'heteroCheck=true 需要存在 dev 与 review 节点（异源检查对象）');
 
-  return { ok: errors.length === 0, errors, counts: { nodes: bp.nodes.length, edges: bp.edges.length } };
+  // 异源硬规则（契约 §3.1 规则 7，T-06：全局强制，仅 dev↔review）
+  const warnings = [];
+  if (ids.dev && ids.review) {
+    const bm = (bp.bindings && bp.bindings.models) || {};
+    const dm = bm.dev;
+    const rm = bm.review;
+    if (!dm || !rm) {
+      err('$.bindings.models', 'dev/review 未配置 bindings.models，无法证明异源，请显式配置');
+    } else {
+      const dt = (dm.provider || 'default') + '/' + (dm.model || 'default');
+      const rt = (rm.provider || 'default') + '/' + (rm.model || 'default');
+      if (dt === rt) {
+        err('$.bindings.models', 'dev 与 review 模型相同（' + dt + '）：异源硬规则要求不同 provider 或不同模型，请调整 bindings.models');
+      } else if (dm.provider === rm.provider) {
+        warnings.push('弱异源：dev/review 同 provider（' + dm.provider + '）不同模型，建议配置不同 provider 满足真异源');
+      }
+    }
+  }
+
+  return { ok: errors.length === 0, errors, warnings, counts: { nodes: bp.nodes.length, edges: bp.edges.length } };
 }

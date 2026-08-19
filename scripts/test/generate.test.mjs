@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { generateAll } from '../generate.mjs';
+import { generateAll, generateUserSkill } from '../generate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tplDir = path.join(here, '../../templates');
+const bp = JSON.parse(readFileSync(path.join(tplDir, 'dev-workflow-2-0.json'), 'utf8'));
 
 test('S2 生成器：产物四件套齐全', () => {
   const { files, report } = generateAll(tplDir);
@@ -61,4 +63,19 @@ test('S2 生成器：非法蓝图编译失败并报错（不产出）', () => {
   const { files, report } = generateAll(badDir);
   assert.equal(report[0].ok, false);
   assert.equal(files.size, 0);
+});
+
+test('S2 generateUserSkill：用户模板 → 自包含 skill 三件套（T-03 save 即闭环）', () => {
+  const files = generateUserSkill(bp);
+  for (const rel of ['SKILL.md', 'script.mjs', 'meta.json']) {
+    assert.ok(files.has(rel), '缺产物：' + rel);
+  }
+  const skill = files.get('SKILL.md');
+  assert.ok(skill.includes('name: dev-workflow-2-0'), 'skill frontmatter name');
+  assert.ok(skill.includes('开发工作流 2.0'), 'skill 触发词（displayName）');
+  const script = files.get('script.mjs');
+  assert.ok(script.includes('AWAITING_HUMAN_'), 'script 含人工门禁语义');
+  assert.ok(script.includes('超限归因'), 'script 含超限归因（auto-reschedule）');
+  const meta = JSON.parse(files.get('meta.json'));
+  assert.equal(meta.name, 'vwf-dev-workflow-2-0');
 });

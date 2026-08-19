@@ -109,3 +109,69 @@ test('S1 heteroCheck=true 但缺 dev/review 节点拒绝', () => {
   b.edges = b.edges.filter((e) => e.from !== 'review' && e.to !== 'review');
   expectReject(b, 'dev 与 review', 'heteroNodes');
 });
+
+// —— 异源硬规则（契约 §3.1 规则 7，T-06 六用例；T6=update 路径在宿主层，此处 T1-T5）——
+const withHetero = (dev, review) => {
+  const b = clone();
+  b.bindings.models.dev = dev;
+  b.bindings.models.review = review;
+  return b;
+};
+
+test('S1 异源 T1：完全同模型（同 provider 同 model）拒绝', () => {
+  expectReject(withHetero(
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+  ), '模型相同', 'heteroT1');
+});
+
+test('S1 异源 T2：弱异源（同 provider 不同 model）通过 + warning', () => {
+  const r = validateBlueprint(withHetero(
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+  ));
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.ok(r.warnings.length > 0, '应产生弱异源 warning');
+  assert.ok(r.warnings[0].includes('弱异源'), JSON.stringify(r.warnings));
+});
+
+test('S1 异源 T3：真异源（不同 provider）通过无警告', () => {
+  const r = validateBlueprint(withHetero(
+    { provider: 'kimi-coding', model: 'k3' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+  ));
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.equal(r.warnings.length, 0, JSON.stringify(r.warnings));
+});
+
+test('S1 异源 T4：dev 缺绑定拒绝（无法证明异源）', () => {
+  const b = clone();
+  delete b.bindings.models.dev;
+  expectReject(b, '无法证明异源', 'heteroT4');
+});
+
+test('S1 异源 T5：无 dev/review 节点的蓝图跳过异源校验', () => {
+  const b = {
+    id: 'no-dev-review', displayName: '无 dev/review（fixture）', entry: 'dispatch',
+    nodes: [
+      { id: 'dispatch', profile: 'dispatcher', goal: 'x',
+        output: { schema: { type: 'object', properties: { complete: { type: 'boolean' } }, required: ['complete'], additionalProperties: false } } },
+      { id: 'test', profile: 'test', goal: 'x',
+        output: { schema: { type: 'object', properties: { result: { type: 'string' } }, required: ['result'], additionalProperties: false } } },
+      { id: 'accept', profile: 'accept', goal: 'x', manualCheck: true,
+        output: { schema: { type: 'object', properties: { verdict: { type: 'string' } }, required: ['verdict'], additionalProperties: false } } },
+      { id: 'closeout', profile: 'closeout', goal: 'x',
+        output: { schema: { type: 'object', properties: { status: { type: 'string' } }, required: ['status'], additionalProperties: false } } },
+    ],
+    edges: [
+      { from: 'dispatch', to: 'test', on: 'success' },
+      { from: 'dispatch', to: '$end', on: 'failure' },
+      { from: 'test', to: 'accept', on: 'success' },
+      { from: 'accept', to: 'closeout', on: 'success' },
+      { from: 'closeout', to: '$end', on: 'success' },
+    ],
+  };
+  const r = validateBlueprint(b);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.equal(r.warnings.length, 0);
+});

@@ -285,6 +285,17 @@ export function generateAll(templatesDir) {
   return { files, report };
 }
 
+// ---------- 用户模板 → 自包含 skill 三件套（T-03 save 即闭环；vwf.save 经 CLI 调用） ----------
+export function generateUserSkill(bp) {
+  const dsh = compileDsh(bp);
+  return new Map([
+    ['SKILL.md', skillWrap(bp)],
+    ['script.mjs', dsh.script],
+    ['meta.json', JSON.stringify(
+      { name: 'vwf-' + bp.id, description: bp.displayName, phases: bp.nodes.map((n) => ({ title: n.label || n.id })) }, null, 2) + '\n'],
+  ]);
+}
+
 // ---------- CLI（薄壳：参数解析 + 写盘 + 幂等比对，T-IMP-10 接入 validate） ----------
 function writeAll(files, outDir) {
   for (const [rel, content] of files) {
@@ -295,6 +306,29 @@ function writeAll(files, outDir) {
 }
 
 function main() {
+  // 子命令 user：node scripts/generate.mjs user <蓝图json路径> <skill输出目录>
+  //   —— vwf.save 落盘后同步生成自包含 skill 三件套（T-03 save 即闭环）
+  if (process.argv[2] === 'user') {
+    const [bpPath, skillDir] = process.argv.slice(3);
+    if (!bpPath || !skillDir) {
+      console.error('用法：node scripts/generate.mjs user <蓝图json路径> <skill输出目录>');
+      process.exit(1);
+    }
+    const bp = JSON.parse(fs.readFileSync(path.resolve(bpPath), 'utf8'));
+    const v = validateBlueprint(bp);
+    if (!v.ok) {
+      console.error('❌ 蓝图校验失败：' + v.errors.map((e) => e.at + ' ' + e.message).join('；'));
+      if (v.warnings.length) console.error('⚠️ ' + v.warnings.join('；'));
+      process.exit(1);
+    }
+    const dir = path.join(path.resolve(skillDir), bp.id);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [rel, content] of generateUserSkill(bp)) fs.writeFileSync(path.join(dir, rel), content);
+    console.log('✅ 用户 skill 已生成：' + dir);
+    if (v.warnings.length) console.log('⚠️ ' + v.warnings.join('；'));
+    return;
+  }
+
   const tplDir = process.argv[2] || DEFAULT_TPL_DIR;
   const outDir = process.argv[3] || DEFAULT_OUT_DIR;
   const prev = fs.existsSync(outDir)
