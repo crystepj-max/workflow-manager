@@ -1,0 +1,9 @@
+{
+  "id": "bad-blueprint",
+  "displayName": "非法蓝图（fixture）",
+  "entry": "a",
+  "nodes": [
+    { "id": "a", "label": "A", "profile": "dev", "goal": "x" }
+  ],
+  "edges": []
+}

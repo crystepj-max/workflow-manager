@@ -12,3 +12,7 @@ node_modules/
 
 # 会话脚手架与参考副本（不入库）
 .scratch/
+
+# 生成物（不可手改，改动蓝图后重生成）
+.generated/
+.generated.check/

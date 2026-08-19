@@ -1,8 +1,8 @@
 # 开发工作流 2.0 · DSH 实现
 
 「开发工作流 2.0」在 DeepSeek Harness（DSH）上的迁移实现。需求基线见
-[`docs/开发工作流2.0需求规格.md`](../docs/开发工作流2.0需求规格.md)，原 gold-band
-实现见 `workflows/dev-workflow-2.0.json` 与 `profiles/`。
+[`docs/开发工作流2.0需求规格.md`](../docs/开发工作流2.0需求规格.md)；蓝图单一事实源见
+`templates/dev-workflow-2-0.json`（生成产物 `.generated/dev-workflow-2-0/`，契约见 `docs/design/blueprint-schema.md`）。
 
 ## 架构
 
@@ -54,7 +54,7 @@ workflow 编排脚本（dsh/workflow/dev-workflow-2.0.mjs）
 | `dsh/skills/requirements-analysis/` | requirements-analysis 技能真源（SKILL.md + evals/ + references/，内联自洽版） |
 | `dsh/install-requirements-analysis.sh` | requirements-analysis 真源 → 公共池安装脚本（对齐 install-skill.sh 约定） |
 
-角色正文与 `profiles/*.md` 一致，仅 dev 角色有 3 处适配：task.yaml 引用改为
+角色正文与蓝图 `templates/dev-workflow-2-0.json` 的 `nodes[].profile` 一一对应（dev 角色有 3 处适配：task.yaml 引用改为
 「运行上下文注入」（DSH 侧调度结论直接进提示词与 dispatch-result.json，无 task.yaml）。
 
 ## 运行方式（主会话 runbook）
@@ -115,6 +115,20 @@ gh issue view <N> --json title,body,comments
 
 人工确认卡建议字段：通过 / 不通过（附意见）。`accept.verdict` 是 AI 的核验结论，
 仅供参考，**裁决权在人工**。
+
+### 新契约状态补充（蓝图生成脚本，T-05）
+
+旧 mjs 退役后，由生成器产出的脚本（`.generated/<id>/script.mjs`）返回状态统一为新契约：
+
+| 状态 | 含义 | 主会话动作 |
+|---|---|---|
+| `AWAITING_HUMAN_<节点id>`（如 `AWAITING_HUMAN_accept`） | 门禁节点产出后挂起 | 呈报告 + 人工确认卡：通过 → `entry=<节点id>` + `approved=true` 续跑；不通过 → `entry=dev` + `feedback` + `startRound+1` 续跑（返回体含 `resume` 载荷） |
+| `FAILED_AT_<节点id>`（如 `FAILED_AT_dispatch`） | 节点未通过且无打回边（含三要素缺失） | 呈节点结果（dispatch 场景含 `missing`/`reason` 三要素判定），人工补齐后重跑 `entry=dispatch` |
+| `FAILED_MAX_ROUNDS` | 超限（auto-reschedule 时含归因 `reschedule`） | 呈 reschedule → 人工决策拆分 |
+| `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` | 图缺陷 | 检查蓝图 |
+| `ERROR` / `TECHNICAL_FAILURE` / `BLOCKED` / `DONE` | 同旧契约语义 | 见上表 |
+
+> 旧 `REJECTED_INCOMPLETE` 语义由 `FAILED_AT_dispatch` 承接（T-05 决策：接受差异、原因可读）。
 
 ## run 目录产物约定
 

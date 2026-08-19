@@ -4,7 +4,7 @@
 // 本文件是 workflow 工具 script 参数的版本控制源：运行时把本文件全文作为
 // script 传入，args 按 dsh/README.md 的契约装配（角色提示词从 dsh/roles/*.md 读入）。
 //
-// 迁移自 gold-band DSL 模板 workflows/dev-workflow-2.0.json：
+// 迁移自 gold-band DSL 模板（已归档 .scratch/retired-goldband/workflows/dev-workflow-2.0.json）；
 //   7 节点（调度/开发/分流/测试/审核/人工验收/收口），打回上限 9 轮。
 // DSH 侧差异：
 //   - 「分流」不再是 LLM 节点，是脚本内 if（严格满足"只转发不重新分析"）；

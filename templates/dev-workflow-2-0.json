@@ -1,0 +1,409 @@
+{
+  "id": "dev-workflow-2-0",
+  "displayName": "开发工作流 2.0",
+  "description": "issue 三要素门禁 → 开发 →（分流）测试/直审 → 审核 → 人工验收 → 收口，打回上限 9 轮",
+  "entry": "dispatch",
+  "control": {
+    "maxRounds": 9
+  },
+  "onMaxRounds": "auto-reschedule",
+  "heteroCheck": true,
+  "bindings": {
+    "models": {
+      "dispatch": {
+        "provider": "kimi-coding",
+        "model": "k3"
+      },
+      "dev": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-pro"
+      },
+      "route": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash"
+      },
+      "test": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash"
+      },
+      "review": {
+        "provider": "kimi-coding",
+        "model": "k3"
+      },
+      "accept": {
+        "provider": "kimi-coding",
+        "model": "k3"
+      },
+      "closeout": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "dispatch",
+      "label": "调度",
+      "profile": "dispatcher",
+      "goal": "读取 GitHub issue（或原始需求文本），校验三要素并判定是否需要集成测试；三要素缺失如实判定。写 dispatch-result.json 并更新 STATE.md。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "complete": {
+              "type": "boolean"
+            },
+            "missing": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "objective": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scope": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "acceptance": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "need_integration_test": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "complete",
+            "missing",
+            "need_integration_test",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        "successCondition": "$.complete == true",
+        "files": {
+          "dispatch-result.json": "json"
+        }
+      }
+    },
+    {
+      "id": "dev",
+      "label": "开发",
+      "profile": "dev",
+      "goal": "在工作分支施工（tdd），本地验证全绿后提交（不推送、不建 PR）；写 dev-report.md 并更新 STATE.md。环境受阻时 status 报 blocked。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "completed",
+                "blocked"
+              ]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "self_verify": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "summary",
+            "self_verify"
+          ],
+          "additionalProperties": false
+        },
+        "successCondition": "$.status == \"completed\"",
+        "files": {
+          "dev-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "route",
+      "label": "分流",
+      "profile": "dispatcher",
+      "goal": "读取 dispatch-result.json，如实输出是否需要集成测试的判定，不重新分析三要素。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "need_integration_test": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "need_integration_test",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "test",
+      "label": "测试",
+      "profile": "test",
+      "verifyBranch": true,
+      "goal": "对实现做运行态验证（证据驱动判定），专杀假测试；不修改业务代码；写 test-report.md 并更新 STATE.md。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string",
+              "enum": [
+                "PASSED",
+                "FAILED",
+                "BLOCKED"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "verified_branch": {
+              "type": "string"
+            },
+            "verified_head": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "result",
+            "reason",
+            "evidence",
+            "verified_branch",
+            "verified_head"
+          ],
+          "additionalProperties": false
+        },
+        "successCondition": "$.result == \"PASSED\"",
+        "files": {
+          "test-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "review",
+      "label": "审核",
+      "profile": "review",
+      "verifyBranch": true,
+      "goal": "双轴独立审查（需求符合性优先 + 代码质量），只读源代码；写 review-report.md 并更新 STATE.md；存在阻塞问题必须 REQUEST_CHANGES。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "verdict": {
+              "type": "string",
+              "enum": [
+                "APPROVE",
+                "REQUEST_CHANGES",
+                "COMMENT_ONLY"
+              ]
+            },
+            "blockers": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "verified_branch": {
+              "type": "string"
+            },
+            "verified_head": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "verdict",
+            "summary",
+            "verified_branch",
+            "verified_head"
+          ],
+          "additionalProperties": false
+        },
+        "successCondition": "$.verdict != \"REQUEST_CHANGES\"",
+        "files": {
+          "review-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "accept",
+      "label": "人工验收",
+      "profile": "accept",
+      "manualCheck": true,
+      "verifyBranch": true,
+      "goal": "逐条核对验收标准（证据缺失时只读验证），写 acceptance-summary.md 与 accept-report.md 并更新 STATE.md；不代签人工结论。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "verdict": {
+              "type": "string",
+              "enum": [
+                "PASS",
+                "FAIL",
+                "INCOMPLETE"
+              ]
+            },
+            "summary_for_human": {
+              "type": "string"
+            },
+            "details": {
+              "type": "string"
+            },
+            "verified_branch": {
+              "type": "string"
+            },
+            "verified_head": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "verdict",
+            "summary_for_human",
+            "details",
+            "verified_branch",
+            "verified_head"
+          ],
+          "additionalProperties": false
+        },
+        "files": {
+          "acceptance-summary.md": "markdown",
+          "accept-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "closeout",
+      "label": "收口",
+      "profile": "closeout",
+      "goal": "一致性收口；写 cleanup-report.md；推送、创建并合并 Draft PR（squash + 删分支）、关闭 issue；收束本地工作区。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "done"
+              ]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "followups": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "summary"
+          ],
+          "additionalProperties": false
+        },
+        "files": {
+          "cleanup-report.md": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "dispatch",
+      "to": "dev",
+      "on": "success"
+    },
+    {
+      "from": "dispatch",
+      "to": "$end",
+      "on": "failure"
+    },
+    {
+      "from": "dev",
+      "to": "route",
+      "on": "success"
+    },
+    {
+      "from": "route",
+      "to": "test",
+      "on": "success",
+      "when": "$.need_integration_test == true"
+    },
+    {
+      "from": "route",
+      "to": "review",
+      "on": "success",
+      "when": "$.need_integration_test == false"
+    },
+    {
+      "from": "test",
+      "to": "review",
+      "on": "success"
+    },
+    {
+      "from": "test",
+      "to": "dev",
+      "on": "failure"
+    },
+    {
+      "from": "review",
+      "to": "accept",
+      "on": "success"
+    },
+    {
+      "from": "review",
+      "to": "dev",
+      "on": "failure"
+    },
+    {
+      "from": "accept",
+      "to": "closeout",
+      "on": "success"
+    },
+    {
+      "from": "accept",
+      "to": "dev",
+      "on": "failure"
+    },
+    {
+      "from": "closeout",
+      "to": "$end",
+      "on": "success"
+    }
+  ]
+}
