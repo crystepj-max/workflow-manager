@@ -1,4 +1,4 @@
-# 插件层实现总结（T-IMP-06/07 · 已收口）
+# 插件层实现总结（T-IMP-06/07/12 · 已收口）
 
 > 面向「下一个接手的人」：本仓库 vwf 图形入口插件（`packages/dsh-visual-workflow/`）的
 > 架构、运行环境适配与验证路径。行为细节以源码注释与 `tests/host.test.mjs` 为准，
@@ -9,8 +9,25 @@
 vwf 插件是 **Cordis 动态双半插件**（plain JS、无 import/JSX，`cordis_define`/`cordis_run` 激活），
 在 DSH Web 设置页注册「工作流」section（`settings.section`，id=`workflow-visual`，order=25）：
 
-- **host 半**：DSL 校验（Gold-Band 同构规则集）/ 编译 / 9 个 RPC / `wf_run` 工具 / 运行状态跟踪 / `vwf_debug` 诊断工具。
+- **host 半**：DSL 校验（Gold-Band 同构规则集）/ **统一编译器管道**（T-IMP-12，见下）/ RPC / `wf_run` 工具 / 运行状态跟踪 / `vwf_debug` 诊断工具。
 - **client 半**：模板库（新建/编辑/删除/刷新/另存为）+ 大抽屉可视化编辑器（画布/配置面板/JSON tab）+ 运行看板。
+
+### 1.0 统一编译器管道（T-IMP-12 · 候选一）
+
+原 host 内联 `compileDsl`（无增强的第二份编译器）已删除。单一编译器 =
+`scripts/generate.mjs` 的 `compileBlueprint`（DSH 与 vwf 双入口共用）；host 按来源取译文：
+
+| 来源 | 取法 | 说明 |
+|---|---|---|
+| 内置模板（wf_run templateId） | 读 `<repo>/.generated/<id>/script.mjs` | `npm run generate` 产物，含蓝图全部增强（折叠/闸门/归因/异源日志） |
+| 用户模板（wf_run templateId） | 读 `~/.dsh/skills/<id>/script.mjs` | save 即闭环产物；手工放置的蓝图无产物时落 CLI 兜底 |
+| 临时图（wf_run args.dsl） | CLI：逆投影蓝图落盘 `~/.dsh/visual-workflow/templates/tmp/` → spawn `generate.mjs compile` → 清理 | 编辑器实时查看（vwf.script RPC）同此路径 |
+
+- `vwf.compile` RPC 已删除（仅测试在用）；`vwf.script` 返回统一译文。
+- 磁盘产物优先意味着与 DSH 技能入口相同的 staleness 特性（改蓝图未重生成 → 跑旧产物），
+  由 validate 步骤②重生成比对兜底。
+- 行为验收：`scripts/test/runtime-host.test.mjs`（H1-H6：磁盘路径逐字节一致 / 用户产物 /
+  CLI 兜底接线 / 行为统一 / 真实 CLI 集成）；原「双编译器对拍」差异断言已翻转为一致断言。
 
 模板存储为**双根目录**（单一事实源 = 蓝图，见 `docs/design/blueprint-schema.md`）：
 

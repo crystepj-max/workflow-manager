@@ -44,7 +44,7 @@ cordis_define:
 |---|---|
 | `vwf.workflows.list / save / remove` | 模板库 CRUD：双根加载（内置 `.generated/` 只读 + 用户 `~/.dsh/visual-workflow/templates/` 可写）；save 撞名拒绝 + 同步编译 skill（save 即闭环）；remove 仅用户 + 同步删 skill |
 | `vwf.validate` | DSL 校验，返回 `{ok, errors, fieldErrors, sanitized}`（fieldErrors 键形如 `node:<id>:<field>` / `edge:<i>:<field>` / `control:<field>`） |
-| `vwf.compile` / `vwf.script` | DSL → workflow 脚本编译（`vwf.script` 返回脚本全文与 engineAvailable） |
+| `vwf.script` | 统一编译器管道（T-IMP-12）：DSL → `scripts/generate.mjs compileBlueprint` 译文（CLI 兜底），返回脚本全文、meta 与 engineAvailable。`vwf.compile` 已随统一编译器删除 |
 | `vwf.state` | 运行状态（runId → status/phase/agents/logs） |
 | `vwf.models` | 对接 DSH 宿主 `llm` 服务的 provider/model 列表（编辑器的 Agent/模型下拉数据源） |
 | `vwf.roles` | 读取工作区 `dsh/roles/*.md`（`fs` 服务，多形态兜底；不可用回退内置六角色） |

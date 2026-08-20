@@ -61,7 +61,9 @@ function foldableNodes(bp) {
 }
 
 // ---------- DSH 侧编译（契约 §4.2/§4.3，移植 host.js compileDsl + 增强） ----------
-export function compileDsh(bp, opts = {}) {
+// 统一编译器（候选一 T-IMP-12）：DSH 与 vwf 双入口的唯一翻译员。
+// 宿主侧 compileDsl 已删除，经管道消费本函数产物（磁盘产物优先 + CLI compile 兜底）。
+export function compileBlueprint(bp, opts = {}) {
   const maxRounds = (bp.control && bp.control.maxRounds) || 9;
   const models = (bp.bindings && bp.bindings.models) || {};
   const folds = foldableNodes(bp);
@@ -260,6 +262,11 @@ export function skillWrap(bp) {
   ].join('\n');
 }
 
+// ---------- meta 组装（三处共用：generateAll / generateUserSkill / CLI compile） ----------
+export function buildMeta(bp) {
+  return { name: 'vwf-' + bp.id, description: bp.displayName, phases: bp.nodes.map((n) => ({ title: n.label || n.id })) };
+}
+
 // ---------- 生成（纯函数） ----------
 export function generateAll(templatesDir) {
   const files = new Map();
@@ -278,15 +285,14 @@ export function generateAll(templatesDir) {
       report.push({ id: bp.id || f, ok: false, errors: v.errors });
       continue;
     }
-    const dsh = compileDsh(bp);
+    const dsh = compileBlueprint(bp);
     const vwf = projectToVwf(bp);
     const skill = skillWrap(bp);
     const rel = (p) => bp.id + '/' + p;
     files.set(rel('script.mjs'), dsh.script);
     files.set(rel('vwf-dsl.json'), JSON.stringify(vwf, null, 2) + '\n');
     files.set(rel('SKILL.md'), skill);
-    files.set(rel('meta.json'), JSON.stringify(
-      { name: 'vwf-' + bp.id, description: bp.displayName, phases: bp.nodes.map((n) => ({ title: n.label || n.id })) }, null, 2) + '\n');
+    files.set(rel('meta.json'), JSON.stringify(buildMeta(bp), null, 2) + '\n');
     report.push({ id: bp.id, ok: true, nodes: v.counts.nodes, edges: v.counts.edges, folds: Object.keys(dsh.folds), scriptBytes: dsh.script.length });
   }
   return { files, report };
@@ -294,12 +300,11 @@ export function generateAll(templatesDir) {
 
 // ---------- 用户模板 → 自包含 skill 三件套（T-03 save 即闭环；vwf.save 经 CLI 调用） ----------
 export function generateUserSkill(bp) {
-  const dsh = compileDsh(bp);
+  const dsh = compileBlueprint(bp);
   return new Map([
     ['SKILL.md', skillWrap(bp)],
     ['script.mjs', dsh.script],
-    ['meta.json', JSON.stringify(
-      { name: 'vwf-' + bp.id, description: bp.displayName, phases: bp.nodes.map((n) => ({ title: n.label || n.id })) }, null, 2) + '\n'],
+    ['meta.json', JSON.stringify(buildMeta(bp), null, 2) + '\n'],
   ]);
 }
 
@@ -333,6 +338,33 @@ function main() {
     for (const [rel, content] of generateUserSkill(bp)) fs.writeFileSync(path.join(dir, rel), content);
     console.log('✅ 用户 skill 已生成：' + dir);
     if (v.warnings.length) console.log('⚠️ ' + v.warnings.join('；'));
+    return;
+  }
+
+  // 子命令 compile：node scripts/generate.mjs compile <蓝图json路径>
+  //   —— 统一编译器管道兜底（候选一 T-IMP-12）：宿主 vwf 侧临时图/编辑器实时查看
+  //   经 CLI 取译文。宿主先做 DSL 校验（validateDsl），此处不重复校验（保持行为对齐）。
+  //   stdout 输出 JSON：{ ok:true, script, meta } 或 { ok:false, error }。
+  if (process.argv[2] === 'compile') {
+    const bpPath = process.argv[3];
+    if (!bpPath) {
+      console.error('用法：node scripts/generate.mjs compile <蓝图json路径>');
+      process.exit(1);
+    }
+    let bp;
+    try {
+      bp = JSON.parse(fs.readFileSync(path.resolve(bpPath), 'utf8'));
+    } catch (e) {
+      console.error(JSON.stringify({ ok: false, error: '蓝图解析失败：' + e.message }));
+      process.exit(1);
+    }
+    try {
+      const { script } = compileBlueprint(bp);
+      console.log(JSON.stringify({ ok: true, script, meta: buildMeta(bp) }));
+    } catch (e) {
+      console.error(JSON.stringify({ ok: false, error: '编译失败：' + String((e && e.message) || e) }));
+      process.exit(1);
+    }
     return;
   }
 

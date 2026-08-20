@@ -39,7 +39,7 @@
 | `output.successCondition` | 可选 | `$.path ==|!= value`（value ∈ true/false/null/字符串/数字）；路径必须已在 `output.schema` 中声明 |
 | `output.files` | 可选 | 对象：`{ "<相对路径>": "json"\|"markdown"\|"text" }`——本节点**应产出**的声明式文件契约（D7，Q1 增补）；路径相对 `runDir/`；见 §6.4 |
 | `manualCheck` | 可选 | 布尔，默认 false；true = 人工门禁节点（vwf 编译为 `AWAITING_HUMAN_<id>` + resume 续跑；DSH 侧对应脚本返回 + 主会话裁决） |
-| `verifyBranch` | 可选 | 布尔，默认 false；DSH 增强（D4）：置 true 时 `output.schema.required` **必须**含 `verified_branch` 与 `verified_head`（可信度闸门，编译注入开工分支自检 + 结论硬校验）；vwf 侧 v1 忽略 |
+| `verifyBranch` | 可选 | 布尔，默认 false；DSH 增强（D4）：置 true 时 `output.schema.required` **必须**含 `verified_branch` 与 `verified_head`（可信度闸门，编译注入开工分支自检 + 结论硬校验）；vwf 侧 v1 忽略，**v1.1（候选一统一编译器）起按蓝图内容生效**——内置模板含本字段，vwf 入口同样硬校验 |
 
 ### 2.3 边
 
@@ -75,7 +75,14 @@
 
 ### 4.1 vwf 侧投影
 
-`projectToVwf(bp)`：字段映射为 vwf DSL 子集——`id`、`name = displayName`、`description`、`entry`、`control.maxRounds`；节点注入 `model = bindings.models[nodeId]`（无则省略）；保留 `output`/`manualCheck`；**增强字段（onMaxRounds/heteroCheck/verifyBranch）不进入 DSL**。产物可直接喂现有 `validateDsl`/`compileDsl`（其编译产物可被普通 `workflow` 工具执行，R-02/R-03）。
+`projectToVwf(bp)`：字段映射为 vwf DSL 子集——`id`、`name = displayName`、`description`、`entry`、`control.maxRounds`；节点注入 `model = bindings.models[nodeId]`（无则省略）；保留 `output`/`manualCheck`；**增强字段（onMaxRounds/heteroCheck/verifyBranch）不进入 DSL**（编辑器字段为 v2 候选）。产物可喂现有 `validateDsl`（R-02/R-03）。
+
+> **编译语义（v1.1 候选一统一编译器，T-IMP-12）**：DSH 与 vwf 双入口共用单一编译器
+> `scripts/generate.mjs compileBlueprint`。宿主（`host.js`）经管道取译文：内置模板读
+> `.generated/<id>/script.mjs`、用户模板读 `~/.dsh/skills/<id>/script.mjs`（均为
+> `compileBlueprint` 产物，含蓝图全部增强）；临时图/编辑器实时查看走 CLI
+> `generate.mjs compile` 兜底（DSL 逆投影回蓝图后编译，行为由蓝图内容决定）。
+> 原宿主侧 `compileDsl`（无增强的第二份实现）已删除。
 
 ### 4.2 DSH 侧折叠与增强注入（D3、D4）
 

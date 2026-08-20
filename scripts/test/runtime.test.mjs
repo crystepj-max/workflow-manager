@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { compileDsh, generateAll } from '../generate.mjs'
+import { compileBlueprint, generateAll } from '../generate.mjs'
 import { runGeneratedScript, makeAgentScript } from './helpers/runtime-harness.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -25,7 +25,7 @@ test('夹具卫生：微型图纸与内置蓝图均通过蓝图校验（含走�
 
 // ---------- 第一层 · 框架级场景（微型图纸 hello） ----------
 const runEngine = (bp, table, args = {}) => {
-  const { script } = compileDsh(bp)
+  const { script } = compileBlueprint(bp)
   const agent = makeAgentScript(table)
   return runGeneratedScript(script, { args, agent })
 }
@@ -125,7 +125,7 @@ test('F8 折叠通用语义：两路同路径条件分流节点零出场、按�
       { from: 'start', to: '$end', on: 'failure' },
     ],
   }
-  const { script, folds } = compileDsh(foldBp)
+  const { script, folds } = compileBlueprint(foldBp)
   assert.deepEqual(Object.keys(folds), ['route'])
   const { result, agentCalls } = await runGeneratedScript(script, { agent: makeAgentScript({ start: { go: true }, a: {}, b: {} }) })
   assert.equal(result.status, 'DONE')

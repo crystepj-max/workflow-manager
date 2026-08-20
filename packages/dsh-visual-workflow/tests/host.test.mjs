@@ -7,98 +7,13 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const REPO = '/repo'
-const SESSION_REPO = '/session/workspace'
-const HOME = '/Users/tester'
-const DSH_HOME = HOME + '/.dsh'
-const USER_DIR = DSH_HOME + '/visual-workflow/templates'
-const SKILL_ROOT = DSH_HOME + '/skills'
+const realGenerated = join(here, '..', '..', '..', '.generated', 'dev-workflow-2-0', 'vwf-dsl.json')
 
-// ── 加载 host 半（共享加载器：helpers/load-host.mjs，new Function + 假 ctx/harness）──
+// ── 共享假服务（helpers/fake-services.mjs）与共享加载器（helpers/load-host.mjs）──
 import { loadHost } from './helpers/load-host.mjs'
+import { REPO, SESSION_REPO, HOME, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 
 const call = async (handlers, method, args) => handlers.get(method)(args)
-
-// ── 假服务：fs（内存 Map，与宿主 fs 服务同形）/ subprocess / sandboxPolicy ──
-function makeFs(seed = {}) {
-  const files = new Map(Object.entries(seed))
-  const target = (path) => ({ targetKey: path, displayPath: path })
-  const fs = {
-    async resolve(path) { return target(path) },
-    async stat(t) {
-      const p = t.displayPath || t.targetKey
-      if (files.has(p)) return { version: 'v' + files.get(p).length, type: 'file' }
-      for (const k of files.keys()) if (k.startsWith(p + '/')) return { version: 'd', type: 'directory' }
-      return undefined
-    },
-    async readText(t) {
-      const p = t.displayPath || t.targetKey
-      if (!files.has(p)) throw new Error('ENOENT ' + p)
-      return files.get(p)
-    },
-    async writeText(t, content) {
-      const p = t.displayPath || t.targetKey
-      files.set(p, content)
-      return { version: 'v' + content.length }
-    },
-    async listDir(t) {
-      const p = t.displayPath || t.targetKey
-      const kids = new Map()
-      for (const k of files.keys()) {
-        if (!k.startsWith(p + '/')) continue
-        const first = k.slice(p.length + 1).split('/')[0]
-        if (!kids.has(first)) {
-          kids.set(first, { name: first, type: files.has(p + '/' + first) ? 'file' : 'directory', target: target(p + '/' + first) })
-        }
-      }
-      return [...kids.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-    },
-    _files: files,
-  }
-  return fs
-}
-
-// failPattern：argv 字符串匹配则模拟生成器失败（exit 1 + 蓝图校验错误）
-// fs：传入时模拟 rmSync 真实删除（remove/回滚路径）
-function makeSubprocess({ failPattern = null, fs = null } = {}) {
-  const calls = []
-  const specs = []
-  const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
-  const sub = {
-    async resolveExecutable(command) { return '/usr/bin/node' },
-    spawn(spec) {
-      calls.push(spec.argv)
-      specs.push(spec)
-      const argvStr = spec.argv.join(' ')
-      let exitCode = 0
-      let stdout = ''
-      let stderr = ''
-      if (argvStr.includes('.homedir')) {
-        stdout = DSH_HOME
-      } else if (argvStr.includes('rmSync')) {
-        if (fs) fs._files.delete(spec.argv[spec.argv.length - 1])
-      } else if (failPattern && failPattern.test(argvStr)) {
-        exitCode = 1
-        stderr = '❌ 蓝图校验失败：$.id 测试错误'
-      }
-      return {
-        pid: 1,
-        done: Promise.resolve({ exitCode, signal: null }),
-        collected: { stdout: reader(stdout), stderr: reader(stderr) },
-        terminate() {},
-        waitForExit: async () => true,
-      }
-    },
-    _calls: calls,
-    _specs: specs,
-  }
-  return sub
-}
-
-const sandboxPolicy = { workspaceRoot: REPO, resolve: () => ({ mode: 'danger-full-access', workspaceRoot: REPO }) }
-
-// 默认环境：内置根 .generated/dev-workflow-2-0/vwf-dsl.json（真实生成物存在时用之）
-const realGenerated = join(here, '..', '..', '..', '.generated', 'dev-workflow-2-0', 'vwf-dsl.json')
 const MINIMAL_BUILTIN = JSON.stringify({
   id: 'dev-workflow-2-0', name: '开发工作流 2.0', description: '内置最小样例', entry: 'dispatch',
   control: { maxRounds: 9 },
@@ -120,7 +35,11 @@ function seedFs(extra = {}) {
 
 function env({ failPattern, extra = {} } = {}) {
   const fs = seedFs()
-  const sub = makeSubprocess({ failPattern, fs })
+  // 统一编译器管道（T-IMP-12）：vwf.script 走 CLI compile——模拟输出用真实生成物（存在时）
+  const compileScript = existsSync(realGenerated)
+    ? readFileSync(join(here, '..', '..', '..', '.generated', 'dev-workflow-2-0', 'script.mjs'), 'utf8')
+    : '//MOCK-SCRIPT'
+  const sub = makeSubprocess({ failPattern, fs, compileScript })
   const { handlers, definedTools, events, ctx } = loadHost({ fs, subprocess: sub, sandboxPolicy, ...extra })
   return { handlers, definedTools, events, ctx, fs, sub }
 }
@@ -169,20 +88,22 @@ function heteroDsl(devModel, reviewModel, overrides = {}) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('AC-2：内置模板从 .generated/ 目录加载（host.js 无硬编码模板）', async () => {
-  const { handlers } = env()
+  const { handlers, sub } = env()
   const list = await call(handlers, 'vwf.workflows.list')
   const builtin = list.find(w => w.id === 'dev-workflow-2-0')
   assert.ok(builtin, '列表包含内置模板')
   assert.equal(builtin.builtin, true)
   const v = await call(handlers, 'vwf.validate', { dsl: builtin.dsl })
   assert.equal(v.ok, true, JSON.stringify(v.errors))
-  const c = await call(handlers, 'vwf.compile', { dsl: builtin.dsl })
-  assert.equal(c.ok, true)
-  assert.ok(c.meta.phases.length === builtin.dsl.nodes.length)
+  // T-IMP-12：vwf.compile 已删除；vwf.script 走统一编译器管道（CLI compile）
   const s = await call(handlers, 'vwf.script', { dsl: builtin.dsl })
-  assert.equal(s.ok, true)
-  assert.ok(s.script.includes('AWAITING_HUMAN_'), '人工验收门禁在编译产物中')
-  assert.ok(s.script.includes("const MAX_ROUNDS = 9"))
+  assert.equal(s.ok, true, JSON.stringify(s.errors))
+  const compileCall = sub._calls.find(c => c.join(' ').includes('generate.mjs') && c.join(' ').includes(' compile '))
+  assert.ok(compileCall, 'vwf.script 经 CLI compile 取统一译文')
+  if (existsSync(realGenerated)) {
+    assert.ok(s.script.includes('AWAITING_HUMAN_'), '统一译文含人工验收门禁语义')
+    assert.ok(s.script.includes('const MAX_ROUNDS = 9'))
+  }
 })
 
 test('内置根优先取发起 agent 会话 cwd（agentless 兜底 sandboxPolicy.workspaceRoot）', async () => {
@@ -236,15 +157,13 @@ test('apply 无 initiator（浏览器审批激活）→ 后续模型调用实时
   assert.ok(list.some(w => w.id === 'dev-workflow-2-0' && w.builtin === true), 'knownCwd 历史兜底生效')
 })
 
-test('真实生成物 .generated/dev-workflow-2-0/vwf-dsl.json 校验与编译通过', async (t) => {
+test('真实生成物 .generated/dev-workflow-2-0/vwf-dsl.json 校验通过（编译已并入统一管道）', async (t) => {
   if (!existsSync(realGenerated)) { t.skip('缺少 .generated/（先 npm run generate）'); return }
   const { handlers } = env()
   const list = await call(handlers, 'vwf.workflows.list')
   const builtin = list.find(w => w.id === 'dev-workflow-2-0')
   const v = await call(handlers, 'vwf.validate', { dsl: builtin.dsl })
   assert.equal(v.ok, true, JSON.stringify(v.errors))
-  const c = await call(handlers, 'vwf.compile', { dsl: builtin.dsl })
-  assert.equal(c.ok, true)
 })
 
 test('AC-3：save 新模板 → 蓝图落盘 + skill 同步（save 即闭环）+ list 投影', async () => {

@@ -29,6 +29,11 @@
 // T-IMP-07（异源接入，FR-8，AC-8）：save 与 vwf.validate 叠加内联异源硬规则
 //  （有 dev+review 节点 → 缺绑定拒 / 完全同模型拒 / 弱异源警告），与引擎
 //  validate-blueprint.mjs 规则 7 行为一致。
+// T-IMP-12（候选一：统一编译器）：compileDsl 已删除——单一编译器 =
+//  scripts/generate.mjs compileBlueprint；宿主经管道取译文：内置模板读
+//  .generated/<id>/script.mjs、用户模板读 ~/.dsh/skills/<id>/script.mjs（磁盘优先，
+//  含蓝图全部增强），临时图/编辑器实时查看走 CLI `generate.mjs compile` 兜底。
+//  vwf.compile RPC 随之删除（仅测试在用）；vwf.script 返回统一译文。
 //
 // 运行形态：动态插件（cordis_define code.host）——plain JS、无 import，
 // 服务经 ctx.get 获取并判空。vm 沙箱无 process/env：仓库根优先取发起 agent
@@ -510,117 +515,61 @@ return {
       return { ok: errors.length === 0, errors, fieldErrors, sanitized }
     }
 
-    function compileDsl(dsl) {
-      const v = validateDsl(dsl)
-      if (!v.ok) return { ok: false, errors: v.errors }
-      const maxRounds = (dsl.control && dsl.control.maxRounds) || 9
-      const nodesJson = JSON.stringify(dsl.nodes)
-      const edgesJson = JSON.stringify(dsl.edges)
-      const phases = dsl.nodes.map(n => ({ title: (n.label || n.id) }))
-      const meta = { name: 'vwf-' + (dsl.id || 'run'), description: dsl.name || dsl.id || 'visual workflow run', phases: phases }
-      const script = [
-        "const A = args || {}",
-        "const TASK = A.taskId || 'task'",
-        "const RUNDIR = A.runDir || ('.agent-runs/' + TASK)",
-        "const ROLE_DIR = A.roleDir || 'dsh/roles'",
-        "const BASE = A.baseBranch || 'main'",
-        "const WORK = 'dev2/' + TASK",
-        "const MAX_ROUNDS = " + maxRounds,
-        "const NODES = " + nodesJson,
-        "const EDGES = " + edgesJson,
-        "const BYID = {}",
-        "for (const n of NODES) BYID[n.id] = n",
-        "function cond(expr, res) {",
-        "  if (!expr) return true",
-        "  const m = /^\\$\\.([A-Za-z0-9_.]+)\\s*(==|!=)\\s*(true|false|null|\"([^\"]*)\"|-?\\d+(\\.\\d+)?)$/.exec(expr)",
-        "  if (!m) return false",
-        "  let v = res",
-        "  for (const k of m[1].split('.')) { if (v == null) return false; v = v[k] }",
-        "  let want",
-        "  if (m[3] === 'true') want = true",
-        "  else if (m[3] === 'false') want = false",
-        "  else if (m[3] === 'null') want = null",
-        "  else if (m[4] !== undefined) want = m[4]",
-        "  else want = Number(m[3])",
-        "  return m[2] === '==' ? v === want : v !== want",
-        "}",
-        "function issueBlock() {",
-        "  if (A.issueBody) return 'GitHub issue ' + (A.issueRef || '') + '\\n标题：' + (A.issueTitle || '（未提供）') + '\\n正文：\\n' + A.issueBody + (A.issueComments ? '\\n\\n需求确认相关评论：\\n' + A.issueComments : '')",
-        "  if (A.requirement) return '原始需求文本（运行时直接给出，以此为准）：\\n' + A.requirement",
-        "  return '（本任务未提供 issue 或需求文本，请以前序产物为准）'",
-        "}",
-        "function roleRef(name) {",
-        "  return '【角色定义】开工前先用读文件工具读取 ' + ROLE_DIR + '/' + name + '.md（相对当前工作区根目录），严格遵循其中的定位、工作流程、产出模板、判定标准与硬规则——该文件是你在本节点的唯一角色依据。\\n'",
-        "}",
-        "function runtimeCtx(nodeId, extra) {",
-        "  const n = BYID[nodeId]",
-        "  return '\\n\\n---\\n\\n## 运行上下文（编排注入，以此为准）\\n\\n' + '【节点目标】\\n' + (n.goal || '') + '\\n\\n【任务输入】\\n' + issueBlock() + '\\n\\n- 任务标识：' + TASK + '\\n- run 产物目录：' + RUNDIR + '/（不存在则创建；本节点只允许在该目录内写文件）\\n- base 分支：' + BASE + '；工作分支：' + WORK + '\\n- 当前节点：' + (n.label || nodeId) + '\\n- 完成本节点后更新 ' + RUNDIR + '/STATE.md（stage / round / status / updated，时间用 date -u +%FT%TZ）\\n' + (extra ? '\\n' + extra + '\\n' : '') + '\\n## 最终回复要求\\n完成全部工作（含写报告、更新 STATE.md）后，最终回复只给出结构化结果本身，不要复述报告全文。\\n'",
-        "}",
-        "async function callNode(id, round, feedback) {",
-        "  const n = BYID[id]",
-        "  const opts = { label: (n.label || id) + (round > 0 ? ' R' + round : ''), ...(n.model || {}) }",
-        "  if (n.output && n.output.schema) opts.schema = n.output.schema",
-        "  const fb = feedback ? '【上轮打回反馈——必须逐条修复】\\n' + feedback + '\\n\\n' : ''",
-        "  const prompt = roleRef(n.profile) + runtimeCtx(id, fb)",
-        "  phase(n.label || id)",
-        "  return await agent(prompt, opts)",
-        "}",
-        "function outEdges(id) { return EDGES.filter(e => e.from === id) }",
-        "function route(id, res, ok) {",
-        "  const out = outEdges(id)",
-        "  if (ok) {",
-        "    for (const e of out) if (e.on === 'success' && e.when && cond(e.when, res)) return e",
-        "    for (const e of out) if (e.on === 'success' && !e.when) return e",
-        "  } else {",
-        "    for (const e of out) if (e.on === 'failure') return e",
-        "  }",
-        "  return null",
-        "}",
-        "let current = A.entry || '" + dsl.entry + "'",
-        "let round = A.startRound || 0",
-        "let feedback = A.feedback || ''",
-        "const results = {}",
-        "const history = A.history || []",
-        "while (current !== '$end') {",
-        "  const n = BYID[current]",
-        "  if (!n) return { status: 'ERROR', detail: '未知节点：' + current }",
-        "  if (n.manualCheck) {",
-        "    if (A.approved !== true) {",
-        "      const res = await callNode(current, round, feedback)",
-        "      results[current] = res",
-        "      return { status: 'AWAITING_HUMAN_' + current, taskId: TASK, node: current, round: round, result: res, history: history, resume: { entry: current, approved: true, startRound: round, history: history, feedback: feedback } }",
-        "    }",
-        "    const e = route(current, results[current], true)",
-        "    if (!e) return { status: 'ERROR', detail: '人工裁决后无出边：' + current }",
-        "    current = e.to",
-        "    continue",
-        "  }",
-        "  const res = await callNode(current, round, feedback)",
-        "  if (res === null) {",
-        "    history.push({ round: round, stage: current, verdict: 'AGENT_FAILED', reason: '节点 agent 未返回有效结果' })",
-        "    const ef = route(current, null, false)",
-        "    if (!ef || ef.to === '$end') return { status: 'TECHNICAL_FAILURE', stage: current, round: round, results: results, history: history }",
-        "    current = ef.to; round++; feedback = '【' + (BYID[current].label || current) + ' agent 技术失败】请重试并自查。'; continue",
-        "  }",
-        "  results[current] = res",
-        "  const ok = n.output && n.output.successCondition ? cond(n.output.successCondition, res) : true",
-        "  log((n.label || current) + ' → ' + (ok ? '通过' : '未通过'))",
-        "  const e = route(current, res, ok)",
-        "  if (!e) return { status: ok ? 'ENDED_NO_SUCCESS_EDGE' : 'ENDED_NO_FAILURE_EDGE', stage: current, results: results, history: history }",
-        "  if (e.on === 'failure') {",
-        "    round++",
-        "    if (e.to === '$end') return { status: 'FAILED_AT_' + current, stage: current, result: res, results: results, history: history }",
-        "    if (round >= MAX_ROUNDS) return { status: 'FAILED_MAX_ROUNDS', taskId: TASK, rounds: MAX_ROUNDS, results: results, history: history, dispatch: results['dispatch'] || null }",
-        "    history.push({ round: round, stage: current, verdict: 'REJECTED', reason: JSON.stringify(res) })",
-        "    feedback = '【' + (n.label || current) + '未通过 · 第 ' + round + ' 轮】' + JSON.stringify(res)",
-        "  } else {",
-        "    feedback = ''",
-        "  }",
-        "  current = e.to",
-        "}",
-        "return { status: 'DONE', taskId: TASK, round: round, results: results, history: history }"
-      ].join('\n')
-      return { ok: true, script: script, meta: meta }
+    // ── 统一编译器管道（候选一 T-IMP-12）────────────────────────────────────
+    // compileDsl 已删除：单一编译器 = scripts/generate.mjs 的 compileBlueprint，
+    // 宿主按来源取译文（磁盘优先 + CLI 兜底）：
+    //   - 内置模板（fromTemplate，builtin）：读 .generated/<id>/script.mjs
+    //     （npm run generate 产物，含蓝图全部增强：折叠/可信度闸门/超限归因/异源日志）
+    //   - 用户模板（fromTemplate，user）：读 ~/.dsh/skills/<id>/script.mjs（save 闭环产物）
+    //   - 其余（编辑器实时查看 vwf.script / wf_run 临时图 args.dsl）：
+    //     逆投影蓝图 → spawn `node scripts/generate.mjs compile <临时蓝图>` 取译文
+    //   （DSL 不含增强字段，CLI 编译结果 = 蓝图内容决定的行为，与磁盘产物一致）
+
+    function metaFromDsl(dsl) {
+      return { name: 'vwf-' + (dsl.id || 'run'), description: dsl.name || dsl.id || 'visual workflow run', phases: (dsl.nodes || []).map(n => ({ title: (n.label || n.id) })) }
+    }
+
+    async function readTextIfExists(p) {
+      if (fs === undefined) return null
+      try {
+        const target = await fs.resolve(p)
+        const info = await fs.stat(target)
+        if (!info || info.type !== 'file') return null
+        return await fs.readText(target)
+      } catch (e) { return null }
+    }
+
+    // opts.fromTemplate = true：模板来源 → 磁盘产物优先；false：临时图 → CLI 编译。
+    async function compileViaPipeline(dsl, opts) {
+      const p = await rootPaths()
+      if (opts && opts.fromTemplate) {
+        const builtin = await readTextIfExists(p.builtinDir + '/' + dsl.id + '/script.mjs')
+        if (builtin) return { ok: true, script: builtin, meta: metaFromDsl(dsl) }
+        const user = await readTextIfExists(p.skillRoot + '/' + dsl.id + '/script.mjs')
+        if (user) return { ok: true, script: user, meta: metaFromDsl(dsl) }
+      }
+      if (fs === undefined || subprocess === undefined || !p.repo || !p.generator || !p.userDir) {
+        return { ok: false, detail: '宿主子进程/文件能力不可用：无法编译临时图（模板来源请先运行 npm run generate 或经保存闭环）' }
+      }
+      // 临时蓝图落盘（用户目录 tmp 区，danger 策略）→ CLI compile → 清理
+      const bp = projectToBlueprint(dsl)
+      const tmp = p.userDir + '/tmp/compile-' + dsl.id + '-' + Date.now() + '.json'
+      try {
+        const target = await fs.resolve(tmp)
+        await fs.writeText(target, JSON.stringify(bp, null, 2) + '\n', undefined, undefined, writePolicy())
+      } catch (e) {
+        return { ok: false, detail: '临时蓝图写入失败：' + String((e && e.message) || e) }
+      }
+      const r = await runNode([p.generator, 'compile', tmp], { cwd: p.repo, graceMs: 30000 })
+      try { await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", tmp], { cwd: p.repo }) } catch (e) {}
+      if (!r.ok) return { ok: false, detail: r.detail }
+      try {
+        const out = JSON.parse(r.stdout)
+        if (!out.ok) return { ok: false, detail: '编译器返回错误：' + (out.error || '未知') }
+        return { ok: true, script: out.script, meta: out.meta || metaFromDsl(dsl) }
+      } catch (e) {
+        return { ok: false, detail: '编译器输出不可解析：' + String((e && e.message) || e) }
+      }
     }
 
     // 双根查找：内置优先（沿用），用户目录兜底（蓝图 → vwf DSL 投影）
@@ -727,14 +676,13 @@ return {
       if (!het.ok) return { ok: false, errors: het.errors, fieldErrors: {}, sanitized: v.sanitized }
       return { ok: true, errors: [], fieldErrors: {}, sanitized: v.sanitized, warnings: het.warnings }
     })
-    harness.handle('vwf.compile', async (a) => {
-      const c = compileDsl(a && a.dsl)
-      if (!c.ok) return { ok: false, errors: c.errors }
-      return { ok: true, scriptLen: c.script.length, meta: c.meta }
-    })
+    // vwf.compile 已删除（T-IMP-12）：统一编译器后无独立编译 RPC；脚本经 vwf.script 走管道。
     harness.handle('vwf.script', async (a) => {
-      const c = compileDsl(a && a.dsl)
-      if (!c.ok) return { ok: false, errors: c.errors }
+      const dsl = a && a.dsl
+      const v = validateDsl(dsl)
+      if (!v.ok) return { ok: false, errors: v.errors }
+      const c = await compileViaPipeline(v.sanitized, { fromTemplate: false })
+      if (!c.ok) return { ok: false, errors: [{ at: '$', message: c.detail }] }
       return { ok: true, engineAvailable: !!(resolveEngine()), script: c.script, meta: c.meta }
     })
     harness.handle('vwf.state', async (a) => {
@@ -843,9 +791,11 @@ return {
         output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
         async execute(args) {
           let dsl = null
+          let fromTemplate = false
           if (args.templateId) {
             dsl = await findWorkflow(args.templateId)
             if (!dsl) return '错误：未知工作流 ' + args.templateId + '（可用：' + (await listWorkflows()).map(w => w.id).join(', ') + '）'
+            fromTemplate = true
           } else if (args.dsl) {
             dsl = args.dsl
           } else {
@@ -853,8 +803,8 @@ return {
           }
           const v = validateDsl(dsl)
           if (!v.ok) return 'DSL 校验失败：' + JSON.stringify(v.errors)
-          const c = compileDsl(dsl)
-          if (!c.ok) return '编译失败：' + JSON.stringify(c.errors)
+          const c = await compileViaPipeline(v.sanitized, { fromTemplate })
+          if (!c.ok) return '编译失败：' + c.detail
           const engineNow = resolveEngine()
           if (engineNow === undefined) return '错误：当前宿主平面无法访问 workflowEngine（wf_run 需要 agent preset 挂载的工作流引擎）。可改用内置 workflow 工具执行 vwf.script 编译产物。'
           const parent = agents.requireInitiator()
