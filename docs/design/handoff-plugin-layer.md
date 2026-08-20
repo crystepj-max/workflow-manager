@@ -1,6 +1,10 @@
 # 插件层交接：T-IMP-06/07 实现说明（创造模式会话用）
 
-> 本文档供**新会话（创造模式 / cordis preset）**实施 vwf 插件改造时使用。
+> **✅ 状态：已完成（2026-08-20，提交 `c3af4b0`）**——本文档原为「新会话实施 vwf 插件改造」的
+> 交接，现已收口：实现总结与运行环境适配见 `docs/design/plugin-layer.md`，行为细节以
+> `packages/dsh-visual-workflow/src/host.js` 注释与 `tests/host.test.mjs` 为准。
+> 本文档保留为任务说明与验收记录；下一项见 §5（T-IMP-11）。
+>
 > 前置：引擎层已完成并提交（`d0060ca`）——生成器/校验器/断言/契约全部就绪，**插件层只剩 host.js 接入**。
 > 决策依据：wayfinder 地图 T-02/T-03/T-04/T-06（`wayfinder/MAP.md`）+ 契约 `docs/design/blueprint-schema.md`。
 
@@ -95,7 +99,10 @@ node <repo>/scripts/generate.mjs user ~/.dsh/visual-workflow/templates/<id>.json
 - AC-8：全同 provider 模板 save 被拒（含「dev/review 同 provider/模型相同」类错误）；推荐异源分配（dev=deepseek-official/v4-pro、review=kimi-coding/k3）save 通过。
 - 回归：`npm test`（引擎层 32 测试）+ `npm run validate` 全绿；`packages/dsh-visual-workflow/tests/` 更新后全绿。
 
-## 5. 收口提醒
+## 5. 收口记录（2026-08-20）
 
-- 插件层完成后：T-IMP-11（等价验收收口：checklist 勾选 + 旧 mjs 退役）→ 可安排。
-- v1 全部完成后建议提交并回归 `npm run validate`（CI 已配置）。
+- 实现与验证结果：见 `docs/design/plugin-layer.md`（架构 + 运行环境适配 + 验证路径）。
+- 插件层已提交（`c3af4b0`）；`npm run validate` 全绿（含 ③′ 包测试 host 34 + client 8）。
+- 真机复测通过：双根列表 / save 落盘+skill 闭环 / 撞名 / 异源（含 profile 识别）/ 模型与名称必填 /
+  删除（含 WorkBuddy NODE_OPTIONS 钩子问题修复）/ 模板名称与 ID 编辑 + 另存为。
+- **T-IMP-11**（等价验收收口：checklist 勾选 + 旧 mjs 退役）→ 可安排。

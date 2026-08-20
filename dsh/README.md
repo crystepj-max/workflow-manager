@@ -305,18 +305,21 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
 ## 可视化插件（vwf）使用说明
 
 「可视化工作流」（Visual Workflow，下文 vwf）把同一套「开发工作流 2.0」状态机做成图形化
-入口：在 Web UI 里选内置模板 → 看只读流程图 → 点「运行」，插件把 DSL 图编译成 workflow 脚本
-并交给 harness 引擎执行，全程零代码。需求基线见 `.scratch/dsh-visual-workflow-p0/requirements-analysis.md`。
+入口：在 Web UI 里选内置/用户模板 → 图形化编辑或直接查看流程图 → 点「运行」，插件把 DSL 图
+编译成 workflow 脚本并交给 harness 引擎执行，全程零代码。需求基线见
+`.scratch/dsh-visual-workflow-p0/requirements-analysis.md`；实现说明见 `docs/design/plugin-layer.md`。
 
 ### 插件形态：动态原型 → P2 组合包
 
-- **P0 动态原型（当前形态）**：动态 Cordis 插件，host + client 两半、plain JS（无打包器/JSX/import）。
-  运行时用 `cordis_define` / `cordis_run` 定义并激活，进程内生效、重启即失效，不落盘。Host 半承载
-  DSL 校验器、DSL→script 编译器与内存运行状态；Client 半在 settings.section 注册「工作流」页
-  （内置模板列表 + 只读 SVG 流程图 + 运行按钮）。
-- **P2 组合包（目标形态）**：P0 验完语义后打包为组合包（`dsh plugin add` / cordis.yml preset），
-  随部署持久化，重启仍在、可跨会话复用。按 P0 需求分析的非目标清单：画布编辑、运行看板状态染色
-  归 P1；组合包打包、storageDomain 持久化、多工作流并行归 P2。
+- **动态插件（当前形态）**：动态 Cordis 插件，host + client 两半、plain JS（无打包器/JSX/import）。
+  运行时用 `cordis_define` / `cordis_run` 定义并激活（重启需重新激活）。Host 半承载 DSL 校验器、
+  DSL→script 编译器、双根模板库与运行状态；Client 半在 settings.section 注册「工作流」页
+  （模板库 + 大抽屉可视化编辑器 + 运行看板）。**模板数据已持久化**：内置模板只读
+  （`.generated/<id>/`），用户模板落盘 `~/.dsh/visual-workflow/templates/<id>.json`，保存即同步
+  编译 `~/.dsh/skills/<id>/` 技能（save 即闭环）。
+- **P2 组合包（目标形态）**：打包为组合包（`dsh plugin add` / cordis.yml preset），随部署持久化，
+  重启仍在、可跨会话复用。按 P0 需求分析的非目标清单：画布编辑、运行看板状态染色已随插件层落地；
+  组合包打包、storageDomain 持久化、多工作流并行归 P2。
 
 ### wf_run 工具：调用方式与参数表
 
@@ -326,10 +329,15 @@ Host 半把 `wf_run` 注册为模型工具，主会话直接以工具调用驱�
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| `templateId` | 首次运行* | 内置模板 id（如 `vwf-dev-workflow-2-0`，对应「开发工作流 2.0」）；与 `dsl` 二选一 |
+| `templateId` | 首次运行* | 内置/用户模板 id（如 `dev-workflow-2-0`，对应「开发工作流 2.0」）；与 `dsl` 二选一 |
 | `dsl` | 首次运行* | 原始 DSL JSON（自定义/覆盖图）；与 `templateId` 二选一，两者同给以 `dsl` 为准 |
-| `taskId` | 必填 | 任务标识（如 `issue-7`） |
-| `runDir` | 必填 | run 产物目录（如 `.agent-runs/issue-7`） |
+| `taskId` | 必填 | 任务标识（如 `issue-7`），兼作缺省 runDir 名 |
+| `runDir` | 可选 | run 产物目录，缺省 `.agent-runs/<taskId>` |
+| `baseBranch` | 可选 | base 分支，缺省 `main` |
+| `roleDir` | 可选 | 角色目录，缺省 `dsh/roles` |
+| `issueRef` | 可选 | issue 引用（如 `#7`）；无 issue 时用 `requirement` |
+| `issueTitle` / `issueBody` / `issueComments` | 可选 | issue 标题 / 正文 / 评论 |
+| `requirement` | 可选 | 原始需求文本（无 issue 时） |
 | `entry` | 可选 | 起点/续跑点，缺省 `dispatch`；续跑时指向被暂停的门禁节点（如 `accept`）或打回起点 `dev` |
 | `approved` | 续跑 | 人工裁决结果：`true` 表「通过」，放行门禁节点走 success 出边 |
 | `feedback` | 续跑 | 打回/续跑意见（验收不通过或审核打回时回传） |
@@ -351,14 +359,18 @@ Host 半把 `wf_run` 注册为模型工具，主会话直接以工具调用驱�
   回到开发循环继续（9 轮上限计数连续）。
 
 ```jsonc
-// 首次运行：选内置模板，entry=dispatch 起（issue 为透传输入，与 workflow 工具同源）
-{ "templateId": "vwf-dev-workflow-2-0", "taskId": "issue-7",
-  "runDir": ".agent-runs/issue-7", "entry": "dispatch",
-  "issue": { "ref": "#7", "body": "..." } }
+// 首次运行：选内置模板，entry=dispatch 起（issue 字段为透传输入，与 workflow 工具同源）
+{ "templateId": "dev-workflow-2-0", "taskId": "issue-7",
+  "entry": "dispatch",
+  "issueRef": "#7", "issueTitle": "...", "issueBody": "...", "issueComments": "..." }
+
+// 无 issue 时直接用需求文本
+{ "templateId": "dev-workflow-2-0", "taskId": "req-1",
+  "requirement": "把登录流程改为无密码邮箱验证码" }
 
 // 收到 AWAITING_HUMAN_accept 后，人工裁决「通过」→ 放行进入收口
-{ "templateId": "vwf-dev-workflow-2-0", "taskId": "issue-7",
-  "runDir": ".agent-runs/issue-7", "entry": "accept", "approved": true,
+{ "templateId": "dev-workflow-2-0", "taskId": "issue-7",
+  "entry": "accept", "approved": true,
   "startRound": 1, "history": [], "feedback": "" }
 ```
 
@@ -369,4 +381,6 @@ vwf 插件与技能包 `dev-workflow-2-0`（编排脚本版本控制源 = `dsh/w
 `workflow` 工具），vwf 插件走图形触发（把同一状态机画成 DSL 图、编译成脚本再交给同一引擎）。
 二者共享六角色（`dsh/roles/*.md`）、返回状态机（`AWAITING_HUMAN_*` / `DONE` / `FAILED_MAX_ROUNDS`
 等）、9 轮上限与异源模型分配；vwf 编译产物与手写脚本行为对齐（P0 任务 02 的对照验收）。差别只在
-入口与脚本来源：技能包脚本手写维护，vwf 脚本由 DSL 编译生成。
+入口与脚本来源：技能包脚本手写维护，vwf 脚本由 DSL 编译生成。此外 vwf 编辑器保存用户模板时会
+同步生成自包含技能到 `~/.dsh/skills/<id>/`，该技能即可像 `dev-workflow-2-0` 一样按触发词调用
+（save 即闭环）。

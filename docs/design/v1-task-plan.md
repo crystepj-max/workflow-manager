@@ -31,15 +31,17 @@
 - **范围**：`scripts/equivalence.test.mjs`（10 项静态断言：入口四态/拓扑/折叠/manualCheck/轮次+归因/闸门/异源/文件/角色/三要素 schema）；`docs/design/equivalence-checklist.md`（8 维度人工勾选清单）。
 - **验收**：断言全绿 = AC-1 等价成立；清单文档就绪。
 
-### T-IMP-06 vwf 插件改造（FR-2/FR-3/AC-2/AC-3/T-03）· 插件层（创造模式）
+### T-IMP-06 vwf 插件改造（FR-2/FR-3/AC-2/AC-3/T-03）· 插件层（创造模式） ✅
 - **目标**：host.js 双根加载 + 用户模板落盘闭环。
 - **范围**：废除硬编码 `TEMPLATES` → 扫 `.generated/`（内置）+ `~/.dsh/visual-workflow/templates/`（用户）；`save` 写 `<id>.json`（sanitize 后）+ 撞名拒绝（更新自身允许、内置只读）+ 同步生成 `~/.dsh/skills/<id>/`（自包含四件套）；`remove` 仅用户 + 同步删 skill；`list` id 字母序 + builtin。
 - **验收**：AC-3（重启后 list 仍在）；撞名/内置只读用例过；save 后 `~/.dsh/skills/<id>/SKILL.md` 存在。
+- **完成**（2026-08-20，插件层收口）：双根加载 + 落盘闭环落地；save 撞名拒绝并支持 `currentId` 更新语义与「另存为」；save 同步编译 `~/.dsh/skills/<id>/` 三件套；remove 仅用户 + 同步删 skill（修复 WorkBuddy `NODE_OPTIONS` 删除钩子冲突）；编辑器支持模板名称/ID 编辑与必填校验；真机复测通过（详见 `docs/design/plugin-layer.md`）。
 
-### T-IMP-07 异源校验集成（FR-8/T-06，v2 标注）· 引擎层+插件层
+### T-IMP-07 异源校验集成（FR-8/T-06，v2 标注）· 引擎层+插件层 ✅
 - **目标**：save/update/validate 三处异源强制（v2 生效）。
 - **范围**：校验器规则 7（T-06：弱异源放行+同模型拒+缺绑定拒）；host.js save/validate 接入；6 测试用例（AC-8）。
 - **验收**：AC-8 正反例过（T1/T4 拒，T2/T3 过，T5 跳过，T6 同 save）。
+- **完成**（2026-08-20，插件层收口）：规则 7 按节点 `id` 或 `profile` 识别 dev/review（`scripts/validate-blueprint.mjs` 规则 4/7 与 host.js 内联校验同源）；save/validate 强制、缺绑定拒、完全同模型拒、弱异源放行+警告；测试增补 T7/T8（profile 识别正反例）；真机复测通过（详见 `docs/design/plugin-layer.md`）。
 
 ### T-IMP-08 文档修链与 gold-band 清理（FR-5/FR-6/AC-5）· 引擎层
 - **目标**：单一入口 + 无死链。

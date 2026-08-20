@@ -63,9 +63,9 @@
 3. **DSL 差异**：插件 DSL（nodes{id,label,profile,model,goal,output{schema(JSON Schema),successCondition},manualCheck}，edges{from,to,on,when}，control{maxRounds}）不引入 Gold-Band 的 `$new-round`/`session`/`max_attempts`/思考强度/权限模式——右击菜单仅 $end、边面板仅 on/to/when、控制仅 maxRounds；编译器与 wf_run 语义零改动。
 4. **数据源**：用户选择对接 DSH 服务——`vwf.models` 直读宿主 `llm` 服务（pkg-16 已有），新增 `vwf.roles` 读工作区 `dsh/roles/*.md`（fs 服务，多形态兜底 + 内置六角色回退）。
 5. **计时器**：动态客户端无 setTimeout → schema 防抖/校验防抖/缩放滚动全部走 `ctx.timeout`（inject: ['timer']）。
-6. **模板库持久化**：保留 pkg-19 进程内 Map（storageDomain 持久化属 P2 D3，独立任务）。
+6. **模板库持久化**：保留 pkg-19 进程内 Map（storageDomain 持久化属 P2 D3，独立任务）。*（已被插件层取代：T-IMP-06 落地双根落盘 + save 即闭环，见 `docs/design/plugin-layer.md`。）*
 
 ## 6. 验证
 
-- `npm test`：24 用例全绿——host 16（内置模板校验/编译、入口拓扑、多入口 nodeIds、$end/悬空/重复/保留 id、表达式路径 ∈ schema、failure 唯一、多 success 带 when、when 禁则、maxRounds、save/list/remove 链路、roles/models 回退、wf_run 注册、state）；client jsdom 8（模板列表、抽屉、增删节点、**把手拖拽连线建边**、边面板、JSON tab 同步、**校验弹窗→字段标红**、保存 RPC）。
-- 真机验收：需在 cordis 会话以 `cordis_define` 定义并批准运行后，于 DSH 设置→工作流页复核（本会话无 cordis 工具，仅做了离线验证）。
+- `npm test`：42 用例全绿——host 34（双根加载/校验/编译/撞名/异源/RPC/回退/wf_run 注册/state）、client jsdom 8（模板列表、抽屉、增删节点、**把手拖拽连线建边**、边面板、JSON tab 同步、**校验弹窗→字段标红**、保存 RPC）。
+- 真机验收：插件层会话已在 DSH 设置→工作流页完成全链路复测（双根列表/save 落盘+skill 闭环/撞名/异源/必填/删除/名称 ID 编辑+另存为），记录见 `docs/design/plugin-layer.md`。
