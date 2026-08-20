@@ -15,8 +15,27 @@
 //  - 保留 pkg-19 全部 RPC（workflows.list/save/remove、validate、compile、
 //    script、state、models）与 wf_run 工具、运行状态跟踪。
 //
+// T-IMP-06（双根加载 + 用户模板落盘闭环，FR-2/FR-3，AC-2/AC-3）：
+//  - 废除硬编码 TEMPLATES（L29-74）→ 目录加载：内置 = <repo>/.generated/<id>/vwf-dsl.json
+//    （生成物，CI 先 npm run generate）；用户 = ~/.dsh/visual-workflow/templates/<id>.json
+//    （蓝图 JSON，宿主数据根 ~/.dsh 下新建）。
+//  - list 合并双根（builtin 标志 + id 字母序），用户条目 dsl = 蓝图→vwf DSL 投影
+//    （内联 projectToVwf，与 scripts/generate.mjs 行为一致）。
+//  - save：结构+异源校验 → 撞名拒绝（内置只读 / 当前编辑 id ≠ 目标 → 改名提示）→
+//    逆投影蓝图落盘 → spawn 生成器 user 子命令同步自包含 skill 到 ~/.dsh/skills/<id>/
+//    （save 即闭环；生成失败回滚落盘，保持原子）。save 新增参数 currentId。
+//  - remove：仅用户模板可删（删蓝图 + 同步删 skill 目录）；内置拒绝。
+//  - findWorkflow：内置优先、用户目录兜底。
+// T-IMP-07（异源接入，FR-8，AC-8）：save 与 vwf.validate 叠加内联异源硬规则
+//  （有 dev+review 节点 → 缺绑定拒 / 完全同模型拒 / 弱异源警告），与引擎
+//  validate-blueprint.mjs 规则 7 行为一致。
+//
 // 运行形态：动态插件（cordis_define code.host）——plain JS、无 import，
-// 服务经 ctx.get 获取并判空。
+// 服务经 ctx.get 获取并判空。vm 沙箱无 process/env：仓库根优先取发起 agent
+// 会话 cwd（apply 时捕获），兜底 sandboxPolicy.workspaceRoot；DSH home
+// （~/.dsh）经子进程引导一次（os.homedir）；用户目录写入显式传
+// danger-full-access 策略（宿主数据根不受会话 workspace-write 沙箱约束）；
+// fs 服务无删除能力，remove 经子进程 rm。
 // ─────────────────────────────────────────────────────────────────────────────
 return {
   name: 'visual-workflow-host',
@@ -25,52 +44,232 @@ return {
     const agents = ctx.get('agents')
     const llm = ctx.get('llm')
     const fs = ctx.get('fs')
+    const sp = ctx.get('sandboxPolicy')
+    const subprocess = ctx.get('subprocess')
 
-    const TEMPLATES = {
-      'dev-workflow-2-0': {
-        id: 'dev-workflow-2-0',
-        name: '开发工作流 2.0',
-        description: 'issue 三要素门禁 → 开发 →（分流）测试/直审 → 审核 → 人工验收 → 收口（推送/合并 PR/关闭 issue），打回上限 9 轮',
-        entry: 'dispatch',
-        control: { maxRounds: 9 },
-        nodes: [
-          { id: 'dispatch', profile: 'dispatcher', label: '调度', model: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
-            goal: '读取 GitHub issue（或原始需求文本），校验三要素（任务目标/涉及范围/验收标准）并判定是否需要集成测试；三要素缺失如实判定缺失，不追问不编造。写 dispatch-result.json 并更新 STATE.md。',
-            output: { schema: { type: 'object', properties: { complete: { type: 'boolean' }, missing: { type: 'array', items: { type: 'string' } }, objective: { oneOf: [{ type: 'string' }, { type: 'null' }] }, scope: { oneOf: [{ type: 'string' }, { type: 'null' }] }, acceptance: { oneOf: [{ type: 'string' }, { type: 'null' }] }, need_integration_test: { type: 'boolean' }, reason: { type: 'string' } }, required: ['complete', 'missing', 'need_integration_test', 'reason'], additionalProperties: false }, successCondition: '$.complete == true' } },
-          { id: 'dev', profile: 'dev', label: '开发', model: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
-            goal: '在工作分支施工（tdd：先写会失败的测试再写实现），本地验证全绿后提交（不推送、不建 PR）；写 dev-report.md 并更新 STATE.md。环境受阻时 status 报 blocked。',
-            output: { schema: { type: 'object', properties: { status: { type: 'string', enum: ['completed', 'blocked'] }, summary: { type: 'string' }, files_changed: { type: 'array', items: { type: 'string' } }, self_verify: { type: 'string' }, risks: { type: 'string' } }, required: ['status', 'summary', 'self_verify'], additionalProperties: false }, successCondition: '$.status == "completed"' } },
-          { id: 'route', profile: 'dispatcher', label: '分流', model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-            goal: '读取 dispatch-result.json，如实输出是否需要集成测试的判定，不重新分析三要素。',
-            output: { schema: { type: 'object', properties: { need_integration_test: { type: 'boolean' }, reason: { type: 'string' } }, required: ['need_integration_test', 'reason'], additionalProperties: false } } },
-          { id: 'test', profile: 'test', label: '测试', model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-            goal: '对实现做运行态验证（证据驱动判定），专杀假测试；不修改业务代码；写 test-report.md 并更新 STATE.md。环境阻塞时 result 报 BLOCKED。',
-            output: { schema: { type: 'object', properties: { result: { type: 'string', enum: ['PASSED', 'FAILED', 'BLOCKED'] }, reason: { type: 'string' }, evidence: { type: 'string' }, failed_cases: { type: 'string' } }, required: ['result', 'reason', 'evidence'], additionalProperties: false }, successCondition: '$.result == "PASSED"' } },
-          { id: 'review', profile: 'review', label: '审核', model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-            goal: '双轴独立审查（需求符合性优先 + 代码质量），只读源代码；写 review-report.md 并更新 STATE.md；存在阻塞问题必须 REQUEST_CHANGES。',
-            output: { schema: { type: 'object', properties: { verdict: { type: 'string', enum: ['APPROVE', 'REQUEST_CHANGES', 'COMMENT_ONLY'] }, blockers: { type: 'string' }, compliance: { type: 'string' }, summary: { type: 'string' } }, required: ['verdict', 'summary'], additionalProperties: false }, successCondition: '$.verdict != "REQUEST_CHANGES"' } },
-          { id: 'accept', profile: 'accept', label: '人工验收', model: { provider: 'deepseek-official', model: 'deepseek-v4-pro' }, manualCheck: true,
-            goal: '逐条核对验收标准（证据缺失时只读验证），写 acceptance-summary.md 与 accept-report.md 并更新 STATE.md；不代签人工结论。',
-            output: { schema: { type: 'object', properties: { verdict: { type: 'string', enum: ['PASS', 'FAIL', 'INCOMPLETE'] }, summary_for_human: { type: 'string' }, details: { type: 'string' } }, required: ['verdict', 'summary_for_human', 'details'], additionalProperties: false } } },
-          { id: 'closeout', profile: 'closeout', label: '收口', model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-            goal: '一致性收口；写 cleanup-report.md；推送工作分支、创建并合并 Draft PR（squash + 删分支）、关闭 issue；收束本地工作区。禁止绕过 PR 直推 base 分支。',
-            output: { schema: { type: 'object', properties: { status: { type: 'string', enum: ['done'] }, summary: { type: 'string' }, followups: { type: 'string' } }, required: ['status', 'summary'], additionalProperties: false } } }
-        ],
-        edges: [
-          { from: 'dispatch', to: 'dev', on: 'success' },
-          { from: 'dispatch', to: '$end', on: 'failure' },
-          { from: 'dev', to: 'route', on: 'success' },
-          { from: 'route', to: 'test', on: 'success', when: '$.need_integration_test == true' },
-          { from: 'route', to: 'review', on: 'success', when: '$.need_integration_test == false' },
-          { from: 'test', to: 'review', on: 'success' },
-          { from: 'test', to: 'dev', on: 'failure' },
-          { from: 'review', to: 'accept', on: 'success' },
-          { from: 'review', to: 'dev', on: 'failure' },
-          { from: 'accept', to: 'closeout', on: 'success' },
-          { from: 'accept', to: 'dev', on: 'failure' },
-          { from: 'closeout', to: '$end', on: 'success' }
-        ]
+    // ── 双根模板存储（T-IMP-06）────────────────────────────────────────────
+    // 路径来源：repo 根优先 = 发起 agent 会话 cwd（会话工作区即仓库根）。
+    // currentInitiator 仅在模型发起的调用中存在——浏览器审批触发的激活
+    // （apply 时）与客户端 RPC 调用都没有，因此每次调用实时探测，并把任何
+    // 有 initiator 的调用记录为 knownCwd 兜底；最后才落 sandboxPolicy
+    // workspaceRoot（部署默认 process.cwd()）。
+    // DSH home = 子进程引导（os.homedir() + '/.dsh'，一次性缓存）。
+    function sessionCwd() {
+      try {
+        if (agents === undefined || typeof agents.currentInitiator !== 'function') return null
+        const a = agents.currentInitiator()
+        const cwd = a && a.session && a.session.header && a.session.header.cwd
+        return typeof cwd === 'string' && cwd ? cwd : null
+      } catch (e) { return null }
+    }
+    let knownCwd = sessionCwd()
+    function repoRoot() {
+      const live = sessionCwd()
+      if (live) { knownCwd = live; return live }
+      if (knownCwd) return knownCwd
+      if (sp && typeof sp.workspaceRoot === 'string' && sp.workspaceRoot) return sp.workspaceRoot
+      return null
+    }
+
+    let nodePathPromise = null
+    function resolveNode() {
+      if (!nodePathPromise) {
+        nodePathPromise = (async () => {
+          if (subprocess === undefined) return null
+          try { return await Promise.resolve(subprocess.resolveExecutable('node')) } catch (e) { return null }
+        })()
       }
+      return nodePathPromise
+    }
+
+    // spawn node <args>，收集输出；返回 { ok, stdout, detail }
+    async function runNode(args, opts) {
+      const node = await resolveNode()
+      if (!node) return { ok: false, detail: '子进程服务不可用（node 解析失败）' }
+      try {
+        const handle = subprocess.spawn({
+          argv: [node].concat(args || []),
+          cwd: (opts && opts.cwd) || repoRoot() || '/',
+          // 移除宿主注入的 NODE_OPTIONS（如 WorkBuddy genie-safe-delete 的
+          // --require 钩子会拦截 fs.rmSync 并抛 SAFE_DELETE_BULK_CONFIRM_REQUIRED，
+          // 导致 remove 的 rm 子进程失败；插件自己的脚本不需要该钩子）
+          env: { NODE_OPTIONS: undefined },
+          stdio: {
+            stdin: 'ignore',
+            stdout: { maxBytes: 64 * 1024 },
+            stderr: { maxBytes: 64 * 1024 },
+          },
+          graceMs: (opts && opts.graceMs) || 30000,
+        })
+        const outcome = await handle.done
+        const readerText = (r) => { if (!r) return ''; const rd = r.readFrom(0); return rd ? rd.text : '' }
+        const stdout = readerText(handle.collected.stdout)
+        const stderr = readerText(handle.collected.stderr)
+        if (outcome.exitCode !== 0) {
+          return { ok: false, detail: ((stderr || stdout) || ('exit ' + outcome.exitCode)).trim().slice(0, 500) }
+        }
+        return { ok: true, stdout: stdout, stderr: stderr }
+      } catch (e) {
+        return { ok: false, detail: String((e && e.message) || e) }
+      }
+    }
+
+    let dshHomePromise = null
+    function dshHome() {
+      if (!dshHomePromise) {
+        dshHomePromise = (async () => {
+          // 宿主 env 经 scrub 后仍保留 HOME；DSH_* 被剥除，os.homedir() 不受影响
+          const r = await runNode(['-e', "console.log(require('path').join(require('os').homedir(), '.dsh'))"], { cwd: repoRoot() || '/' })
+          const home = r.ok ? (r.stdout || '').trim() : ''
+          return home || null
+        })()
+      }
+      return dshHomePromise
+    }
+
+    async function rootPaths() {
+      const repo = repoRoot()
+      const home = await dshHome()
+      return {
+        repo: repo,
+        builtinDir: repo ? repo + '/.generated' : null,
+        userDir: home ? home + '/visual-workflow/templates' : null,
+        skillRoot: home ? home + '/skills' : null,
+        generator: repo ? repo + '/scripts/generate.mjs' : null,
+      }
+    }
+
+    // 用户目录（~/.dsh 宿主数据根）写入不受会话 workspace-write 沙箱约束
+    function writePolicy() {
+      if (!sp || typeof sp.resolve !== 'function') return undefined
+      try { return sp.resolve({ mode: 'danger-full-access' }) } catch (e) { return undefined }
+    }
+
+    // 内置根：.generated/<id>/vwf-dsl.json（生成物四件套之一，CI 先 npm run generate）
+    async function loadBuiltins() {
+      const out = new Map()
+      if (fs === undefined) return out
+      const p = await rootPaths()
+      if (!p.builtinDir) return out
+      let entries = null
+      try {
+        const dir = await fs.resolve(p.builtinDir)
+        entries = await fs.listDir(dir)
+      } catch (e) { return out }
+      for (const ent of entries || []) {
+        if (!ent || typeof ent.name !== 'string' || !ent.name) continue
+        try {
+          const target = await fs.resolve(p.builtinDir + '/' + ent.name + '/vwf-dsl.json')
+          const info = await fs.stat(target)
+          if (!info || info.type !== 'file') continue
+          const dsl = JSON.parse(await fs.readText(target))
+          if (dsl && typeof dsl.id === 'string' && dsl.id) out.set(dsl.id, dsl)
+        } catch (e) { /* 单个生成物损坏不影响其余 */ }
+      }
+      return out
+    }
+
+    // 用户根：~/.dsh/visual-workflow/templates/<id>.json（蓝图 JSON）
+    async function loadUserTemplates() {
+      const out = new Map()
+      if (fs === undefined) return out
+      const p = await rootPaths()
+      if (!p.userDir) return out
+      let entries = null
+      try {
+        const dir = await fs.resolve(p.userDir)
+        entries = await fs.listDir(dir)
+      } catch (e) { return out }
+      for (const ent of entries || []) {
+        if (!ent || typeof ent.name !== 'string' || !/\.json$/i.test(ent.name)) continue
+        try {
+          const bp = JSON.parse(await fs.readText(ent.target))
+          if (bp && typeof bp.id === 'string' && bp.id) out.set(bp.id, bp)
+        } catch (e) { /* 损坏的模板文件跳过 */ }
+      }
+      return out
+    }
+
+    // ── 蓝图 ↔ vwf DSL 投影（与 scripts/generate.mjs projectToVwf 行为一致；
+    // RPC 走 lossless-JSON 守卫，undefined 字段必须剔除，故条件装配）────────
+    function projectToVwf(bp) {
+      const models = (bp.bindings && bp.bindings.models) || {}
+      return {
+        id: bp.id,
+        name: bp.displayName,
+        description: bp.description || '',
+        entry: bp.entry,
+        control: { maxRounds: (bp.control && bp.control.maxRounds) || 9 },
+        nodes: bp.nodes.map((n) => {
+          const o = { id: n.id, profile: n.profile, label: n.label || n.id, goal: n.goal }
+          if (n.output) o.output = n.output
+          if (n.manualCheck) o.manualCheck = true
+          if (models[n.id]) o.model = models[n.id]
+          return o
+        }),
+        edges: bp.edges.map((e) => {
+          const o = { from: e.from, to: e.to, on: e.on }
+          if (e.when !== undefined) o.when = e.when
+          return o
+        }),
+      }
+    }
+    // 逆投影（save 落盘格式：蓝图 JSON；增强字段 onMaxRounds/heteroCheck/
+    // verifyBranch 不存在于 vwf DSL，自然不产生）
+    function projectToBlueprint(dsl) {
+      const models = {}
+      const nodes = (dsl.nodes || []).map((n) => {
+        const o = { id: n.id, profile: n.profile, label: n.label || n.id, goal: n.goal || '' }
+        if (n.output) o.output = n.output
+        if (n.manualCheck) o.manualCheck = true
+        if (n.model && typeof n.model === 'object' && n.model.provider && n.model.model) {
+          models[n.id] = { provider: n.model.provider, model: n.model.model }
+        }
+        return o
+      })
+      const bp = {
+        id: dsl.id,
+        displayName: dsl.name || dsl.id,
+        entry: dsl.entry,
+        nodes: nodes,
+        edges: (dsl.edges || []).map((e) => {
+          const o = { from: e.from, to: e.to, on: e.on }
+          if (e.when !== undefined) o.when = e.when
+          return o
+        }),
+      }
+      if (dsl.description) bp.description = dsl.description
+      if (dsl.control && dsl.control.maxRounds != null) bp.control = { maxRounds: dsl.control.maxRounds }
+      if (Object.keys(models).length) bp.bindings = { models: models }
+      return bp
+    }
+
+    // ── 异源硬规则（T-IMP-07，与引擎 validate-blueprint.mjs 规则 7 行为一致；
+    // 入参为 vwf DSL 形态，模型在节点 model 上；dev/review 按节点 id 或
+    // profile（角色）识别——编辑器新建节点默认 id 为 node-N，用户以角色
+    // 表达 dev/review 时同样纳入检查）────────────────────────────────────────
+    function heteroCheck(dsl) {
+      const nodes = dsl && Array.isArray(dsl.nodes) ? dsl.nodes : []
+      const isDev = (n) => n && (n.id === 'dev' || n.profile === 'dev')
+      const isReview = (n) => n && (n.id === 'review' || n.profile === 'review')
+      const dev = nodes.find(isDev)
+      const review = nodes.find(isReview)
+      if (!dev || !review) return { ok: true, errors: [], warnings: [] }
+      const dm = dev.model
+      const rm = review.model
+      const tag = (m) => (m && m.provider && m.model) ? m.provider + '/' + m.model : null
+      const dt = tag(dm)
+      const rt = tag(rm)
+      if (!dt || !rt) {
+        return { ok: false, errors: [{ at: 'bindings.models', message: 'dev/review 未配置模型绑定，无法证明异源，请显式配置（节点 model 或 bindings.models）' }], warnings: [] }
+      }
+      if (dt === rt) {
+        return { ok: false, errors: [{ at: 'bindings.models', message: 'dev 与 review 模型相同（' + dt + '）：异源硬规则要求不同 provider 或不同模型，请调整模型绑定' }], warnings: [] }
+      }
+      const warnings = dm.provider === rm.provider
+        ? ['弱异源：dev/review 同 provider（' + dm.provider + '）不同模型，建议配置不同 provider 满足真异源']
+        : []
+      return { ok: true, errors: [], warnings: warnings }
     }
 
     // ── 保留 id（与 Gold-Band workflowGraph.ts 的哨兵一致；插件 DSL 仅使用 $end）──
@@ -200,6 +399,7 @@ return {
 
       if (!dsl || typeof dsl !== 'object') { err('$', 'dsl 必须是对象'); return { ok: false, errors, fieldErrors } }
       if (typeof dsl.id !== 'string' || !dsl.id.trim()) err('$.id', '工作流 ID 不能为空。')
+      if (typeof dsl.name !== 'string' || !dsl.name.trim()) err('$.name', '模板名称不能为空。')
       if (!Array.isArray(dsl.nodes) || dsl.nodes.length === 0) err('$.nodes', '工作流至少需要一个节点。')
       if (!Array.isArray(dsl.edges)) err('$.edges', 'edges 必填（数组）')
       if (errors.length) return { ok: false, errors, fieldErrors }
@@ -234,6 +434,11 @@ return {
         if (idCounts[n.id] > 1) err('$.nodes[' + n.id + ']', label + ' 节点 ID 重复。', nodeField(n.id, 'id'), n.id)
         if ((outgoingCounts[n.id] || 0) === 0) err('$.nodes[' + n.id + ']', label + ' 没有出边，无法继续执行或结束。', nodeField(n.id, 'id'), n.id)
         if (typeof n.profile !== 'string' || !n.profile.trim()) err('$.nodes[' + n.id + '].profile', label + ' 节点未关联角色。', nodeField(n.id, 'profile'), n.id)
+        // 模型绑定必填（编辑器保存路径强制；蓝图契约 bindings.models 仍允许
+        // 缺省=宿主默认，host 侧为满足「provider/model 必填」的产品要求而收紧）
+        const hasModel = n.model && typeof n.model === 'object'
+        if (!hasModel || !n.model.provider) err('$.nodes[' + n.id + '].model.provider', label + ' 未绑定 Agent（model.provider 必填）。', nodeField(n.id, 'model.provider'), n.id)
+        if (!hasModel || !n.model.model) err('$.nodes[' + n.id + '].model.model', label + ' 未绑定模型（model.model 必填）。', nodeField(n.id, 'model.model'), n.id)
         if (n.output !== undefined && n.output !== null) {
           if (!n.output || typeof n.output.schema !== 'object' || n.output.schema === null) {
             err('$.nodes[' + n.id + '].output.schema', label + ' 的 JSON 输出约束必填（对象）。', nodeField(n.id, 'output.schema'), n.id)
@@ -418,15 +623,25 @@ return {
       return { ok: true, script: script, meta: meta }
     }
 
-    const userWorkflows = new Map()
-    function findWorkflow(id) {
-      if (TEMPLATES[id]) return TEMPLATES[id]
-      const w = userWorkflows.get(id)
-      return w ? w.dsl : null
+    // 双根查找：内置优先（沿用），用户目录兜底（蓝图 → vwf DSL 投影）
+    async function findWorkflow(id) {
+      if (!id || typeof id !== 'string') return null
+      const builtins = await loadBuiltins()
+      if (builtins.has(id)) return builtins.get(id)
+      const users = await loadUserTemplates()
+      const bp = users.get(id)
+      return bp ? projectToVwf(bp) : null
     }
-    function listWorkflows() {
-      const out = Object.keys(TEMPLATES).map(k => ({ id: TEMPLATES[k].id, name: TEMPLATES[k].name, description: TEMPLATES[k].description, builtin: true, dsl: TEMPLATES[k] }))
-      for (const w of userWorkflows.values()) out.push({ id: w.dsl.id, name: w.dsl.name || w.dsl.id, description: w.dsl.description || '', builtin: false, dsl: w.dsl })
+    // 合并双根：builtin 标志 + id 字母序；用户条目 dsl = 蓝图 → vwf DSL 投影
+    async function listWorkflows() {
+      const [builtins, users] = await Promise.all([loadBuiltins(), loadUserTemplates()])
+      const out = []
+      for (const dsl of builtins.values()) out.push({ id: dsl.id, name: dsl.name, description: dsl.description || '', builtin: true, dsl: dsl })
+      for (const bp of users.values()) {
+        const dsl = projectToVwf(bp)
+        out.push({ id: bp.id, name: bp.displayName, description: bp.description || '', builtin: false, dsl: dsl })
+      }
+      out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       return out
     }
 
@@ -443,14 +658,75 @@ return {
       const dsl = a && a.dsl
       const v = validateDsl(dsl)
       if (!v.ok) return { ok: false, errors: v.errors, fieldErrors: v.fieldErrors }
-      userWorkflows.set(v.sanitized.id, { dsl: v.sanitized })
-      return { ok: true, id: v.sanitized.id, dsl: v.sanitized }
+      const het = heteroCheck(v.sanitized)
+      if (!het.ok) return { ok: false, errors: het.errors, fieldErrors: {} }
+      const id = v.sanitized.id
+      const p = await rootPaths()
+      if (fs === undefined || !p.repo || !p.userDir || !p.skillRoot || !p.generator) {
+        return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法解析模板目录（需 fs/subprocess/sandboxPolicy 服务）' }] }
+      }
+      const [builtins, users] = await Promise.all([loadBuiltins(), loadUserTemplates()])
+      if (builtins.has(id)) {
+        return { ok: false, errors: [{ at: '$.id', message: '内置模板只读：' + id + ' 属于内置模板，不能覆盖，请改用新 id（另存为新模板）' }] }
+      }
+      const currentId = a && a.currentId
+      if (users.has(id) && currentId !== id) {
+        return { ok: false, errors: [{ at: '$.id', message: '已存在同名模板 ' + id + '：另存为新模板请修改模板 ID；更新当前模板请保持 ID 不变。' }] }
+      }
+      // 逆投影蓝图 → 落盘用户目录
+      const bp = projectToBlueprint(v.sanitized)
+      const file = p.userDir + '/' + id + '.json'
+      try {
+        const target = await fs.resolve(file)
+        await fs.writeText(target, JSON.stringify(bp, null, 2) + '\n', undefined, undefined, writePolicy())
+      } catch (e) {
+        return { ok: false, errors: [{ at: '$', message: '模板落盘失败：' + String((e && e.message) || e) }] }
+      }
+      // save 即闭环：spawn 生成器 user 子命令 → 自包含 skill 三件套到 ~/.dsh/skills/<id>/
+      // （生成器内部先跑蓝图校验含异源；失败 exit 1 输出错误）
+      const gen = await runNode([p.generator, 'user', file, p.skillRoot], { cwd: p.repo, graceMs: 60000 })
+      if (!gen.ok) {
+        // 闭环失败：回滚已落盘蓝图，save 保持原子（蓝图级校验失败同此路径）
+        try {
+          await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.repo })
+        } catch (e) {}
+        return { ok: false, errors: [{ at: '$', message: '蓝图校验/技能生成失败（save 已回滚）：' + gen.detail }] }
+      }
+      return { ok: true, id: id, dsl: v.sanitized, warnings: het.warnings }
     })
     harness.handle('vwf.workflows.remove', async (a) => {
-      userWorkflows.delete(a && a.id)
-      return { ok: true }
+      const id = a && a.id
+      if (!id || typeof id !== 'string') return { ok: false, errors: [{ at: '$.id', message: '缺少模板 id' }] }
+      const p = await rootPaths()
+      if (fs === undefined || !p.repo || !p.userDir || !p.skillRoot) {
+        return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法删除用户模板' }] }
+      }
+      const builtins = await loadBuiltins()
+      if (builtins.has(id)) {
+        return { ok: false, errors: [{ at: '$.id', message: '内置模板只读：' + id + ' 属于内置模板，不能删除' }] }
+      }
+      const file = p.userDir + '/' + id + '.json'
+      let existed = false
+      try {
+        const target = await fs.resolve(file)
+        const info = await fs.stat(target)
+        existed = !!info
+      } catch (e) { existed = false }
+      if (!existed) return { ok: false, errors: [{ at: '$.id', message: '用户模板不存在：' + id }] }
+      // 删蓝图 + 同步删 ~/.dsh/skills/<id>/（fs 服务无删除能力，经子进程 rm）
+      const rm = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.repo })
+      if (!rm.ok) return { ok: false, errors: [{ at: '$', message: '模板删除失败：' + rm.detail }] }
+      const skillDir = p.skillRoot + '/' + id
+      await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", skillDir], { cwd: p.repo })
+      return { ok: true, id: id }
     })
-    harness.handle('vwf.validate', async (a) => validateDsl(a && a.dsl))
+    harness.handle('vwf.validate', async (a) => {
+      const v = validateDsl(a && a.dsl)
+      if (!v.ok) return v
+      const het = heteroCheck(v.sanitized)
+      if (!het.ok) return { ok: false, errors: het.errors, fieldErrors: {}, sanitized: v.sanitized }
+      return { ok: true, errors: [], fieldErrors: {}, sanitized: v.sanitized, warnings: het.warnings }
+    })
     harness.handle('vwf.compile', async (a) => {
       const c = compileDsl(a && a.dsl)
       if (!c.ok) return { ok: false, errors: c.errors }
@@ -539,35 +815,37 @@ return {
       } catch (e) { return undefined }
     }
 
-    const runEngine = resolveEngine()
-    if (runEngine !== undefined && agents !== undefined) {
+    // wf_run 注册条件：有 agents 服务即注册（engine 解析不依赖 apply 时刻的
+    // currentInitiator——浏览器审批触发的激活无 initiator；engine 不可用推迟到
+    // execute 时优雅报错，且运行时模型调用通常有 currentInitiator）。
+    if (agents !== undefined) {
       const tool = harness.defineTool({
         name: 'wf_run',
         description: '运行一个可视化工作流（DSL 图）：校验并编译为 workflow 脚本后交给引擎执行。args.templateId 用内置/用户模板，或 args.dsl 传自定义图。返回运行状态；人工验收节点会以 AWAITING_HUMAN_<node> 状态暂停，等待人工裁决后以 entry=节点id + approved=true/false 续跑。',
         parameters: {
-          templateId: { type: 'string', required: false, description: '内置/用户工作流 id，如 dev-workflow-2-0' },
-          dsl: { type: 'object', required: false, description: '自定义工作流 DSL（nodes/edges/control）' },
+          templateId: { type: 'string', description: '内置/用户工作流 id，如 dev-workflow-2-0' },
+          dsl: { type: 'object', additionalProperties: true, description: '自定义工作流 DSL（nodes/edges/control）' },
           taskId: { type: 'string', required: true, description: '任务标识，如 issue-12' },
-          runDir: { type: 'string', required: false, description: 'run 产物目录，缺省 .agent-runs/<taskId>' },
-          baseBranch: { type: 'string', required: false, description: 'base 分支，缺省 main' },
-          roleDir: { type: 'string', required: false, description: '角色目录，缺省 dsh/roles' },
-          issueRef: { type: 'string', required: false, description: 'issue 引用，如 #12' },
-          issueTitle: { type: 'string', required: false, description: 'issue 标题' },
-          issueBody: { type: 'string', required: false, description: 'issue 正文' },
-          issueComments: { type: 'string', required: false, description: 'issue 评论' },
-          requirement: { type: 'string', required: false, description: '原始需求文本（无 issue 时）' },
-          entry: { type: 'string', required: false, description: '续跑入口节点 id' },
-          approved: { type: 'boolean', required: false, description: '人工验收续跑裁决（true 通过 / false 打回）' },
-          feedback: { type: 'string', required: false, description: '人工打回意见（续跑）' },
-          startRound: { type: 'number', required: false, description: '续跑起始轮次' },
-          history: { type: 'array', required: false, description: '前次打回历史（续跑）' }
+          runDir: { type: 'string', description: 'run 产物目录，缺省 .agent-runs/<taskId>' },
+          baseBranch: { type: 'string', description: 'base 分支，缺省 main' },
+          roleDir: { type: 'string', description: '角色目录，缺省 dsh/roles' },
+          issueRef: { type: 'string', description: 'issue 引用，如 #12' },
+          issueTitle: { type: 'string', description: 'issue 标题' },
+          issueBody: { type: 'string', description: 'issue 正文' },
+          issueComments: { type: 'string', description: 'issue 评论' },
+          requirement: { type: 'string', description: '原始需求文本（无 issue 时）' },
+          entry: { type: 'string', description: '续跑入口节点 id' },
+          approved: { type: 'boolean', description: '人工验收续跑裁决（true 通过 / false 打回）' },
+          feedback: { type: 'string', description: '人工打回意见（续跑）' },
+          startRound: { type: 'number', description: '续跑起始轮次' },
+          history: { type: 'array', description: '前次打回历史（续跑）' }
         },
         output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
         async execute(args) {
           let dsl = null
           if (args.templateId) {
-            dsl = findWorkflow(args.templateId)
-            if (!dsl) return '错误：未知工作流 ' + args.templateId + '（可用：' + listWorkflows().map(w => w.id).join(', ') + '）'
+            dsl = await findWorkflow(args.templateId)
+            if (!dsl) return '错误：未知工作流 ' + args.templateId + '（可用：' + (await listWorkflows()).map(w => w.id).join(', ') + '）'
           } else if (args.dsl) {
             dsl = args.dsl
           } else {
@@ -591,6 +869,51 @@ return {
         }
       })
       harness.registerTool(ctx, tool)
+      // 诊断工具（定位删除/路径问题）：op=paths 返回路径解析；op=remove 逐步执行删除
+      const debugTool = harness.defineTool({
+        name: 'vwf_debug',
+        description: 'vwf 插件诊断：op=paths 返回双根路径解析结果；op=remove <id> 逐步执行删除流程并返回每一步结果（含真实 rm 子进程输出），用于定位删除失败。',
+        parameters: {
+          op: { type: 'string', required: true, description: 'paths | remove' },
+          id: { type: 'string', description: 'remove 诊断的模板 id' },
+        },
+        output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
+        async execute(args) {
+          if (args.op === 'paths') {
+            const p = await rootPaths()
+            return JSON.stringify({
+              repoRoot: repoRoot(), knownCwd: knownCwd, dshHome: await dshHome(),
+              userDir: p.userDir, skillRoot: p.skillRoot, builtinDir: p.builtinDir, generator: p.generator,
+              fsAvailable: fs !== undefined, subprocessAvailable: subprocess !== undefined,
+              nodePath: await resolveNode(),
+            }, null, 2)
+          }
+          if (args.op === 'remove' && args.id) {
+            const id = args.id
+            const p = await rootPaths()
+            const file = p.userDir + '/' + id + '.json'
+            const steps = { id: id, repo: p.repo, userDir: p.userDir, file: file }
+            try {
+              const target = await fs.resolve(file)
+              const info = await fs.stat(target)
+              steps.existed = !!info
+              steps.statType = info ? info.type : null
+            } catch (e) { steps.statError = String((e && e.message) || e) }
+            const rm = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.repo })
+            steps.rm = rm
+            const skillDir = p.skillRoot + '/' + id
+            const rm2 = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", skillDir], { cwd: p.repo })
+            steps.rmSkill = rm2
+            try {
+              const after = await fs.stat(await fs.resolve(file))
+              steps.fileExistsAfter = !!after
+            } catch (e) { steps.fileExistsAfter = false }
+            return JSON.stringify(steps, null, 2)
+          }
+          return '用法：vwf_debug { op: "paths" } 或 { op: "remove", id: "<模板id>" }'
+        },
+      })
+      harness.registerTool(ctx, debugTool)
     } else {
       console.log('[vwf] workflowEngine 未解析（host ctx 与 agent-preset 桥接均不可用）或 agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行')
     }

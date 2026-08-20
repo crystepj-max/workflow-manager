@@ -158,14 +158,20 @@ export function validateBlueprint(bp) {
       if (!ids[k]) err('$.bindings.models.' + k, 'bindings.models 引用的节点 ' + k + ' 不存在');
     });
   }
-  if (bp.heteroCheck && (!ids.dev || !ids.review)) err('$.heteroCheck', 'heteroCheck=true 需要存在 dev 与 review 节点（异源检查对象）');
+  if (bp.heteroCheck && !(bp.nodes.some((n) => n && (n.id === 'dev' || n.profile === 'dev')) && bp.nodes.some((n) => n && (n.id === 'review' || n.profile === 'review')))) {
+    err('$.heteroCheck', 'heteroCheck=true 需要存在 dev 与 review 节点（按节点 id 或 profile 识别，异源检查对象）');
+  }
 
-  // 异源硬规则（契约 §3.1 规则 7，T-06：全局强制，仅 dev↔review）
+  // 异源硬规则（契约 §3.1 规则 7，T-06：全局强制，仅 dev↔review；
+  // dev/review 按节点 id 或 profile（角色）识别——编辑器新建节点默认 id 为
+  // node-N，用户以角色表达 dev/review 时同样纳入检查）
   const warnings = [];
-  if (ids.dev && ids.review) {
+  const devNode = bp.nodes.find((n) => n && (n.id === 'dev' || n.profile === 'dev'));
+  const reviewNode = bp.nodes.find((n) => n && (n.id === 'review' || n.profile === 'review'));
+  if (devNode && reviewNode) {
     const bm = (bp.bindings && bp.bindings.models) || {};
-    const dm = bm.dev;
-    const rm = bm.review;
+    const dm = bm[devNode.id];
+    const rm = bm[reviewNode.id];
     if (!dm || !rm) {
       err('$.bindings.models', 'dev/review 未配置 bindings.models，无法证明异源，请显式配置');
     } else {

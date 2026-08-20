@@ -59,7 +59,7 @@
 4. `heteroCheck=true` 时存在 `dev` 与 `review` 节点。
 5. `verifyBranch=true` 节点：`output.schema.required` 含 `verified_branch`/`verified_head`。
 6. `output.files`（若给）：键为合法相对路径（非空、不以 `/` 开头或结尾、不含 `..`、不覆盖保留文件 `STATE.md`）；值为 `json|markdown|text` 枚举。
-7. **异源硬规则（v2 生效，T-06）**：凡含 `dev` 与 `review` 节点的蓝图，save/update/validate 一律校验 `bindings.models.dev` 与 `bindings.models.review`——任一缺失 → 拒（「无法证明异源，请显式配置」）；完全同模型（provider+model 相同）→ 拒；同 provider 不同 model（弱异源）→ 通过 + warning；不同 provider → 通过。无 dev/review 节点的蓝图跳过。错误消息沿用 `errors[]` 结构（at=`bindings.models`，含实际 provider/model 与修复指引）。
+7. **异源硬规则（v2 生效，T-06）**：凡含 `dev` 与 `review` 节点的蓝图（按节点 `id` 或 `profile` 识别——编辑器新建节点默认 id 为 node-N，以角色表达 dev/review 时同样纳入），save/update/validate 一律校验其 `bindings.models`——任一缺失 → 拒（「无法证明异源，请显式配置」）；完全同模型（provider+model 相同）→ 拒；同 provider 不同 model（弱异源）→ 通过 + warning；不同 provider → 通过。无 dev/review 节点的蓝图跳过。错误消息沿用 `errors[]` 结构（at=`bindings.models`，含实际 provider/model 与修复指引）。
 
 ### 3.2 DSL 结构规则（与 `validateDsl` 规则集对齐，host.js:184-306）
 

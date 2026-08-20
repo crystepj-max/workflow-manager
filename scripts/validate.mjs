@@ -1,7 +1,7 @@
 // 根 validate（T-IMP-10，FR-4）
 // ① 校验 templates/ 每个蓝图（契约 §3）
 // ② 幂等重生成比对：编译全部蓝图到 .generated.check/（gitignore），与 .generated/ 逐文件比对（T-04 Q2）
-// ③ 引擎层测试（node --test）；包测试（packages/dsh-visual-workflow）在插件层（T-IMP-06）后接入
+// ③ 引擎层测试 + 包测试（packages/dsh-visual-workflow，T-IMP-06 起接入）
 // 用法：npm run validate；CI（push/PR）执行并以非零退出阻断。
 
 import fs from 'node:fs';
@@ -57,13 +57,20 @@ if (!fs.existsSync(GEN_DIR)) {
   else pass('生成物与重生成一致（' + genFiles.length + ' 个文件）');
 }
 
-// ③ 引擎层测试
+// ③ 引擎层测试 + 包测试
 console.log('—— ③ 引擎层测试 ——');
 try {
   execFileSync(process.execPath, ['--test', 'scripts/test/*.test.mjs'], { cwd: root, stdio: 'pipe', shell: true });
   pass('引擎层测试全绿');
 } catch (e) {
   fail('引擎层测试失败：' + String(e.stdout || e.message).split('\n').slice(-4).join('\n'));
+}
+console.log('—— ③′ 包测试（packages/dsh-visual-workflow：host 双根/异源 + client 冒烟）——');
+try {
+  execFileSync(process.execPath, ['--test', 'tests/host.test.mjs', 'tests/client.smoke.mjs'], { cwd: path.join(root, 'packages', 'dsh-visual-workflow'), stdio: 'pipe', shell: true });
+  pass('包测试全绿');
+} catch (e) {
+  fail('包测试失败：' + String(e.stdout || e.message).split('\n').slice(-4).join('\n'));
 }
 
 console.log(failures === 0 ? '\n✅ validate 通过' : '\n❌ validate 失败（' + failures + ' 项）');

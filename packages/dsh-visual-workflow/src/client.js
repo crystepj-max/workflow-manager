@@ -49,6 +49,9 @@ return {
     const ZH = {
       title: '工作流编辑器',
       subtitle: '通过画布创建节点和边，并为每个节点绑定角色与模型；右键画布可添加结束节点。',
+      templateName: '模板名称',
+      templateId: '模板 ID',
+      saveAs: '另存为',
       canvas: '画布',
       saveWorkflow: '保存工作流',
       getScript: '获取脚本',
@@ -115,6 +118,8 @@ return {
       saved: '已保存 ',
       saveFailed: '保存失败：',
       deleted: '已删除 ',
+      deleteFailed: '删除失败：',
+      confirmDelete: '确认删除模板 ',
       builtinReadonly: '内置模板不可删除',
       noModels: '宿主未配置可用模型（vwf.models 返回空），provider/model 将保留文本输入。',
       zoomIn: '放大',
@@ -125,6 +130,9 @@ return {
     const EN = {
       title: 'Workflow Editor',
       subtitle: 'Create nodes and edges on the canvas and bind each node to a role and a model; right-click the canvas to add an end node.',
+      templateName: 'Template name',
+      templateId: 'Template ID',
+      saveAs: 'Save As',
       canvas: 'Canvas',
       saveWorkflow: 'Save Workflow',
       getScript: 'Get Script',
@@ -191,6 +199,8 @@ return {
       saved: 'Saved ',
       saveFailed: 'Save failed: ',
       deleted: 'Deleted ',
+      deleteFailed: 'Delete failed: ',
+      confirmDelete: 'Delete template ',
       builtinReadonly: 'The built-in template cannot be deleted',
       noModels: 'No models configured on the host (vwf.models empty); provider/model fall back to text inputs.',
       zoomIn: 'Zoom in',
@@ -891,7 +901,7 @@ return {
             onChange: (v) => props.onUpdate(node.id, { profile: v || null }),
           })
         ),
-        h(Field, { label: t('agent'), errors: errorsFor('model.provider') },
+        h(Field, { label: t('agent'), required: true, errors: errorsFor('model.provider') },
           provOpts.length
             ? h(VwfSelect, {
                 value: curProv,
@@ -900,7 +910,7 @@ return {
               })
             : h('input', { className: 'vwf-input', value: curProv, placeholder: 'deepseek-official', onChange: (ev) => props.onUpdate(node.id, { model: { provider: ev.target.value, model: curModel || undefined } }) })
         ),
-        h(Field, { label: t('model'), errors: errorsFor('model.model') },
+        h(Field, { label: t('model'), required: true, errors: errorsFor('model.model') },
           modelOpts.length
             ? h(VwfSelect, {
                 value: curModel,
@@ -909,7 +919,7 @@ return {
               })
             : h('input', { className: 'vwf-input', value: curModel, placeholder: 'deepseek-v4-flash', onChange: (ev) => props.onUpdate(node.id, { model: { provider: curProv || undefined, model: ev.target.value || undefined } }) })
         ),
-        h(Field, { label: t('goal'), errors: errorsFor('goal') },
+        h(Field, { label: t('goal'), required: true, errors: errorsFor('goal') },
           h('textarea', { className: 'vwf-textarea', rows: 3, value: node.goal || '', placeholder: t('defaultNodeGoal'), onChange: (ev) => props.onUpdate(node.id, { goal: ev.target.value }) })
         ),
         h('div', { className: 'vwf-subsection' },
@@ -936,7 +946,7 @@ return {
           resultMode === 'ai' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('outputValidationDescription')) : null,
           resultMode === 'manual' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('manualCheckDescription')) : null,
           resultMode === 'ai' ? h('div', null,
-            h(Field, { label: t('outputSchema'), help: t('outputSchemaHelp'), errors: errorsFor('output.schema') },
+            h(Field, { label: t('outputSchema'), required: true, help: t('outputSchemaHelp'), errors: errorsFor('output.schema') },
               h('div', { style: { position: 'relative' } },
                 h('textarea', {
                   className: 'vwf-textarea vwf-mono' + (errorsFor('output.schema').length ? ' err' : ''),
@@ -1025,6 +1035,8 @@ return {
       const selectedNode = selectedNodeId ? (wf.nodes || []).find(n => n.id === selectedNodeId) || null : null
       const selectedEdge = selectedEdgeIndex !== null ? (wf.edges || [])[selectedEdgeIndex] || null : null
       const entryCandidates = React.useMemo(() => deriveEntryCandidates(wf), [wf])
+      // 编辑已有模板且 ID 已修改 → 保存置灰，只能另存为（currentId=原模板 id）
+      const idChanged = props.currentId != null && wf.id !== props.currentId
 
       // 变更同步：归一入口、清空校验标记、同步 JSON 草稿、通知上层、防抖实时校验
       const syncWorkflow = (next) => {
@@ -1130,7 +1142,7 @@ return {
           setDialogOpen(true)
           return
         }
-        const r = await host.call('vwf.workflows.save', { dsl: v.sanitized || toSave }).catch((e) => ({ ok: false, errors: [{ message: String(e) }] }))
+        const r = await host.call('vwf.workflows.save', { dsl: v.sanitized || toSave, currentId: props.currentId }).catch((e) => ({ ok: false, errors: [{ message: String(e) }] }))
         if (!r.ok) {
           setPendingValidation({ errors: r.errors || [{ message: t('saveFailed') }] })
           setDialogOpen(true)
@@ -1201,6 +1213,21 @@ return {
               h('div', { className: 'vwf-card-head' },
                 h('div', null,
                   h('div', { className: 'vwf-card-title' }, t('title')),
+                  // 模板信息：名称/ID 必填可编辑（编辑态 ID 变化 → 保存置灰，只能另存为）
+                  h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 8 } },
+                    h('span', { className: 'vwf-field-label' }, t('templateName'), h('span', { className: 'req' }, '*')),
+                    h('input', {
+                      className: 'vwf-input', style: { width: 220 },
+                      value: wf.name || '', placeholder: t('templateName'),
+                      onChange: (ev) => syncWorkflow({ ...wf, name: ev.target.value }),
+                    }),
+                    h('span', { className: 'vwf-field-label' }, t('templateId'), h('span', { className: 'req' }, '*')),
+                    h('input', {
+                      className: 'vwf-input vwf-mono', style: { width: 180 },
+                      value: wf.id || '', placeholder: 'my-workflow',
+                      onChange: (ev) => syncWorkflow({ ...wf, id: ev.target.value }),
+                    })
+                  ),
                   h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('subtitle'))
                 ),
                 h('div', { className: 'vwf-row' },
@@ -1209,7 +1236,8 @@ return {
                     h('button', { className: 'vwf-btn sm' + (tab === 'json' ? ' primary' : ''), onClick: () => setTab('json') }, 'JSON')
                   ),
                   h('button', { className: 'vwf-btn sm', onClick: props.onScript }, t('getScript')),
-                  h('button', { className: 'vwf-btn sm primary', disabled: props.saving || !(wf.nodes || []).length, onClick: () => { void handleSave() } }, t('saveWorkflow'))
+                  idChanged ? h('button', { className: 'vwf-btn sm', onClick: () => { void handleSave() } }, t('saveAs')) : null,
+                  h('button', { className: 'vwf-btn sm primary', disabled: props.saving || !(wf.nodes || []).length || idChanged, onClick: () => { void handleSave() } }, t('saveWorkflow'))
                 )
               ),
               tab === 'canvas' ? h('div', { className: 'vwf-canvas-toolbar' },
@@ -1380,12 +1408,17 @@ return {
       const onRemove = (id) => {
         const w = (list || []).find(x => x.id === id)
         if (w && w.builtin) { setMsg(t('builtinReadonly')); return }
-        host.call('vwf.workflows.remove', { id }).then(() => { setMsg(t('deleted') + id); refresh() }).catch(() => {})
+        if (!window.confirm(t('confirmDelete') + id + '？')) return
+        host.call('vwf.workflows.remove', { id }).then((r) => {
+          if (r && r.ok) { setMsg(t('deleted') + id); refresh() }
+          else setMsg(t('deleteFailed') + ((r && r.errors && r.errors[0] && r.errors[0].message) || ''))
+        }).catch((e) => setMsg(t('deleteFailed') + String(e)))
       }
       const onSaved = (id) => {
         setSaving(false)
         setDirty(false)
         setMsg(t('saved') + id)
+        closeEditor()
         refresh()
       }
       const onScript = () => {
@@ -1438,6 +1471,7 @@ return {
             h('div', { className: 'vwf-drawer-body' },
               h(Editor, {
                 wf, providers, roles, saving,
+                currentId: editId,
                 setWf: (next) => { setWf(next); setDirty(true) },
                 onSaved: (id) => { onSaved(id); if (!editId) setEditId(id) },
                 onScript,

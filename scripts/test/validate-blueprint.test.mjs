@@ -175,3 +175,26 @@ test('S1 异源 T5：无 dev/review 节点的蓝图跳过异源校验', () => {
   assert.equal(r.ok, true, JSON.stringify(r.errors));
   assert.equal(r.warnings.length, 0);
 });
+
+test('S1 异源 T7：profile（角色）为 dev/review 的节点同样纳入检查（节点 id 为 node-N）', () => {
+  const b = clone();
+  const mapId = { dev: 'node-1', review: 'node-2' };
+  b.nodes = b.nodes.map((n) => (mapId[n.id] ? { ...n, id: mapId[n.id] } : n));
+  b.edges = b.edges.map((e) => ({ ...e, from: mapId[e.from] || e.from, to: mapId[e.to] || e.to }));
+  b.entry = mapId[b.entry] || b.entry;
+  b.bindings = { models: {} };
+  b.nodes.forEach((n) => { if (n.profile === 'dev' || n.profile === 'review') b.bindings.models[n.id] = { provider: 'deepseek-official', model: 'deepseek-v4-pro' }; });
+  expectReject(b, '模型相同', 'heteroT7-profile');
+});
+
+test('S1 异源 T8：profile 定位 + 真异源通过无警告', () => {
+  const b = clone();
+  const mapId = { dev: 'node-1', review: 'node-2' };
+  b.nodes = b.nodes.map((n) => (mapId[n.id] ? { ...n, id: mapId[n.id] } : n));
+  b.edges = b.edges.map((e) => ({ ...e, from: mapId[e.from] || e.from, to: mapId[e.to] || e.to }));
+  b.entry = mapId[b.entry] || b.entry;
+  b.bindings = { models: { 'node-1': { provider: 'kimi-coding', model: 'k3' }, 'node-2': { provider: 'deepseek-official', model: 'deepseek-v4-pro' } } };
+  const r = validateBlueprint(b);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.equal(r.warnings.length, 0);
+});
