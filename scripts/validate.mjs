@@ -10,7 +10,6 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { validateBlueprint } from './validate-blueprint.mjs';
 import { generateAll } from './generate.mjs';
-import { assertEquivalence } from './equivalence.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -33,12 +32,8 @@ for (const f of tpls) {
     continue;
   }
   pass(bp.id + '：结构合法（' + v.counts.nodes + ' 节点 / ' + v.counts.edges + ' 边）');
-  // 等价断言：生成产物忠实表达蓝图（T-05）
-  const { files } = generateAll(TPL_DIR);
-  const script = files.get(bp.id + '/script.mjs');
-  const eq = assertEquivalence(script, bp);
-  if (!eq.ok) fail(bp.id + ' 等价断言：' + eq.failures.join('；'));
-  else pass(bp.id + ' 等价断言：10 项全过');
+  // 等价验证由步骤③的运行时排练厅套件承担（runtime.test.mjs / runtime-host.test.mjs，
+  // 真实执行生成脚本断言返回体状态机——替代原字符串嗅探断言）
 }
 
 // ② 幂等重生成比对（T-04 Q2：generateAll 内存产物 vs .generated/ 磁盘逐文件比对，无需临时目录）

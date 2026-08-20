@@ -1,7 +1,8 @@
 # 2.0 等价验收清单（equivalence-checklist · T-05）
 
 > 用途：AC-1/NFR-3 的收口人工核对清单（v1 收口时逐项勾选）。
-> 自动化部分：`scripts/equivalence.test.mjs`（10 项断言，进 validate/CI）。
+> 自动化部分：**运行时排练厅套件**（`scripts/test/runtime.test.mjs` + `runtime-host.test.mjs`，进 validate/CI）——
+> 真实执行生成脚本、断言返回体状态机；原 `scripts/equivalence.mjs` 字符串嗅探断言已删除（候选三收口，Q5）。
 > 依据：R-01 语义清单（`docs/research/mjs-semantics.md`）+ T-05 决策（语义等价 + 新契约统一）。
 
 ## 核对对象
@@ -20,17 +21,18 @@
 | 5 | 可信度闸门 | test/review/accept 开工分支自检（worktree=dev2/<taskId>）；`verified_branch`/`verified_head` 硬校验（失败 TECHNICAL_FAILURE） | ☐ |
 | 6 | 异源 | dev↔review 模型比对（v2 起 save 层强制，运行时日志）；弱异源 warning | ☐ |
 | 7 | 文件契约 | STATE.md 四行（stage/round/status/updated）；report 文件命名与蓝图 output.files 一致；runDir 只写约定 | ☐ |
-| 8 | 返回状态机 | 新契约状态全集可驱动：`AWAITING_HUMAN_<id>` / `FAILED_AT_<id>`（含 dispatch 三要素缺失）/ `FAILED_MAX_ROUNDS` / `BLOCKED` / `TECHNICAL_FAILURE` / `DONE` | ☐ |
+| 8 | 返回状态机 | 新契约状态全集可驱动：`AWAITING_HUMAN_<id>` / `FAILED_AT_<id>`（含 dispatch 三要素缺失、dev 受阻）/ `FAILED_MAX_ROUNDS` / `TECHNICAL_FAILURE` / `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` / `ERROR` / `DONE`。**run 级无 `BLOCKED`**——受阻两层语义：节点结果枚举（test `BLOCKED` / dev `blocked`）仍有效；流程层受阻 = dev 受阻 → `FAILED_AT_dev`（failure 边兜底，走通性规则）、test 受阻 → 沿 failure 边打回开发 | ☐ |
 
 ## 已知差异（T-05 决策，接受）
 
 - 三要素缺失：旧 `REJECTED_INCOMPLETE` → 新 `FAILED_AT_dispatch`（终止原因可读：missing/reason 在结果中）；runbook 已增补 `FAILED_AT_*` 驱动。
+- run 级 `BLOCKED`：旧状态机有、新契约无（候选三 Q4/Q12 修正）——受阻按节点结果呈现：内置图纸 dev 补 failure 边（→ `$end`）后，dev 受阻 = `FAILED_AT_dev`；`ENDED_NO_*` 仅作为图缺陷（走通性违约）的运行时兜底，创作期由校验器规则拦截。
 - 返回体：旧 `AWAITING_HUMAN_ACCEPTANCE`（next/heterogeneity 字段）→ 新 `AWAITING_HUMAN_<节点id>` + resume；主会话按新契约驱动。
 - 允许差异：报错文案、log 细节、label 命名、代码风格。
 
 ## 收口步骤
 
-1. `npm test` 全绿（含 equivalence 断言）
+1. `npm test` 全绿（含运行时排练厅场景套件：框架级走通性 + 模板级回归 + 双编译器对拍）
 2. 本清单 8 维度逐项人工核对生成脚本（对照 R-01 产物）→ 全勾
 3. 触发词路由实测：新会话以「开发工作流 2.0」/「dev-workflow-2-0」调用生成 skill（FR-6 软路由，规格风险 3）
 4. 通过后：删除旧 mjs，入口由生成 skill 承接

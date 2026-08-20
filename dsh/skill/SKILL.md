@@ -80,20 +80,22 @@ diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
 
 开发/审核不同 provider 即满足「异源异模型」硬规则；宿主缺某个 provider 时退化为同默认模型（脚本会警告弱异源），流程仍可跑。
 
-### 4. 按返回 status 驱动
+### 4. 按返回 status 驱动（新契约；旧 mjs 已退役）
 
 | status | 含义 | 主会话动作 |
 |---|---|---|
-| `REJECTED_INCOMPLETE` | 三要素缺失 | 呈缺失项与补齐建议 → 人工补齐 issue → 重跑 entry=dispatch |
-| `BLOCKED` | 环境/依赖阻塞 | 呈阻塞原因，人工介入后按需续跑 |
-| `TECHNICAL_FAILURE` | 节点 agent 技术失败 | 检查模型路由/额度后重试该 entry |
-| `AWAITING_HUMAN_ACCEPTANCE` | 验收双报告已产出 | 见第 5 步人工门禁 |
-| `FAILED_MAX_ROUNDS` | 9 轮超限 | 呈 reschedule（归因/拆分/人工介入建议）→ 人工决策 |
+| `AWAITING_HUMAN_<节点id>`（如 `AWAITING_HUMAN_accept`） | 门禁节点产出后挂起 | 见第 5 步人工门禁（返回体含 `resume` 载荷） |
+| `FAILED_AT_<节点id>`（如 `FAILED_AT_dispatch` / `FAILED_AT_dev`） | 节点未通过且走 failure 边至终点（含三要素缺失、dev 受阻 status=blocked） | 呈节点结果（dispatch 含 `missing`/`reason`），人工补齐后重跑对应 `entry` |
+| `FAILED_MAX_ROUNDS` | 打回超限（auto-reschedule 时含归因 `reschedule`） | 呈 reschedule（归因/拆分/人工介入建议）→ 人工决策 |
+| `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` | 图缺陷（走通性违约的运行时兜底） | 检查蓝图（创作期由校验器「successCondition 必须有 failure 边」规则拦截） |
+| `ERROR` / `TECHNICAL_FAILURE` | 未知节点 / 节点 agent 技术失败 | 检查模型路由/额度后重试该 entry |
 | `DONE` | 收口完成 | 呈 cleanup-report 摘要 + PR 合并/commit + 已关闭 issue |
+
+> 旧 `REJECTED_INCOMPLETE` / `BLOCKED` 已由 `FAILED_AT_*` 承接（run 级无 BLOCKED；受阻按节点结果呈现）。
 
 ### 5. 人工门禁（验收裁决）
 
-`AWAITING_HUMAN_ACCEPTANCE` 时：
+`AWAITING_HUMAN_<节点id>`（如 `AWAITING_HUMAN_accept`）时：
 
 0. 先确认验证分支：核对 `<runDir>/acceptance-summary.md`（或 accept-report.md）记录的
    verified_branch = dev2/<taskId>（worktree 分支）、verified_head 与 worktree HEAD 一致；

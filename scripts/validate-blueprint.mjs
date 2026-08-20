@@ -143,6 +143,12 @@ export function validateBlueprint(bp) {
     const fail = out.filter((e) => e.on === 'failure');
     if (succ.length > 1 && succ.some((e) => e.when === undefined)) err('$.nodes[' + id + ']', '多条 success 出边必须全部带 when 条件');
     if (fail.length > 1) err('$.nodes[' + id + ']', 'failure 边最多一条（打回唯一路径）');
+    // 走通性规则（候选三 Q12）：有成功条件（可判失败）的节点必须有 failure 出口，
+    // 否则判定失败时运行时无路可走（ENDED_NO_FAILURE_EDGE）——创作期即拒绝。
+    const node = bp.nodes.find((n) => n && n.id === id);
+    if (node && node.output && node.output.successCondition && fail.length === 0) {
+      err('$.nodes[' + id + ']', '节点 ' + (node.label || id) + ' 有成功条件（successCondition）但无 failure 出边——判定失败时将无出口（走通性违约），请补 failure 边或移除成功条件');
+    }
   });
 
   const entry = entryOk ? bp.entry : (cands.length === 1 ? cands[0] : '');

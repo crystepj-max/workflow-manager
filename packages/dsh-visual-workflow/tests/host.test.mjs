@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const src = readFileSync(join(here, '..', 'src', 'host.js'), 'utf8')
 const REPO = '/repo'
 const SESSION_REPO = '/session/workspace'
 const HOME = '/Users/tester'
@@ -15,26 +14,8 @@ const DSH_HOME = HOME + '/.dsh'
 const USER_DIR = DSH_HOME + '/visual-workflow/templates'
 const SKILL_ROOT = DSH_HOME + '/skills'
 
-// ── 加载 host 半（动态包形态：return {...} 闭包体）──────────────────────────
-function loadHost(overrides = {}) {
-  const handlers = new Map()
-  const definedTools = []
-  const runs = new Map()
-  const events = new Map()
-  const ctx = {
-    get: (name) => overrides[name] === undefined ? undefined : overrides[name],
-    on: (name, fn) => { events.set(name, fn) },
-  }
-  const harness = {
-    handle: (method, fn) => { handlers.set(method, fn) },
-    defineTool: (tool) => { definedTools.push(tool); return tool },
-    registerTool: () => {},
-  }
-  const fn = new Function('ctx', 'harness', `${src}`)
-  const plugin = fn(ctx, harness)
-  plugin.apply(ctx)
-  return { handlers, definedTools, events, ctx }
-}
+// ── 加载 host 半（共享加载器：helpers/load-host.mjs，new Function + 假 ctx/harness）──
+import { loadHost } from './helpers/load-host.mjs'
 
 const call = async (handlers, method, args) => handlers.get(method)(args)
 

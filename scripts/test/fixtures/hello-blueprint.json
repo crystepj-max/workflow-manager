@@ -1,0 +1,82 @@
+{
+  "id": "hello",
+  "displayName": "hello 微型蓝图",
+  "description": "框架级走通性测试夹具：与任何业务无关的 4 节点最小图纸",
+  "entry": "dispatch",
+  "control": {
+    "maxRounds": 2
+  },
+  "bindings": {
+    "models": {
+      "dispatch": { "provider": "test-provider", "model": "test-model" },
+      "work": { "provider": "test-provider", "model": "test-model" },
+      "gate": { "provider": "test-provider", "model": "test-model" },
+      "finish": { "provider": "test-provider", "model": "test-model" }
+    }
+  },
+  "nodes": [
+    {
+      "id": "dispatch",
+      "profile": "dispatcher",
+      "goal": "x",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": { "complete": { "type": "boolean" } },
+          "required": ["complete"],
+          "additionalProperties": false
+        },
+        "successCondition": "$.complete == true"
+      }
+    },
+    {
+      "id": "work",
+      "profile": "dev",
+      "goal": "y",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": { "status": { "type": "string", "enum": ["completed", "blocked"] } },
+          "required": ["status"],
+          "additionalProperties": false
+        },
+        "successCondition": "$.status == \"completed\""
+      }
+    },
+    {
+      "id": "gate",
+      "profile": "accept",
+      "goal": "z",
+      "manualCheck": true,
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": { "verdict": { "type": "string" } },
+          "required": ["verdict"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "finish",
+      "profile": "closeout",
+      "goal": "w",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": { "done": { "type": "boolean" } },
+          "required": ["done"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "dispatch", "to": "work", "on": "success" },
+    { "from": "work", "to": "gate", "on": "success" },
+    { "from": "gate", "to": "finish", "on": "success" },
+    { "from": "dispatch", "to": "$end", "on": "failure" },
+    { "from": "work", "to": "dispatch", "on": "failure" },
+    { "from": "finish", "to": "$end", "on": "success" }
+  ]
+}

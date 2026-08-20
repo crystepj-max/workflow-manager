@@ -12,7 +12,7 @@ test('S1 合法蓝图（dev-workflow-2-0 全量）通过校验', () => {
   const r = validateBlueprint(good);
   assert.equal(r.ok, true, JSON.stringify(r.errors));
   assert.equal(r.counts.nodes, 7);
-  assert.equal(r.counts.edges, 12);
+  assert.equal(r.counts.edges, 13);
 });
 
 // —— 场景辅助：基于合法蓝图做单点破坏 ——
@@ -39,7 +39,7 @@ test('S1 缺 $end 与无出边拒绝', () => {
 
 test('S1 多 success 出边缺 when 拒绝', () => {
   const b = clone();
-  b.edges[3].when = undefined;
+  b.edges[4].when = undefined;
   expectReject(b, '多条 success 出边必须全部带 when', 'whenMissing');
 });
 
@@ -65,6 +65,20 @@ test('S1 success 环拒绝（打回走 failure 边）', () => {
   const b = clone();
   b.edges.push({ from: 'test', to: 'route', on: 'success' });
   expectReject(b, '环', 'cycle');
+});
+
+// —— 走通性规则（候选三 Q12：有成功条件即可判失败的节点必须有 failure 出口）——
+test('S1 走通性：有 successCondition 的节点缺 failure 边拒绝', () => {
+  const b = clone();
+  b.edges = b.edges.filter((e) => !(e.from === 'dev' && e.on === 'failure'));
+  expectReject(b, 'failure 出边', 'walkability');
+});
+
+test('S1 走通性：manualCheck 节点无 successCondition 不强制 failure 边', () => {
+  const b = clone();
+  b.edges = b.edges.filter((e) => !(e.from === 'accept' && e.on === 'failure'));
+  const r = validateBlueprint(b);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
 });
 
 test('S1 output.files：非法相对路径拒绝', () => {

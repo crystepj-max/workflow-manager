@@ -359,6 +359,11 @@
       "on": "success"
     },
     {
+      "from": "dev",
+      "to": "$end",
+      "on": "failure"
+    },
+    {
       "from": "route",
       "to": "test",
       "on": "success",

@@ -15,14 +15,14 @@
    ▼
 workflow 编排脚本（dsh/workflow/dev-workflow-2.0.mjs）
    │
-   ├─ 阶段 调度：dispatcher agent ── schema 闸门 ── 三要素缺失 → REJECTED_INCOMPLETE（打回人工）
+   ├─ 阶段 调度：dispatcher agent ── schema 闸门 ── 三要素缺失 → FAILED_AT_dispatch（打回人工）
    │
    ├─ 阶段 开发循环（≤9 轮）：
    │     开发 agent → 分流（脚本内 if，无 LLM）→ [测试 agent] → 审核 agent（异源）
    │     测试 FAILED / 审核 REQUEST_CHANGES → 带反馈打回开发，计 1 轮
    │     9 轮超限 → 自动回调度做失败归因 → FAILED_MAX_ROUNDS
    │
-   ├─ 阶段 人工验收：accept agent 产双报告 → AWAITING_HUMAN_ACCEPTANCE（脚本返回）
+   ├─ 阶段 人工验收：accept agent 产双报告 → AWAITING_HUMAN_accept（脚本返回）
    │
    ▼
 主会话呈 acceptance-summary.md → ask_user_question 人工裁决（AI 不代签）
@@ -102,33 +102,26 @@ gh issue view <N> --json title,body,comments
 }
 ```
 
-### 4. 按返回状态驱动
+### 4. 按返回状态驱动（新契约；旧 mjs 已退役）
+
+> 状态机以生成器产出的脚本（`.generated/<id>/script.mjs`）为准；行为由运行时排练厅套件
+> （`scripts/test/runtime.test.mjs` / `runtime-host.test.mjs`）持续验证。
 
 | 返回 status | 含义 | 主会话动作 |
 |---|---|---|
-| `REJECTED_INCOMPLETE` | 三要素缺失 | 呈缺失项与补齐建议 → 人工补齐 issue → 重跑 entry=dispatch |
-| `BLOCKED` | 环境/依赖阻塞 | 呈阻塞原因，人工介入后按需续跑 |
-| `TECHNICAL_FAILURE` | agent 技术失败 | 检查模型/额度后重试该 entry |
-| `AWAITING_HUMAN_ACCEPTANCE` | 验收双报告已产出 | 呈 `acceptance-summary.md` + 人工确认卡：通过 → entry=closeout；不通过 → entry=dev + feedback + startRound+1 |
-| `FAILED_MAX_ROUNDS` | 9 轮超限 | 呈 reschedule（归因/拆分建议/人工介入建议）→ 人工决策：拆分后重新调度 |
+| `AWAITING_HUMAN_<节点id>`（如 `AWAITING_HUMAN_accept`） | 门禁节点产出后挂起 | 呈报告 + 人工确认卡：通过 → `entry=<节点id>` + `approved=true` 续跑；不通过 → `entry=dev` + `feedback` + `startRound+1` 续跑（返回体含 `resume` 载荷） |
+| `FAILED_AT_<节点id>`（如 `FAILED_AT_dispatch`） | 节点未通过且走 failure 边至终点（含三要素缺失、dev 受阻） | 呈节点结果（dispatch 场景含 `missing`/`reason` 三要素判定；dev 受阻 = `status: "blocked"`），人工补齐后重跑对应 `entry` |
+| `FAILED_MAX_ROUNDS` | 超限（auto-reschedule 时含归因 `reschedule`） | 呈 reschedule（归因/拆分建议/人工介入建议）→ 人工决策拆分 |
+| `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` | 图缺陷（走通性违约的运行时兜底） | 检查蓝图（创作期由校验器「successCondition 必须有 failure 边」规则拦截） |
+| `ERROR` / `TECHNICAL_FAILURE` | 未知节点 / agent 技术失败 | 检查模型/额度后重试该 entry |
 | `DONE` | 收口完成 | 呈 cleanup-report.md + 合并 commit + 已关闭 issue，流程结束 |
 
 人工确认卡建议字段：通过 / 不通过（附意见）。`accept.verdict` 是 AI 的核验结论，
 仅供参考，**裁决权在人工**。
 
-### 新契约状态补充（蓝图生成脚本，T-05）
-
-旧 mjs 退役后，由生成器产出的脚本（`.generated/<id>/script.mjs`）返回状态统一为新契约：
-
-| 状态 | 含义 | 主会话动作 |
-|---|---|---|
-| `AWAITING_HUMAN_<节点id>`（如 `AWAITING_HUMAN_accept`） | 门禁节点产出后挂起 | 呈报告 + 人工确认卡：通过 → `entry=<节点id>` + `approved=true` 续跑；不通过 → `entry=dev` + `feedback` + `startRound+1` 续跑（返回体含 `resume` 载荷） |
-| `FAILED_AT_<节点id>`（如 `FAILED_AT_dispatch`） | 节点未通过且无打回边（含三要素缺失） | 呈节点结果（dispatch 场景含 `missing`/`reason` 三要素判定），人工补齐后重跑 `entry=dispatch` |
-| `FAILED_MAX_ROUNDS` | 超限（auto-reschedule 时含归因 `reschedule`） | 呈 reschedule → 人工决策拆分 |
-| `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` | 图缺陷 | 检查蓝图 |
-| `ERROR` / `TECHNICAL_FAILURE` / `BLOCKED` / `DONE` | 同旧契约语义 | 见上表 |
-
-> 旧 `REJECTED_INCOMPLETE` 语义由 `FAILED_AT_dispatch` 承接（T-05 决策：接受差异、原因可读）。
+> 旧契约语义承接（T-05/候选三修正）：`REJECTED_INCOMPLETE` → `FAILED_AT_dispatch`；
+> run 级 `BLOCKED` 已移除——受阻按节点结果呈现（dev 受阻 = `FAILED_AT_dev`，test 受阻 = 打回开发）；
+> 节点结果枚举（test `BLOCKED` / dev `blocked`）仍有效。
 
 ## run 目录产物约定
 

@@ -42,9 +42,16 @@ function foldableNodes(bp) {
     if (out.length !== 2 || !out.every((e) => e.when)) return;
     const parsed = out.map((e) => { const m = COND_RE.exec(e.when); return m ? { to: e.to, path: m[1], value: m[3] } : null; });
     if (!parsed[0] || !parsed[1] || parsed[0].path !== parsed[1].path || parsed[0].value === parsed[1].value) return;
+    // 折叠转发源（运行时排练厅 T1 暴露的 bug 修复）：优先取「输出 schema 声明了
+    // when 路径」的节点（上游判定者，如模板中 need_integration_test 产自 dispatch），
+    // 兜底取 success 入边来源（值直接产自前驱的场景，如 F8 折叠测试）。
+    // 旧实现固定取入边来源：模板中入边来源是 dev，dev 结果无 need_integration_test，
+    // 折叠永远走 false 分支（跳过测试环节）——与契约「严格转发上游判定」相悖。
+    const declaring = bp.nodes.find((x) => x !== n && x.output && x.output.schema
+      && x.output.schema.properties && x.output.schema.properties[parsed[0].path] !== undefined);
     const src = bp.edges.find((e) => e.to === n.id && e.on === 'success');
     folds[n.id] = {
-      from: src ? src.from : null,
+      from: declaring ? declaring.id : (src ? src.from : null),
       path: parsed[0].path,
       trueTo: parsed[0].value === 'true' ? parsed[0].to : parsed[1].to,
       falseTo: parsed[0].value === 'true' ? parsed[1].to : parsed[0].to,
@@ -239,10 +246,10 @@ export function skillWrap(bp) {
     '2. 调用 `workflow` 工具：`script` = 编译产物 `.generated/' + bp.id + '/script.mjs` 全文，`meta` = `.generated/' + bp.id + '/meta.json`。',
     '3. 按返回状态机驱动：',
     '   - `AWAITING_HUMAN_<节点id>`：呈 acceptance 报告 + 人工确认卡；通过 → entry=<节点id> + approved=true 续跑；不通过 → entry=dev + feedback + startRound+1 续跑。',
-    '   - `FAILED_AT_<节点id>`：流程终止；呈节点结果（如 dispatch 含 missing/reason 三要素缺失判定），人工补齐后重跑 entry=dispatch。',
+    '   - `FAILED_AT_<节点id>`：流程终止；呈节点结果（如 dispatch 含 missing/reason 三要素判定、dev status=blocked 受阻），人工补齐后按需续跑。',
     '   - `FAILED_MAX_ROUNDS`：呈 reschedule（归因/拆分/人工介入建议）→ 人工决策。',
-    '   - `BLOCKED` / `TECHNICAL_FAILURE`：呈原因，人工介入后按需续跑。',
-    '   - `REJECTED_INCOMPLETE`：见 FAILED_AT_dispatch（新契约统一）。',
+    '   - `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` / `TECHNICAL_FAILURE`：呈原因（图缺陷/技术失败），人工介入后按需续跑。',
+    '   - 旧 `REJECTED_INCOMPLETE` / `BLOCKED`：已由 `FAILED_AT_<节点id>` 承接（run 级无 BLOCKED；受阻语义 = 节点结果，如 dev status=blocked → FAILED_AT_dev）。',
     '   - `DONE`：呈 cleanup 报告与合并 commit，流程结束。',
     '',
     '## 生成信息',
