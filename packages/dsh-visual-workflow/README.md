@@ -18,6 +18,26 @@ packages/dsh-visual-workflow/
 
 ## 使用方式
 
+### 方式 A：组合包安装（产品形态）
+
+```bash
+# 构建 bundle 产物（dist/host-entry.mjs + dist/client.js）
+cd packages/dsh-visual-workflow && npm run build
+
+# link 安装到 profile（路径用绝对路径；目标 profile 以实际为准）
+dsh plugin --profile web add link:/Users/chris/workspace/workflow-manager/packages/dsh-visual-workflow
+
+# 验证
+dsh --profile web --dump-config | grep visual-workflow   # 可见 patch 层
+# 重启 GUI 后：设置 → 工作流
+```
+
+- 包契约：`dsh.bundle.patch` → cordis.patch.yml（host 插件行）；`dsh.client` + `exports["./client"]` → dist/client.js（自包含经典脚本）
+- `scripts/build-bundle.mjs` 把 src/ 的闭包体包装为上述两种形态——单一事实源仍是 src/
+- 注意：动态插件（vwf-*）是进程级的，重启即消失；bundle 版持久存在，二者不要同时启用以免「工作流」入口双挂载
+
+### 方式 B：动态插件（开发迭代）
+
 两个半都是**动态插件包格式**（plain JS、无 import/JSX，`return { name, inject, apply }` 闭包体），直接在支持 cordis 动态插件的会话中定义：
 
 ```

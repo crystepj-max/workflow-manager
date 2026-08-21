@@ -1,0 +1,9 @@
+# dsh-visual-workflow bundle for DeepSeek Harness (dsh).
+# 通过官方 CLI 安装即挂载：
+#   dsh plugin --profile web add link:/Users/chris/workspace/workflow-manager/packages/dsh-visual-workflow
+# 插件行按包名经 profile 的 node_modules 解析；浏览器半由 dsh.client +
+# exports["./client"] 独立提供（不在此 YAML 声明）。
+# 注意：若 profile 手写层已有本插件的挂载行，请先移除，避免双挂载。
+- insert:
+    - id: visual-workflow
+      name: 'dsh-visual-workflow'
