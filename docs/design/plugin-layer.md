@@ -52,8 +52,11 @@ vwf 插件是 **Cordis 动态双半插件**（plain JS、无 import/JSX，`cordi
 | 用户 | `~/.dsh/visual-workflow/templates/<id>.json` | 蓝图 JSON | `vwf.workflows.save` 落盘 |
 
 - `list` 合并双根（`builtin` 标志 + id 字母序）；用户条目经内联 `projectToVwf` 投影为 vwf DSL。
-- **save 即闭环**：校验（结构+异源+模型必填）→ 撞名拒绝 → 逆投影蓝图落盘 → spawn 生成器
-  `node scripts/generate.mjs user <蓝图> ~/.dsh/skills` 同步自包含 skill 三件套（失败回滚，保持原子）。
+- **save 即闭环**：校验（统一校验管道，结构+异源+模型必填）→ 撞名拒绝 → 逆投影蓝图落盘 →
+  spawn 生成器 `node scripts/generate.mjs user <蓝图> ~/.dsh/skills` 同步自包含 skill 三件套。
+  **原子性（候选四 T-IMP-14）**：skill 写盘 = 暂存目录 + 同父目录 rename 原子换入——
+  任一步失败清理暂存、零残留（更新场景旧版本不受影响）；宿主侧回滚蓝图保留为防御纵深
+  （校验已同内核同数据，正常操作回滚不可达）。
 - `remove` 仅用户模板（蓝图 + `~/.dsh/skills/<id>/` 同步删）；内置只读。
 - 保存/另存为语义：save 携带 `currentId`（当前编辑模板 id）；目标 id 已存在且 `currentId !== id` → 拒绝
   （client 编辑态 ID 变化时「保存」置灰，只能「另存为」）。

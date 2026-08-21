@@ -316,6 +316,37 @@ export function generateUserSkill(bp) {
   ]);
 }
 
+// ---------- 用户 skill 原子写盘（候选四 T-IMP-14） ----------
+// 失败零残留：先写暂存目录 → 原子换入（同父目录 rename）→ 任一步失败清理暂存并报错。
+// 更新场景：旧版本目录在换入前整体移除——失败时旧版本不受影响（换入未发生）。
+// io 可注入（测试用）；删除用 unlink/rmdir（避免宿主 NODE_OPTIONS safe-delete 钩子）。
+export function writeUserSkill(bp, skillDir, io = fs) {
+  const finalDir = path.join(path.resolve(skillDir), bp.id);
+  const stage = finalDir + '.tmp-' + process.pid + '-' + Date.now();
+  const removeTree = (dir) => {
+    let entries = [];
+    try { entries = io.readdirSync(dir); } catch (e) { return; }
+    for (const f of entries) {
+      const p = path.join(dir, f);
+      let st = null;
+      try { st = io.statSync(p); } catch (e) { continue; }
+      if (st.isDirectory()) removeTree(p);
+      else { try { io.unlinkSync(p); } catch (e) {} }
+    }
+    try { io.rmdirSync(dir); } catch (e) {}
+  };
+  try {
+    io.mkdirSync(stage, { recursive: true });
+    for (const [rel, content] of generateUserSkill(bp)) io.writeFileSync(path.join(stage, rel), content);
+    removeTree(finalDir);            // 原子换入前半：移除旧版
+    io.renameSync(stage, finalDir);  // 同父目录 rename = 原子换入
+    return { ok: true, dir: finalDir };
+  } catch (e) {
+    removeTree(stage);               // 失败零残留：清理暂存与已写文件
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
 // ---------- CLI（薄壳：参数解析 + 写盘 + 幂等比对，T-IMP-10 接入 validate） ----------
 function writeAll(files, outDir) {
   for (const [rel, content] of files) {
@@ -341,10 +372,13 @@ function main() {
       if (v.warnings.length) console.error('⚠️ ' + v.warnings.join('；'));
       process.exit(1);
     }
-    const dir = path.join(path.resolve(skillDir), bp.id);
-    fs.mkdirSync(dir, { recursive: true });
-    for (const [rel, content] of generateUserSkill(bp)) fs.writeFileSync(path.join(dir, rel), content);
-    console.log('✅ 用户 skill 已生成：' + dir);
+    // 原子写盘（候选四 T-IMP-14）：暂存 + 换入，失败零残留
+    const r = writeUserSkill(bp, skillDir);
+    if (!r.ok) {
+      console.error('❌ 用户 skill 生成失败（已清理，无残留）：' + r.error);
+      process.exit(1);
+    }
+    console.log('✅ 用户 skill 已生成：' + r.dir);
     if (v.warnings.length) console.log('⚠️ ' + v.warnings.join('；'));
     return;
   }

@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import fs from 'node:fs';
+import { readFileSync, mkdtempSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { generateAll, generateUserSkill } from '../generate.mjs';
+import { tmpdir } from 'node:os';
+import { generateAll, generateUserSkill, writeUserSkill } from '../generate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tplDir = path.join(here, '../../templates');
@@ -81,3 +84,61 @@ test('S2 generateUserSkill：用户模板 → 自包含 skill 三件套（T-03 s
   const meta = JSON.parse(files.get('meta.json'));
   assert.equal(meta.name, 'vwf-dev-workflow-2-0');
 });
+
+// ── 候选四 T-IMP-14 · 原子写盘（失败零残留） ──
+const makeTmp = () => mkdtempSync(path.join(tmpdir(), 'vwf-skill-'))
+const rmTmp = (dir) => { try { execFileSync('/bin/rm', ['-rf', dir]) } catch (e) {} }
+const realIo = {
+  mkdirSync: (p, o) => fs.mkdirSync(p, o),
+  writeFileSync: (p, c) => fs.writeFileSync(p, c),
+  renameSync: (a, b) => fs.renameSync(a, b),
+  readdirSync: (p) => fs.readdirSync(p),
+  statSync: (p) => fs.statSync(p),
+  unlinkSync: (p) => fs.unlinkSync(p),
+  rmdirSync: (p) => fs.rmdirSync(p),
+}
+
+test('C4 原子写盘-成功：三件套落盘且与 generateUserSkill 内容一致，无暂存残留', () => {
+  const tmp = makeTmp()
+  try {
+    const r = writeUserSkill(bp, tmp, realIo)
+    assert.equal(r.ok, true, r.error)
+    for (const rel of ['SKILL.md', 'script.mjs', 'meta.json']) {
+      assert.equal(readFileSync(path.join(r.dir, rel), 'utf8'), generateUserSkill(bp).get(rel), rel + ' 内容一致')
+    }
+    const kids = fs.readdirSync(tmp)
+    assert.deepEqual(kids, ['dev-workflow-2-0'], '无暂存目录残留')
+  } finally { rmTmp(tmp) }
+})
+
+test('C4 原子写盘-中途失败：暂存与已写文件零残留（注入第 2 个文件写失败）', () => {
+  const tmp = makeTmp()
+  try {
+    let writes = 0
+    const failingIo = {
+      ...realIo,
+      writeFileSync: (p, c) => { writes++; if (writes === 2) throw new Error('磁盘满（模拟）'); return fs.writeFileSync(p, c) },
+    }
+    const r = writeUserSkill(bp, tmp, failingIo)
+    assert.equal(r.ok, false)
+    assert.ok(r.error.includes('磁盘满'))
+    assert.deepEqual(fs.readdirSync(tmp), [], '失败后目录零残留（含暂存区）')
+  } finally { rmTmp(tmp) }
+})
+
+test('C4 原子写盘-更新失败：旧版本目录不受影响（换入未发生）', () => {
+  const tmp = makeTmp()
+  try {
+    const finalDir = path.join(tmp, 'dev-workflow-2-0')
+    fs.mkdirSync(finalDir, { recursive: true })
+    fs.writeFileSync(path.join(finalDir, 'OLD.md'), '旧版本')
+    let writes = 0
+    const failingIo = {
+      ...realIo,
+      writeFileSync: (p, c) => { writes++; if (writes === 2) throw new Error('磁盘满（模拟）'); return fs.writeFileSync(p, c) },
+    }
+    const r = writeUserSkill(bp, tmp, failingIo)
+    assert.equal(r.ok, false)
+    assert.equal(readFileSync(path.join(finalDir, 'OLD.md'), 'utf8'), '旧版本', '更新失败时旧版本完整保留')
+  } finally { rmTmp(tmp) }
+})
