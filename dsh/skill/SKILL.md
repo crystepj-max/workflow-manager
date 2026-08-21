@@ -7,8 +7,12 @@ description: "在 DeepSeek Harness（DSH）会话中驱动「开发工作流 2.0
 
 在任意项目的 DSH 会话中运行「开发工作流 2.0」。本 skill 目录自包含：
 
-- `workflow/dev-workflow-2.0.mjs` —— workflow 工具的编排脚本（`script` 参数来源，原样传入）
+- `script.mjs` / `meta.json` —— workflow 工具的编排脚本与 meta（**由单一编译器从蓝图生成**，安装时产出；脚本语义由运行时排练厅套件持续验证）
+- `SKILL.md` —— 本 runbook（真源 `dsh/skill/SKILL.md`）
 - `roles/` —— 六个节点角色提示词：dispatcher / dev / test / review / accept / closeout
+
+模型绑定已在**编译时固化**于蓝图 `bindings.models`（真源 `templates/dev-workflow-2-0.json`）：
+**运行时不传 models**——改模型分配 = 改蓝图 `bindings.models` 后重装/重生成。
 
 加载本 skill 时会给出 base directory（本目录绝对路径），下文记作 `<SKILL_DIR>`。
 
@@ -53,10 +57,8 @@ diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
 
 ### 3. 调用 workflow 工具
 
-读取 `<SKILL_DIR>/workflow/dev-workflow-2.0.mjs` 全文，原样作为 `script` 参数；`meta` 与 `args` 如下：
-
-- `meta.name`：`dev-workflow-2-0`；`meta.phases` 标题须为 `调度 / 开发循环 / 人工验收 / 收口 / 超限重调度`（与脚本内 `phase()` 一致）。
-- `args` 模板：
+读取 `<SKILL_DIR>/script.mjs` 全文，原样作为 `script` 参数；`meta` 使用 `<SKILL_DIR>/meta.json`
+（`name` / `phases` 已由生成器按蓝图组装，直接引用，不手写）。`args` 模板：
 
 ```json
 {
@@ -64,21 +66,15 @@ diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
   "runDir": ".agent-runs/issue-<N>",
   "roleDir": ".agent-runs/issue-<N>/roles",
   "entry": "dispatch",
-  "issueRef": "#<N>", "issueTitle": "...", "issueBody": "...", "issueComments": "...",
-  "repoPath": "<会话工作区绝对路径>",
-  "baseBranch": "main",
-  "models": {
-    "dispatcher": { "provider": "kimi-coding", "model": "k3" },
-    "dev":        { "provider": "deepseek-official", "model": "deepseek-v4-pro" },
-    "test":       { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-    "review":     { "provider": "kimi-coding", "model": "k3" },
-    "accept":     { "provider": "kimi-coding", "model": "k3" },
-    "closeout":   { "provider": "deepseek-official", "model": "deepseek-v4-flash" }
-  }
+  "issueRef": "#<N>", "issueTitle": "...", "issueBody": "...", "issueComments": "..."
 }
 ```
 
-开发/审核不同 provider 即满足「异源异模型」硬规则；宿主缺某个 provider 时退化为同默认模型（脚本会警告弱异源），流程仍可跑。
+- 无 issue 时改用 `"requirement": "<原始需求文本>"`。
+- 续跑（`AWAITING_HUMAN_<节点id>` 后）：按第 5 步回传 `entry` / `approved` / `feedback` / `startRound` / `history`。
+- **不传 `models`**（编译时固化于蓝图 `bindings.models`）；节点模型路由缺 provider 时退化为宿主默认（流程仍可跑，异源警告由运行日志提示）。
+
+开发/审核不同 provider 即满足「异源异模型」硬规则（蓝图当前分配：dev=`deepseek-official/deepseek-v4-pro`、review=`kimi-coding/k3`）。
 
 ### 4. 按返回 status 驱动（新契约；旧 mjs 已退役）
 
@@ -108,12 +104,12 @@ diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
 1. 向用户呈现 `<runDir>/acceptance-summary.md` 的核心内容（逐条 ✅/⚠️/❌ + 确认方式）；
 2. 用 ask_user_question 发起裁决：通过 / 不通过（附意见）；
 3. **通过** → 以 `entry=closeout` 续跑（收口会推送分支、合并 PR、关闭 issue、收束本地工作区）；
-4. **不通过** → 以 `entry=dev` 续跑，args 增加：`feedback`=人工意见、`startRound`=上次 round+1、`dispatch`=前次调度结论、`history`=前次打回历史（保持 9 轮计数连续）。
+4. **不通过** → 以 `entry=dev` 续跑，args 增加：`feedback`=人工意见、`startRound`=上次 round+1、`history`=前次打回历史（保持 9 轮计数连续；dev 节点开工自行读取 runDir 内 `dispatch-result.json`）。
 
 ## 硬规则提醒（约束主会话自己）
 
 - 未获人工「通过」裁决前，禁止以 entry=closeout 续跑。
-- 续跑必须回传前次 `dispatch` / `history`，否则 9 轮上限计数会断。
+- 续跑必须回传前次 `history` / `startRound`，否则 9 轮上限计数会断。
 - 目标仓库必须在当前会话工作区内；不要跨工作区读写别的项目。
 - 每个 issue 独立会话 + 独立 git worktree（脚本自动建 `.agent-runs/<taskId>/worktree` + 分支 `dev2/<taskId>`）；多任务并行 = 多会话 + 多 worktree 物理隔离。
 

@@ -13,7 +13,7 @@
 主会话（调度台 + 人工门禁）
    │  ① gh issue view 拉取 issue  ② 装配 args 调 workflow 工具（角色文件由节点 agent 自读）
    ▼
-workflow 编排脚本（dsh/workflow/dev-workflow-2.0.mjs）
+workflow 编排脚本（.generated/dev-workflow-2-0/script.mjs——单一编译器产物，含折叠/闸门/归因）
    │
    ├─ 阶段 调度：dispatcher agent ── schema 闸门 ── 三要素缺失 → FAILED_AT_dispatch（打回人工）
    │
@@ -37,8 +37,9 @@ workflow 编排脚本（dsh/workflow/dev-workflow-2.0.mjs）
   结构化闸门 = `agent()` 的 `schema` 校验（替代 gold-band 的 output/messageId 机制）。
 - **人工门禁**：脚本不等人。跑到验收点返回，主会话发人工确认卡，裁决后以对应
   `entry` 续跑。全过程状态落在 run 目录文件中，天然支持断点续跑。
-- **角色异源**：`agent()` 支持 `provider`/`model` 覆盖；通过 `args.models` 按节点指定，
-  开发与审核指定不同模型即满足「异源异模型」硬规则（脚本会检查并警告弱异源）。
+- **角色异源**：模型绑定在**编译时固化**（蓝图 `bindings.models`，见「异源配置」）；
+  开发与审核绑定不同 provider 即满足「异源异模型」硬规则（校验内核全局强制，
+  运行日志提示弱异源）。
 
 ## 文件清单
 
@@ -50,12 +51,12 @@ workflow 编排脚本（dsh/workflow/dev-workflow-2.0.mjs）
 | `dsh/roles/review.md` | 审核角色（双轴审查 + review-report.md） |
 | `dsh/roles/accept.md` | 验收角色（acceptance-summary.md + accept-report.md） |
 | `dsh/roles/closeout.md` | 收口角色（cleanup-report.md） |
-| `dsh/workflow/dev-workflow-2.0.mjs` | 编排脚本（workflow 工具 script 参数的版本控制源） |
+| `dsh/skill/SKILL.md` | 运行 runbook 真源（取需求/角色快照/人工门禁/硬规则；安装时随技能包部署） |
+| `templates/dev-workflow-2-0.json` | 蓝图（唯一事实源；编译出 `.generated/dev-workflow-2-0/{script.mjs, meta.json, SKILL.md, vwf-dsl.json}`） |
 | `dsh/skills/requirements-analysis/` | requirements-analysis 技能真源（SKILL.md + evals/ + references/，内联自洽版） |
 | `dsh/install-requirements-analysis.sh` | requirements-analysis 真源 → 公共池安装脚本（对齐 install-skill.sh 约定） |
 
-角色正文与蓝图 `templates/dev-workflow-2-0.json` 的 `nodes[].profile` 一一对应（dev 角色有 3 处适配：task.yaml 引用改为
-「运行上下文注入」（DSH 侧调度结论直接进提示词与 dispatch-result.json，无 task.yaml）。
+角色正文与蓝图 `templates/dev-workflow-2-0.json` 的 `nodes[].profile` 一一对应。
 
 ## 运行方式（主会话 runbook）
 
@@ -75,30 +76,21 @@ gh issue view <N> --json title,body,comments
 
 ### 3. 调用 workflow 工具
 
-- `script`：`dsh/workflow/dev-workflow-2.0.mjs` 全文；
-- `meta`：`name: "dev-workflow-2-0"`，`phases` 标题须为
-  `调度 / 开发循环 / 人工验收 / 收口 / 超限重调度`（与脚本内 `phase()` 调用一致）；
-- `args`：见下表。
+- `script`：`.generated/dev-workflow-2-0/script.mjs` 全文（生成物，勿手改；改蓝图后 `npm run generate` 重建）；
+- `meta`：`.generated/dev-workflow-2-0/meta.json`（name/phases 已由生成器按蓝图组装，直接引用）；
+- `args`：见下表。**不传 `models`**（模型绑定编译时固化于蓝图 `bindings.models`）。
 
 ```jsonc
 {
   "taskId": "issue-12",                 // 必填，任务标识
   "runDir": ".agent-runs/issue-12",     // 必填，run 产物目录（相对目标仓库根）
-  "entry": "dispatch",                  // dispatch(默认) | dev | accept | closeout
+  "entry": "dispatch",                  // 首次 = 蓝图入口；续跑 = 门禁节点 id（accept）或打回起点（dev）
   "issueRef": "#12", "issueTitle": "...", "issueBody": "...", "issueComments": "...",
   // 或 "requirement": "...(直接需求文本)",
-  "repoPath": "/path/to/repo",          // 缺省 = 当前会话工作区
-  "baseBranch": "main",
   "roleDir": "dsh/roles",               // 可选，角色提示词目录（相对工作区根）
-  "models": {                           // 可选；开发/审核不同模型 = 异源硬规则
-    "dev":    { "provider": "...", "model": "..." },
-    "review": { "provider": "...", "model": "..." }
-  },
-  // —— 续跑专用（entry=dev/accept 时需要）——
-  "dispatch": { "...": "前次返回的 dispatch 结论" },
-  "startRound": 3, "feedback": "人工验收不通过意见 / 打回原因",
-  "history": [ { "round": 1, "stage": "review", "verdict": "REQUEST_CHANGES", "reason": "..." } ],
-  "priorFailure": "..."                 // 超限重调度时的历史失败记录
+  // —— 续跑专用（AWAITING_HUMAN_<节点id> 后回传返回值）——
+  "approved": true, "startRound": 3, "feedback": "人工验收不通过意见 / 打回原因",
+  "history": [ { "round": 1, "stage": "review", "verdict": "REQUEST_CHANGES", "reason": "..." } ]
 }
 ```
 
@@ -194,12 +186,16 @@ gh issue view <N> --json title,body,comments
 | 人工验收 | `kimi-coding/k3` | 中 |
 | 收口 | `deepseek-official/deepseek-v4-flash` | 低：机械整理 + 推送/合并/关闭 issue |
 
-传入方式：`args.models = { dispatcher: {provider,model}, dev: {...}, test: {...}, review: {...}, accept: {...}, closeout: {...} }`。
+配置方式：**蓝图 `bindings.models`（编译时固化）**——改分配 = 改 `templates/dev-workflow-2-0.json`
+的 `bindings.models` 后 `npm run generate` 重生成（生成物禁手改）。当前分配见蓝图文件；
+编辑器（vwf）保存用户模板时在节点上配置模型，同样落盘为 `bindings.models`。
 
 备注：kimi `k2.7` 不在 pi-ai 内置 catalog（仅 `k3`/`k3-256k`），如需使用要在设置界面
 `llm-pi-ai → providers.kimi-coding` 的 models 中显式添加；不添加也能用上述三路由实现真异源。
 
 ### kimi 额度耗尽时的兜底分配（DeepSeek-only）
+
+把蓝图的 `bindings.models` 改为以下分配后重生成：
 
 ```json
 {
@@ -212,14 +208,15 @@ gh issue view <N> --json title,body,comments
 }
 ```
 
-开发(v4-pro) / 审核(v4-flash) 不同模型 + 不同角色 = 弱异源（脚本会提示警告）；
-kimi 额度恢复后换回上面的推荐分配即恢复跨 provider 真异源。
+开发(v4-pro) / 审核(v4-flash) 不同模型 + 不同角色 = 弱异源（运行时日志提示警告）；
+kimi 额度恢复后改回上面的推荐分配（跨 provider 真异源）。
 
 ## 在其他项目中使用（推荐：技能包，装一次全局可用）
 
 工作流已打包为 DSH 技能 `dev-workflow-2-0`，安装于公共池
-`~/.agents/skills/dev-workflow-2-0/`（SKILL.md + roles/ + workflow/ 自包含）。
-任何项目的 DSH 会话都能按触发词直接调用，**无需往项目里复制任何文件**。
+`~/.agents/skills/dev-workflow-2-0/`（SKILL.md runbook + roles/ + script.mjs + meta.json 自包含；
+脚本与 meta 由单一编译器从蓝图生成）。任何项目的 DSH 会话都能按触发词直接调用，
+**无需往项目里复制任何文件**。
 
 **在任意项目使用：**
 
@@ -227,15 +224,16 @@ kimi 额度恢复后换回上面的推荐分配即恢复跨 provider 真异源�
 2. 直接说「用开发工作流 2.0 跑 issue #N」——技能触发后按 SKILL.md 的 runbook
    装配 args 并驱动全流程（角色快照自动拷贝进 `.agent-runs/<task>/roles/` 满足留痕）。
 
-**更新/重装技能**：`./dsh/install-skill.sh`（公共池真源 = 本仓库 `dsh/`，改仓库即改全局）。
+**更新/重装技能**：`./dsh/install-skill.sh`（安装时从蓝图 `templates/dev-workflow-2-0.json`
+生成脚本与 meta + 部署 runbook/roles，改仓库即改全局）。
 
 ## 技能真源布局与安装脚本（仓库 = 真源）
 
-本仓库 `dsh/` 是多个公共池技能的**版本化真源**：改仓库 → 跑安装脚本 → 公共池生效（改仓库即改全局）。当前布局：
+本仓库是多个公共池技能的**版本化真源**：改仓库 → 跑安装脚本 → 公共池生效（改仓库即改全局）。当前布局：
 
 | 技能 | 真源（本仓库） | 安装脚本 | 公共池目标 |
 |------|----------------|----------|------------|
-| dev-workflow-2-0 | `dsh/skill/` + `dsh/roles/` + `dsh/workflow/` | `dsh/install-skill.sh` | `~/.agents/skills/dev-workflow-2-0/` |
+| dev-workflow-2-0 | `templates/dev-workflow-2-0.json`（蓝图）+ `dsh/roles/` + `dsh/skill/SKILL.md`（runbook） | `dsh/install-skill.sh` | `~/.agents/skills/dev-workflow-2-0/`（脚本/meta 安装时由蓝图生成） |
 | requirements-analysis | `dsh/skills/requirements-analysis/`（SKILL.md + evals/ + references/） | `dsh/install-requirements-analysis.sh` | `~/.agents/skills/requirements-analysis/` |
 
 **技能变更落地 GitHub 的同步流程：**
@@ -249,8 +247,9 @@ kimi 额度恢复后换回上面的推荐分配即恢复跨 provider 真异源�
 模型不可通过 `skill` 工具调用；因此该 skill 将四者知识全部内联，**不调用任何子 skill**——这是
 issue #22 的持久修复，真源即内联自洽版。
 
-**备选：仓库内置方式**——把 `dsh/` 目录复制进目标仓库（角色+脚本随仓库走，
-不依赖宿主技能池）。两种方式的编排脚本、角色、返回状态机完全一致。
+**备选：仓库内置方式**——把 `dsh/roles/` 复制进目标仓库（角色随仓库走）+ 按本 runbook
+使用生成脚本（`.generated/` 或安装技能），不依赖宿主技能池。两种方式的编排脚本、角色、
+返回状态机完全一致。
 
 注意事项：目标仓库需 `gh` 已登录（无远端可跑，收口退化为本地 commit 清单）；
 模型分配宿主级共享（kimi 额度不足时用 DeepSeek 双模型兜底，见「异源配置」节）；
@@ -342,8 +341,8 @@ Host 半把 `wf_run` 注册为模型工具，主会话直接以工具调用驱�
 ### 运行状态 AWAITING_HUMAN_* 的人工裁决续跑
 
 编译器把 `manualCheck: true` 节点编译为「运行到该节点即返回」，状态记为
-`AWAITING_HUMAN_<节点id>`（如 `AWAITING_HUMAN_accept`，等价于手写脚本的
-`AWAITING_HUMAN_ACCEPTANCE`）。返回体给出续跑所需参数（`entry` / `approved` / `startRound` /
+`AWAITING_HUMAN_<节点id>`（如 `AWAITING_HUMAN_accept`；旧手写契约名为
+`AWAITING_HUMAN_ACCEPTANCE`，已随 mjs 退役）。返回体给出续跑所需参数（`entry` / `approved` / `startRound` /
 `history` / `feedback`），主会话据此呈 `acceptance-summary.md` + 发人工确认卡（AI 不代签）：
 
 - **通过**：以 `entry=<节点id>` + `approved=true` 续跑（并回传 `startRound` / `history` /
@@ -369,11 +368,13 @@ Host 半把 `wf_run` 注册为模型工具，主会话直接以工具调用驱�
 
 ### 与技能包 dev-workflow-2-0 的关系
 
-vwf 插件与技能包 `dev-workflow-2-0`（编排脚本版本控制源 = `dsh/workflow/dev-workflow-2.0.mjs`）
-是同一套工作流的两种入口：技能包走文本触发（主会话读 SKILL.md runbook，把脚本全文 + args 传给
-`workflow` 工具），vwf 插件走图形触发（把同一状态机画成 DSL 图、编译成脚本再交给同一引擎）。
-二者共享六角色（`dsh/roles/*.md`）、返回状态机（`AWAITING_HUMAN_*` / `DONE` / `FAILED_MAX_ROUNDS`
-等）、9 轮上限与异源模型分配；vwf 编译产物与手写脚本行为对齐（P0 任务 02 的对照验收）。差别只在
-入口与脚本来源：技能包脚本手写维护，vwf 脚本由 DSL 编译生成。此外 vwf 编辑器保存用户模板时会
-同步生成自包含技能到 `~/.dsh/skills/<id>/`，该技能即可像 `dev-workflow-2-0` 一样按触发词调用
+vwf 插件与技能包 `dev-workflow-2-0` 是同一套工作流的两种入口，**共用单一编译器
+（`scripts/generate.mjs compileBlueprint`）产出的同一份脚本**（逐字节一致，候选一 T-IMP-12）：
+技能包走文本触发（主会话读 SKILL.md runbook，把生成脚本全文 + args 传给 `workflow` 工具），
+vwf 插件走图形触发（模板 → DSL 校验 → 磁盘产物或 CLI 编译，交给同一引擎执行）。
+二者共享六角色（`dsh/roles/*.md`）、返回状态机（`AWAITING_HUMAN_*` / `DONE` /
+`FAILED_MAX_ROUNDS` 等）、9 轮上限与异源模型分配。差别只在入口与取脚本的管道：
+技能包读生成产物（`.generated/` 或安装时的技能目录），vwf 内置模板读 `.generated/`、
+用户模板读 save 闭环产物、临时图走 CLI 编译。vwf 编辑器保存用户模板时会同步生成
+自包含技能到 `~/.dsh/skills/<id>/`，该技能即可像 `dev-workflow-2-0` 一样按触发词调用
 （save 即闭环）。

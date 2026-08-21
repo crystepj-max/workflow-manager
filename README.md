@@ -23,7 +23,7 @@ templates/<id>.json（蓝图，唯一事实源）
 ```bash
 npm run generate   # 遍历 templates/*.json → .generated/<id>/
 npm run validate   # 蓝图校验 + 包测试 + 重生成一致性比对
-npm test           # 引擎层测试（校验器/生成器/等价断言）
+npm test           # 引擎层测试（校验内核/生成器/运行时排练厅场景套件）
 ```
 
 ## 目录
@@ -32,7 +32,7 @@ npm test           # 引擎层测试（校验器/生成器/等价断言）
 |---|---|
 | `templates/` | 蓝图（唯一事实源） |
 | `.generated/` | 生成物（gitignore，勿手改） |
-| `scripts/` | 生成器 / 校验器 / 断言 / 测试 |
+| `scripts/` | 单一编译器 / 校验内核 / 运行时排练厅与测试 |
 | `packages/dsh-visual-workflow/` | vwf 图形入口插件（Cordis 动态插件） |
 | `dsh/` | DSH 侧角色、技能真源 |
 | `docs/design/` | 契约与设计文档 |

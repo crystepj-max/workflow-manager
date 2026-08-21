@@ -7,8 +7,8 @@
 
 ## 核对对象
 
-- 旧：`dsh/workflow/dev-workflow-2.0.mjs`（手写，验收通过后**退役**）
-- 新：`templates/dev-workflow-2-0.json` + 生成产物 `.generated/dev-workflow-2-0/script.mjs`
+- 旧：`dsh/workflow/dev-workflow-2.0.mjs`（手写，验收通过后**退役**；**已于 2026-08-20 删除**——neat-freak 收口执行收口步骤 4，入口由生成 skill 承接）
+- 新：`templates/dev-workflow-2-0.json` + 生成产物 `.generated/dev-workflow-2-0/script.mjs`（行为由运行时排练厅套件持续验证）
 
 ## 8 维度核对清单
 
@@ -35,6 +35,6 @@
 1. `npm test` 全绿（含运行时排练厅场景套件：框架级走通性 + 模板级回归 + 双编译器对拍）
 2. 本清单 8 维度逐项人工核对生成脚本（对照 R-01 产物）→ 全勾
 3. 触发词路由实测：新会话以「开发工作流 2.0」/「dev-workflow-2-0」调用生成 skill（FR-6 软路由，规格风险 3）
-4. 通过后：删除旧 mjs，入口由生成 skill 承接
+4. ✅ 已执行（2026-08-20，neat-freak 收口）：旧 mjs 删除，入口由生成 skill 承接（安装脚本 `dsh/install-skill.sh` 改为从蓝图生成脚本/meta）
 
 核对人：__________　日期：__________　结论：通过 / 不通过（附差异说明）

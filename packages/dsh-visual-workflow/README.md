@@ -54,7 +54,7 @@ cordis_define:
 ```bash
 cd packages/dsh-visual-workflow
 npm install --cache <本地缓存目录>   # 仅安装测试 devDependencies
-npm test                              # 42 个用例（host 34 + client 8）
+npm test                              # 45 个用例（host 37 + client 8）
 ```
 
 ## 与 pkg-19 的主要差异

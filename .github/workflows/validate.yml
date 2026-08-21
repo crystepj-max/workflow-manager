@@ -15,5 +15,5 @@ jobs:
           node-version: 22
       - name: generate（生产物供校验与 vwf 加载）
         run: npm run generate
-      - name: validate（蓝图校验 + 等价断言 + 重生成一致性 + 测试）
+      - name: validate（蓝图校验 + 重生成一致性 + 引擎/包测试（含运行时排练厅））
         run: npm run validate
