@@ -20,9 +20,9 @@
 | `displayName` | ✅ | 非空字符串 | 中文展示名，如「开发工作流 2.0」；生成 skill 的触发词之一（FR-6） |
 | `description` | 可选 | 字符串 | 一句话概述，进 vwf 模板 description |
 | `entry` | ✅ | 节点 id | 首次运行入口；**必须等于拓扑推导的唯一入口**（与 validateDsl 严格一致） |
-| `control.maxRounds` | 可选 | 正整数，默认 9 | 打回上限 |
-| `onMaxRounds` | 可选 | `'return'`（默认）\| `'auto-reschedule'` | DSH 增强：超限自动回调度做失败归因（D4）；vwf 侧忽略 |
-| `heteroCheck` | 可选 | 布尔，默认 false | DSH 增强：注入 dev↔review 异源运行日志（T-06 定稿后：v2 起异源由 save/validate 全局强制，本字段退化为运行时日志开关）；置 true 时须存在 dev 与 review 节点；vwf 侧忽略 |
+| `control.maxRounds` | 可选 | 正整数，默认 9 | 打回上限；**系统约定上限 9（候选二 Q7：编辑器与校验器强制 1-9，超限拒绝）** |
+| `onMaxRounds` | 可选 | `'return'`（默认）\| `'auto-reschedule'` | DSH 增强：超限自动回调度做失败归因（D4）；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
+| `heteroCheck` | 可选 | 布尔，默认 false | DSH 增强：注入 dev↔review 异源运行日志（T-06 定稿后：v2 起异源由 save/validate 全局强制，本字段退化为运行时日志开关）；置 true 时须存在 dev 与 review 节点；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
 | `bindings.models` | 可选 | 对象：`{ <nodeId>: {provider?, model?} }` | 模型绑定（D2 节点粒度）；键必须都是节点 id；缺省 = 宿主默认 |
 | `nodes` | ✅ | 数组，≥1 | 见 2.2 |
 | `edges` | ✅ | 数组 | 见 2.3 |
@@ -51,7 +51,15 @@
 
 ## 3. 校验规则（两层，D5）
 
-### 3.1 蓝图级规则（校验器新增）
+### 3.1 蓝图级规则（校验内核，候选二 T-IMP-13）
+
+> **统一校验内核**：`scripts/validate-core.cjs` 为唯一规则集（CJS 单文件、零依赖）——
+> 结构层 `validateStructure`（走通性/节点边定义/入口/环/条件/schema 路径/保留 id/
+> **maxRounds ∈ [1,9] 系统上限**）与业务规则层 `validateBlueprint`（本节约束 +
+> `requireModels` 选项——宿主编辑器产品收紧）。引擎 ESM import；宿主经 fs 读源码、
+> vm 内求值缓存（热路径内存执行）。错误统一携带坐标键 `fieldKey`
+> （`node:<id>:<field>` / `edge:<i>:<field>` / `control:<field>` / `heteroCheck` /
+> `onMaxRounds`）；前端文案翻译列为优化任务（MAP Not yet specified）。
 
 1. `id` 匹配 kebab-case；`displayName` 非空；无 `name` 字段（单标识，D1）。
 2. `onMaxRounds ∈ {return, auto-reschedule}`。
@@ -60,22 +68,23 @@
 5. `verifyBranch=true` 节点：`output.schema.required` 含 `verified_branch`/`verified_head`。
 6. `output.files`（若给）：键为合法相对路径（非空、不以 `/` 开头或结尾、不含 `..`、不覆盖保留文件 `STATE.md`）；值为 `json|markdown|text` 枚举。
 7. **异源硬规则（v2 生效，T-06）**：凡含 `dev` 与 `review` 节点的蓝图（按节点 `id` 或 `profile` 识别——编辑器新建节点默认 id 为 node-N，以角色表达 dev/review 时同样纳入），save/update/validate 一律校验其 `bindings.models`——任一缺失 → 拒（「无法证明异源，请显式配置」）；完全同模型（provider+model 相同）→ 拒；同 provider 不同 model（弱异源）→ 通过 + warning；不同 provider → 通过。无 dev/review 节点的蓝图跳过。错误消息沿用 `errors[]` 结构（at=`bindings.models`，含实际 provider/model 与修复指引）。
+8. `control.maxRounds`（若给）：**1-9 的整数（系统约定上限 9，候选二 Q7）**——0/负数/小数/非数/超 9 一律拒绝（坐标键 `control:maxRounds`）。
 
-### 3.2 DSL 结构规则（与 `validateDsl` 规则集对齐，host.js:184-306）
+### 3.2 DSL 结构规则（与校验内核结构层对齐；原 host `validateDsl` 已删除）
 
 - 唯一入口（无入边节点恰一个，回退边不计入边）；**多候选一律拒绝，显式 entry 不豁免**。
 - 必须存在指向 `$end` 的边；节点必须有出边；profile 必填。
 - 边：from/to 存在、on 合法、when 仅 success 且格式合法、failure 边 ≤1、多 success 出边全带 when。
 - 拓扑：全节点从入口沿 success 边可达；success 边无环（打回走 failure 边）。
 - `successCondition` 路径必须在 `output.schema` 内。
-
-> 实现建议：蓝图级规则独立实现；DSL 结构规则可先投影为 vwf DSL 子集后复用 `validateDsl`（或复刻其规则集），避免两套语义漂移。
+- **走通性**：有 successCondition 的节点必须有 failure 边（判定失败无出口 → 创作期拒绝，运行时 `ENDED_NO_FAILURE_EDGE` 兜底）。
+- 宿主侧 `heteroCheck`/拓扑推导/COND_RE 已删除——唯一实现收敛进内核。
 
 ## 4. 编译语义（生成器，FR-2 依据）
 
 ### 4.1 vwf 侧投影
 
-`projectToVwf(bp)`：字段映射为 vwf DSL 子集——`id`、`name = displayName`、`description`、`entry`、`control.maxRounds`；节点注入 `model = bindings.models[nodeId]`（无则省略）；保留 `output`/`manualCheck`；**增强字段（onMaxRounds/heteroCheck/verifyBranch）不进入 DSL**（编辑器字段为 v2 候选）。产物可喂现有 `validateDsl`（R-02/R-03）。
+`projectToVwf(bp)`：字段映射为 vwf DSL 子集——`id`、`name = displayName`、`description`、`entry`、`control.maxRounds`；节点注入 `model = bindings.models[nodeId]`（无则省略）；保留 `output`/`manualCheck`；**业务规则字段（候选二 Q7 修订）：`onMaxRounds` / `heteroCheck` 进入 DSL（编辑器可配置）；`verifyBranch` 为节点级字段、编辑器无 UI，暂不进入**。产物可喂校验内核结构层（R-02/R-03）。
 
 > **编译语义（v1.1 候选一统一编译器，T-IMP-12）**：DSH 与 vwf 双入口共用单一编译器
 > `scripts/generate.mjs compileBlueprint`。宿主（`host.js`）经管道取译文：内置模板读

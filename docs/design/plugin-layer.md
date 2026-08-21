@@ -29,6 +29,21 @@ vwf 插件是 **Cordis 动态双半插件**（plain JS、无 import/JSX，`cordi
 - 行为验收：`scripts/test/runtime-host.test.mjs`（H1-H6：磁盘路径逐字节一致 / 用户产物 /
   CLI 兜底接线 / 行为统一 / 真实 CLI 集成）；原「双编译器对拍」差异断言已翻转为一致断言。
 
+### 1.1 统一校验管道（T-IMP-13 · 候选二）
+
+原 host 内联 `validateDsl` / `heteroCheck` / 拓扑推导 / COND_RE 已删除。唯一规则集 =
+`scripts/validate-core.cjs`（结构层 + 蓝图业务规则层）；host 无法 import（vm 沙箱），
+**经 fs 服务读源码、vm 内 `new Function('module','exports', src)` 求值并缓存**（热路径内存执行，零子进程）：
+
+- 管线：`sanitizeDsl`（DSL 形态归一，entry 依内核拓扑）→ `projectToBlueprint` →
+  `core.validateBlueprint(bp, { requireModels: true })` → 错误坐标映射 `fieldErrors`
+  （node:<id>:<field> / edge:<i>:<field> / control:<field>）——编辑器逐字段标红契约保真。
+- 校验入口统一：`vwf.validate` / `vwf.workflows.save` / `vwf.script` / `wf_run` 共用 `validatePipeline`。
+- 编辑器业务规则字段（Q7）：`heteroCheck` / `onMaxRounds` / `control.maxRounds`（1-9 系统上限）
+  经 DSL 双向投影落盘蓝图；异源硬规则全局强制（与开关无关），开关注入运行日志。
+- 测试：host.test.mjs 34+3 用例（含 Q7 闭环：开关/上限往返、上限 10 拒、坐标保真）+ 内核侧
+  maxRounds 边界 + COND_RE 一致性断言（内核 vs 生成脚本内嵌）。
+
 模板存储为**双根目录**（单一事实源 = 蓝图，见 `docs/design/blueprint-schema.md`）：
 
 | 根 | 路径 | 内容 | 来源 |

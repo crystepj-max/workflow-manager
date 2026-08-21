@@ -17,10 +17,18 @@ const tpl = JSON.parse(readFileSync(path.join(tplDir, 'dev-workflow-2-0.json'), 
 const mini = JSON.parse(readFileSync(path.join(here, 'fixtures/hello-blueprint.json'), 'utf8'))
 
 // 微型图纸（框架级）与内置蓝图（模板级）都应通过蓝图校验（夹具卫生）
-import { validateBlueprint } from '../validate-blueprint.mjs'
+import validatorCore from '../validate-core.cjs'
+const { validateBlueprint, COND_RE } = validatorCore
 test('夹具卫生：微型图纸与内置蓝图均通过蓝图校验（含走通性规则）', () => {
   assert.equal(validateBlueprint(mini).ok, true, JSON.stringify(validateBlueprint(mini).errors))
   assert.equal(validateBlueprint(tpl).ok, true, JSON.stringify(validateBlueprint(tpl).errors))
+})
+
+test('COND_RE 单一来源：内核正则与生成脚本内嵌正则逐字一致（候选二）', () => {
+  const { script } = compileBlueprint(mini)
+  const embedded = /function cond\(expr, res\) \{[\s\S]*?const m = (\/.*?\/)\.exec\(expr\)/.exec(script)
+  assert.ok(embedded, '生成脚本应含内嵌条件正则')
+  assert.equal(embedded[1].slice(1, -1), COND_RE.source, '内嵌正则与内核 COND_RE 必须一致（否则校验与运行时语义漂移）')
 })
 
 // ---------- 第一层 · 框架级场景（微型图纸 hello） ----------
@@ -255,4 +263,11 @@ test('T7 模板回归-受阻语义（Q12 修正后）：dev 交 blocked → FAIL
   })
   assert.equal(result.status, 'FAILED_AT_dev')
   assert.equal(result.result.status, 'blocked')
+})
+
+test('Q7 引擎侧：蓝图自定上限 5 → 编译产物 MAX_ROUNDS=5（业务规则可配置生效）', () => {
+  const { script } = compileBlueprint({ ...mini, control: { maxRounds: 5 } })
+  assert.ok(script.includes('const MAX_ROUNDS = 5'), '上限 5 编译进产物')
+  const { script: s9 } = compileBlueprint({ ...mini, onMaxRounds: 'auto-reschedule' })
+  assert.ok(s9.includes('超限归因'), 'onMaxRounds=auto-reschedule 注入归因')
 })

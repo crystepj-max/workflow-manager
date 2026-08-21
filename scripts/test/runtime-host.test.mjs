@@ -29,8 +29,11 @@ const tplVwfDsl = files.get('dev-workflow-2-0/vwf-dsl.json')
 const tplScript = files.get('dev-workflow-2-0/script.mjs')
 
 // wf_run 驱动环境：假 fs/子进程/引擎，捕获 engine.start 收到的 script/meta
+// （统一校验内核 T-IMP-13：假 fs 默认种入真实 validate-core.cjs 源码）
+const validatorCoreSrc = readFileSync(path.join(root, 'scripts', 'validate-core.cjs'), 'utf8')
+
 function wfRunEnv({ fsSeed = {}, compileScript = '//MOCK-SCRIPT' } = {}) {
-  const fs = makeFs(fsSeed)
+  const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc, ...fsSeed })
   const sub = makeSubprocess({ fs, compileScript })
   const captured = {}
   const engine = {
@@ -77,7 +80,7 @@ test('H2 用户模板磁盘路径：wf_run(templateId) 收到 save 闭环产物�
 })
 
 test('H3 临时图 CLI 兜底：wf_run(args.dsl) → 逆投影蓝图落盘 + compile 子命令 + 清理', async () => {
-  const fs = makeFs({})
+  const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
   const writes = []
   const origWrite = fs.writeText
   fs.writeText = async (t, content, ...rest) => { writes.push([t.displayPath || t.targetKey, content]); return origWrite.call(fs, t, content, ...rest) }

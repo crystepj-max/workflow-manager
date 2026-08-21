@@ -6,16 +6,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateBlueprint } from './validate-blueprint.mjs';
+// 统一校验内核（候选二 T-IMP-13，CJS 单文件——引擎 import / 宿主 vm eval 双形态）
+import validatorCore from './validate-core.cjs';
+
+const { validateBlueprint, COND_RE } = validatorCore;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TPL_DIR = path.join(__dirname, '..', 'templates');
 const DEFAULT_OUT_DIR = path.join(__dirname, '..', '.generated');
 
-// ---------- vwf 侧投影（契约 §4.1） ----------
+// ---------- vwf 侧投影（契约 §4.1；候选二 Q7 修订：业务规则字段进入 DSL） ----------
 export function projectToVwf(bp) {
   const models = (bp.bindings && bp.bindings.models) || {};
-  return {
+  const out = {
     id: bp.id,
     name: bp.displayName,
     description: bp.description || '',
@@ -30,10 +33,15 @@ export function projectToVwf(bp) {
     }),
     edges: bp.edges.map((e) => ({ from: e.from, to: e.to, on: e.on, when: e.when })),
   };
+  // 业务规则字段（编辑器可配置）：onMaxRounds / heteroCheck 进入 DSL；
+  // verifyBranch 为节点级字段，编辑器无 UI，暂不进入（契约修订，MAP 记录）
+  if (bp.onMaxRounds !== undefined) out.onMaxRounds = bp.onMaxRounds;
+  if (bp.heteroCheck) out.heteroCheck = true;
+  return out;
 }
 
 // ---------- route 折叠识别（契约 §4.2） ----------
-const COND_RE = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/;
+// COND_RE 单一来源 = 校验内核（候选二）；生成脚本内嵌正则与其一致性由测试断言
 
 function foldableNodes(bp) {
   const folds = {};

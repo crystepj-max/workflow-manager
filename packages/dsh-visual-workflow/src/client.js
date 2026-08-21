@@ -63,9 +63,13 @@ return {
       edgeConfig: '边配置',
       selectHint: '选择画布中的节点或边进行配置。',
       workflowControls: '工作流控制',
-      workflowControlsHelp: '打回上限限制 failure 打回的最大轮次；留空使用默认值 9。',
+      workflowControlsHelp: '回合上限限制 failure 打回的最大轮次（1-9，留空默认 9）；异源检查声明 dev/review 必须异源；超限行为选打回超限后的处置。',
       maxRounds: '打回上限',
-      maxRoundsHelp: '每个 failure 打回消耗一轮；超过上限工作流失败。',
+      maxRoundsHelp: '每个 failure 打回消耗一轮；系统约定上限 9，超过上限工作流失败。',
+      heteroCheck: '异源检查',
+      heteroCheckHelp: '声明 dev 与 review 节点必须异源（注入运行日志；异源硬规则全局强制，与开关无关）。',
+      onMaxRounds: '超限行为',
+      onMaxRoundsHelp: '打回超限后：return=直接终止；auto-reschedule=先做失败归因分析（归因/拆分/人工介入建议）再终止。',
       nodeId: '节点 ID',
       nodeLabel: '显示名',
       profile: '角色',
@@ -144,9 +148,13 @@ return {
       edgeConfig: 'Edge Config',
       selectHint: 'Select a node or edge on the canvas to configure it.',
       workflowControls: 'Workflow Controls',
-      workflowControlsHelp: 'Max reject rounds limits failure loops; blank uses the default of 9.',
+      workflowControlsHelp: 'Max reject rounds limits failure loops (1-9, blank uses 9); heterogeneity declares dev/review must differ; onMaxRounds picks the over-limit behavior.',
       maxRounds: 'Max reject rounds',
-      maxRoundsHelp: 'Each failure transition consumes one round; the workflow fails beyond the limit.',
+      maxRoundsHelp: 'Each failure transition consumes one round; the workflow fails beyond the limit (system cap 9).',
+      heteroCheck: 'Heterogeneity check',
+      heteroCheckHelp: 'Declares dev and review must use different models (runtime log injection; the hard rule is global regardless of the switch).',
+      onMaxRounds: 'Over-limit behavior',
+      onMaxRoundsHelp: 'After max rounds: return=terminate; auto-reschedule=run failure attribution (attribution/split/human advice) then terminate.',
       nodeId: 'Node ID',
       nodeLabel: 'Label',
       profile: 'Profile',
@@ -1122,6 +1130,9 @@ return {
         syncWorkflow({ ...wf, control })
       }
 
+      // 业务规则字段（候选二 Q7）：工作流级顶层字段（异源开关 / 超限行为）
+      const updateMeta = (patch) => syncWorkflow({ ...wf, ...patch })
+
       // 保存：校验 → 失败弹窗；关闭弹窗 → 字段标红 + 画布红圈 + 定位首个问题
       const handleSave = async () => {
         let toSave = wf
@@ -1280,16 +1291,41 @@ return {
               h(Field, { label: t('maxRounds'), help: t('maxRoundsHelp'), errors: fieldErrors['control:maxRounds'] || [] },
                 h('input', {
                   className: 'vwf-input' + ((fieldErrors['control:maxRounds'] || []).length ? ' err' : ''),
-                  type: 'number', min: 1, step: 1,
+                  type: 'number', min: 1, max: 9, step: 1,
                   value: wf.control && wf.control.maxRounds != null ? wf.control.maxRounds : '',
                   placeholder: '9',
                   onChange: (ev) => {
                     const raw = ev.target.value
                     if (!raw.trim()) return updateControl({ maxRounds: null })
                     const parsed = Number(raw)
-                    updateControl({ maxRounds: Number.isFinite(parsed) ? Math.trunc(parsed) : 0 })
+                    // 系统约定上限 9（候选二 Q7）：超 9 钳制到 9，校验器同样强制 1-9
+                    updateControl({ maxRounds: Number.isFinite(parsed) ? Math.min(9, Math.trunc(parsed)) : 0 })
                   },
                 })
+              ),
+              h(Field, { label: t('heteroCheck'), help: t('heteroCheckHelp'), errors: fieldErrors['heteroCheck'] || [] },
+                h('label', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 } },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: !!wf.heteroCheck,
+                    onChange: (ev) => updateMeta({ heteroCheck: ev.target.checked }),
+                  }),
+                  h('span', null, wf.heteroCheck ? 'ON' : 'OFF')
+                )
+              ),
+              h(Field, { label: t('onMaxRounds'), help: t('onMaxRoundsHelp'), errors: fieldErrors['onMaxRounds'] || [] },
+                h('select', {
+                  className: 'vwf-input',
+                  value: wf.onMaxRounds || 'return',
+                  onChange: (ev) => {
+                    const v = ev.target.value
+                    if (v === 'return') updateMeta({ onMaxRounds: undefined })
+                    else updateMeta({ onMaxRounds: v })
+                  },
+                },
+                  h('option', { value: 'return' }, 'return'),
+                  h('option', { value: 'auto-reschedule' }, 'auto-reschedule')
+                )
               )
             ),
             selectedNode ? h(NodeInspector, { node: selectedNode, dsl: wf, fieldErrors, providers: props.providers, roles: props.roles, onUpdate: updateNode }) : null,

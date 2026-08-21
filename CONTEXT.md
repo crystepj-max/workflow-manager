@@ -19,7 +19,17 @@
   临时图与编辑器实时查看走 CLI `generate.mjs compile` 兜底（DSL 逆投影回蓝图后编译，
   行为由蓝图内容决定）。磁盘产物有「改蓝图未重生成 → 跑旧产物」的 staleness 特性（与 DSH 入口一致，
   validate 步骤②兜底）。
-- **校验器**：蓝图形态 `validate-blueprint.mjs` 与 DSL 形态 `host.js validateDsl` 两份规则集（候选二待统一）。
+- **校验器（校验内核）**：唯一规则集 = `scripts/validate-core.cjs`（候选二 T-IMP-13，CJS 单文件）。
+  双层：**结构层** `validateStructure`（走通性 / 节点边定义 / 入口唯一 / 环 / 条件与 schema 路径 /
+  保留 id / maxRounds ∈ [1,9] 系统上限——框架保证，与业务无关）与**业务规则层** `validateBlueprint`
+  （蓝图声明的规则：异源硬规则、verifyBranch 联动、onMaxRounds 枚举、output.files、单标识、
+  requireModels 产品收紧选项）。引擎 ESM import；宿主经 fs 读源码、vm 内求值缓存（热路径内存执行）。
+  原 `validate-blueprint.mjs` 与宿主 `validateDsl`/`heteroCheck`/拓扑推导/COND_RE 已删除。
+  错误统一带坐标键 fieldKey（node:<id>:<field> / edge:<i>:<field> / control:<field> / heteroCheck /
+  onMaxRounds）；**前端文案翻译 = 优化任务**（MAP Not yet specified）。
+- **布局拓扑（client）**：client 的 `successTopologyOrder`/`deriveEntryCandidates` 服务于画布分层、
+  入口徽标与保存前归一——UI 关注点，插件无法 import 共享文件（vm 沙箱），保留为独立实现；
+  入口唯一性的**权威判定**在校验内核（保存时宿主 sanitize 依内核拓扑重新归一）。
 - **走通性（walkability）**：框架级保证——任何蓝图运行要么走通（DONE），要么以明确终态终止
   （`FAILED_AT_*` / `FAILED_MAX_ROUNDS` / `TECHNICAL_FAILURE` / `ENDED_NO_*` / `ERROR`），绝不卡死。
   创作期规则：有 successCondition 的节点必须有 failure 边（否则判定失败无出口，运行时只能报
@@ -43,5 +53,8 @@
 - **可信度闸门（verifyBranch）**：验证节点开工分支自检 + `verified_branch`/`verified_head` 硬校验。
 - **异源（heteroCheck）**：dev↔review 模型绑定必须不同（save/validate 层强制；运行时日志）。
 - **人工门禁（manualCheck）**：节点产出后挂起（`AWAITING_HUMAN_<节点id>` + resume 载荷），人工裁决后续跑。
+- **业务规则前端可配置（候选二 Q7）**：编辑器工作流控制面板可配置——打回上限（1-9 系统上限钳制）、
+  异源开关（heteroCheck）、超限行为（onMaxRounds return/auto-reschedule）；字段经 DSL 双向投影落盘蓝图，
+  校验与编译按蓝图内容生效。verifyBranch（节点级闸门）编辑器无 UI，列后续候选。
 - **受阻语义（Q12 修正）**：run 级无 BLOCKED；节点结果枚举（test `BLOCKED` / dev `blocked`）仍有效——
   dev 受阻 = `FAILED_AT_dev`（failure 边兜底），test 受阻 = 沿 failure 边打回开发。

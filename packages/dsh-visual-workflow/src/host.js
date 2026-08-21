@@ -2,13 +2,15 @@
 // visual-workflow · HOST 半（pkg-20，编辑模块 Gold-Band 对齐版）
 //
 // 基于 pkg-19 host 改造：
-//  - validateDsl 升级为 Gold-Band《工作流编辑器》保存校验的同构规则集
+//  - 校验收敛进统一内核 scripts/validate-core.cjs（候选二 T-IMP-13）：结构层
 //    （入口拓扑推导 / $end 必须 / 悬空节点 / 保留 id / 成功表达式路径落在
 //    output.schema 内 / 边来源目标与类型 / when 仅 success / failure 唯一 /
-//    多 success 出边必须全部带 when / success 环检测），并返回
-//    fieldErrors（node:<id>:<field> / edge:<i>:<field> / control:<field>）
-//    供编辑面板逐字段标红——对应 WorkflowEditor.tsx 的 validateWorkflowForSave。
-//  - sanitizeDsl：保存前清洗（entry 依拓扑归一、failure 边剔除 when、空白修整），
+//    多 success 出边必须全部带 when / success 环检测 / 走通性 / maxRounds 1-9）
+//    + 蓝图业务规则层（异源硬规则 / requireModels 产品收紧）；经 fs 读源码、
+//    vm 内求值缓存（热路径内存执行）。原 validateDsl / heteroCheck / 拓扑推导
+//    已删除。校验结果带 fieldErrors（node:<id>:<field> / edge:<i>:<field> /
+//    control:<field>）供编辑面板逐字段标红。
+//  - sanitizeDsl：保存前清洗（entry 依内核拓扑归一、failure 边剔除 when、空白修整），
 //    对应 Gold-Band 的 sanitizedWorkflow。
 //  - 新增 vwf.roles RPC：列出工作区 dsh/roles/*.md 角色（fs 服务，多形态兜底），
 //    供节点表单的角色选择器使用（对应 Gold-Band 的 ProfilePicker 数据源）。
@@ -28,7 +30,7 @@
 //  - findWorkflow：内置优先、用户目录兜底。
 // T-IMP-07（异源接入，FR-8，AC-8）：save 与 vwf.validate 叠加内联异源硬规则
 //  （有 dev+review 节点 → 缺绑定拒 / 完全同模型拒 / 弱异源警告），与引擎
-//  validate-blueprint.mjs 规则 7 行为一致。
+//  校验内核 validate-core.cjs 规则 7 行为一致（候选二统一）。
 // T-IMP-12（候选一：统一编译器）：compileDsl 已删除——单一编译器 =
 //  scripts/generate.mjs compileBlueprint；宿主经管道取译文：内置模板读
 //  .generated/<id>/script.mjs、用户模板读 ~/.dsh/skills/<id>/script.mjs（磁盘优先，
@@ -199,7 +201,7 @@ return {
     // RPC 走 lossless-JSON 守卫，undefined 字段必须剔除，故条件装配）────────
     function projectToVwf(bp) {
       const models = (bp.bindings && bp.bindings.models) || {}
-      return {
+      const out = {
         id: bp.id,
         name: bp.displayName,
         description: bp.description || '',
@@ -218,9 +220,14 @@ return {
           return o
         }),
       }
+      // 业务规则字段（候选二 Q7，与 generate.mjs projectToVwf 一致）
+      if (bp.onMaxRounds !== undefined) out.onMaxRounds = bp.onMaxRounds
+      if (bp.heteroCheck) out.heteroCheck = true
+      return out
     }
-    // 逆投影（save 落盘格式：蓝图 JSON；增强字段 onMaxRounds/heteroCheck/
-    // verifyBranch 不存在于 vwf DSL，自然不产生）
+    // 逆投影（save 落盘格式：蓝图 JSON；候选二 Q7：业务规则字段 onMaxRounds/
+    // heteroCheck 已在 DSL 中（前端可配置），原样带回蓝图；verifyBranch 节点级
+    // 字段无编辑器 UI、不在 DSL，自然不产生）
     function projectToBlueprint(dsl) {
       const models = {}
       const nodes = (dsl.nodes || []).map((n) => {
@@ -234,7 +241,8 @@ return {
       })
       const bp = {
         id: dsl.id,
-        displayName: dsl.name || dsl.id,
+        // 空/空白名称原样保留（displayName 必填校验会拒绝），仅缺省（undefined）兜底 id
+        displayName: typeof dsl.name === 'string' ? dsl.name : (dsl.id || ''),
         entry: dsl.entry,
         nodes: nodes,
         edges: (dsl.edges || []).map((e) => {
@@ -245,131 +253,50 @@ return {
       }
       if (dsl.description) bp.description = dsl.description
       if (dsl.control && dsl.control.maxRounds != null) bp.control = { maxRounds: dsl.control.maxRounds }
+      if (dsl.onMaxRounds !== undefined) bp.onMaxRounds = dsl.onMaxRounds
+      if (dsl.heteroCheck) bp.heteroCheck = true
       if (Object.keys(models).length) bp.bindings = { models: models }
       return bp
     }
 
-    // ── 异源硬规则（T-IMP-07，与引擎 validate-blueprint.mjs 规则 7 行为一致；
-    // 入参为 vwf DSL 形态，模型在节点 model 上；dev/review 按节点 id 或
-    // profile（角色）识别——编辑器新建节点默认 id 为 node-N，用户以角色
-    // 表达 dev/review 时同样纳入检查）────────────────────────────────────────
-    function heteroCheck(dsl) {
-      const nodes = dsl && Array.isArray(dsl.nodes) ? dsl.nodes : []
-      const isDev = (n) => n && (n.id === 'dev' || n.profile === 'dev')
-      const isReview = (n) => n && (n.id === 'review' || n.profile === 'review')
-      const dev = nodes.find(isDev)
-      const review = nodes.find(isReview)
-      if (!dev || !review) return { ok: true, errors: [], warnings: [] }
-      const dm = dev.model
-      const rm = review.model
-      const tag = (m) => (m && m.provider && m.model) ? m.provider + '/' + m.model : null
-      const dt = tag(dm)
-      const rt = tag(rm)
-      if (!dt || !rt) {
-        return { ok: false, errors: [{ at: 'bindings.models', message: 'dev/review 未配置模型绑定，无法证明异源，请显式配置（节点 model 或 bindings.models）' }], warnings: [] }
+
+    // ── 统一校验管道（候选二 T-IMP-13）───────────────────────────────────────
+    // 校验内核 = scripts/validate-core.cjs（唯一规则集：结构层 + 蓝图业务规则层）。
+    // host 无法 import（vm 沙箱），经 fs 服务读源码、vm 内求值并缓存——热路径内存执行。
+    // 管线：sanitize（DSL 形态归一）→ 逆投影蓝图 → core.validateBlueprint({requireModels:true})
+    //   → 错误坐标映射 fieldErrors（node:<id>:<field> / edge:<i>:<field> / control:<field>）。
+    // 原 validateDsl / heteroCheck / 拓扑推导 / COND_RE 已删除（唯一实现收敛进内核）。
+    let validatorCorePromise = null
+    function loadValidatorCore() {
+      if (!validatorCorePromise) {
+        validatorCorePromise = (async () => {
+          const repo = repoRoot()
+          if (!repo || fs === undefined) return null
+          try {
+            const target = await fs.resolve(repo + '/scripts/validate-core.cjs')
+            const info = await fs.stat(target)
+            if (!info || info.type !== 'file') return null
+            const src = await fs.readText(target)
+            const module = { exports: {} }
+            new Function('module', 'exports', src)(module, module.exports)
+            return module.exports
+          } catch (e) { return null }
+        })()
       }
-      if (dt === rt) {
-        return { ok: false, errors: [{ at: 'bindings.models', message: 'dev 与 review 模型相同（' + dt + '）：异源硬规则要求不同 provider 或不同模型，请调整模型绑定' }], warnings: [] }
-      }
-      const warnings = dm.provider === rm.provider
-        ? ['弱异源：dev/review 同 provider（' + dm.provider + '）不同模型，建议配置不同 provider 满足真异源']
-        : []
-      return { ok: true, errors: [], warnings: warnings }
+      return validatorCorePromise
     }
 
-    // ── 保留 id（与 Gold-Band workflowGraph.ts 的哨兵一致；插件 DSL 仅使用 $end）──
-    const END_NODE = '$end'
-    const ENTRY_NODE = '$entry'
-    const NEW_ROUND_NODE = '$new-round'
-    const RESERVED_IDS = [END_NODE, ENTRY_NODE, NEW_ROUND_NODE]
-
-    const COND_RE = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
-
-    // ── 入口候选推导（对应 Gold-Band deriveWorkflowEntryCandidateIds）────────
-    // 没有「非回退入边」的节点即入口候选；回退边 = 在 success 拓扑序中指向更早节点的边。
-    function successTopologyOrder(dsl) {
-      const ids = (dsl.nodes || []).map(n => n && n.id).filter(Boolean)
-      const idSet = new Set(ids)
-      const adjacency = new Map()
-      const indegree = new Map()
-      ids.forEach(id => { adjacency.set(id, []); indegree.set(id, 0) })
-      ;(dsl.edges || []).forEach(e => {
-        if (e.on !== 'success') return
-        if (!idSet.has(e.from) || !idSet.has(e.to)) return
-        adjacency.get(e.from).push(e.to)
-        indegree.set(e.to, (indegree.get(e.to) || 0) + 1)
-      })
-      const queued = new Set()
-      const queue = []
-      const pushRoot = (id) => {
-        if (!idSet.has(id) || queued.has(id)) return
-        queued.add(id); queue.push(id)
-      }
-      pushRoot(dsl.entry)
-      ids.forEach(id => { if ((indegree.get(id) || 0) === 0) pushRoot(id) })
-      const ordered = []
-      while (queue.length) {
-        const id = queue.shift()
-        ordered.push(id)
-        ;(adjacency.get(id) || []).forEach(next => {
-          indegree.set(next, (indegree.get(next) || 0) - 1)
-          if ((indegree.get(next) || 0) === 0) pushRoot(next)
-        })
-      }
-      ids.forEach(id => { if (!queued.has(id)) ordered.push(id) })
-      const order = new Map()
-      ordered.forEach((id, i) => order.set(id, i))
-      return order
-    }
-
-    function isBackwardEdge(from, to, order) {
-      const s = order.get(from)
-      const t = order.get(to)
-      return s !== undefined && t !== undefined && t < s
-    }
-
-    function deriveEntryCandidates(dsl) {
-      const ids = new Set((dsl.nodes || []).map(n => n && n.id).filter(Boolean))
-      const order = successTopologyOrder({ ...dsl, entry: '' })
-      const incoming = new Set()
-      ;(dsl.edges || []).forEach(e => {
-        if (!ids.has(e.from) || !ids.has(e.to)) return
-        if (e.on !== 'success' && isBackwardEdge(e.from, e.to, order)) return
-        incoming.add(e.to)
-      })
-      return (dsl.nodes || []).map(n => n.id).filter(id => Boolean(id) && !incoming.has(id))
-    }
-
-    // ── 成功表达式路径解析（对应 Gold-Band parseExpressionPath/parseJsonPath）──
-    function parseCondPath(expr) {
-      const m = COND_RE.exec(String(expr || ''))
-      if (!m) throw new Error('unsupported expression')
-      return m[1].split('.').filter(Boolean)
-    }
-
-    // 路径是否落在 JSON Schema（properties/items 下钻）内——对应 Gold-Band
-    // schemaContainsPath，但插件 DSL 的 schema 是标准 JSON Schema。
-    function schemaContainsPath(schema, segments) {
-      let cursor = schema
-      for (const key of segments) {
-        if (Array.isArray(cursor)) { cursor = cursor[0]; }
-        if (!cursor || typeof cursor !== 'object') return false
-        if (cursor.type === 'array' && cursor.items) { cursor = cursor.items }
-        const props = cursor.properties
-        if (!props || typeof props !== 'object' || !(key in props)) return false
-        cursor = props[key]
-      }
-      return true
-    }
-
-    // ── 保存前清洗（对应 Gold-Band sanitizedWorkflow）────────────────────────
-    function sanitizeDsl(dsl) {
+    // 保存前清洗（对应 Gold-Band sanitizedWorkflow）：entry 依拓扑归一（内核推导）、
+    // failure 边剔除 when、maxRounds 取整——DSL 形态变换，留在宿主。
+    function sanitizeDsl(dsl, core) {
       const next = JSON.parse(JSON.stringify(dsl || {}))
       next.edges = Array.isArray(next.edges) ? next.edges : []
       next.nodes = Array.isArray(next.nodes) ? next.nodes : []
-      const candidates = deriveEntryCandidates(next)
-      next.entry = candidates.length === 1 ? candidates[0] : (next.entry || '')
-      next.edges = next.edges.map(e => {
+      if (core && core.deriveEntryCandidates) {
+        const candidates = core.deriveEntryCandidates(next.nodes, next.edges)
+        next.entry = candidates.length === 1 ? candidates[0] : (next.entry || '')
+      }
+      next.edges = next.edges.map((e) => {
         const edge = { ...e }
         if (edge.on !== 'success') delete edge.when
         return edge
@@ -381,138 +308,41 @@ return {
       return next
     }
 
-    // ── DSL 校验（Gold-Band validateWorkflowForSave 的插件 DSL 同构版）────────
-    // 返回 { ok, errors, fieldErrors, sanitized }
-    //  error: { at, message, fieldKey?, nodeId?, nodeIds?, edgeIndex? }
-    //  fieldErrors: { 'node:<id>:<field>' | 'edge:<i>:<field>' | 'control:<field>': [message] }
-    function validateDsl(dsl) {
+    // DSL 校验（编辑器/保存/运行共用）：返回 { ok, errors, fieldErrors, sanitized, warnings }
+    //  error: { at, message, fieldKey? }（lossless-JSON 守卫：可选键仅在定义时携带）
+    async function validatePipeline(dsl) {
+      const core = await loadValidatorCore()
+      if (!core) {
+        return { ok: false, errors: [{ at: '$', message: '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）' }], fieldErrors: {} }
+      }
+      if (!dsl || typeof dsl !== 'object') {
+        return { ok: false, errors: [{ at: '$', message: 'dsl 必须是对象' }], fieldErrors: {} }
+      }
+      // 原始边预检：failure 边带 when 必须报错（sanitize 会剔除 when，须在清洗前拦截）
+      const rawErrors = []
+      if (Array.isArray(dsl.edges)) {
+        dsl.edges.forEach((e, i) => {
+          if (e && e.when !== undefined && e.on !== 'success') {
+            rawErrors.push({ at: '$.edges[' + i + '].when', message: 'when 只允许用于 success 边', fieldKey: 'edge:' + i + ':when' })
+          }
+        })
+      }
+      const sanitized = sanitizeDsl(dsl, core)
+      const bp = projectToBlueprint(sanitized)
+      const v = core.validateBlueprint(bp, { requireModels: true })
       const errors = []
       const fieldErrors = {}
-      // 注意：可选字段仅在定义时携带——host RPC 的 lossless-JSON 守卫拒绝
-      // undefined 值（真机曾因此报错：errors[0].fieldKey/edgeIndex undefined）。
-      const err = (at, msg, fieldKey, nodeId, edgeIndex, nodeIds) => {
-        const entry = { at, message: msg }
-        if (fieldKey !== undefined) entry.fieldKey = fieldKey
-        if (nodeId !== undefined) entry.nodeId = nodeId
-        if (edgeIndex !== undefined) entry.edgeIndex = edgeIndex
-        if (nodeIds !== undefined) entry.nodeIds = nodeIds
+      for (const e of rawErrors) {
+        errors.push(e)
+        if (e.fieldKey !== undefined) (fieldErrors[e.fieldKey] = fieldErrors[e.fieldKey] || []).push(e.message)
+      }
+      for (const e of v.errors || []) {
+        const entry = { at: e.at, message: e.message }
+        if (e.fieldKey !== undefined) entry.fieldKey = e.fieldKey
         errors.push(entry)
-        if (fieldKey) (fieldErrors[fieldKey] = fieldErrors[fieldKey] || []).push(msg)
+        if (entry.fieldKey !== undefined) (fieldErrors[entry.fieldKey] = fieldErrors[entry.fieldKey] || []).push(e.message)
       }
-      const nodeField = (id, field) => 'node:' + id + ':' + field
-      const edgeField = (i, field) => 'edge:' + i + ':' + field
-
-      if (!dsl || typeof dsl !== 'object') { err('$', 'dsl 必须是对象'); return { ok: false, errors, fieldErrors } }
-      if (typeof dsl.id !== 'string' || !dsl.id.trim()) err('$.id', '工作流 ID 不能为空。')
-      if (typeof dsl.name !== 'string' || !dsl.name.trim()) err('$.name', '模板名称不能为空。')
-      if (!Array.isArray(dsl.nodes) || dsl.nodes.length === 0) err('$.nodes', '工作流至少需要一个节点。')
-      if (!Array.isArray(dsl.edges)) err('$.edges', 'edges 必填（数组）')
-      if (errors.length) return { ok: false, errors, fieldErrors }
-
-      const sanitized = sanitizeDsl(dsl)
-      const candidates = deriveEntryCandidates(sanitized)
-
-      // 入口拓扑（Gold-Band：唯一无入边节点即入口）
-      if (candidates.length === 0) err('$.entry', '工作流必须存在且只能存在一个没有入边的入口节点。')
-      else if (candidates.length > 1) err('$.entry', '工作流存在多个入口节点：' + candidates.join(', ') + '。请通过连线收敛为唯一入口。', undefined, undefined, undefined, candidates)
-
-      if (!dsl.edges.some(e => e && e.to === END_NODE)) err('$.edges', '工作流必须包含结束节点（存在指向 $end 的边）。')
-      if (sanitized.control && sanitized.control.maxRounds != null && sanitized.control.maxRounds <= 0) {
-        err('$.control.maxRounds', '打回上限必须大于 0。', 'control:maxRounds')
-      }
-
-      const ids = new Set()
-      const idCounts = {}
-      for (const n of dsl.nodes) {
-        if (!n || typeof n !== 'object') continue
-        idCounts[n.id] = (idCounts[n.id] || 0) + 1
-      }
-      const outgoingCounts = {}
-      dsl.edges.forEach(e => { if (e && e.from) outgoingCounts[e.from] = (outgoingCounts[e.from] || 0) + 1 })
-
-      for (const n of dsl.nodes) {
-        if (!n || typeof n !== 'object') { err('$.nodes', '节点必须是对象。'); continue }
-        const label = n.id ? n.id : '未命名节点'
-        if (typeof n.id !== 'string' || !n.id.trim()) { err('$.nodes', '节点 ID 不能为空。', nodeField(label, 'id'), n.id || undefined); continue }
-        ids.add(n.id)
-        if (RESERVED_IDS.indexOf(n.id) >= 0) err('$.nodes[' + n.id + ']', label + ' 使用了系统保留节点 ID。', nodeField(n.id, 'id'), n.id)
-        if (idCounts[n.id] > 1) err('$.nodes[' + n.id + ']', label + ' 节点 ID 重复。', nodeField(n.id, 'id'), n.id)
-        if ((outgoingCounts[n.id] || 0) === 0) err('$.nodes[' + n.id + ']', label + ' 没有出边，无法继续执行或结束。', nodeField(n.id, 'id'), n.id)
-        if (typeof n.profile !== 'string' || !n.profile.trim()) err('$.nodes[' + n.id + '].profile', label + ' 节点未关联角色。', nodeField(n.id, 'profile'), n.id)
-        // 模型绑定必填（编辑器保存路径强制；蓝图契约 bindings.models 仍允许
-        // 缺省=宿主默认，host 侧为满足「provider/model 必填」的产品要求而收紧）
-        const hasModel = n.model && typeof n.model === 'object'
-        if (!hasModel || !n.model.provider) err('$.nodes[' + n.id + '].model.provider', label + ' 未绑定 Agent（model.provider 必填）。', nodeField(n.id, 'model.provider'), n.id)
-        if (!hasModel || !n.model.model) err('$.nodes[' + n.id + '].model.model', label + ' 未绑定模型（model.model 必填）。', nodeField(n.id, 'model.model'), n.id)
-        if (n.output !== undefined && n.output !== null) {
-          if (!n.output || typeof n.output.schema !== 'object' || n.output.schema === null) {
-            err('$.nodes[' + n.id + '].output.schema', label + ' 的 JSON 输出约束必填（对象）。', nodeField(n.id, 'output.schema'), n.id)
-          }
-          if (n.output.successCondition !== undefined && n.output.successCondition !== null && n.output.successCondition !== '') {
-            if (typeof n.output.successCondition !== 'string' || !COND_RE.test(n.output.successCondition)) {
-              err('$.nodes[' + n.id + '].output.successCondition', label + ' 的成功表达式格式无效（需为 $.path == value 形式）。', nodeField(n.id, 'output.successCondition'), n.id)
-            } else if (n.output.schema && typeof n.output.schema === 'object') {
-              try {
-                const path = parseCondPath(n.output.successCondition)
-                if (!schemaContainsPath(n.output.schema, path)) {
-                  err('$.nodes[' + n.id + '].output.successCondition', label + ' 的成功表达式路径未在 JSON 输出约束中声明。', nodeField(n.id, 'output.successCondition'), n.id)
-                }
-              } catch (e) { /* COND_RE 已拦下 */ }
-            }
-          }
-        }
-      }
-
-      let edgeIndex = -1
-      for (const e of dsl.edges) {
-        edgeIndex++
-        const at = '$.edges[' + edgeIndex + ']'
-        if (!e || typeof e !== 'object') { err(at, '第 ' + (edgeIndex + 1) + ' 条边必须是对象。', undefined, undefined, edgeIndex); continue }
-        if (!e.from || !String(e.from).trim()) { err(at + '.from', '第 ' + (edgeIndex + 1) + ' 条边缺少来源节点。', edgeField(edgeIndex, 'from'), undefined, edgeIndex); continue }
-        if (!ids.has(e.from)) err(at + '.from', '边的来源节点 ' + e.from + ' 不存在。', edgeField(edgeIndex, 'from'), e.from, edgeIndex)
-        if (!e.to || !String(e.to).trim()) { err(at + '.to', '第 ' + (edgeIndex + 1) + ' 条边缺少目标节点。', edgeField(edgeIndex, 'to'), undefined, edgeIndex); continue }
-        if (e.to !== END_NODE && !ids.has(e.to)) err(at + '.to', '边的目标节点 ' + e.to + ' 不存在。', edgeField(edgeIndex, 'to'), e.to, edgeIndex)
-        if (RESERVED_IDS.indexOf(e.from) >= 0) err(at + '.from', '终止节点 ' + e.from + ' 不能作为边的来源。', edgeField(edgeIndex, 'from'), undefined, edgeIndex)
-        if (e.on !== 'success' && e.on !== 'failure') { err(at + '.on', '第 ' + (edgeIndex + 1) + ' 条边类型无效。', edgeField(edgeIndex, 'on'), undefined, edgeIndex); continue }
-        if (e.when !== undefined) {
-          if (e.on !== 'success') err(at + '.when', 'when 条件只允许用于 success 边。', edgeField(edgeIndex, 'when'), e.from, edgeIndex)
-          else if (typeof e.when !== 'string' || !COND_RE.test(e.when)) err(at + '.when', 'when 需为 $.path == value 形式。', edgeField(edgeIndex, 'when'), e.from, edgeIndex)
-        }
-      }
-
-      for (const id of ids) {
-        const out = dsl.edges.filter(e => e && e.from === id)
-        const succ = out.filter(e => e.on === 'success')
-        const fail = out.filter(e => e.on === 'failure')
-        if (succ.length > 1 && succ.some(e => e.when === undefined)) {
-          err('$.nodes[' + id + ']', id + ' 有多条 success 出边时必须全部带 when 条件。', nodeField(id, 'id'), id)
-        }
-        if (fail.length > 1) err('$.nodes[' + id + ']', id + ' 有 ' + fail.length + ' 条 failure 边，同类型边最多只能有一条。', nodeField(id, 'id'), id)
-      }
-
-      const reach = new Set()
-      const stack = candidates.length === 1 ? [candidates[0]] : (dsl.entry && ids.has(dsl.entry) ? [dsl.entry] : [])
-      while (stack.length) {
-        const cur = stack.pop()
-        if (reach.has(cur)) continue
-        reach.add(cur)
-        for (const e of dsl.edges) if (e && e.from === cur && e.on === 'success' && e.to !== END_NODE) stack.push(e.to)
-      }
-      for (const id of ids) if (!reach.has(id)) err('$.nodes[' + id + ']', id + ' 没有入边，无法从入口节点到达。', nodeField(id, 'id'), id)
-
-      const color = {}
-      const dfs = (u) => {
-        color[u] = 1
-        for (const e of dsl.edges) {
-          if (e.from !== u || e.on !== 'success' || e.to === END_NODE) continue
-          if (color[e.to] === 1) { err('$.nodes[' + e.to + ']', e.to + ' 的 success 边存在环（打回请用 failure 边）。', nodeField(e.to, 'id'), e.to); return }
-          if (color[e.to] === undefined) dfs(e.to)
-        }
-        color[u] = 2
-      }
-      if (!errors.length) { const start = candidates.length === 1 ? candidates[0] : dsl.entry; if (ids.has(start)) dfs(start) }
-
-      return { ok: errors.length === 0, errors, fieldErrors, sanitized }
+      return { ok: v.ok, errors, fieldErrors, sanitized, warnings: v.warnings || [] }
     }
 
     // ── 统一编译器管道（候选一 T-IMP-12）────────────────────────────────────
@@ -605,10 +435,8 @@ return {
     harness.handle('vwf.workflows.list', async () => listWorkflows())
     harness.handle('vwf.workflows.save', async (a) => {
       const dsl = a && a.dsl
-      const v = validateDsl(dsl)
+      const v = await validatePipeline(dsl)
       if (!v.ok) return { ok: false, errors: v.errors, fieldErrors: v.fieldErrors }
-      const het = heteroCheck(v.sanitized)
-      if (!het.ok) return { ok: false, errors: het.errors, fieldErrors: {} }
       const id = v.sanitized.id
       const p = await rootPaths()
       if (fs === undefined || !p.repo || !p.userDir || !p.skillRoot || !p.generator) {
@@ -641,7 +469,7 @@ return {
         } catch (e) {}
         return { ok: false, errors: [{ at: '$', message: '蓝图校验/技能生成失败（save 已回滚）：' + gen.detail }] }
       }
-      return { ok: true, id: id, dsl: v.sanitized, warnings: het.warnings }
+      return { ok: true, id: id, dsl: v.sanitized, warnings: v.warnings }
     })
     harness.handle('vwf.workflows.remove', async (a) => {
       const id = a && a.id
@@ -670,16 +498,13 @@ return {
       return { ok: true, id: id }
     })
     harness.handle('vwf.validate', async (a) => {
-      const v = validateDsl(a && a.dsl)
-      if (!v.ok) return v
-      const het = heteroCheck(v.sanitized)
-      if (!het.ok) return { ok: false, errors: het.errors, fieldErrors: {}, sanitized: v.sanitized }
-      return { ok: true, errors: [], fieldErrors: {}, sanitized: v.sanitized, warnings: het.warnings }
+      const v = await validatePipeline(a && a.dsl)
+      return { ok: v.ok, errors: v.errors, fieldErrors: v.fieldErrors, sanitized: v.sanitized, warnings: v.warnings }
     })
     // vwf.compile 已删除（T-IMP-12）：统一编译器后无独立编译 RPC；脚本经 vwf.script 走管道。
     harness.handle('vwf.script', async (a) => {
       const dsl = a && a.dsl
-      const v = validateDsl(dsl)
+      const v = await validatePipeline(dsl)
       if (!v.ok) return { ok: false, errors: v.errors }
       const c = await compileViaPipeline(v.sanitized, { fromTemplate: false })
       if (!c.ok) return { ok: false, errors: [{ at: '$', message: c.detail }] }
@@ -801,7 +626,7 @@ return {
           } else {
             return '错误：必须提供 templateId 或 dsl'
           }
-          const v = validateDsl(dsl)
+          const v = await validatePipeline(dsl)
           if (!v.ok) return 'DSL 校验失败：' + JSON.stringify(v.errors)
           const c = await compileViaPipeline(v.sanitized, { fromTemplate })
           if (!c.ok) return '编译失败：' + c.detail

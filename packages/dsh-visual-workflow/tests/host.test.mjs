@@ -27,8 +27,14 @@ const MINIMAL_BUILTIN = JSON.stringify({
   ],
 }, null, 2) + '\n'
 
+// 统一校验内核（候选二 T-IMP-13）：宿主经 fs 读源码求值——测试假 fs 需种入真实内核
+const validatorCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
+
 function seedFs(extra = {}) {
-  const seed = { [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: existsSync(realGenerated) ? readFileSync(realGenerated, 'utf8') : MINIMAL_BUILTIN }
+  const seed = {
+    [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: existsSync(realGenerated) ? readFileSync(realGenerated, 'utf8') : MINIMAL_BUILTIN,
+    [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+  }
   Object.assign(seed, extra)
   return makeFs(seed)
 }
@@ -56,6 +62,7 @@ function baseDsl(overrides = {}) {
     ],
     edges: [
       { from: 'a', to: 'b', on: 'success' },
+      { from: 'a', to: '$end', on: 'failure' },
       { from: 'b', to: '$end', on: 'success' },
       { from: 'b', to: 'a', on: 'failure' },
     ],
@@ -63,7 +70,7 @@ function baseDsl(overrides = {}) {
   return { ...dsl, ...overrides }
 }
 
-// 含 dev+review 节点的合法结构（异源检查对象）
+// 含 dev+review 节点的合法结构（异源检查对象；走通性：dev 有成功条件须带 failure 出口）
 function heteroDsl(devModel, reviewModel, overrides = {}) {
   const dsl = {
     id: 'h1',
@@ -71,11 +78,12 @@ function heteroDsl(devModel, reviewModel, overrides = {}) {
     entry: 'dev',
     control: { maxRounds: 3 },
     nodes: [
-      { id: 'dev', profile: 'dev', label: '开发', model: devModel, output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, successCondition: '$.ok == true' } },
-      { id: 'review', profile: 'review', label: '审核', model: reviewModel },
+      { id: 'dev', profile: 'dev', label: '开发', goal: '开发目标', model: devModel, output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, successCondition: '$.ok == true' } },
+      { id: 'review', profile: 'review', label: '审核', goal: '审核目标', model: reviewModel },
     ],
     edges: [
       { from: 'dev', to: 'review', on: 'success' },
+      { from: 'dev', to: '$end', on: 'failure' },
       { from: 'review', to: '$end', on: 'success' },
       { from: 'review', to: 'dev', on: 'failure' },
     ],
@@ -274,7 +282,7 @@ test('wf_run 在 agents 缺失时不注册（优雅降级）', async () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-// T-IMP-07 · 异源硬规则（与引擎 validate-blueprint.mjs 规则 7 行为一致）
+// T-IMP-07 · 异源硬规则（与校验内核 validate-core.cjs 规则 7 一致，候选二统一）
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('异源 T1：dev/review 完全同模型 → save 与 validate 均拒', async () => {
@@ -282,7 +290,7 @@ test('异源 T1：dev/review 完全同模型 → save 与 validate 均拒', asyn
   const dsl = heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm1' })
   const v = await call(handlers, 'vwf.validate', { dsl })
   assert.equal(v.ok, false)
-  assert.ok(v.errors.some(e => e.at === 'bindings.models' && e.message.includes('模型相同')), JSON.stringify(v.errors))
+  assert.ok(v.errors.some(e => e.at === '$.bindings.models' && e.message.includes('模型相同')), JSON.stringify(v.errors))
   const s = await call(handlers, 'vwf.workflows.save', { dsl })
   assert.equal(s.ok, false)
   assert.ok(s.errors.some(e => e.message.includes('模型相同')))
@@ -396,9 +404,9 @@ test('多入口节点报错并携带 nodeIds', async () => {
   })
   const v = await call(handlers, 'vwf.validate', { dsl })
   assert.equal(v.ok, false)
-  const issue = v.errors.find(e2 => e2.message.indexOf('多个入口') >= 0)
+  const issue = v.errors.find(e2 => e2.message.indexOf('入口不唯一') >= 0)
   assert.ok(issue, '存在多入口错误')
-  assert.deepEqual(issue.nodeIds, ['a', 'b', 'c'])
+  assert.equal(issue.at, '$.entry')
 })
 
 test('无入口（环形互指）报错', async () => {
@@ -440,8 +448,8 @@ test('缺 $end / 悬空节点 / 重复 id / 保留 id / 缺 profile 报错', asy
   const msg = (part) => v.errors.filter(e2 => e2.message.indexOf(part) >= 0)
   assert.ok(msg('结束节点').length, '缺 $end 报错')
   assert.ok(msg('没有出边').length, '悬空节点报错（$end 与 a 无出边）')
-  assert.ok(msg('ID 重复').length, '重复 id 报错')
-  assert.ok(msg('保留节点 ID').length, '保留 id 报错')
+  assert.ok(msg('id 重复').length, '重复 id 报错')
+  assert.ok(msg('保留 id').length, '保留 id 报错')
   assert.ok(msg('未关联角色').length, '缺 profile 报错')
   assert.ok(v.fieldErrors['node:a:id'] && v.fieldErrors['node:a:id'].length >= 1, 'fieldErrors 定位节点')
 })
@@ -456,7 +464,7 @@ test('successCondition 路径不在 schema 内报错', async () => {
   })
   const v = await call(handlers, 'vwf.validate', { dsl })
   assert.equal(v.ok, false)
-  assert.ok(v.errors.some(e2 => e2.message.indexOf('路径未在 JSON 输出约束中声明') >= 0))
+  assert.ok(v.errors.some(e2 => e2.message.indexOf('成功表达式路径未在') >= 0))
   assert.ok(v.fieldErrors['node:a:output.successCondition'], '字段级定位')
 })
 
@@ -467,7 +475,7 @@ test('successCondition 格式无效报错', async () => {
     edges: [{ from: 'a', to: '$end', on: 'success' }],
   })
   const v = await call(handlers, 'vwf.validate', { dsl })
-  assert.ok(v.errors.some(e2 => e2.message.indexOf('格式无效') >= 0))
+  assert.ok(v.errors.some(e2 => e2.message.indexOf('需为 $.path') >= 0))
 })
 
 test('failure 出边最多一条；多 success 出边必须全部带 when', async () => {
@@ -503,9 +511,9 @@ test('failure 出边最多一条；多 success 出边必须全部带 when', asyn
   const v3 = await call(handlers, 'vwf.validate', {
     dsl: baseDsl({
       nodes: [
-        { id: 'a', profile: 'dispatcher', model: { provider: 'p1', model: 'm1' }, output: { schema: { type: 'object', properties: { x: { type: 'boolean' } } } } },
-        { id: 'b', profile: 'dev', model: { provider: 'p1', model: 'm1' } },
-        { id: 'c', profile: 'dev', model: { provider: 'p1', model: 'm1' } },
+        { id: 'a', profile: 'dispatcher', goal: '目标A', model: { provider: 'p1', model: 'm1' }, output: { schema: { type: 'object', properties: { x: { type: 'boolean' } } } } },
+        { id: 'b', profile: 'dev', goal: '目标B', model: { provider: 'p1', model: 'm1' } },
+        { id: 'c', profile: 'dev', goal: '目标C', model: { provider: 'p1', model: 'm1' } },
       ],
       edges: [
         { from: 'a', to: 'b', on: 'success', when: '$.x == true' },
@@ -529,7 +537,7 @@ test('when 只允许 success 边', async () => {
       ],
     }),
   })
-  assert.ok(v.errors.some(e2 => e2.message.indexOf('when 条件只允许用于 success 边') >= 0))
+  assert.ok(v.errors.some(e2 => e2.message.indexOf('只允许用于 success 边') >= 0))
   // sanitize 会剔除 failure 边的 when
   const clean = await call(handlers, 'vwf.validate', {
     dsl: baseDsl({ edges: [{ from: 'a', to: 'b', on: 'success' }, { from: 'b', to: '$end', on: 'success' }, { from: 'b', to: 'a', on: 'failure' }] }),
@@ -547,16 +555,16 @@ test('maxRounds 非正报错', async () => {
 test('工作流 id 为空 / nodes 为空报错', async () => {
   const { handlers } = env()
   const v1 = await call(handlers, 'vwf.validate', { dsl: baseDsl({ id: '  ' }) })
-  assert.ok(v1.errors.some(e2 => e2.message.indexOf('工作流 ID') >= 0))
+  assert.ok(v1.errors.some(e2 => e2.message.indexOf('kebab-case') >= 0))
   const v2 = await call(handlers, 'vwf.validate', { dsl: { id: 'x', nodes: [], edges: [] } })
-  assert.ok(v2.errors.some(e2 => e2.message.indexOf('至少需要') >= 0))
+  assert.ok(v2.errors.some(e2 => e2.message.indexOf('至少') >= 0))
 })
 
 test('模板名称必填（name 为空拒绝，save 同拒）', async () => {
   const { handlers } = env()
   const v = await call(handlers, 'vwf.validate', { dsl: baseDsl({ name: '  ' }) })
   assert.equal(v.ok, false)
-  assert.ok(v.errors.some(e => e.message.includes('模板名称')), JSON.stringify(v.errors))
+  assert.ok(v.errors.some(e => e.message.includes('displayName')), JSON.stringify(v.errors))
   const s = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ name: '' }) })
   assert.equal(s.ok, false, 'save 拒绝空名称')
 })
@@ -579,4 +587,46 @@ test('vwf.state 未找到返回 found:false', async () => {
   const { handlers } = env()
   const r = await call(handlers, 'vwf.state', { runId: 'nope' })
   assert.deepEqual(r, { found: false, state: null })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 候选二 Q7 · 业务规则前端可配置闭环（编辑器字段 → DSL → 蓝图 → 校验生效）
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('Q7 闭环：heteroCheck/onMaxRounds 随 DSL 往返并在校验中生效', async () => {
+  const { handlers, fs } = env()
+  const dsl = {
+    ...heteroDsl({ provider: 'deepseek-official', model: 'v4-pro' }, { provider: 'kimi-coding', model: 'k3' }),
+    heteroCheck: true,
+    onMaxRounds: 'auto-reschedule',
+  }
+  const v = await call(handlers, 'vwf.validate', { dsl })
+  assert.equal(v.ok, true, JSON.stringify(v.errors))
+  assert.equal(v.sanitized.heteroCheck, true, '异源开关过 sanitize 保留')
+  assert.equal(v.sanitized.onMaxRounds, 'auto-reschedule', '超限行为过 sanitize 保留')
+  const s = await call(handlers, 'vwf.workflows.save', { dsl })
+  assert.equal(s.ok, true, JSON.stringify(s.errors))
+  const bp = JSON.parse(fs._files.get(USER_DIR + '/h1.json'))
+  assert.equal(bp.heteroCheck, true, '异源开关落盘蓝图')
+  assert.equal(bp.onMaxRounds, 'auto-reschedule', '超限行为落盘蓝图')
+})
+
+test('Q7 闭环：开启异源开关 + 同模型 → 保存被拒；关掉开关同模型依旧被拒（硬规则全局）', async () => {
+  const { handlers } = env()
+  const on = await call(handlers, 'vwf.workflows.save', { dsl: { ...heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm1' }), heteroCheck: true } })
+  assert.equal(on.ok, false)
+  assert.ok(on.errors.some(e => e.message.includes('模型相同')), JSON.stringify(on.errors))
+  const off = await call(handlers, 'vwf.workflows.save', { dsl: heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm1' }) })
+  assert.equal(off.ok, false, '异源硬规则全局强制（T-06），与开关无关')
+})
+
+test('Q7 闭环：回合上限系统约束（10 拒并带 control:maxRounds 坐标；5 通过）', async () => {
+  const { handlers, fs } = env()
+  const bad = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ control: { maxRounds: 10 } }) })
+  assert.equal(bad.ok, false)
+  assert.ok(bad.errors.some(e => e.fieldKey === 'control:maxRounds'), JSON.stringify(bad.errors))
+  const good = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ control: { maxRounds: 5 } }) })
+  assert.equal(good.ok, true, JSON.stringify(good.errors))
+  const bp = JSON.parse(fs._files.get(USER_DIR + '/t1.json'))
+  assert.equal(bp.control.maxRounds, 5, '上限 5 落盘蓝图')
 })

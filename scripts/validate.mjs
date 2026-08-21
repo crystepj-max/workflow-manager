@@ -8,7 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { validateBlueprint } from './validate-blueprint.mjs';
+import validatorCore from './validate-core.cjs';
+const { validateBlueprint } = validatorCore;
 import { generateAll } from './generate.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

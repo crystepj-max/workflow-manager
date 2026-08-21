@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { validateBlueprint } from '../validate-blueprint.mjs';
+import validatorCore from '../validate-core.cjs';
+const { validateBlueprint } = validatorCore;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const good = JSON.parse(readFileSync(path.join(here, '../../templates/dev-workflow-2-0.json'), 'utf8'));
@@ -122,6 +123,33 @@ test('S1 heteroCheck=true 但缺 dev/review 节点拒绝', () => {
   b.nodes = b.nodes.filter((n) => n.id !== 'review');
   b.edges = b.edges.filter((e) => e.from !== 'review' && e.to !== 'review');
   expectReject(b, 'dev 与 review', 'heteroNodes');
+});
+
+// —— 打回上限系统约束（候选二 Q7：maxRounds ∈ [1,9]，系统约定上限 9）——
+test('S1 maxRounds：缺省 = 合法（默认 9）', () => {
+  const b = clone();
+  delete b.control;
+  const r = validateBlueprint(b);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+});
+
+test('S1 maxRounds：1 与 9 边界合法', () => {
+  const a = clone();
+  a.control.maxRounds = 1;
+  assert.equal(validateBlueprint(a).ok, true, JSON.stringify(validateBlueprint(a).errors));
+  const z = clone();
+  z.control.maxRounds = 9;
+  assert.equal(validateBlueprint(z).ok, true, JSON.stringify(validateBlueprint(z).errors));
+});
+
+test('S1 maxRounds：0 / 10 / 3.5 / 非数拒绝（系统上限 9）', () => {
+  for (const bad of [0, 10, 3.5, -1, '9']) {
+    const b = clone();
+    b.control.maxRounds = bad;
+    const r = validateBlueprint(b);
+    assert.equal(r.ok, false, 'maxRounds=' + bad + ' 应拒绝');
+    assert.ok(r.errors.some((e) => e.fieldKey === 'control:maxRounds'), 'maxRounds=' + bad + ' 应带 control:maxRounds 坐标');
+  }
 });
 
 // —— 异源硬规则（契约 §3.1 规则 7，T-06 六用例；T6=update 路径在宿主层，此处 T1-T5）——
