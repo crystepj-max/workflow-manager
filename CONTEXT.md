@@ -58,3 +58,6 @@
   校验与编译按蓝图内容生效。verifyBranch（节点级闸门）编辑器无 UI，列后续候选。
 - **受阻语义（Q12 修正）**：run 级无 BLOCKED；节点结果枚举（test `BLOCKED` / dev `blocked`）仍有效——
   dev 受阻 = `FAILED_AT_dev`（failure 边兜底），test 受阻 = 沿 failure 边打回开发。
+- **文件契约（候选五 C5）**：`output.files` 为权威声明；goal 与角色文件中**反引号引用**的交付物文件名
+  必须 ⊆ 全局声明 ∪ {STATE.md}（校验内核规则 A + repo 级测试 T8 机器核对，替代人工核对；
+  裸提及如 `package.json` 不检查避免误报）。

@@ -45,7 +45,7 @@
       "id": "dispatch",
       "label": "调度",
       "profile": "dispatcher",
-      "goal": "读取 GitHub issue（或原始需求文本），校验三要素并判定是否需要集成测试；三要素缺失如实判定。写 dispatch-result.json 并更新 STATE.md。",
+      "goal": "读取 GitHub issue（或原始需求文本），校验三要素并判定是否需要集成测试；三要素缺失如实判定。写 `dispatch-result.json` 并更新 STATE.md。",
       "output": {
         "schema": {
           "type": "object",
@@ -114,7 +114,7 @@
       "id": "dev",
       "label": "开发",
       "profile": "dev",
-      "goal": "在工作分支施工（tdd），本地验证全绿后提交（不推送、不建 PR）；写 dev-report.md 并更新 STATE.md。环境受阻时 status 报 blocked。",
+      "goal": "在工作分支施工（tdd），本地验证全绿后提交（不推送、不建 PR）；写 `dev-report.md` 并更新 STATE.md。环境受阻时 status 报 blocked。",
       "output": {
         "schema": {
           "type": "object",
@@ -150,7 +150,7 @@
       "id": "route",
       "label": "分流",
       "profile": "dispatcher",
-      "goal": "读取 dispatch-result.json，如实输出是否需要集成测试的判定，不重新分析三要素。",
+      "goal": "读取 `dispatch-result.json`，如实输出是否需要集成测试的判定，不重新分析三要素。",
       "output": {
         "schema": {
           "type": "object",
@@ -175,7 +175,7 @@
       "label": "测试",
       "profile": "test",
       "verifyBranch": true,
-      "goal": "对实现做运行态验证（证据驱动判定），专杀假测试；不修改业务代码；写 test-report.md 并更新 STATE.md。",
+      "goal": "对实现做运行态验证（证据驱动判定），专杀假测试；不修改业务代码；写 `test-report.md` 并更新 STATE.md。",
       "output": {
         "schema": {
           "type": "object",
@@ -221,7 +221,7 @@
       "label": "审核",
       "profile": "review",
       "verifyBranch": true,
-      "goal": "双轴独立审查（需求符合性优先 + 代码质量），只读源代码；写 review-report.md 并更新 STATE.md；存在阻塞问题必须 REQUEST_CHANGES。",
+      "goal": "双轴独立审查（需求符合性优先 + 代码质量），只读源代码；写 `review-report.md` 并更新 STATE.md；存在阻塞问题必须 REQUEST_CHANGES。",
       "output": {
         "schema": {
           "type": "object",
@@ -267,7 +267,7 @@
       "profile": "accept",
       "manualCheck": true,
       "verifyBranch": true,
-      "goal": "逐条核对验收标准（证据缺失时只读验证），写 acceptance-summary.md 与 accept-report.md 并更新 STATE.md；不代签人工结论。",
+      "goal": "逐条核对验收标准（证据缺失时只读验证），写 `acceptance-summary.md` 与 `accept-report.md` 并更新 STATE.md；不代签人工结论。",
       "output": {
         "schema": {
           "type": "object",
@@ -312,7 +312,7 @@
       "id": "closeout",
       "label": "收口",
       "profile": "closeout",
-      "goal": "一致性收口；写 cleanup-report.md；推送、创建并合并 Draft PR（squash + 删分支）、关闭 issue；收束本地工作区。",
+      "goal": "一致性收口；写 `cleanup-report.md`；推送、创建并合并 Draft PR（squash + 删分支）、关闭 issue；收束本地工作区。",
       "output": {
         "schema": {
           "type": "object",

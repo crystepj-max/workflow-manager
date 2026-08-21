@@ -176,6 +176,17 @@ function validateStructure(nodes, edges, opts) {
   return { errors }
 }
 
+// ---------- 文件名 token 提取（候选五 C5：契约一致性自动断言） ----------
+// 仅提取「反引号引用的文件名」（`dev-report.md`）——裸提及（package.json 等工程文件）
+// 不纳入检查，避免误报；约定：交付物文件名在 goal/角色文件中用反引号显式引用。
+const FILE_TOKEN_RE = /`([A-Za-z0-9][A-Za-z0-9._-]*\.(?:json|md|markdown|txt))`/g
+function extractFileTokens(text) {
+  if (typeof text !== 'string') return []
+  const out = new Set()
+  for (const m of String(text).matchAll(FILE_TOKEN_RE)) out.add(m[1])
+  return [...out]
+}
+
 // ---------- 业务规则层（蓝图声明的规则） ----------
 // opts：{ requireModels }——宿主编辑器保存路径的产品收紧（每节点模型绑定必填）。
 function validateBlueprint(bp, opts) {
@@ -263,7 +274,26 @@ function validateBlueprint(bp, opts) {
     }
   }
 
+  // 契约一致性（候选五 C5 规则 A）：goal 中反引号引用的文件名必须全局声明
+  // （某节点 output.files ∪ 保留文件 STATE.md）——output.files 为权威，改一处漏一处即红
+  {
+    const declared = new Set(['STATE.md'])
+    bp.nodes.forEach((n) => {
+      if (n && n.output && n.output.files && typeof n.output.files === 'object' && !Array.isArray(n.output.files)) {
+        Object.keys(n.output.files).forEach((p) => declared.add(p))
+      }
+    })
+    bp.nodes.forEach((n) => {
+      if (!n || typeof n.goal !== 'string') return
+      for (const tok of extractFileTokens(n.goal)) {
+        if (!declared.has(tok)) {
+          err('$.nodes[' + n.id + '].goal', 'goal 提及的文件名 `' + tok + '` 未在任何节点 output.files 声明（或保留文件 STATE.md）——文件契约以 output.files 为权威，请同步命名')
+        }
+      }
+    })
+  }
+
   return { ok: errors.length === 0, errors, warnings, counts: { nodes: bp.nodes.length, edges: bp.edges.length } }
 }
 
-module.exports = { validateStructure, validateBlueprint, deriveEntryCandidates, COND_RE, MAX_ROUNDS_CAP }
+module.exports = { validateStructure, validateBlueprint, deriveEntryCandidates, extractFileTokens, COND_RE, MAX_ROUNDS_CAP }

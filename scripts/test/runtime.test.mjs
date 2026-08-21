@@ -5,7 +5,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { compileBlueprint, generateAll } from '../generate.mjs'
@@ -270,4 +270,23 @@ test('Q7 引擎侧：蓝图自定上限 5 → 编译产物 MAX_ROUNDS=5（业务
   assert.ok(script.includes('const MAX_ROUNDS = 5'), '上限 5 编译进产物')
   const { script: s9 } = compileBlueprint({ ...mini, onMaxRounds: 'auto-reschedule' })
   assert.ok(s9.includes('超限归因'), 'onMaxRounds=auto-reschedule 注入归因')
+})
+
+// ---------- 候选五 C5 规则 B：角色文件文件名 ⊆ 模板声明（契约一致性，repo 级） ----------
+test('T8 契约一致性：dsh/roles/*.md 反引号文件名 ⊆ 模板 output.files ∪ {STATE.md}', () => {
+  const declared = new Set(['STATE.md'])
+  tpl.nodes.forEach((n) => {
+    if (n.output && n.output.files && typeof n.output.files === 'object') Object.keys(n.output.files).forEach((p) => declared.add(p))
+  })
+  const rolesDir = path.join(here, '../../dsh/roles')
+  const roleNames = readdirSync(rolesDir).filter((f) => f.endsWith('.md'))
+  assert.ok(roleNames.length >= 6, '角色文件齐全')
+  const bad = []
+  for (const f of roleNames) {
+    const text = readFileSync(path.join(rolesDir, f), 'utf8')
+    for (const tok of validatorCore.extractFileTokens(text)) {
+      if (!declared.has(tok)) bad.push(f + ' → ' + tok)
+    }
+  }
+  assert.deepEqual(bad, [], '角色文件引用了未声明的文件名（output.files 为权威）')
 })

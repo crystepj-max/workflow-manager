@@ -152,6 +152,24 @@ test('S1 maxRounds：0 / 10 / 3.5 / 非数拒绝（系统上限 9）', () => {
   }
 });
 
+// —— 契约一致性（候选五 C5 规则 A：goal 反引号文件名 ⊆ 全局 output.files ∪ STATE.md）——
+test('S1 契约一致性：goal 提及未声明文件名拒绝（带 node:<id>:goal 坐标）', () => {
+  const b = clone();
+  b.nodes.find((n) => n.id === 'dev').goal = '写 `dev-report-v2.md` 并更新 STATE.md。';
+  const r = validateBlueprint(b);
+  assert.equal(r.ok, false);
+  const hit = r.errors.find((e) => e.fieldKey === 'node:dev:goal');
+  assert.ok(hit, '应带 node:dev:goal 坐标，实际：' + JSON.stringify(r.errors));
+  assert.ok(hit.message.includes('dev-report-v2.md'), '报错应指出未声明文件名');
+});
+
+test('S1 契约一致性：goal 裸提及（无反引号）不检查（避免 package.json 类误报）', () => {
+  const b = clone();
+  b.nodes.find((n) => n.id === 'dev').goal = '修改 package.json 的 scripts 后施工。';
+  const r = validateBlueprint(b);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+});
+
 // —— 异源硬规则（契约 §3.1 规则 7，T-06 六用例；T6=update 路径在宿主层，此处 T1-T5）——
 const withHetero = (dev, review) => {
   const b = clone();

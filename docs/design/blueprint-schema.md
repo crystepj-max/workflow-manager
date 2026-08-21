@@ -140,7 +140,8 @@
 - 运行目录：`runDir/`（如 `.agent-runs/<taskId>/`，已 gitignore），由 `args.runDir` 注入；编译产物固定注入「本节点只允许在该目录内写文件」。
 - `STATE.md`（stage/round/status/updated）为**运行时固定维护**文件，蓝图不可声明、不可覆盖。
 - `output.files` 为节点**应产出**文件的声明式契约（D7）：编译器注入文件清单到运行上下文（「本节点产出：`dispatch-result.json`(json)、`dev-report.md`(markdown)…」），供 AI 与下游校验引用。
-- 兼容性：现有 2.0 抽取时把 goal 中已提及的文件名同步填入 `output.files`；`output.files` 是权威声明，goal 提及的文件名应与之一致（评审时人工核对，不做文本级自动校验）。
+- 兼容性：现有 2.0 抽取时把 goal 中已提及的文件名同步填入 `output.files`；`output.files` 是权威声明，goal 提及的文件名应与之一致。
+  **机器核对（候选五 C5 起替代人工核对）**：校验内核规则 A——goal 中**反引号引用**的文件名（`` `dev-report.md` ``）必须在某节点 `output.files` 声明或为保留文件 `STATE.md`，否则拒绝（坐标 `node:<id>:goal`）；裸提及（如 `package.json` 工程文件）不检查，避免误报。repo 级测试 T8 同步核对 `dsh/roles/*.md` 的反引号文件名 ⊆ 模板声明（约定：交付物文件名在 goal/角色文件中一律反引号引用）。
 - v1 仅注入与留痕，不做「文件缺失即失败」的运行时强制（agent 自报为主）；若 v2 需要硬门禁（文件未产出视为节点失败），校验器与运行时再升级。
 
 ## 7. 决策记录（T-01，2026-08-19）

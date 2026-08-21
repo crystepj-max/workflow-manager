@@ -4,13 +4,13 @@
 
 前序产物读取前提：当运行时上下文、当前任务说明或用户明确给出前序节点，或给出对应产物/附件/路径时，应先尝试获取并读取该节点对应的最新产物或指定内容。若只给出前序节点链而未给文件列表，不要因此跳过读取；应通过当前可用的节点产物/附件查看能力按节点定位。不要主动扫描 run 目录寻找未声明产物；如果仍无法定位，则记录为缺失证据或缺失产物。
 
-1. 读取验收报告（accept-report.md）、审核报告（review-report.md）、测试报告（test-report.md）与开发交接（dev-report.md）的最新终态。
+1. 读取验收报告（`accept-report.md`）、审核报告（`review-report.md`）、测试报告（`test-report.md`）与开发交接（`dev-report.md`）的最新终态。
 2. **一致性收口**：用知识收口流程做代码 / 文档 / 路线图 / 规则对齐——消除文档与实现的不一致，确认无遗留死代码与格式漂移，保留仓库整洁。
 3. **交接产物汇总**：整理本轮全部报告与产物清单，产出 `cleanup-report.md`，说明归档位置与后续事项。
 4. **推送、合并与关闭**：主工作区（编排区）承担推送/合并/关闭——把工作分支推送到远端（`git push -u origin <工作分支>`），基于 base 分支创建 Draft PR（`gh pr create --draft`，已存在则复用），PR 正文汇总本轮目标、验收结论与报告清单；然后将 PR 标记 ready 并合并（`gh pr merge --squash --delete-branch`），最后关闭对应 issue（`gh issue close`，评论说明验收结论与合并 commit）。**禁止绕过 PR 直接推送 base 分支**；无远端时记录本地 commit 清单即可。合并依据是「人工验收已通过」这一前置决策，本节点只执行，不重新判定。
 5. **原子清理 worktree**：确认边界后收束——只处理本轮需求相关变更，不触碰用户已有改动或无关文件；合并后用 `git worktree remove <runDir>/worktree` 原子清理（worktree 内残留本任务未提交/未跟踪文件时，先确认归属再用 `git worktree remove --force`），残留本地工作分支用 `git branch -D <工作分支>`；主工作区始终停在 base 分支，需要时 `git pull` 同步最新。
 
-## 产出（cleanup-report.md）
+## 产出（`cleanup-report.md`）
 
 ```markdown
 # 收口报告
@@ -18,10 +18,10 @@
 ## 产物清单
 | 产物 | 路径 | 状态 |
 |------|------|------|
-| 开发交接 | dev-report.md | ✅ |
-| 测试报告 | test-report.md | ✅ |
-| 审核报告 | review-report.md | ✅ |
-| 验收报告 | accept-report.md / acceptance-summary.md | ✅ |
+| 开发交接 | `dev-report.md` | ✅ |
+| 测试报告 | `test-report.md` | ✅ |
+| 审核报告 | `review-report.md` | ✅ |
+| 验收报告 | `accept-report.md` / `acceptance-summary.md` | ✅ |
 | 需求归档 | <归档路径> | ✅ |
 
 ## 后续事项（不影响本轮验收）
