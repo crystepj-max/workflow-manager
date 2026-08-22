@@ -37,6 +37,7 @@ export function projectToVwf(bp) {
   // verifyBranch 为节点级字段，编辑器无 UI，暂不进入（契约修订，MAP 记录）
   if (bp.onMaxRounds !== undefined) out.onMaxRounds = bp.onMaxRounds;
   if (bp.heteroCheck) out.heteroCheck = true;
+  if (bp.bundleRoles) out.bundleRoles = true;
   return out;
 }
 
@@ -301,6 +302,22 @@ export function generateAll(templatesDir) {
     files.set(rel('vwf-dsl.json'), JSON.stringify(vwf, null, 2) + '\n');
     files.set(rel('SKILL.md'), skill);
     files.set(rel('meta.json'), JSON.stringify(buildMeta(bp), null, 2) + '\n');
+    // bundleRoles：角色随模板自包含分发（默认工作流等用户级内置模板）——
+    // 把仓库 dsh/roles/*.md 复制进生成目录，syncBuiltins 随之同步到宿主根
+    if (bp.bundleRoles) {
+      const rolesSrc = path.join(path.dirname(templatesDir), 'dsh', 'roles');
+      let roleFiles;
+      try {
+        roleFiles = fs.readdirSync(rolesSrc).filter((f) => f.endsWith('.md')).sort();
+      } catch (e) {
+        roleFiles = null;
+      }
+      if (!roleFiles || roleFiles.length === 0) {
+        report.push({ id: bp.id, ok: false, errors: [{ at: '$.bundleRoles', message: 'bundleRoles=true 但角色源目录缺失或为空：' + rolesSrc }] });
+        continue;
+      }
+      for (const rf of roleFiles) files.set(rel('roles/' + rf), fs.readFileSync(path.join(rolesSrc, rf), 'utf8'));
+    }
     report.push({ id: bp.id, ok: true, nodes: v.counts.nodes, edges: v.counts.edges, folds: Object.keys(dsh.folds), scriptBytes: dsh.script.length });
   }
   return { files, report };

@@ -18,7 +18,7 @@ test('S2 生成器：产物四件套齐全', () => {
   for (const rel of ['script.mjs', 'vwf-dsl.json', 'SKILL.md', 'meta.json']) {
     assert.ok(files.has(id + '/' + rel), '缺产物：' + rel);
   }
-  assert.equal(report.length, 1);
+  assert.equal(report.length, 2, '两个蓝图（dev-workflow-2-0 + default-workflow）都产出');
   assert.equal(report[0].ok, true);
 });
 
@@ -45,6 +45,17 @@ test('S2 生成器：业务规则字段进 vwf DSL（候选二 Q7 修订），�
   assert.equal(dsl.onMaxRounds, 'auto-reschedule', 'onMaxRounds 业务规则进 DSL（前端可配置）');
   assert.equal(dsl.heteroCheck, true, 'heteroCheck 业务规则进 DSL（前端可配置）');
   assert.equal(dsl.control.maxRounds, 9);
+});
+
+test('S2 生成器：bundleRoles 蓝图角色自包含分发（默认工作流用户级内置模板）', () => {
+  const { files, report } = generateAll(tplDir);
+  const rep = report.find((r) => r.id === 'default-workflow');
+  assert.ok(rep && rep.ok, 'default-workflow 生成成功');
+  assert.ok(files.has('default-workflow/roles/dispatcher.md'), '角色包随模板分发：dispatcher.md');
+  assert.ok(files.has('default-workflow/roles/review.md'), '角色包随模板分发：review.md');
+  const dsl = JSON.parse(files.get('default-workflow/vwf-dsl.json'));
+  assert.equal(dsl.bundleRoles, true, 'DSL 投影携带 bundleRoles 标记');
+  assert.ok(files.get('default-workflow/SKILL.md').includes('默认工作流'), 'SKILL.md 触发词含 displayName');
 });
 
 test('S2 生成器：SKILL.md 触发词含 displayName 与 id', () => {

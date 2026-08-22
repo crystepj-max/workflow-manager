@@ -178,25 +178,29 @@ return {
     }
 
     // 内置根：.generated/<id>/vwf-dsl.json（生成物四件套之一，CI 先 npm run generate）
+    // 双根：仓库 .generated（开发期最新）优先，宿主根 ~/.dsh/.generated（syncBuiltins 同步，
+    // 会话无关）补缺失——默认工作流这类用户级内置模板在任意项目会话都可见
     async function loadBuiltins() {
       const out = new Map()
       if (fs === undefined) return out
       const p = await rootPaths()
-      if (!p.builtinDir) return out
-      let entries = null
-      try {
-        const dir = await fs.resolve(p.builtinDir)
-        entries = await fs.listDir(dir)
-      } catch (e) { return out }
-      for (const ent of entries || []) {
-        if (!ent || typeof ent.name !== 'string' || !ent.name) continue
+      const roots = [p.builtinDir, p.homeBuiltinDir].filter(Boolean)
+      for (const root of roots) {
+        let entries = null
         try {
-          const target = await fs.resolve(p.builtinDir + '/' + ent.name + '/vwf-dsl.json')
-          const info = await fs.stat(target)
-          if (!info || info.type !== 'file') continue
-          const dsl = JSON.parse(await fs.readText(target))
-          if (dsl && typeof dsl.id === 'string' && dsl.id) out.set(dsl.id, dsl)
-        } catch (e) { /* 单个生成物损坏不影响其余 */ }
+          const dir = await fs.resolve(root)
+          entries = await fs.listDir(dir)
+        } catch (e) { continue }
+        for (const ent of entries || []) {
+          if (!ent || typeof ent.name !== 'string' || !ent.name) continue
+          try {
+            const target = await fs.resolve(root + '/' + ent.name + '/vwf-dsl.json')
+            const info = await fs.stat(target)
+            if (!info || info.type !== 'file') continue
+            const dsl = JSON.parse(await fs.readText(target))
+            if (dsl && typeof dsl.id === 'string' && dsl.id && !out.has(dsl.id)) out.set(dsl.id, dsl)
+          } catch (e) { /* 单个生成物损坏不影响其余 */ }
+        }
       }
       return out
     }
@@ -398,10 +402,24 @@ return {
     async function compileViaPipeline(dsl, opts) {
       const p = await rootPaths()
       if (opts && opts.fromTemplate) {
-        const builtin = await readTextIfExists(p.builtinDir + '/' + dsl.id + '/script.mjs')
-        if (builtin) return { ok: true, script: builtin, meta: metaFromDsl(dsl) }
-        const user = await readTextIfExists(p.skillRoot + '/' + dsl.id + '/script.mjs')
-        if (user) return { ok: true, script: user, meta: metaFromDsl(dsl) }
+        // 磁盘产物优先：仓库 .generated → 宿主根 .generated（用户级内置，syncBuiltins 同步）→ 用户 skill 闭环产物
+        // bundleRoles 模板在产物目录旁带 roles/ 自包含角色包，命中则随译文返回 roleDir
+        const spots = [p.builtinDir, p.homeBuiltinDir, p.skillRoot]
+        for (const spot of spots) {
+          if (!spot) continue
+          const script = await readTextIfExists(spot + '/' + dsl.id + '/script.mjs')
+          if (!script) continue
+          const out = { ok: true, script, meta: metaFromDsl(dsl) }
+          if (fs !== undefined) {
+            try {
+              const rolesDir = spot + '/' + dsl.id + '/roles'
+              const rd = await fs.resolve(rolesDir)
+              const ents = await fs.listDir(rd)
+              if (ents && ents.length) out.roleDir = rolesDir
+            } catch (e) { /* 无角色包则不携带 roleDir（调用方走 args.roleDir 或缺省 dsh/roles） */ }
+          }
+          return out
+        }
       }
       if (fs === undefined || subprocess === undefined || !p.repo || !p.generator || !p.userDir) {
         return { ok: false, detail: '宿主子进程/文件能力不可用：无法编译临时图（模板来源请先运行 npm run generate 或经保存闭环）' }
@@ -531,9 +549,13 @@ return {
       const dsl = a && a.dsl
       const v = await validatePipeline(dsl)
       if (!v.ok) return { ok: false, errors: v.errors }
-      const c = await compileViaPipeline(v.sanitized, { fromTemplate: false })
+      // 模板命中（含 bundleRoles 用户级内置模板）走磁盘产物并带出 roleDir；否则 CLI 编译临时图
+      const fromTemplate = !!(dsl && typeof dsl.id === 'string' && (await findWorkflow(dsl.id)))
+      const c = await compileViaPipeline(v.sanitized, { fromTemplate })
       if (!c.ok) return { ok: false, errors: [{ at: '$', message: c.detail }] }
-      return { ok: true, engineAvailable: !!(resolveEngine()), script: c.script, meta: c.meta }
+      const out = { ok: true, engineAvailable: !!(resolveEngine()), script: c.script, meta: c.meta }
+      if (c.roleDir) out.roleDir = c.roleDir
+      return out
     })
     registerRpc('vwf.state', async (a) => {
       const s = a && a.runId ? runs.get(a.runId) : null
@@ -694,7 +716,7 @@ return {
           if (engineNow === undefined) return '错误：当前宿主平面无法访问 workflowEngine（wf_run 需要 agent preset 挂载的工作流引擎）。可改用内置 workflow 工具执行 vwf.script 编译产物。'
           const parent = agents.requireInitiator()
           const scriptArgs = {
-            taskId: args.taskId, runDir: args.runDir, roleDir: args.roleDir, baseBranch: args.baseBranch,
+            taskId: args.taskId, runDir: args.runDir, roleDir: args.roleDir || c.roleDir, baseBranch: args.baseBranch,
             issueRef: args.issueRef, issueTitle: args.issueTitle, issueBody: args.issueBody, issueComments: args.issueComments,
             requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history
           }
