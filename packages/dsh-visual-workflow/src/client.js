@@ -1374,8 +1374,8 @@ return {
       }, [auto, runId])
       const st = snap && snap.found && dsl ? mapStatus(snap.state, dsl) : {}
       return h('div', { className: 'vwf-root' },
-        h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
-          h('strong', null, t('runMode')),
+        h('div', { className: 'vwf-card', style: { marginBottom: 8, padding: '10px 14px' } },
+          h('div', { className: 'vwf-card-title' }, t('runMode')),
           h('div', { className: 'vwf-muted', style: { marginTop: 4 } }, t('runModePrimary')),
           h('div', { className: 'vwf-muted', style: { marginTop: 2 } }, t('runModeEnhanced'))
         ),
