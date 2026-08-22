@@ -297,27 +297,31 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
 ## 可视化插件（vwf）使用说明
 
 「可视化工作流」（Visual Workflow，下文 vwf）把同一套「开发工作流 2.0」状态机做成图形化
-入口：在 Web UI 里选内置/用户模板 → 图形化编辑或直接查看流程图 → 点「运行」，插件把 DSL 图
-编译成 workflow 脚本并交给 harness 引擎执行，全程零代码。需求基线见
+入口：在 Web UI 里选内置/用户模板 → 图形化编辑或直接查看流程图 → 点「获取脚本」，
+再把插件由 DSL 图编译出的脚本交给平台 `workflow` 工具执行。这是所有部署均可用的正式执行路径。
+需求基线见
 `.scratch/dsh-visual-workflow-p0/requirements-analysis.md`；实现说明见 `docs/design/plugin-layer.md`。
 
-### 插件形态：动态原型 → P2 组合包
+### 插件形态：组合包与动态开发包
 
-- **动态插件（当前形态）**：动态 Cordis 插件，host + client 两半、plain JS（无打包器/JSX/import）。
+- **组合包（产品形态）**：通过 `dsh plugin add` / `cordis.yml` preset 安装，随部署持久化，
+  重启仍在、可跨会话复用。Host 半承载 DSL 校验器、DSL→script 编译器、双根模板库与运行状态；
+  Client 半在 settings.section 注册「工作流」页（模板库 + 大抽屉可视化编辑器 + 运行看板）。
+  **模板数据已持久化**：内置模板只读（`.generated/<id>/`），用户模板落盘
+  `~/.dsh/visual-workflow/templates/<id>.json`，保存即同步编译
+  `~/.dsh/skills/<id>/` 技能（save 即闭环）。
+- **动态插件（开发迭代形态）**：动态 Cordis 插件，host + client 两半、plain JS
+  （无打包器/JSX/import）。
   运行时用 `cordis_define` / `cordis_run` 定义并激活（重启需重新激活）。Host 半承载 DSL 校验器、
   DSL→script 编译器、双根模板库与运行状态；Client 半在 settings.section 注册「工作流」页
-  （模板库 + 大抽屉可视化编辑器 + 运行看板）。**模板数据已持久化**：内置模板只读
-  （`.generated/<id>/`），用户模板落盘 `~/.dsh/visual-workflow/templates/<id>.json`，保存即同步
-  编译 `~/.dsh/skills/<id>/` 技能（save 即闭环）。
-- **P2 组合包（目标形态）**：打包为组合包（`dsh plugin add` / cordis.yml preset），随部署持久化，
-  重启仍在、可跨会话复用。按 P0 需求分析的非目标清单：画布编辑、运行看板状态染色已随插件层落地；
-  组合包打包、storageDomain 持久化、多工作流并行归 P2。
+  （模板库 + 大抽屉可视化编辑器 + 运行看板）。
 
-### wf_run 工具：调用方式与参数表
+### wf_run 增强路径：调用方式与参数表
 
-Host 半把 `wf_run` 注册为模型工具，主会话直接以工具调用驱动——把 `workflow` 工具的「手写脚本」
-换成「DSL 图编译」。首次运行从 `entry=dispatch` 起，跑到人工门禁节点即返回，裁决后再以对应
-`entry` 续跑。
+宿主 `agents` 可用时，Host 半才会把 `wf_run` 条件注册为模型工具，主会话可直接用工具调用完成
+「DSL 图编译 + 执行」。`workflowEngine` 推迟到 execute 阶段解析；若解析失败，工具会明确报错，
+此时仍可回到正式路径：点「获取脚本」，再用平台 `workflow` 工具执行。首次运行从
+`entry=dispatch` 起，跑到人工门禁节点即返回，裁决后再以对应 `entry` 续跑。
 
 | 参数 | 必填 | 说明 |
 |------|------|------|

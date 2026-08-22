@@ -112,6 +112,9 @@ return {
       edgeFailure: '失败',
       templates: '模板库',
       dashboard: '运行看板',
+      runMode: '运行方式',
+      runModePrimary: '正式路径：在编辑器中点「获取脚本」，再把脚本交给平台 workflow 工具执行。',
+      runModeEnhanced: '增强路径：宿主 agents 可用时才注册 wf_run；若 workflowEngine 在执行阶段解析失败，请改用正式路径。',
       newTemplate: '新建模板',
       editTemplate: '编辑',
       deleteTemplate: '删除',
@@ -197,6 +200,9 @@ return {
       edgeFailure: 'Failure',
       templates: 'Templates',
       dashboard: 'Runs',
+      runMode: 'How to run',
+      runModePrimary: 'Standard path: select Get Script in the editor, then run the script with the platform workflow tool.',
+      runModeEnhanced: 'Enhanced path: wf_run is registered only when host agents are available. If workflowEngine cannot be resolved at execution time, use the standard path.',
       newTemplate: 'New Template',
       editTemplate: 'Edit',
       deleteTemplate: 'Delete',
@@ -1368,6 +1374,11 @@ return {
       }, [auto, runId])
       const st = snap && snap.found && dsl ? mapStatus(snap.state, dsl) : {}
       return h('div', { className: 'vwf-root' },
+        h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
+          h('strong', null, t('runMode')),
+          h('div', { className: 'vwf-muted', style: { marginTop: 4 } }, t('runModePrimary')),
+          h('div', { className: 'vwf-muted', style: { marginTop: 2 } }, t('runModeEnhanced'))
+        ),
         h('div', { className: 'vwf-row' },
           h('input', { className: 'vwf-input', style: { flex: 1 }, placeholder: 'runId（运行回执中的 runId）', value: runId, onChange: (ev) => setRunId(ev.target.value) }),
           h('button', { className: 'vwf-btn', onClick: refresh }, t('refresh')),
