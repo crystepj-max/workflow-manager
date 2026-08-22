@@ -54,6 +54,30 @@ return {
     const sp = ctx.get('sandboxPolicy')
     const subprocess = ctx.get('subprocess')
 
+    // ── 双模式 RPC 注册（动态会话=harness.handle / 静态 bundle=webServer 路由）──
+    // 动态插件运行时提供 harness 内建；静态组合包没有，改经 webServer 前缀路由
+    // （POST /dsh-visual-workflow/<method>，信封 {rpcId,method,payload}→{rpcId,result}）
+    const isDynamicHost = typeof harness !== 'undefined'
+    const rpcRoutes = new Map()
+    function registerRpc(method, fn) {
+      if (isDynamicHost) { harness.handle(method, fn); return }
+      rpcRoutes.set(method, fn)
+    }
+    // 工具定义/注册双模式：动态=harness.defineTool/registerTool；静态=ctx.tools + 平台 defineTool
+    const dtools = {
+      define(t) {
+        if (isDynamicHost && typeof harness.defineTool === 'function') return harness.defineTool(t)
+        if (typeof defineTool === 'function') return defineTool(t)
+        return t
+      },
+      register(ctx2, t) {
+        if (isDynamicHost && typeof harness.registerTool === 'function') { harness.registerTool(ctx2, t); return }
+        const tools = ctx2.get('tools')
+        if (tools && typeof tools.register === 'function') tools.register(t)
+        else console.log('[vwf] tools 服务缺失，工具未注册：' + (t && t.name))
+      },
+    }
+
     // ── 双根模板存储（T-IMP-06）────────────────────────────────────────────
     // 路径来源：repo 根优先 = 发起 agent 会话 cwd（会话工作区即仓库根）。
     // currentInitiator 仅在模型发起的调用中存在——浏览器审批触发的激活
@@ -432,8 +456,8 @@ return {
     ctx.on('workflow/agent-end', (info, agent) => { const r = runs.get(info.id); if (!r) return; const a = r.agents[r.agents.length - 1]; if (a && a.seq === agent.seq) a.outcome = String(agent.outcome) })
     ctx.on('workflow/end', (info, result) => { const r = runs.get(info.id); if (r) r.status = String(result.stopReason) })
 
-    harness.handle('vwf.workflows.list', async () => listWorkflows())
-    harness.handle('vwf.workflows.save', async (a) => {
+    registerRpc('vwf.workflows.list', async () => listWorkflows())
+    registerRpc('vwf.workflows.save', async (a) => {
       const dsl = a && a.dsl
       const v = await validatePipeline(dsl)
       if (!v.ok) return { ok: false, errors: v.errors, fieldErrors: v.fieldErrors }
@@ -471,7 +495,7 @@ return {
       }
       return { ok: true, id: id, dsl: v.sanitized, warnings: v.warnings }
     })
-    harness.handle('vwf.workflows.remove', async (a) => {
+    registerRpc('vwf.workflows.remove', async (a) => {
       const id = a && a.id
       if (!id || typeof id !== 'string') return { ok: false, errors: [{ at: '$.id', message: '缺少模板 id' }] }
       const p = await rootPaths()
@@ -497,12 +521,12 @@ return {
       await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", skillDir], { cwd: p.repo })
       return { ok: true, id: id }
     })
-    harness.handle('vwf.validate', async (a) => {
+    registerRpc('vwf.validate', async (a) => {
       const v = await validatePipeline(a && a.dsl)
       return { ok: v.ok, errors: v.errors, fieldErrors: v.fieldErrors, sanitized: v.sanitized, warnings: v.warnings }
     })
     // vwf.compile 已删除（T-IMP-12）：统一编译器后无独立编译 RPC；脚本经 vwf.script 走管道。
-    harness.handle('vwf.script', async (a) => {
+    registerRpc('vwf.script', async (a) => {
       const dsl = a && a.dsl
       const v = await validatePipeline(dsl)
       if (!v.ok) return { ok: false, errors: v.errors }
@@ -510,12 +534,12 @@ return {
       if (!c.ok) return { ok: false, errors: [{ at: '$', message: c.detail }] }
       return { ok: true, engineAvailable: !!(resolveEngine()), script: c.script, meta: c.meta }
     })
-    harness.handle('vwf.state', async (a) => {
+    registerRpc('vwf.state', async (a) => {
       const s = a && a.runId ? runs.get(a.runId) : null
       if (!s) return { found: false, state: null }
       return { found: true, state: { id: a.runId, meta: s.meta, status: s.status, phase: s.phase, logs: s.logs, agents: s.agents } }
     })
-    harness.handle('vwf.models', async () => {
+    registerRpc('vwf.models', async () => {
       if (llm === undefined) return { providers: [] }
       const out = []
       let providers = []
@@ -544,7 +568,7 @@ return {
       { id: 'accept', name: '验收', summary: '验收角色：最终核验，人工验收门禁' },
       { id: 'closeout', name: '收口', summary: '收口角色：一致性收口与交接产物汇总' }
     ]
-    harness.handle('vwf.roles', async () => {
+    registerRpc('vwf.roles', async () => {
       if (fs === undefined) return { roles: FALLBACK_ROLES }
       try {
         const listFn = fs.readdir || fs.readDir || fs.list || fs.listDir
@@ -572,6 +596,41 @@ return {
       }
     })
 
+    // ── 静态 bundle 模式：webServer RPC 路由（动态模式走 harness.handle）────
+    // 信封与平台一致：POST /dsh-visual-workflow/<method>
+    //   请求 {type:'client-request', rpcId, method, payload}
+    //   响应 {rpcId, result}（result = 各 handler 的原样返回值）
+    if (!isDynamicHost) {
+      const webServer = ctx.get('webServer')
+      if (webServer && typeof webServer.register === 'function') {
+        ctx.effect(() => webServer.register({
+          kind: 'prefix',
+          path: '/dsh-visual-workflow',
+          handler: function vwfRpcHandler(req, res) {
+            if (req.method !== 'POST') { res.writeHead(405, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'POST only' })); return }
+            let raw = ''
+            req.on('data', (c) => { raw += c })
+            req.on('end', async () => {
+              let rpcId = '', method = '', payload = {}
+              try {
+                const msg = JSON.parse(raw || '{}')
+                rpcId = String(msg.rpcId || '')
+                method = String(msg.method || '')
+                payload = msg.payload || {}
+              } catch (e) {}
+              const fn = rpcRoutes.get(method)
+              let result
+              if (typeof fn !== 'function') result = { ok: false, errors: [{ at: '$', message: '未知方法：' + method }] }
+              else try { result = await fn(payload) } catch (e) { result = { ok: false, errors: [{ at: '$', message: String((e && e.message) || e) }] } }
+              try { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ rpcId: rpcId || 'r0', result: result === undefined ? null : result })) } catch (e) {}
+            })
+          }
+        }), 'vwf: rpc route')
+      } else {
+        console.log('[vwf] webServer 服务缺失：静态 RPC 路由未注册，client 将无法调用 vwf.*')
+      }
+    }
+
     // ── workflowEngine 解析 ──────────────────────────────────────────────────
     // 本部署中 workflowEngine 由 agent preset 平面挂载（workflow-worker-thread），
     // 动态插件 host ctx 看不到；经 agentPresets.serviceFor 对当前发起 agent 做
@@ -592,7 +651,7 @@ return {
     // currentInitiator——浏览器审批触发的激活无 initiator；engine 不可用推迟到
     // execute 时优雅报错，且运行时模型调用通常有 currentInitiator）。
     if (agents !== undefined) {
-      const tool = harness.defineTool({
+      const tool = dtools.define({
         name: 'wf_run',
         description: '运行一个可视化工作流（DSL 图）：校验并编译为 workflow 脚本后交给引擎执行。args.templateId 用内置/用户模板，或 args.dsl 传自定义图。返回运行状态；人工验收节点会以 AWAITING_HUMAN_<node> 状态暂停，等待人工裁决后以 entry=节点id + approved=true/false 续跑。',
         parameters: {
@@ -643,9 +702,9 @@ return {
           return JSON.stringify({ runId: String(run.id), stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
         }
       })
-      harness.registerTool(ctx, tool)
+      dtools.register(ctx, tool)
       // 诊断工具（定位删除/路径问题）：op=paths 返回路径解析；op=remove 逐步执行删除
-      const debugTool = harness.defineTool({
+      const debugTool = dtools.define({
         name: 'vwf_debug',
         description: 'vwf 插件诊断：op=paths 返回双根路径解析结果；op=remove <id> 逐步执行删除流程并返回每一步结果（含真实 rm 子进程输出），用于定位删除失败。',
         parameters: {
@@ -688,7 +747,7 @@ return {
           return '用法：vwf_debug { op: "paths" } 或 { op: "remove", id: "<模板id>" }'
         },
       })
-      harness.registerTool(ctx, debugTool)
+      dtools.register(ctx, debugTool)
     } else {
       console.log('[vwf] workflowEngine 未解析（host ctx 与 agent-preset 桥接均不可用）或 agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行')
     }

@@ -17,7 +17,10 @@ const clientBody = readFileSync(join(root, 'src', 'client.js'), 'utf8')
 writeFileSync(
   join(dist, 'host-entry.mjs'),
   `// 由 scripts/build-bundle.mjs 生成——勿手改；源：src/host.js\n` +
-  `const plugin = (() => {\n${hostBody}\n})();\n` +
+  `import { defineTool as __vwfDefineTool } from '@deepseek-ai/dsh-tools';\n` +
+  `const plugin = (() => {\n` +
+  `const defineTool = __vwfDefineTool;\n` +
+  `${hostBody}\n})();\n` +
   `export const name = plugin.name;\n` +
   (pluginHasInject(hostBody) ? `export const inject = plugin.inject;\n` : ``) +
   `export function apply(ctx) { return plugin.apply(ctx); }\n`
@@ -26,7 +29,13 @@ writeFileSync(
 writeFileSync(
   join(dist, 'client.js'),
   `// 由 scripts/build-bundle.mjs 生成——勿手改；源：src/client.js\n` +
-  `module.exports = (function () {\n${clientBody}\n})();\n`
+  `module.exports = (function () {\n` +
+  `const React = require('react');\n` +
+  `const host = { call(method, args) {\n` +
+  `  return fetch('/dsh-visual-workflow/' + method, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'client-request', rpcId: String(Math.random()).slice(2), method, payload: args || {} }) }).then(r => r.json()).then(f => f.result);\n` +
+  `} };\n` +
+  `const styles = { insert(css) { const el = document.createElement('style'); el.dataset.plugin = 'dsh-visual-workflow'; el.textContent = css; document.head.appendChild(el); } };\n` +
+  clientBody + `\n})();\n`
 )
 
 function pluginHasInject(body) {

@@ -29,7 +29,9 @@
     "dist/",
     "src/"
   ],
-  "dependencies": {},
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.7"
+  },
   "devDependencies": {
     "jsdom": "^26.0.0",
     "react": "^19.0.0",
