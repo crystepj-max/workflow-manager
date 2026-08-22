@@ -1,0 +1,69 @@
+{
+  "id": "fanout-example",
+  "displayName": "扇出示例",
+  "description": "从运行参数读取任务列表并逐项处理",
+  "entry": "fan",
+  "control": {
+    "maxRounds": 3
+  },
+  "nodes": [
+    {
+      "id": "fan",
+      "kind": "fanout",
+      "label": "逐项处理",
+      "profile": "dev",
+      "goal": "处理任务：{{item}}",
+      "items": "$.args.items",
+      "failOn": "all",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "finish",
+      "label": "汇总",
+      "profile": "review",
+      "goal": "读取前序扇出聚合结果并完成汇总"
+    }
+  ],
+  "edges": [
+    {
+      "from": "fan",
+      "to": "finish",
+      "on": "success"
+    },
+    {
+      "from": "fan",
+      "to": "$end",
+      "on": "failure"
+    },
+    {
+      "from": "finish",
+      "to": "$end",
+      "on": "success"
+    }
+  ],
+  "bindings": {
+    "models": {
+      "fan": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-pro"
+      },
+      "finish": {
+        "provider": "kimi-coding",
+        "model": "k3"
+      }
+    }
+  }
+}

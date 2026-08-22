@@ -15,6 +15,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const tplDir = path.join(here, '../../templates')
 const tpl = JSON.parse(readFileSync(path.join(tplDir, 'dev-workflow-2-0.json'), 'utf8'))
 const mini = JSON.parse(readFileSync(path.join(here, 'fixtures/hello-blueprint.json'), 'utf8'))
+const fanoutFixture = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'))
 
 // 微型图纸（框架级）与内置蓝图（模板级）都应通过蓝图校验（夹具卫生）
 import validatorCore from '../validate-core.cjs'
@@ -270,6 +271,90 @@ test('Q7 引擎侧：蓝图自定上限 5 → 编译产物 MAX_ROUNDS=5（业务
   assert.ok(script.includes('const MAX_ROUNDS = 5'), '上限 5 编译进产物')
   const { script: s9 } = compileBlueprint({ ...mini, onMaxRounds: 'auto-reschedule' })
   assert.ok(s9.includes('超限归因'), 'onMaxRounds=auto-reschedule 注入归因')
+})
+
+// ---------- fanout 节点：聚合、阈值、cap 前置与表达式 ----------
+const fanoutBp = (failOn = 'all') => ({
+  ...fanoutFixture,
+  nodes: [{ ...fanoutFixture.nodes[0], failOn }],
+  edges: [
+    { from: 'fan', to: '$end', on: 'success' },
+    { from: 'fan', to: '$end', on: 'failure' },
+  ],
+})
+const runFanout = (items, table, failOn = 'all') => runEngine(fanoutBp(failOn), table, { items })
+
+test('fanout 三项成功：pipeline 保序聚合并替换 {{item}}', async () => {
+  const { result, agentCalls } = await runFanout(['a', { id: 2 }, 'c'], {
+    '逐项处理 #1': { value: 'A' },
+    '逐项处理 #2': { value: 'B' },
+    '逐项处理 #3': { value: 'C' },
+  })
+  assert.equal(result.status, 'DONE')
+  assert.deepEqual(result.results.fan, {
+    total: 3,
+    okCount: 3,
+    failedCount: 0,
+    items: [{ value: 'A' }, { value: 'B' }, { value: 'C' }],
+  })
+  assert.deepEqual(agentCalls.map((c) => c.label), ['逐项处理 #1', '逐项处理 #2', '逐项处理 #3'])
+  assert.ok(agentCalls[0].prompt.includes('处理任务：a'))
+  assert.ok(agentCalls[1].prompt.includes('处理任务：{"id":2}'))
+  assert.ok(agentCalls.every((c) => c.opts.schema && c.opts.schema.type === 'object'), 'output.schema 应作为 per-item schema')
+})
+
+test('fanout 单项失败保留 null，failOn=all 时其余项不受污染', async () => {
+  const { result } = await runFanout(['a', 'b', 'c'], {
+    '逐项处理 #1': { value: 'A' },
+    '逐项处理 #2': null,
+    '逐项处理 #3': { value: 'C' },
+  })
+  assert.equal(result.status, 'DONE')
+  assert.deepEqual(result.results.fan, {
+    total: 3,
+    okCount: 2,
+    failedCount: 1,
+    items: [{ value: 'A' }, null, { value: 'C' }],
+  })
+})
+
+test('fanout failOn=any/all/整数 N 分别走正确出边', async () => {
+  const oneFailure = {
+    '逐项处理 #1': { value: 'A' },
+    '逐项处理 #2': null,
+  }
+  assert.equal((await runFanout(['a', 'b'], oneFailure, 'any')).result.status, 'FAILED_AT_fan')
+  assert.equal((await runFanout(['a', 'b'], oneFailure, 'all')).result.status, 'DONE')
+  assert.equal((await runFanout(['a', 'b'], oneFailure, 0)).result.status, 'FAILED_AT_fan')
+  assert.equal((await runFanout(['a', 'b'], oneFailure, 1)).result.status, 'DONE')
+  assert.equal((await runFanout(['a', 'b'], { '逐项处理 #1': null, '逐项处理 #2': null }, 'all')).result.status, 'FAILED_AT_fan')
+})
+
+test('fanout 空数组成功且不调用 agent；非数组返回 TECHNICAL_FAILURE', async () => {
+  const empty = await runFanout([], {})
+  assert.equal(empty.result.status, 'DONE')
+  assert.deepEqual(empty.result.results.fan, { total: 0, okCount: 0, failedCount: 0, items: [] })
+  assert.equal(empty.agentCalls.length, 0)
+  assert.ok(empty.logs.some((line) => line.includes('空数组')))
+
+  const bad = await runFanout('not-array', {})
+  assert.equal(bad.result.status, 'TECHNICAL_FAILURE')
+  assert.ok(bad.result.detail.includes('$.args.items') && bad.result.detail.includes('string'))
+  assert.equal(bad.agentCalls.length, 0)
+})
+
+test('fanout ITEM_CAP 与 AGENT_CAP 均在任何 agent() 前返回可读终态', async () => {
+  const itemCap = await runFanout(new Array(4097).fill('x'), {})
+  assert.equal(itemCap.result.status, 'FAILED_ITEM_CAP')
+  assert.equal(itemCap.result.actual, 4097)
+  assert.equal(itemCap.result.limit, 4096)
+  assert.equal(itemCap.agentCalls.length, 0)
+
+  const agentCap = await runFanout(new Array(1001).fill('x'), {})
+  assert.equal(agentCap.result.status, 'FAILED_AGENT_CAP')
+  assert.equal(agentCap.result.requested, 1001)
+  assert.equal(agentCap.result.limit, 1000)
+  assert.equal(agentCap.agentCalls.length, 0)
 })
 
 // ---------- 候选五 C5 规则 B：角色文件文件名 ⊆ 模板声明（契约一致性，repo 级） ----------

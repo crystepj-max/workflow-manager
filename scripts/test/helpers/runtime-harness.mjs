@@ -75,13 +75,25 @@ export function makeAgentScript(table) {
 
 // ---------- 执行入口 ----------
 // run(script, { args, agent }) → { result, agentCalls, logs, phases }
-// 把脚本包进 async IIFE 再以 new Function 注入 args/agent/log/phase 全局。
+// 把脚本包进 async IIFE，再注入真实脚本契约中的五个钩子全局与 args。
 export async function runGeneratedScript(script, { args = {}, agent } = {}) {
   const logs = []
   const phases = []
   const noAgent = async () => { throw new Error('排练厅：脚本调用了 agent 但未提供演员表') }
-  const fn = new Function('args', 'agent', 'log', 'phase',
+  const parallel = async (thunks) => Promise.all(thunks.map(async (thunk) => {
+    try { return await thunk() } catch (e) { return null }
+  }))
+  const pipeline = async (items, ...stages) => Promise.all(items.map(async (item) => {
+    let value = item
+    try {
+      for (const stage of stages) value = await stage(value)
+      return value
+    } catch (e) {
+      return null
+    }
+  }))
+  const fn = new Function('args', 'agent', 'parallel', 'pipeline', 'log', 'phase',
     'return (async () => {\n' + script + '\n})()')
-  const result = await fn(args, agent || noAgent, (m) => logs.push(String(m)), (t) => phases.push(String(t)))
+  const result = await fn(args, agent || noAgent, parallel, pipeline, (m) => logs.push(String(m)), (t) => phases.push(String(t)))
   return { result, logs, phases, agentCalls: agent ? agent.calls : [] }
 }
