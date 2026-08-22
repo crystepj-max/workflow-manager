@@ -61,9 +61,11 @@ try {
 } catch (e) {
   fail('引擎层测试失败：' + String(e.stdout || e.message).split('\n').slice(-4).join('\n'));
 }
-console.log('—— ③′ 包测试（packages/dsh-visual-workflow：host 双根/异源 + client 冒烟）——');
+console.log('—— ③′ 包测试（packages/dsh-visual-workflow：host 双根/异源 + client 冒烟 + 静态 bundle）——');
 try {
-  execFileSync(process.execPath, ['--test', 'tests/host.test.mjs', 'tests/client.smoke.mjs'], { cwd: path.join(root, 'packages', 'dsh-visual-workflow'), stdio: 'pipe', shell: true });
+  const pkg = path.join(root, 'packages', 'dsh-visual-workflow');
+  execFileSync(process.execPath, ['scripts/build-bundle.mjs'], { cwd: pkg, stdio: 'pipe' });
+  execFileSync('npm', ['test'], { cwd: pkg, stdio: 'pipe', shell: true });
   pass('包测试全绿');
 } catch (e) {
   fail('包测试失败：' + String(e.stdout || e.message).split('\n').slice(-4).join('\n'));

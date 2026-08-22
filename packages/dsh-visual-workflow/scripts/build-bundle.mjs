@@ -2,7 +2,9 @@
 // 把 src/ 的动态插件闭包体（return {name, inject?, apply}）编译为 bundle 安装产物：
 //   dist/host-entry.mjs — ESM 入口（cordis.patch.yml 的 name 经包 main/exports 解析）
 //   dist/client.js      — 自包含经典脚本（CJS：module.exports = 插件对象），供浏览器 /plugins/<id>/client.js 加载
+//   dist/.src-stamp.json — 源码哈希戳，供 check-dist-fresh 校验「源码变更后必须重建」
 // 单一事实源仍是 src/*.js；本脚本只做形态包装，不做逻辑转换。
+import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,8 +13,16 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const dist = join(root, 'dist')
 mkdirSync(dist, { recursive: true })
 
-const hostBody = readFileSync(join(root, 'src', 'host.js'), 'utf8')
-const clientBody = readFileSync(join(root, 'src', 'client.js'), 'utf8')
+const hostPath = join(root, 'src', 'host.js')
+const clientPath = join(root, 'src', 'client.js')
+const hostBody = readFileSync(hostPath, 'utf8')
+const clientBody = readFileSync(clientPath, 'utf8')
+const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
+const stamp = {
+  host: sha256(hostBody),
+  client: sha256(clientBody),
+  builtAt: new Date().toISOString(),
+}
 
 writeFileSync(
   join(dist, 'host-entry.mjs'),
@@ -43,5 +53,8 @@ function pluginHasInject(body) {
   return /^\s*inject\s*:/m.test(body)
 }
 
+writeFileSync(join(dist, '.src-stamp.json'), JSON.stringify(stamp, null, 2) + '\n')
+
 console.log('built:', join(dist, 'host-entry.mjs'))
 console.log('built:', join(dist, 'client.js'))
+console.log('stamp:', stamp.host.slice(0, 12), stamp.client.slice(0, 12))
