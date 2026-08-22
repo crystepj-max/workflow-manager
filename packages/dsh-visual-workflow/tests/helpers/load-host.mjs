@@ -25,3 +25,25 @@ export function loadHost(overrides = {}) {
   plugin.apply(ctx)
   return { handlers, definedTools, events, ctx }
 }
+
+// 静态 Host / Minke bundle：不注入 harness 自由变量，走 webServer 前缀路由。
+export function loadStaticHost(overrides = {}) {
+  const registered = []
+  const definedTools = []
+  const events = new Map()
+  const defaultWebServer = {
+    register(route, label) { registered.push({ route, label }) },
+  }
+  const ctx = {
+    get: (name) => {
+      if (name === 'webServer' && overrides.webServer === undefined) return defaultWebServer
+      return overrides[name] === undefined ? undefined : overrides[name]
+    },
+    on: (name, fn) => { events.set(name, fn) },
+    effect: (fn) => { fn(); return () => {} },
+  }
+  const fn = new Function('ctx', `${src}`)
+  const plugin = fn(ctx)
+  plugin.apply(ctx)
+  return { registered, definedTools, events, ctx }
+}

@@ -9,11 +9,17 @@ packages/dsh-visual-workflow/
 ├── src/
 │   ├── host.js            # 宿主半：DSL 校验（Gold-Band 同构规则）+ 编译 + RPC + wf_run 工具 + 运行状态跟踪
 │   └── client.js          # 客户端半：模板库 + 大抽屉编辑器（画布/配置面板/校验弹窗/JSON tab）+ 运行看板
+├── scripts/
+│   ├── build-bundle.mjs   # src → dist + .src-stamp.json
+│   └── check-dist-fresh.mjs
 ├── tests/
-│   ├── host.test.mjs      # 34 个 node 单测（双根加载/校验/编译/撞名/RPC/回退/异源）
-│   └── client.smoke.mjs   # 8 个 jsdom 冒烟用例（渲染/增删节点/拖拽连线/边面板/JSON tab/校验弹窗/保存）
-├── docs/EDITOR-MIGRATION.md  # 迁移分析报告（架构对照 + 适配决策）
-└── package.json           # 仅测试用 devDependencies（react/jsdom），插件本体零依赖
+│   ├── host.test.mjs      # host 单测（双根加载/校验/编译/撞名/RPC/回退/异源）
+│   ├── client.smoke.mjs   # jsdom 冒烟
+│   ├── static-bundle.test.mjs  # 无 harness 静态 Host / dist apply
+│   └── dist-fresh.test.mjs     # dist 新鲜度 + dsh-tools 版本对齐
+├── verify.sh              # 本地质量闸门（build + 新鲜度 + 版本 + 包测试）
+├── docs/EDITOR-MIGRATION.md
+└── package.json           # @deepseek-ai/dsh-tools 对齐宿主 DSH v0.1.1-rc.2
 ```
 
 ## 使用方式
@@ -21,8 +27,9 @@ packages/dsh-visual-workflow/
 ### 方式 A：组合包安装（产品形态）
 
 ```bash
-# 构建 bundle 产物（dist/host-entry.mjs + dist/client.js）
-cd packages/dsh-visual-workflow && npm run build
+# 构建 bundle 产物（dist/host-entry.mjs + dist/client.js + dist/.src-stamp.json）
+# npm install / prepare 会自动重建；改 src 后必须再跑一次，否则 link 安装仍加载旧 dist
+cd packages/dsh-visual-workflow && npm run build && npm run check:dist
 
 # link 安装到 profile（路径用绝对路径；目标 profile 以实际为准）
 dsh plugin --profile web add link:/Users/chris/workspace/workflow-manager/packages/dsh-visual-workflow
@@ -73,9 +80,17 @@ cordis_define:
 
 ```bash
 cd packages/dsh-visual-workflow
-npm install --cache <本地缓存目录>   # 仅安装测试 devDependencies
-npm test                              # 45 个用例（host 37 + client 8）
+npm install --cache <本地缓存目录>   # prepare 会重建 dist
+npm test                              # host + client 冒烟 + 静态 bundle + dist 新鲜度
+bash verify.sh                        # Gate1–4：版本对齐 + 构建 + 新鲜度 + 包测试
 ```
+
+## 版本策略（dsh-tools ↔ 宿主）
+
+- 插件 `@deepseek-ai/dsh-tools` **固定 `0.1.1-rc.2`**，与本地/官方最新宿主 **DSH v0.1.1-rc.2** 对齐（npm dist-tag `next`）。
+- 用途仅限静态 bundle 的 `defineTool` 兜底（动态模式走 `harness.defineTool`）。`defineTool` 工厂签名自 rc.7 / rc.8 / 0.1.1-rc.2 保持兼容。
+- Minke 0.2.0 宿主本体仍内嵌 `dsh-tools@0.1.0-rc.8`。插件不再把 rc.7 混入 rc.8/0.1.1 宿主闭包；静态模式用本包自己的 0.1.1-rc.2 副本整形工具对象，再经 `ctx.tools.register` 交给宿主。
+- 改 `src/` 后若未 `npm run build`，`npm run check:dist` / `verify.sh` / 包测试会失败，避免再出现 issue-33 的过期 `dist/host-entry.mjs`。
 
 ## 与 pkg-19 的主要差异
 

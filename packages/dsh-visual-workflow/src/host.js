@@ -57,6 +57,7 @@ return {
     // ── 双模式 RPC 注册（动态会话=harness.handle / 静态 bundle=webServer 路由）──
     // 动态插件运行时提供 harness 内建；静态组合包没有，改经 webServer 前缀路由
     // （POST /dsh-visual-workflow/<method>，信封 {rpcId,method,payload}→{rpcId,result}）
+    // 必须用 typeof 探测未声明标识符：静态 IIFE / Minke 无 harness 全局，直接读会 ReferenceError。
     const isDynamicHost = typeof harness !== 'undefined'
     const rpcRoutes = new Map()
     function registerRpc(method, fn) {
