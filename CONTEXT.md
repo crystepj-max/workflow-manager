@@ -31,7 +31,8 @@
   入口徽标与保存前归一——UI 关注点，插件无法 import 共享文件（vm 沙箱），保留为独立实现；
   入口唯一性的**权威判定**在校验内核（保存时宿主 sanitize 依内核拓扑重新归一）。
 - **走通性（walkability）**：框架级保证——任何蓝图运行要么走通（DONE），要么以明确终态终止
-  （`FAILED_AT_*` / `FAILED_MAX_ROUNDS` / `TECHNICAL_FAILURE` / `ENDED_NO_*` / `ERROR`），绝不卡死。
+  （`FAILED_AT_*` / `FAILED_MAX_ROUNDS` / `FAILED_ITEM_CAP` / `FAILED_AGENT_CAP` /
+  `TECHNICAL_FAILURE` / `ENDED_NO_*` / `ERROR`），绝不卡死。
   创作期规则：有 successCondition 的节点必须有 failure 边（否则判定失败无出口，运行时只能报
   `ENDED_NO_FAILURE_EDGE` 兜底）。
 - **运行时排练厅（runtime harness）**：测试基建——`scripts/test/helpers/runtime-harness.mjs`。
@@ -53,6 +54,12 @@
 - **可信度闸门（verifyBranch）**：验证节点开工分支自检 + `verified_branch`/`verified_head` 硬校验。
 - **异源（heteroCheck）**：dev↔review 模型绑定必须不同（save/validate 层强制；运行时日志）。
 - **人工门禁（manualCheck）**：节点产出后挂起（`AWAITING_HUMAN_<节点id>` + resume 载荷），人工裁决后续跑。
+- **扇出（fanout）**：受限并行子任务节点。`items` 仅从 `$.args` 或 success 路径上的前序
+  `$.results.<节点id>` 读取数组；`goal` 用 `{{item}}` 注入当前项，`output.schema` 是 per-item
+  schema。编译器以 `pipeline` 执行，按原序聚合为 `{ total, okCount, failedCount, items }`，
+  失败项为 `null`，再按 `failOn` 决定出边。看板通过 `<节点label> #<序号>` label 归组，
+  不依赖结果回灌。4096 items / 1000 累计 agent 上限在本批 agent 出场前分别返回
+  `FAILED_ITEM_CAP` / `FAILED_AGENT_CAP`。
 - **业务规则前端可配置（候选二 Q7）**：编辑器工作流控制面板可配置——打回上限（1-9 系统上限钳制）、
   异源开关（heteroCheck）、超限行为（onMaxRounds return/auto-reschedule）；字段经 DSL 双向投影落盘蓝图，
   校验与编译按蓝图内容生效。verifyBranch（节点级闸门）编辑器无 UI，列后续候选。

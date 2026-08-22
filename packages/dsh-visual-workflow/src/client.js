@@ -70,6 +70,15 @@ return {
       heteroCheckHelp: '声明 dev 与 review 节点必须异源（注入运行日志；异源硬规则全局强制，与开关无关）。',
       onMaxRounds: '超限行为',
       onMaxRoundsHelp: '打回超限后：return=直接终止；auto-reschedule=先做失败归因分析（归因/拆分/人工介入建议）再终止。',
+      nodeKind: '节点类型',
+      nodeKindWorker: '普通节点',
+      nodeKindFanout: '扇出节点',
+      fanoutItems: 'items 来源',
+      fanoutItemsHelp: '仅支持 $.results.<节点id>.<字段> 或 $.args.<字段>；目标中用 {{item}} 引用当前项。',
+      fanoutFailOn: '失败阈值',
+      fanoutFailOnHelp: 'any=任一项失败；all=全部失败（默认）；数字 N=失败数大于 N。',
+      fanoutFailOnNumber: '允许失败数',
+      perItemSchemaHelp: '该 Schema 校验每个子代理的结果；聚合包装对象不受此 Schema 校验。',
       nodeId: '节点 ID',
       nodeLabel: '显示名',
       profile: '角色',
@@ -155,6 +164,15 @@ return {
       heteroCheckHelp: 'Declares dev and review must use different models (runtime log injection; the hard rule is global regardless of the switch).',
       onMaxRounds: 'Over-limit behavior',
       onMaxRoundsHelp: 'After max rounds: return=terminate; auto-reschedule=run failure attribution (attribution/split/human advice) then terminate.',
+      nodeKind: 'Node type',
+      nodeKindWorker: 'Worker',
+      nodeKindFanout: 'Fan-out',
+      fanoutItems: 'Items source',
+      fanoutItemsHelp: 'Use $.results.<node-id>.<field> or $.args.<field>; reference the current item as {{item}} in the goal.',
+      fanoutFailOn: 'Failure threshold',
+      fanoutFailOnHelp: 'any=one failure; all=all fail (default); number N=failedCount > N.',
+      fanoutFailOnNumber: 'Allowed failures',
+      perItemSchemaHelp: 'This schema validates each sub-agent result, not the aggregate wrapper.',
       nodeId: 'Node ID',
       nodeLabel: 'Label',
       profile: 'Profile',
@@ -298,6 +316,7 @@ return {
 .vwf-code { white-space:pre-wrap; font-family:var(--dsw-font-family-mono, ui-monospace, monospace); font-size:11px; opacity:.9; max-height:320px; overflow:auto; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; padding:10px; background:var(--dsw-alias-bg-base, #181818); }
 .vwf-table { width:100%; border-collapse:collapse; font-size:11px; }
 .vwf-table th, .vwf-table td { text-align:left; padding:4px 8px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); }
+.vwf-table .vwf-fanout-group td { padding-top:9px; font-weight:600; color:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #4d9fff)); background:var(--dsw-alias-bg-layer-2, #242424); }
 .vwf-json-edit { width:100%; height:520px; box-sizing:border-box; resize:none; font-family:var(--dsw-font-family-mono, ui-monospace, monospace); font-size:11px; line-height:1.6; }
 /* ── SVG 画布 ── */
 .vwf-edge-flow { stroke-dasharray:3 17; animation:vwf-dash 3.6s linear infinite; }
@@ -742,7 +761,7 @@ return {
             h('text', { className: 'vwf-entry-badge-text', x: 11, y: 3, textAnchor: 'middle' }, t('entryBadge'))
           ) : null,
           h('text', { className: 'vwf-node-label', x: p.w / 2, y: p.h / 2 - 4, textAnchor: 'middle' }, (node && (node.label || node.id)) || id),
-          h('text', { className: 'vwf-node-kind', x: p.w / 2, y: p.h / 2 + 15, textAnchor: 'middle' }, 'worker'),
+          h('text', { className: 'vwf-node-kind', x: p.w / 2, y: p.h / 2 + 15, textAnchor: 'middle' }, (node && node.kind) || 'worker'),
           status ? h('circle', { cx: p.w - 14, cy: 14, r: 6, fill: STATUS_COLOR[status] }) : null,
           !props.readOnly ? h('circle', { className: 'vwf-handle', cx: 0, cy: p.h / 2, r: 4 }) : null,
           !props.readOnly ? h('circle', {
@@ -821,6 +840,9 @@ return {
       const validationEnabled = !!node.output
       const manualEnabled = !!node.manualCheck
       const resultMode = validationEnabled ? 'ai' : manualEnabled ? 'manual' : 'none'
+      const isFanout = node.kind === 'fanout'
+      const failOnValue = node.failOn === undefined ? 'all' : node.failOn
+      const failOnMode = Number.isInteger(failOnValue) ? 'number' : failOnValue
 
       const commitSchema = (value) => {
         if (!value.trim()) {
@@ -866,6 +888,28 @@ return {
         props.onUpdate(node.id, { id: value })
       }
 
+      const changeKind = (kind) => {
+        if (kind === 'fanout') {
+          const output = { ...(node.output || {}), schema: (node.output && node.output.schema) || null }
+          delete output.successCondition
+          setSchemaDraft(output.schema ? JSON.stringify(output.schema, null, 2) : '')
+          props.onUpdate(node.id, {
+            kind: 'fanout',
+            items: node.items || '$.args.items',
+            failOn: node.failOn === undefined ? 'all' : node.failOn,
+            manualCheck: null,
+            output,
+          })
+        } else {
+          props.onUpdate(node.id, {
+            kind: undefined,
+            items: undefined,
+            failOn: undefined,
+            output: node.output && node.output.schema ? node.output : null,
+          })
+        }
+      }
+
       // provider/model 选项（vwf.models 数据源；当前值不在列表时保留显示）
       const providers = props.providers || []
       const curProv = node.model && node.model.provider ? node.model.provider : ''
@@ -883,7 +927,18 @@ return {
         h('div', { className: 'vwf-row' },
           h('strong', null, t('nodeConfig')),
           h('span', { className: 'vwf-spacer' }),
-          h('span', { className: 'vwf-badge' }, 'worker')
+          h('span', { className: 'vwf-badge' }, isFanout ? 'fanout' : 'worker')
+        ),
+        h(Field, { label: t('nodeKind'), required: true, errors: errorsFor('kind') },
+          h(VwfSelect, {
+            value: isFanout ? 'fanout' : 'worker',
+            invalid: errorsFor('kind').length > 0,
+            options: [
+              { value: 'worker', label: t('nodeKindWorker') },
+              { value: 'fanout', label: t('nodeKindFanout') },
+            ],
+            onChange: changeKind,
+          })
         ),
         h(Field, { label: t('nodeId'), required: true, errors: errorsFor('id') },
           h('input', {
@@ -927,10 +982,52 @@ return {
               })
             : h('input', { className: 'vwf-input', value: curModel, placeholder: 'deepseek-v4-flash', onChange: (ev) => props.onUpdate(node.id, { model: { provider: curProv || undefined, model: ev.target.value || undefined } }) })
         ),
-        h(Field, { label: t('goal'), required: true, errors: errorsFor('goal') },
-          h('textarea', { className: 'vwf-textarea', rows: 3, value: node.goal || '', placeholder: t('defaultNodeGoal'), onChange: (ev) => props.onUpdate(node.id, { goal: ev.target.value }) })
+        h(Field, { label: t('goal'), required: true, help: isFanout ? t('fanoutItemsHelp') : undefined, errors: errorsFor('goal') },
+          h('textarea', { className: 'vwf-textarea' + (errorsFor('goal').length ? ' err' : ''), rows: 3, value: node.goal || '', placeholder: isFanout ? '处理任务：{{item}}' : t('defaultNodeGoal'), onChange: (ev) => props.onUpdate(node.id, { goal: ev.target.value }) })
         ),
-        h('div', { className: 'vwf-subsection' },
+        isFanout ? h('div', { className: 'vwf-subsection' },
+          h(Field, { label: t('fanoutItems'), required: true, help: t('fanoutItemsHelp'), errors: errorsFor('items') },
+            h('input', {
+              className: 'vwf-input vwf-mono' + (errorsFor('items').length ? ' err' : ''),
+              value: node.items || '', placeholder: '$.args.items',
+              onChange: (ev) => props.onUpdate(node.id, { items: ev.target.value }),
+            })
+          ),
+          h(Field, { label: t('fanoutFailOn'), required: true, help: t('fanoutFailOnHelp'), errors: errorsFor('failOn') },
+            h(VwfSelect, {
+              value: failOnMode,
+              invalid: errorsFor('failOn').length > 0,
+              options: [
+                { value: 'all', label: 'all' },
+                { value: 'any', label: 'any' },
+                { value: 'number', label: t('fanoutFailOnNumber') },
+              ],
+              onChange: (value) => props.onUpdate(node.id, { failOn: value === 'number' ? 0 : value }),
+            }),
+            failOnMode === 'number' ? h('input', {
+              className: 'vwf-input' + (errorsFor('failOn').length ? ' err' : ''),
+              type: 'number', min: 0, step: 1, value: failOnValue,
+              onChange: (ev) => props.onUpdate(node.id, { failOn: Math.max(0, Math.trunc(Number(ev.target.value) || 0)) }),
+            }) : null
+          ),
+          h(Field, { label: t('outputSchema'), help: t('perItemSchemaHelp'), errors: errorsFor('output.schema') },
+            h('div', { style: { position: 'relative' } },
+              h('textarea', {
+                className: 'vwf-textarea vwf-mono' + (errorsFor('output.schema').length ? ' err' : ''),
+                rows: 6, value: schemaDraft, placeholder: t('outputSchemaPlaceholder'),
+                onChange: (ev) => onSchemaChange(ev.target.value),
+                onBlur: () => { if (schemaDirty) { commitSchema(schemaDraft); setSchemaDirty(false) } },
+              }),
+              h('button', {
+                className: 'vwf-btn sm', title: t('outputSchemaBeautify'),
+                style: { position: 'absolute', right: 6, top: 6 },
+                onMouseDown: (ev) => ev.preventDefault(),
+                onClick: beautifySchema,
+              }, '✨')
+            ),
+            schemaError ? h('div', { className: 'vwf-err-line' }, schemaError) : null
+          )
+        ) : h('div', { className: 'vwf-subsection' },
           h('div', { style: { fontSize: 13, fontWeight: 500 } }, t('resultMode')),
           h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('resultModeDescription')),
           h('div', { className: 'vwf-field' },
@@ -1344,13 +1441,55 @@ return {
     function mapStatus(state, dsl) {
       const m = {}
       for (const a of (state && state.agents) || []) {
-        const id = nodeIdForLabel(String(a.label).replace(/ R\d+$/, ''), dsl)
+        const baseLabel = String(a.label).replace(/ R\d+$/, '').replace(/ #\d+$/, '')
+        const id = nodeIdForLabel(baseLabel, dsl)
         if (!id) continue
-        m[id] = a.outcome === 'completed' ? 'pass' : a.outcome === 'failed' ? 'fail' : 'running'
+        const next = a.outcome === 'completed' ? 'pass' : a.outcome === 'failed' ? 'fail' : 'running'
+        if (next === 'fail' || m[id] === undefined || (next === 'running' && m[id] === 'pass')) m[id] = next
       }
       const cur = state && state.phase ? nodeIdForLabel(state.phase, dsl) : null
       if (cur && m[cur] !== 'pass' && m[cur] !== 'fail') m[cur] = 'running'
       return m
+    }
+
+    function dashboardAgentRows(agents) {
+      const regular = []
+      const groups = []
+      const byGroup = {}
+      for (const a of agents || []) {
+        const clean = String(a.label || '').replace(/ R\d+$/, '')
+        const match = /^(.*) #(\d+)$/.exec(clean)
+        if (!match) { regular.push(a); continue }
+        if (!byGroup[match[1]]) {
+          byGroup[match[1]] = []
+          groups.push(match[1])
+        }
+        byGroup[match[1]].push({ ...a, itemIndex: Number(match[2]) })
+      }
+      const statusBadge = (a) => h('span', {
+        className: 'vwf-badge',
+        style: { color: a.outcome === 'completed' ? STATUS_COLOR.pass : a.outcome === 'failed' ? STATUS_COLOR.fail : STATUS_COLOR.running },
+      }, a.outcome)
+      const rows = regular.map(a => h('tr', { key: 'agent-' + a.seq },
+        h('td', null, String(a.seq)),
+        h('td', null, a.label),
+        h('td', null, a.phase || '—'),
+        h('td', null, statusBadge(a))
+      ))
+      for (const name of groups) {
+        rows.push(h('tr', { key: 'group-' + name, className: 'vwf-fanout-group' },
+          h('td', { colSpan: 4 }, name + ' · fanout · ' + byGroup[name].length + ' items')
+        ))
+        byGroup[name].sort((a, b) => a.itemIndex - b.itemIndex).forEach((a) => {
+          rows.push(h('tr', { key: 'fanout-' + a.seq },
+            h('td', null, '#' + a.itemIndex),
+            h('td', null, a.label),
+            h('td', null, a.phase || '—'),
+            h('td', null, statusBadge(a))
+          ))
+        })
+      }
+      return rows
     }
 
     function Dashboard(props) {
@@ -1392,12 +1531,7 @@ return {
                 dsl ? h('div', { className: 'vwf-card', style: { marginTop: 8 } }, h(Canvas, { dsl, readOnly: true, statusMap: st })) : null,
                 h('table', { className: 'vwf-table', style: { marginTop: 8 } },
                   h('thead', null, h('tr', null, h('th', null, '#'), h('th', null, '节点'), h('th', null, '阶段'), h('th', null, '结果'))),
-                  h('tbody', null, snap.state.agents.map(a => h('tr', { key: a.seq },
-                    h('td', null, String(a.seq)),
-                    h('td', null, a.label),
-                    h('td', null, a.phase || '—'),
-                    h('td', null, h('span', { className: 'vwf-badge', style: { color: a.outcome === 'completed' ? STATUS_COLOR.pass : a.outcome === 'failed' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, a.outcome))
-                  )))
+                  h('tbody', null, dashboardAgentRows(snap.state.agents))
                 ),
                 h('div', { className: 'vwf-code', style: { marginTop: 8 } }, (snap.state.logs || []).slice(-20).join('\n'))
               )

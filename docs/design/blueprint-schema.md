@@ -33,9 +33,12 @@
 |---|---|---|
 | `id` | ✅ | 唯一；不得使用保留 id `$end`/`$entry`/`$new-round`；必须有出边 |
 | `label` | 可选 | 展示名（缺省 = id） |
+| `kind` | 可选 | `worker`（缺省）\| `fanout`；既有节点不写 `kind` 时语义不变 |
 | `profile` | ✅ | 角色名，对应 `dsh/roles/<profile>.md` |
-| `goal` | ✅ | 节点目标提示词 |
-| `output.schema` | 可选 | JSON Schema，仅受支持子集：`type/oneOf/properties/required/additionalProperties/items/enum/const` + 注解 `description/title/default/examples`（R-03） |
+| `goal` | ✅ | 节点目标提示词；fanout 节点必须含 `{{item}}`，非字符串 item 以 JSON 序列化后替换 |
+| `items` | fanout 必填 | 运行时数组来源：仅 `$.results.<前序节点id>[.路径]` 或 `$.args[.路径]` |
+| `failOn` | fanout 可选 | `any` \| `all`（缺省）\| 非负整数 N；分别表示任一失败、全部失败、`failedCount > N` 时走 failure 边 |
+| `output.schema` | 可选 | JSON Schema，仅受支持子集：`type/oneOf/properties/required/additionalProperties/items/enum/const` + 注解 `description/title/default/examples`（R-03）；fanout 下是 per-item schema，不校验聚合包装对象 |
 | `output.successCondition` | 可选 | `$.path ==|!= value`（value ∈ true/false/null/字符串/数字）；路径必须已在 `output.schema` 中声明 |
 | `output.files` | 可选 | 对象：`{ "<相对路径>": "json"\|"markdown"\|"text" }`——本节点**应产出**的声明式文件契约（D7，Q1 增补）；路径相对 `runDir/`；见 §6.4 |
 | `manualCheck` | 可选 | 布尔，默认 false；true = 人工门禁节点（vwf 编译为 `AWAITING_HUMAN_<id>` + resume 续跑；DSH 侧对应脚本返回 + 主会话裁决） |
@@ -69,6 +72,7 @@
 6. `output.files`（若给）：键为合法相对路径（非空、不以 `/` 开头或结尾、不含 `..`、不覆盖保留文件 `STATE.md`）；值为 `json|markdown|text` 枚举。
 7. **异源硬规则（v2 生效，T-06）**：凡含 `dev` 与 `review` 节点的蓝图（按节点 `id` 或 `profile` 识别——编辑器新建节点默认 id 为 node-N，以角色表达 dev/review 时同样纳入），save/update/validate 一律校验其 `bindings.models`——任一缺失 → 拒（「无法证明异源，请显式配置」）；完全同模型（provider+model 相同）→ 拒；同 provider 不同 model（弱异源）→ 通过 + warning；不同 provider → 通过。无 dev/review 节点的蓝图跳过。错误消息沿用 `errors[]` 结构（at=`bindings.models`，含实际 provider/model 与修复指引）。
 8. `control.maxRounds`（若给）：**1-9 的整数（系统约定上限 9，候选二 Q7）**——0/负数/小数/非数/超 9 一律拒绝（坐标键 `control:maxRounds`）。
+9. **fanout 专属规则**：`kind ∈ {worker, fanout}`；fanout 必须有合法 `items`、含 `{{item}}` 的 `goal` 和 failure 出边，禁止 `output.successCondition` / `manualCheck` / `verifyBranch`；`failOn` 仅接受 `any` / `all` / 非负整数。`$.results.<节点id>` 引用必须存在且沿 success 边先于当前节点。worker 出现 `items` / `failOn` 拒绝。所有错误携带对应 `node:<id>:<field>` 坐标。
 
 ### 3.2 DSL 结构规则（与校验内核结构层对齐；原 host `validateDsl` 已删除）
 
@@ -85,6 +89,8 @@
 ### 4.1 vwf 侧投影
 
 `projectToVwf(bp)`：字段映射为 vwf DSL 子集——`id`、`name = displayName`、`description`、`entry`、`control.maxRounds`；节点注入 `model = bindings.models[nodeId]`（无则省略）；保留 `output`/`manualCheck`；**业务规则字段（候选二 Q7 修订）：`onMaxRounds` / `heteroCheck` 进入 DSL（编辑器可配置）；`verifyBranch` 为节点级字段、编辑器无 UI，暂不进入**。产物可喂校验内核结构层（R-02/R-03）。
+
+fanout 节点的 `kind` / `items` / `failOn` 必须双向透传；编辑器保存、重开不得丢失。
 
 > **编译语义（v1.1 候选一统一编译器，T-IMP-12）**：DSH 与 vwf 双入口共用单一编译器
 > `scripts/generate.mjs compileBlueprint`。宿主（`host.js`）经管道取译文：内置模板读
@@ -103,6 +109,13 @@
 ### 4.3 角色与运行上下文
 
 生成脚本须注入与手写 mjs 等价的 `roleRef`（agent 开工自读 `dsh/roles/<profile>.md`）与运行上下文块（taskId/runDir/baseBranch/workBranch/STATE.md 契约）——见 `docs/research/mjs-semantics.md` §4。
+
+### 4.4 fanout 编译与聚合
+
+- `compileBlueprint` 把 items 表达式解析为运行时数组，并生成 `pipeline(items, perItemStage)`；取值非数组时返回 `TECHNICAL_FAILURE`。
+- 每项调用 `agent()`，label 为 `<节点label> #<1 起序号>`，`output.schema` 作为单次 agent 的 schema；输出顺序与输入一致，失败项为 `null`。
+- 节点结果固定包装为 `{ total, okCount, failedCount, items }`，再由 `failOn` 决定 success/failure 出边。空数组聚合为全零对象、记录 log 并判成功。
+- 在任何本批 agent 启动前检查 `ITEM_CAP=4096` 与累计 `AGENT_CAP=1000`，分别返回 `FAILED_ITEM_CAP` / `FAILED_AGENT_CAP`；脚本仅使用 `agent/parallel/pipeline/phase/log/args`，agent opts 仅使用白名单字段。
 
 ## 5. 示例蓝图
 

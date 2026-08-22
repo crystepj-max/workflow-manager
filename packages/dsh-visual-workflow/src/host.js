@@ -238,6 +238,9 @@ return {
         control: { maxRounds: (bp.control && bp.control.maxRounds) || 9 },
         nodes: bp.nodes.map((n) => {
           const o = { id: n.id, profile: n.profile, label: n.label || n.id, goal: n.goal }
+          if (n.kind !== undefined) o.kind = n.kind
+          if (n.items !== undefined) o.items = n.items
+          if (n.failOn !== undefined) o.failOn = n.failOn
           if (n.output) o.output = n.output
           if (n.manualCheck) o.manualCheck = true
           if (models[n.id]) o.model = models[n.id]
@@ -261,6 +264,9 @@ return {
       const models = {}
       const nodes = (dsl.nodes || []).map((n) => {
         const o = { id: n.id, profile: n.profile, label: n.label || n.id, goal: n.goal || '' }
+        if (n.kind !== undefined) o.kind = n.kind
+        if (n.items !== undefined) o.items = n.items
+        if (n.failOn !== undefined) o.failOn = n.failOn
         if (n.output) o.output = n.output
         if (n.manualCheck) o.manualCheck = true
         if (n.model && typeof n.model === 'object' && n.model.provider && n.model.model) {

@@ -6,11 +6,12 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { generateAll, generateUserSkill, writeUserSkill } from '../generate.mjs';
+import { compileBlueprint, generateAll, generateUserSkill, projectToVwf, skillWrap, writeUserSkill } from '../generate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tplDir = path.join(here, '../../templates');
 const bp = JSON.parse(readFileSync(path.join(tplDir, 'dev-workflow-2-0.json'), 'utf8'));
+const fanoutBp = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'));
 
 test('S2 生成器：产物四件套齐全', () => {
   const { files, report } = generateAll(tplDir);
@@ -72,6 +73,27 @@ test('S2 生成器：幂等（两次调用产物完全一致）', () => {
   for (const [rel, content] of a.files) {
     assert.equal(content, b.files.get(rel), '产物不一致：' + rel);
   }
+});
+
+test('fanout 编译使用 pipeline、白名单 agent opts，并保持投影字段', () => {
+  const { script } = compileBlueprint(fanoutBp);
+  assert.ok(script.includes('pipeline('), 'fanout 产物应调用 pipeline');
+  assert.ok(script.includes('const ITEM_CAP = 4096'));
+  assert.ok(script.includes('const AGENT_CAP = 1000'));
+  assert.ok(!/\b(?:require|process|fetch|setTimeout)\b/.test(script), '脚本不得使用沙箱外全局');
+  assert.ok(!/\b(?:effort|isolation|agentType)\s*:/.test(script), 'agent opts 不得含非白名单字段');
+  const dsl = projectToVwf(fanoutBp);
+  const fan = dsl.nodes.find((n) => n.id === 'fan');
+  assert.equal(fan.kind, 'fanout');
+  assert.equal(fan.items, '$.args.items');
+  assert.equal(fan.failOn, 'all');
+});
+
+test('fanout 编译与 skill 包装幂等，runbook 覆盖 cap 终态', () => {
+  assert.equal(compileBlueprint(fanoutBp).script, compileBlueprint(fanoutBp).script);
+  const skill = skillWrap(fanoutBp);
+  assert.ok(skill.includes('FAILED_ITEM_CAP'));
+  assert.ok(skill.includes('FAILED_AGENT_CAP'));
 });
 
 test('S2 生成器：非法蓝图编译失败并报错（不产出）', () => {

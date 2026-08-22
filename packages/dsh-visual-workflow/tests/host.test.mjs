@@ -630,3 +630,57 @@ test('Q7 闭环：回合上限系统约束（10 拒并带 control:maxRounds 坐�
   const bp = JSON.parse(fs._files.get(USER_DIR + '/t1.json'))
   assert.equal(bp.control.maxRounds, 5, '上限 5 落盘蓝图')
 })
+
+test('fanout 投影往返：kind/items/failOn 经 validate/save/list 无损', async () => {
+  const { handlers, fs } = env()
+  const dsl = {
+    id: 'fanout-ui', name: '扇出编辑器', entry: 'fan', control: { maxRounds: 3 },
+    nodes: [
+      {
+        id: 'fan', kind: 'fanout', profile: 'dispatcher', label: '逐项处理',
+        goal: '处理 {{item}}', items: '$.args.items', failOn: 1,
+        model: { provider: 'p1', model: 'm1' },
+        output: { schema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'], additionalProperties: false } },
+      },
+      { id: 'finish', profile: 'test', label: '汇总', goal: '汇总', model: { provider: 'p1', model: 'm1' } },
+    ],
+    edges: [
+      { from: 'fan', to: 'finish', on: 'success' },
+      { from: 'fan', to: '$end', on: 'failure' },
+      { from: 'finish', to: '$end', on: 'success' },
+    ],
+  }
+  const v = await call(handlers, 'vwf.validate', { dsl })
+  assert.equal(v.ok, true, JSON.stringify(v.errors))
+  assert.equal(v.sanitized.nodes[0].kind, 'fanout')
+  assert.equal(v.sanitized.nodes[0].items, '$.args.items')
+  assert.equal(v.sanitized.nodes[0].failOn, 1)
+  const saved = await call(handlers, 'vwf.workflows.save', { dsl })
+  assert.equal(saved.ok, true, JSON.stringify(saved.errors))
+  const bp = JSON.parse(fs._files.get(USER_DIR + '/fanout-ui.json'))
+  assert.equal(bp.nodes[0].kind, 'fanout')
+  assert.equal(bp.nodes[0].items, '$.args.items')
+  assert.equal(bp.nodes[0].failOn, 1)
+  const listed = (await call(handlers, 'vwf.workflows.list')).find((item) => item.id === 'fanout-ui')
+  assert.equal(listed.dsl.nodes[0].kind, 'fanout')
+  assert.equal(listed.dsl.nodes[0].items, '$.args.items')
+  assert.equal(listed.dsl.nodes[0].failOn, 1)
+})
+
+test('fanout 校验错误按 kind/items/failOn fieldKey 接入宿主', async () => {
+  const { handlers } = env()
+  const dsl = baseDsl({
+    nodes: [
+      {
+        id: 'a', kind: 'fanout', profile: 'dispatcher', label: 'A', goal: '缺占位',
+        items: '$.bad.items', failOn: -1, model: { provider: 'p1', model: 'm1' },
+      },
+      { id: 'b', profile: 'dev', label: 'B', goal: '目标B', model: { provider: 'p1', model: 'm1' } },
+    ],
+  })
+  const v = await call(handlers, 'vwf.validate', { dsl })
+  assert.equal(v.ok, false)
+  assert.ok(v.fieldErrors['node:a:items'])
+  assert.ok(v.fieldErrors['node:a:failOn'])
+  assert.ok(v.fieldErrors['node:a:goal'])
+})
