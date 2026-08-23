@@ -341,7 +341,10 @@ return {
         entry: bp.entry,
         control: { maxRounds: (bp.control && bp.control.maxRounds) || 9 },
         nodes: bp.nodes.map((n) => {
-          const o = { id: n.id, profile: n.profile, label: n.label || n.id, goal: n.goal }
+          const o = { id: n.id, profile: n.profile, label: n.label || n.id }
+          // lossless-JSON 守卫：undefined 键会被拒绝；与 generate.mjs 的
+          // JSON.stringify（剥除 undefined/null）语义保持逐键一致
+          if (n.goal !== undefined && n.goal !== null) o.goal = n.goal
           if (n.output) o.output = n.output
           if (n.manualCheck) o.manualCheck = true
           if (models[n.id]) o.model = models[n.id]
@@ -455,10 +458,11 @@ return {
     async function validatePipeline(dsl) {
       const core = await loadValidatorCore()
       if (!core) {
-        return { ok: false, errors: [{ at: '$', message: '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）' }], fieldErrors: {} }
+        // lossless-JSON 守卫：所有键都必须有值，sanitized 早退时显式给 null
+        return { ok: false, errors: [{ at: '$', message: '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）' }], fieldErrors: {}, sanitized: null }
       }
       if (!dsl || typeof dsl !== 'object') {
-        return { ok: false, errors: [{ at: '$', message: 'dsl 必须是对象' }], fieldErrors: {} }
+        return { ok: false, errors: [{ at: '$', message: 'dsl 必须是对象' }], fieldErrors: {}, sanitized: null }
       }
       // 原始边预检：failure 边带 when 必须报错（sanitize 会剔除 when，须在清洗前拦截）
       const rawErrors = []
