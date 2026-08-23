@@ -65,6 +65,17 @@ cordis_define:
   - 画布 / JSON 双 tab 实时互同步；变更后防抖实时校验状态行。
 - **运行看板**：输入 runId 自动轮询 `vwf.state`，画布染色 + Agent 表 + 日志（保留 pkg-19 能力）。
 
+## 运行方式
+
+正式执行路径适用于所有部署：
+
+1. 在编辑器中打开或保存工作流，点「获取脚本」，由 `vwf.script` 把 DSL 图编译成脚本。
+2. 把脚本交给平台内置 `workflow` 工具执行；运行回执中的 runId 可用于运行看板轮询状态。
+
+`wf_run` 是条件注册的增强路径：仅在宿主 `agents` 可用时注册，可直接完成 DSL 编译与执行。
+`workflowEngine` 推迟到 execute 阶段解析；若解析失败，工具会明确报错，此时改用上述
+「获取脚本 → 平台 `workflow` 工具」路径即可。
+
 ## RPC 面（host 半）
 
 | RPC | 说明 |
@@ -104,4 +115,3 @@ bash verify.sh                        # Gate1–4：版本对齐 + 构建 + 新�
 - 持久化已落地（用户模板 `~/.dsh/visual-workflow/templates/` + skill 同步 `~/.dsh/skills/`），不再依赖 P2 的 storageDomain 方案（specs/vwf-p2 D3）。
 - 插件 DSL 无 `$new-round` / `session` / `max_attempts` 概念，右击菜单仅「添加结束节点」（详见迁移报告）。
 - 动态包无法 `import` 宿主 ui-primitives（运行时会话约束），编辑器使用 DSH shell 的 CSS 变量体系（`--dsw-alias-*`）实现原生观感。
-- `wf_run` 工具注册条件为宿主 `agents` 可用；`workflowEngine` 解析推迟到执行期（本部署中该服务在 agent preset 平面，动态插件经 `agentPresets.serviceFor` 只读桥接仍可能解析不到），解析不到时错误在 execute 阶段明确返回，用户可改用「获取脚本」产物 + 内置 workflow 工具执行。
