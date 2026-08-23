@@ -36,7 +36,10 @@ writeFileSync(
   `const __VWF_REPO__ = ${JSON.stringify(vwfRepoRoot)};\n` +
   `${hostBody}\n})();\n` +
   `export const name = plugin.name;\n` +
-  (pluginHasInject(hostBody) ? `export const inject = plugin.inject;\n` : ``) +
+  // 静态组合包行级激活必须等 webServer 与 tools 就绪：无 inject 的行会在
+  // 这些服务激活前 apply，导致 RPC 路由或工具注册永久错过。
+  // 动态会话插件仍走 harness.handle，不受影响（src 闭包体本身不声明 inject）。
+  `export const inject = ['webServer', 'tools'];\n` +
   `export function apply(ctx) { return plugin.apply(ctx); }\n`
 )
 

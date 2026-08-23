@@ -75,8 +75,13 @@ return {
       register(ctx2, t) {
         if (isDynamicHost && typeof harness.registerTool === 'function') { harness.registerTool(ctx2, t); return }
         const tools = ctx2.get('tools')
-        if (tools && typeof tools.register === 'function') tools.register(t)
-        else console.log('[vwf] tools 服务缺失，工具未注册：' + (t && t.name))
+        if (tools && typeof tools.register === 'function') {
+          if (ctx2 && typeof ctx2.effect === 'function') {
+            ctx2.effect(() => tools.register(t), 'vwf: tool ' + (t && t.name))
+          } else {
+            tools.register(t)
+          }
+        } else console.log('[vwf] tools 服务缺失，工具未注册：' + (t && t.name))
       },
     }
 
@@ -744,34 +749,47 @@ return {
     // 信封与平台一致：POST /dsh-visual-workflow/<method>
     //   请求 {type:'client-request', rpcId, method, payload}
     //   响应 {rpcId, result}（result = 各 handler 的原样返回值）
+    // 加载时序：静态组合包的 webServer 服务可能晚于本插件激活（bundle 声明
+    // inject:['webServer'] 已让行级激活等待；此处对未声明 inject 的旧安装位
+    // 再兜底 ctx.inject 延迟注册，避免「路由未注册 → 浏览器 RPC 全 404/405」）。
     if (!isDynamicHost) {
+      const vwfRoute = {
+        kind: 'prefix',
+        path: '/dsh-visual-workflow',
+        handler: function vwfRpcHandler(req, res) {
+          if (req.method !== 'POST') { res.writeHead(405, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'POST only' })); return }
+          let raw = ''
+          req.on('data', (c) => { raw += c })
+          req.on('end', async () => {
+            let rpcId = '', method = '', payload = {}
+            try {
+              const msg = JSON.parse(raw || '{}')
+              rpcId = String(msg.rpcId || '')
+              method = String(msg.method || '')
+              payload = msg.payload || {}
+            } catch (e) {}
+            const fn = rpcRoutes.get(method)
+            let result
+            if (typeof fn !== 'function') result = { ok: false, errors: [{ at: '$', message: '未知方法：' + method }] }
+            else try { result = await fn(payload) } catch (e) { result = { ok: false, errors: [{ at: '$', message: String((e && e.message) || e) }] } }
+            try { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ rpcId: rpcId || 'r0', result: result === undefined ? null : result })) } catch (e) {}
+          })
+        },
+      }
+      const registerOn = (owner, ws) => {
+        if (!ws || typeof ws.register !== 'function') return false
+        if (owner && typeof owner.effect === 'function') owner.effect(() => ws.register(vwfRoute), 'vwf: rpc route')
+        else ws.register(vwfRoute)
+        return true
+      }
       const webServer = ctx.get('webServer')
-      if (webServer && typeof webServer.register === 'function') {
-        ctx.effect(() => webServer.register({
-          kind: 'prefix',
-          path: '/dsh-visual-workflow',
-          handler: function vwfRpcHandler(req, res) {
-            if (req.method !== 'POST') { res.writeHead(405, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'POST only' })); return }
-            let raw = ''
-            req.on('data', (c) => { raw += c })
-            req.on('end', async () => {
-              let rpcId = '', method = '', payload = {}
-              try {
-                const msg = JSON.parse(raw || '{}')
-                rpcId = String(msg.rpcId || '')
-                method = String(msg.method || '')
-                payload = msg.payload || {}
-              } catch (e) {}
-              const fn = rpcRoutes.get(method)
-              let result
-              if (typeof fn !== 'function') result = { ok: false, errors: [{ at: '$', message: '未知方法：' + method }] }
-              else try { result = await fn(payload) } catch (e) { result = { ok: false, errors: [{ at: '$', message: String((e && e.message) || e) }] } }
-              try { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ rpcId: rpcId || 'r0', result: result === undefined ? null : result })) } catch (e) {}
-            })
-          }
-        }), 'vwf: rpc route')
-      } else {
-        console.log('[vwf] webServer 服务缺失：静态 RPC 路由未注册，client 将无法调用 vwf.*')
+      if (!registerOn(ctx, webServer) && typeof ctx.inject === 'function') {
+        ctx.inject(['webServer'], (wctx) => {
+          registerOn(wctx, (wctx && typeof wctx.get === 'function' ? wctx.get('webServer') : wctx) || wctx)
+        })
+      }
+      if (ctx.get('webServer') === undefined) {
+        console.log('[vwf] webServer 服务当前不可用：静态 RPC 路由延迟到 webServer 激活（bundle 已声明 inject）；若仍未注册请检查组合包版本')
       }
     }
 
