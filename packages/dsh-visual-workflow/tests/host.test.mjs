@@ -773,3 +773,173 @@ test('Q7 闭环：回合上限系统约束（10 拒并带 control:maxRounds 坐�
   const bp = JSON.parse(fs._files.get(USER_DIR + '/t1.json'))
   assert.equal(bp.control.maxRounds, 5, '上限 5 落盘蓝图')
 })
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #19 · 多 run 并行三约束（P2-T4）：runTag 登记 / 同 taskId 互斥 / entry 续跑
+//      接管 / vwf.runs.list 清单 / 双 run 事件流隔离
+// ═══════════════════════════════════════════════════════════════════════════
+
+// 可控假引擎：start() 返回挂起 result（测试末尾统一放行终态），事件经 loadHost
+// 的 events 表手工驱动——与真实 worker 线程的异步投递时序解耦。
+function makeEngine() {
+  const pending = []
+  return {
+    starts: [],
+    start(req) {
+      this.starts.push(req)
+      const id = 'run-' + this.starts.length
+      let release = () => {}
+      const result = new Promise((r) => { release = r })
+      pending.push({ id, release })
+      return { id, result }
+    },
+    end(id, stopReason) {
+      const p = pending.find((x) => x.id === id)
+      if (p) p.release({ stopReason, value: null, agentsStarted: 0 })
+    },
+  }
+}
+
+// 结束一次运行：resolve 引擎 result（wf_run 回执需要）+ 投递 workflow/end 事件
+// （runs 状态机与 runTag.active 清除依赖事件——假引擎不会自动广播）
+function settleRun(eng, events, id, stopReason) {
+  eng.end(id, stopReason)
+  const ev = events.get('workflow/end')
+  if (ev) ev({ id }, { stopReason })
+}
+
+function engineEnv(eng) {
+  return env({ extra: { workflowEngine: eng, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
+}
+
+// wf_run.execute 内部有校验/编译等多个 await，引擎 start 非同步可达：轮询等待
+async function until(fn, label, ms = 4000) {
+  const t0 = Date.now()
+  while (!fn()) {
+    if (Date.now() - t0 > ms) throw new Error('until 超时：' + (label || '条件未满足'))
+    await new Promise((r) => setTimeout(r, 5))
+  }
+}
+
+test('#19 T1：wf_run 启动登记 taskId/workflowId；runs.list 最新在前；双 run 状态互不串扰', async () => {
+  const eng = makeEngine()
+  const { handlers, events, definedTools } = engineEnv(eng)
+  const wfRun = definedTools.find(t => t.name === 'wf_run')
+  assert.ok(wfRun, 'wf_run 已注册')
+  assert.equal(eng.starts.length, 0)
+  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  await until(() => eng.starts.length >= 1, '第一次启动放行')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: '开发工作流 2.0' } })
+  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-13' })
+  await until(() => eng.starts.length >= 2, '不同 taskId 并行放行')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: '开发工作流 2.0' } })
+  // 交错事件：两个 run 各自 phase/log/agent 互不相干
+  events.get('workflow/phase')({ id: 'run-1' }, '调度')
+  events.get('workflow/phase')({ id: 'run-2' }, '开发')
+  events.get('workflow/agent-start')({ id: 'run-1' }, { seq: 1, label: 'dev', phase: '调度' })
+  events.get('workflow/agent-start')({ id: 'run-2' }, { seq: 1, label: 'review', phase: '开发' })
+  events.get('workflow/log')({ id: 'run-2' }, 'B 的私有日志')
+
+  const list = await call(handlers, 'vwf.runs.list', {})
+  assert.equal(list.runs.length, 2)
+  assert.equal(list.runs[0].id, 'run-2', '最新在前')
+  assert.equal(list.runs[1].id, 'run-1')
+  assert.equal(list.runs[1].taskId, 'issue-12')
+  assert.equal(list.runs[1].workflowId, 'dev-workflow-2-0', 'templateId 登记为来源')
+  assert.equal(typeof list.runs[1].startedAt, 'number')
+  assert.equal(list.runs[1].supersededBy, '')
+
+  const s1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
+  const s2 = await call(handlers, 'vwf.state', { runId: 'run-2' })
+  assert.equal(s1.found, true)
+  assert.equal(s1.state.phase, '调度', 'A 的阶段不被 B 覆盖')
+  assert.equal(s2.state.phase, '开发')
+  assert.deepEqual(s1.state.agents.map(a => a.label), ['dev'])
+  assert.equal(s1.state.logs.some(l => l.includes('B 的私有日志')), false, 'A 看不到 B 的日志')
+  assert.ok(s2.state.logs.some(l => l.includes('B 的私有日志')))
+  assert.equal(s1.state.taskId, 'issue-12')
+  assert.equal(s2.state.taskId, 'issue-13')
+
+  settleRun(eng, events, 'run-1', 'DONE')
+  settleRun(eng, events, 'run-2', 'DONE')
+  const [r1, r2] = await Promise.all([p1, p2])
+  assert.ok(r1.includes('"stopReason":"DONE"'), r1)
+  assert.ok(r2.includes('"stopReason":"DONE"'), r2)
+})
+
+test('#19 T2（AC2）：同 taskId 进行中二次启动被拒并提示占用 runId；不同 taskId 放行；完成后解除', async () => {
+  const eng = makeEngine()
+  const { handlers, events, definedTools } = engineEnv(eng)
+  const wfRun = definedTools.find(t => t.name === 'wf_run')
+  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  await until(() => eng.starts.length >= 1, '首次启动')
+  // 互斥不依赖 workflow/start 事件到达（tag.active 空窗回归点）
+  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  assert.ok(blocked.includes('串行互斥'), blocked)
+  assert.ok(blocked.includes('run-1'), '提示占用中的 runId')
+  assert.equal(eng.starts.length, 1, '被拒调用未触达引擎')
+  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-13' })
+  await until(() => eng.starts.length >= 2, '不同 taskId 并行放行')
+  settleRun(eng, events, 'run-1', 'DONE')
+  settleRun(eng, events, 'run-2', 'DONE')
+  await Promise.all([p1, p2])
+  // 终态后同 taskId 解除互斥，可再次启动
+  const p3 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  await until(() => eng.starts.length >= 3, '终态后同 taskId 可再次启动')
+  settleRun(eng, events, 'run-3', 'DONE')
+  await p3
+})
+
+test('#19 T3（AC3）：AWAITING_HUMAN 占用同 taskId 拒绝新启动；entry 续跑放行并把旧门禁标记接管', async () => {
+  const eng = makeEngine()
+  const { handlers, events, definedTools } = engineEnv(eng)
+  const wfRun = definedTools.find(t => t.name === 'wf_run')
+  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  await until(() => eng.starts.length >= 1, '首次启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-1', 'AWAITING_HUMAN_accept')
+  await p1
+  // 门禁占用仍互斥（isActiveStatus 兜住 AWAITING_HUMAN_* 终态）
+  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  assert.ok(blocked.includes('串行互斥'), blocked)
+  assert.ok(blocked.includes('entry='), '提示续跑路径')
+  // entry 续跑绕过互斥；接管发生在续跑启动边界（start 后同步 supersedeParked）
+  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12', entry: 'accept', approved: true })
+  await until(() => eng.starts.length >= 2, 'entry 续跑绕过互斥')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
+  const s1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
+  assert.equal(s1.state.status, 'AWAITING_HUMAN_accept', '旧记录状态保留供追溯')
+  assert.equal(s1.state.supersededBy, 'run-2', '旧门禁标记接管')
+  const list = await call(handlers, 'vwf.runs.list', {})
+  assert.equal(list.runs.find(r => r.id === 'run-1').supersededBy, 'run-2', '旧卡片退出门禁队列')
+  assert.equal(list.runs.find(r => r.id === 'run-2').supersededBy, '')
+  assert.equal(list.runs[0].id, 'run-2', '续跑记录最新在前')
+  settleRun(eng, events, 'run-2', 'DONE')
+  await p2
+})
+
+test('#19 T4（AC1）：无 wf_run 参与的双 run 交错事件按 runId 隔离（平台工具直起路径）', async () => {
+  const { handlers, events } = env()
+  events.get('workflow/start')({ id: 'wfa', meta: { name: 'A' } })
+  events.get('workflow/start')({ id: 'wfb', meta: { name: 'B' } })
+  for (let i = 1; i <= 3; i++) {
+    events.get('workflow/agent-start')({ id: 'wfa' }, { seq: i, label: 'a-' + i, phase: 'pa' })
+    events.get('workflow/agent-start')({ id: 'wfb' }, { seq: i, label: 'b-' + i, phase: 'pb' })
+    events.get('workflow/agent-end')({ id: 'wfa' }, { seq: i, outcome: i === 3 ? 'failed' : 'completed' })
+    events.get('workflow/agent-end')({ id: 'wfb' }, { seq: i, outcome: 'completed' })
+  }
+  events.get('workflow/end')({ id: 'wfa' }, { stopReason: 'FAILED_AT_dev' })
+  events.get('workflow/end')({ id: 'wfb' }, { stopReason: 'DONE' })
+  const a = await call(handlers, 'vwf.state', { runId: 'wfa' })
+  const b = await call(handlers, 'vwf.state', { runId: 'wfb' })
+  const none = await call(handlers, 'vwf.state', { runId: 'nope' })
+  assert.equal(a.state.status, 'FAILED_AT_dev')
+  assert.equal(b.state.status, 'DONE')
+  assert.equal(a.state.agents.filter(x => x.outcome === 'failed').length, 1, '失败只落在 A')
+  assert.equal(b.state.agents.some(x => x.outcome === 'failed'), false)
+  assert.equal(none.found, false)
+  const list = await call(handlers, 'vwf.runs.list', {})
+  assert.deepEqual(list.runs.map(r => r.id), ['wfb', 'wfa'], '最新在前')
+  assert.deepEqual(list.runs.map(r => r.taskId), ['', ''], '平台工具直起无 tag：taskId 留空且不影响列表')
+})

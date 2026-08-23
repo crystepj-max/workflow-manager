@@ -589,13 +589,55 @@ return {
       return out
     }
 
+    // ── 多 run 并行三约束（#19，P2-T4）──────────────────────────────────────
+    // workflow/start 载荷 WorkflowRunInfo = { id, meta } 不含 taskId/模板来源
+    // （taskId 只在引擎 start() 的 args 里），因此由 wf_run 启动边界自登记
+    // runTag（runId → { taskId, workflowId, startedAt, active }）。平台 workflow
+    // 工具直起的 run 无 tag，看板列表照常展示（taskId 列留空），不参与互斥。
+    // 约束②（同 taskId 互斥）：该 taskId 最新未接管的记录处于活跃态时拒绝新
+    // 启动。活跃判定不依赖 workflow/start 事件到达时机（start() 返回与 worker
+    // 线程事件投递之间有空窗）：登记时即置 tag.active=true，workflow/end 清除；
+    // AWAITING_HUMAN_* 终态由 runs 记录状态兜住。entry 续跑放行，并把同 taskId
+    // 前序 AWAITING_HUMAN 记录标记 supersededBy（旧卡片自动退出门禁队列）。
+    // 约束①③（并行隔离 / closeout 串行）在客户端看板呈现：数据本就按 runId
+    // 隔离，列表 + 门禁队列 + 并行警示条见 client.js Dashboard。
+    const runTags = new Map()
+    function isActiveStatus(status) {
+      const s = String(status || '')
+      return s === 'running' || s.indexOf('AWAITING_HUMAN_') === 0
+    }
+    // Map 保持插入序 = 启动序：取同 taskId 最后插入且未被续跑接管的记录
+    function latestTagByTaskId(taskId) {
+      let found = null
+      for (const [rid, tag] of runTags) {
+        if (tag && tag.taskId === taskId && !tag.supersededBy) found = { runId: rid, tag: tag }
+      }
+      return found
+    }
+    function taskMutexBlocker(taskId) {
+      const hit = latestTagByTaskId(taskId)
+      if (!hit) return null
+      const rec = runs.get(hit.runId)
+      const active = (hit.tag && hit.tag.active === true) || isActiveStatus(rec && rec.status)
+      return active ? { runId: hit.runId, status: (rec && rec.status) || 'running' } : null
+    }
+    function supersedeParked(taskId, newRunId) {
+      for (const [rid, tag] of runTags) {
+        if (rid === newRunId || !tag || tag.taskId !== taskId || tag.supersededBy) continue
+        const rec = runs.get(rid)
+        if (rec && String(rec.status).indexOf('AWAITING_HUMAN_') === 0) tag.supersededBy = newRunId
+      }
+    }
+
     const runs = new Map()
     ctx.on('workflow/start', (info) => { runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [] }) })
     ctx.on('workflow/phase', (info, title) => { const r = runs.get(info.id); if (r) { r.phase = String(title); r.logs.push('[phase] ' + title); if (r.logs.length > 50) r.logs.shift() } })
     ctx.on('workflow/log', (info, message) => { const r = runs.get(info.id); if (r) { r.logs.push(String(message)); if (r.logs.length > 50) r.logs.shift() } })
     ctx.on('workflow/agent-start', (info, agent) => { const r = runs.get(info.id); if (r) r.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' }) })
     ctx.on('workflow/agent-end', (info, agent) => { const r = runs.get(info.id); if (!r) return; const a = r.agents[r.agents.length - 1]; if (a && a.seq === agent.seq) a.outcome = String(agent.outcome) })
-    ctx.on('workflow/end', (info, result) => { const r = runs.get(info.id); if (r) r.status = String(result.stopReason) })
+    // workflow/end 同时清 runTag.active（终态落定，含 AWAITING_HUMAN_*——门禁占用
+    // 由 isActiveStatus(runs 状态) 继续兜住），互斥的解除与维持由此统一裁决
+    ctx.on('workflow/end', (info, result) => { const r = runs.get(info.id); if (r) r.status = String(result.stopReason); const t = runTags.get(info.id); if (t) t.active = false })
 
     registerRpc('vwf.workflows.list', async () => listWorkflows())
     registerRpc('vwf.workflows.save', async (a) => {
@@ -682,7 +724,22 @@ return {
     registerRpc('vwf.state', async (a) => {
       const s = a && a.runId ? runs.get(a.runId) : null
       if (!s) return { found: false, state: null }
-      return { found: true, state: { id: a.runId, meta: s.meta, status: s.status, phase: s.phase, logs: s.logs, agents: s.agents } }
+      const tag = runTags.get(a.runId) || null
+      return { found: true, state: { id: a.runId, meta: s.meta, status: s.status, phase: s.phase, logs: s.logs, agents: s.agents,
+        taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: tag ? tag.startedAt : null,
+        supersededBy: tag && tag.supersededBy ? tag.supersededBy : '' } }
+    })
+    // 多 run 并行（#19）：运行清单（最新在前），看板列表/门禁队列/并行警示的数据源
+    registerRpc('vwf.runs.list', async () => {
+      const out = []
+      for (const [rid, rec] of runs) {
+        const tag = runTags.get(rid) || null
+        out.push({ id: rid, name: (rec.meta && rec.meta.name) || '', status: rec.status, phase: rec.phase || '',
+          taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: tag ? tag.startedAt : null,
+          supersededBy: tag && tag.supersededBy ? tag.supersededBy : '' })
+      }
+      out.reverse()
+      return { runs: out }
     })
     registerRpc('vwf.models', async () => {
       if (llm === undefined) return { providers: [] }
@@ -836,6 +893,13 @@ return {
         },
         output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
         async execute(args) {
+          // 约束②（同 taskId 互斥）：最新记录进行中/AWAITING_HUMAN 且非 entry 续跑 → 拒绝。
+          // 校验放最前（fail-fast），不浪费校验/编译开销。
+          const blocker = (args && args.entry) ? null : taskMutexBlocker(String((args && args.taskId) || ''))
+          if (blocker) {
+            return '错误：任务 ' + args.taskId + ' 已有进行中的运行 ' + blocker.runId + '（状态 ' + blocker.status +
+              '）：同 taskId 串行互斥。如该运行停在人工门禁，请带 entry=<节点id> 与 approved 续跑；并行任务请换一个 taskId。'
+          }
           let dsl = null
           let fromTemplate = false
           if (args.templateId) {
@@ -860,6 +924,15 @@ return {
             requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history
           }
           const run = engineNow.start({ script: c.script, meta: c.meta, args: scriptArgs, parent: parent })
+          // 启动边界自登记（workflow/start 事件无 taskId，见 runTags 注释）；
+          // entry 续跑把同 taskId 前序门禁记录标记接管，旧卡片退出门禁队列
+          runTags.set(String(run.id), {
+            taskId: String(args.taskId || ''),
+            workflowId: String(args.templateId || (v.sanitized && v.sanitized.id) || ''),
+            startedAt: Date.now(),
+            active: true,
+          })
+          if (args.entry) supersedeParked(String(args.taskId), String(run.id))
           const result = await run.result
           return JSON.stringify({ runId: String(run.id), stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
         }

@@ -919,7 +919,7 @@ return {
             : h('input', { className: 'vwf-input', value: curProv, placeholder: 'deepseek-official', onChange: (ev) => props.onUpdate(node.id, { model: { provider: ev.target.value, model: curModel || undefined } }) })
         ),
         h(Field, { label: t('model'), required: true, errors: errorsFor('model.model') },
-          modelOpts.length
+          providers.length
             ? h(VwfSelect, {
                 value: curModel,
                 options: [{ value: '', label: t('selectModel') }].concat(modelOpts.map(id => ({ value: id, label: id }))),
@@ -1353,37 +1353,96 @@ return {
       return m
     }
 
+    function statusBadge(status) {
+      const s = String(status || '')
+      const color = s === 'DONE' ? STATUS_COLOR.pass : s === 'running' ? STATUS_COLOR.running : s.indexOf('AWAITING_HUMAN_') === 0 ? STATUS_COLOR.human : STATUS_COLOR.fail
+      return h('span', { className: 'vwf-badge', style: { color: color } }, s.indexOf('AWAITING_HUMAN_') === 0 ? '人工门禁' : (s || '—'))
+    }
+    function isActiveRunStatus(status) {
+      const s = String(status || '')
+      return s === 'running' || s.indexOf('AWAITING_HUMAN_') === 0
+    }
+
+    // 运行看板（#19 多 run 并行）：运行清单 + 切换、门禁卡片队列（一次裁决一张）、
+    // closeout 串行警示条；同 taskId 互斥拒绝在 host 端 wf_run 边界执行。
+    // 数据源 vwf.runs.list + vwf.state；画布按 workflowId 匹配模板 DSL。
     function Dashboard(props) {
       const [runId, setRunId] = React.useState('')
       const [snap, setSnap] = React.useState(null)
+      const [runs, setRuns] = React.useState([])
+      const [tplMap, setTplMap] = React.useState({})
       const [auto, setAuto] = React.useState(true)
-      const dsl = props.wf || null
+      React.useEffect(() => {
+        host.call('vwf.workflows.list').then((l) => {
+          const m = {}
+          for (const w of l || []) m[w.id] = w.dsl || null
+          setTplMap(m)
+        }).catch(() => {})
+      }, [])
       const refresh = React.useCallback(() => {
+        host.call('vwf.runs.list').then((r) => setRuns((r && r.runs) || [])).catch(() => {})
         if (!runId) return
-        host.call('vwf.state', { runId }).then(r => setSnap(r)).catch(() => {})
+        host.call('vwf.state', { runId }).then((r) => setSnap(r)).catch(() => {})
       }, [runId])
       React.useEffect(() => {
-        if (!auto || !runId) return undefined
+        if (!auto) return undefined
         return ctx.interval(refresh, 3000)
-      }, [auto, runId])
-      const st = snap && snap.found && dsl ? mapStatus(snap.state, dsl) : {}
+      }, [auto, refresh])
+      const activeCount = runs.filter((r) => !r.supersededBy && isActiveRunStatus(r.status)).length
+      const gates = runs.filter((r) => !r.supersededBy && String(r.status).indexOf('AWAITING_HUMAN_') === 0).reverse()
+      const snapState = snap && snap.found ? snap.state : null
+      const dsl = snapState ? (tplMap[snapState.workflowId] || null) : null
+      const st = snapState && dsl ? mapStatus(snapState, dsl) : {}
       return h('div', { className: 'vwf-root' },
+        activeCount >= 2 ? h('div', { className: 'vwf-code', style: { borderColor: STATUS_COLOR.human, marginBottom: 8 } },
+          '⚠ 并行运行 ' + activeCount + ' 个：closeout 收口须串行执行，避免并发互踩；人工门禁请逐张裁决。') : null,
+        gates.length ? h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
+          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, '人工门禁队列（一次裁决一张）')),
+          h('div', { style: { padding: '4px 14px 10px' } },
+            gates.map((g, i) => h('div', { key: g.id, style: { padding: '8px 0', borderTop: i ? '1px solid var(--dsw-alias-border-l2, #333)' : 'none' } },
+              h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap' } },
+                h('span', { className: 'vwf-badge accent' }, i === 0 ? '裁决中' : '排队 #' + (i + 1)),
+                h('strong', null, g.taskId || g.id),
+                h('span', { className: 'vwf-muted-sm' }, (g.name || g.workflowId || '') + ' · 门禁节点 ' + String(g.status).replace('AWAITING_HUMAN_', '')),
+                statusBadge(g.status)
+              ),
+              h('div', { className: 'vwf-code', style: { marginTop: 4 } },
+                '续跑：wf_run { taskId: "' + (g.taskId || '<taskId>') + '"' + (g.workflowId ? ', templateId: "' + g.workflowId + '"' : '') + ', entry: "' + String(g.status).replace('AWAITING_HUMAN_', '') + '", approved: true|false }')
+            )))
+        ) : null,
+        h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
+          h('div', { className: 'vwf-card-head' },
+            h('div', { className: 'vwf-card-title' }, '运行列表'),
+            h('label', { className: 'vwf-row', style: { fontSize: 11 } },
+              h('input', { type: 'checkbox', checked: auto, onChange: (ev) => setAuto(ev.target.checked) }),
+              ' 自动轮询 3s'
+            )
+          ),
+          h('table', { className: 'vwf-table' },
+            h('thead', null, h('tr', null, h('th', null, 'taskId'), h('th', null, '工作流'), h('th', null, '状态'), h('th', null, '阶段'), h('th', null, 'runId'))),
+            h('tbody', null, runs.map((r) => h('tr', { key: r.id, onClick: () => setRunId(r.id), style: { cursor: 'pointer', opacity: r.supersededBy ? 0.5 : 1 } },
+              h('td', null, r.taskId || '—'),
+              h('td', null, r.name || r.workflowId || '—'),
+              h('td', null, r.supersededBy ? h('span', { className: 'vwf-badge' }, '已由续跑接管') : statusBadge(r.status)),
+              h('td', null, r.phase || '—'),
+              h('td', { className: 'vwf-muted-sm' }, r.id)
+            )))
+          ),
+          runs && !runs.length ? h('div', { className: 'vwf-empty' }, '暂无运行记录（仅插件进程内）') : null
+        ),
         h('div', { className: 'vwf-row' },
-          h('input', { className: 'vwf-input', style: { flex: 1 }, placeholder: 'runId（运行回执中的 runId）', value: runId, onChange: (ev) => setRunId(ev.target.value) }),
-          h('button', { className: 'vwf-btn', onClick: refresh }, t('refresh')),
-          h('label', { className: 'vwf-row', style: { fontSize: 11 } },
-            h('input', { type: 'checkbox', checked: auto, onChange: (ev) => setAuto(ev.target.checked) }),
-            ' 自动轮询 3s'
-          )
+          h('input', { className: 'vwf-input', style: { flex: 1 }, placeholder: 'runId（点上方行自动填入，或手动粘贴）', value: runId, onChange: (ev) => setRunId(ev.target.value) }),
+          h('button', { className: 'vwf-btn', onClick: refresh }, t('refresh'))
         ),
         snap === null
-          ? h('div', { className: 'vwf-muted' }, '输入 runId 后自动轮询运行状态')
+          ? h('div', { className: 'vwf-muted' }, '选择或输入 runId 查看运行详情')
           : !snap.found
             ? h('div', { className: 'vwf-err-line' }, '未找到该 runId 的状态（仅插件进程内的运行记录）')
             : h('div', null,
                 h('div', { className: 'vwf-row' },
                   h('span', null, '状态：' + snap.state.status),
                   h('span', { className: 'vwf-muted' }, '当前阶段：' + (snap.state.phase || '—')),
+                  snap.state.taskId ? h('span', { className: 'vwf-muted' }, 'taskId：' + snap.state.taskId) : null,
                   h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.running } }, 'running'),
                   h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, 'pass'),
                   h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.fail } }, 'fail'),
