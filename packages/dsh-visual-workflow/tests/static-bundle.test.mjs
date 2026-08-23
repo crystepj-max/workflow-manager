@@ -2,14 +2,38 @@
 // 断言 apply() 不抛 ReferenceError，并走 webServer 前缀路由（而非 harness.handle）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import vm from 'node:vm'
+import { createRequire } from 'node:module'
+import { existsSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadStaticHost, loadHost } from './helpers/load-host.mjs'
+import { makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const distEntry = join(here, '..', 'dist', 'host-entry.mjs')
+const distClient = join(here, '..', 'dist', 'client.js')
+
+test('T3：静态客户端 bundle 注册 dsh-visual-workflow 到网页模块加载器', () => {
+  assert.ok(existsSync(distClient), 'dist/client.js 必须存在（源码变更后须重新 build）')
+  const registrations = []
+  const context = vm.createContext({
+    window: {
+      __ModuleLoader__: {
+        load(registration) { registrations.push(registration) },
+      },
+    },
+  })
+  vm.runInContext(readFileSync(distClient, 'utf8'), context, { filename: distClient })
+  assert.equal(registrations.length, 1, '客户端 bundle 必须注册一次')
+  assert.equal(registrations[0].id, 'dsh-visual-workflow')
+  const plugin = registrations[0].factory((specifier) => {
+    assert.equal(specifier, 'react')
+    return {}
+  })
+  assert.equal(typeof plugin.apply, 'function')
+})
 
 test('T3：源码静态 Host 无 harness 时 apply() 不抛 ReferenceError，并注册 webServer 路由', async () => {
   assert.equal(typeof globalThis.harness, 'undefined', '测试进程不得预置 harness 全局')
