@@ -577,6 +577,149 @@ test('vwf.roles 无 fs 服务时回退内置六角色', async () => {
   assert.ok(r.roles.some(x => x.id === 'closeout'))
 })
 
+test('vwf.roles 经 fs 服务读工作区 dsh/roles/*.md（resolve→stat→listDir→readText 契约）', async () => {
+  // 回归：旧实现把 'dsh/roles' 字符串直接传给 listDir（宿主 fs 服务期望 resolve 后的
+  // target），任何真实服务都会抛错回退内置清单——改为按 fs 服务契约取目录。
+  const fs = makeFs({
+    [REPO + '/dsh/roles/dispatcher.md']: '你是 2.0 开发工作流的调度 Agent。\n职责：三要素门禁。\n',
+    [REPO + '/dsh/roles/dev.md']: '你是开发 Agent。\n职责：测试驱动施工。\n',
+    [REPO + '/dsh/roles/review.md']: '你是审核 Agent。\n职责：独立审查。\n',
+    [REPO + '/dsh/roles/NOT_ROLE.txt']: '不应被识别为角色',
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const r = await call(handlers, 'vwf.roles')
+  assert.deepEqual(r.roles.map(x => x.id).sort(), ['dev', 'dispatcher', 'review'], '仅 .md 且不含非角色文件')
+  const dp = r.roles.find(x => x.id === 'dispatcher')
+  assert.ok(dp.summary.startsWith('你是 2.0'), '摘要取正文首行（跳过 frontmatter/标题）')
+})
+
+test('vwf.roles：仓库根无 dsh/roles 目录时回退内置六角色（静态/web 模式兜底）', async () => {
+  const { handlers } = env()
+  const r = await call(handlers, 'vwf.roles')
+  assert.deepEqual(r.roles.map(x => x.id).sort(), ['accept', 'closeout', 'dev', 'dispatcher', 'review', 'test'])
+})
+
+test('内置双根：仓库 .generated 为空时从 ~/.dsh/.generated 加载（homeBuiltinDir 回归）', async () => {
+  // 回归：rootPaths 曾不返回 homeBuiltinDir，而 loadBuiltins 引用 p.homeBuiltinDir——
+  // 任意非本仓库会话下内置模板列表为空。修复后宿主根内置模板可见。
+  const homeDsl = JSON.stringify({
+    id: 'default-workflow', name: '默认工作流', description: '用户级内置', entry: 'n1',
+    control: { maxRounds: 9 },
+    nodes: [{ id: 'n1', profile: 'dispatcher', label: '节点1', goal: 'g' }],
+    edges: [{ from: 'n1', to: '$end', on: 'success' }],
+  }, null, 2) + '\n'
+  const fs = makeFs({
+    [DSH_HOME + '/.generated/default-workflow/vwf-dsl.json']: homeDsl,
+    [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const list = await call(handlers, 'vwf.workflows.list')
+  const w = list.find(x => x.id === 'default-workflow')
+  assert.ok(w && w.builtin === true, '宿主根内置模板可见')
+  assert.equal(w.name, '默认工作流')
+})
+
+test('静态组合包：首次同步完成前也能直接读取包内内置模板', async () => {
+  // 回归：页面首个 list RPC 可能早于异步宿主根同步；组合包本身携带的生成物
+  // 应直接可读，不能把首屏是否为空交给同步任务的时序。
+  const previous = globalThis.__VWF_REPO__
+  globalThis.__VWF_REPO__ = REPO
+  try {
+    const fs = makeFs({
+      [REPO + '/.generated/default-workflow/vwf-dsl.json']: JSON.stringify({
+        id: 'default-workflow', name: '默认工作流', entry: 'n1', control: { maxRounds: 9 },
+        nodes: [{ id: 'n1', profile: 'dispatcher', label: '节点1', goal: 'g' }],
+        edges: [{ from: 'n1', to: '$end', on: 'success' }],
+      }),
+    })
+    const sub = makeSubprocess({ fs })
+    const { handlers } = loadHost({
+      fs, subprocess: sub, sandboxPolicy,
+      agents: { currentInitiator: () => ({ session: { header: { cwd: SESSION_REPO } } }) },
+    })
+    const list = await call(handlers, 'vwf.workflows.list')
+    assert.ok(list.some(x => x.id === 'default-workflow'), '包内生成物可直接进入模板列表')
+  } finally {
+    if (previous === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previous
+  }
+})
+
+test('静态组合包：项目路径不可用时仍从包内加载校验内核', async () => {
+  // 回归：网页模式没有当前 agent 项目路径；校验内核随组合包仓库一起提供，
+  // 保存模板不能因为 repoRoot 为空而被误报为“缺少 scripts/validate-core.cjs”。
+  const previous = globalThis.__VWF_REPO__
+  globalThis.__VWF_REPO__ = REPO
+  try {
+    const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
+    const { handlers } = loadHost({
+      fs,
+      subprocess: makeSubprocess({ fs }),
+      sandboxPolicy: { workspaceRoot: '' },
+    })
+    const v = await call(handlers, 'vwf.validate', { dsl: baseDsl() })
+    assert.equal(v.ok, true, JSON.stringify(v.errors))
+    assert.notEqual(v.errors && v.errors[0] && v.errors[0].message, '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）')
+  } finally {
+    if (previous === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previous
+  }
+})
+
+test('静态组合包：另存为使用包内生成器，不使用宿主工作目录下的同名路径', async () => {
+  // 回归：web profile 的 sandbox workspace 可能是 DSH 宿主仓库，
+  // 生成器实际随 workflow-manager 组合包提供，不能拼接到宿主 workspace。
+  const previous = globalThis.__VWF_REPO__
+  globalThis.__VWF_REPO__ = REPO
+  try {
+    const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
+    const sub = makeSubprocess({ fs })
+    const { handlers } = loadHost({
+      fs,
+      subprocess: sub,
+      sandboxPolicy: { workspaceRoot: '/deepseek-harness' },
+    })
+    const saved = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ id: 'my-flow001', name: '另存为测试' }) })
+    assert.equal(saved.ok, true, JSON.stringify(saved.errors))
+    assert.ok(
+      sub._calls.some((argv) => argv[1] === REPO + '/scripts/generate.mjs'),
+      JSON.stringify(sub._calls),
+    )
+    assert.equal(
+      sub._calls.some((argv) => argv[1] === '/deepseek-harness/scripts/generate.mjs'),
+      false,
+      JSON.stringify(sub._calls),
+    )
+  } finally {
+    if (previous === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previous
+  }
+})
+
+test('syncBuiltins：apply 后把仓库 .generated 标准配置同步到宿主根（仅补缺失）', async () => {
+  const fs = makeFs({
+    [REPO + '/.generated/default-workflow/vwf-dsl.json']: JSON.stringify({ id: 'default-workflow', bundleRoles: true }),
+    [REPO + '/.generated/default-workflow/roles/dispatcher.md']: '调度角色正文\n',
+    [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: JSON.stringify({ id: 'dev-workflow-2-0' }),
+    [REPO + '/.generated/dev-workflow-2-0/script.mjs']: '// project-only\n',
+  })
+  const sub = makeSubprocess({ fs })
+  loadHost({ fs, subprocess: sub, sandboxPolicy })
+  // syncBuiltins 异步触发（fire-and-forget）：轮询假 fs 等待落盘
+  const dst = DSH_HOME + '/.generated/default-workflow/vwf-dsl.json'
+  let synced = false
+  for (let i = 0; i < 100; i++) {
+    if (fs._files.has(dst)) { synced = true; break }
+    await new Promise(r => setTimeout(r, 10))
+  }
+  assert.ok(synced, '声明用户级的内置模板已同步到宿主根 ~/.dsh/.generated')
+  assert.ok(fs._files.has(DSH_HOME + '/.generated/default-workflow/roles/dispatcher.md'), '角色包随模板同步')
+  assert.ok(!fs._files.has(DSH_HOME + '/.generated/dev-workflow-2-0/vwf-dsl.json'), '项目专属模板不进入用户级目录')
+  assert.ok(!fs._files.has(DSH_HOME + '/.generated/.sync-probe'), '同步不留下探针文件')
+})
+
 test('vwf.models 无 llm 服务时返回空 providers', async () => {
   const { handlers } = loadHost()
   const r = await call(handlers, 'vwf.models')
@@ -629,4 +772,174 @@ test('Q7 闭环：回合上限系统约束（10 拒并带 control:maxRounds 坐�
   assert.equal(good.ok, true, JSON.stringify(good.errors))
   const bp = JSON.parse(fs._files.get(USER_DIR + '/t1.json'))
   assert.equal(bp.control.maxRounds, 5, '上限 5 落盘蓝图')
+})
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #19 · 多 run 并行三约束（P2-T4）：runTag 登记 / 同 taskId 互斥 / entry 续跑
+//      接管 / vwf.runs.list 清单 / 双 run 事件流隔离
+// ═══════════════════════════════════════════════════════════════════════════
+
+// 可控假引擎：start() 返回挂起 result（测试末尾统一放行终态），事件经 loadHost
+// 的 events 表手工驱动——与真实 worker 线程的异步投递时序解耦。
+function makeEngine() {
+  const pending = []
+  return {
+    starts: [],
+    start(req) {
+      this.starts.push(req)
+      const id = 'run-' + this.starts.length
+      let release = () => {}
+      const result = new Promise((r) => { release = r })
+      pending.push({ id, release })
+      return { id, result }
+    },
+    end(id, stopReason) {
+      const p = pending.find((x) => x.id === id)
+      if (p) p.release({ stopReason, value: null, agentsStarted: 0 })
+    },
+  }
+}
+
+// 结束一次运行：resolve 引擎 result（wf_run 回执需要）+ 投递 workflow/end 事件
+// （runs 状态机与 runTag.active 清除依赖事件——假引擎不会自动广播）
+function settleRun(eng, events, id, stopReason) {
+  eng.end(id, stopReason)
+  const ev = events.get('workflow/end')
+  if (ev) ev({ id }, { stopReason })
+}
+
+function engineEnv(eng) {
+  return env({ extra: { workflowEngine: eng, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
+}
+
+// wf_run.execute 内部有校验/编译等多个 await，引擎 start 非同步可达：轮询等待
+async function until(fn, label, ms = 4000) {
+  const t0 = Date.now()
+  while (!fn()) {
+    if (Date.now() - t0 > ms) throw new Error('until 超时：' + (label || '条件未满足'))
+    await new Promise((r) => setTimeout(r, 5))
+  }
+}
+
+test('#19 T1：wf_run 启动登记 taskId/workflowId；runs.list 最新在前；双 run 状态互不串扰', async () => {
+  const eng = makeEngine()
+  const { handlers, events, definedTools } = engineEnv(eng)
+  const wfRun = definedTools.find(t => t.name === 'wf_run')
+  assert.ok(wfRun, 'wf_run 已注册')
+  assert.equal(eng.starts.length, 0)
+  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  await until(() => eng.starts.length >= 1, '第一次启动放行')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: '开发工作流 2.0' } })
+  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-13' })
+  await until(() => eng.starts.length >= 2, '不同 taskId 并行放行')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: '开发工作流 2.0' } })
+  // 交错事件：两个 run 各自 phase/log/agent 互不相干
+  events.get('workflow/phase')({ id: 'run-1' }, '调度')
+  events.get('workflow/phase')({ id: 'run-2' }, '开发')
+  events.get('workflow/agent-start')({ id: 'run-1' }, { seq: 1, label: 'dev', phase: '调度' })
+  events.get('workflow/agent-start')({ id: 'run-2' }, { seq: 1, label: 'review', phase: '开发' })
+  events.get('workflow/log')({ id: 'run-2' }, 'B 的私有日志')
+
+  const list = await call(handlers, 'vwf.runs.list', {})
+  assert.equal(list.runs.length, 2)
+  assert.equal(list.runs[0].id, 'run-2', '最新在前')
+  assert.equal(list.runs[1].id, 'run-1')
+  assert.equal(list.runs[1].taskId, 'issue-12')
+  assert.equal(list.runs[1].workflowId, 'dev-workflow-2-0', 'templateId 登记为来源')
+  assert.equal(typeof list.runs[1].startedAt, 'number')
+  assert.equal(list.runs[1].supersededBy, '')
+
+  const s1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
+  const s2 = await call(handlers, 'vwf.state', { runId: 'run-2' })
+  assert.equal(s1.found, true)
+  assert.equal(s1.state.phase, '调度', 'A 的阶段不被 B 覆盖')
+  assert.equal(s2.state.phase, '开发')
+  assert.deepEqual(s1.state.agents.map(a => a.label), ['dev'])
+  assert.equal(s1.state.logs.some(l => l.includes('B 的私有日志')), false, 'A 看不到 B 的日志')
+  assert.ok(s2.state.logs.some(l => l.includes('B 的私有日志')))
+  assert.equal(s1.state.taskId, 'issue-12')
+  assert.equal(s2.state.taskId, 'issue-13')
+
+  settleRun(eng, events, 'run-1', 'DONE')
+  settleRun(eng, events, 'run-2', 'DONE')
+  const [r1, r2] = await Promise.all([p1, p2])
+  assert.ok(r1.includes('"stopReason":"DONE"'), r1)
+  assert.ok(r2.includes('"stopReason":"DONE"'), r2)
+})
+
+test('#19 T2（AC2）：同 taskId 进行中二次启动被拒并提示占用 runId；不同 taskId 放行；完成后解除', async () => {
+  const eng = makeEngine()
+  const { handlers, events, definedTools } = engineEnv(eng)
+  const wfRun = definedTools.find(t => t.name === 'wf_run')
+  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  await until(() => eng.starts.length >= 1, '首次启动')
+  // 互斥不依赖 workflow/start 事件到达（tag.active 空窗回归点）
+  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  assert.ok(blocked.includes('串行互斥'), blocked)
+  assert.ok(blocked.includes('run-1'), '提示占用中的 runId')
+  assert.equal(eng.starts.length, 1, '被拒调用未触达引擎')
+  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-13' })
+  await until(() => eng.starts.length >= 2, '不同 taskId 并行放行')
+  settleRun(eng, events, 'run-1', 'DONE')
+  settleRun(eng, events, 'run-2', 'DONE')
+  await Promise.all([p1, p2])
+  // 终态后同 taskId 解除互斥，可再次启动
+  const p3 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  await until(() => eng.starts.length >= 3, '终态后同 taskId 可再次启动')
+  settleRun(eng, events, 'run-3', 'DONE')
+  await p3
+})
+
+test('#19 T3（AC3）：AWAITING_HUMAN 占用同 taskId 拒绝新启动；entry 续跑放行并把旧门禁标记接管', async () => {
+  const eng = makeEngine()
+  const { handlers, events, definedTools } = engineEnv(eng)
+  const wfRun = definedTools.find(t => t.name === 'wf_run')
+  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  await until(() => eng.starts.length >= 1, '首次启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-1', 'AWAITING_HUMAN_accept')
+  await p1
+  // 门禁占用仍互斥（isActiveStatus 兜住 AWAITING_HUMAN_* 终态）
+  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  assert.ok(blocked.includes('串行互斥'), blocked)
+  assert.ok(blocked.includes('entry='), '提示续跑路径')
+  // entry 续跑绕过互斥；接管发生在续跑启动边界（start 后同步 supersedeParked）
+  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12', entry: 'accept', approved: true })
+  await until(() => eng.starts.length >= 2, 'entry 续跑绕过互斥')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
+  const s1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
+  assert.equal(s1.state.status, 'AWAITING_HUMAN_accept', '旧记录状态保留供追溯')
+  assert.equal(s1.state.supersededBy, 'run-2', '旧门禁标记接管')
+  const list = await call(handlers, 'vwf.runs.list', {})
+  assert.equal(list.runs.find(r => r.id === 'run-1').supersededBy, 'run-2', '旧卡片退出门禁队列')
+  assert.equal(list.runs.find(r => r.id === 'run-2').supersededBy, '')
+  assert.equal(list.runs[0].id, 'run-2', '续跑记录最新在前')
+  settleRun(eng, events, 'run-2', 'DONE')
+  await p2
+})
+
+test('#19 T4（AC1）：无 wf_run 参与的双 run 交错事件按 runId 隔离（平台工具直起路径）', async () => {
+  const { handlers, events } = env()
+  events.get('workflow/start')({ id: 'wfa', meta: { name: 'A' } })
+  events.get('workflow/start')({ id: 'wfb', meta: { name: 'B' } })
+  for (let i = 1; i <= 3; i++) {
+    events.get('workflow/agent-start')({ id: 'wfa' }, { seq: i, label: 'a-' + i, phase: 'pa' })
+    events.get('workflow/agent-start')({ id: 'wfb' }, { seq: i, label: 'b-' + i, phase: 'pb' })
+    events.get('workflow/agent-end')({ id: 'wfa' }, { seq: i, outcome: i === 3 ? 'failed' : 'completed' })
+    events.get('workflow/agent-end')({ id: 'wfb' }, { seq: i, outcome: 'completed' })
+  }
+  events.get('workflow/end')({ id: 'wfa' }, { stopReason: 'FAILED_AT_dev' })
+  events.get('workflow/end')({ id: 'wfb' }, { stopReason: 'DONE' })
+  const a = await call(handlers, 'vwf.state', { runId: 'wfa' })
+  const b = await call(handlers, 'vwf.state', { runId: 'wfb' })
+  const none = await call(handlers, 'vwf.state', { runId: 'nope' })
+  assert.equal(a.state.status, 'FAILED_AT_dev')
+  assert.equal(b.state.status, 'DONE')
+  assert.equal(a.state.agents.filter(x => x.outcome === 'failed').length, 1, '失败只落在 A')
+  assert.equal(b.state.agents.some(x => x.outcome === 'failed'), false)
+  assert.equal(none.found, false)
+  const list = await call(handlers, 'vwf.runs.list', {})
+  assert.deepEqual(list.runs.map(r => r.id), ['wfb', 'wfa'], '最新在前')
+  assert.deepEqual(list.runs.map(r => r.taskId), ['', ''], '平台工具直起无 tag：taskId 留空且不影响列表')
 })
