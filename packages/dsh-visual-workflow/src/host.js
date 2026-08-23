@@ -634,6 +634,17 @@ return {
         if (rec && String(rec.status).indexOf('AWAITING_HUMAN_') === 0) tag.supersededBy = newRunId
       }
     }
+    // 引擎契约（dsh workflow types.ts）：WorkflowStopReason 只有
+    // 'completed' | 'cancelled' | 'error'，且 workflow/end 事件故意剥掉 value——
+    // 脚本终态（DONE / AWAITING_HUMAN_* / FAILED_* 等）只在 result.value 里，
+    // 恰好只有持有 run 并 await 的 wf_run 能看到。事件层的 'completed' 对门禁/
+    // 互斥语义不够：wf_run 收尾后用 value.status 回写权威终态。
+    const TERMINAL_STATUS_RE = /^(DONE|AWAITING_HUMAN_[A-Za-z0-9_-]+|FAILED_AT_[A-Za-z0-9_-]+|FAILED_MAX_ROUNDS|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ERROR)$/
+    function canonicalStop(result) {
+      const v = result && result.value
+      const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
+      return TERMINAL_STATUS_RE.test(cand) ? cand : ''
+    }
 
     const runs = new Map()
     ctx.on('workflow/start', (info) => { runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [] }) })
@@ -953,6 +964,15 @@ return {
           })
           if (args.entry) supersedeParked(String(args.taskId), String(run.id))
           const result = await run.result
+          // 权威终态回写（见 canonicalStop 注释）：completed 时以脚本返回为准
+          // （DONE / AWAITING_HUMAN_* / FAILED_*），cancelled/error 保持事件原样。
+          // 注意：wf_run 回执保持引擎原样 stopReason/value 不做翻译（runtime-host
+          // 套件 H1/H2 钉住该契约）；看板/互斥语义只消费这里回写的 runs 状态
+          const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
+          if (canon) {
+            const rec = runs.get(String(run.id))
+            if (rec) rec.status = canon
+          }
           return JSON.stringify({ runId: String(run.id), stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
         }
       })

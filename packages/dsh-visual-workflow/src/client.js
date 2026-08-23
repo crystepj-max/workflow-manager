@@ -1524,10 +1524,19 @@ return {
           setTplMap(m)
         }).catch(() => {})
       }, [])
+      // 立即拉取所选 run 详情：点击行即时切换，不等下一个轮询周期；
+      // seq 守卫防止慢响应回写覆盖新选择（连续切行竞态）
+      const seqRef = React.useRef(0)
+      const fetchState = (id) => {
+        if (!id) return
+        const seq = ++seqRef.current
+        host.call('vwf.state', { runId: id }).then((r) => { if (seq === seqRef.current) setSnap(r) }).catch(() => {})
+      }
+      const selectRun = (id) => { setRunId(id); fetchState(id) }
       const refresh = React.useCallback(() => {
         host.call('vwf.runs.list').then((r) => setRuns((r && r.runs) || [])).catch(() => {})
         if (!runId) return
-        host.call('vwf.state', { runId }).then((r) => setSnap(r)).catch(() => {})
+        fetchState(runId)
       }, [runId])
       React.useEffect(() => {
         if (!auto) return undefined
@@ -1565,7 +1574,7 @@ return {
           ),
           h('table', { className: 'vwf-table' },
             h('thead', null, h('tr', null, h('th', null, 'taskId'), h('th', null, '工作流'), h('th', null, '状态'), h('th', null, '阶段'), h('th', null, 'runId'))),
-            h('tbody', null, runs.map((r) => h('tr', { key: r.id, onClick: () => setRunId(r.id), style: { cursor: 'pointer', opacity: r.supersededBy ? 0.5 : 1 } },
+            h('tbody', null, runs.map((r) => h('tr', { key: r.id, onClick: () => selectRun(r.id), style: { cursor: 'pointer', opacity: r.supersededBy ? 0.5 : 1 } },
               h('td', null, r.taskId || '—'),
               h('td', null, r.name || r.workflowId || '—'),
               h('td', null, r.supersededBy ? h('span', { className: 'vwf-badge' }, '已由续跑接管') : statusBadge(r.status)),
@@ -1589,14 +1598,19 @@ return {
           : !snap.found
             ? h('div', { className: 'vwf-err-line' }, '未找到该 runId 的状态（仅插件进程内的运行记录）')
             : h('div', null,
-                h('div', { className: 'vwf-row' },
-                  h('span', null, '状态：' + snap.state.status),
-                  h('span', { className: 'vwf-muted' }, '当前阶段：' + (snap.state.phase || '—')),
-                  snap.state.taskId ? h('span', { className: 'vwf-muted' }, 'taskId：' + snap.state.taskId) : null,
-                  h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.running } }, 'running'),
-                  h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, 'pass'),
-                  h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.fail } }, 'fail'),
-                  h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, '人工门禁')
+                h('div', null,
+                  h('div', { className: 'vwf-row' },
+                    h('span', null, '状态：' + snap.state.status),
+                    h('span', { className: 'vwf-muted' }, '当前阶段：' + (snap.state.phase || '—')),
+                    snap.state.taskId ? h('span', { className: 'vwf-muted' }, 'taskId：' + snap.state.taskId) : null
+                  ),
+                  h('div', { className: 'vwf-row', style: { borderTop: '1px solid var(--dsw-alias-border-l2, #333)', marginTop: 6, paddingTop: 6 } },
+                    h('span', { className: 'vwf-muted', style: { fontSize: 10 } }, '画布图例：'),
+                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.running } }, 'running'),
+                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, 'pass'),
+                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.fail } }, 'fail'),
+                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, '人工门禁')
+                  )
                 ),
                 dsl ? h('div', { className: 'vwf-card', style: { marginTop: 8 } }, h(Canvas, { dsl, readOnly: true, statusMap: st })) : null,
                 h('table', { className: 'vwf-table', style: { marginTop: 8 } },
