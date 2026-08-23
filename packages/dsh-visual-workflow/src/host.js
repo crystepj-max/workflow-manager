@@ -19,7 +19,8 @@
 //
 // T-IMP-06（双根加载 + 用户模板落盘闭环，FR-2/FR-3，AC-2/AC-3）：
 //  - 废除硬编码 TEMPLATES（L29-74）→ 目录加载：内置 = <repo>/.generated/<id>/vwf-dsl.json
-//    （生成物，CI 先 npm run generate）；用户 = ~/.dsh/visual-workflow/templates/<id>.json
+//    （生成物，CI 先 npm run generate）+ ~/.dsh/.generated（syncBuiltins 同步，会话无关，
+//    默认工作流这类用户级内置模板在任意项目会话可见）；用户 = ~/.dsh/visual-workflow/templates/<id>.json
 //    （蓝图 JSON，宿主数据根 ~/.dsh 下新建）。
 //  - list 合并双根（builtin 标志 + id 字母序），用户条目 dsl = 蓝图→vwf DSL 投影
 //    （内联 projectToVwf，与 scripts/generate.mjs 行为一致）。
@@ -50,9 +51,9 @@ return {
     const engine = ctx.get('workflowEngine')
     const agents = ctx.get('agents')
     const llm = ctx.get('llm')
-    const fs = ctx.get('fs')
+    let fs = ctx.get('fs')
     const sp = ctx.get('sandboxPolicy')
-    const subprocess = ctx.get('subprocess')
+    let subprocess = ctx.get('subprocess')
 
     // ── 双模式 RPC 注册（动态会话=harness.handle / 静态 bundle=webServer 路由）──
     // 动态插件运行时提供 harness 内建；静态组合包没有，改经 webServer 前缀路由
@@ -150,9 +151,20 @@ return {
     function dshHome() {
       if (!dshHomePromise) {
         dshHomePromise = (async () => {
-          // 宿主 env 经 scrub 后仍保留 HOME；DSH_* 被剥除，os.homedir() 不受影响
+          // 宿主 env 经 scrub 后仍保留 HOME；DSH_* 被剥除，os.homedir() 不受影响。
+          // 优先子进程引导（动态 vm 沙箱与测试假服务均走这里）；子进程服务不可用时
+          // （静态/web profile 无 subprocess 服务）回落进程 env：DSH_HOME 显式覆盖，
+          // 否则 HOME + '/.dsh'。
+          let home = null
           const r = await runNode(['-e', "console.log(require('path').join(require('os').homedir(), '.dsh'))"], { cwd: repoRoot() || '/' })
-          const home = r.ok ? (r.stdout || '').trim() : ''
+          if (r.ok) {
+            home = (r.stdout || '').trim()
+          } else if (typeof process !== 'undefined' && process && process.env) {
+            const envHome = process.env.DSH_HOME || process.env.HOME
+            if (typeof envHome === 'string' && envHome) {
+              home = process.env.DSH_HOME ? envHome : envHome.replace(/\/$/, '') + '/.dsh'
+            }
+          }
           return home || null
         })()
       }
@@ -162,20 +174,112 @@ return {
     async function rootPaths() {
       const repo = repoRoot()
       const home = await dshHome()
+      const packageRepo = (typeof __VWF_REPO__ === 'string' && __VWF_REPO__) ? __VWF_REPO__ : null
+      const generatorRoot = packageRepo || repo
       return {
         repo: repo,
+        // 静态组合包的生成/校验脚本根；web profile 的 workspaceRoot 可能属于 DSH 宿主仓库。
+        generatorRoot: generatorRoot,
         builtinDir: repo ? repo + '/.generated' : null,
+        // 静态组合包的仓库根（仅 bundle 内注入）；避免首次 RPC 早于同步任务时看不到模板。
+        packageBuiltinDir: packageRepo ? packageRepo + '/.generated' : null,
+        // 宿主根内置模板（会话无关）：安装/重装时经 syncBuiltins 同步的标准配置，
+        // 任何会话都能看到（默认工作流这类用户级内置模板）
+        homeBuiltinDir: home ? home + '/.generated' : null,
         userDir: home ? home + '/visual-workflow/templates' : null,
         skillRoot: home ? home + '/skills' : null,
-        generator: repo ? repo + '/scripts/generate.mjs' : null,
+        generator: generatorRoot ? generatorRoot + '/scripts/generate.mjs' : null,
       }
     }
 
-    // 用户目录（~/.dsh 宿主数据根）写入不受会话 workspace-write 沙箱约束
+    // 用户目录（~/.dsh 宿主数据根）写入不受会话 workspace-write 沙箱约束；
+    // sandboxPolicy 服务缺失时（web profile 无 agent 会话），手工构造 danger-full-access
+    // 策略——fs 服务的策略层只认 policy.mode === 'danger-full-access' 即放行。
     function writePolicy() {
-      if (!sp || typeof sp.resolve !== 'function') return undefined
-      try { return sp.resolve({ mode: 'danger-full-access' }) } catch (e) { return undefined }
+      if (sp && typeof sp.resolve === 'function') {
+        try { return sp.resolve({ mode: 'danger-full-access' }) } catch (e) { /* fall through */ }
+      }
+      return { mode: 'danger-full-access', workspaceRoot: '/' }
     }
+
+    // 安装/重装时同步内置模板到宿主根（会话无关）：把仓库 .generated 的标准配置
+    // 复制到 ~/.dsh/.generated（仅补缺失，已存在不动），使任何会话都能看到内置模板。
+    // fs 服务可能尚未注入，重试几次再放弃（每次重取 ctx）——与 apply 的加载时序解耦。
+    async function syncBuiltins() {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        fs = ctx.get('fs')
+        subprocess = ctx.get('subprocess')
+        if (fs !== undefined) break
+        // 动态会话 vm 沙箱不提供真定时器（setTimeout 为教学拦截陷阱函数）：
+        // 无定时器或调用被拦截则放弃重试（会话内 fs 通常立即可用）
+        try {
+          await new Promise((r) => setTimeout(r, 100 * (attempt + 1)))
+        } catch (e) { break }
+      }
+      if (fs === undefined) { console.log('[vwf] fs 服务不可用，跳过内置模板同步'); return }
+      const p = await rootPaths()
+      if (!p.homeBuiltinDir) return
+      const policy = writePolicy()
+      // 源根：会话 cwd（动态模式）优先，打包期仓库根（静态 bundle 编译期注入
+      // __VWF_REPO__）与进程 cwd 兜底（web profile 无 agent 会话）
+      const sources = []
+      if (p.repo) sources.push(p.builtinDir)
+      if (p.packageBuiltinDir && sources.indexOf(p.packageBuiltinDir) < 0) sources.push(p.packageBuiltinDir)
+      if (typeof __VWF_REPO__ === 'string' && __VWF_REPO__) {
+        const pkgRoot = __VWF_REPO__ + '/.generated'
+        if (sources.indexOf(pkgRoot) < 0) sources.push(pkgRoot)
+      }
+      try {
+        const cwdRoot = process.cwd() + '/.generated'
+        if (sources.indexOf(cwdRoot) < 0) sources.push(cwdRoot)
+      } catch (e) { /* 忽略 */ }
+      for (const srcRoot of sources) {
+        let entries = null
+        try {
+          const dir = await fs.resolve(srcRoot)
+          entries = await fs.listDir(dir)
+        } catch (e) { continue }
+        // 递归复制（含 roles/ 等子目录——bundleRoles 模板的角色包为目录树）
+        const copyTree = async (srcRel, dstRel) => {
+          let children = null
+          try {
+            children = await fs.listDir(await fs.resolve(srcRoot + srcRel))
+          } catch (e) { return }
+          for (const child of children || []) {
+            if (!child || typeof child.name !== 'string' || !child.name) continue
+            const sub = srcRel + '/' + child.name
+            if (child.type === 'directory') {
+              await copyTree(sub, dstRel + '/' + child.name)
+              continue
+            }
+            if (child.type !== 'file') continue
+            const dst = await fs.resolve(p.homeBuiltinDir + dstRel + '/' + child.name)
+            let exists = false
+            try { const st = await fs.stat(dst); exists = !!(st && st.type === 'file') } catch (e) { }
+            if (exists) continue
+            try {
+              // fs 服务无 mkdir 面：writeText 后端保证创建父目录（writeFileAtomic 递归 mkdir）
+              await fs.writeText(dst, await fs.readText(await fs.resolve(srcRoot + sub)), undefined, undefined, policy)
+            } catch (e) { /* 单文件同步失败不影响其余 */ }
+          }
+        }
+        for (const ent of entries || []) {
+          if (!ent || typeof ent.name !== 'string' || !ent.name) continue
+          if (ent.type !== 'directory') continue
+          // 只有蓝图明确声明 bundleRoles 的用户级内置模板才进入宿主根；
+          // 项目专属模板（如 dev-workflow-2-0）继续只在项目内可见。
+          let bundleRoles = false
+          try {
+            const marker = await fs.readText(await fs.resolve(srcRoot + '/' + ent.name + '/vwf-dsl.json'))
+            bundleRoles = JSON.parse(marker).bundleRoles === true
+          } catch (e) { /* 缺少标记或损坏产物不进入用户级同步 */ }
+          if (!bundleRoles) continue
+          await copyTree('/' + ent.name, '/' + ent.name)
+        }
+      }
+    }
+    // 与 apply 时序解耦的异步同步：不阻塞 apply，失败仅在终端日志留痕
+    syncBuiltins().catch((e) => console.log('[vwf] 内置模板同步失败：' + String((e && e.message) || e)))
 
     // 内置根：.generated/<id>/vwf-dsl.json（生成物四件套之一，CI 先 npm run generate）
     // 双根：仓库 .generated（开发期最新）优先，宿主根 ~/.dsh/.generated（syncBuiltins 同步，
@@ -184,7 +288,7 @@ return {
       const out = new Map()
       if (fs === undefined) return out
       const p = await rootPaths()
-      const roots = [p.builtinDir, p.homeBuiltinDir].filter(Boolean)
+      const roots = [p.builtinDir, p.packageBuiltinDir, p.homeBuiltinDir].filter(Boolean)
       for (const root of roots) {
         let entries = null
         try {
@@ -300,16 +404,25 @@ return {
       if (!validatorCorePromise) {
         validatorCorePromise = (async () => {
           const repo = repoRoot()
-          if (!repo || fs === undefined) return null
-          try {
-            const target = await fs.resolve(repo + '/scripts/validate-core.cjs')
-            const info = await fs.stat(target)
-            if (!info || info.type !== 'file') return null
-            const src = await fs.readText(target)
-            const module = { exports: {} }
-            new Function('module', 'exports', src)(module, module.exports)
-            return module.exports
-          } catch (e) { return null }
+          if (fs === undefined) return null
+          // 动态会话优先读当前项目；静态/web 模式没有项目路径时，
+          // 读取组合包注入的仓库根，避免编辑器保存被误报为缺少校验内核。
+          const roots = [
+            repo,
+            (typeof __VWF_REPO__ === 'string' && __VWF_REPO__) ? __VWF_REPO__ : null,
+          ].filter(Boolean)
+          for (const root of roots) {
+            try {
+              const target = await fs.resolve(root + '/scripts/validate-core.cjs')
+              const info = await fs.stat(target)
+              if (!info || info.type !== 'file') continue
+              const src = await fs.readText(target)
+              const module = { exports: {} }
+              new Function('module', 'exports', src)(module, module.exports)
+              return module.exports
+            } catch (e) { /* 尝试下一个根 */ }
+          }
+          return null
         })()
       }
       return validatorCorePromise
@@ -404,7 +517,7 @@ return {
       if (opts && opts.fromTemplate) {
         // 磁盘产物优先：仓库 .generated → 宿主根 .generated（用户级内置，syncBuiltins 同步）→ 用户 skill 闭环产物
         // bundleRoles 模板在产物目录旁带 roles/ 自包含角色包，命中则随译文返回 roleDir
-        const spots = [p.builtinDir, p.homeBuiltinDir, p.skillRoot]
+        const spots = [p.builtinDir, p.packageBuiltinDir, p.homeBuiltinDir, p.skillRoot]
         for (const spot of spots) {
           if (!spot) continue
           const script = await readTextIfExists(spot + '/' + dsl.id + '/script.mjs')
@@ -421,7 +534,7 @@ return {
           return out
         }
       }
-      if (fs === undefined || subprocess === undefined || !p.repo || !p.generator || !p.userDir) {
+      if (fs === undefined || subprocess === undefined || !p.generatorRoot || !p.generator || !p.userDir) {
         return { ok: false, detail: '宿主子进程/文件能力不可用：无法编译临时图（模板来源请先运行 npm run generate 或经保存闭环）' }
       }
       // 临时蓝图落盘（用户目录 tmp 区，danger 策略）→ CLI compile → 清理
@@ -433,8 +546,8 @@ return {
       } catch (e) {
         return { ok: false, detail: '临时蓝图写入失败：' + String((e && e.message) || e) }
       }
-      const r = await runNode([p.generator, 'compile', tmp], { cwd: p.repo, graceMs: 30000 })
-      try { await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", tmp], { cwd: p.repo }) } catch (e) {}
+      const r = await runNode([p.generator, 'compile', tmp], { cwd: p.generatorRoot, graceMs: 30000 })
+      try { await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", tmp], { cwd: p.generatorRoot }) } catch (e) {}
       if (!r.ok) return { ok: false, detail: r.detail }
       try {
         const out = JSON.parse(r.stdout)
@@ -482,7 +595,7 @@ return {
       if (!v.ok) return { ok: false, errors: v.errors, fieldErrors: v.fieldErrors }
       const id = v.sanitized.id
       const p = await rootPaths()
-      if (fs === undefined || !p.repo || !p.userDir || !p.skillRoot || !p.generator) {
+      if (fs === undefined || !p.generatorRoot || !p.userDir || !p.skillRoot || !p.generator) {
         return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法解析模板目录（需 fs/subprocess/sandboxPolicy 服务）' }] }
       }
       const [builtins, users] = await Promise.all([loadBuiltins(), loadUserTemplates()])
@@ -504,11 +617,11 @@ return {
       }
       // save 即闭环：spawn 生成器 user 子命令 → 自包含 skill 三件套到 ~/.dsh/skills/<id>/
       // （生成器内部先跑蓝图校验含异源；失败 exit 1 输出错误）
-      const gen = await runNode([p.generator, 'user', file, p.skillRoot], { cwd: p.repo, graceMs: 60000 })
+      const gen = await runNode([p.generator, 'user', file, p.skillRoot], { cwd: p.generatorRoot, graceMs: 60000 })
       if (!gen.ok) {
         // 闭环失败：回滚已落盘蓝图，save 保持原子（蓝图级校验失败同此路径）
         try {
-          await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.repo })
+          await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.generatorRoot })
         } catch (e) {}
         return { ok: false, errors: [{ at: '$', message: '蓝图校验/技能生成失败（save 已回滚）：' + gen.detail }] }
       }
@@ -518,7 +631,7 @@ return {
       const id = a && a.id
       if (!id || typeof id !== 'string') return { ok: false, errors: [{ at: '$.id', message: '缺少模板 id' }] }
       const p = await rootPaths()
-      if (fs === undefined || !p.repo || !p.userDir || !p.skillRoot) {
+      if (fs === undefined || !p.generatorRoot || !p.userDir || !p.skillRoot) {
         return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法删除用户模板' }] }
       }
       const builtins = await loadBuiltins()
@@ -534,10 +647,10 @@ return {
       } catch (e) { existed = false }
       if (!existed) return { ok: false, errors: [{ at: '$.id', message: '用户模板不存在：' + id }] }
       // 删蓝图 + 同步删 ~/.dsh/skills/<id>/（fs 服务无删除能力，经子进程 rm）
-      const rm = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.repo })
+      const rm = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.generatorRoot })
       if (!rm.ok) return { ok: false, errors: [{ at: '$', message: '模板删除失败：' + rm.detail }] }
       const skillDir = p.skillRoot + '/' + id
-      await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", skillDir], { cwd: p.repo })
+      await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", skillDir], { cwd: p.generatorRoot })
       return { ok: true, id: id }
     })
     registerRpc('vwf.validate', async (a) => {
@@ -592,30 +705,34 @@ return {
       { id: 'closeout', name: '收口', summary: '收口角色：一致性收口与交接产物汇总' }
     ]
     registerRpc('vwf.roles', async () => {
-      if (fs === undefined) return { roles: FALLBACK_ROLES }
+      const fallback = () => ({ roles: FALLBACK_ROLES })
+      if (fs === undefined) return fallback()
+      // 目录优先级：发起会话仓库根（动态模式，即会话工作区）→ fs 服务默认 cwd 相对
+      // 'dsh/roles'（静态/web 模式无 agent 会话时兜底尝试）→ 内置六角色清单。
+      const p = await rootPaths()
+      const roleDir = p.repo ? p.repo + '/dsh/roles' : 'dsh/roles'
       try {
-        const listFn = fs.readdir || fs.readDir || fs.list || fs.listDir
-        const readFn = fs.readFile || fs.readTextFile || fs.readText
-        if (!listFn) return { roles: FALLBACK_ROLES }
-        let entries = await listFn.call(fs, 'dsh/roles')
-        entries = (entries || []).map(e => typeof e === 'string' ? e : (e && (e.name || e.path)) || '').filter(name => /\.md$/i.test(name))
-        if (!entries.length) return { roles: FALLBACK_ROLES }
+        const dir = await fs.resolve(roleDir)
+        const info = await fs.stat(dir)
+        if (!info || info.type !== 'directory') return fallback()
+        const entries = (await fs.listDir(dir) || [])
+          .filter(e => e && typeof e.name === 'string' && /\.md$/i.test(e.name))
+          .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+        if (!entries.length) return fallback()
         const roles = []
-        for (const name of entries.sort()) {
-          const id = name.replace(/\.md$/i, '')
+        for (const ent of entries) {
+          const id = ent.name.replace(/\.md$/i, '')
           let summary = ''
-          if (readFn) {
-            try {
-              const text = String(await readFn.call(fs, 'dsh/roles/' + name))
-              const firstLine = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('---') && !l.startsWith('id:') && !l.startsWith('name:') && !l.startsWith('summary') && !l.startsWith('createdAt') && !l.startsWith('updatedAt') && !l.startsWith('dynamicTemplate') && !l.startsWith('#'))[0]
-              summary = (firstLine || '').slice(0, 80)
-            } catch (e) {}
-          }
+          try {
+            const text = String(await fs.readText(await fs.resolve(roleDir + '/' + ent.name)))
+            const firstLine = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('---') && !l.startsWith('id:') && !l.startsWith('name:') && !l.startsWith('summary') && !l.startsWith('createdAt') && !l.startsWith('updatedAt') && !l.startsWith('dynamicTemplate') && !l.startsWith('#'))[0]
+            summary = (firstLine || '').slice(0, 80)
+          } catch (e) {}
           roles.push({ id, name: id, summary })
         }
         return { roles: roles.length ? roles : FALLBACK_ROLES }
       } catch (e) {
-        return { roles: FALLBACK_ROLES }
+        return fallback()
       }
     })
 
@@ -740,7 +857,7 @@ return {
             const p = await rootPaths()
             return JSON.stringify({
               repoRoot: repoRoot(), knownCwd: knownCwd, dshHome: await dshHome(),
-              userDir: p.userDir, skillRoot: p.skillRoot, builtinDir: p.builtinDir, generator: p.generator,
+              userDir: p.userDir, skillRoot: p.skillRoot, builtinDir: p.builtinDir, homeBuiltinDir: p.homeBuiltinDir, generatorRoot: p.generatorRoot, generator: p.generator,
               fsAvailable: fs !== undefined, subprocessAvailable: subprocess !== undefined,
               nodePath: await resolveNode(),
             }, null, 2)
@@ -756,10 +873,10 @@ return {
               steps.existed = !!info
               steps.statType = info ? info.type : null
             } catch (e) { steps.statError = String((e && e.message) || e) }
-            const rm = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.repo })
+            const rm = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.generatorRoot })
             steps.rm = rm
             const skillDir = p.skillRoot + '/' + id
-            const rm2 = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", skillDir], { cwd: p.repo })
+            const rm2 = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", skillDir], { cwd: p.generatorRoot })
             steps.rmSkill = rm2
             try {
               const after = await fs.stat(await fs.resolve(file))

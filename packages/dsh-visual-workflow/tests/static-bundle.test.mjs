@@ -46,6 +46,9 @@ test('T3：静态 bundle dist/host-entry.mjs 在无 harness 时 apply() 走 webS
       if (name === 'webServer') {
         return { register(route) { registered.push(route) } }
       }
+      if (name === 'fs') return makeFs({})
+      if (name === 'subprocess') return makeSubprocess({})
+      if (name === 'sandboxPolicy') return sandboxPolicy
       return undefined
     },
     on() {},

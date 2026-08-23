@@ -12,6 +12,9 @@ import { fileURLToPath } from 'node:url'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const dist = join(root, 'dist')
 mkdirSync(dist, { recursive: true })
+// 静态组合包：__VWF_REPO__ = 工作流仓库根（含 .generated/scripts 的项目根），
+// 供 syncBuiltins 在 web profile（无 agent 会话）时兜底定位内置模板源。
+const vwfRepoRoot = dirname(dirname(root))
 
 const hostPath = join(root, 'src', 'host.js')
 const clientPath = join(root, 'src', 'client.js')
@@ -30,6 +33,7 @@ writeFileSync(
   `import { defineTool as __vwfDefineTool } from '@deepseek-ai/dsh-tools';\n` +
   `const plugin = (() => {\n` +
   `const defineTool = __vwfDefineTool;\n` +
+  `const __VWF_REPO__ = ${JSON.stringify(vwfRepoRoot)};\n` +
   `${hostBody}\n})();\n` +
   `export const name = plugin.name;\n` +
   (pluginHasInject(hostBody) ? `export const inject = plugin.inject;\n` : ``) +

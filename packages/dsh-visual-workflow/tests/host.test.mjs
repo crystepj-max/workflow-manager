@@ -577,6 +577,149 @@ test('vwf.roles 无 fs 服务时回退内置六角色', async () => {
   assert.ok(r.roles.some(x => x.id === 'closeout'))
 })
 
+test('vwf.roles 经 fs 服务读工作区 dsh/roles/*.md（resolve→stat→listDir→readText 契约）', async () => {
+  // 回归：旧实现把 'dsh/roles' 字符串直接传给 listDir（宿主 fs 服务期望 resolve 后的
+  // target），任何真实服务都会抛错回退内置清单——改为按 fs 服务契约取目录。
+  const fs = makeFs({
+    [REPO + '/dsh/roles/dispatcher.md']: '你是 2.0 开发工作流的调度 Agent。\n职责：三要素门禁。\n',
+    [REPO + '/dsh/roles/dev.md']: '你是开发 Agent。\n职责：测试驱动施工。\n',
+    [REPO + '/dsh/roles/review.md']: '你是审核 Agent。\n职责：独立审查。\n',
+    [REPO + '/dsh/roles/NOT_ROLE.txt']: '不应被识别为角色',
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const r = await call(handlers, 'vwf.roles')
+  assert.deepEqual(r.roles.map(x => x.id).sort(), ['dev', 'dispatcher', 'review'], '仅 .md 且不含非角色文件')
+  const dp = r.roles.find(x => x.id === 'dispatcher')
+  assert.ok(dp.summary.startsWith('你是 2.0'), '摘要取正文首行（跳过 frontmatter/标题）')
+})
+
+test('vwf.roles：仓库根无 dsh/roles 目录时回退内置六角色（静态/web 模式兜底）', async () => {
+  const { handlers } = env()
+  const r = await call(handlers, 'vwf.roles')
+  assert.deepEqual(r.roles.map(x => x.id).sort(), ['accept', 'closeout', 'dev', 'dispatcher', 'review', 'test'])
+})
+
+test('内置双根：仓库 .generated 为空时从 ~/.dsh/.generated 加载（homeBuiltinDir 回归）', async () => {
+  // 回归：rootPaths 曾不返回 homeBuiltinDir，而 loadBuiltins 引用 p.homeBuiltinDir——
+  // 任意非本仓库会话下内置模板列表为空。修复后宿主根内置模板可见。
+  const homeDsl = JSON.stringify({
+    id: 'default-workflow', name: '默认工作流', description: '用户级内置', entry: 'n1',
+    control: { maxRounds: 9 },
+    nodes: [{ id: 'n1', profile: 'dispatcher', label: '节点1', goal: 'g' }],
+    edges: [{ from: 'n1', to: '$end', on: 'success' }],
+  }, null, 2) + '\n'
+  const fs = makeFs({
+    [DSH_HOME + '/.generated/default-workflow/vwf-dsl.json']: homeDsl,
+    [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const list = await call(handlers, 'vwf.workflows.list')
+  const w = list.find(x => x.id === 'default-workflow')
+  assert.ok(w && w.builtin === true, '宿主根内置模板可见')
+  assert.equal(w.name, '默认工作流')
+})
+
+test('静态组合包：首次同步完成前也能直接读取包内内置模板', async () => {
+  // 回归：页面首个 list RPC 可能早于异步宿主根同步；组合包本身携带的生成物
+  // 应直接可读，不能把首屏是否为空交给同步任务的时序。
+  const previous = globalThis.__VWF_REPO__
+  globalThis.__VWF_REPO__ = REPO
+  try {
+    const fs = makeFs({
+      [REPO + '/.generated/default-workflow/vwf-dsl.json']: JSON.stringify({
+        id: 'default-workflow', name: '默认工作流', entry: 'n1', control: { maxRounds: 9 },
+        nodes: [{ id: 'n1', profile: 'dispatcher', label: '节点1', goal: 'g' }],
+        edges: [{ from: 'n1', to: '$end', on: 'success' }],
+      }),
+    })
+    const sub = makeSubprocess({ fs })
+    const { handlers } = loadHost({
+      fs, subprocess: sub, sandboxPolicy,
+      agents: { currentInitiator: () => ({ session: { header: { cwd: SESSION_REPO } } }) },
+    })
+    const list = await call(handlers, 'vwf.workflows.list')
+    assert.ok(list.some(x => x.id === 'default-workflow'), '包内生成物可直接进入模板列表')
+  } finally {
+    if (previous === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previous
+  }
+})
+
+test('静态组合包：项目路径不可用时仍从包内加载校验内核', async () => {
+  // 回归：网页模式没有当前 agent 项目路径；校验内核随组合包仓库一起提供，
+  // 保存模板不能因为 repoRoot 为空而被误报为“缺少 scripts/validate-core.cjs”。
+  const previous = globalThis.__VWF_REPO__
+  globalThis.__VWF_REPO__ = REPO
+  try {
+    const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
+    const { handlers } = loadHost({
+      fs,
+      subprocess: makeSubprocess({ fs }),
+      sandboxPolicy: { workspaceRoot: '' },
+    })
+    const v = await call(handlers, 'vwf.validate', { dsl: baseDsl() })
+    assert.equal(v.ok, true, JSON.stringify(v.errors))
+    assert.notEqual(v.errors && v.errors[0] && v.errors[0].message, '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）')
+  } finally {
+    if (previous === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previous
+  }
+})
+
+test('静态组合包：另存为使用包内生成器，不使用宿主工作目录下的同名路径', async () => {
+  // 回归：web profile 的 sandbox workspace 可能是 DSH 宿主仓库，
+  // 生成器实际随 workflow-manager 组合包提供，不能拼接到宿主 workspace。
+  const previous = globalThis.__VWF_REPO__
+  globalThis.__VWF_REPO__ = REPO
+  try {
+    const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
+    const sub = makeSubprocess({ fs })
+    const { handlers } = loadHost({
+      fs,
+      subprocess: sub,
+      sandboxPolicy: { workspaceRoot: '/deepseek-harness' },
+    })
+    const saved = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ id: 'my-flow001', name: '另存为测试' }) })
+    assert.equal(saved.ok, true, JSON.stringify(saved.errors))
+    assert.ok(
+      sub._calls.some((argv) => argv[1] === REPO + '/scripts/generate.mjs'),
+      JSON.stringify(sub._calls),
+    )
+    assert.equal(
+      sub._calls.some((argv) => argv[1] === '/deepseek-harness/scripts/generate.mjs'),
+      false,
+      JSON.stringify(sub._calls),
+    )
+  } finally {
+    if (previous === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previous
+  }
+})
+
+test('syncBuiltins：apply 后把仓库 .generated 标准配置同步到宿主根（仅补缺失）', async () => {
+  const fs = makeFs({
+    [REPO + '/.generated/default-workflow/vwf-dsl.json']: JSON.stringify({ id: 'default-workflow', bundleRoles: true }),
+    [REPO + '/.generated/default-workflow/roles/dispatcher.md']: '调度角色正文\n',
+    [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: JSON.stringify({ id: 'dev-workflow-2-0' }),
+    [REPO + '/.generated/dev-workflow-2-0/script.mjs']: '// project-only\n',
+  })
+  const sub = makeSubprocess({ fs })
+  loadHost({ fs, subprocess: sub, sandboxPolicy })
+  // syncBuiltins 异步触发（fire-and-forget）：轮询假 fs 等待落盘
+  const dst = DSH_HOME + '/.generated/default-workflow/vwf-dsl.json'
+  let synced = false
+  for (let i = 0; i < 100; i++) {
+    if (fs._files.has(dst)) { synced = true; break }
+    await new Promise(r => setTimeout(r, 10))
+  }
+  assert.ok(synced, '声明用户级的内置模板已同步到宿主根 ~/.dsh/.generated')
+  assert.ok(fs._files.has(DSH_HOME + '/.generated/default-workflow/roles/dispatcher.md'), '角色包随模板同步')
+  assert.ok(!fs._files.has(DSH_HOME + '/.generated/dev-workflow-2-0/vwf-dsl.json'), '项目专属模板不进入用户级目录')
+  assert.ok(!fs._files.has(DSH_HOME + '/.generated/.sync-probe'), '同步不留下探针文件')
+})
+
 test('vwf.models 无 llm 服务时返回空 providers', async () => {
   const { handlers } = loadHost()
   const r = await call(handlers, 'vwf.models')
