@@ -996,3 +996,23 @@ test('#19 T4（AC1）：无 wf_run 参与的双 run 交错事件按 runId 隔离
   assert.deepEqual(list.runs.map(r => r.id), ['wfb', 'wfa'], '最新在前')
   assert.deepEqual(list.runs.map(r => r.taskId), ['', ''], '平台工具直起无 tag：taskId 留空且不影响列表')
 })
+
+test('#18 终态归一：workflow/end 时未收到 agent-end 的子代理按 failed 收口，不误判为 running', async () => {
+  const { handlers, events } = env()
+  events.get('workflow/start')({ id: 'wfr', meta: { name: 'F' } })
+  events.get('workflow/phase')({ id: 'wfr' }, '逐项处理')
+  for (let i = 1; i <= 3; i++) {
+    events.get('workflow/agent-start')({ id: 'wfr' }, { seq: i, label: '逐项处理 #' + i, phase: '逐项处理' })
+  }
+  // 只有 #2 投递了 agent-end；#1/#3 启动即失败、引擎未投递 agent-end
+  events.get('workflow/agent-end')({ id: 'wfr' }, { seq: 2, outcome: 'failed' })
+  events.get('workflow/end')({ id: 'wfr' }, { stopReason: 'FAILED_AT_fan' })
+  const s = await call(handlers, 'vwf.state', { runId: 'wfr' })
+  assert.equal(s.state.status, 'FAILED_AT_fan')
+  assert.deepEqual(s.state.agents.map(a => a.outcome), ['failed', 'failed', 'failed'],
+    '终局时仍 running 的行按 failed 收口（看板红色，不再永久进行中）')
+  // 迟到的乱序 agent-end 仍按 seq 覆盖回真实结果
+  events.get('workflow/agent-end')({ id: 'wfr' }, { seq: 1, outcome: 'completed' })
+  const s2 = await call(handlers, 'vwf.state', { runId: 'wfr' })
+  assert.deepEqual(s2.state.agents.map(a => a.outcome), ['completed', 'failed', 'failed'])
+})
