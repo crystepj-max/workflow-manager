@@ -350,6 +350,9 @@ return {
           // lossless-JSON 守卫：undefined 键会被拒绝；与 generate.mjs 的
           // JSON.stringify（剥除 undefined/null）语义保持逐键一致
           if (n.goal !== undefined && n.goal !== null) o.goal = n.goal
+          if (n.kind !== undefined) o.kind = n.kind
+          if (n.items !== undefined) o.items = n.items
+          if (n.failOn !== undefined) o.failOn = n.failOn
           if (n.output) o.output = n.output
           if (n.manualCheck) o.manualCheck = true
           if (models[n.id]) o.model = models[n.id]
@@ -373,6 +376,9 @@ return {
       const models = {}
       const nodes = (dsl.nodes || []).map((n) => {
         const o = { id: n.id, profile: n.profile, label: n.label || n.id, goal: n.goal || '' }
+        if (n.kind !== undefined) o.kind = n.kind
+        if (n.items !== undefined) o.items = n.items
+        if (n.failOn !== undefined) o.failOn = n.failOn
         if (n.output) o.output = n.output
         if (n.manualCheck) o.manualCheck = true
         if (n.model && typeof n.model === 'object' && n.model.provider && n.model.model) {
@@ -634,10 +640,23 @@ return {
     ctx.on('workflow/phase', (info, title) => { const r = runs.get(info.id); if (r) { r.phase = String(title); r.logs.push('[phase] ' + title); if (r.logs.length > 50) r.logs.shift() } })
     ctx.on('workflow/log', (info, message) => { const r = runs.get(info.id); if (r) { r.logs.push(String(message)); if (r.logs.length > 50) r.logs.shift() } })
     ctx.on('workflow/agent-start', (info, agent) => { const r = runs.get(info.id); if (r) r.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' }) })
-    ctx.on('workflow/agent-end', (info, agent) => { const r = runs.get(info.id); if (!r) return; const a = r.agents[r.agents.length - 1]; if (a && a.seq === agent.seq) a.outcome = String(agent.outcome) })
+    // 按 seq 精确匹配：pipeline 并发下 agent-start/agent-end 可能交错到达，
+    // 只看数组末位会把非最新项的结局事件丢掉（行卡在 running）
+    ctx.on('workflow/agent-end', (info, agent) => { const r = runs.get(info.id); if (!r) return; const a = r.agents.find((x) => x.seq === agent.seq); if (a) a.outcome = String(agent.outcome) })
     // workflow/end 同时清 runTag.active（终态落定，含 AWAITING_HUMAN_*——门禁占用
-    // 由 isActiveStatus(runs 状态) 继续兜住），互斥的解除与维持由此统一裁决
-    ctx.on('workflow/end', (info, result) => { const r = runs.get(info.id); if (r) r.status = String(result.stopReason); const t = runTags.get(info.id); if (t) t.active = false })
+    // 由 isActiveStatus(runs 状态) 继续兜住），互斥的解除与维持由此统一裁决。
+    // 终态归一（#18 验收发现）：运行已终局却仍处 running 的子代理不可能再有结果
+    // 回报——引擎对「启动即失败」的项可能不投递 agent-end（如 provider 无法解析），
+    // 若保持 running，看板会把已失败项永久显示为进行中造成误判；统一按 failed
+    // 收口。迟到的 agent-end（乱序投递）仍会按 seq 覆盖回真实结果。
+    ctx.on('workflow/end', (info, result) => {
+      const r = runs.get(info.id)
+      if (r) {
+        r.status = String(result.stopReason)
+        for (const a of r.agents) { if (a.outcome === 'running') a.outcome = 'failed' }
+      }
+      const t = runTags.get(info.id); if (t) t.active = false
+    })
 
     registerRpc('vwf.workflows.list', async () => listWorkflows())
     registerRpc('vwf.workflows.save', async (a) => {

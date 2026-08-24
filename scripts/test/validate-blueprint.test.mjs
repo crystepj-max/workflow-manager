@@ -8,12 +8,88 @@ const { validateBlueprint } = validatorCore;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const good = JSON.parse(readFileSync(path.join(here, '../../templates/dev-workflow-2-0.json'), 'utf8'));
+const fanoutGood = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'));
 
 test('S1 合法蓝图（dev-workflow-2-0 全量）通过校验', () => {
   const r = validateBlueprint(good);
   assert.equal(r.ok, true, JSON.stringify(r.errors));
   assert.equal(r.counts.nodes, 7);
   assert.equal(r.counts.edges, 13);
+});
+
+test('fanout 合法夹具通过校验，worker 缺省 kind 保持兼容', () => {
+  const r = validateBlueprint(fanoutGood);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.equal(fanoutGood.nodes[1].kind, undefined);
+});
+
+test('fanout kind/items/goal/failOn 规则逐字段拒绝并携带 fieldKey', () => {
+  const cases = [
+    ['kind', (b) => { b.nodes[0].kind = 'parallel' }, 'node:fan:kind'],
+    ['items 缺失', (b) => { delete b.nodes[0].items }, 'node:fan:items'],
+    ['items 格式', (b) => { b.nodes[0].items = '$.unknown.items' }, 'node:fan:items'],
+    ['goal 占位', (b) => { b.nodes[0].goal = '处理任务' }, 'node:fan:goal'],
+    ['failOn 字符串', (b) => { b.nodes[0].failOn = 'some' }, 'node:fan:failOn'],
+    ['failOn 负数', (b) => { b.nodes[0].failOn = -1 }, 'node:fan:failOn'],
+  ];
+  for (const [label, mutate, fieldKey] of cases) {
+    const b = JSON.parse(JSON.stringify(fanoutGood));
+    mutate(b);
+    const r = validateBlueprint(b);
+    assert.equal(r.ok, false, label + ' 应拒绝');
+    assert.ok(r.errors.some((e) => e.fieldKey === fieldKey), label + ' 缺坐标：' + JSON.stringify(r.errors));
+  }
+});
+
+test('fanout 禁止 successCondition/manualCheck/verifyBranch，且必须有 failure 出边', () => {
+  const cases = [
+    ['successCondition', (b) => { b.nodes[0].output.successCondition = '$.value == "x"' }, 'node:fan:output.successCondition'],
+    ['manualCheck', (b) => { b.nodes[0].manualCheck = true }, 'node:fan:manualCheck'],
+    ['verifyBranch', (b) => { b.nodes[0].verifyBranch = true }, 'node:fan:verifyBranch'],
+    ['failure 出边', (b) => { b.edges = b.edges.filter((e) => !(e.from === 'fan' && e.on === 'failure')) }, 'node:fan:kind'],
+  ];
+  for (const [label, mutate, fieldKey] of cases) {
+    const b = JSON.parse(JSON.stringify(fanoutGood));
+    mutate(b);
+    const r = validateBlueprint(b);
+    assert.equal(r.ok, false, label + ' 应拒绝');
+    assert.ok(r.errors.some((e) => e.fieldKey === fieldKey), label + ' 缺坐标：' + JSON.stringify(r.errors));
+  }
+});
+
+test('worker 出现 items/failOn 拒绝，fanout failOn 缺省 all 与非负整数合法', () => {
+  for (const field of ['items', 'failOn']) {
+    const b = JSON.parse(JSON.stringify(fanoutGood));
+    b.nodes[1][field] = field === 'items' ? '$.args.items' : 'all';
+    const r = validateBlueprint(b);
+    assert.equal(r.ok, false);
+    assert.ok(r.errors.some((e) => e.fieldKey === 'node:finish:' + field), JSON.stringify(r.errors));
+  }
+  for (const value of [undefined, 'any', 'all', 0, 2]) {
+    const b = JSON.parse(JSON.stringify(fanoutGood));
+    if (value === undefined) delete b.nodes[0].failOn;
+    else b.nodes[0].failOn = value;
+    assert.equal(validateBlueprint(b).ok, true, 'failOn=' + value + ' 应合法');
+  }
+});
+
+test('fanout results 表达式只能引用 success 路径上的前序节点', () => {
+  const b = JSON.parse(JSON.stringify(fanoutGood));
+  b.entry = 'source';
+  b.nodes.unshift({ id: 'source', profile: 'dispatcher', goal: '准备数组' });
+  b.edges.unshift({ from: 'source', to: 'fan', on: 'success' });
+  b.nodes[1].items = '$.results.source.payload.items';
+  assert.equal(validateBlueprint(b).ok, true, JSON.stringify(validateBlueprint(b).errors));
+
+  b.nodes[1].items = '$.results.finish.payload.items';
+  const after = validateBlueprint(b);
+  assert.equal(after.ok, false);
+  assert.ok(after.errors.some((e) => e.fieldKey === 'node:fan:items' && e.message.includes('success')));
+
+  b.nodes[1].items = '$.results.ghost.items';
+  const missing = validateBlueprint(b);
+  assert.equal(missing.ok, false);
+  assert.ok(missing.errors.some((e) => e.fieldKey === 'node:fan:items' && e.message.includes('不存在')));
 });
 
 // —— 场景辅助：基于合法蓝图做单点破坏 ——

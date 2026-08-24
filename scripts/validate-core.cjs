@@ -17,6 +17,8 @@ const RESERVED = ['$end', '$entry', '$new-round']
 const FILES_KINDS = ['json', 'markdown', 'text']
 const ON_MAX_ROUNDS = ['return', 'auto-reschedule']
 const MAX_ROUNDS_CAP = 9 // 系统约定上限：编辑器最大可设 9 轮（用户意见 Q7）
+const FANOUT_ITEMS_ARGS_RE = /^\$\.args(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
+const FANOUT_ITEMS_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
 
 // ---------- 错误坐标 → 编辑器 fieldKey ----------
 function fieldKeyOf(at) {
@@ -71,6 +73,21 @@ function reachable(entry, nodes, edges) {
     edges.forEach((e) => { if (e && e.from === cur && e.on === 'success' && e.to !== '$end' && !reach[e.to]) stack.push(e.to) })
   }
   return reach
+}
+
+function successPathExists(from, to, edges) {
+  const seen = {}
+  const stack = [from]
+  while (stack.length) {
+    const cur = stack.pop()
+    if (cur === to) return true
+    if (seen[cur]) continue
+    seen[cur] = true
+    edges.forEach((e) => {
+      if (e && e.from === cur && e.on === 'success' && e.to !== '$end' && !seen[e.to]) stack.push(e.to)
+    })
+  }
+  return false
 }
 
 function hasSuccessCycle(entry, nodes, edges) {
@@ -212,6 +229,51 @@ function validateBlueprint(bp, opts) {
   // 蓝图级业务规则
   const ids = {}
   bp.nodes.forEach((n) => { if (n && n.id) ids[n.id] = true })
+
+  // fanout 节点契约：类型、items 来源、逐项目标、失败阈值与互斥字段。
+  bp.nodes.forEach((n) => {
+    if (!n || !n.id) return
+    const kind = n.kind === undefined ? 'worker' : n.kind
+    if (kind !== 'worker' && kind !== 'fanout') {
+      err('$.nodes[' + n.id + '].kind', 'kind 仅接受 worker | fanout，缺省为 worker')
+      return
+    }
+    if (kind !== 'fanout') {
+      if (n.items !== undefined) err('$.nodes[' + n.id + '].items', 'items 仅允许用于 kind=fanout 节点')
+      if (n.failOn !== undefined) err('$.nodes[' + n.id + '].failOn', 'failOn 仅允许用于 kind=fanout 节点')
+      return
+    }
+
+    if (typeof n.items !== 'string' || !n.items.trim()) {
+      err('$.nodes[' + n.id + '].items', 'fanout 节点 items 必填')
+    } else {
+      const resultMatch = FANOUT_ITEMS_RESULTS_RE.exec(n.items)
+      if (!FANOUT_ITEMS_ARGS_RE.test(n.items) && !resultMatch) {
+        err('$.nodes[' + n.id + '].items', 'items 仅支持 $.args[.路径] 或 $.results.<节点id>[.路径]')
+      } else if (resultMatch) {
+        const ref = resultMatch[1]
+        if (!ids[ref]) err('$.nodes[' + n.id + '].items', 'items 引用的节点 ' + ref + ' 不存在')
+        else if (ref === n.id || !successPathExists(ref, n.id, bp.edges)) {
+          err('$.nodes[' + n.id + '].items', 'items 引用节点 ' + ref + ' 必须沿 success 边先于 fanout 节点 ' + n.id)
+        }
+      }
+    }
+    if (typeof n.goal !== 'string' || !n.goal.includes('{{item}}')) {
+      err('$.nodes[' + n.id + '].goal', 'fanout 节点 goal 必须包含 {{item}} 占位')
+    }
+    if (n.failOn !== undefined && n.failOn !== 'any' && n.failOn !== 'all'
+      && !(Number.isInteger(n.failOn) && n.failOn >= 0)) {
+      err('$.nodes[' + n.id + '].failOn', 'failOn 仅接受 any | all | 非负整数，缺省为 all')
+    }
+    if (n.output && n.output.successCondition !== undefined) {
+      err('$.nodes[' + n.id + '].output.successCondition', 'fanout 节点禁止 output.successCondition；失败判定统一使用 failOn')
+    }
+    if (n.manualCheck) err('$.nodes[' + n.id + '].manualCheck', 'fanout 节点禁止 manualCheck')
+    if (n.verifyBranch) err('$.nodes[' + n.id + '].verifyBranch', 'fanout 节点禁止 verifyBranch')
+    if (!bp.edges.some((e) => e && e.from === n.id && e.on === 'failure')) {
+      err('$.nodes[' + n.id + '].kind', 'fanout 节点必须有 failure 出边')
+    }
+  })
 
   // output.files 契约（蓝图级，DSL 无此字段）
   bp.nodes.forEach((n) => {

@@ -69,6 +69,18 @@ function makeRuntime() {
         return { ok: true, id: args.dsl.id, dsl: args.dsl }
       case 'vwf.script':
         return { ok: true, engineAvailable: false, script: '// compiled' }
+      case 'vwf.state':
+        return {
+          found: true,
+          state: {
+            status: 'running', phase: '逐项处理', logs: [],
+            agents: [
+              { seq: 1, label: '逐项处理 #1', phase: '逐项处理', outcome: 'completed' },
+              { seq: 2, label: '逐项处理 #2', phase: '逐项处理', outcome: 'failed' },
+              { seq: 3, label: '逐项处理 #3', phase: '逐项处理', outcome: 'completed' },
+            ],
+          },
+        }
       default:
         throw new Error('unexpected rpc: ' + method)
     }
@@ -215,6 +227,53 @@ test('JSON tab：双 tab 切换与 JSON 编辑区', async () => {
   await act(async () => {
     const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
     canvasTab.click()
+    await flush()
+  })
+})
+
+test('fanout 编辑器：类型切换显示专属字段，画布卡片同步类型', async () => {
+  const kindLabel = byText(container, '节点类型')
+  assert.ok(kindLabel, '存在节点类型字段')
+  const kindSelect = kindLabel.closest('.vwf-field').querySelector('select')
+  await act(async () => {
+    kindSelect.value = 'fanout'
+    kindSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush()
+  })
+  assert.ok(byText(container, 'items 来源'), 'fanout 显示 items 来源')
+  assert.ok(byText(container, '失败阈值'), 'fanout 显示失败阈值')
+  assert.ok(container.querySelector('.vwf-help[title*="该 Schema 校验每个子代理"]'), 'fanout 显示 per-item schema 说明')
+  const kinds = Array.from(container.querySelectorAll('text.vwf-node-kind')).map((el) => el.textContent)
+  assert.ok(kinds.includes('fanout'), '画布卡片显示 fanout')
+})
+
+test('fanout 看板：按节点归组展示三项并保留失败状态', async () => {
+  await act(async () => {
+    const dashboardTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '运行看板')
+    assert.ok(dashboardTab)
+    dashboardTab.click()
+    await flush()
+  })
+  const input = container.querySelector('input[placeholder^="runId"]')
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    setter.call(input, 'run-1')
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+  })
+  await act(async () => {
+    const refresh = input.parentElement.querySelector('button')
+    refresh.click()
+    await flush()
+  })
+  assert.ok(byText(container, '逐项处理 · fanout · 3 items'), '看板显示 fanout 组标题')
+  assert.ok(byText(container, '逐项处理 #1'))
+  assert.ok(byText(container, '逐项处理 #2'))
+  const failed = Array.from(container.querySelectorAll('.vwf-badge')).find((el) => el.textContent === 'failed')
+  assert.ok(failed && failed.getAttribute('style').includes('error'), '失败项使用失败色')
+  await act(async () => {
+    const templatesTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '模板库')
+    templatesTab.click()
     await flush()
   })
 })
