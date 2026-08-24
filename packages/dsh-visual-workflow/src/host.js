@@ -192,6 +192,8 @@ return {
         // 任何会话都能看到（默认工作流这类用户级内置模板）
         homeBuiltinDir: home ? home + '/.generated' : null,
         userDir: home ? home + '/visual-workflow/templates' : null,
+        // runs 运行记录持久化目录（#40）：<runId>.json 一条一文件
+        runsDir: home ? home + '/visual-workflow/runs' : null,
         skillRoot: home ? home + '/skills' : null,
         generator: generatorRoot ? generatorRoot + '/scripts/generate.mjs' : null,
       }
@@ -631,7 +633,7 @@ return {
       for (const [rid, tag] of runTags) {
         if (rid === newRunId || !tag || tag.taskId !== taskId || tag.supersededBy) continue
         const rec = runs.get(rid)
-        if (rec && String(rec.status).indexOf('AWAITING_HUMAN_') === 0) tag.supersededBy = newRunId
+        if (rec && String(rec.status).indexOf('AWAITING_HUMAN_') === 0) { tag.supersededBy = newRunId; requestRunPersist(rid) }
       }
     }
     // 引擎契约（dsh workflow types.ts）：WorkflowStopReason 只有
@@ -650,13 +652,16 @@ return {
     }
 
     const runs = new Map()
-    ctx.on('workflow/start', (info) => { runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [] }) })
-    ctx.on('workflow/phase', (info, title) => { const r = runs.get(info.id); if (r) { r.phase = String(title); r.logs.push('[phase] ' + title); if (r.logs.length > 50) r.logs.shift() } })
-    ctx.on('workflow/log', (info, message) => { const r = runs.get(info.id); if (r) { r.logs.push(String(message)); if (r.logs.length > 50) r.logs.shift() } })
-    ctx.on('workflow/agent-start', (info, agent) => { const r = runs.get(info.id); if (r) r.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' }) })
+    ctx.on('workflow/start', (info) => {
+      runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [], startedAt: Date.now() })
+      requestRunPersist(info.id)
+    })
+    ctx.on('workflow/phase', (info, title) => { const r = runs.get(info.id); if (r) { r.phase = String(title); r.logs.push('[phase] ' + title); if (r.logs.length > 50) r.logs.shift(); requestRunPersist(info.id) } })
+    ctx.on('workflow/log', (info, message) => { const r = runs.get(info.id); if (r) { r.logs.push(String(message)); if (r.logs.length > 50) r.logs.shift(); requestRunPersist(info.id) } })
+    ctx.on('workflow/agent-start', (info, agent) => { const r = runs.get(info.id); if (r) { r.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' }); requestRunPersist(info.id) } })
     // 按 seq 精确匹配：pipeline 并发下 agent-start/agent-end 可能交错到达，
     // 只看数组末位会把非最新项的结局事件丢掉（行卡在 running）
-    ctx.on('workflow/agent-end', (info, agent) => { const r = runs.get(info.id); if (!r) return; const a = r.agents.find((x) => x.seq === agent.seq); if (a) a.outcome = String(agent.outcome) })
+    ctx.on('workflow/agent-end', (info, agent) => { const r = runs.get(info.id); if (!r) return; const a = r.agents.find((x) => x.seq === agent.seq); if (a) { a.outcome = String(agent.outcome); requestRunPersist(info.id) } })
     // workflow/end 同时清 runTag.active（终态落定，含 AWAITING_HUMAN_*——门禁占用
     // 由 isActiveStatus(runs 状态) 继续兜住），互斥的解除与维持由此统一裁决。
     // 终态归一（#18 验收发现）：运行已终局却仍处 running 的子代理不可能再有结果
@@ -668,9 +673,185 @@ return {
       if (r) {
         r.status = String(result.stopReason)
         for (const a of r.agents) { if (a.outcome === 'running') a.outcome = 'failed' }
+        requestRunPersist(info.id)
       }
       const t = runTags.get(info.id); if (t) t.active = false
     })
+
+    // ── runs 运行记录持久化（#40，P2-T2b）────────────────────────────────────
+    // 内存 runs/runTags 进程重启即失：事件流驱动的记录落盘到
+    // ~/.dsh/visual-workflow/runs/<runId>.json；插件启动回载最近 RUNS_RELOAD 条
+    // 进内存，其余留在磁盘由 vwf.state 按需回落读取；磁盘总量按 RUNS_RETAIN
+    // 淘汰最旧。落盘内容以事件流为界（meta/状态/阶段/日志/子代理 label+outcome
+    // + 启动边界登记的 taskId/workflowId/supersededBy），不含子代理返回内容。
+    // 所有落盘路径异常仅终端日志留痕，runs 内存态不受损（验收 AC4）。
+    const RUNS_RELOAD = 20
+    const RUNS_RETAIN = 50
+
+    function runFileName(runId) {
+      return String(runId || '').replace(/[^A-Za-z0-9._-]/g, '_') + '.json'
+    }
+
+    // 事件流快照：只取叶子字段构造自有 JSON（logs 上限 50 已在事件层收紧；
+    // 数组在 stringify 同步执行期间无并发插入，无需深拷贝）
+    function runRecordPayload(runId) {
+      const rec = runs.get(runId)
+      if (!rec) return null
+      const tag = runTags.get(runId) || null
+      return {
+        id: String(runId),
+        meta: { name: (rec.meta && rec.meta.name) || '', description: (rec.meta && rec.meta.description) || '' },
+        status: String(rec.status || ''),
+        phase: String(rec.phase || ''),
+        logs: rec.logs || [],
+        agents: (rec.agents || []).map((a) => ({ seq: a.seq, label: a.label || '', phase: a.phase || '', outcome: a.outcome || '' })),
+        taskId: tag ? String(tag.taskId || '') : '',
+        workflowId: tag ? String(tag.workflowId || '') : '',
+        startedAt: rec.startedAt != null ? rec.startedAt : (tag && tag.startedAt != null ? tag.startedAt : null),
+        supersededBy: tag && tag.supersededBy ? String(tag.supersededBy) : '',
+        updatedAt: Date.now(),
+      }
+    }
+
+    async function writeRunFile(runId) {
+      if (fs === undefined) return
+      const p = await rootPaths()
+      if (!p.runsDir) return
+      const payload = runRecordPayload(runId)
+      if (!payload) return
+      const file = runFileName(runId)
+      const target = await fs.resolve(p.runsDir + '/' + file)
+      await fs.writeText(target, JSON.stringify(payload, null, 2) + '\n', undefined, undefined, writePolicy())
+      runsDiskIndex.set(file, { file: file, id: payload.id, ts: payload.updatedAt || payload.startedAt || 0 })
+    }
+
+    // 无定时器节流（动态 vm 沙箱无真 setTimeout）：每个 run 至多一个飞行中
+    // 写入，期间的变更只置 dirty，当前写入完成后按最新内存态补一次尾写——
+    // start/phase/log/agent/end 全部走此队列，天然合并且终态不落空。
+    const runWriteQueues = new Map()
+    function requestRunPersist(runId) {
+      const id = String(runId || '')
+      if (!id) return
+      let q = runWriteQueues.get(id)
+      if (!q) { q = { dirty: false, pending: null }; runWriteQueues.set(id, q) }
+      q.dirty = true
+      if (!q.pending) drainRunWrite(id)
+    }
+    function drainRunWrite(id) {
+      const q = runWriteQueues.get(id)
+      if (!q) return
+      if (!q.dirty) { runWriteQueues.delete(id); return }
+      q.dirty = false
+      q.pending = writeRunFile(id)
+        .catch((e) => { console.log('[vwf] 运行记录落盘失败（不影响运行）：' + id + '：' + String((e && e.message) || e)) })
+        .then(() => { q.pending = null; drainRunWrite(id); evictRunsSoon() })
+    }
+
+    // 磁盘容量淘汰：启动回载重建索引，写入后增量更新；超出 RUNS_RETAIN 时
+    // 删除最旧（fs 服务无删除面，经子进程 rm；子进程缺失则暂停淘汰并仅记
+    // 一次日志——永不删除索引外的未知文件，方向安全）。
+    const runsDiskIndex = new Map()
+    let evictChain = Promise.resolve()
+    let evictWarned = false
+    function evictRunsSoon() {
+      evictChain = evictChain.then(evictRunsDisk).catch((e) => {
+        console.log('[vwf] 运行记录淘汰失败（不影响运行）：' + String((e && e.message) || e))
+      })
+    }
+    async function evictRunsDisk() {
+      if (fs === undefined) return
+      const p = await rootPaths()
+      if (!p.runsDir || runsDiskIndex.size <= RUNS_RETAIN) return
+      if (subprocess === undefined) {
+        if (!evictWarned) { evictWarned = true; console.log('[vwf] subprocess 服务不可用：运行记录淘汰暂停（磁盘条数 ' + runsDiskIndex.size + ' 超过上限 ' + RUNS_RETAIN + '）') }
+        return
+      }
+      const items = Array.from(runsDiskIndex.values()).sort((a, b) => (a.ts - b.ts) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
+      const victims = items.slice(0, items.length - RUNS_RETAIN)
+      for (const v of victims) {
+        // 活跃 run 不淘汰（保险带：按时间序正常轮不到；防止淘汰把进行中快照删掉）
+        const rec = runs.get(v.id)
+        if (rec && isActiveStatus(rec.status)) continue
+        const r = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{force:true})", p.runsDir + '/' + v.file])
+        if (r.ok) runsDiskIndex.delete(v.file)
+        else console.log('[vwf] 运行记录淘汰删除失败：' + v.file + '：' + r.detail)
+      }
+    }
+
+    // 磁盘 → 内存水合：live 优先（runs 已有同 id 记录则不动）。回载的 runTag
+    // 以 active:false 恢复——进程重启后不存在执行中的 run；AWAITING_HUMAN_*
+    // 门禁状态经 isActiveStatus(runs) 继续保持 taskId 占用与接管语义。
+    function hydrateRunFromDisk(data) {
+      if (!data || typeof data !== 'object') return false
+      const id = typeof data.id === 'string' && data.id ? data.id : null
+      if (!id || runs.has(id)) return false
+      runs.set(id, {
+        meta: { name: (data.meta && data.meta.name) || '', description: (data.meta && data.meta.description) || '' },
+        status: typeof data.status === 'string' && data.status ? data.status : 'unknown',
+        phase: typeof data.phase === 'string' ? data.phase : '',
+        logs: Array.isArray(data.logs) ? data.logs.map((l) => String(l)).slice(-50) : [],
+        agents: Array.isArray(data.agents) ? data.agents.filter((a) => a && typeof a === 'object').map((a) => ({ seq: a.seq, label: String(a.label || ''), phase: a.phase ? String(a.phase) : '', outcome: String(a.outcome || '') })) : [],
+        startedAt: typeof data.startedAt === 'number' ? data.startedAt : null,
+      })
+      if (data.taskId || data.workflowId) {
+        const tag = {
+          taskId: typeof data.taskId === 'string' ? data.taskId : '',
+          workflowId: typeof data.workflowId === 'string' ? data.workflowId : '',
+          startedAt: typeof data.startedAt === 'number' ? data.startedAt : null,
+          active: false,
+        }
+        if (typeof data.supersededBy === 'string' && data.supersededBy) tag.supersededBy = data.supersededBy
+        runTags.set(id, tag)
+      }
+      return true
+    }
+
+    // vwf.state 内存 miss 的磁盘回落：命中即水合进内存（后续列表/互斥照常工作）
+    async function loadRunFromDisk(runId) {
+      if (fs === undefined) return null
+      const p = await rootPaths()
+      if (!p.runsDir) return null
+      try {
+        const target = await fs.resolve(p.runsDir + '/' + runFileName(runId))
+        const info = await fs.stat(target)
+        if (!info || info.type !== 'file') return null
+        const data = JSON.parse(await fs.readText(target))
+        if (!hydrateRunFromDisk(data)) return null
+        return runs.get(data.id) || null
+      } catch (e) { return null }
+    }
+
+    // 启动回载：按时间升序插入（保持 runs Map 插入序=时间序，vwf.runs.list
+    // 反转后最新在前）；单文件损坏仅跳过留痕（验收 AC5）；回载后补一次淘汰
+    // （前序进程可能死在淘汰前）。
+    async function loadPersistedRuns() {
+      if (fs === undefined) return
+      const p = await rootPaths()
+      if (!p.runsDir) return
+      let entries = null
+      try {
+        entries = await fs.listDir(await fs.resolve(p.runsDir))
+      } catch (e) { return } // 目录不存在 = 首次运行
+      const loaded = []
+      for (const ent of entries || []) {
+        if (!ent || ent.type !== 'file' || !/\.json$/i.test(ent.name)) continue
+        try {
+          const data = JSON.parse(await fs.readText(await fs.resolve(p.runsDir + '/' + ent.name)))
+          if (!data || typeof data.id !== 'string' || !data.id) throw new Error('缺少 id 字段')
+          const ts = (typeof data.updatedAt === 'number' && data.updatedAt) || (typeof data.startedAt === 'number' && data.startedAt) || 0
+          loaded.push({ file: ent.name, id: data.id, ts: ts, data: data })
+        } catch (e) {
+          console.log('[vwf] 跳过损坏的运行记录：' + ent.name + '（' + String((e && e.message) || e) + '）')
+        }
+      }
+      loaded.sort((a, b) => (a.ts - b.ts) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
+      for (const it of loaded) runsDiskIndex.set(it.file, { file: it.file, id: it.id, ts: it.ts })
+      for (const it of loaded.slice(-RUNS_RELOAD)) hydrateRunFromDisk(it.data)
+      evictRunsSoon()
+    }
+    // 与 apply 时序解耦的异步回载：不阻塞 apply，失败仅在终端日志留痕
+    loadPersistedRuns().catch((e) => console.log('[vwf] 运行记录回载失败（不影响本次运行）：' + String((e && e.message) || e)))
+
 
     registerRpc('vwf.workflows.list', async () => listWorkflows())
     registerRpc('vwf.workflows.save', async (a) => {
@@ -755,11 +936,14 @@ return {
       return out
     })
     registerRpc('vwf.state', async (a) => {
-      const s = a && a.runId ? runs.get(a.runId) : null
+      const id = a && a.runId
+      let s = id ? runs.get(id) : null
+      // 内存 miss 回落磁盘（#40）：重启后未回载进内存的历史记录按 runId 直查
+      if (!s && id) s = await loadRunFromDisk(id)
       if (!s) return { found: false, state: null }
-      const tag = runTags.get(a.runId) || null
-      return { found: true, state: { id: a.runId, meta: s.meta, status: s.status, phase: s.phase, logs: s.logs, agents: s.agents,
-        taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: tag ? tag.startedAt : null,
+      const tag = runTags.get(id) || null
+      return { found: true, state: { id: id, meta: s.meta, status: s.status, phase: s.phase, logs: s.logs, agents: s.agents,
+        taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: s.startedAt != null ? s.startedAt : (tag ? tag.startedAt : null),
         supersededBy: tag && tag.supersededBy ? tag.supersededBy : '' } }
     })
     // 多 run 并行（#19）：运行清单（最新在前），看板列表/门禁队列/并行警示的数据源
@@ -768,10 +952,36 @@ return {
       for (const [rid, rec] of runs) {
         const tag = runTags.get(rid) || null
         out.push({ id: rid, name: (rec.meta && rec.meta.name) || '', status: rec.status, phase: rec.phase || '',
-          taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: tag ? tag.startedAt : null,
+          taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: rec.startedAt != null ? rec.startedAt : (tag ? tag.startedAt : null),
           supersededBy: tag && tag.supersededBy ? tag.supersededBy : '' })
       }
       out.reverse()
+      return { runs: out }
+    })
+    // 磁盘全量运行清单（#40：运行历史浏览）。只读磁盘返回元数据，**不**水合进
+    // 内存——保持「启动回载最近 RUNS_RELOAD 条」的内存上限语义；用户点击某条
+    // 历史时仍走 vwf.state 磁盘回落按需水合。最新在前；损坏文件跳过。
+    registerRpc('vwf.runs.history', async () => {
+      if (fs === undefined) return { runs: [] }
+      const p = await rootPaths()
+      if (!p.runsDir) return { runs: [] }
+      let entries = null
+      try {
+        entries = await fs.listDir(await fs.resolve(p.runsDir))
+      } catch (e) { return { runs: [] } }
+      const out = []
+      for (const ent of entries || []) {
+        if (!ent || ent.type !== 'file' || !/\.json$/i.test(ent.name)) continue
+        try {
+          const data = JSON.parse(await fs.readText(await fs.resolve(p.runsDir + '/' + ent.name)))
+          if (!data || typeof data.id !== 'string' || !data.id) continue
+          const ts = (typeof data.updatedAt === 'number' && data.updatedAt) || (typeof data.startedAt === 'number' && data.startedAt) || 0
+          out.push({ id: data.id, name: (data.meta && data.meta.name) || '', status: data.status || '', phase: data.phase || '',
+            taskId: data.taskId || '', workflowId: data.workflowId || '', startedAt: data.startedAt != null ? data.startedAt : null,
+            supersededBy: data.supersededBy || '', ts: ts })
+        } catch (e) { /* 损坏文件跳过 */ }
+      }
+      out.sort((a, b) => (b.ts - a.ts) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       return { runs: out }
     })
     registerRpc('vwf.models', async () => {
@@ -965,6 +1175,9 @@ return {
             startedAt: Date.now(),
             active: true,
           })
+          // 启动边界同步落一份快照：workflow/start 事件可能晚于 tag 登记到达，
+          // 这里保证进行中的 run 在 start 后即有含 taskId 的可见快照（#40 AC2）
+          requestRunPersist(String(run.id))
           if (args.entry) supersedeParked(String(args.taskId), String(run.id))
           const result = await run.result
           // 权威终态回写（见 canonicalStop 注释）：completed 时以脚本返回为准
@@ -974,7 +1187,7 @@ return {
           const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
           if (canon) {
             const rec = runs.get(String(run.id))
-            if (rec) rec.status = canon
+            if (rec) { rec.status = canon; requestRunPersist(String(run.id)) }
           }
           return JSON.stringify({ runId: String(run.id), stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
         }

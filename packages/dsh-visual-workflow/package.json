@@ -9,7 +9,7 @@
     "build": "node scripts/build-bundle.mjs",
     "check:dist": "node scripts/check-dist-fresh.mjs",
     "prepare": "node scripts/build-bundle.mjs",
-    "test": "node --test tests/host.test.mjs tests/client.smoke.mjs tests/static-bundle.test.mjs tests/dist-fresh.test.mjs",
+    "test": "node --test tests/host.test.mjs tests/runs-persistence.test.mjs tests/client.smoke.mjs tests/static-bundle.test.mjs tests/dist-fresh.test.mjs",
     "verify": "bash verify.sh"
   },
   "dsh": {
