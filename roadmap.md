@@ -1,51 +1,57 @@
 # Workflow Manager Roadmap
 
-> 状态基线：2026-08-21
+> 状态基线：2026-08-25
 >
-> 本文档描述项目从当前 DSH 优先实现，逐步演进为可验证、可扩展、可跨 Coding Agent 复用的工作流系统的计划。它是产品/架构级路线图，不替代 `docs/design/` 中的详细契约、`wayfinder/MAP.md` 中的决策记录或 GitHub Issue 中的施工任务。
+> 本文档是产品 / 架构级路线图。详细字段与运行语义以 `docs/design/` 为准，项目共同规则以 `AGENTS.md` 为准，术语以 `CONTEXT.md` 为准，历史决策以 `wayfinder/MAP.md` 为准，具体施工状态以 GitHub Issue / PR 与 `main` 实际实现为准。
 
 ## 1. 项目定位
 
-Workflow Manager 的长期目标不是维护一份固定的 DSH 编排脚本，而是形成一套：
+Workflow Manager 的长期目标不是维护一份固定的 DSH 编排脚本，也不是单纯做一个“通用工作流引擎”。
 
-- **工作流定义与具体 Agent 解耦**；
-- **可机器校验、可行为回归、可人工门禁**；
-- **支持可视化创作与版本化复用**；
-- **可逐步接入 DSH、Codex、Claude Code、ACP Agent 等执行器**；
-- **适合真实软件开发任务长期迭代**
+项目定位调整为：
 
-的软件开发工作流系统。
+> **面向复杂软件研发的 AI 协作工作流系统。**
+>
+> 它负责把需求、设计、项目规则与专业能力按需交给正确的角色；约束每个角色的责任、权限与交付证据；允许 Agent 在职责边界内自主工作；在关键范围变更、验收、合并与其他高风险动作上保留人工授权；并让同一套协作规则逐步复用于不同 Coding Agent。
 
-当前实现仍以 DSH 为首个运行时，但项目的核心资产已经逐步从单一脚本演进为：
+因此，跨 Agent 兼容仍然重要，但它是实现手段，不再是最高层产品目标。
 
-1. Blueprint Contract（蓝图契约）；
-2. `validate-core.cjs`（统一校验内核）；
-3. `compileBlueprint()`（统一编译器）；
-4. runtime harness（运行时行为测试）；
-5. DSH execution runtime（当前默认执行运行时）。
+### 1.1 项目优先解决的问题
 
-长期架构方向：
+1. **上下文正确性**：Agent 不应靠复制整份项目知识工作，而应在当前阶段获得最小且权威的上下文指针。
+2. **责任边界**：每个角色清楚知道自己负责什么、不负责什么、必须交付什么证据。
+3. **局部自主与宏观授权**：正常开发 / 测试 / 审核尽量自动推进；改变范围、接受风险、最终验收、合并发布等动作保留人工决策。
+4. **证据驱动交接**：角色之间不是靠“我做完了”交接，而是靠结构化结果、文件产物、验证记录和可复现证据交接。
+5. **多人 / 多 Agent 协作**：同一个需求可以拥有不同责任轨道并行推进，而不只是多个独立需求同时运行。
+6. **执行器可替换**：DSH、Codex、Claude Code 或其他 Agent 可以逐步成为执行者，但不能绕过协作契约。
+
+### 1.2 长期四层模型
 
 ```text
-Workflow Definition / Template
-          │
-          ▼
-   Workflow Contract
-          │
-   ┌──────┴──────┐
-   │ Validate    │
-   │ Compile     │
-   │ Test        │
-   └──────┬──────┘
-          │
-   Execution Adapter
-          │
-   ┌──────┼───────────────┐
-   ▼      ▼               ▼
-  DSH   Native Agent      ACP
-         │                │
-      Codex / Claude    Any ACP Agent
+权威上下文层
+需求 / 设计 / AGENTS / 决策 / Skill / 历史证据
+        │
+        │ 只传递当前阶段需要的引用与摘要
+        ▼
+协作契约层
+责任 / 输入 / 输出 / 证据 / 权限 / Gate / 状态
+        │
+        ▼
+协作执行层
+开发轨 / 测试轨 / Review / 人工裁决 / 汇合
+        │
+        ▼
+执行器层
+DSH / Codex / Claude Code / Other Agent
 ```
+
+核心顺序是：
+
+> **上下文 → 责任 → 权限 → 证据 → 协作 → 执行器。**
+
+不再以“先接更多执行器，再补协作语义”为主要演进顺序。
+
+---
 
 ## 2. 版本与命名规范
 
@@ -57,599 +63,458 @@ MAJOR.MINOR.PATCH
 
 在 `1.0.0` 前：
 
-- `0.x.0`：新增一组明确的产品/架构能力；
-- `0.x.y`：兼容性修复、测试补强、文档/体验优化；
+- `0.x.0`：新增一组明确的产品 / 架构能力；
+- `0.x.y`：兼容性修复、测试补强、文档 / 体验优化；
 - Git Tag / GitHub Release 使用 `v0.1.0`、`v0.2.0` 形式。
 
-### 历史 Workflow 名称与项目版本分离
+历史 Workflow 名称与项目版本分离：
 
-`dev-workflow-2-0` / “开发工作流 2.0”来自 Gold Band 迁移历史，用于区别早期工作流，不再作为本项目软件版本号。
+- `dev-workflow-2-0` / “开发工作流 2.0”是模板历史名称；
+- `version` 是具体 Workflow 模板版本；
+- `contractVersion` 是 Workflow Contract 版本；
+- GitHub Release 版本是整个项目版本。
 
-近期保持现有 Workflow ID，避免破坏：
+---
 
-- 模板 ID；
-- Skill ID；
-- 触发词；
-- 生成目录；
-- 用户已有引用。
+## 3. 当前现实基线
 
-后续在蓝图契约中明确区分：
+截至 2026-08-25，项目已经完成了第一阶段目标：**把 AI 开发流程从提示词集合收敛为可验证、可回归、可人工裁决的工作流底座。**
 
-```jsonc
-{
-  "contractVersion": "1",
-  "version": "0.1.0",
-  "id": "dev-workflow-2-0"
-}
-```
+### 3.1 Workflow 定义与执行基线 ✅
 
-其中：
+已完成：
 
-- `contractVersion`：蓝图协议版本；
-- `version`：某个 Workflow 模板自身的版本；
-- `id`：稳定标识；
-- 项目 Release 版本：仓库整体产品版本。
+- Blueprint 作为具体 Workflow 的唯一事实源；
+- Schema / 状态机蓝图化；
+- 单一编译路径；
+- 单一校验规则集；
+- runtime harness 行为测试；
+- DSH / vwf 双入口统一语义；
+- 生成 Skill 运行路径；
+- 用户模板保存 → 校验 → 编译 → Skill 闭环；
+- 生成物不可手改与重生成一致性检查。
 
-## 3. 当前基线（已完成）
+### 3.2 软件开发流程健壮性 ✅
 
-截至 2026-08-21，项目已经完成第一次关键架构收敛。
+已完成：
 
-### 3.1 Blueprint 单一事实源 ✅
+- dev / review 异源约束；
+- 工作分支物理隔离；
+- test / review / accept 验证分支与 HEAD 留痕；
+- 验证结论值一致性检查；
+- 测试 / 审核打回循环；
+- 9 轮上限与超限归因；
+- AI 验收准备 + 人工最终裁决；
+- `output.files` 与角色 / 目标的文件契约核对；
+- 关键状态机行为进入回归测试。
 
-`templates/*.json` 已成为具体工作流定义的唯一事实源。
+### 3.3 可视化与产品入口 ✅
 
-```text
-templates/<id>.json
-        │
-        ▼
- scripts/generate.mjs
-        │
-        ▼
-.generated/<id>/
-  ├── script.mjs
-  ├── vwf-dsl.json
-  ├── SKILL.md
-  └── meta.json
-```
-
-`.generated/` 为生成物，禁止直接编辑。
-
-旧的手写 `dsh/workflow/dev-workflow-2.0.mjs` 已退役删除，DSH 入口改由生成 Skill 承接。
-
-### 3.2 Workflow Schema / 状态机已进入蓝图 ✅
-
-节点的以下能力已由蓝图声明：
-
-- `profile` / `goal`；
-- `output.schema`；
-- `output.successCondition`；
-- `output.files`；
-- `manualCheck`；
-- `verifyBranch`；
-- `bindings.models`；
-- `edges` / success / failure；
-- `control.maxRounds`；
-- `onMaxRounds`；
-- `heteroCheck`。
-
-因此“业务流程规则 = 手写 DSH 脚本”的耦合已经显著降低。
-
-### 3.3 统一编译器 ✅
-
-DSH 与 vwf 已统一使用 `scripts/generate.mjs` 中的 `compileBlueprint()`。
-
-原有第二套 `host.js compileDsl` 已删除。
-
-当前架构硬原则：
-
-> 同一 Blueprint 不允许由两个业务语义不同的编译器解释。
-
-### 3.4 统一校验内核 ✅
-
-唯一规则集为：
-
-```text
-scripts/validate-core.cjs
-```
-
-分为：
-
-- `validateStructure()`：拓扑、边、入口、走通性、条件、Schema 路径、maxRounds 等框架约束；
-- `validateBlueprint()`：异源、`verifyBranch`、`output.files`、模型绑定等业务约束。
-
-原 `validate-blueprint.mjs` 与宿主独立 `validateDsl` 等重复规则实现已删除。
-
-### 3.5 运行时排练厅 / 行为测试 ✅
-
-测试已经从“嗅探生成脚本字符串”升级为真实执行生成脚本并断言返回状态机行为。
-
-当前 runtime harness 覆盖：
-
-- 框架级走通性；
-- 模板级回归；
-- DSH / vwf 统一编译路径；
-- 人工门禁；
-- 打回循环；
-- 分流；
-- 可信度闸门；
-- 超限归因等关键行为。
-
-后续 Contract 变更必须继续以行为测试而非仅静态字符串测试作为主要回归依据。
-
-### 3.6 可视化编辑器基础能力 ✅
-
-当前 vwf 已具备：
+已完成：
 
 - 模板库；
-- 节点增删；
-- 拖拽连线；
-- 节点/边配置；
-- provider / model / role / goal；
-- JSON Schema；
-- `successCondition`；
-- `maxRounds`；
-- `heteroCheck`；
-- `onMaxRounds`；
+- 节点 / 边编辑；
+- 节点属性和结构化输出配置；
 - JSON / 画布双向编辑；
-- 实时校验与字段定位；
 - 保存 / 删除 / 另存为；
-- 运行看板基础能力。
+- 运行看板；
+- DSH 静态组合包安装路径；
+- 浏览器入口与宿主生命周期修复；
+- 默认工作流与角色自包含分发。
 
-因此后续重点是产品化与补齐，而不是重新建设编辑器。
+### 3.4 并行基础能力 ✅
 
-### 3.7 用户模板持久化与 Skill 闭环 ✅
+项目已经提前完成了原 Roadmap 后置的两项能力：
 
-用户模板当前采用文件系统持久化：
+- **多 run 并行**：不同 taskId 的 Workflow 可同时运行；同 taskId 互斥；人工门禁可排队裁决。Issue #19 已验收关闭。
+- **fanOut 受限并行子任务**：同一节点可按 items 并行展开同类子任务、聚合结果并执行数量上限保护。Issue #18 已验收关闭，PR #38 已合并。
 
-```text
-~/.dsh/visual-workflow/templates/<id>.json
-```
+需要明确：
 
-保存成功后同步生成：
+> 多 run 并行解决“多个独立任务同时跑”；fanOut 解决“同类子任务批量并行”。它们都不是“同一需求下多个不同责任角色并行协作”的完整实现。
 
-```text
-~/.dsh/skills/<id>/
-```
+### 3.5 运行历史持久化：Reality Reconciliation ⚠️
 
-形成：
+Issue #40 定义的是运行记录跨进程重启后的恢复能力。
 
-```text
-编辑 → 校验 → 保存 Blueprint → 编译 → Skill 可运行
-```
+截至本 Roadmap 更新时，GitHub Issue #40 仍显示为 open，`main` 最近提交中也没有找到可明确归属于 #40 的合并记录。因此当前文档不把它标记为已完成。
 
-Skill 写盘已采用暂存目录 + rename 换入的原子化流程，并具有失败清理测试。
+如果该能力已在其他分支 / PR 完成验收，需要先完成一次 Reality Reconciliation：
 
-### 3.8 开发工作流关键健壮性规则 ✅
+1. 找到对应 PR / commit；
+2. 核对验收证据；
+3. 合入 `main`；
+4. 关闭 #40；
+5. 再将本节改为 ✅。
 
-当前已实现：
+### 3.6 当前仍存在的产品级缺口
 
-- dev / review 异源模型硬规则；
-- `verified_branch` / `verified_head` 可信度闸门；
-- Git worktree 物理隔离；
-- test / review / accept 结论校验；
-- 最多 9 轮打回；
-- 超限失败归因；
-- AI 验收 + 人工裁决分离；
-- `AWAITING_HUMAN_<id>` 可续跑门禁；
-- `output.files` 与 goal / role 文件名的一致性机器核对。
+当前底座已经可控，但离“复杂软件研发 AI 协作系统”还有五个关键缺口：
 
-### 3.9 AGENTS.md 基础版 ✅
+1. **Context Pointer 只完成角色级雏形**：节点会按角色读取规则，但尚未把需求、设计、项目规则、Skill、历史证据等正式建模为按需上下文。
+2. **人工授权粒度较粗**：主要依赖固定 `manualCheck` 节点，尚未形成按风险 / 规模 / 动作定义的权限策略。
+3. **S / M / L 需求准入未进入主工作流硬约束**：`requirements-analysis` 已有分级治理，但默认 Workflow 仍主要检查“三要素完整”后开工。
+4. **同需求多角色并行未建立**：尚不能正式表达“开发轨与测试轨并行准备 → 汇合验证 → Review → 人工决策”。
+5. **权威上下文仍可能漂移**：Roadmap、旧 OpenSpec、Issue、PR 与实际实现需要更强的持续对账机制。
 
-根目录已经建立 `AGENTS.md`，覆盖：
+---
 
-- 项目结构；
-- 生成物规则；
-- 构建 / 测试命令；
-- 编码与命名约定；
-- 提交 / PR 规范；
-- 安全与本地状态边界。
-
-后续从“已有 AGENTS.md”转向“AGENTS 治理与漂移控制”。
-
-### 3.10 CI / validate 基线 ✅
-
-根级 `npm run validate` 与 GitHub Actions 已用于：
-
-- Blueprint 校验；
-- 重生成一致性；
-- 引擎测试；
-- runtime harness；
-- 插件测试。
-
-## 4. v0.1.0 — 统一 Workflow Engine 基线
+## 4. v0.1.0 — 可信基线与现实对账
 
 ### 目标
 
-发布首个正式项目版本，确认当前架构具备稳定、可重复、可回归的基线。
+发布首个正式版本，确认当前成果具有可信、可重复、可回归的基线。
 
-本版本原则：**只收口，不扩大能力边界。**
+**原则：只收口，不扩大能力边界。**
 
 ### 已完成
 
 - [x] Blueprint 单一事实源
-- [x] Schema / 状态机蓝图化
-- [x] 统一编译器
-- [x] 统一校验内核
+- [x] 统一编译与校验语义
 - [x] runtime harness
-- [x] DSH / vwf 双入口同编译语义
+- [x] DSH / vwf 双入口一致
 - [x] 可视化编辑器基础能力
-- [x] 用户模板持久化
-- [x] save → Skill 闭环
-- [x] Skill 原子写盘
-- [x] 异源 enforcement
-- [x] `verifyBranch` 可信度闸门
-- [x] worktree 隔离
+- [x] 用户模板持久化与 Skill 闭环
+- [x] 工作分支隔离与验证可信度闸门
 - [x] 人工门禁
-- [x] 9 轮 / 超限归因
-- [x] 文件契约机器核对
-- [x] 旧手写 mjs 退役
-- [x] 根级 `AGENTS.md`
+- [x] 多 run 并行（#19）
+- [x] fanOut 受限并行（#18 / PR #38）
+- [x] DSH 安装形态基础能力
 - [x] CI / validate 基础
 
-### 发布前待完成
+### 发布前必须完成
 
-- [ ] 正式统一版本号：根项目与尚未正式发布的子包从 `0.1.0` 建立一致基线
-- [ ] 清理文档中容易误解的软件版本表述：历史 “Workflow 2.0 / v1 / v1.1 / v2” 与项目 SemVer 分离
-- [ ] 完成 `docs/design/equivalence-checklist.md` 8 个维度的正式人工签核
-- [ ] 以生成 Skill 触发词完成一次完整 E2E 实跑并记录结果
-- [ ] 对 GitHub Issues 与当前实现做 Reality Reconciliation：关闭已完成项、重写已过时方案
-- [ ] 清理或明确已跟踪 `.scratch/` 历史遗留，避免与 `AGENTS.md` / `.gitignore` 规则冲突
-- [ ] 给 `AGENTS.md` 增加最小架构硬规则和 SemVer 规则
-- [ ] 创建 Git Tag / GitHub Release：`v0.1.0`
+- [ ] 正式统一项目与尚未正式发布子包的版本号基线；
+- [ ] 完成 `docs/design/equivalence-checklist.md` 正式签核；
+- [ ] 用生成 Skill 的真实触发路径完成一次完整 E2E；
+- [ ] 对 Issue / PR / Roadmap / OpenSpec / `main` 做 Reality Reconciliation；
+- [ ] 明确 #40 的真实实现状态并完成对账；
+- [ ] 处理仍开放但与已关闭 Issue 相关的 PR（包括 #44）的最终去向；
+- [ ] 重写或标记 #3 / #6 等历史 Epic，避免继续作为当前产品目标施工；
+- [ ] 在 `AGENTS.md` 中补齐架构硬规则、SemVer 规则与权威上下文层级；
+- [ ] 对已经过时的设计文档增加 Superseded / Historical 标记，而不是让 Agent 把旧方案当当前要求；
+- [ ] 创建 `v0.1.0` Tag / Release。
 
 ### v0.1.0 完成定义
 
 以下条件必须同时成立：
 
 1. `npm run validate` 全绿；
-2. 等价验收清单签核完成；
-3. 生成 Skill 的真实 E2E 流程通过；
-4. 文档、Issue、代码对当前架构描述一致；
-5. 版本号语义无歧义；
-6. 发布 `v0.1.0` Release。
-
-## 5. v0.2.0 — Contract 正式化 + AGENTS 治理 + DSH 产品化
-
-### 5.1 Formalize Workflow Contract
-
-现有 `blueprint-schema.md + validate-core + compileBlueprint + runtime harness` 已经形成事实上的 Workflow Contract。
-
-本阶段不是从零创建，而是正式化：
-
-- [ ] 为 Blueprint 增加 `contractVersion`
-- [ ] 为具体 Workflow 模板增加独立 `version`
-- [ ] 明确字段兼容策略：新增 / 废弃 / breaking change
-- [ ] 定义 Blueprint migration 机制
-- [ ] 定义状态码、Gate、Artifact 的稳定协议
-- [ ] 明确哪些字段属于业务 Workflow，哪些属于某个执行运行时扩展
-- [ ] 为 Contract 变化建立兼容性测试矩阵
-
-目标：
-
-> Workflow Contract 可以独立描述“软件开发流程要发生什么”，而不要求消费者理解 DSH 实现细节。
-
-### 5.2 AGENTS 治理
-
-根 `AGENTS.md` 已完成基础版。本阶段补治理能力：
-
-- [ ] 增加架构硬规则：禁止重新引入第二套编译器 / 校验器
-- [ ] 明确权威性层次：Blueprint 实例 / Contract / validator / generated artifact
-- [ ] 加入 SemVer 与命名规则
-- [ ] review / closeout 增加 AGENTS drift 检查
-- [ ] 项目级定期漂移审计持续执行
-- [ ] 仅在目录出现独立且稳定规则后再增加子目录 `AGENTS.md`
-
-知识分层目标：
-
-```text
-AGENTS.md           项目共同规则
-CONTEXT.md          项目统一术语
-blueprint-schema    机器/业务契约
-wayfinder/MAP.md    决策记录
-dsh/roles/*.md      角色岗位规则
-```
-
-### 5.3 DSH 插件产品化
-
-完成真正可安装的 DSH 组合包，而不是依赖 Creative Mode 动态 `cordis_define`：
-
-- [ ] 完成组合包 manifest / patch 接线
-- [ ] `dsh plugin --profile <name> add link:...` 安装验证
-- [ ] 重启 Profile 后功能完整保留
-- [ ] 明确开发安装、升级、卸载流程
-- [ ] 为后续 GitHub / registry 分发准备构建产物
-
-GitHub Issue #16 应作为本阶段核心施工项之一。
-
-### 5.4 持久化边界重新定义
-
-当前 Blueprint 文件持久化已经满足模板可移植、可 diff、可 Git 管理的目标，因此暂不把模板迁回 opaque storage。
-
-建议：
-
-```text
-Blueprint / Template  → 文件系统
-Run metadata/history  → storageDomain（如确有需要）
-UI state              → storageDomain（如确有需要）
-```
-
-原 Issue #17 的“模板整体迁 storageDomain”应按现状重新评审。
-
-## 6. v0.3.0 — External Agent Execution Adapter
-
-### 目标
-
-在不破坏 Workflow Contract 和现有 DSH Schema Gate 的前提下，让外部 Coding Agent 成为真实执行者。
-
-### 架构方向
-
-抽象执行接口：
-
-```text
-executeNode(node, context)
-        │
-        ├── DshAgentExecutor
-        ├── CodexExecutor
-        └── ClaudeCodeExecutor
-```
-
-### Codex 第一阶段策略
-
-优先使用 DSH 内置 `subagent_codex`，而不是立即把整个 Workflow 迁到 ACP。
-
-推荐路径：
-
-```text
-Workflow node
-    │
-    ▼
-DSH wrapper / adapter
-    │
-    ▼
-subagent_codex
-    │
-    ▼
-Codex 执行真实开发任务
-    │
-    ▼
-DSH wrapper 校验 / 归一化
-    │
-    ▼
-Workflow output.schema
-```
-
-原因：
-
-- 当前 Workflow 强依赖 `output.schema`；
-- Codex 产品 subagent 与 ACP backend 当前都不直接继承 DSH structured output 契约；
-- wrapper 可以保留现有状态机与 Gate，同时把重型开发交给 Codex。
-
-### 本阶段任务
-
-- [ ] 定义 Executor capability matrix
-- [ ] 抽象节点执行接口
-- [ ] 保持 DSH Executor 为默认实现
-- [ ] Codex Executor 原型
-- [ ] Claude Code Executor 原型
-- [ ] 外部 Agent 输出归一化与本地 Schema 验证
-- [ ] 权限 / sandbox / cancel / timeout 统一错误分类
-- [ ] 同一 Workflow 在至少两个执行器上完成行为测试
-
-### 非目标
-
-本阶段不把 ACP 设为强制中间层。
-
-## 7. v0.4.0 — Plugin Development Profile
-
-### 目标
-
-支持“普通仓库开发”和“DSH/Cordis Runtime 插件开发”共享同一个 Workflow Core，但拥有不同运行 Profile。
-
-```text
-Workflow Core
-    │
-    ├── normal
-    └── cordis-plugin
-```
-
-### 插件开发专属阶段
-
-可能包括：
-
-```text
-inspect runtime
-      ↓
-develop
-      ↓
-static test
-      ↓
-runtime define / run
-      ↓
-AWAITING_PLUGIN_APPROVAL
-      ↓
-human / main Creative session
-      ↓
-runtime verify
-      ↓
-review / accept / closeout
-```
-
-### 原则
-
-- [ ] Workflow 不同步等待需要多轮人工交互的 runtime approval
-- [ ] 复用当前 `AWAITING_HUMAN_*` 人机边界
-- [ ] 主 Creative Session 负责 live runtime / approval 生命周期
-- [ ] 自动 Workflow 负责可重复的开发、静态验证、review 与状态管理
-- [ ] 尽量不复制一套独立工作流实现
-
-## 8. v0.5.0 — ACP 通用执行层
-
-### 目标
-
-在 Workflow Contract 和 Executor 抽象稳定后，引入 ACP 作为跨 Agent 通讯 / 会话传输层之一。
-
-职责必须分层：
-
-```text
-AGENTS.md
-= 项目共同规则
-
-Workflow Contract
-= 软件开发任务、节点、结果、状态、Gate 的业务协议
-
-ACP
-= Agent 会话 / Prompt / 生命周期 / Permission 等通讯协议
-
-DSH / Codex / Claude / Other
-= 真正执行工作的 Agent
-```
-
-### 本阶段任务
-
-- [ ] ACP Executor
-- [ ] capability negotiation
-- [ ] Workflow Contract 在 ACP 上的 namespaced extension / envelope
-- [ ] structured output 的本地解析与 JSON Schema 强制验证
-- [ ] 无效结构结果的 repair / retry 策略
-- [ ] permission / cancel / error 映射
-- [ ] Codex ACP Adapter 实验
-- [ ] 至少一个非 Codex ACP Agent 互操作实验
-
-### 关键原则
-
-ACP 不替代 Workflow Contract。
-
-不能因为“通过 ACP 通讯”就降低：
-
-- Schema Gate；
-- Artifact Contract；
-- 状态机可验证性；
-- 人工门禁；
-- 行为测试。
-
-## 9. v0.6.0+ — 高级编排与分发
-
-在 Contract / Execution Adapter 稳定后再逐步推进：
-
-### 并行编排
-
-- [ ] fanOut 受限并行子任务
-- [ ] 结果聚合
-- [ ] item / agent 数量上限
-- [ ] 部分失败策略
-
-对应现有 Issue #18。
-
-### 多 Workflow 并行
-
-- [ ] 多 run 看板
-- [ ] 同 taskId 互斥
-- [ ] 人工门禁队列
-- [ ] closeout 串行规则
-- [ ] 状态 / 日志互不串扰
-
-对应现有 Issue #19。
-
-### AiDynamic / 动态规划
-
-- [ ] 在约束内允许 Agent 动态拆解任务
-- [ ] 动态结果必须落入 Contract
-- [ ] 不允许绕过 max rounds / Gate / Schema
-
-### 分发
-
-- [ ] 独立插件仓库评估
-- [ ] GitHub 安装
-- [ ] registry 发布评估
-- [ ] 升级 / migration / rollback
-
-对应现有 Issue #21。
-
-## 10. GitHub Issue 对账方向
-
-现有 Issue 是重要历史记录，但部分描述已经被实际实现超前或替代。
-
-建议在 `v0.1.0` 前完成一次集中对账：
-
-| Issue | 当前判断 | 建议 |
-|---|---|---|
-| #4 P0 动态插件原型 | 大部分能力已落地 | 按验收证据复核后关闭或补缺口 |
-| #5 P1 可视化编辑器 | 大部分能力已落地 | 重写剩余产品化缺口，避免继续按旧描述施工 |
-| #6 P2 持久化产品 | 范围已变化 | 作为高层 Epic 重写 |
-| #16 组合包安装 | 仍是真实缺口 | 进入 v0.2.0 |
-| #17 storageDomain 模板迁移 | 已被文件系统持久化替代大半 | 重写为 run/UI 持久化或关闭 |
-| #18 fanOut | 未开始 | v0.6.0+ |
-| #19 多工作流并行 | 未开始 | v0.6.0+ |
-| #20 执行路径文档化 | 已落地：三入口统一为「获取脚本 → 平台 workflow 工具」，wf_run 为条件注册增强路径 | 已验收，随本轮 PR 关闭 |
-| #21 独立仓库分发 | 后置合理 | v0.6.0+ |
-
-## 11. 架构硬规则
-
-以下原则应逐步进入 `AGENTS.md` 并由测试/Review 保护：
-
-1. **Blueprint 是具体 Workflow 的唯一事实源。**
-2. **`.generated/` 永远是生成物，不允许成为人工修改源。**
-3. **唯一业务编译器是 `compileBlueprint()`；禁止重新引入第二套语义实现。**
-4. **唯一校验规则集是 `validate-core.cjs`；UI 可以有布局辅助逻辑，但不能成为权威业务校验器。**
-5. **Workflow Contract 变更必须增加或更新 runtime harness 行为测试。**
-6. **项目共同规则属于 `AGENTS.md`；角色规则属于 `dsh/roles/*.md`。**
-7. **Workflow Contract 与 Agent 通讯协议分层；ACP 不等于 Workflow Contract。**
-8. **人工 Gate 不由 AI 代签。**
-9. **外部 Agent 接入不能绕过 Schema / Artifact / branch verification Gate。**
-10. **优先渐进抽象现有真实能力，不为未来兼容性提前复制多套 Workflow。**
-
-## 12. 近期优先顺序
-
-当前建议施工顺序：
-
-```text
-v0.1.0 收口
-  │
-  ├─ 版本统一
-  ├─ 等价验收签核
-  ├─ E2E 实跑
-  ├─ Issue / 文档对账
-  └─ AGENTS 架构规则
-        │
-        ▼
-v0.2.0
-  │
-  ├─ Workflow Contract 正式化
-  ├─ DSH 安装产品化
-  └─ AGENTS drift 治理
-        │
-        ▼
-v0.3.0
-  │
-  └─ Codex / Claude Execution Adapter
-        │
-        ▼
-v0.4.0
-  │
-  └─ Plugin Development Profile
-        │
-        ▼
-v0.5.0
-  │
-  └─ ACP Execution Layer
-        │
-        ▼
-v0.6.0+
-     fanOut / 多 Workflow / AiDynamic / 分发
-```
-
-## 13. 成功标准
-
-项目进入 `1.0.0` 前，至少应满足：
-
-- Workflow Contract 稳定且具有兼容/迁移机制；
-- DSH 运行时可正式安装使用；
-- 至少两个不同 Coding Agent 执行器通过同一 Workflow Contract 的 E2E 验证；
-- structured output、Artifact、Gate、错误状态均可机器验证；
-- Blueprint 可视化编辑与文本编辑都不会产生语义分叉；
-- 多 run / 人工门禁生命周期可可靠管理；
-- 版本、文档、AGENTS、Issue 与真实实现长期保持一致。
+2. 等价验收清单签核；
+3. 真实 E2E 通过；
+4. Issue、PR、Roadmap、设计文档与 `main` 对关键能力的描述一致；
+5. 已过时文档不会被误认为当前权威方案；
+6. 发布 `v0.1.0`。
 
 ---
 
-本 Roadmap 随项目实际实现滚动更新。短期决策以稳定现有引擎为优先；新的抽象只有在能够消除已发生的重复实现、协议漂移或接入成本时才进入核心架构。
+## 5. v0.2.0 — Collaboration Contract v1
+
+### 目标
+
+把现有“节点 + 状态机”升级为第一版正式的**协作契约**：不仅描述下一步做什么，还描述谁负责、需要什么上下文、允许做什么、必须交什么证据、哪些动作需要人批准。
+
+这是下一阶段最高优先级。
+
+### 5.1 Context Pointer：上下文按需装载
+
+建立节点级上下文声明，使节点可以显式引用：
+
+- 需求来源；
+- 设计 / ADR / OpenSpec；
+- 项目共同规则；
+- 角色规则；
+- 可复用 Skill / 方法知识；
+- 前序节点产物；
+- 历史决策与验证证据。
+
+原则：
+
+- 默认传指针 / 引用，不复制整份知识；
+- 节点只获得职责所需的最小上下文；
+- 引用必须能追溯到权威来源；
+- 不通过复制多个 Skill 来解决知识复用问题；
+- 允许对当前节点生成短摘要，但摘要不能替代原始权威来源。
+
+### 5.2 Responsibility Contract：责任与交付
+
+为节点 / 角色正式描述：
+
+- 责任目标；
+- 明确非目标；
+- 输入契约；
+- 输出契约；
+- 必须提交的证据；
+- 可修改范围；
+- 可自主决策范围；
+- 失败 / 阻塞 / 升级条件。
+
+目标是让角色交接从“Prompt 约定”升级为可检查的协作协议。
+
+### 5.3 Human Authorization Policy：宏观授权
+
+人工参与从固定节点升级为策略：
+
+- 局部开发、测试、审核、打回可以自动推进；
+- 需求范围变化必须人工确认；
+- L 型 / 高风险需求进入实施前必须人工授权；
+- 最终体验 / 业务验收保留人工裁决；
+- 合并、发布、不可逆清理等动作可按项目策略独立授权；
+- AI 不得代签人工 Gate。
+
+目标不是增加审批次数，而是明确哪些决定属于人。
+
+### 5.4 S / M / L 实施准入
+
+将现有需求分析能力与开发 Workflow 正式衔接：
+
+- **S**：三要素完整、风险低，可直接进入实施；
+- **M**：必须存在可执行子任务与依赖关系；
+- **L / 高风险**：必须先完成决策 / 规格收敛，并取得人工“允许实施”授权。
+
+默认 Workflow 不再仅凭“三要素完整”判断所有任务都可以直接开发。
+
+### 5.5 运行历史与续接
+
+如果 #40 尚未实际落地，则在本版本完成：
+
+- run 历史跨进程保留；
+- 重启后可查看最近状态、角色调用与日志；
+- 人工 Gate 可以恢复归属；
+- 后续逐步支持从可信检查点继续工作，而不是只恢复 UI 展示。
+
+### 5.6 Workflow Contract 正式化
+
+在上述协作语义确定后，再正式化 Contract：
+
+- `contractVersion`；
+- Workflow 独立 `version`；
+- 字段兼容 / 废弃 / breaking change 策略；
+- migration；
+- 状态、Gate、Artifact、Evidence 的稳定协议；
+- 兼容性测试矩阵。
+
+### 5.7 AGENTS 与权威上下文治理
+
+建立明确的知识层级：
+
+```text
+AGENTS.md        项目共同规则
+CONTEXT.md       统一术语
+Workflow Contract
+                 协作与运行协议
+templates/       具体工作流事实源
+specs / ADR      已批准需求与设计
+wayfinder/MAP.md 历史决策与雾区
+roles / skills   专业角色与可复用方法
+run evidence     某次执行的证据
+```
+
+Review / closeout 增加文档漂移检查。
+
+---
+
+## 6. v0.3.0 — 同一需求的多角色并行协作
+
+### 目标
+
+从“多个独立 run 并行”和“同类子任务 fanOut”升级为真正的软件研发协作：**同一个需求下，不同责任角色可以并行工作并在证据 Gate 汇合。**
+
+推荐第一条目标流程：
+
+```text
+                 ┌─ 开发轨：设计理解 → 开发 → 单测 / 自检 ─┐
+需求确认 / 授权 ─┤                                      ├─ 集成验证 → Review → 人工裁决
+                 └─ 测试轨：场景分析 → 用例 / 验证准备 ─────┘
+```
+
+### 本阶段重点
+
+- [ ] 多责任轨道定义；
+- [ ] 轨道级 Context Pointer；
+- [ ] 轨道间只通过正式 Artifact / Evidence 交接；
+- [ ] 汇合条件与未完成分支处理；
+- [ ] 开发与测试的独立责任边界；
+- [ ] 冲突与重新规划机制；
+- [ ] 人工 Gate 对多轨道状态的统一裁决；
+- [ ] 看板从“run 列表”升级为“责任轨道 + 证据 + 等待关系”。
+
+### 关于已有 fanOut
+
+#18 已完成的 fanOut 作为底层并行原语保留，但不把 fanOut 等同于多人协作。
+
+---
+
+## 7. v0.4.0 — 多 Coding Agent 执行器
+
+### 目标
+
+在 Collaboration Contract 稳定后，让不同 Coding Agent 执行同一责任节点，而不改变协作规则。
+
+### 推荐顺序
+
+1. 保持 DSH 为默认执行器；
+2. 定义能力矩阵；
+3. 接入 Codex 执行原型；
+4. 接入 Claude Code 执行原型；
+5. 统一结果归一化、权限、取消、超时与错误分类；
+6. 同一 Workflow 至少在两种执行器上通过行为验证。
+
+### 核心原则
+
+- 执行器不能绕过 Schema / Artifact / Evidence / branch verification / Human Gate；
+- 不为了兼容某个 Agent 复制第二套 Workflow；
+- 不在本阶段强制引入 ACP 作为中间层。
+
+---
+
+## 8. v0.5.0 — 专业开发 Profile 与规模化协作
+
+在核心协作模型稳定后，再增加特定开发场景。
+
+候选能力：
+
+- DSH / Cordis 插件开发 Profile；
+- 需要真实运行时审批的开发流程；
+- 复杂人工 Gate 生命周期；
+- 更丰富的协作看板；
+- 多团队 / 多项目上下文边界；
+- 运行历史、Evidence 与项目决策的长期查询。
+
+原则：共享 Workflow Core，不复制一套独立工作流。
+
+---
+
+## 9. v0.6.0+ — 通用通讯、动态规划与分发
+
+以下能力保持后置，只有在核心协作模型已经验证后再推进。
+
+### ACP / 通用 Agent 通讯
+
+- ACP Executor；
+- capability negotiation；
+- 通讯协议与 Workflow Contract 分层；
+- structured output repair / retry；
+- permission / cancel / error 映射；
+- 多 Agent 互操作实验。
+
+ACP 是通讯层，不替代 Workflow Contract。
+
+### 动态规划
+
+- Agent 在约束内动态拆解任务；
+- 动态结果必须落入 Contract；
+- 不得绕过权限、Gate、轮次与证据要求。
+
+### 独立分发
+
+Issue #21 以及 #45–#48 当前涉及独立仓库、自包含边界、构建产物与后续开发流归属。
+
+这些问题本身重要，但短期对“复杂软件研发协作质量”的提升有限，因此在 v0.1 收口后默认暂停扩张，待 Collaboration Contract 与多角色协作稳定后再恢复。
+
+后续再评估：
+
+- 独立插件仓库；
+- GitHub 安装；
+- registry 发布；
+- 升级 / migration / rollback；
+- 多仓库 Issue 与协作流归属。
+
+---
+
+## 10. GitHub Reality Reconciliation
+
+当前 Issue 是重要历史记录，但不能自动视为当前产品计划。
+
+| Issue / PR | 当前判断 | Roadmap 处理 |
+|---|---|---|
+| #3 DSH 可视化工作流总 Epic | 大量目标已实现，定位已升级 | 标记历史 Epic / 重写剩余目标 |
+| #6 P2 持久化产品 Epic | 旧范围已多次变化 | 重写或收口，不再直接作为新施工计划 |
+| #18 fanOut | ✅ 已验收关闭，PR #38 已合并 | 记入当前基线 |
+| #19 多 run 并行 | ✅ 已验收关闭 | 记入当前基线 |
+| PR #44 | 当前仍开放，属于 #19 后续验收修复 | v0.1 决定合入 / 替代 / 关闭 |
+| #40 run 记录持久化 | GitHub 当前仍 open，未找到明确合并证据 | v0.1 先现实对账；未完成则进入 v0.2 |
+| #21 独立仓库分发 | 后置合理 | v0.6+ |
+| #45–#48 分发决策工单 | 已形成较大决策成本 | 暂停，待核心协作模型稳定后恢复 |
+
+---
+
+## 11. 架构与产品硬规则
+
+以下原则应由 `AGENTS.md`、Contract、测试与 Review 共同保护：
+
+1. Blueprint 是具体 Workflow 的唯一事实源。
+2. 生成物永远不是人工修改源。
+3. 同一 Contract 不允许存在两套语义不同的编译 / 校验解释。
+4. Contract 变化必须有行为测试保护。
+5. 节点默认只获得完成职责所需的最小权威上下文。
+6. 权威知识优先引用，不因复用方便而复制成多份长期真源。
+7. 角色必须有明确输入、输出、证据与权限边界。
+8. 局部执行尽量自主，宏观范围和高风险动作保留人工授权。
+9. AI 不代签人工 Gate。
+10. 外部 Agent 接入不能降低 Schema、Artifact、Evidence、分支验证与人工 Gate。
+11. fanOut、多 run 与多角色协作是三种不同能力，不混为一谈。
+12. Roadmap、Issue、设计文档与 `main` 出现冲突时，必须显式对账，不允许 Agent 静默选择旧文档继续施工。
+13. 只有真实出现重复、漂移或接入成本时才增加抽象，不为未来可能性提前复制体系。
+
+---
+
+## 12. 近期施工顺序
+
+```text
+v0.1.0 可信基线
+  │
+  ├─ E2E / 等价签核
+  ├─ Issue / PR / 文档现实对账
+  ├─ #40 / PR #44 状态收口
+  ├─ 权威上下文与过时文档治理
+  └─ v0.1.0 Release
+        │
+        ▼
+v0.2.0 Collaboration Contract v1
+  │
+  ├─ Context Pointer
+  ├─ Responsibility Contract
+  ├─ Human Authorization Policy
+  ├─ S/M/L 实施准入
+  ├─ run 历史与续接
+  └─ Contract / AGENTS 治理
+        │
+        ▼
+v0.3.0 同需求多角色并行
+  │
+  └─ 开发轨 + 测试轨 + 汇合 Gate + Review
+        │
+        ▼
+v0.4.0 多 Coding Agent 执行器
+  │
+  └─ DSH / Codex / Claude Code
+        │
+        ▼
+v0.5.0 专业 Profile / 规模化协作
+        │
+        ▼
+v0.6.0+
+     ACP / 动态规划 / 独立分发
+```
+
+---
+
+## 13. 1.0.0 前的成功标准
+
+项目进入 `1.0.0` 前，至少应满足：
+
+- Workflow / Collaboration Contract 稳定并具有版本与迁移机制；
+- 节点能够声明并获得最小必要上下文，而不是依赖全量提示词复制；
+- 责任、Artifact、Evidence、权限与 Gate 均可机器检查或明确人工裁决；
+- S / M / L 需求具有与风险匹配的实施准入；
+- 同一需求至少支持两条不同责任轨道可靠并行并汇合；
+- 运行历史与关键人工决策可以跨会话追溯；
+- 至少两个不同 Coding Agent 通过同一 Collaboration Contract 的 E2E 验证；
+- 可视化编辑与文本编辑不会产生语义分叉；
+- Roadmap、AGENTS、设计文档、Issue / PR 与真实实现能够持续保持一致；
+- 分发和通讯层不会反向绑架核心协作模型。
+
+---
+
+本 Roadmap 随真实使用持续更新。新的抽象只有在能够减少已经发生的上下文错误、职责混乱、知识复制、协议漂移或协作成本时才进入核心；新的执行器、通讯协议与分发方式默认晚于协作语义本身。
