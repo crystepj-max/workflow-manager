@@ -304,8 +304,10 @@ return {
 .vwf-editor .vwf-canvas-wrap { flex:1; min-height:360px; height:auto; }
 .vwf-canvas-stage { flex:0 0 auto; width:max-content; height:max-content; box-sizing:border-box; margin:auto; padding:24px; cursor:grab; }
 .vwf-canvas-stage:active { cursor:grabbing; }
-/* 画布工具栏：文档流内一行（不再悬浮遮挡入口节点） */
-.vwf-canvas-toolbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-layer-2, #242424); }
+/* 画布工具栏：文档流内一行（不再悬浮遮挡入口节点）；窄屏允许提示换行增高 */
+.vwf-canvas-toolbar { display:flex; gap:8px; row-gap:6px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-layer-2, #242424); }
+.vwf-canvas-toolbar .vwf-btn { flex:0 0 auto; min-height:28px; white-space:nowrap; }
+.vwf-toolbar-hint { flex:1 1 240px; min-width:180px; margin-left:2px; line-height:1.45; overflow-wrap:anywhere; }
 .vwf-svg { display:block; user-select:none; touch-action:none; }
 .vwf-menu { position:absolute; z-index:20; min-width:160px; padding:4px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-overlay, #2d2d2d); box-shadow:0 8px 28px rgba(0,0,0,.4); }
 .vwf-menu-item { display:block; width:100%; text-align:left; padding:7px 10px; border:0; border-radius:7px; background:transparent; color:var(--dsw-alias-label-primary, #e8e8e8); font-size:12px; cursor:pointer; }
@@ -1412,7 +1414,7 @@ return {
               tab === 'canvas' ? h('div', { className: 'vwf-canvas-toolbar' },
                 h('button', { className: 'vwf-btn sm ghost', onClick: addNode }, '＋ ' + t('addNode')),
                 h('button', { className: 'vwf-btn sm ghost danger', disabled: !selectedNodeId, onClick: deleteSelectedNode }, t('deleteNode')),
-                h('span', { className: 'vwf-muted-sm', style: { padding: '0 6px' } }, t('connectHint'))
+                h('span', { className: 'vwf-muted-sm vwf-toolbar-hint' }, t('connectHint'))
               ) : null,
               tab === 'canvas'
                 ? h(Canvas, {
