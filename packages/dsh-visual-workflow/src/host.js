@@ -639,7 +639,10 @@ return {
     // 脚本终态（DONE / AWAITING_HUMAN_* / FAILED_* 等）只在 result.value 里，
     // 恰好只有持有 run 并 await 的 wf_run 能看到。事件层的 'completed' 对门禁/
     // 互斥语义不够：wf_run 收尾后用 value.status 回写权威终态。
-    const TERMINAL_STATUS_RE = /^(DONE|AWAITING_HUMAN_[A-Za-z0-9_-]+|FAILED_AT_[A-Za-z0-9_-]+|FAILED_MAX_ROUNDS|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ERROR)$/
+    // 终态集合（评审 PRRT_kwDOT57Tec6bfXfm/6b6ZN3）：节点 id 允许非 ASCII/
+    // 空白/标点（AWAITING_HUMAN_验收、FAILED_AT_调度A 等），前缀类用 .+ 宽匹配；
+    // fanout cap 失败态（FAILED_ITEM_CAP/FAILED_AGENT_CAP）同为脚本终态
+    const TERMINAL_STATUS_RE = /^(DONE|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ERROR)$/
     function canonicalStop(result) {
       const v = result && result.value
       const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')

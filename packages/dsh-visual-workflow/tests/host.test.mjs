@@ -1025,3 +1025,28 @@ test('#18 终态归一：workflow/end 时未收到 agent-end 的子代理按 fai
   const s2 = await call(handlers, 'vwf.state', { runId: 'wfr' })
   assert.deepEqual(s2.state.agents.map(a => a.outcome), ['completed', 'failed', 'failed'])
 })
+
+test('#19 评审修复：终态正则接受非 ASCII 节点 id 与 fanout cap 失败态', async () => {
+  const eng = makeEngine()
+  const { handlers, events, definedTools } = engineEnv(eng)
+  const wfRun = definedTools.find(t => t.name === 'wf_run')
+  // 非 ASCII 门禁节点 id：AWAITING_HUMAN_验收 必须被权威回写
+  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-19a' })
+  await until(() => eng.starts.length >= 1, '启动1')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-1', 'AWAITING_HUMAN_验收')
+  await p1
+  const s1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
+  assert.equal(s1.state.status, 'AWAITING_HUMAN_验收', '非 ASCII 节点 id 的门禁态被回写')
+  // fanout cap 失败态：FAILED_ITEM_CAP 同为脚本终态
+  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-19b' })
+  await until(() => eng.starts.length >= 2, '启动2')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-2', 'FAILED_ITEM_CAP')
+  await p2
+  const s2 = await call(handlers, 'vwf.state', { runId: 'run-2' })
+  assert.equal(s2.state.status, 'FAILED_ITEM_CAP', 'cap 失败态被回写')
+  // 门禁占用互斥对非 ASCII 态同样生效
+  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-19a' })
+  assert.ok(blocked.includes('串行互斥'), 'AWAITING_HUMAN_验收 占用同 taskId 互斥')
+})
