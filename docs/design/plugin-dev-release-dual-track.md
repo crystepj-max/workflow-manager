@@ -56,6 +56,7 @@ npm run dev:plugin
   → 确认 Home 隔离且开发 Profile 无正式 VWF
 npm run dev:plugin -- start
   → DSH 用默认模板初始化开发 web Profile
+  → 开发 DSH 使用系统分配的空闲端口，可与产品 DSH 并行运行
   → 进入 DSH Cordis 动态插件开发会话
 ```
 

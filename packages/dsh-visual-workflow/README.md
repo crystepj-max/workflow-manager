@@ -35,6 +35,8 @@ npm run dev:plugin
 npm run dev:plugin -- start
 ```
 
+开发 DSH 启动时使用系统分配的空闲端口，因此可以在产品 DSH 保持运行时并行启动；终端输出的实际地址用于打开开发会话。
+
 如果当前 shell 显式设置的 `DSH_HOME` 不是开发 Home，入口会拒绝执行。需要自定义隔离路径时
 使用 `VWF_DEV_DSH_HOME`；不得把它设为产品 Home。
 

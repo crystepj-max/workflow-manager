@@ -142,19 +142,38 @@ if (running) {
 }
 
 mkdirSync(devHome, { recursive: true })
-const child = spawn('dsh', ['web'], {
+const child = spawn('dsh', ['web', '--port', '0'], {
   cwd: repoRoot,
   env: { ...process.env, DSH_HOME: devHome },
   stdio: 'inherit',
+  detached: true,
 })
 if (!Number.isSafeInteger(child.pid)) {
   fail('开发 DSH 进程未能创建。')
 }
-writeFileSync(pidFile, `${child.pid}\n`)
-console.log(`已使用隔离 Home 启动开发 DSH（PID ${child.pid}）。`)
+const launcherPid = process.pid
+writeFileSync(pidFile, `${launcherPid}\n`)
+console.log(`已使用隔离 Home 启动开发 DSH（启动器 PID ${launcherPid}）。`)
+
+let shuttingDown = false
+const forwardSignal = (signal) => {
+  if (shuttingDown) return
+  shuttingDown = true
+  try {
+    process.kill(-child.pid, signal)
+  } catch {
+    child.kill(signal)
+  }
+}
+const onSigint = () => forwardSignal('SIGINT')
+const onSigterm = () => forwardSignal('SIGTERM')
+process.once('SIGINT', onSigint)
+process.once('SIGTERM', onSigterm)
 
 const cleanup = () => {
-  if (readPid() === child.pid) rmSync(pidFile, { force: true })
+  process.removeListener('SIGINT', onSigint)
+  process.removeListener('SIGTERM', onSigterm)
+  if (readPid() === launcherPid) rmSync(pidFile, { force: true })
 }
 child.once('error', (error) => {
   cleanup()
