@@ -318,3 +318,49 @@ test('#40：runId 特殊字符落盘文件名清洗', async () => {
   await drain()
   assert.ok(fs._files.has(RUNS_DIR + '/run_x_y_z.json'), '非法文件名字符替换为下划线')
 })
+
+test('#40 评审修复：重启中断的 running 快照不永久占用同 taskId 互斥', async () => {
+  const seed = {
+    [RUNS_DIR + '/stuck-1.json']: seedRun('stuck-1', { status: 'running', phase: '开发', taskId: 'task-stuck', startedAt: 5000, updatedAt: 5000 }),
+  }
+  const engB = makeEngine('rb-')
+  const b = env({ seed, extra: { workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
+  const wfRun = b.definedTools.find(t => t.name === 'wf_run')
+  let s = null
+  await until(async () => { s = await call(b.handlers, 'vwf.state', { runId: 'stuck-1' }); return s.found }, '回载 stuck-1')
+  assert.equal(s.state.status, 'running', '历史展示保留原状态')
+  // 中断快照（进程死亡、无门禁语义）不得永久占用 taskId
+  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'task-stuck' })
+  await until(() => engB.starts.length >= 1, '新启动被放行')
+  b.events.get('workflow/start')({ id: 'rb-1', meta: { name: 'x' } })
+  settleRun(engB, b.events, 'rb-1', 'DONE')
+  const r1 = await p1
+  assert.ok(r1.includes('"status":"DONE"'), r1)
+})
+
+test('#40 评审修复：回载窗口外的门禁保持互斥并可接管回写磁盘', async () => {
+  const seed = {}
+  for (let i = 0; i < 25; i++) {
+    const id = 'gate-' + String(i).padStart(2, '0')
+    seed[RUNS_DIR + '/' + id + '.json'] = seedRun(id, {
+      status: 'AWAITING_HUMAN_b', phase: 'b',
+      taskId: 'task-gate-' + String(i).padStart(2, '0'), workflowId: 'dev-workflow-2-0',
+      startedAt: 7000 + i, updatedAt: 7000 + i,
+    })
+  }
+  const engB = makeEngine('rb-')
+  const b = env({ seed, extra: { workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
+  const wfRun = b.definedTools.find(t => t.name === 'wf_run')
+  // gate-00 最旧、在回载窗口外（幽灵门禁）：execute 先等回载完成再判定互斥
+  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'task-gate-00' })
+  assert.ok(blocked.includes('串行互斥'), '幽灵门禁占用互斥：' + blocked)
+  assert.ok(blocked.includes('gate-00'), '提示占用的 runId')
+  // entry 续跑放行并接管；接管标记经按需水合回写磁盘
+  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'task-gate-00', entry: 'b', approved: true })
+  await until(() => engB.starts.length >= 1, '续跑绕过互斥')
+  b.events.get('workflow/start')({ id: 'rb-1', meta: { name: 'x' } })
+  settleRun(engB, b.events, 'rb-1', 'DONE')
+  await p2
+  await drain()
+  await until(() => { try { return readRun(b.fs, 'gate-00').supersededBy === 'rb-1' } catch (e) { return false } }, '接管标记回写磁盘')
+})
