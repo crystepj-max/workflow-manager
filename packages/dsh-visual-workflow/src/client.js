@@ -1515,8 +1515,11 @@ return {
       const [runId, setRunId] = React.useState('')
       const [snap, setSnap] = React.useState(null)
       const [runs, setRuns] = React.useState([])
+      const [older, setOlder] = React.useState([])
       const [tplMap, setTplMap] = React.useState({})
       const [auto, setAuto] = React.useState(true)
+      const [page, setPage] = React.useState(0)
+      const [pageSize, setPageSize] = React.useState(20)
       React.useEffect(() => {
         host.call('vwf.workflows.list').then((l) => {
           const m = {}
@@ -1535,6 +1538,9 @@ return {
       const selectRun = (id) => { setRunId(id); fetchState(id) }
       const refresh = React.useCallback(() => {
         host.call('vwf.runs.list').then((r) => setRuns((r && r.runs) || [])).catch(() => {})
+        // 磁盘历史随刷新重拉（评审 PRRT_kwDOT57Tec6b7TeY）：看板常驻期间发生
+        // 容量淘汰时，已淘汰冷记录要从 older 移除，否则出现 51 条/点陈旧行 not-found
+        host.call('vwf.runs.history').then((r) => setOlder((r && r.runs) || [])).catch(() => {})
         if (!runId) return
         fetchState(runId)
       }, [runId])
@@ -1542,8 +1548,29 @@ return {
         if (!auto) return undefined
         return ctx.interval(refresh, 3000)
       }, [auto, refresh])
-      const activeCount = runs.filter((r) => !r.supersededBy && isActiveRunStatus(r.status)).length
-      const gates = runs.filter((r) => !r.supersededBy && String(r.status).indexOf('AWAITING_HUMAN_') === 0).reverse()
+      // 进入看板即时查询一次：不等首个 3s 轮询周期（避免首屏误显示「暂无运行记录」）；
+      // 磁盘全量历史已由 refresh 一并拉取（见 allRuns 合并）
+      React.useEffect(() => { refresh() }, [])
+      // 展示列表 = 内存实时记录（最近回载，状态更新鲜） ∪ 磁盘历史（按 id 去重，历史追加在后）
+      const allRuns = React.useMemo(() => {
+        const seen = new Set()
+        const merged = []
+        for (const r of runs) if (!seen.has(r.id)) { seen.add(r.id); merged.push(r) }
+        for (const r of older) if (!seen.has(r.id)) { seen.add(r.id); merged.push(r) }
+        // 统一按持久化时间倒序（评审 PRRT_kwDOT57Tec6b7TeU）：内存合并在前会把
+        // 按需水合的旧 run 提到磁盘冷记录之前，令表格/分页失序；排序恢复真实时序
+        return merged.sort((a, b) => ((b.startedAt || b.ts || 0) - (a.startedAt || a.ts || 0)) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      }, [runs, older])
+      const activeCount = allRuns.filter((r) => !r.supersededBy && isActiveRunStatus(r.status)).length
+      const gates = allRuns.filter((r) => !r.supersededBy && String(r.status).indexOf('AWAITING_HUMAN_') === 0)
+      // 分页：数据刷新（新 run 落盘 / 历史拉取）时回到第 0 页
+      React.useEffect(() => { setPage(0) }, [allRuns.length])
+      const totalPages = Math.max(1, Math.ceil(allRuns.length / pageSize))
+      const safePage = Math.min(page, totalPages - 1)
+      const start = safePage * pageSize
+      const pageRuns = allRuns.slice(start, start + pageSize)
+      const prevPage = () => setPage((p) => Math.max(0, p - 1))
+      const nextPage = () => setPage((p) => Math.min(totalPages - 1, p + 1))
       const snapState = snap && snap.found ? snap.state : null
       const dsl = snapState ? (tplMap[snapState.workflowId] || null) : null
       const st = snapState && dsl ? mapStatus(snapState, dsl) : {}
@@ -1572,17 +1599,28 @@ return {
               ' 自动轮询 3s'
             )
           ),
-          h('table', { className: 'vwf-table' },
-            h('thead', null, h('tr', null, h('th', null, 'taskId'), h('th', null, '工作流'), h('th', null, '状态'), h('th', null, '阶段'), h('th', null, 'runId'))),
-            h('tbody', null, runs.map((r) => h('tr', { key: r.id, onClick: () => selectRun(r.id), style: { cursor: 'pointer', opacity: r.supersededBy ? 0.5 : 1 } },
-              h('td', null, r.taskId || '—'),
-              h('td', null, r.name || r.workflowId || '—'),
-              h('td', null, r.supersededBy ? h('span', { className: 'vwf-badge' }, '已由续跑接管') : statusBadge(r.status)),
-              h('td', null, r.phase || '—'),
-              h('td', { className: 'vwf-muted-sm' }, r.id)
-            )))
+          h('div', { className: 'vwf-table-scroll', style: { maxHeight: 420, overflowY: 'auto' } },
+            h('table', { className: 'vwf-table' },
+              h('thead', null, h('tr', null, h('th', null, 'taskId'), h('th', null, '工作流'), h('th', null, '状态'), h('th', null, '阶段'), h('th', null, 'runId'))),
+              h('tbody', null, pageRuns.map((r) => h('tr', { key: r.id, onClick: () => selectRun(r.id), style: { cursor: 'pointer', opacity: r.supersededBy ? 0.5 : 1 } },
+                h('td', null, r.taskId || '—'),
+                h('td', null, r.name || r.workflowId || '—'),
+                h('td', null, r.supersededBy ? h('span', { className: 'vwf-badge' }, '已由续跑接管') : statusBadge(r.status)),
+                h('td', null, r.phase || '—'),
+                h('td', { className: 'vwf-muted-sm' }, r.id)
+              )))
+            )
           ),
-          runs && !runs.length ? h('div', { className: 'vwf-empty' }, '暂无运行记录（仅插件进程内）') : null
+          pageRuns && !pageRuns.length ? h('div', { className: 'vwf-empty' }, '暂无运行记录') : null,
+          h('div', { className: 'vwf-row', style: { marginTop: 8, flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
+            h('span', { className: 'vwf-muted-sm' }, '第 ' + (safePage + 1) + '/' + totalPages + ' 页 · 共 ' + allRuns.length + ' 条'),
+            h('button', { className: 'vwf-btn sm', disabled: safePage === 0, onClick: prevPage }, '上一页'),
+            h('button', { className: 'vwf-btn sm', disabled: safePage >= totalPages - 1, onClick: nextPage }, '下一页'),
+            h('span', { className: 'vwf-muted-sm' }, '每页'),
+            h('select', { className: 'vwf-input', style: { width: 70 }, value: pageSize, onChange: (ev) => setPageSize(Number(ev.target.value)) },
+              [10, 20, 50, 100].map((n) => h('option', { key: n, value: n }, String(n)))
+            )
+          )
         ),
         h('div', { className: 'vwf-card', style: { marginBottom: 8, padding: '10px 14px' } },
           h('div', { className: 'vwf-card-title' }, t('runMode')),
@@ -1596,7 +1634,7 @@ return {
         snap === null
           ? h('div', { className: 'vwf-muted' }, '选择或输入 runId 查看运行详情')
           : !snap.found
-            ? h('div', { className: 'vwf-err-line' }, '未找到该 runId 的状态（仅插件进程内的运行记录）')
+            ? h('div', { className: 'vwf-err-line' }, '未找到该 runId 的状态（内存与磁盘历史均无记录）')
             : h('div', null,
                 h('div', null,
                   h('div', { className: 'vwf-row' },

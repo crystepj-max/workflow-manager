@@ -26,7 +26,7 @@ console.log('✅ @deepseek-ai/dsh-tools=' + v + '（对齐 DSH v0.1.1-rc.2）')
 "
 
 echo '—— Gate4 包测试 ——'
-node --test tests/host.test.mjs tests/client.smoke.mjs tests/static-bundle.test.mjs tests/dist-fresh.test.mjs
+node --test tests/host.test.mjs tests/runs-persistence.test.mjs tests/client.smoke.mjs tests/static-bundle.test.mjs tests/dist-fresh.test.mjs
 
 echo
 echo '✅ verify.sh 全绿'

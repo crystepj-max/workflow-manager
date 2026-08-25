@@ -192,6 +192,8 @@ return {
         // 任何会话都能看到（默认工作流这类用户级内置模板）
         homeBuiltinDir: home ? home + '/.generated' : null,
         userDir: home ? home + '/visual-workflow/templates' : null,
+        // runs 运行记录持久化目录（#40）：<runId>.json 一条一文件
+        runsDir: home ? home + '/visual-workflow/runs' : null,
         skillRoot: home ? home + '/skills' : null,
         generator: generatorRoot ? generatorRoot + '/scripts/generate.mjs' : null,
       }
@@ -624,15 +626,45 @@ return {
       const hit = latestTagByTaskId(taskId)
       if (!hit) return null
       const rec = runs.get(hit.runId)
-      const active = (hit.tag && hit.tag.active === true) || isActiveStatus(rec && rec.status)
-      return active ? { runId: hit.runId, status: (rec && rec.status) || 'running' } : null
+      // 重启中断的 running 快照（评审 PRRT_kwDOT57Tec6b6Iuv）：进程已死且无门禁
+      // 语义，不得永久占用 taskId——放行新启动；旧记录保留展示，真实恢复走
+      // entry 续跑或直接重跑。
+      const staleRunning = !!(hit.tag && hit.tag.restoredRunning === true)
+      // 幽灵门禁（评审 PRRT_kwDOT57Tec6b6Iuz）：未水合进内存的窗口外记录，
+      // 以回载时的 lastStatus 参与互斥判定。兜底用 '' 而非 'running'——
+      // 运行期 tag 可能没有 lastStatus（execute 自登记早于任何落盘点），且
+      // runs 也可能无 rec（workflow/start 未投递）；此时状态由 tag.active 裁决，
+      // 若 active 已解除（终态），绝不能假想仍在运行而误判占用。
+      const status = rec ? rec.status : (hit.tag && hit.tag.lastStatus) || ''
+      const active = !staleRunning && ((hit.tag && hit.tag.active === true) || isActiveStatus(status))
+      return active ? { runId: hit.runId, status: status || 'running' } : null
     }
     function supersedeParked(taskId, newRunId) {
       for (const [rid, tag] of runTags) {
         if (rid === newRunId || !tag || tag.taskId !== taskId || tag.supersededBy) continue
         const rec = runs.get(rid)
-        if (rec && String(rec.status).indexOf('AWAITING_HUMAN_') === 0) tag.supersededBy = newRunId
+        const parked = rec
+          ? String(rec.status).indexOf('AWAITING_HUMAN_') === 0
+          : String(tag.lastStatus || '').indexOf('AWAITING_HUMAN_') === 0
+        if (parked) {
+          tag.supersededBy = newRunId
+          requestRunPersist(rid)
+          // 幽灵门禁（内存无完整记录）：按需水合后把接管标记回写磁盘
+          if (!rec) supersedeGhostOnDisk(rid, newRunId)
+        }
       }
+    }
+    // 幽灵门禁接管回写：从磁盘水合完整记录→补写 supersededBy→落盘（异步，
+    // 失败仅终端留痕，不影响续跑本身）
+    function supersedeGhostOnDisk(runId, newRunId) {
+      loadRunFromDisk(runId)
+        .then((rec) => {
+          if (!rec) return
+          const tag = runTags.get(runId)
+          if (tag) tag.supersededBy = newRunId
+          requestRunPersist(runId)
+        })
+        .catch((e) => console.log('[vwf] 幽灵门禁接管回写失败：' + runId + '：' + String((e && e.message) || e)))
     }
     // 引擎契约（dsh workflow types.ts）：WorkflowStopReason 只有
     // 'completed' | 'cancelled' | 'error'，且 workflow/end 事件故意剥掉 value——
@@ -650,13 +682,16 @@ return {
     }
 
     const runs = new Map()
-    ctx.on('workflow/start', (info) => { runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [] }) })
-    ctx.on('workflow/phase', (info, title) => { const r = runs.get(info.id); if (r) { r.phase = String(title); r.logs.push('[phase] ' + title); if (r.logs.length > 50) r.logs.shift() } })
-    ctx.on('workflow/log', (info, message) => { const r = runs.get(info.id); if (r) { r.logs.push(String(message)); if (r.logs.length > 50) r.logs.shift() } })
-    ctx.on('workflow/agent-start', (info, agent) => { const r = runs.get(info.id); if (r) r.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' }) })
+    ctx.on('workflow/start', (info) => {
+      runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [], startedAt: Date.now() })
+      requestRunPersist(info.id)
+    })
+    ctx.on('workflow/phase', (info, title) => { const r = runs.get(info.id); if (r) { r.phase = String(title); r.logs.push('[phase] ' + title); if (r.logs.length > 50) r.logs.shift(); requestRunPersist(info.id) } })
+    ctx.on('workflow/log', (info, message) => { const r = runs.get(info.id); if (r) { r.logs.push(String(message)); if (r.logs.length > 50) r.logs.shift(); requestRunPersist(info.id) } })
+    ctx.on('workflow/agent-start', (info, agent) => { const r = runs.get(info.id); if (r) { r.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' }); requestRunPersist(info.id) } })
     // 按 seq 精确匹配：pipeline 并发下 agent-start/agent-end 可能交错到达，
     // 只看数组末位会把非最新项的结局事件丢掉（行卡在 running）
-    ctx.on('workflow/agent-end', (info, agent) => { const r = runs.get(info.id); if (!r) return; const a = r.agents.find((x) => x.seq === agent.seq); if (a) a.outcome = String(agent.outcome) })
+    ctx.on('workflow/agent-end', (info, agent) => { const r = runs.get(info.id); if (!r) return; const a = r.agents.find((x) => x.seq === agent.seq); if (a) { a.outcome = String(agent.outcome); requestRunPersist(info.id) } })
     // workflow/end 同时清 runTag.active（终态落定，含 AWAITING_HUMAN_*——门禁占用
     // 由 isActiveStatus(runs 状态) 继续兜住），互斥的解除与维持由此统一裁决。
     // 终态归一（#18 验收发现）：运行已终局却仍处 running 的子代理不可能再有结果
@@ -668,9 +703,232 @@ return {
       if (r) {
         r.status = String(result.stopReason)
         for (const a of r.agents) { if (a.outcome === 'running') a.outcome = 'failed' }
+        requestRunPersist(info.id)
       }
       const t = runTags.get(info.id); if (t) t.active = false
     })
+
+    // ── runs 运行记录持久化（#40，P2-T2b）────────────────────────────────────
+    // 内存 runs/runTags 进程重启即失：事件流驱动的记录落盘到
+    // ~/.dsh/visual-workflow/runs/<runId>.json；插件启动回载最近 RUNS_RELOAD 条
+    // 进内存，其余留在磁盘由 vwf.state 按需回落读取；磁盘总量按 RUNS_RETAIN
+    // 淘汰最旧。落盘内容以事件流为界（meta/状态/阶段/日志/子代理 label+outcome
+    // + 启动边界登记的 taskId/workflowId/supersededBy），不含子代理返回内容。
+    // 所有落盘路径异常仅终端日志留痕，runs 内存态不受损（验收 AC4）。
+    const RUNS_RELOAD = 20
+    const RUNS_RETAIN = 50
+
+    function runFileName(runId) {
+      // 注入式编码（评审 PRRT_kwDOT57Tec6b6it5）：run/a 与 run:a 若都替换为 _
+      // 会碰撞成同一文件互相覆盖历史；encodeURIComponent 保持 runId→文件一一对应
+      return encodeURIComponent(String(runId || '')) + '.json'
+    }
+
+    // 事件流快照：只取叶子字段构造自有 JSON（logs 上限 50 已在事件层收紧；
+    // 数组在 stringify 同步执行期间无并发插入，无需深拷贝）
+    function runRecordPayload(runId) {
+      const rec = runs.get(runId)
+      if (!rec) return null
+      const tag = runTags.get(runId) || null
+      return {
+        id: String(runId),
+        meta: { name: (rec.meta && rec.meta.name) || '', description: (rec.meta && rec.meta.description) || '' },
+        status: String(rec.status || ''),
+        phase: String(rec.phase || ''),
+        logs: rec.logs || [],
+        agents: (rec.agents || []).map((a) => ({ seq: a.seq, label: a.label || '', phase: a.phase || '', outcome: a.outcome || '' })),
+        taskId: tag ? String(tag.taskId || '') : '',
+        workflowId: tag ? String(tag.workflowId || '') : '',
+        startedAt: rec.startedAt != null ? rec.startedAt : (tag && tag.startedAt != null ? tag.startedAt : null),
+        supersededBy: tag && tag.supersededBy ? String(tag.supersededBy) : '',
+        updatedAt: Date.now(),
+      }
+    }
+
+    async function writeRunFile(runId) {
+      if (fs === undefined) return
+      const p = await rootPaths()
+      if (!p.runsDir) return
+      const payload = runRecordPayload(runId)
+      if (!payload) return
+      const file = runFileName(runId)
+      const target = await fs.resolve(p.runsDir + '/' + file)
+      await fs.writeText(target, JSON.stringify(payload, null, 2) + '\n', undefined, undefined, writePolicy())
+      runsDiskIndex.set(file, { file: file, id: payload.id, ts: payload.updatedAt || payload.startedAt || 0 })
+    }
+
+    // 无定时器节流（动态 vm 沙箱无真 setTimeout）：每个 run 至多一个飞行中
+    // 写入，期间的变更只置 dirty，当前写入完成后按最新内存态补一次尾写——
+    // start/phase/log/agent/end 全部走此队列，天然合并且终态不落空。
+    const runWriteQueues = new Map()
+    function requestRunPersist(runId) {
+      const id = String(runId || '')
+      if (!id) return
+      let q = runWriteQueues.get(id)
+      if (!q) { q = { dirty: false, pending: null }; runWriteQueues.set(id, q) }
+      q.dirty = true
+      if (!q.pending) drainRunWrite(id)
+    }
+    function drainRunWrite(id) {
+      const q = runWriteQueues.get(id)
+      if (!q) return
+      if (!q.dirty) { runWriteQueues.delete(id); return }
+      q.dirty = false
+      q.pending = writeRunFile(id)
+        .catch((e) => { console.log('[vwf] 运行记录落盘失败（不影响运行）：' + id + '：' + String((e && e.message) || e)) })
+        .then(() => { q.pending = null; drainRunWrite(id); evictRunsSoon() })
+    }
+
+    // 磁盘容量淘汰：启动回载重建索引，写入后增量更新；超出 RUNS_RETAIN 时
+    // 删除最旧（fs 服务无删除面，经子进程 rm；子进程缺失则暂停淘汰并仅记
+    // 一次日志——永不删除索引外的未知文件，方向安全）。
+    const runsDiskIndex = new Map()
+    let evictChain = Promise.resolve()
+    let evictWarned = false
+    function evictRunsSoon() {
+      evictChain = evictChain.then(evictRunsDisk).catch((e) => {
+        console.log('[vwf] 运行记录淘汰失败（不影响运行）：' + String((e && e.message) || e))
+      })
+    }
+    async function evictRunsDisk() {
+      if (fs === undefined) return
+      const p = await rootPaths()
+      if (!p.runsDir || runsDiskIndex.size <= RUNS_RETAIN) return
+      if (subprocess === undefined) {
+        if (!evictWarned) { evictWarned = true; console.log('[vwf] subprocess 服务不可用：运行记录淘汰暂停（磁盘条数 ' + runsDiskIndex.size + ' 超过上限 ' + RUNS_RETAIN + '）') }
+        return
+      }
+      const items = Array.from(runsDiskIndex.values()).sort((a, b) => (a.ts - b.ts) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
+      const victims = items.slice(0, items.length - RUNS_RETAIN)
+      for (const v of victims) {
+        // 活跃 run 不淘汰（保险带：按时间序正常轮不到；防止淘汰把进行中快照删掉）。
+        // 未接管的门禁同样不淘汰（评审 PRRT_kwDOT57Tec6b7RDw）：窗口外幽灵门禁
+        // 只在 runTags 登记、runs 无 rec——若被删，重启后门禁与互斥一并消失，
+        // 同 taskId 会被继续放行且丢失续跑历史
+        const rec = runs.get(v.id)
+        const tag = runTags.get(v.id)
+        const status = rec ? rec.status : (tag && tag.lastStatus) || ''
+        const unsuperseded = !(tag && tag.supersededBy)
+        if (unsuperseded && isActiveStatus(status)) continue
+        const r = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{force:true})", p.runsDir + '/' + v.file])
+        if (r.ok) runsDiskIndex.delete(v.file)
+        else console.log('[vwf] 运行记录淘汰删除失败：' + v.file + '：' + r.detail)
+      }
+    }
+
+    // 磁盘 → 内存水合：live 优先（runs 已有同 id 记录则不动）。回载的 runTag
+    // 以 active:false 恢复——进程重启后不存在执行中的 run；AWAITING_HUMAN_*
+    // 门禁状态经 isActiveStatus(runs) 继续保持 taskId 占用与接管语义。
+    function hydrateRunFromDisk(data) {
+      if (!data || typeof data !== 'object') return false
+      const id = typeof data.id === 'string' && data.id ? data.id : null
+      if (!id || runs.has(id)) return false
+      runs.set(id, {
+        meta: { name: (data.meta && data.meta.name) || '', description: (data.meta && data.meta.description) || '' },
+        status: typeof data.status === 'string' && data.status ? data.status : 'unknown',
+        phase: typeof data.phase === 'string' ? data.phase : '',
+        logs: Array.isArray(data.logs) ? data.logs.map((l) => String(l)).slice(-50) : [],
+        agents: Array.isArray(data.agents) ? data.agents.filter((a) => a && typeof a === 'object').map((a) => ({ seq: a.seq, label: String(a.label || ''), phase: a.phase ? String(a.phase) : '', outcome: String(a.outcome || '') })) : [],
+        startedAt: typeof data.startedAt === 'number' ? data.startedAt : null,
+      })
+      if (data.taskId || data.workflowId) {
+        const status = typeof data.status === 'string' && data.status ? data.status : 'unknown'
+        const tag = {
+          taskId: typeof data.taskId === 'string' ? data.taskId : '',
+          workflowId: typeof data.workflowId === 'string' ? data.workflowId : '',
+          startedAt: typeof data.startedAt === 'number' ? data.startedAt : null,
+          active: false,
+          // 重启中断的 running 快照标记（评审 PRRT_kwDOT57Tec6b6Iuv）：
+          // 进程死亡时该 run 不可能再有结果，互斥判定对其放行（见 taskMutexBlocker）
+          restoredRunning: status === 'running',
+          lastStatus: status,
+        }
+        if (typeof data.supersededBy === 'string' && data.supersededBy) tag.supersededBy = data.supersededBy
+        runTags.set(id, tag)
+      }
+      return true
+    }
+
+    // vwf.state 内存 miss 的磁盘回落：命中即水合进内存（后续列表/互斥照常工作）
+    async function loadRunFromDisk(runId) {
+      if (fs === undefined) return null
+      const p = await rootPaths()
+      if (!p.runsDir) return null
+      try {
+        const target = await fs.resolve(p.runsDir + '/' + runFileName(runId))
+        const info = await fs.stat(target)
+        if (!info || info.type !== 'file') return null
+        const data = JSON.parse(await fs.readText(target))
+        // 并发水合（评审 PRRT_kwDOT57Tec6b6it7）：另一请求可能抢先水合同一冷记录，
+        // hydrateRunFromDisk 返回 false；此时该记录已在 runs 中，属成功 cache hit
+        hydrateRunFromDisk(data)
+        return runs.get(data.id) || null
+      } catch (e) { return null }
+    }
+
+    // 启动回载：按时间升序插入（保持 runs Map 插入序=时间序，vwf.runs.list
+    // 反转后最新在前）；单文件损坏仅跳过留痕（验收 AC5）；回载后补一次淘汰
+    // （前序进程可能死在淘汰前）。
+    async function loadPersistedRuns() {
+      // fs 可能在 apply 后注入（静态 bundle 仅等待 webServer/tools，评审
+      // PRRT_kwDOT57Tec6b7RDu）：与 syncBuiltins 相同的轮询策略等待 fs 出现，
+      // 避免 runsHydration 在无 fs 时提前 resolve 而门禁从未加载
+      for (let attempt = 0; attempt < 10; attempt++) {
+        if (fs !== undefined) break
+        fs = ctx.get('fs')
+        if (fs !== undefined) break
+        try { await new Promise((r) => setTimeout(r, 100 * (attempt + 1))) } catch (e) { break }
+      }
+      if (fs === undefined) { console.log('[vwf] fs 服务不可用，运行记录回载未完成（本次互斥以内存态为准）'); return }
+      const p = await rootPaths()
+      if (!p.runsDir) return
+      let entries = null
+      try {
+        entries = await fs.listDir(await fs.resolve(p.runsDir))
+      } catch (e) { return } // 目录不存在 = 首次运行
+      const loaded = []
+      for (const ent of entries || []) {
+        if (!ent || ent.type !== 'file' || !/\.json$/i.test(ent.name)) continue
+        try {
+          const data = JSON.parse(await fs.readText(await fs.resolve(p.runsDir + '/' + ent.name)))
+          if (!data || typeof data.id !== 'string' || !data.id) throw new Error('缺少 id 字段')
+          const ts = (typeof data.updatedAt === 'number' && data.updatedAt) || (typeof data.startedAt === 'number' && data.startedAt) || 0
+          loaded.push({ file: ent.name, id: data.id, ts: ts, data: data })
+        } catch (e) {
+          console.log('[vwf] 跳过损坏的运行记录：' + ent.name + '（' + String((e && e.message) || e) + '）')
+        }
+      }
+      loaded.sort((a, b) => (a.ts - b.ts) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
+      for (const it of loaded) runsDiskIndex.set(it.file, { file: it.file, id: it.id, ts: it.ts })
+      const hydrated = new Set()
+      for (const it of loaded.slice(-RUNS_RELOAD)) { if (hydrateRunFromDisk(it.data)) hydrated.add(it.id) }
+      // 幽灵门禁（评审 PRRT_kwDOT57Tec6b6Iuz）：回载窗口之外的未接管 AWAITING_*
+      // 记录以 lastStatus 轻量登记进 runTags——taskMutexBlocker/supersedeParked
+      // 据此保持同 taskId 互斥与接管语义，完整记录仍留在磁盘按需水合
+      for (const it of loaded) {
+        if (hydrated.has(it.id) || runs.has(it.id)) continue
+        const d = it.data
+        const st = typeof d.status === 'string' ? d.status : ''
+        if (String(st).indexOf('AWAITING_HUMAN_') !== 0) continue
+        if (typeof d.supersededBy === 'string' && d.supersededBy) continue
+        if (!d.taskId && !d.workflowId) continue
+        runTags.set(d.id, {
+          taskId: typeof d.taskId === 'string' ? d.taskId : '',
+          workflowId: typeof d.workflowId === 'string' ? d.workflowId : '',
+          startedAt: typeof d.startedAt === 'number' ? d.startedAt : null,
+          active: false,
+          ghost: true,
+          lastStatus: st,
+        })
+      }
+      evictRunsSoon()
+    }
+    // 与 apply 时序解耦的异步回载：不阻塞 apply，失败仅在终端日志留痕；
+    // 回载 promise 暴露给 wf_run 边界 await（评审 PRRT_kwDOT57Tec6b6Iu1：
+    // 互斥判定必须看到完整门禁状态，不能与回载竞速）
+    let runsHydration = null
+    runsHydration = loadPersistedRuns().catch((e) => console.log('[vwf] 运行记录回载失败（不影响本次运行）：' + String((e && e.message) || e)))
+
 
     registerRpc('vwf.workflows.list', async () => listWorkflows())
     registerRpc('vwf.workflows.save', async (a) => {
@@ -755,11 +1013,14 @@ return {
       return out
     })
     registerRpc('vwf.state', async (a) => {
-      const s = a && a.runId ? runs.get(a.runId) : null
+      const id = a && a.runId
+      let s = id ? runs.get(id) : null
+      // 内存 miss 回落磁盘（#40）：重启后未回载进内存的历史记录按 runId 直查
+      if (!s && id) s = await loadRunFromDisk(id)
       if (!s) return { found: false, state: null }
-      const tag = runTags.get(a.runId) || null
-      return { found: true, state: { id: a.runId, meta: s.meta, status: s.status, phase: s.phase, logs: s.logs, agents: s.agents,
-        taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: tag ? tag.startedAt : null,
+      const tag = runTags.get(id) || null
+      return { found: true, state: { id: id, meta: s.meta, status: s.status, phase: s.phase, logs: s.logs, agents: s.agents,
+        taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: s.startedAt != null ? s.startedAt : (tag ? tag.startedAt : null),
         supersededBy: tag && tag.supersededBy ? tag.supersededBy : '' } }
     })
     // 多 run 并行（#19）：运行清单（最新在前），看板列表/门禁队列/并行警示的数据源
@@ -768,10 +1029,39 @@ return {
       for (const [rid, rec] of runs) {
         const tag = runTags.get(rid) || null
         out.push({ id: rid, name: (rec.meta && rec.meta.name) || '', status: rec.status, phase: rec.phase || '',
-          taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: tag ? tag.startedAt : null,
+          taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: rec.startedAt != null ? rec.startedAt : (tag ? tag.startedAt : null),
           supersededBy: tag && tag.supersededBy ? tag.supersededBy : '' })
       }
-      out.reverse()
+      // 按时间倒序（评审 PRRT_kwDOT57Tec6b6it9）：按需水合会把窗口外旧记录追加到
+      // runs map 尾部，若依赖插入序反转，选中的旧 run 会跳到清单最前并驻留；按
+      // startedAt 降序可稳定呈现真实时间序，同刻用 id 降序兜底
+      out.sort((a, b) => ((b.startedAt || 0) - (a.startedAt || 0)) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      return { runs: out }
+    })
+    // 磁盘全量运行清单（#40：运行历史浏览）。只读磁盘返回元数据，**不**水合进
+    // 内存——保持「启动回载最近 RUNS_RELOAD 条」的内存上限语义；用户点击某条
+    // 历史时仍走 vwf.state 磁盘回落按需水合。最新在前；损坏文件跳过。
+    registerRpc('vwf.runs.history', async () => {
+      if (fs === undefined) return { runs: [] }
+      const p = await rootPaths()
+      if (!p.runsDir) return { runs: [] }
+      let entries = null
+      try {
+        entries = await fs.listDir(await fs.resolve(p.runsDir))
+      } catch (e) { return { runs: [] } }
+      const out = []
+      for (const ent of entries || []) {
+        if (!ent || ent.type !== 'file' || !/\.json$/i.test(ent.name)) continue
+        try {
+          const data = JSON.parse(await fs.readText(await fs.resolve(p.runsDir + '/' + ent.name)))
+          if (!data || typeof data.id !== 'string' || !data.id) continue
+          const ts = (typeof data.updatedAt === 'number' && data.updatedAt) || (typeof data.startedAt === 'number' && data.startedAt) || 0
+          out.push({ id: data.id, name: (data.meta && data.meta.name) || '', status: data.status || '', phase: data.phase || '',
+            taskId: data.taskId || '', workflowId: data.workflowId || '', startedAt: data.startedAt != null ? data.startedAt : null,
+            supersededBy: data.supersededBy || '', ts: ts })
+        } catch (e) { /* 损坏文件跳过 */ }
+      }
+      out.sort((a, b) => (b.ts - a.ts) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       return { runs: out }
     })
     registerRpc('vwf.models', async () => {
@@ -928,6 +1218,9 @@ return {
         async execute(args) {
           // 约束②（同 taskId 互斥）：最新记录进行中/AWAITING_HUMAN 且非 entry 续跑 → 拒绝。
           // 校验放最前（fail-fast），不浪费校验/编译开销。
+          // 先等启动回载完成（评审 PRRT_kwDOT57Tec6b6Iu1）：否则互斥判定可能与
+          // 磁盘门禁水合竞速，重启后立刻续跑会漏判占用
+          try { if (runsHydration) await runsHydration } catch (e) { /* 回载失败已留痕 */ }
           const blocker = (args && args.entry) ? null : taskMutexBlocker(String((args && args.taskId) || ''))
           if (blocker) {
             return '错误：任务 ' + args.taskId + ' 已有进行中的运行 ' + blocker.runId + '（状态 ' + blocker.status +
@@ -965,6 +1258,9 @@ return {
             startedAt: Date.now(),
             active: true,
           })
+          // 启动边界同步落一份快照：workflow/start 事件可能晚于 tag 登记到达，
+          // 这里保证进行中的 run 在 start 后即有含 taskId 的可见快照（#40 AC2）
+          requestRunPersist(String(run.id))
           if (args.entry) supersedeParked(String(args.taskId), String(run.id))
           const result = await run.result
           // 权威终态回写（见 canonicalStop 注释）：completed 时以脚本返回为准
@@ -974,7 +1270,7 @@ return {
           const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
           if (canon) {
             const rec = runs.get(String(run.id))
-            if (rec) rec.status = canon
+            if (rec) { rec.status = canon; requestRunPersist(String(run.id)) }
           }
           return JSON.stringify({ runId: String(run.id), stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
         }
