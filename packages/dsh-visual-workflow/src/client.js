@@ -10,8 +10,9 @@
 //     布线（lane routing，同 computeBackwardLanes + WorkflowRoutedEdge 公式）
 //   - 节点卡片 220x66（圆角 14、label + 类型小字、入口徽标）、$end 虚线圆形
 //     终止节点、左右连接把手；边带流动虚线动画 + 箭头 + 成功/失败标签
-//   - 交互：点选节点/边；从源把手拖出连线落到目标节点建边；右键画布弹出
-//     「添加结束节点」菜单；滚轮缩放（指针锚定）+ 拖拽平移 + 缩放控件
+//   - 交互：首次打开/重置时纵横居中；点选节点/边；从源把手拖出连线落到目标
+//     节点建边；右键画布弹出「添加结束节点」菜单；滚轮缩放（指针锚定）+
+//     空白区域四向拖动 + 缩放控件
 //
 //  配置面板（对应右侧 Inspector 340px 栏）
 //   - 工作流控制：打回上限 maxRounds
@@ -299,8 +300,10 @@ return {
 @media (max-width: 900px) { .vwf-editor { grid-template-columns:minmax(0,1fr); height:auto; } .vwf-inspector { position:static; height:auto; } }
 .vwf-canvas-col { min-width:0; min-height:0; display:flex; flex-direction:column; }
 .vwf-canvas-col > .vwf-card { flex:1; min-height:0; display:flex; flex-direction:column; }
-.vwf-canvas-wrap { position:relative; height:560px; overflow:auto; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-base, #181818); }
+.vwf-canvas-wrap { position:relative; height:560px; overflow:auto; display:flex; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-base, #181818); overscroll-behavior:contain; }
 .vwf-editor .vwf-canvas-wrap { flex:1; min-height:360px; height:auto; }
+.vwf-canvas-stage { flex:0 0 auto; width:max-content; height:max-content; box-sizing:border-box; margin:auto; padding:24px; cursor:grab; }
+.vwf-canvas-stage:active { cursor:grabbing; }
 /* 画布工具栏：文档流内一行（不再悬浮遮挡入口节点） */
 .vwf-canvas-toolbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-layer-2, #242424); }
 .vwf-svg { display:block; user-select:none; touch-action:none; }
@@ -356,6 +359,7 @@ return {
     const RANK_SEP = 116
     const MARGIN_X = 56
     const MARGIN_Y = 64
+    const CANVAS_PAD = 24
     const END_NODE = '$end'
     const STATUS_COLOR = { running: 'var(--dsw-alias-brand-primary, #60a5fa)', pass: 'var(--dsw-alias-state-success-primary, #22c55e)', fail: 'var(--dsw-alias-state-error-primary, #ef4444)', human: 'var(--dsw-alias-state-warn-primary, #f59e0b)' }
     const EDGE_OK = 'var(--dsw-alias-label-tertiary, #9a9a9a)'
@@ -539,7 +543,9 @@ return {
     function Canvas(props) {
       const dsl = props.dsl
       const wrapRef = React.useRef(null)
+      const svgRef = React.useRef(null)
       const [scale, setScale] = React.useState(1)
+      const [panOffset, setPanOffset] = React.useState({ x: 0, y: 0 })
       const [connect, setConnect] = React.useState(null) // {from, x, y}
       const [menu, setMenu] = React.useState(null) // {x, y}
       const panRef = React.useRef(null)
@@ -554,19 +560,24 @@ return {
       const fitView = React.useCallback(() => {
         const wrap = wrapRef.current
         if (!wrap) return
-        const s = Math.min(1.2, Math.max(0.3, Math.min((wrap.clientWidth - 24) / W, (wrap.clientHeight - 24) / H)))
+        const s = Math.min(1.2, Math.max(0.3, Math.min((wrap.clientWidth - CANVAS_PAD * 2) / W, (wrap.clientHeight - CANVAS_PAD * 2) / H)))
         setScale(s)
+        setPanOffset({ x: 0, y: 0 })
         ctx.timeout(() => {
           if (!wrapRef.current) return
-          wrapRef.current.scrollLeft = Math.max(0, (W * s - wrapRef.current.clientWidth) / 2)
-          wrapRef.current.scrollTop = 0
+          const stageW = Math.max(W * s + CANVAS_PAD * 2, wrapRef.current.clientWidth)
+          const stageH = Math.max(H * s + CANVAS_PAD * 2, wrapRef.current.clientHeight)
+          wrapRef.current.scrollLeft = Math.max(0, (stageW - wrapRef.current.clientWidth) / 2)
+          wrapRef.current.scrollTop = Math.max(0, (stageH - wrapRef.current.clientHeight) / 2)
         }, 0)
       }, [W, H])
       const fittedRef = React.useRef(false)
       React.useEffect(() => {
-        if (fittedRef.current) return
+        if (fittedRef.current) return undefined
         fittedRef.current = true
-        fitView()
+        // 编辑器宿主是先渲染 <dialog>、再在父级 effect 中 showModal；初始 fit 延后到
+        // 下一轮，确保读到的是弹层打开后的真实可视尺寸，而不是 display:none 的 0 尺寸。
+        return ctx.timeout(fitView, 0)
       }, [fitView])
       React.useEffect(() => { props.registerFit && props.registerFit(fitView) }, [fitView])
       // 定位到指定节点（校验弹窗关闭后聚焦首个问题节点，对应 Gold-Band 的 setCenter）
@@ -576,13 +587,18 @@ return {
         props.registerScrollTo && props.registerScrollTo((id) => {
           const p = posRef.current[id]
           const wrap = wrapRef.current
-          if (!p || !wrap) return
-          wrap.scrollLeft = Math.max(0, p.x * scaleRef.current - wrap.clientWidth / 2)
-          wrap.scrollTop = Math.max(0, p.y * scaleRef.current - 60)
+          const svg = svgRef.current
+          if (!p || !wrap || !svg) return
+          const wrapRect = wrap.getBoundingClientRect()
+          const svgRect = svg.getBoundingClientRect()
+          const dx = (svgRect.left - wrapRect.left) + p.x * scaleRef.current - wrap.clientWidth / 2
+          const dy = (svgRect.top - wrapRect.top) + p.y * scaleRef.current - wrap.clientHeight / 2
+          wrap.scrollLeft += dx
+          wrap.scrollTop += dy
         })
       }, [])
 
-      // 滚轮缩放（指针锚定）
+      // 滚轮缩放（指针锚定；stage 居中后按 SVG 实际屏幕位置换算）
       const scaleRef = React.useRef(scale)
       React.useEffect(() => { scaleRef.current = scale }, [scale])
       React.useEffect(() => {
@@ -590,42 +606,66 @@ return {
         if (!wrap) return undefined
         const onWheel = (ev) => {
           ev.preventDefault()
-          const rect = wrap.getBoundingClientRect()
-          const px = ev.clientX - rect.left + wrap.scrollLeft
-          const py = ev.clientY - rect.top + wrap.scrollTop
+          const svg = svgRef.current
+          if (!svg) return
+          const svgRect = svg.getBoundingClientRect()
+          const px = (ev.clientX - svgRect.left) / scaleRef.current
+          const py = (ev.clientY - svgRect.top) / scaleRef.current
           const next = Math.min(1.6, Math.max(0.3, +(scaleRef.current * (ev.deltaY < 0 ? 1.12 : 0.89)).toFixed(3)))
-          const ratio = next / scaleRef.current
           setScale(next)
           ctx.timeout(() => {
-            if (!wrapRef.current) return
-            wrapRef.current.scrollLeft = px * ratio - (ev.clientX - rect.left)
-            wrapRef.current.scrollTop = py * ratio - (ev.clientY - rect.top)
+            if (!wrapRef.current || !svgRef.current) return
+            const nextRect = svgRef.current.getBoundingClientRect()
+            wrapRef.current.scrollLeft += (nextRect.left + px * next) - ev.clientX
+            wrapRef.current.scrollTop += (nextRect.top + py * next) - ev.clientY
           }, 0)
         }
         wrap.addEventListener('wheel', onWheel, { passive: false })
         return () => wrap.removeEventListener('wheel', onWheel)
       }, [])
       const toGraph = (ev) => {
-        const wrap = wrapRef.current
-        if (!wrap) return null
-        const rect = wrap.getBoundingClientRect()
-        return { x: (ev.clientX - rect.left + wrap.scrollLeft) / scale, y: (ev.clientY - rect.top + wrap.scrollTop) / scale }
+        const svg = svgRef.current
+        if (!svg) return null
+        const rect = svg.getBoundingClientRect()
+        return { x: (ev.clientX - rect.left) / scale, y: (ev.clientY - rect.top) / scale }
       }
 
-      // 空白拖拽平移
+      // 画布拖拽平移：任意非连线把手区域都可拖动；有滚动空间的轴写 scroll，
+      // 没有滚动空间的轴写 stage transform，保证小工作流也能四向移动。
       const onPanePointerDown = (ev) => {
         if (connect) return
+        if (ev.button !== undefined && ev.button !== 0) return
         const wrap = wrapRef.current
-        if (!wrap) return
-        panRef.current = { sx: ev.clientX, sy: ev.clientY, left: wrap.scrollLeft, top: wrap.scrollTop, moved: false }
+        const target = ev.target
+        const inCanvas = target === wrap || !!(target && typeof target.closest === 'function' && target.closest('.vwf-canvas-stage'))
+        const isConnectHandle = !!(target && typeof target.closest === 'function' && target.closest('.vwf-handle-src'))
+        if (!wrap || !inCanvas || isConnectHandle) return
+        ev.preventDefault()
+        panRef.current = {
+          sx: ev.clientX,
+          sy: ev.clientY,
+          left: wrap.scrollLeft,
+          top: wrap.scrollTop,
+          offsetX: panOffset.x,
+          offsetY: panOffset.y,
+          canScrollX: wrap.scrollWidth > wrap.clientWidth + 1,
+          canScrollY: wrap.scrollHeight > wrap.clientHeight + 1,
+          moved: false,
+        }
         const move = (me) => {
           const p = panRef.current
           if (!p) return
           const dx = me.clientX - p.sx
           const dy = me.clientY - p.sy
           if (Math.abs(dx) + Math.abs(dy) > 3) p.moved = true
-          wrap.scrollLeft = p.left - dx
-          wrap.scrollTop = p.top - dy
+          if (p.canScrollX) wrap.scrollLeft = p.left - dx
+          if (p.canScrollY) wrap.scrollTop = p.top - dy
+          if (!p.canScrollX || !p.canScrollY) {
+            setPanOffset({
+              x: p.canScrollX ? p.offsetX : p.offsetX + dx,
+              y: p.canScrollY ? p.offsetY : p.offsetY + dy,
+            })
+          }
         }
         const up = () => {
           panRef.current = null
@@ -794,25 +834,37 @@ return {
       }
 
       return h('div', { style: { position: 'relative' } },
-        h('div', { className: 'vwf-canvas-wrap', ref: wrapRef, style: props.height ? { height: props.height } : undefined },
-          h('svg', {
-            className: 'vwf-svg', width: W * scale, height: H * scale, viewBox: '0 0 ' + W + ' ' + H,
-            onPointerDown: onPanePointerDown,
-            onClick: (ev) => { if (panRef.current && panRef.current.moved) return; if (props.onPaneClick) props.onPaneClick() },
-            onContextMenu: onPaneContextMenu,
+        h('div', {
+          className: 'vwf-canvas-wrap',
+          ref: wrapRef,
+          style: props.height ? { height: props.height } : undefined,
+          onPointerDown: onPanePointerDown,
+        },
+          h('div', {
+            className: 'vwf-canvas-stage',
+            'data-vwf-pane': 'true',
+            style: { transform: 'translate(' + panOffset.x + 'px,' + panOffset.y + 'px)' },
           },
-            h('defs', null,
-              h('pattern', { id: 'vwf-dots', width: 28, height: 28, patternUnits: 'userSpaceOnUse' },
-                h('circle', { cx: 1, cy: 1, r: 1, fill: 'var(--dsw-alias-border-l2, #333)' })),
-              h('marker', { id: 'vwf-arrow', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_OK })),
-              h('marker', { id: 'vwf-arrow-fail', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_FAIL })),
-              h('marker', { id: 'vwf-arrow-sel', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: ACCENT }))
-            ),
-            h('rect', { width: W, height: H, fill: 'url(#vwf-dots)' }),
-            edgeEls,
-            nodeEls,
-            connectEl,
-            labelEls
+            h('svg', {
+              className: 'vwf-svg', width: W * scale, height: H * scale, viewBox: '0 0 ' + W + ' ' + H,
+              ref: svgRef,
+              'data-vwf-pane': 'true',
+              onClick: (ev) => { if (panRef.current && panRef.current.moved) return; if (props.onPaneClick) props.onPaneClick() },
+              onContextMenu: onPaneContextMenu,
+            },
+              h('defs', null,
+                h('pattern', { id: 'vwf-dots', width: 28, height: 28, patternUnits: 'userSpaceOnUse' },
+                  h('circle', { cx: 1, cy: 1, r: 1, fill: 'var(--dsw-alias-border-l2, #333)' })),
+                h('marker', { id: 'vwf-arrow', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_OK })),
+                h('marker', { id: 'vwf-arrow-fail', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_FAIL })),
+                h('marker', { id: 'vwf-arrow-sel', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: ACCENT }))
+              ),
+              h('rect', { width: W, height: H, fill: 'url(#vwf-dots)', 'data-vwf-pane': 'true' }),
+              edgeEls,
+              nodeEls,
+              connectEl,
+              labelEls
+            )
           )
         ),
         menu ? h('div', { className: 'vwf-menu', style: { left: menu.x, top: menu.y } },
@@ -1789,6 +1841,7 @@ return {
           ),
           h('div', { className: 'vwf-editor-body' },
             h(Editor, {
+              key: editId || 'new',
               wf, providers, roles, saving,
               currentId: editId,
               setWf: (next) => { setWf(next); setDirty(true) },

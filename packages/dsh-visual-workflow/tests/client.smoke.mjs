@@ -102,7 +102,7 @@ function makeRuntime() {
   }
   const ctxFake = {
     get: (name) => (name === 'slots' ? slotsFake : undefined),
-    timeout: () => () => {},
+    timeout: (fn, delay) => { if (delay === 0 && typeof fn === 'function') fn(); return () => {} },
     interval: () => () => {},
   }
   const harnessTrap = {}
@@ -112,7 +112,11 @@ function makeRuntime() {
 }
 
 const { plugin, slotsFake, state, styleText } = makeRuntime()
-plugin.apply({ get: (n) => (n === 'slots' ? slotsFake : undefined), timeout: () => () => {}, interval: () => () => {} })
+plugin.apply({
+  get: (n) => (n === 'slots' ? slotsFake : undefined),
+  timeout: (fn, delay) => { if (delay === 0 && typeof fn === 'function') fn(); return () => {} },
+  interval: () => () => {},
+})
 
 // slots.inject 的回调里调用了 slots.register —— 用上面的 apply 前需要让 register 返回并设置 component
 // 注：slotsFake.inject 会同步调用 fn()，fn 内部 ctx.slots.register(...) 设置 component
@@ -161,6 +165,9 @@ test('模板列表渲染并打开全局编辑层', async () => {
   assert.match(css, /\.vwf-editor-dialog::backdrop/, '编辑层带背景弱化 backdrop')
   assert.match(css, /width:min\(1440px/, '编辑层使用大尺寸自适应宽度')
   assert.match(css, /inset:var\(--vwf-editor-safe-gap\)/, '编辑层保留全局安全边距')
+  assert.match(css, /\.vwf-canvas-stage/, '画布使用独立 stage 承载内容')
+  assert.match(css, /\.vwf-canvas-wrap[^`]*display:flex/, '滚动容器以 flex 提供自动外边距居中')
+  assert.match(css, /\.vwf-canvas-stage[^`]*margin:auto/, 'stage 通过 auto margin 纵横居中')
   assert.ok(byText(container, '工作流编辑器'), '编辑层打开，编辑器标题渲染')
   assert.ok(byText(container, '配置面板'), '配置面板渲染')
   assert.ok(byText(container, '节点配置'), '默认选中首节点，节点表单渲染')
@@ -178,6 +185,29 @@ test('新增节点：画布出现新节点并选中', async () => {
   const labels = Array.from(svg.querySelectorAll('text.vwf-node-label')).map((el) => el.textContent)
   assert.ok(labels.includes('节点2'), '新增节点出现在画布：' + labels.join(','))
   assert.ok(byText(container, '节点配置'), '新增节点被选中，节点表单仍在')
+})
+
+test('重置视图：内容超出小画布时纵横居中', async () => {
+  const wrap = container.querySelector('.vwf-canvas-wrap')
+  Object.defineProperty(wrap, 'clientWidth', { value: 1000, configurable: true })
+  Object.defineProperty(wrap, 'clientHeight', { value: 120, configurable: true })
+  wrap.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 120, right: 1000, bottom: 120 })
+  await act(async () => {
+    container.querySelector('.vwf-zoom button[title="适配视图"]').click()
+    await flush()
+  })
+  assert.equal(wrap.scrollLeft, 0, '横向内容不足时由 stage 居中，不产生偏移')
+  assert.ok(wrap.scrollTop > 0, '纵向内容超出时重置到纵向中心')
+  wrap.scrollLeft = 31
+  wrap.scrollTop = 2
+  await act(async () => {
+    container.querySelector('.vwf-zoom button[title="适配视图"]').click()
+    await flush()
+  })
+  assert.equal(wrap.scrollLeft, 0, '用户移动后点击重置恢复横向中心')
+  assert.ok(wrap.scrollTop > 0, '用户移动后点击重置恢复纵向中心')
+  Object.defineProperty(wrap, 'clientHeight', { value: 600, configurable: true })
+  wrap.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600 })
 })
 
 test('拖拽连线：从节点右把手拖到结束节点创建新边', async () => {
@@ -201,6 +231,40 @@ test('拖拽连线：从节点右把手拖到结束节点创建新边', async ()
   })
   const after = container.querySelectorAll('.vwf-edge-flow').length
   assert.ok(after === before + 1, '连线创建新边（' + before + ' → ' + after + '）')
+})
+
+test('画布任意非把手区域支持四向拖动且不修改工作流内容', async () => {
+  const wrap = container.querySelector('.vwf-canvas-wrap')
+  const stage = container.querySelector('.vwf-canvas-stage')
+  const nodeCard = container.querySelector('.vwf-node-card')
+  const beforeEdges = container.querySelectorAll('.vwf-edge-flow').length
+  const beforeNodes = container.querySelectorAll('.vwf-node-card').length
+  Object.defineProperty(wrap, 'scrollWidth', { value: 1000, configurable: true })
+  Object.defineProperty(wrap, 'scrollHeight', { value: 600, configurable: true })
+  wrap.scrollLeft = 120
+  wrap.scrollTop = 80
+  await act(async () => {
+    nodeCard.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientX: 300, clientY: 200 }))
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 340, clientY: 150 }))
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 340, clientY: 150 }))
+    await flush()
+  })
+  assert.equal(stage.style.transform, 'translate(40px,-50px)', '无滚动空间时拖动节点区域也会移动画布')
+  assert.equal(wrap.scrollLeft, 120, '无横向滚动空间时不写 scrollLeft')
+  assert.equal(wrap.scrollTop, 80, '无纵向滚动空间时不写 scrollTop')
+
+  Object.defineProperty(wrap, 'scrollWidth', { value: 1400, configurable: true })
+  Object.defineProperty(wrap, 'scrollHeight', { value: 900, configurable: true })
+  await act(async () => {
+    stage.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientX: 340, clientY: 150 }))
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 300, clientY: 210 }))
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 300, clientY: 210 }))
+    await flush()
+  })
+  assert.equal(wrap.scrollLeft, 160, '有横向滚动空间时继续走横向滚动')
+  assert.equal(wrap.scrollTop, 20, '有纵向滚动空间时支持纵向滚动')
+  assert.equal(container.querySelectorAll('.vwf-edge-flow').length, beforeEdges, '拖动浏览不增删边')
+  assert.equal(container.querySelectorAll('.vwf-node-card').length, beforeNodes, '拖动浏览不增删节点')
 })
 
 test('点击边：边配置面板出现', async () => {
