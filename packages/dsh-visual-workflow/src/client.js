@@ -24,8 +24,8 @@
 //   - 保存校验：校验失败弹窗列问题 → 关闭后逐字段标红 + 画布红圈 + 定位首个
 //     问题节点；画布/JSON 双 tab 实时互同步；变更后防抖实时校验状态行
 //
-//  宿主形态：设置→工作流 section 内为「模板库 + 运行看板」，点「编辑」弹出
-//  右侧大抽屉（≈1120px，对应 Gold-Band 的 Sheet 抽屉）承载编辑器。
+//  宿主形态：设置→工作流 section 内为「模板库 + 运行看板」，点「编辑」打开
+//  原生顶层 <dialog> 编辑工作区（相对浏览器窗口居中），不再依附设置页布局。
 //
 //  pkg-4（视觉复核反馈修订）：
 //  - 撤销 pkg-3 的配置页内联画布编辑（快速调整 tab），恢复「已保存工作流列表
@@ -290,14 +290,17 @@ return {
 .vwf-err-line { color:var(--dsw-alias-state-error-primary, #e5484d); font-size:11px; margin-top:2px; }
 .vwf-section { border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); padding:10px 12px; margin-top:10px; }
 .vwf-subsection { border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; background:var(--dsw-alias-bg-layer-2, #242424); padding:10px 12px; margin-top:10px; }
-.vwf-drawer-mask { position:fixed; inset:0; z-index:900; background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.4)); }
-.vwf-drawer { position:fixed; top:0; right:0; bottom:0; z-index:901; width:min(1120px, 94vw); display:flex; flex-direction:column; background:var(--dsw-alias-bg-layer-1, #1b1b1b); border-left:1px solid var(--dsw-alias-border-l2, #333); box-shadow:-18px 0 48px rgba(0,0,0,.35); }
-.vwf-drawer-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); }
-.vwf-drawer-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; }
-.vwf-editor { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:12px; align-items:start; }
-@media (max-width: 900px) { .vwf-editor { grid-template-columns:minmax(0,1fr); } }
-.vwf-canvas-col { min-width:0; }
+.vwf-editor-dialog { --vwf-editor-safe-gap:clamp(12px, 3vw, 32px); position:fixed; inset:var(--vwf-editor-safe-gap); z-index:900; width:min(1440px, calc(100vw - var(--vwf-editor-safe-gap) - var(--vwf-editor-safe-gap))); height:min(920px, calc(100vh - var(--vwf-editor-safe-gap) - var(--vwf-editor-safe-gap))); max-width:none; max-height:none; margin:auto; padding:0; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:18px; background:var(--dsw-alias-bg-layer-1, #1b1b1b); color:var(--dsw-alias-label-primary, #e8e8e8); box-shadow:0 24px 80px rgba(0,0,0,.48); overflow:hidden; }
+.vwf-editor-dialog[open] { display:flex; flex-direction:column; }
+.vwf-editor-dialog::backdrop { background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.56)); backdrop-filter:blur(2px); }
+.vwf-editor-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); flex:0 0 auto; }
+.vwf-editor-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; overscroll-behavior:contain; }
+.vwf-editor { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:12px; align-items:stretch; height:100%; min-height:0; }
+@media (max-width: 900px) { .vwf-editor { grid-template-columns:minmax(0,1fr); height:auto; } .vwf-inspector { position:static; height:auto; } }
+.vwf-canvas-col { min-width:0; min-height:0; display:flex; flex-direction:column; }
+.vwf-canvas-col > .vwf-card { flex:1; min-height:0; display:flex; flex-direction:column; }
 .vwf-canvas-wrap { position:relative; height:560px; overflow:auto; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-base, #181818); }
+.vwf-editor .vwf-canvas-wrap { flex:1; min-height:360px; height:auto; }
 /* 画布工具栏：文档流内一行（不再悬浮遮挡入口节点） */
 .vwf-canvas-toolbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-layer-2, #242424); }
 .vwf-svg { display:block; user-select:none; touch-action:none; }
@@ -308,7 +311,7 @@ return {
 .vwf-zoom button { width:30px; height:30px; border:0; border-bottom:1px solid var(--dsw-alias-border-l2, #333); background:transparent; color:var(--dsw-alias-label-secondary, #9a9a9a); cursor:pointer; font-size:14px; }
 .vwf-zoom button:last-child { border-bottom:0; }
 .vwf-zoom button:hover { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); }
-.vwf-inspector { position:sticky; top:0; max-height:calc(100vh - 140px); overflow:auto; padding:12px; }
+.vwf-inspector { position:sticky; top:0; height:100%; min-height:0; overflow:auto; padding:12px; }
 .vwf-empty { display:grid; place-items:center; min-height:120px; border:1px dashed var(--dsw-alias-border-l2, #333); border-radius:10px; color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:12px; padding:16px; text-align:center; }
 .vwf-dialog-mask { position:fixed; inset:0; z-index:950; background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.45)); display:flex; align-items:center; justify-content:center; }
 .vwf-dialog { width:min(520px, 92vw); max-height:80vh; display:flex; flex-direction:column; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:14px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:10px; }
@@ -336,10 +339,10 @@ return {
 .vwf-handle-src:hover { fill:var(--dsw-alias-brand-primary, #4d9fff); }
 .vwf-entry-badge { fill:var(--dsw-alias-bg-layer-1, #1e1e1e); stroke:var(--dsw-alias-border-l3, #444); }
 .vwf-entry-badge-text { fill:var(--dsw-alias-label-secondary, #9a9a9a); font-size:10px; }
-/* ── 滚动条常显样式（画布内纵向滚动 + 抽屉/面板/弹窗） ── */
-.vwf-canvas-wrap::-webkit-scrollbar, .vwf-drawer-body::-webkit-scrollbar, .vwf-inspector::-webkit-scrollbar, .vwf-dialog-issues::-webkit-scrollbar { width:10px; height:10px; }
-.vwf-canvas-wrap::-webkit-scrollbar-thumb, .vwf-drawer-body::-webkit-scrollbar-thumb, .vwf-inspector::-webkit-scrollbar-thumb, .vwf-dialog-issues::-webkit-scrollbar-thumb { background:var(--dsw-alias-border-l3, #444); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
-.vwf-canvas-wrap::-webkit-scrollbar-track, .vwf-drawer-body::-webkit-scrollbar-track, .vwf-inspector::-webkit-scrollbar-track, .vwf-dialog-issues::-webkit-scrollbar-track { background:transparent; }
+/* ── 滚动条常显样式（画布内纵向滚动 + 编辑层/面板/弹窗） ── */
+.vwf-canvas-wrap::-webkit-scrollbar, .vwf-editor-body::-webkit-scrollbar, .vwf-inspector::-webkit-scrollbar, .vwf-dialog-issues::-webkit-scrollbar { width:10px; height:10px; }
+.vwf-canvas-wrap::-webkit-scrollbar-thumb, .vwf-editor-body::-webkit-scrollbar-thumb, .vwf-inspector::-webkit-scrollbar-thumb, .vwf-dialog-issues::-webkit-scrollbar-thumb { background:var(--dsw-alias-border-l3, #444); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
+.vwf-canvas-wrap::-webkit-scrollbar-track, .vwf-editor-body::-webkit-scrollbar-track, .vwf-inspector::-webkit-scrollbar-track, .vwf-dialog-issues::-webkit-scrollbar-track { background:transparent; }
 `)
 
     const h = React.createElement
@@ -1127,7 +1130,7 @@ return {
     function Editor(props) {
       const wf = props.wf
       const setWf = props.setWf
-      const canvasHeight = props.canvasHeight || 560
+      const canvasHeight = props.canvasHeight
       const [tab, setTab] = React.useState('canvas')
       const [selectedNodeId, setSelectedNodeId] = React.useState((wf.nodes[0] || {}).id || null)
       const [selectedEdgeIndex, setSelectedEdgeIndex] = React.useState(null)
@@ -1660,7 +1663,7 @@ return {
       )
     }
 
-    // ── 页面：模板库 + 大抽屉编辑器 + 运行看板 ───────────────────────────────
+    // ── 页面：模板库 + 全局编辑层 + 运行看板 ───────────────────────────────
     function Skeleton() {
       return { id: 'my-flow', name: '我的工作流', description: '', entry: 'node-1', control: { maxRounds: 9 }, nodes: [{ id: 'node-1', profile: 'dispatcher', label: '节点1' }], edges: [{ from: 'node-1', to: '$end', on: 'success' }] }
     }
@@ -1668,13 +1671,33 @@ return {
     function Page() {
       const [tab, setTab] = React.useState('templates')
       const [list, setList] = React.useState(null)
-      const [editId, setEditId] = React.useState(null) // 抽屉中的模板 id
-      const [wf, setWf] = React.useState(null) // 抽屉中的工作流草稿
+      const [editId, setEditId] = React.useState(null) // 编辑层中的模板 id
+      const [wf, setWf] = React.useState(null) // 编辑层中的工作流草稿
       const [dirty, setDirty] = React.useState(false)
       const [saving, setSaving] = React.useState(false)
       const [msg, setMsg] = React.useState(null)
       const [providers, setProviders] = React.useState([])
       const [roles, setRoles] = React.useState([])
+      const editorDialogRef = React.useRef(null)
+      const editorOpen = !!wf
+
+      // issue-54：用原生 top-layer dialog 承载编辑器，避免皮肤布局中的
+      // transform / overflow 等祖先样式把 position:fixed 元素限制在设置页内部。
+      React.useEffect(() => {
+        if (!editorOpen) return undefined
+        const dialog = editorDialogRef.current
+        if (!dialog) return undefined
+        try {
+          if (typeof dialog.showModal === 'function') {
+            if (!dialog.open) dialog.showModal()
+          } else {
+            dialog.setAttribute('open', '')
+          }
+        } catch (e) {
+          dialog.setAttribute('open', '')
+        }
+        return undefined
+      }, [editorOpen])
 
       const refresh = React.useCallback(() => host.call('vwf.workflows.list').then((l) => setList(l || [])).catch(() => setList([])), [])
       React.useEffect(() => { refresh() }, [])
@@ -1749,26 +1772,29 @@ return {
         ) : null,
         tab === 'dashboard' ? h(Dashboard, { wf }) : null,
         msg ? h('div', { className: 'vwf-code' }, msg) : null,
-        wf ? h('div', null,
-          h('div', { className: 'vwf-drawer-mask', onClick: closeEditor }),
-          h('div', { className: 'vwf-drawer' },
-            h('div', { className: 'vwf-drawer-head' },
-              h('strong', null, (wf.name || wf.id) + ''),
-              editId ? h('span', { className: 'vwf-badge' }, editId) : h('span', { className: 'vwf-badge accent' }, t('newTemplate')),
-              editingBuiltin ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null,
-              dirty ? h('span', { className: 'vwf-badge', style: { color: 'var(--dsw-alias-state-warn-primary, #f59e0b)' } }, t('unsavedDraft')) : null,
-              h('span', { className: 'vwf-spacer' }),
-              h('button', { className: 'vwf-btn sm', onClick: closeEditor }, t('close'))
-            ),
-            h('div', { className: 'vwf-drawer-body' },
-              h(Editor, {
-                wf, providers, roles, saving,
-                currentId: editId,
-                setWf: (next) => { setWf(next); setDirty(true) },
-                onSaved: (id) => { onSaved(id); if (!editId) setEditId(id) },
-                onScript,
-              })
-            )
+        wf ? h('dialog', {
+          className: 'vwf-editor-dialog',
+          ref: editorDialogRef,
+          'aria-label': t('title'),
+          onClick: (ev) => { if (ev.target === ev.currentTarget) closeEditor() },
+          onClose: closeEditor,
+        },
+          h('div', { className: 'vwf-editor-head' },
+            h('strong', null, (wf.name || wf.id) + ''),
+            editId ? h('span', { className: 'vwf-badge' }, editId) : h('span', { className: 'vwf-badge accent' }, t('newTemplate')),
+            editingBuiltin ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null,
+            dirty ? h('span', { className: 'vwf-badge', style: { color: 'var(--dsw-alias-state-warn-primary, #f59e0b)' } }, t('unsavedDraft')) : null,
+            h('span', { className: 'vwf-spacer' }),
+            h('button', { className: 'vwf-btn sm', onClick: closeEditor }, t('close'))
+          ),
+          h('div', { className: 'vwf-editor-body' },
+            h(Editor, {
+              wf, providers, roles, saving,
+              currentId: editId,
+              setWf: (next) => { setWf(next); setDirty(true) },
+              onSaved: (id) => { onSaved(id); if (!editId) setEditId(id) },
+              onScript,
+            })
           )
         ) : null
       )

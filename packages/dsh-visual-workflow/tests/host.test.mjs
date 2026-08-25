@@ -560,6 +560,14 @@ test('工作流 id 为空 / nodes 为空报错', async () => {
   assert.ok(v2.errors.some(e2 => e2.message.indexOf('至少') >= 0))
 })
 
+test('vwf.validate 异常输入也返回 lossless JSON 的 warnings 数组', async () => {
+  const { handlers } = env()
+  const v = await call(handlers, 'vwf.validate', { dsl: null })
+  assert.equal(v.ok, false)
+  assert.deepEqual(v.warnings, [])
+  assert.doesNotThrow(() => JSON.stringify(v))
+})
+
 test('模板名称必填（name 为空拒绝，save 同拒）', async () => {
   const { handlers } = env()
   const v = await call(handlers, 'vwf.validate', { dsl: baseDsl({ name: '  ' }) })

@@ -1,5 +1,5 @@
 // client.js jsdom 冒烟测试：
-// 模板列表 → 打开大抽屉编辑器 → 新增/删除节点 → 拖拽连线 → 边/节点配置面板
+// 模板列表 → 打开全局编辑层 → 新增/删除节点 → 拖拽连线 → 边/节点配置面板
 // → JSON tab → 保存校验弹窗与字段标红（Gold-Band 对齐交互链路）
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -85,7 +85,8 @@ function makeRuntime() {
         throw new Error('unexpected rpc: ' + method)
     }
   }
-  const styles = { insert: () => () => {} }
+  const styleText = []
+  const styles = { insert: (css) => { styleText.push(css); return () => {} } }
   const host = { call: (m, a = null) => rpc(m, a) }
   const slotsFake = {
     inject: (name, fn) => {
@@ -107,10 +108,10 @@ function makeRuntime() {
   const harnessTrap = {}
   const closure = new Function('React', 'console', 'styles', 'host', 'harness', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'fetch', 'require', 'process', 'Buffer', src)
   const plugin = closure(React, console, styles, host, harnessTrap, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, undefined, undefined)
-  return { plugin, slotsFake, state }
+  return { plugin, slotsFake, state, styleText }
 }
 
-const { plugin, slotsFake, state } = makeRuntime()
+const { plugin, slotsFake, state, styleText } = makeRuntime()
 plugin.apply({ get: (n) => (n === 'slots' ? slotsFake : undefined), timeout: () => () => {}, interval: () => () => {} })
 
 // slots.inject 的回调里调用了 slots.register —— 用上面的 apply 前需要让 register 返回并设置 component
@@ -128,9 +129,17 @@ const Page = slotsFake.component
 
 const container = document.createElement('div')
 document.body.appendChild(container)
+let editorShowModalCalls = 0
+dom.window.HTMLDialogElement.prototype.showModal = function () {
+  editorShowModalCalls += 1
+  this.setAttribute('open', '')
+}
+dom.window.HTMLDialogElement.prototype.close = function () {
+  this.removeAttribute('open')
+}
 const root = createRoot(container)
 
-test('模板列表渲染并打开大抽屉编辑器', async () => {
+test('模板列表渲染并打开全局编辑层', async () => {
   await act(async () => {
     root.render(React.createElement(Page))
     await flush()
@@ -143,7 +152,16 @@ test('模板列表渲染并打开大抽屉编辑器', async () => {
     editBtn.click()
     await flush()
   })
-  assert.ok(byText(container, '工作流编辑器'), '抽屉打开，编辑器标题渲染')
+  const editorDialog = container.querySelector('dialog.vwf-editor-dialog')
+  assert.ok(editorDialog, '编辑器使用原生顶层 dialog 承载')
+  assert.equal(editorShowModalCalls, 1, '打开编辑器时调用 showModal 进入 top layer')
+  assert.ok(editorDialog.hasAttribute('open'), '编辑层处于打开状态')
+  assert.ok(!container.querySelector('.vwf-drawer'), '不再渲染右侧抽屉')
+  const css = styleText.join('\n')
+  assert.match(css, /\.vwf-editor-dialog::backdrop/, '编辑层带背景弱化 backdrop')
+  assert.match(css, /width:min\(1440px/, '编辑层使用大尺寸自适应宽度')
+  assert.match(css, /inset:var\(--vwf-editor-safe-gap\)/, '编辑层保留全局安全边距')
+  assert.ok(byText(container, '工作流编辑器'), '编辑层打开，编辑器标题渲染')
   assert.ok(byText(container, '配置面板'), '配置面板渲染')
   assert.ok(byText(container, '节点配置'), '默认选中首节点，节点表单渲染')
 })

@@ -1,0 +1,151 @@
+{
+  "results": [
+    {
+      "combo": {
+        "skin": "dark",
+        "w": 1440,
+        "h": 900,
+        "label": "dark-desktop"
+      },
+      "metrics": {
+        "dialogPresent": true,
+        "dialogOpen": true,
+        "rect": {
+          "left": 32,
+          "top": 31,
+          "right": 1410,
+          "bottom": 869,
+          "width": 1378,
+          "height": 838
+        },
+        "viewport": {
+          "w": 1440,
+          "h": 900
+        },
+        "fitsViewport": true,
+        "centered": true,
+        "noPageHScroll": true,
+        "headPresent": true,
+        "bodyPresent": true,
+        "bodyScrollable": {
+          "w": 1376,
+          "cw": 1376,
+          "h": 1018,
+          "ch": 786
+        }
+      },
+      "screenshot": "dark-desktop.png"
+    },
+    {
+      "combo": {
+        "skin": "dark",
+        "w": 1280,
+        "h": 800,
+        "label": "dark-laptop"
+      },
+      "metrics": {
+        "dialogPresent": true,
+        "dialogOpen": true,
+        "rect": {
+          "left": 32,
+          "top": 31,
+          "right": 1250,
+          "bottom": 769,
+          "width": 1218,
+          "height": 738
+        },
+        "viewport": {
+          "w": 1280,
+          "h": 800
+        },
+        "fitsViewport": true,
+        "centered": true,
+        "noPageHScroll": true,
+        "headPresent": true,
+        "bodyPresent": true,
+        "bodyScrollable": {
+          "w": 1216,
+          "cw": 1216,
+          "h": 1018,
+          "ch": 686
+        }
+      },
+      "screenshot": "dark-laptop.png"
+    },
+    {
+      "combo": {
+        "skin": "dark",
+        "w": 1024,
+        "h": 768,
+        "label": "dark-narrow"
+      },
+      "metrics": {
+        "dialogPresent": true,
+        "dialogOpen": true,
+        "rect": {
+          "left": 30.71875,
+          "top": 29.734375,
+          "right": 995.265625,
+          "bottom": 738.28125,
+          "width": 964.546875,
+          "height": 708.546875
+        },
+        "viewport": {
+          "w": 1024,
+          "h": 768
+        },
+        "fitsViewport": true,
+        "centered": true,
+        "noPageHScroll": true,
+        "headPresent": true,
+        "bodyPresent": true,
+        "bodyScrollable": {
+          "w": 963,
+          "cw": 963,
+          "h": 1018,
+          "ch": 657
+        }
+      },
+      "screenshot": "dark-narrow.png"
+    },
+    {
+      "combo": {
+        "skin": "light",
+        "w": 1440,
+        "h": 900,
+        "label": "light-desktop"
+      },
+      "metrics": {
+        "dialogPresent": true,
+        "dialogOpen": true,
+        "rect": {
+          "left": 32,
+          "top": 31,
+          "right": 1410,
+          "bottom": 869,
+          "width": 1378,
+          "height": 838
+        },
+        "viewport": {
+          "w": 1440,
+          "h": 900
+        },
+        "fitsViewport": true,
+        "centered": true,
+        "noPageHScroll": true,
+        "headPresent": true,
+        "bodyPresent": true,
+        "bodyScrollable": {
+          "w": 1376,
+          "cw": 1376,
+          "h": 1018,
+          "ch": 786
+        }
+      },
+      "screenshot": "light-desktop.png"
+    }
+  ],
+  "passed": true,
+  "fitsCount": 4,
+  "total": 4
+}
