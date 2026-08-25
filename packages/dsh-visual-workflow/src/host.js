@@ -634,6 +634,20 @@ return {
         if (rec && String(rec.status).indexOf('AWAITING_HUMAN_') === 0) tag.supersededBy = newRunId
       }
     }
+    // 引擎契约（dsh workflow types.ts）：WorkflowStopReason 只有
+    // 'completed' | 'cancelled' | 'error'，且 workflow/end 事件故意剥掉 value——
+    // 脚本终态（DONE / AWAITING_HUMAN_* / FAILED_* 等）只在 result.value 里，
+    // 恰好只有持有 run 并 await 的 wf_run 能看到。事件层的 'completed' 对门禁/
+    // 互斥语义不够：wf_run 收尾后用 value.status 回写权威终态。
+    // 终态集合（评审 PRRT_kwDOT57Tec6bfXfm/6b6ZN3）：节点 id 允许非 ASCII/
+    // 空白/标点（AWAITING_HUMAN_验收、FAILED_AT_调度A 等），前缀类用 .+ 宽匹配；
+    // fanout cap 失败态（FAILED_ITEM_CAP/FAILED_AGENT_CAP）同为脚本终态
+    const TERMINAL_STATUS_RE = /^(DONE|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ERROR)$/
+    function canonicalStop(result) {
+      const v = result && result.value
+      const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
+      return TERMINAL_STATUS_RE.test(cand) ? cand : ''
+    }
 
     const runs = new Map()
     ctx.on('workflow/start', (info) => { runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [] }) })
@@ -953,6 +967,15 @@ return {
           })
           if (args.entry) supersedeParked(String(args.taskId), String(run.id))
           const result = await run.result
+          // 权威终态回写（见 canonicalStop 注释）：completed 时以脚本返回为准
+          // （DONE / AWAITING_HUMAN_* / FAILED_*），cancelled/error 保持事件原样。
+          // 注意：wf_run 回执保持引擎原样 stopReason/value 不做翻译（runtime-host
+          // 套件 H1/H2 钉住该契约）；看板/互斥语义只消费这里回写的 runs 状态
+          const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
+          if (canon) {
+            const rec = runs.get(String(run.id))
+            if (rec) rec.status = canon
+          }
           return JSON.stringify({ runId: String(run.id), stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
         }
       })

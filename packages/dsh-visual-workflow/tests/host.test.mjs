@@ -847,19 +847,21 @@ function makeEngine() {
       pending.push({ id, release })
       return { id, result }
     },
-    end(id, stopReason) {
+    end(id, stopReason, value) {
       const p = pending.find((x) => x.id === id)
-      if (p) p.release({ stopReason, value: null, agentsStarted: 0 })
+      if (p) p.release({ stopReason, value: value === undefined ? null : value, agentsStarted: 0 })
     },
   }
 }
 
 // 结束一次运行：resolve 引擎 result（wf_run 回执需要）+ 投递 workflow/end 事件
 // （runs 状态机与 runTag.active 清除依赖事件——假引擎不会自动广播）
-function settleRun(eng, events, id, stopReason) {
-  eng.end(id, stopReason)
+// 真实引擎语义：workflow/end 事件只带 stopReason（completed/cancelled/error，
+// 无 value）；脚本终态在 result.value 里，只有 wf_run 的 await 能看到
+function settleRun(eng, events, id, scriptStatus) {
+  eng.end(id, 'completed', { status: scriptStatus })
   const ev = events.get('workflow/end')
-  if (ev) ev({ id }, { stopReason })
+  if (ev) ev({ id }, { stopReason: 'completed' })
 }
 
 function engineEnv(eng) {
@@ -917,8 +919,11 @@ test('#19 T1：wf_run 启动登记 taskId/workflowId；runs.list 最新在前；
   settleRun(eng, events, 'run-1', 'DONE')
   settleRun(eng, events, 'run-2', 'DONE')
   const [r1, r2] = await Promise.all([p1, p2])
-  assert.ok(r1.includes('"stopReason":"DONE"'), r1)
-  assert.ok(r2.includes('"stopReason":"DONE"'), r2)
+  // 终态回写回归：事件层是 completed，权威状态应为脚本返回 DONE
+  const d1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
+  assert.equal(d1.state.status, 'DONE', 'value.status 回写覆盖事件层 completed')
+  assert.ok(r1.includes('"stopReason":"completed"') && r1.includes('"status":"DONE"'), r1)
+  assert.ok(r2.includes('"stopReason":"completed"') && r2.includes('"status":"DONE"'), r2)
 })
 
 test('#19 T2（AC2）：同 taskId 进行中二次启动被拒并提示占用 runId；不同 taskId 放行；完成后解除', async () => {
@@ -952,7 +957,9 @@ test('#19 T3（AC3）：AWAITING_HUMAN 占用同 taskId 拒绝新启动；entry 
   await until(() => eng.starts.length >= 1, '首次启动')
   events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(eng, events, 'run-1', 'AWAITING_HUMAN_accept')
-  await p1
+  const receipt1 = await p1
+  // 回执契约：引擎原样 completed + value 携带脚本终态（runtime-host H1/H2 钉住）
+  assert.ok(receipt1.includes('"stopReason":"completed"') && receipt1.includes('AWAITING_HUMAN_accept'), receipt1)
   // 门禁占用仍互斥（isActiveStatus 兜住 AWAITING_HUMAN_* 终态）
   const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
   assert.ok(blocked.includes('串行互斥'), blocked)
@@ -970,6 +977,8 @@ test('#19 T3（AC3）：AWAITING_HUMAN 占用同 taskId 拒绝新启动；entry 
   assert.equal(list.runs[0].id, 'run-2', '续跑记录最新在前')
   settleRun(eng, events, 'run-2', 'DONE')
   await p2
+  const d2 = await call(handlers, 'vwf.state', { runId: 'run-2' })
+  assert.equal(d2.state.status, 'DONE', '续跑终态同样回写为 DONE')
 })
 
 test('#19 T4（AC1）：无 wf_run 参与的双 run 交错事件按 runId 隔离（平台工具直起路径）', async () => {
@@ -1015,4 +1024,29 @@ test('#18 终态归一：workflow/end 时未收到 agent-end 的子代理按 fai
   events.get('workflow/agent-end')({ id: 'wfr' }, { seq: 1, outcome: 'completed' })
   const s2 = await call(handlers, 'vwf.state', { runId: 'wfr' })
   assert.deepEqual(s2.state.agents.map(a => a.outcome), ['completed', 'failed', 'failed'])
+})
+
+test('#19 评审修复：终态正则接受非 ASCII 节点 id 与 fanout cap 失败态', async () => {
+  const eng = makeEngine()
+  const { handlers, events, definedTools } = engineEnv(eng)
+  const wfRun = definedTools.find(t => t.name === 'wf_run')
+  // 非 ASCII 门禁节点 id：AWAITING_HUMAN_验收 必须被权威回写
+  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-19a' })
+  await until(() => eng.starts.length >= 1, '启动1')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-1', 'AWAITING_HUMAN_验收')
+  await p1
+  const s1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
+  assert.equal(s1.state.status, 'AWAITING_HUMAN_验收', '非 ASCII 节点 id 的门禁态被回写')
+  // fanout cap 失败态：FAILED_ITEM_CAP 同为脚本终态
+  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-19b' })
+  await until(() => eng.starts.length >= 2, '启动2')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-2', 'FAILED_ITEM_CAP')
+  await p2
+  const s2 = await call(handlers, 'vwf.state', { runId: 'run-2' })
+  assert.equal(s2.state.status, 'FAILED_ITEM_CAP', 'cap 失败态被回写')
+  // 门禁占用互斥对非 ASCII 态同样生效
+  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-19a' })
+  assert.ok(blocked.includes('串行互斥'), 'AWAITING_HUMAN_验收 占用同 taskId 互斥')
 })
