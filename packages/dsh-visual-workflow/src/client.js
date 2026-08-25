@@ -1538,6 +1538,9 @@ return {
       const selectRun = (id) => { setRunId(id); fetchState(id) }
       const refresh = React.useCallback(() => {
         host.call('vwf.runs.list').then((r) => setRuns((r && r.runs) || [])).catch(() => {})
+        // 磁盘历史随刷新重拉（评审 PRRT_kwDOT57Tec6b7TeY）：看板常驻期间发生
+        // 容量淘汰时，已淘汰冷记录要从 older 移除，否则出现 51 条/点陈旧行 not-found
+        host.call('vwf.runs.history').then((r) => setOlder((r && r.runs) || [])).catch(() => {})
         if (!runId) return
         fetchState(runId)
       }, [runId])
@@ -1546,19 +1549,20 @@ return {
         return ctx.interval(refresh, 3000)
       }, [auto, refresh])
       // 进入看板即时查询一次：不等首个 3s 轮询周期（避免首屏误显示「暂无运行记录」）；
-      // 同时拉取磁盘全量历史，供完整浏览（见 allRuns 合并）
-      const loadHistory = React.useCallback(() => { host.call('vwf.runs.history').then((r) => setOlder((r && r.runs) || [])).catch(() => {}) }, [])
-      React.useEffect(() => { refresh(); loadHistory() }, [])
+      // 磁盘全量历史已由 refresh 一并拉取（见 allRuns 合并）
+      React.useEffect(() => { refresh() }, [])
       // 展示列表 = 内存实时记录（最近回载，状态更新鲜） ∪ 磁盘历史（按 id 去重，历史追加在后）
       const allRuns = React.useMemo(() => {
         const seen = new Set()
         const merged = []
         for (const r of runs) if (!seen.has(r.id)) { seen.add(r.id); merged.push(r) }
         for (const r of older) if (!seen.has(r.id)) { seen.add(r.id); merged.push(r) }
-        return merged
+        // 统一按持久化时间倒序（评审 PRRT_kwDOT57Tec6b7TeU）：内存合并在前会把
+        // 按需水合的旧 run 提到磁盘冷记录之前，令表格/分页失序；排序恢复真实时序
+        return merged.sort((a, b) => ((b.startedAt || b.ts || 0) - (a.startedAt || a.ts || 0)) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
       }, [runs, older])
       const activeCount = allRuns.filter((r) => !r.supersededBy && isActiveRunStatus(r.status)).length
-      const gates = allRuns.filter((r) => !r.supersededBy && String(r.status).indexOf('AWAITING_HUMAN_') === 0).reverse()
+      const gates = allRuns.filter((r) => !r.supersededBy && String(r.status).indexOf('AWAITING_HUMAN_') === 0)
       // 分页：数据刷新（新 run 落盘 / 历史拉取）时回到第 0 页
       React.useEffect(() => { setPage(0) }, [allRuns.length])
       const totalPages = Math.max(1, Math.ceil(allRuns.length / pageSize))
