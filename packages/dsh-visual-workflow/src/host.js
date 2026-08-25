@@ -801,9 +801,15 @@ return {
       const items = Array.from(runsDiskIndex.values()).sort((a, b) => (a.ts - b.ts) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
       const victims = items.slice(0, items.length - RUNS_RETAIN)
       for (const v of victims) {
-        // 活跃 run 不淘汰（保险带：按时间序正常轮不到；防止淘汰把进行中快照删掉）
+        // 活跃 run 不淘汰（保险带：按时间序正常轮不到；防止淘汰把进行中快照删掉）。
+        // 未接管的门禁同样不淘汰（评审 PRRT_kwDOT57Tec6b7RDw）：窗口外幽灵门禁
+        // 只在 runTags 登记、runs 无 rec——若被删，重启后门禁与互斥一并消失，
+        // 同 taskId 会被继续放行且丢失续跑历史
         const rec = runs.get(v.id)
-        if (rec && isActiveStatus(rec.status)) continue
+        const tag = runTags.get(v.id)
+        const status = rec ? rec.status : (tag && tag.lastStatus) || ''
+        const unsuperseded = !(tag && tag.supersededBy)
+        if (unsuperseded && isActiveStatus(status)) continue
         const r = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{force:true})", p.runsDir + '/' + v.file])
         if (r.ok) runsDiskIndex.delete(v.file)
         else console.log('[vwf] 运行记录淘汰删除失败：' + v.file + '：' + r.detail)
@@ -864,7 +870,16 @@ return {
     // 反转后最新在前）；单文件损坏仅跳过留痕（验收 AC5）；回载后补一次淘汰
     // （前序进程可能死在淘汰前）。
     async function loadPersistedRuns() {
-      if (fs === undefined) return
+      // fs 可能在 apply 后注入（静态 bundle 仅等待 webServer/tools，评审
+      // PRRT_kwDOT57Tec6b7RDu）：与 syncBuiltins 相同的轮询策略等待 fs 出现，
+      // 避免 runsHydration 在无 fs 时提前 resolve 而门禁从未加载
+      for (let attempt = 0; attempt < 10; attempt++) {
+        if (fs !== undefined) break
+        fs = ctx.get('fs')
+        if (fs !== undefined) break
+        try { await new Promise((r) => setTimeout(r, 100 * (attempt + 1))) } catch (e) { break }
+      }
+      if (fs === undefined) { console.log('[vwf] fs 服务不可用，运行记录回载未完成（本次互斥以内存态为准）'); return }
       const p = await rootPaths()
       if (!p.runsDir) return
       let entries = null

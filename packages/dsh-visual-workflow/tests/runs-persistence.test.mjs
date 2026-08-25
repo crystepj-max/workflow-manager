@@ -270,6 +270,23 @@ test('#40 AC3：容量淘汰——超过保留上限后最旧记录被清理（�
   assert.ok(fs._files.has(RUNS_DIR + '/run-live.json'), '活跃 run 快照保留')
 })
 
+test('#40 评审修复：未接管门禁不被容量淘汰——幽灵门禁磁盘记录存活', async () => {
+  const seed = {}
+  for (let i = 0; i < 53; i++) {
+    const id = 'seed-' + String(i).padStart(2, '0')
+    const gate = i < 2 // 最旧两条为未接管门禁（回载窗口外 → 幽灵门禁，仅 runTags 登记）
+    seed[RUNS_DIR + '/' + id + '.json'] = seedRun(id, {
+      startedAt: 1000 + i, updatedAt: 1000 + i,
+      ...(gate ? { status: 'AWAITING_HUMAN_b', phase: 'b', taskId: 'task-gate-' + i, workflowId: 'dev-workflow-2-0' } : {}),
+    })
+  }
+  const { fs } = env({ seed })
+  await until(() => runFiles(fs).length < 53, '触发启动淘汰')
+  assert.ok(fs._files.has(RUNS_DIR + '/seed-00.json'), '幽灵门禁 seed-00 不被淘汰')
+  assert.ok(fs._files.has(RUNS_DIR + '/seed-01.json'), '幽灵门禁 seed-01 不被淘汰')
+  assert.ok(!fs._files.has(RUNS_DIR + '/seed-02.json'), '最旧 DONE 记录被淘汰')
+})
+
 test('#40 AC5：损坏文件容错——坏文件跳过留痕，好记录照常回载', async () => {
   const seed = {
     [RUNS_DIR + '/good-1.json']: seedRun('good-1', { updatedAt: 3001 }),
