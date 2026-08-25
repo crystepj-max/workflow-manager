@@ -1,6 +1,6 @@
 # VWF 开发模式 / 产品模式双轨
 
-状态：Accepted for v0.1.0  
+状态：Accepted for v0.1.0
 关联：[Issue #53](https://github.com/crystepj-max/workflow-manager/issues/53)
 
 ## 1. 目标
