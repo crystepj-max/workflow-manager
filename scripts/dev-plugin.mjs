@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -23,15 +24,19 @@ const webProfile = join(devHome, 'profiles', 'web')
 const profilePackage = join(webProfile, 'package.json')
 const pidFile = join(devHome, '.vwf-dev-dsh.pid')
 
+function comparisonPath(path) {
+  return existsSync(path) ? realpathSync(path) : path
+}
+
 function fail(message) {
   console.error(`❌ ${message}`)
   process.exit(1)
 }
 
-if (devHome === productHome) {
+if (comparisonPath(devHome) === comparisonPath(productHome)) {
   fail(`开发 DSH Home 与产品 Home 相同：${devHome}`)
 }
-if (configuredHome && configuredHome !== devHome) {
+if (configuredHome && comparisonPath(configuredHome) !== comparisonPath(devHome)) {
   fail(
     `当前 DSH_HOME 指向 ${configuredHome}，不是开发 Home ${devHome}。` +
       '请取消该变量，或将其明确设为开发 Home 后重试。',
@@ -151,9 +156,8 @@ const child = spawn('dsh', ['web', '--port', '0'], {
 if (!Number.isSafeInteger(child.pid)) {
   fail('开发 DSH 进程未能创建。')
 }
-const launcherPid = process.pid
-writeFileSync(pidFile, `${launcherPid}\n`)
-console.log(`已使用隔离 Home 启动开发 DSH（启动器 PID ${launcherPid}）。`)
+writeFileSync(pidFile, `${child.pid}\n`)
+console.log(`已使用隔离 Home 启动开发 DSH（DSH PID ${child.pid}）。`)
 
 let shuttingDown = false
 const forwardSignal = (signal) => {
@@ -173,7 +177,7 @@ process.once('SIGTERM', onSigterm)
 const cleanup = () => {
   process.removeListener('SIGINT', onSigint)
   process.removeListener('SIGTERM', onSigterm)
-  if (readPid() === launcherPid) rmSync(pidFile, { force: true })
+  if (readPid() === child.pid) rmSync(pidFile, { force: true })
 }
 child.once('error', (error) => {
   cleanup()
