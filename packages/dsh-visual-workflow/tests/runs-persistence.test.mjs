@@ -312,11 +312,22 @@ test('#40 AC4：落盘失败不影响运行本身——内存态不受损，恢�
   assert.ok(rec.logs.includes('恢复后一条日志'))
 })
 
-test('#40：runId 特殊字符落盘文件名清洗', async () => {
-  const { events, fs } = env()
-  events.get('workflow/start')({ id: 'run x/y:z', meta: { name: 'w' } })
+test('#40 评审修复：runId 文件名注入式编码——特殊字符互不碰撞、可回读', async () => {
+  const { events, fs, handlers } = env()
+  // run/a 与 run:a：旧 _ 替换会撞成同一文件，注入式编码必须分成两个文件
+  events.get('workflow/start')({ id: 'run a/b', meta: { name: 'w' } })
+  events.get('workflow/start')({ id: 'run a:b', meta: { name: 'w' } })
   await drain()
-  assert.ok(fs._files.has(RUNS_DIR + '/run_x_y_z.json'), '非法文件名字符替换为下划线')
+  const fileA = RUNS_DIR + '/' + encodeURIComponent('run a/b') + '.json'
+  const fileB = RUNS_DIR + '/' + encodeURIComponent('run a:b') + '.json'
+  assert.ok(fs._files.has(fileA), 'run a/b 落到独立文件')
+  assert.ok(fs._files.has(fileB), 'run a:b 落到独立文件')
+  // 两个 distinct runId 不得映射到同一文件
+  const runFiles = [...fs._files.keys()].filter(k => k.startsWith(RUNS_DIR + '/'))
+  assert.equal(runFiles.length, 2, '两 run 两文件，无碰撞')
+  // 文件名可回读（vwf.state 磁盘回落按 encoding 反查）
+  const s = await call(handlers, 'vwf.state', { runId: 'run a:b' })
+  assert.equal(s.found, true, '编码文件名可被 vwf.state 解析回读')
 })
 
 test('#40 评审修复：重启中断的 running 快照不永久占用同 taskId 互斥', async () => {

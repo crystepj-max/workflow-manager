@@ -719,7 +719,9 @@ return {
     const RUNS_RETAIN = 50
 
     function runFileName(runId) {
-      return String(runId || '').replace(/[^A-Za-z0-9._-]/g, '_') + '.json'
+      // 注入式编码（评审 PRRT_kwDOT57Tec6b6it5）：run/a 与 run:a 若都替换为 _
+      // 会碰撞成同一文件互相覆盖历史；encodeURIComponent 保持 runId→文件一一对应
+      return encodeURIComponent(String(runId || '')) + '.json'
     }
 
     // 事件流快照：只取叶子字段构造自有 JSON（logs 上限 50 已在事件层收紧；
@@ -851,7 +853,9 @@ return {
         const info = await fs.stat(target)
         if (!info || info.type !== 'file') return null
         const data = JSON.parse(await fs.readText(target))
-        if (!hydrateRunFromDisk(data)) return null
+        // 并发水合（评审 PRRT_kwDOT57Tec6b6it7）：另一请求可能抢先水合同一冷记录，
+        // hydrateRunFromDisk 返回 false；此时该记录已在 runs 中，属成功 cache hit
+        hydrateRunFromDisk(data)
         return runs.get(data.id) || null
       } catch (e) { return null }
     }
@@ -1013,7 +1017,10 @@ return {
           taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: rec.startedAt != null ? rec.startedAt : (tag ? tag.startedAt : null),
           supersededBy: tag && tag.supersededBy ? tag.supersededBy : '' })
       }
-      out.reverse()
+      // 按时间倒序（评审 PRRT_kwDOT57Tec6b6it9）：按需水合会把窗口外旧记录追加到
+      // runs map 尾部，若依赖插入序反转，选中的旧 run 会跳到清单最前并驻留；按
+      // startedAt 降序可稳定呈现真实时间序，同刻用 id 降序兜底
+      out.sort((a, b) => ((b.startedAt || 0) - (a.startedAt || 0)) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
       return { runs: out }
     })
     // 磁盘全量运行清单（#40：运行历史浏览）。只读磁盘返回元数据，**不**水合进
