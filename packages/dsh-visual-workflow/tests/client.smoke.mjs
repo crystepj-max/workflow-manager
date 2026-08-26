@@ -178,13 +178,14 @@ test('顶部操作区：按钮独立、提示文字可换行让位', async () =>
   assert.ok(toolbar, '顶部操作区渲染')
   const labels = Array.from(toolbar.querySelectorAll('button')).map((el) => el.textContent)
   assert.ok(labels.includes('＋ 新增节点'), '新增节点按钮独立存在')
-  assert.ok(labels.includes('删除节点'), '删除节点按钮独立存在')
+  assert.ok(labels.includes('− 删除节点'), '删除节点按钮带减号图标')
   assert.ok(toolbar.querySelector('.vwf-toolbar-hint'), '连接提示使用独立可换行区域')
   const css = styleText.join('\n')
   assert.ok(css.includes('.vwf-canvas-toolbar { display:flex;'), '操作区使用 flex 排布')
   assert.ok(css.includes('flex-wrap:wrap'), '窄屏允许操作区换行')
   assert.ok(css.includes('.vwf-canvas-toolbar .vwf-btn { flex:0 0 auto;'), '按钮不压缩不变形')
   assert.ok(css.includes('.vwf-toolbar-hint { flex:1 1 240px;'), '提示文字占用剩余空间并让位')
+  assert.ok(css.includes('.vwf-canvas-toolbar .vwf-btn.danger:disabled { color:var(--dsw-alias-state-error-primary, #e5484d); opacity:1;'), '删除节点禁用态保持完整红色')
 })
 
 test('新增节点：画布出现新节点并选中', async () => {

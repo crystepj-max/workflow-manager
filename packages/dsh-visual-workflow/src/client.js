@@ -271,6 +271,9 @@ return {
 .vwf-btn.primary { border-color:var(--dsw-alias-brand-primary, #4d9fff); background:var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary, #4d9fff)); color:var(--dsw-alias-label-primary-foreground, #fff); }
 .vwf-btn.danger { color:var(--dsw-alias-state-error-primary, #e5484d); }
 .vwf-btn.danger:hover:not(:disabled) { background:var(--dsw-alias-interactive-bg-hover-danger, rgba(229,72,77,.12)); }
+/* 画布顶部删除操作保持完整红色；禁用态不用透明度混色，避免在深色画布上发黑。 */
+.vwf-canvas-toolbar .vwf-btn.danger,
+.vwf-canvas-toolbar .vwf-btn.danger:disabled { color:var(--dsw-alias-state-error-primary, #e5484d); opacity:1; -webkit-text-fill-color:currentColor; }
 .vwf-btn.ghost { border-color:transparent; background:transparent; }
 .vwf-btn.sm { padding:3px 10px; font-size:12px; border-radius:99px; }
 .vwf-badge { display:inline-block; padding:1px 8px; border-radius:99px; font-size:10px; border:1px solid var(--dsw-alias-border-l3, #444); color:var(--dsw-alias-label-secondary, #9a9a9a); }
@@ -1496,7 +1499,7 @@ return {
               ),
               tab === 'canvas' ? h('div', { className: 'vwf-canvas-toolbar' },
                 h('button', { className: 'vwf-btn sm ghost', onClick: addNode }, '＋ ' + t('addNode')),
-                h('button', { className: 'vwf-btn sm ghost danger', disabled: !selectedNodeId, onClick: deleteSelectedNode }, t('deleteNode')),
+                h('button', { className: 'vwf-btn sm ghost danger', disabled: !selectedNodeId, onClick: deleteSelectedNode }, '− ' + t('deleteNode')),
                 h('span', { className: 'vwf-muted-sm vwf-toolbar-hint' }, t('connectHint'))
               ) : null,
               tab === 'canvas'
