@@ -474,7 +474,9 @@ return {
         })
         const backward = lanes.has(index)
         let duplicateDirectLabel = false
-        if (!backward) {
+        // 只有最终仍保持直连的边才能占用“直连标签位置”；已因跨节点/回边绕行的边，
+        // 不应把某个中点标记为已占用，否则相邻直连边会被误判为标签冲突。
+        if (!backward && hits.length === 0) {
           const directLabelKey = Math.round((x1 + x2) / 2) + ':' + Math.round((y1 + y2) / 2)
           const count = directLabelCounts.get(directLabelKey) || 0
           directLabelCounts.set(directLabelKey, count + 1)

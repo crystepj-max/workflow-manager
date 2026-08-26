@@ -495,6 +495,45 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
   }
 })
 
+test('防重叠：已绕行长边不影响相邻边保持直连', async () => {
+  const dsl = {
+    id: 'direct-adjacent-edge',
+    name: '相邻直连测试',
+    entry: 'a',
+    control: { maxRounds: 9 },
+    nodes: [
+      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'b', profile: 'dev', label: 'B' },
+      { id: 'c', profile: 'review', label: 'C' },
+      { id: 'd', profile: 'test', label: 'D' },
+    ],
+    edges: [
+      { from: 'a', to: 'b', on: 'success' },
+      { from: 'b', to: 'c', on: 'success' },
+      { from: 'c', to: 'd', on: 'success' },
+      { from: 'a', to: 'd', on: 'success' },
+    ],
+  }
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(dsl, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  const paths = Array.from(container.querySelectorAll('path.vwf-edge-flow'))
+  assert.ok(!paths[0].getAttribute('d').includes(' L '), '普通相邻边 A→B 保持直连')
+  assert.ok(!paths[1].getAttribute('d').includes(' L '), '相邻边 B→C 不因长边占用标签中点而误绕行')
+  assert.ok(!paths[2].getAttribute('d').includes(' L '), '普通相邻边 C→D 保持直连')
+  assert.ok(paths[3].getAttribute('d').includes(' L '), '跨节点长边 A→D 继续外围绕行')
+})
+
 test('防重叠：入口变化会触发画布布局重算', async () => {
   const makeDsl = (entry) => ({
     id: 'entry-layout',
