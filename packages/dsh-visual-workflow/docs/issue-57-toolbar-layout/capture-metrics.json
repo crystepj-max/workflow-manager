@@ -1,0 +1,281 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "viewport": {
+        "label": "desktop",
+        "width": 1440,
+        "height": 900
+      },
+      "screenshot": "desktop.png",
+      "metrics": {
+        "toolbar": {
+          "left": 50,
+          "top": 194.796875,
+          "right": 1040,
+          "bottom": 239.796875,
+          "width": 990,
+          "height": 45
+        },
+        "canvas": {
+          "left": 50,
+          "top": 239.796875,
+          "right": 1040,
+          "bottom": 600.796875,
+          "width": 990,
+          "height": 361
+        },
+        "hint": {
+          "left": 235.34375,
+          "top": 209.828125,
+          "right": 1028,
+          "bottom": 225.765625,
+          "width": 792.65625,
+          "height": 15.9375
+        },
+        "buttons": [
+          {
+            "text": "＋ 新增节点",
+            "rect": {
+              "left": 62,
+              "top": 203.796875,
+              "right": 147.34375,
+              "bottom": 231.796875,
+              "width": 85.34375,
+              "height": 28
+            },
+            "clientWidth": 83,
+            "scrollWidth": 83
+          },
+          {
+            "text": "删除节点",
+            "rect": {
+              "left": 155.34375,
+              "top": 203.796875,
+              "right": 225.34375,
+              "bottom": 231.796875,
+              "width": 70,
+              "height": 28
+            },
+            "clientWidth": 68,
+            "scrollWidth": 68
+          }
+        ],
+        "pairOverlaps": [],
+        "hintButtonOverlap": false,
+        "buttonsReadable": true,
+        "buttonsInside": true,
+        "canvasBelowToolbar": true,
+        "toolbarNoHOverflow": true
+      },
+      "passed": true
+    },
+    {
+      "viewport": {
+        "label": "compact",
+        "width": 900,
+        "height": 760
+      },
+      "screenshot": "compact.png",
+      "metrics": {
+        "toolbar": {
+          "left": 45,
+          "top": 226.59375,
+          "right": 857,
+          "bottom": 271.59375,
+          "width": 812,
+          "height": 45
+        },
+        "canvas": {
+          "left": 45,
+          "top": 271.59375,
+          "right": 857,
+          "bottom": 632.59375,
+          "width": 812,
+          "height": 361
+        },
+        "hint": {
+          "left": 230.34375,
+          "top": 241.625,
+          "right": 845,
+          "bottom": 257.5625,
+          "width": 614.65625,
+          "height": 15.9375
+        },
+        "buttons": [
+          {
+            "text": "＋ 新增节点",
+            "rect": {
+              "left": 57,
+              "top": 235.59375,
+              "right": 142.34375,
+              "bottom": 263.59375,
+              "width": 85.34375,
+              "height": 28
+            },
+            "clientWidth": 83,
+            "scrollWidth": 83
+          },
+          {
+            "text": "删除节点",
+            "rect": {
+              "left": 150.34375,
+              "top": 235.59375,
+              "right": 220.34375,
+              "bottom": 263.59375,
+              "width": 70,
+              "height": 28
+            },
+            "clientWidth": 68,
+            "scrollWidth": 68
+          }
+        ],
+        "pairOverlaps": [],
+        "hintButtonOverlap": false,
+        "buttonsReadable": true,
+        "buttonsInside": true,
+        "canvasBelowToolbar": true,
+        "toolbarNoHOverflow": true
+      },
+      "passed": true
+    },
+    {
+      "viewport": {
+        "label": "narrow",
+        "width": 640,
+        "height": 760
+      },
+      "screenshot": "narrow.png",
+      "metrics": {
+        "toolbar": {
+          "left": 37.1875,
+          "top": 218.796875,
+          "right": 604.78125,
+          "bottom": 263.796875,
+          "width": 567.59375,
+          "height": 45
+        },
+        "canvas": {
+          "left": 37.1875,
+          "top": 263.796875,
+          "right": 604.78125,
+          "bottom": 624.796875,
+          "width": 567.59375,
+          "height": 361
+        },
+        "hint": {
+          "left": 222.53125,
+          "top": 233.828125,
+          "right": 592.78125,
+          "bottom": 249.765625,
+          "width": 370.25,
+          "height": 15.9375
+        },
+        "buttons": [
+          {
+            "text": "＋ 新增节点",
+            "rect": {
+              "left": 49.1875,
+              "top": 227.796875,
+              "right": 134.53125,
+              "bottom": 255.796875,
+              "width": 85.34375,
+              "height": 28
+            },
+            "clientWidth": 83,
+            "scrollWidth": 83
+          },
+          {
+            "text": "删除节点",
+            "rect": {
+              "left": 142.53125,
+              "top": 227.796875,
+              "right": 212.53125,
+              "bottom": 255.796875,
+              "width": 70,
+              "height": 28
+            },
+            "clientWidth": 68,
+            "scrollWidth": 68
+          }
+        ],
+        "pairOverlaps": [],
+        "hintButtonOverlap": false,
+        "buttonsReadable": true,
+        "buttonsInside": true,
+        "canvasBelowToolbar": true,
+        "toolbarNoHOverflow": true
+      },
+      "passed": true
+    },
+    {
+      "viewport": {
+        "label": "wrapped",
+        "width": 420,
+        "height": 760
+      },
+      "screenshot": "wrapped.png",
+      "metrics": {
+        "toolbar": {
+          "left": 30.59375,
+          "top": 264.203125,
+          "right": 391.390625,
+          "bottom": 331.140625,
+          "width": 360.796875,
+          "height": 66.9375
+        },
+        "canvas": {
+          "left": 30.59375,
+          "top": 331.140625,
+          "right": 391.390625,
+          "bottom": 692.140625,
+          "width": 360.796875,
+          "height": 361
+        },
+        "hint": {
+          "left": 44.59375,
+          "top": 307.203125,
+          "right": 379.390625,
+          "bottom": 323.140625,
+          "width": 334.796875,
+          "height": 15.9375
+        },
+        "buttons": [
+          {
+            "text": "＋ 新增节点",
+            "rect": {
+              "left": 42.59375,
+              "top": 273.203125,
+              "right": 127.9375,
+              "bottom": 301.203125,
+              "width": 85.34375,
+              "height": 28
+            },
+            "clientWidth": 83,
+            "scrollWidth": 83
+          },
+          {
+            "text": "删除节点",
+            "rect": {
+              "left": 135.9375,
+              "top": 273.203125,
+              "right": 205.9375,
+              "bottom": 301.203125,
+              "width": 70,
+              "height": 28
+            },
+            "clientWidth": 68,
+            "scrollWidth": 68
+          }
+        ],
+        "pairOverlaps": [],
+        "hintButtonOverlap": false,
+        "buttonsReadable": true,
+        "buttonsInside": true,
+        "canvasBelowToolbar": true,
+        "toolbarNoHOverflow": true
+      },
+      "passed": true
+    }
+  ]
+}

@@ -37,7 +37,7 @@
 | 画布/JSON 双 tab | `Editor` 的 canvas/json tab | JSON 实时解析同步回画布；保存时 JSON 非法报错（同原版） |
 | 实时校验状态 | 防抖 `vwf.validate` 状态行 | 「✓ 校验通过 / N 条问题」（pkg-19 实时预览能力的保留，Gold-Band 仅保存时校验） |
 | 入口拓扑推导 | `deriveEntryCandidates` / `normalizeEntry`（双半同构） | 唯一无入边节点自动设为入口，画布显示入口徽标 |
-| Sheet 抽屉宿主 | 设置 section「模板库」+ 右侧 ≈1120px 大抽屉 | 对应 WorkflowPage 的 Sheet 抽屉形态 |
+| 编辑器宿主 | 设置 section「模板库」+ 全局居中的顶层 `<dialog>` 编辑工作区 | 承接原 WorkflowPage 的独立编辑工作区形态，不依赖设置页或皮肤布局 |
 
 ## 4. 校验规则迁移（host.js validateDsl，Gold-Band 同构）
 
@@ -58,7 +58,7 @@
 
 ## 5. 适配决策记录（与「1:1」的刻意偏差及原因）
 
-1. **UI 栈**：用户选择 DSH 原生观感。动态客户端闭包**禁止 `require`**（运行时教学性拦截），宿主 ui-primitives 无法 import → 采用 DSH shell CSS 变量体系（`--dsw-alias-*`：bg-layer/border/label/state/brand）自绘组件，布局结构（1fr+340px 双栏、卡片分区、弹窗、抽屉）与原版一致。
+1. **UI 栈**：用户选择 DSH 原生观感。动态客户端闭包**禁止 `require`**（运行时教学性拦截），宿主 ui-primitives 无法 import → 采用 DSH shell CSS 变量体系（`--dsw-alias-*`：bg-layer/border/label/state/brand）自绘组件，布局结构（1fr+340px 双栏、卡片分区、弹窗）与原版一致；编辑器宿主使用原生顶层 `<dialog>`，避免皮肤祖先布局裁切。
 2. **布局引擎**：dagre 不可 import → 手写等价分层布局（最长路分层 + 层内居中 + 回退车道），视觉语义与 workflowGraph.ts 一致；节点不可手拖（与 Gold-Band `nodesDraggable=false` 一致），放弃 pkg-19 的拖拽/调宽高。
 3. **DSL 差异**：插件 DSL（nodes{id,label,profile,model,goal,output{schema(JSON Schema),successCondition},manualCheck}，edges{from,to,on,when}，control{maxRounds}）不引入 Gold-Band 的 `$new-round`/`session`/`max_attempts`/思考强度/权限模式——右击菜单仅 $end、边面板仅 on/to/when、控制仅 maxRounds；编译器与 wf_run 语义零改动。
 4. **数据源**：用户选择对接 DSH 服务——`vwf.models` 直读宿主 `llm` 服务（pkg-16 已有），新增 `vwf.roles` 读工作区 `dsh/roles/*.md`（fs 服务，多形态兜底 + 内置六角色回退）。

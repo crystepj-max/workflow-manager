@@ -5,13 +5,14 @@
 // workflowGraph.ts）对 pkg-19 的编辑模块做整体改造：
 //
 //  画布（对应 ReactFlow 画布 + workflowGraph 布局）
-//   - 自动分层布局（success 主链最长路分层，LR），节点不可手拖——与 Gold-Band
-//     nodesDraggable=false 一致；回退边（failure/指向更早节点）走上方法车道
-//     布线（lane routing，同 computeBackwardLanes + WorkflowRoutedEdge 公式）
+//   - 自动分层布局（success 主链最长路分层，LR），节点保持安全间距且不可手拖；
+//     回退边与跨节点边统一走上方外围车道，标签随车道路径避让节点内容
 //   - 节点卡片 220x66（圆角 14、label + 类型小字、入口徽标）、$end 虚线圆形
-//     终止节点、左右连接把手；边带流动虚线动画 + 箭头 + 成功/失败标签
-//   - 交互：点选节点/边；从源把手拖出连线落到目标节点建边；右键画布弹出
-//     「添加结束节点」菜单；滚轮缩放（指针锚定）+ 拖拽平移 + 缩放控件
+//     终止节点、左右连接把手；边带流动虚线动画 + 箭头；成功边/标签为蓝色、
+//     失败为红色、选中为主文字色加粗
+//   - 交互：首次打开/重置时纵横居中；点选节点/边；从源把手拖出连线落到目标
+//     节点建边；右键画布弹出「添加结束节点」菜单；滚轮缩放（指针锚定）+
+//     空白区域四向拖动 + 缩放控件
 //
 //  配置面板（对应右侧 Inspector 340px 栏）
 //   - 工作流控制：打回上限 maxRounds
@@ -24,8 +25,8 @@
 //   - 保存校验：校验失败弹窗列问题 → 关闭后逐字段标红 + 画布红圈 + 定位首个
 //     问题节点；画布/JSON 双 tab 实时互同步；变更后防抖实时校验状态行
 //
-//  宿主形态：设置→工作流 section 内为「模板库 + 运行看板」，点「编辑」弹出
-//  右侧大抽屉（≈1120px，对应 Gold-Band 的 Sheet 抽屉）承载编辑器。
+//  宿主形态：设置→工作流 section 内为「模板库 + 运行看板」，点「编辑」打开
+//  原生顶层 <dialog> 编辑工作区（相对浏览器窗口居中），不再依附设置页布局。
 //
 //  pkg-4（视觉复核反馈修订）：
 //  - 撤销 pkg-3 的配置页内联画布编辑（快速调整 tab），恢复「已保存工作流列表
@@ -131,6 +132,7 @@ return {
       refresh: '刷新列表',
       close: '关闭',
       unsavedDraft: '有未保存改动',
+      confirmDiscard: '放弃未保存的改动并关闭？',
       saved: '已保存 ',
       saveFailed: '保存失败：',
       deleted: '已删除 ',
@@ -228,6 +230,7 @@ return {
       refresh: 'Refresh',
       close: 'Close',
       unsavedDraft: 'Unsaved changes',
+      confirmDiscard: 'Discard unsaved changes and close?',
       saved: 'Saved ',
       saveFailed: 'Save failed: ',
       deleted: 'Deleted ',
@@ -290,16 +293,23 @@ return {
 .vwf-err-line { color:var(--dsw-alias-state-error-primary, #e5484d); font-size:11px; margin-top:2px; }
 .vwf-section { border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); padding:10px 12px; margin-top:10px; }
 .vwf-subsection { border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; background:var(--dsw-alias-bg-layer-2, #242424); padding:10px 12px; margin-top:10px; }
-.vwf-drawer-mask { position:fixed; inset:0; z-index:900; background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.4)); }
-.vwf-drawer { position:fixed; top:0; right:0; bottom:0; z-index:901; width:min(1120px, 94vw); display:flex; flex-direction:column; background:var(--dsw-alias-bg-layer-1, #1b1b1b); border-left:1px solid var(--dsw-alias-border-l2, #333); box-shadow:-18px 0 48px rgba(0,0,0,.35); }
-.vwf-drawer-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); }
-.vwf-drawer-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; }
-.vwf-editor { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:12px; align-items:start; }
-@media (max-width: 900px) { .vwf-editor { grid-template-columns:minmax(0,1fr); } }
-.vwf-canvas-col { min-width:0; }
-.vwf-canvas-wrap { position:relative; height:560px; overflow:auto; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-base, #181818); }
-/* 画布工具栏：文档流内一行（不再悬浮遮挡入口节点） */
-.vwf-canvas-toolbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-layer-2, #242424); }
+.vwf-editor-dialog { --vwf-editor-safe-gap:clamp(12px, 3vw, 32px); position:fixed; inset:var(--vwf-editor-safe-gap); z-index:900; width:min(1440px, calc(100vw - var(--vwf-editor-safe-gap) - var(--vwf-editor-safe-gap))); height:min(920px, calc(100vh - var(--vwf-editor-safe-gap) - var(--vwf-editor-safe-gap))); max-width:none; max-height:none; margin:auto; padding:0; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:18px; background:var(--dsw-alias-bg-layer-1, #1b1b1b); color:var(--dsw-alias-label-primary, #e8e8e8); box-shadow:0 24px 80px rgba(0,0,0,.48); overflow:hidden; }
+.vwf-editor-dialog[open] { display:flex; flex-direction:column; }
+.vwf-editor-dialog::backdrop { background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.56)); backdrop-filter:blur(2px); }
+.vwf-editor-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); flex:0 0 auto; }
+.vwf-editor-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; overscroll-behavior:contain; }
+.vwf-editor { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:12px; align-items:stretch; height:100%; min-height:0; }
+@media (max-width: 900px) { .vwf-editor { grid-template-columns:minmax(0,1fr); height:auto; } .vwf-inspector { position:static; height:auto; } }
+.vwf-canvas-col { min-width:0; min-height:0; display:flex; flex-direction:column; }
+.vwf-canvas-col > .vwf-card { flex:1; min-height:0; display:flex; flex-direction:column; }
+.vwf-canvas-wrap { position:relative; height:560px; overflow:auto; display:flex; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-base, #181818); overscroll-behavior:contain; }
+.vwf-editor .vwf-canvas-wrap { flex:1; min-height:360px; height:auto; }
+.vwf-canvas-stage { flex:0 0 auto; width:max-content; height:max-content; box-sizing:border-box; margin:auto; padding:24px; cursor:grab; }
+.vwf-canvas-stage:active { cursor:grabbing; }
+/* 画布工具栏：文档流内一行（不再悬浮遮挡入口节点）；窄屏允许提示换行增高 */
+.vwf-canvas-toolbar { display:flex; gap:8px; row-gap:6px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-layer-2, #242424); }
+.vwf-canvas-toolbar .vwf-btn { flex:0 0 auto; min-height:28px; white-space:nowrap; }
+.vwf-toolbar-hint { flex:1 1 240px; min-width:180px; margin-left:2px; line-height:1.45; overflow-wrap:anywhere; }
 .vwf-svg { display:block; user-select:none; touch-action:none; }
 .vwf-menu { position:absolute; z-index:20; min-width:160px; padding:4px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-overlay, #2d2d2d); box-shadow:0 8px 28px rgba(0,0,0,.4); }
 .vwf-menu-item { display:block; width:100%; text-align:left; padding:7px 10px; border:0; border-radius:7px; background:transparent; color:var(--dsw-alias-label-primary, #e8e8e8); font-size:12px; cursor:pointer; }
@@ -308,7 +318,7 @@ return {
 .vwf-zoom button { width:30px; height:30px; border:0; border-bottom:1px solid var(--dsw-alias-border-l2, #333); background:transparent; color:var(--dsw-alias-label-secondary, #9a9a9a); cursor:pointer; font-size:14px; }
 .vwf-zoom button:last-child { border-bottom:0; }
 .vwf-zoom button:hover { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); }
-.vwf-inspector { position:sticky; top:0; max-height:calc(100vh - 140px); overflow:auto; padding:12px; }
+.vwf-inspector { position:sticky; top:0; height:100%; min-height:0; overflow:auto; padding:12px; }
 .vwf-empty { display:grid; place-items:center; min-height:120px; border:1px dashed var(--dsw-alias-border-l2, #333); border-radius:10px; color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:12px; padding:16px; text-align:center; }
 .vwf-dialog-mask { position:fixed; inset:0; z-index:950; background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.45)); display:flex; align-items:center; justify-content:center; }
 .vwf-dialog { width:min(520px, 92vw); max-height:80vh; display:flex; flex-direction:column; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:14px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:10px; }
@@ -336,10 +346,10 @@ return {
 .vwf-handle-src:hover { fill:var(--dsw-alias-brand-primary, #4d9fff); }
 .vwf-entry-badge { fill:var(--dsw-alias-bg-layer-1, #1e1e1e); stroke:var(--dsw-alias-border-l3, #444); }
 .vwf-entry-badge-text { fill:var(--dsw-alias-label-secondary, #9a9a9a); font-size:10px; }
-/* ── 滚动条常显样式（画布内纵向滚动 + 抽屉/面板/弹窗） ── */
-.vwf-canvas-wrap::-webkit-scrollbar, .vwf-drawer-body::-webkit-scrollbar, .vwf-inspector::-webkit-scrollbar, .vwf-dialog-issues::-webkit-scrollbar { width:10px; height:10px; }
-.vwf-canvas-wrap::-webkit-scrollbar-thumb, .vwf-drawer-body::-webkit-scrollbar-thumb, .vwf-inspector::-webkit-scrollbar-thumb, .vwf-dialog-issues::-webkit-scrollbar-thumb { background:var(--dsw-alias-border-l3, #444); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
-.vwf-canvas-wrap::-webkit-scrollbar-track, .vwf-drawer-body::-webkit-scrollbar-track, .vwf-inspector::-webkit-scrollbar-track, .vwf-dialog-issues::-webkit-scrollbar-track { background:transparent; }
+/* ── 滚动条常显样式（画布内纵向滚动 + 编辑层/面板/弹窗） ── */
+.vwf-canvas-wrap::-webkit-scrollbar, .vwf-editor-body::-webkit-scrollbar, .vwf-inspector::-webkit-scrollbar, .vwf-dialog-issues::-webkit-scrollbar { width:10px; height:10px; }
+.vwf-canvas-wrap::-webkit-scrollbar-thumb, .vwf-editor-body::-webkit-scrollbar-thumb, .vwf-inspector::-webkit-scrollbar-thumb, .vwf-dialog-issues::-webkit-scrollbar-thumb { background:var(--dsw-alias-border-l3, #444); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
+.vwf-canvas-wrap::-webkit-scrollbar-track, .vwf-editor-body::-webkit-scrollbar-track, .vwf-inspector::-webkit-scrollbar-track, .vwf-dialog-issues::-webkit-scrollbar-track { background:transparent; }
 `)
 
     const h = React.createElement
@@ -349,14 +359,21 @@ return {
     const NODE_H = 66
     const TERM_W = 140
     const TERM_H = 44
-    const NODE_SEP = 72
+    const NODE_SEP = 88
     const RANK_SEP = 116
+    const EDGE_LANE_GAP = 82
+    const EDGE_LANE_SEP = 38
+    const EDGE_ROUTE_STUB = 34
+    const EDGE_LABEL_W = 36
+    const EDGE_LABEL_H = 18
     const MARGIN_X = 56
     const MARGIN_Y = 64
+    const CANVAS_PAD = 24
     const END_NODE = '$end'
     const STATUS_COLOR = { running: 'var(--dsw-alias-brand-primary, #60a5fa)', pass: 'var(--dsw-alias-state-success-primary, #22c55e)', fail: 'var(--dsw-alias-state-error-primary, #ef4444)', human: 'var(--dsw-alias-state-warn-primary, #f59e0b)' }
-    const EDGE_OK = 'var(--dsw-alias-label-tertiary, #9a9a9a)'
+    const EDGE_OK = '#2563eb'
     const EDGE_FAIL = 'var(--dsw-alias-state-error-primary, #f87171)'
+    const EDGE_SELECTED = '#111827'
     const ACCENT = 'var(--dsw-alias-brand-primary, #60a5fa)'
     const SCHEMA_DEBOUNCE_MS = 2000
     const VALIDATE_DEBOUNCE_MS = 350
@@ -429,6 +446,57 @@ return {
       return lanes
     }
 
+    // 边避让：跨节点/回路边统一走上方正交车道；同标签位置的重复边也改走独立车道。
+    function computeEdgeRoutes(edges, pos, lanes) {
+      const routes = new Map()
+      const directLabelCounts = new Map()
+      let nextForwardLane = lanes.size
+      ;(edges || []).forEach((e, index) => {
+        const a = pos[e.from]
+        const b = pos[e.to]
+        if (!a || !b) return
+        const x1 = a.x + a.w
+        const y1 = a.y + a.h / 2
+        const x2 = b.x
+        const y2 = b.y + b.h / 2
+        const left = Math.min(x1, x2)
+        const right = Math.max(x1, x2)
+        const top = Math.min(y1, y2) - 10
+        const bottom = Math.max(y1, y2) + 10
+        const between = Object.keys(pos).map(id => ({ id, p: pos[id] })).filter(item => {
+          const p = item.p
+          if (item.id === e.from || item.id === e.to) return false
+          return p.x < right && p.x + p.w > left
+        })
+        const hits = between.filter(item => {
+          const p = item.p
+          return p.y < bottom && p.y + p.h > top
+        })
+        const backward = lanes.has(index)
+        let duplicateDirectLabel = false
+        if (!backward) {
+          const directLabelKey = Math.round((x1 + x2) / 2) + ':' + Math.round((y1 + y2) / 2)
+          const count = directLabelCounts.get(directLabelKey) || 0
+          directLabelCounts.set(directLabelKey, count + 1)
+          duplicateDirectLabel = count > 0
+        }
+        if (!backward && !duplicateDirectLabel && hits.length === 0) return
+        const lane = backward ? lanes.get(index) : nextForwardLane++
+        const boundaryTop = Math.min(y1, y2, ...between.map(item => item.p.y))
+        const laneY = boundaryTop - EDGE_LANE_GAP - lane * EDGE_LANE_SEP
+        const channelStart = x1 + EDGE_ROUTE_STUB
+        const channelEnd = x2 - EDGE_ROUTE_STUB
+        routes.set(index, {
+          laneY,
+          channelStart,
+          channelEnd,
+          labelX: (channelStart + channelEnd) / 2,
+          labelY: laneY,
+        })
+      })
+      return routes
+    }
+
     // 分层布局：success/前向边最长路定 rank，rank 内按拓扑序纵向堆叠并整体居中
     function layoutGraph(dsl, extraTerminals) {
       const nodeIds = (dsl.nodes || []).map(n => n.id).filter(Boolean)
@@ -489,7 +557,18 @@ return {
       let maxX = 0
       let maxY = 0
       allIds.forEach(id => { const p = pos[id]; if (p) { maxX = Math.max(maxX, p.x + p.w); maxY = Math.max(maxY, p.y + p.h) } })
-      return { pos, W: maxX + MARGIN_X, H: maxY + MARGIN_Y, lanes: computeBackwardLanes(dsl.edges || [], order), order }
+      const lanes = computeBackwardLanes(dsl.edges || [], order)
+      const routes = computeEdgeRoutes(dsl.edges || [], pos, lanes)
+      let minRouteY = Infinity
+      routes.forEach(route => { minRouteY = Math.min(minRouteY, route.laneY) })
+      // 顶部车道也计入画布内容范围：不够时整体下移，避免回退/跨节点边被 SVG 上边界裁掉。
+      const routeShift = minRouteY < CANVAS_PAD ? CANVAS_PAD - minRouteY : 0
+      if (routeShift > 0) {
+        allIds.forEach(id => { if (pos[id]) pos[id].y += routeShift })
+        routes.forEach(route => { route.laneY += routeShift; route.labelY += routeShift })
+        maxY += routeShift
+      }
+      return { pos, W: maxX + MARGIN_X, H: maxY + MARGIN_Y, lanes, routes, order }
     }
 
     function uniqueNodeId(dsl, base) {
@@ -536,13 +615,15 @@ return {
     function Canvas(props) {
       const dsl = props.dsl
       const wrapRef = React.useRef(null)
+      const svgRef = React.useRef(null)
       const [scale, setScale] = React.useState(1)
+      const [panOffset, setPanOffset] = React.useState({ x: 0, y: 0 })
       const [connect, setConnect] = React.useState(null) // {from, x, y}
       const [menu, setMenu] = React.useState(null) // {x, y}
       const panRef = React.useRef(null)
       const lay = React.useMemo(
         () => layoutGraph(dsl, props.visibleTerminals || []),
-        [JSON.stringify({ n: (dsl.nodes || []).map(n => n.id), e: (dsl.edges || []).map(e => [e.from, e.to, e.on]), v: props.visibleTerminals || [] })]
+        [JSON.stringify({ entry: dsl.entry || '', n: (dsl.nodes || []).map(n => n.id), e: (dsl.edges || []).map(e => [e.from, e.to, e.on]), v: props.visibleTerminals || [] })]
       )
       const pos = lay.pos
       const W = lay.W
@@ -551,19 +632,24 @@ return {
       const fitView = React.useCallback(() => {
         const wrap = wrapRef.current
         if (!wrap) return
-        const s = Math.min(1.2, Math.max(0.3, Math.min((wrap.clientWidth - 24) / W, (wrap.clientHeight - 24) / H)))
+        const s = Math.min(1.2, Math.max(0.3, Math.min((wrap.clientWidth - CANVAS_PAD * 2) / W, (wrap.clientHeight - CANVAS_PAD * 2) / H)))
         setScale(s)
+        setPanOffset({ x: 0, y: 0 })
         ctx.timeout(() => {
           if (!wrapRef.current) return
-          wrapRef.current.scrollLeft = Math.max(0, (W * s - wrapRef.current.clientWidth) / 2)
-          wrapRef.current.scrollTop = 0
+          const stageW = Math.max(W * s + CANVAS_PAD * 2, wrapRef.current.clientWidth)
+          const stageH = Math.max(H * s + CANVAS_PAD * 2, wrapRef.current.clientHeight)
+          wrapRef.current.scrollLeft = Math.max(0, (stageW - wrapRef.current.clientWidth) / 2)
+          wrapRef.current.scrollTop = Math.max(0, (stageH - wrapRef.current.clientHeight) / 2)
         }, 0)
       }, [W, H])
       const fittedRef = React.useRef(false)
       React.useEffect(() => {
-        if (fittedRef.current) return
+        if (fittedRef.current) return undefined
         fittedRef.current = true
-        fitView()
+        // 编辑器宿主是先渲染 <dialog>、再在父级 effect 中 showModal；初始 fit 延后到
+        // 下一轮，确保读到的是弹层打开后的真实可视尺寸，而不是 display:none 的 0 尺寸。
+        return ctx.timeout(fitView, 0)
       }, [fitView])
       React.useEffect(() => { props.registerFit && props.registerFit(fitView) }, [fitView])
       // 定位到指定节点（校验弹窗关闭后聚焦首个问题节点，对应 Gold-Band 的 setCenter）
@@ -573,13 +659,18 @@ return {
         props.registerScrollTo && props.registerScrollTo((id) => {
           const p = posRef.current[id]
           const wrap = wrapRef.current
-          if (!p || !wrap) return
-          wrap.scrollLeft = Math.max(0, p.x * scaleRef.current - wrap.clientWidth / 2)
-          wrap.scrollTop = Math.max(0, p.y * scaleRef.current - 60)
+          const svg = svgRef.current
+          if (!p || !wrap || !svg) return
+          const wrapRect = wrap.getBoundingClientRect()
+          const svgRect = svg.getBoundingClientRect()
+          const dx = (svgRect.left - wrapRect.left) + p.x * scaleRef.current - wrap.clientWidth / 2
+          const dy = (svgRect.top - wrapRect.top) + p.y * scaleRef.current - wrap.clientHeight / 2
+          wrap.scrollLeft += dx
+          wrap.scrollTop += dy
         })
       }, [])
 
-      // 滚轮缩放（指针锚定）
+      // 滚轮缩放（指针锚定；stage 居中后按 SVG 实际屏幕位置换算）
       const scaleRef = React.useRef(scale)
       React.useEffect(() => { scaleRef.current = scale }, [scale])
       React.useEffect(() => {
@@ -587,42 +678,66 @@ return {
         if (!wrap) return undefined
         const onWheel = (ev) => {
           ev.preventDefault()
-          const rect = wrap.getBoundingClientRect()
-          const px = ev.clientX - rect.left + wrap.scrollLeft
-          const py = ev.clientY - rect.top + wrap.scrollTop
+          const svg = svgRef.current
+          if (!svg) return
+          const svgRect = svg.getBoundingClientRect()
+          const px = (ev.clientX - svgRect.left) / scaleRef.current
+          const py = (ev.clientY - svgRect.top) / scaleRef.current
           const next = Math.min(1.6, Math.max(0.3, +(scaleRef.current * (ev.deltaY < 0 ? 1.12 : 0.89)).toFixed(3)))
-          const ratio = next / scaleRef.current
           setScale(next)
           ctx.timeout(() => {
-            if (!wrapRef.current) return
-            wrapRef.current.scrollLeft = px * ratio - (ev.clientX - rect.left)
-            wrapRef.current.scrollTop = py * ratio - (ev.clientY - rect.top)
+            if (!wrapRef.current || !svgRef.current) return
+            const nextRect = svgRef.current.getBoundingClientRect()
+            wrapRef.current.scrollLeft += (nextRect.left + px * next) - ev.clientX
+            wrapRef.current.scrollTop += (nextRect.top + py * next) - ev.clientY
           }, 0)
         }
         wrap.addEventListener('wheel', onWheel, { passive: false })
         return () => wrap.removeEventListener('wheel', onWheel)
       }, [])
       const toGraph = (ev) => {
-        const wrap = wrapRef.current
-        if (!wrap) return null
-        const rect = wrap.getBoundingClientRect()
-        return { x: (ev.clientX - rect.left + wrap.scrollLeft) / scale, y: (ev.clientY - rect.top + wrap.scrollTop) / scale }
+        const svg = svgRef.current
+        if (!svg) return null
+        const rect = svg.getBoundingClientRect()
+        return { x: (ev.clientX - rect.left) / scale, y: (ev.clientY - rect.top) / scale }
       }
 
-      // 空白拖拽平移
+      // 画布拖拽平移：任意非连线把手区域都可拖动；有滚动空间的轴写 scroll，
+      // 没有滚动空间的轴写 stage transform，保证小工作流也能四向移动。
       const onPanePointerDown = (ev) => {
         if (connect) return
+        if (ev.button !== undefined && ev.button !== 0) return
         const wrap = wrapRef.current
-        if (!wrap) return
-        panRef.current = { sx: ev.clientX, sy: ev.clientY, left: wrap.scrollLeft, top: wrap.scrollTop, moved: false }
+        const target = ev.target
+        const inCanvas = target === wrap || !!(target && typeof target.closest === 'function' && target.closest('.vwf-canvas-stage'))
+        const isConnectHandle = !!(target && typeof target.closest === 'function' && target.closest('.vwf-handle-src'))
+        if (!wrap || !inCanvas || isConnectHandle) return
+        ev.preventDefault()
+        panRef.current = {
+          sx: ev.clientX,
+          sy: ev.clientY,
+          left: wrap.scrollLeft,
+          top: wrap.scrollTop,
+          offsetX: panOffset.x,
+          offsetY: panOffset.y,
+          canScrollX: wrap.scrollWidth > wrap.clientWidth + 1,
+          canScrollY: wrap.scrollHeight > wrap.clientHeight + 1,
+          moved: false,
+        }
         const move = (me) => {
           const p = panRef.current
           if (!p) return
           const dx = me.clientX - p.sx
           const dy = me.clientY - p.sy
           if (Math.abs(dx) + Math.abs(dy) > 3) p.moved = true
-          wrap.scrollLeft = p.left - dx
-          wrap.scrollTop = p.top - dy
+          if (p.canScrollX) wrap.scrollLeft = p.left - dx
+          if (p.canScrollY) wrap.scrollTop = p.top - dy
+          if (!p.canScrollX || !p.canScrollY) {
+            setPanOffset({
+              x: p.canScrollX ? p.offsetX : p.offsetX + dx,
+              y: p.canScrollY ? p.offsetY : p.offsetY + dy,
+            })
+          }
         }
         const up = () => {
           panRef.current = null
@@ -678,11 +793,12 @@ return {
       // ── 边 ──
       const edgeEls = []
       const labelEls = []
+      const labelRects = []
       ;(dsl.edges || []).forEach((e, idx) => {
         const a = pos[e.from]
         const b = pos[e.to]
         if (!a || !b) return
-        const lane = lay.lanes.get(idx)
+        const route = lay.routes.get(idx)
         const x1 = a.x + a.w
         const y1 = a.y + a.h / 2
         const x2 = b.x
@@ -693,27 +809,39 @@ return {
         let d
         let labelX
         let labelY
-        if (lane !== undefined) {
-          const so = x1 + 34
-          const to = x2 - 34
-          const laneY = Math.min(y1, y2) - 82 - lane * 38
+        if (route) {
+          const so = route.channelStart
+          const to = route.channelEnd
+          const laneY = route.laneY
           d = 'M ' + x1 + ' ' + y1 + ' L ' + so + ' ' + y1 + ' L ' + so + ' ' + laneY + ' L ' + to + ' ' + laneY + ' L ' + to + ' ' + y2 + ' L ' + x2 + ' ' + y2
-          labelX = (so + to) / 2
-          labelY = laneY
+          labelX = route.labelX
+          labelY = route.labelY
         } else {
           const mx = x1 + (x2 - x1) / 2
           d = 'M ' + x1 + ' ' + y1 + ' C ' + mx + ' ' + y1 + ', ' + mx + ' ' + y2 + ', ' + x2 + ' ' + y2
           labelX = mx
           labelY = (y1 + y2) / 2
         }
+        // 标签按实际短文案（成功/失败）估算为固定小矩形；若与节点或已有标签相碰，
+        // 沿垂直方向持续让位。节点/既有标签都是有限集合，不设固定次数上限。
+        let labelBox = { x: labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
+        const boxesOverlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+        while (true) {
+          const hitsNode = Object.keys(pos).some(id => boxesOverlap(labelBox, pos[id]))
+          const hitsLabel = labelRects.some(rect => boxesOverlap(labelBox, rect))
+          if (!hitsNode && !hitsLabel) break
+          labelY += EDGE_LABEL_H
+          labelBox = { x: labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
+        }
+        labelRects.push(labelBox)
         edgeEls.push(h('path', {
           key: 'e' + idx, d, fill: 'none',
           className: 'vwf-edge-flow',
-          stroke: selected ? ACCENT : color,
-          strokeWidth: selected ? 3.4 : (isFail ? 2 : 2.2),
-          opacity: isFail || lane !== undefined ? 0.92 : 1,
+          stroke: selected ? EDGE_SELECTED : color,
+          strokeWidth: selected ? 4.2 : (isFail ? 2 : 2.2),
+          opacity: isFail || route ? 0.92 : 1,
           markerEnd: 'url(#vwf-arrow' + (selected ? '-sel' : isFail ? '-fail' : '') + ')',
-          style: selected ? { filter: 'drop-shadow(0 0 6px ' + ACCENT + ')' } : undefined,
+          style: selected ? { filter: 'drop-shadow(0 0 4px rgba(255,255,255,.78))' } : undefined,
         }))
         edgeEls.push(h('path', {
           key: 'eh' + idx, d, className: 'vwf-edge-hit',
@@ -723,9 +851,9 @@ return {
         // 边标签统一显示 成功/失败；when 条件悬停可见（title），表单/JSON 面板可编辑
         const lbl = isFail ? t('edgeFailure') : t('edgeSuccess')
         labelEls.push(h('text', {
-          key: 'lb' + idx, x: labelX, y: labelY - 6, textAnchor: 'middle', fontSize: 11, fontWeight: 600,
-          fill: selected ? ACCENT : color,
-          style: { paintOrder: 'stroke', stroke: 'var(--dsw-alias-bg-base, #181818)', strokeWidth: 3 },
+          key: 'lb' + idx, x: labelX, y: labelY - 6, textAnchor: 'middle', fontSize: 11, fontWeight: selected ? 700 : 600,
+          fill: selected ? EDGE_SELECTED : color,
+          style: { paintOrder: 'stroke', stroke: selected ? 'rgba(255,255,255,.82)' : 'var(--dsw-alias-bg-base, #181818)', strokeWidth: 3 },
         }, e.when ? h('title', null, e.when) : null, lbl))
       })
 
@@ -741,7 +869,7 @@ return {
         const status = props.statusMap ? props.statusMap[id] : null
         if (isTerm) {
           nodeEls.push(h('g', {
-            key: 'n' + id, transform: 'translate(' + p.x + ',' + p.y + ')',
+            key: 'n' + id, 'data-node-id': id, transform: 'translate(' + p.x + ',' + p.y + ')',
             style: { cursor: props.readOnly ? 'default' : 'pointer' },
             onClick: (ev) => { ev.stopPropagation(); if (!props.readOnly && props.onTerminalClick) props.onTerminalClick(id) },
           },
@@ -753,7 +881,7 @@ return {
         }
         const stroke = selected ? ACCENT : invalid ? 'var(--dsw-alias-state-error-primary, #e5484d)' : status ? STATUS_COLOR[status] : 'var(--dsw-alias-border-l2, #333)'
         nodeEls.push(h('g', {
-          key: 'n' + id, transform: 'translate(' + p.x + ',' + p.y + ')',
+          key: 'n' + id, 'data-node-id': id, transform: 'translate(' + p.x + ',' + p.y + ')',
           style: { cursor: props.readOnly ? 'default' : 'pointer' },
           onClick: (ev) => { ev.stopPropagation(); if (!props.readOnly && props.onNodeClick) props.onNodeClick(id) },
         },
@@ -791,25 +919,37 @@ return {
       }
 
       return h('div', { style: { position: 'relative' } },
-        h('div', { className: 'vwf-canvas-wrap', ref: wrapRef, style: props.height ? { height: props.height } : undefined },
-          h('svg', {
-            className: 'vwf-svg', width: W * scale, height: H * scale, viewBox: '0 0 ' + W + ' ' + H,
-            onPointerDown: onPanePointerDown,
-            onClick: (ev) => { if (panRef.current && panRef.current.moved) return; if (props.onPaneClick) props.onPaneClick() },
-            onContextMenu: onPaneContextMenu,
+        h('div', {
+          className: 'vwf-canvas-wrap',
+          ref: wrapRef,
+          style: props.height ? { height: props.height } : undefined,
+          onPointerDown: onPanePointerDown,
+        },
+          h('div', {
+            className: 'vwf-canvas-stage',
+            'data-vwf-pane': 'true',
+            style: { transform: 'translate(' + panOffset.x + 'px,' + panOffset.y + 'px)' },
           },
-            h('defs', null,
-              h('pattern', { id: 'vwf-dots', width: 28, height: 28, patternUnits: 'userSpaceOnUse' },
-                h('circle', { cx: 1, cy: 1, r: 1, fill: 'var(--dsw-alias-border-l2, #333)' })),
-              h('marker', { id: 'vwf-arrow', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_OK })),
-              h('marker', { id: 'vwf-arrow-fail', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_FAIL })),
-              h('marker', { id: 'vwf-arrow-sel', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: ACCENT }))
-            ),
-            h('rect', { width: W, height: H, fill: 'url(#vwf-dots)' }),
-            edgeEls,
-            nodeEls,
-            connectEl,
-            labelEls
+            h('svg', {
+              className: 'vwf-svg', width: W * scale, height: H * scale, viewBox: '0 0 ' + W + ' ' + H,
+              ref: svgRef,
+              'data-vwf-pane': 'true',
+              onClick: (ev) => { if (panRef.current && panRef.current.moved) return; if (props.onPaneClick) props.onPaneClick() },
+              onContextMenu: onPaneContextMenu,
+            },
+              h('defs', null,
+                h('pattern', { id: 'vwf-dots', width: 28, height: 28, patternUnits: 'userSpaceOnUse' },
+                  h('circle', { cx: 1, cy: 1, r: 1, fill: 'var(--dsw-alias-border-l2, #333)' })),
+                h('marker', { id: 'vwf-arrow', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_OK })),
+                h('marker', { id: 'vwf-arrow-fail', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_FAIL })),
+                h('marker', { id: 'vwf-arrow-sel', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_SELECTED }))
+              ),
+              h('rect', { width: W, height: H, fill: 'url(#vwf-dots)', 'data-vwf-pane': 'true' }),
+              edgeEls,
+              nodeEls,
+              connectEl,
+              labelEls
+            )
           )
         ),
         menu ? h('div', { className: 'vwf-menu', style: { left: menu.x, top: menu.y } },
@@ -1127,7 +1267,7 @@ return {
     function Editor(props) {
       const wf = props.wf
       const setWf = props.setWf
-      const canvasHeight = props.canvasHeight || 560
+      const canvasHeight = props.canvasHeight
       const [tab, setTab] = React.useState('canvas')
       const [selectedNodeId, setSelectedNodeId] = React.useState((wf.nodes[0] || {}).id || null)
       const [selectedEdgeIndex, setSelectedEdgeIndex] = React.useState(null)
@@ -1357,7 +1497,7 @@ return {
               tab === 'canvas' ? h('div', { className: 'vwf-canvas-toolbar' },
                 h('button', { className: 'vwf-btn sm ghost', onClick: addNode }, '＋ ' + t('addNode')),
                 h('button', { className: 'vwf-btn sm ghost danger', disabled: !selectedNodeId, onClick: deleteSelectedNode }, t('deleteNode')),
-                h('span', { className: 'vwf-muted-sm', style: { padding: '0 6px' } }, t('connectHint'))
+                h('span', { className: 'vwf-muted-sm vwf-toolbar-hint' }, t('connectHint'))
               ) : null,
               tab === 'canvas'
                 ? h(Canvas, {
@@ -1660,7 +1800,7 @@ return {
       )
     }
 
-    // ── 页面：模板库 + 大抽屉编辑器 + 运行看板 ───────────────────────────────
+    // ── 页面：模板库 + 全局编辑层 + 运行看板 ───────────────────────────────
     function Skeleton() {
       return { id: 'my-flow', name: '我的工作流', description: '', entry: 'node-1', control: { maxRounds: 9 }, nodes: [{ id: 'node-1', profile: 'dispatcher', label: '节点1' }], edges: [{ from: 'node-1', to: '$end', on: 'success' }] }
     }
@@ -1668,13 +1808,33 @@ return {
     function Page() {
       const [tab, setTab] = React.useState('templates')
       const [list, setList] = React.useState(null)
-      const [editId, setEditId] = React.useState(null) // 抽屉中的模板 id
-      const [wf, setWf] = React.useState(null) // 抽屉中的工作流草稿
+      const [editId, setEditId] = React.useState(null) // 编辑层中的模板 id
+      const [wf, setWf] = React.useState(null) // 编辑层中的工作流草稿
       const [dirty, setDirty] = React.useState(false)
       const [saving, setSaving] = React.useState(false)
       const [msg, setMsg] = React.useState(null)
       const [providers, setProviders] = React.useState([])
       const [roles, setRoles] = React.useState([])
+      const editorDialogRef = React.useRef(null)
+      const editorOpen = !!wf
+
+      // issue-54：用原生 top-layer dialog 承载编辑器，避免皮肤布局中的
+      // transform / overflow 等祖先样式把 position:fixed 元素限制在设置页内部。
+      React.useEffect(() => {
+        if (!editorOpen) return undefined
+        const dialog = editorDialogRef.current
+        if (!dialog) return undefined
+        try {
+          if (typeof dialog.showModal === 'function') {
+            if (!dialog.open) dialog.showModal()
+          } else {
+            dialog.setAttribute('open', '')
+          }
+        } catch (e) {
+          dialog.setAttribute('open', '')
+        }
+        return undefined
+      }, [editorOpen])
 
       const refresh = React.useCallback(() => host.call('vwf.workflows.list').then((l) => setList(l || [])).catch(() => setList([])), [])
       React.useEffect(() => { refresh() }, [])
@@ -1691,6 +1851,10 @@ return {
         setDirty(false)
       }
       const closeEditor = () => { setEditId(null); setWf(null); setDirty(false) }
+      const requestCloseEditor = () => {
+        if (dirty && !window.confirm(t('confirmDiscard'))) return
+        closeEditor()
+      }
       const onNew = () => {
         const d = Skeleton()
         setEditId(null)
@@ -1749,26 +1913,31 @@ return {
         ) : null,
         tab === 'dashboard' ? h(Dashboard, { wf }) : null,
         msg ? h('div', { className: 'vwf-code' }, msg) : null,
-        wf ? h('div', null,
-          h('div', { className: 'vwf-drawer-mask', onClick: closeEditor }),
-          h('div', { className: 'vwf-drawer' },
-            h('div', { className: 'vwf-drawer-head' },
-              h('strong', null, (wf.name || wf.id) + ''),
-              editId ? h('span', { className: 'vwf-badge' }, editId) : h('span', { className: 'vwf-badge accent' }, t('newTemplate')),
-              editingBuiltin ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null,
-              dirty ? h('span', { className: 'vwf-badge', style: { color: 'var(--dsw-alias-state-warn-primary, #f59e0b)' } }, t('unsavedDraft')) : null,
-              h('span', { className: 'vwf-spacer' }),
-              h('button', { className: 'vwf-btn sm', onClick: closeEditor }, t('close'))
-            ),
-            h('div', { className: 'vwf-drawer-body' },
-              h(Editor, {
-                wf, providers, roles, saving,
-                currentId: editId,
-                setWf: (next) => { setWf(next); setDirty(true) },
-                onSaved: (id) => { onSaved(id); if (!editId) setEditId(id) },
-                onScript,
-              })
-            )
+        wf ? h('dialog', {
+          className: 'vwf-editor-dialog',
+          ref: editorDialogRef,
+          'aria-label': t('title'),
+          onClick: (ev) => { if (ev.target === ev.currentTarget) requestCloseEditor() },
+          onCancel: (ev) => { ev.preventDefault(); requestCloseEditor() },
+          onClose: closeEditor,
+        },
+          h('div', { className: 'vwf-editor-head' },
+            h('strong', null, (wf.name || wf.id) + ''),
+            editId ? h('span', { className: 'vwf-badge' }, editId) : h('span', { className: 'vwf-badge accent' }, t('newTemplate')),
+            editingBuiltin ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null,
+            dirty ? h('span', { className: 'vwf-badge', style: { color: 'var(--dsw-alias-state-warn-primary, #f59e0b)' } }, t('unsavedDraft')) : null,
+            h('span', { className: 'vwf-spacer' }),
+            h('button', { className: 'vwf-btn sm', onClick: requestCloseEditor }, t('close'))
+          ),
+          h('div', { className: 'vwf-editor-body' },
+            h(Editor, {
+              key: editId || 'new',
+              wf, providers, roles, saving,
+              currentId: editId,
+              setWf: (next) => { setWf(next); setDirty(true) },
+              onSaved: (id) => { onSaved(id); if (!editId) setEditId(id) },
+              onScript,
+            })
           )
         ) : null
       )

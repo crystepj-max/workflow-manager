@@ -472,10 +472,10 @@ return {
       const core = await loadValidatorCore()
       if (!core) {
         // lossless-JSON 守卫：所有键都必须有值，sanitized 早退时显式给 null
-        return { ok: false, errors: [{ at: '$', message: '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）' }], fieldErrors: {}, sanitized: null }
+        return { ok: false, errors: [{ at: '$', message: '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）' }], fieldErrors: {}, sanitized: null, warnings: [] }
       }
       if (!dsl || typeof dsl !== 'object') {
-        return { ok: false, errors: [{ at: '$', message: 'dsl 必须是对象' }], fieldErrors: {}, sanitized: null }
+        return { ok: false, errors: [{ at: '$', message: 'dsl 必须是对象' }], fieldErrors: {}, sanitized: null, warnings: [] }
       }
       // 原始边预检：failure 边带 when 必须报错（sanitize 会剔除 when，须在清洗前拦截）
       const rawErrors = []
@@ -967,7 +967,7 @@ return {
         } catch (e) {}
         return { ok: false, errors: [{ at: '$', message: '蓝图校验/技能生成失败（save 已回滚）：' + gen.detail }] }
       }
-      return { ok: true, id: id, dsl: v.sanitized, warnings: v.warnings }
+      return { ok: true, id: id, dsl: v.sanitized, warnings: v.warnings || [] }
     })
     registerRpc('vwf.workflows.remove', async (a) => {
       const id = a && a.id
@@ -997,7 +997,7 @@ return {
     })
     registerRpc('vwf.validate', async (a) => {
       const v = await validatePipeline(a && a.dsl)
-      return { ok: v.ok, errors: v.errors, fieldErrors: v.fieldErrors, sanitized: v.sanitized, warnings: v.warnings }
+      return { ok: v.ok, errors: v.errors, fieldErrors: v.fieldErrors, sanitized: v.sanitized, warnings: v.warnings || [] }
     })
     // vwf.compile 已删除（T-IMP-12）：统一编译器后无独立编译 RPC；脚本经 vwf.script 走管道。
     registerRpc('vwf.script', async (a) => {

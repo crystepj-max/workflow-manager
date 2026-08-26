@@ -1,6 +1,6 @@
 # dsh-visual-workflow — 可视化工作流插件（编辑模块 Gold-Band 对齐版）
 
-DSH 动态双半插件：在 Web 设置页提供「工作流」section——模板库 + 大抽屉可视化编辑器 + 运行看板。编辑器参考 **Gold-Band 桌面端《工作流编辑器》模块**（`web/src/components/WorkflowEditor.tsx` + `workflowGraph.ts`）实现，功能、UI 结构、交互体验与其保持一致；基于本仓库历史会话中的 **pkg-19 双半包**（`.scratch/vwf-pkg19/`）改造而来。
+DSH 动态双半插件：在 Web 设置页提供「工作流」section——模板库 + 全局居中可视化编辑器 + 运行看板。编辑器参考 **Gold-Band 桌面端《工作流编辑器》模块**（`web/src/components/WorkflowEditor.tsx` + `workflowGraph.ts`）实现，功能、UI 结构、交互体验与其保持一致；基于本仓库历史会话中的 **pkg-19 双半包**（`.scratch/vwf-pkg19/`）改造而来。
 
 ## 文件
 
@@ -8,7 +8,7 @@ DSH 动态双半插件：在 Web 设置页提供「工作流」section——模�
 packages/dsh-visual-workflow/
 ├── src/
 │   ├── host.js            # 宿主半：DSL 校验（Gold-Band 同构规则）+ 编译 + RPC + wf_run 工具 + 运行状态跟踪
-│   └── client.js          # 客户端半：模板库 + 大抽屉编辑器（画布/配置面板/校验弹窗/JSON tab）+ 运行看板
+│   └── client.js          # 客户端半：模板库 + 全局编辑层（画布/配置面板/校验弹窗/JSON tab）+ 运行看板
 ├── scripts/
 │   ├── build-bundle.mjs   # src → dist + .src-stamp.json
 │   └── check-dist-fresh.mjs
@@ -84,9 +84,9 @@ dsh --profile web --dump-config | grep visual-workflow   # 可见 patch 层
 
 正式或动态插件激活后，打开 DSH Web 设置页 → 「工作流」：
 
-- **模板库**：内置「开发工作流 2.0」（`.generated/<id>/`）+ 用户模板（`~/.dsh/visual-workflow/templates/<id>.json`）双根列表；新建 / 编辑（打开右侧 ≈1120px 大抽屉）/ 删除（confirm 确认）/ 刷新。
-- **编辑器**（抽屉内）：
-  - 画布：自动分层布局（success 主链 LR，回退边走上方车道）、点选节点/边、从节点右把手拖出连线到目标节点建边、右键画布「添加结束节点」、滚轮缩放（指针锚定）+ 拖拽平移 + 缩放控件（画布内带纵向滚动条）、入口徽标、$end 虚线终点、流动虚线边 + 成功/失败标签（when 条件悬停可见，工具栏为文档流内一行、不遮挡入口节点）。
+- **模板库**：内置「开发工作流 2.0」（`.generated/<id>/`）+ 用户模板（`~/.dsh/visual-workflow/templates/<id>.json`）双根列表；新建 / 编辑（打开全局居中的顶层编辑工作区）/ 删除（confirm 确认）/ 刷新。
+- **编辑器**（全局编辑层内）：
+  - 画布：初始/重置时纵横居中并尽量容纳全局，空白区域支持上下左右拖动；自动分层布局（success 主链 LR，节点保持安全间距，跨节点/回退边走上方外围车道并避让无关节点）、点选节点/边、从节点右把手拖出连线到目标节点建边、右键画布「添加结束节点」、滚轮缩放（指针锚定）+ 缩放控件（画布内带横向/纵向滚动条）、入口徽标、$end 虚线终点、流动虚线边 + 成功/失败标签（成功蓝色、失败红色、选中主文字色加粗；when 条件悬停可见，工具栏为文档流内一行、不遮挡入口节点）。
   - 配置面板：工作流控制（打回上限）、节点表单（ID/显示名/角色/Agent/模型/目标/结果判定三态/JSON 输出约束/成功表达式）、边表单（类型/目标/when/删除）；模型/名称带必填红星。
   - 保存：校验失败弹窗列问题 → 关闭后逐字段标红 + 画布红圈 + 定位首个问题；通过则落盘——撞名拒绝（`currentId` 一致=更新当前模板；ID 变更时「保存」禁用、仅「另存为」），落盘后同步编译 `~/.dsh/skills/<id>/` 三件套（save 即闭环）。
   - 画布 / JSON 双 tab 实时互同步；变更后防抖实时校验状态行。
@@ -134,7 +134,7 @@ bash verify.sh                        # Gate1–4：版本对齐 + 构建 + 新�
 
 - 校验规则全面升级为 Gold-Band《工作流编辑器》保存校验的同构集（入口拓扑唯一性 / $end 必须 / 悬空与不可达 / 保留 id / 成功表达式路径必须落在 output.schema 内 / failure 唯一 / 多 success 全带 when / success 环检测），并新增 `fieldErrors` 供面板逐字段标红。
 - 编辑器从「表单式 + 点击连线」重构为 Gold-Band 的「画布 + 右侧配置面板」形态：把手拖拽连线、右键菜单、边/节点双配置面板、结果判定三态、schema 2s 防抖 + 美化、保存校验弹窗 + 定位、画布/JSON 双 tab。
-- 宿主形态：模板库列表 + 右侧大抽屉（对应 Gold-Band 的 Sheet 抽屉）。
+- 宿主形态：模板库列表 + 全局居中的顶层 `<dialog>` 编辑工作区（不再依附设置页或皮肤布局）。
 - 保留：`wf_run` 工具、编译产物、运行看板、`vwf.models`（DSH llm 服务对接）。
 
 ## 已知限制与后续（P2 依赖项）
