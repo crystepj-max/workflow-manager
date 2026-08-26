@@ -281,7 +281,9 @@ test('画布任意非把手区域支持四向拖动且不修改工作流内容',
   assert.equal(container.querySelectorAll('.vwf-node-card').length, beforeNodes, '拖动浏览不增删节点')
 })
 
-test('点击边：边配置面板出现', async () => {
+test('点击边：成功/失败/选中颜色区分且边配置面板出现', async () => {
+  const firstEdge = container.querySelectorAll('.vwf-edge-flow')[0]
+  assert.equal(firstEdge.getAttribute('stroke'), '#2563eb', '默认 success 边使用固定蓝色，不随品牌色变黑')
   await act(async () => {
     const hit = container.querySelector('.vwf-edge-hit')
     assert.ok(hit, '存在边命中路径')
@@ -290,6 +292,13 @@ test('点击边：边配置面板出现', async () => {
   })
   assert.ok(byText(container, '边配置'), '边配置面板渲染')
   assert.ok(byText(container, '删除边'), '边面板含删除按钮')
+  assert.equal(firstEdge.getAttribute('stroke'), '#111827', '选中边使用黑色')
+  assert.equal(firstEdge.getAttribute('stroke-width'), '4.2', '选中边加粗')
+  const selectedLabel = Array.from(container.querySelectorAll('text')).find((el) => el.textContent.includes('成功') && el.getAttribute('fill') === '#111827')
+  assert.ok(selectedLabel, '选中边标签同步使用主文字色')
+  assert.equal(selectedLabel.getAttribute('font-weight'), '700', '选中边标签加粗')
+  assert.equal(selectedLabel.style.stroke, 'rgba(255,255,255,.82)', '黑色选中标签在深色画布上保留浅色描边')
+  assert.equal(container.querySelector('#vwf-arrow-sel path').getAttribute('fill'), '#111827', '选中边箭头同步使用黑色')
 })
 
 test('删除节点：选中节点被移除且画布消失', async () => {

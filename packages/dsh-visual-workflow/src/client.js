@@ -8,7 +8,8 @@
 //   - 自动分层布局（success 主链最长路分层，LR），节点保持安全间距且不可手拖；
 //     回退边与跨节点边统一走上方外围车道，标签随车道路径避让节点内容
 //   - 节点卡片 220x66（圆角 14、label + 类型小字、入口徽标）、$end 虚线圆形
-//     终止节点、左右连接把手；边带流动虚线动画 + 箭头 + 成功/失败标签
+//     终止节点、左右连接把手；边带流动虚线动画 + 箭头；成功边/标签为蓝色、
+//     失败为红色、选中为主文字色加粗
 //   - 交互：首次打开/重置时纵横居中；点选节点/边；从源把手拖出连线落到目标
 //     节点建边；右键画布弹出「添加结束节点」菜单；滚轮缩放（指针锚定）+
 //     空白区域四向拖动 + 缩放控件
@@ -370,8 +371,9 @@ return {
     const CANVAS_PAD = 24
     const END_NODE = '$end'
     const STATUS_COLOR = { running: 'var(--dsw-alias-brand-primary, #60a5fa)', pass: 'var(--dsw-alias-state-success-primary, #22c55e)', fail: 'var(--dsw-alias-state-error-primary, #ef4444)', human: 'var(--dsw-alias-state-warn-primary, #f59e0b)' }
-    const EDGE_OK = 'var(--dsw-alias-label-tertiary, #9a9a9a)'
+    const EDGE_OK = '#2563eb'
     const EDGE_FAIL = 'var(--dsw-alias-state-error-primary, #f87171)'
+    const EDGE_SELECTED = '#111827'
     const ACCENT = 'var(--dsw-alias-brand-primary, #60a5fa)'
     const SCHEMA_DEBOUNCE_MS = 2000
     const VALIDATE_DEBOUNCE_MS = 350
@@ -835,11 +837,11 @@ return {
         edgeEls.push(h('path', {
           key: 'e' + idx, d, fill: 'none',
           className: 'vwf-edge-flow',
-          stroke: selected ? ACCENT : color,
-          strokeWidth: selected ? 3.4 : (isFail ? 2 : 2.2),
+          stroke: selected ? EDGE_SELECTED : color,
+          strokeWidth: selected ? 4.2 : (isFail ? 2 : 2.2),
           opacity: isFail || route ? 0.92 : 1,
           markerEnd: 'url(#vwf-arrow' + (selected ? '-sel' : isFail ? '-fail' : '') + ')',
-          style: selected ? { filter: 'drop-shadow(0 0 6px ' + ACCENT + ')' } : undefined,
+          style: selected ? { filter: 'drop-shadow(0 0 4px rgba(255,255,255,.78))' } : undefined,
         }))
         edgeEls.push(h('path', {
           key: 'eh' + idx, d, className: 'vwf-edge-hit',
@@ -849,9 +851,9 @@ return {
         // 边标签统一显示 成功/失败；when 条件悬停可见（title），表单/JSON 面板可编辑
         const lbl = isFail ? t('edgeFailure') : t('edgeSuccess')
         labelEls.push(h('text', {
-          key: 'lb' + idx, x: labelX, y: labelY - 6, textAnchor: 'middle', fontSize: 11, fontWeight: 600,
-          fill: selected ? ACCENT : color,
-          style: { paintOrder: 'stroke', stroke: 'var(--dsw-alias-bg-base, #181818)', strokeWidth: 3 },
+          key: 'lb' + idx, x: labelX, y: labelY - 6, textAnchor: 'middle', fontSize: 11, fontWeight: selected ? 700 : 600,
+          fill: selected ? EDGE_SELECTED : color,
+          style: { paintOrder: 'stroke', stroke: selected ? 'rgba(255,255,255,.82)' : 'var(--dsw-alias-bg-base, #181818)', strokeWidth: 3 },
         }, e.when ? h('title', null, e.when) : null, lbl))
       })
 
@@ -940,7 +942,7 @@ return {
                   h('circle', { cx: 1, cy: 1, r: 1, fill: 'var(--dsw-alias-border-l2, #333)' })),
                 h('marker', { id: 'vwf-arrow', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_OK })),
                 h('marker', { id: 'vwf-arrow-fail', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_FAIL })),
-                h('marker', { id: 'vwf-arrow-sel', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: ACCENT }))
+                h('marker', { id: 'vwf-arrow-sel', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_SELECTED }))
               ),
               h('rect', { width: W, height: H, fill: 'url(#vwf-dots)', 'data-vwf-pane': 'true' }),
               edgeEls,

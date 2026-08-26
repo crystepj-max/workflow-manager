@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "before": [
+    {
+      "stroke": "rgb(37, 99, 235)",
+      "strokeWidth": "2.2px"
+    },
+    {
+      "stroke": "rgb(229, 72, 77)",
+      "strokeWidth": "2px"
+    }
+  ],
+  "after": {
+    "edge": {
+      "stroke": "rgb(17, 24, 39)",
+      "strokeWidth": "4.2px"
+    },
+    "label": {
+      "fill": "rgb(17, 24, 39)",
+      "fontWeight": "700",
+      "stroke": "rgba(255, 255, 255, 0.82)"
+    }
+  }
+}
