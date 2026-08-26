@@ -59,6 +59,8 @@ return {
       inspector: '配置面板',
       addNode: '新增节点',
       deleteNode: '删除节点',
+      undo: '撤销',
+      redo: '重做',
       addEndTarget: '添加结束节点',
       nodeConfig: '节点配置',
       edgeConfig: '边配置',
@@ -157,6 +159,8 @@ return {
       inspector: 'Inspector',
       addNode: 'Add Node',
       deleteNode: 'Delete Node',
+      undo: 'Undo',
+      redo: 'Redo',
       addEndTarget: 'Add End node',
       nodeConfig: 'Node Config',
       edgeConfig: 'Edge Config',
@@ -313,6 +317,20 @@ return {
 .vwf-canvas-toolbar { display:flex; gap:8px; row-gap:6px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-layer-2, #242424); }
 .vwf-canvas-toolbar .vwf-btn { flex:0 0 auto; min-height:28px; white-space:nowrap; }
 .vwf-toolbar-hint { flex:1 1 240px; min-width:180px; margin-left:2px; line-height:1.45; overflow-wrap:anywhere; }
+/* 画布顶部操作按钮组：图标圆形 + 文案，与 Gold-Band 交互形态一致 */
+.vwf-toolbar-actions { display:inline-flex; align-items:stretch; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:999px; background:var(--dsw-alias-bg-layer-2, #242424); overflow:hidden; }
+.vwf-toolbar-action { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border:0; background:transparent; color:var(--dsw-alias-label-primary, #e8e8e8); cursor:pointer; font-size:12px; white-space:nowrap; }
+.vwf-toolbar-action + .vwf-toolbar-action { border-left:1px solid var(--dsw-alias-border-l2, #333); }
+.vwf-toolbar-action:hover:not(:disabled) { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.06)); }
+.vwf-toolbar-action .vwf-toolbar-action-icon { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:999px; background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); color:inherit; font-size:13px; }
+.vwf-toolbar-action.danger,
+.vwf-toolbar-action.danger:disabled { color:var(--dsw-alias-state-error-primary, #e5484d); opacity:1; -webkit-text-fill-color:currentColor; }
+.vwf-toolbar-action.danger:hover:not(:disabled) { background:rgba(229,72,77,.1); }
+.vwf-toolbar-action:disabled { cursor:not-allowed; }
+/* 显示名历史撤销/重做按钮组 */
+.vwf-history-group { display:inline-flex; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:999px; background:var(--dsw-alias-bg-layer-2, #242424); overflow:hidden; }
+.vwf-history-group .vwf-history-btn { border:0; border-radius:0; background:transparent; font-size:14px; min-width:28px; padding:3px 8px; }
+.vwf-history-group .vwf-history-btn:disabled { opacity:.45; cursor:not-allowed; }
 .vwf-svg { display:block; user-select:none; touch-action:none; }
 .vwf-menu { position:absolute; z-index:20; min-width:160px; padding:4px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-overlay, #2d2d2d); box-shadow:0 8px 28px rgba(0,0,0,.4); }
 .vwf-menu-item { display:block; width:100%; text-align:left; padding:7px 10px; border:0; border-radius:7px; background:transparent; color:var(--dsw-alias-label-primary, #e8e8e8); font-size:12px; cursor:pointer; }
@@ -1283,8 +1301,94 @@ return {
       const [dialogOpen, setDialogOpen] = React.useState(false)
       const [liveErrors, setLiveErrors] = React.useState([])
       const validateTimerRef = React.useRef(null)
+      const validateSeqRef = React.useRef(0)
       const fitRef = React.useRef(null)
       const scrollToRef = React.useRef(null)
+      const scheduleValidate = (snapshot) => {
+        const seq = ++validateSeqRef.current
+        if (validateTimerRef.current) validateTimerRef.current()
+        validateTimerRef.current = ctx.timeout(() => {
+          host.call('vwf.validate', { dsl: snapshot }).then(r => {
+            if (seq !== validateSeqRef.current) return
+            setLiveErrors(r.ok ? [] : (r.errors || []))
+          }).catch(() => {})
+        }, VALIDATE_DEBOUNCE_MS)
+      }
+      const [historyVersion, setHistoryVersion] = React.useState(0)
+      const historyRef = React.useRef({ past: [], future: [] })
+      const pushHistory = (beforeDsl, beforeJson, beforeJsonError) => {
+        const h = historyRef.current
+        const prev = h.past[h.past.length - 1]
+        // 相邻快照相同（同一变更被两个入口记录，如 JSON 编辑与同步）只保留一次。
+        if (prev && prev.json === beforeJson && prev.jsonError === (beforeJsonError || null) && JSON.stringify(prev.dsl) === JSON.stringify(beforeDsl)) return
+        const selEdge = selectedEdgeIndex !== null && wf.edges && wf.edges[selectedEdgeIndex] ? wf.edges[selectedEdgeIndex] : null
+        h.past.push({
+          dsl: clone(beforeDsl),
+          json: beforeJson,
+          jsonError: beforeJsonError || null,
+          selNode: selectedNodeId,
+          selEdgeSig: selEdge ? JSON.stringify({ from: selEdge.from || '', to: selEdge.to || '', on: selEdge.on || '', when: selEdge.when || '' }) : null,
+        })
+        h.future = []
+        setHistoryVersion(v => v + 1)
+      }
+      const applySnapshot = (entry) => {
+        const snapshot = normalizeEntry(entry.dsl)
+        // props.setWf 会同时置脏并同步父级草稿状态；与普通编辑走同一上层通道。
+        setWf(snapshot)
+        setJsonDraft(entry.json)
+        setJsonError(entry.jsonError || null)
+        setFieldErrors({})
+        setInvalidNodeIds(new Set())
+        setLiveErrors([])
+        const nodeStillExists = !!entry.selNode && (snapshot.nodes || []).some(n => n.id === entry.selNode)
+        if (nodeStillExists) {
+          setSelectedNodeId(entry.selNode)
+          setSelectedEdgeIndex(null)
+        } else {
+          setSelectedNodeId(null)
+          let edgeMatchIndex = null
+          if (entry.selEdgeSig) {
+            edgeMatchIndex = (snapshot.edges || []).findIndex(e => JSON.stringify({ from: e.from || '', to: e.to || '', on: e.on || '', when: e.when || '' }) === entry.selEdgeSig)
+          }
+          if (edgeMatchIndex !== null && edgeMatchIndex >= 0) setSelectedEdgeIndex(edgeMatchIndex)
+          else setSelectedEdgeIndex(null)
+        }
+        // 撤销/重做同样触发防抖校验，保持与普通编辑一致的实时校验状态。
+        scheduleValidate(snapshot)
+      }
+      const undo = () => {
+        const h = historyRef.current
+        if (!h.past.length) return
+        const previous = h.past.pop()
+        const currentEdge = selectedEdgeIndex !== null && wf.edges && wf.edges[selectedEdgeIndex] ? wf.edges[selectedEdgeIndex] : null
+        h.future.unshift({
+          dsl: clone(wf),
+          json: jsonDraft,
+          jsonError: jsonError,
+          selNode: selectedNodeId,
+          selEdgeSig: currentEdge ? JSON.stringify({ from: currentEdge.from || '', to: currentEdge.to || '', on: currentEdge.on || '', when: currentEdge.when || '' }) : null,
+        })
+        applySnapshot(previous)
+        setHistoryVersion(v => v + 1)
+      }
+      const redo = () => {
+        const h = historyRef.current
+        if (!h.future.length) return
+        const next = h.future.shift()
+        const currentEdge = selectedEdgeIndex !== null && wf.edges && wf.edges[selectedEdgeIndex] ? wf.edges[selectedEdgeIndex] : null
+        h.past.push({
+          dsl: clone(wf),
+          json: jsonDraft,
+          jsonError: jsonError,
+          selNode: selectedNodeId,
+          selEdgeSig: currentEdge ? JSON.stringify({ from: currentEdge.from || '', to: currentEdge.to || '', on: currentEdge.on || '', when: currentEdge.when || '' }) : null,
+        })
+        applySnapshot(next)
+        setHistoryVersion(v => v + 1)
+      }
+      const canUndo = historyRef.current.past.length > 0
+      const canRedo = historyRef.current.future.length > 0
 
       const selectedNode = selectedNodeId ? (wf.nodes || []).find(n => n.id === selectedNodeId) || null : null
       const selectedEdge = selectedEdgeIndex !== null ? (wf.edges || [])[selectedEdgeIndex] || null : null
@@ -1294,20 +1398,19 @@ return {
 
       // 变更同步：归一入口、清空校验标记、同步 JSON 草稿、通知上层、防抖实时校验
       const syncWorkflow = (next) => {
+        pushHistory(wf, jsonDraft, jsonError)
         const normalized = normalizeEntry(next)
         setFieldErrors({})
         setInvalidNodeIds(new Set())
         setJsonError(null)
+        setLiveErrors([])
         setWf(normalized)
         setJsonDraft(JSON.stringify(normalized, null, 2))
-        if (validateTimerRef.current) validateTimerRef.current()
-        validateTimerRef.current = ctx.timeout(() => {
-          host.call('vwf.validate', { dsl: normalized }).then(r => setLiveErrors(r.ok ? [] : (r.errors || []))).catch(() => {})
-        }, VALIDATE_DEBOUNCE_MS)
+        scheduleValidate(normalized)
       }
       React.useEffect(() => () => { if (validateTimerRef.current) validateTimerRef.current() }, [])
       React.useEffect(() => {
-        host.call('vwf.validate', { dsl: wf }).then(r => setLiveErrors(r.ok ? [] : (r.errors || []))).catch(() => {})
+        scheduleValidate(wf)
       }, [])
 
       const handleConnect = (from, to) => {
@@ -1440,6 +1543,7 @@ return {
       }
 
       const onJsonChange = (value) => {
+        pushHistory(wf, jsonDraft, jsonError)
         setJsonDraft(value)
         setJsonError(null)
         try {
@@ -1487,7 +1591,11 @@ return {
                   ),
                   h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('subtitle'))
                 ),
-                h('div', { className: 'vwf-row' },
+                h('div', { className: 'vwf-row', style: { gap: 6, alignItems: 'center' } },
+                  h('div', { className: 'vwf-history-group' },
+                    h('button', { className: 'vwf-btn sm ghost vwf-history-btn', disabled: !canUndo, title: t('undo'), onClick: undo }, '↶'),
+                    h('button', { className: 'vwf-btn sm ghost vwf-history-btn', disabled: !canRedo, title: t('redo'), onClick: redo }, '↷')
+                  ),
                   h('div', { className: 'vwf-row', style: { gap: 2 } },
                     h('button', { className: 'vwf-btn sm' + (tab === 'canvas' ? ' primary' : ''), onClick: () => setTab('canvas') }, t('canvas')),
                     h('button', { className: 'vwf-btn sm' + (tab === 'json' ? ' primary' : ''), onClick: () => setTab('json') }, 'JSON')
@@ -1498,8 +1606,16 @@ return {
                 )
               ),
               tab === 'canvas' ? h('div', { className: 'vwf-canvas-toolbar' },
-                h('button', { className: 'vwf-btn sm ghost', onClick: addNode }, '＋ ' + t('addNode')),
-                h('button', { className: 'vwf-btn sm ghost danger', disabled: !selectedNodeId, onClick: deleteSelectedNode }, '− ' + t('deleteNode')),
+                h('div', { className: 'vwf-toolbar-actions' },
+                  h('button', { className: 'vwf-toolbar-action', onClick: addNode },
+                    h('span', { className: 'vwf-toolbar-action-icon' }, '＋'),
+                    h('span', { className: 'vwf-toolbar-action-label' }, t('addNode'))
+                  ),
+                  h('button', { className: 'vwf-toolbar-action danger', disabled: !selectedNodeId, onClick: deleteSelectedNode },
+                    h('span', { className: 'vwf-toolbar-action-icon' }, '−'),
+                    h('span', { className: 'vwf-toolbar-action-label' }, t('deleteNode'))
+                  )
+                ),
                 h('span', { className: 'vwf-muted-sm vwf-toolbar-hint' }, t('connectHint'))
               ) : null,
               tab === 'canvas'

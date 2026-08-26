@@ -200,6 +200,8 @@ test('AC-3：save 新模板 → 蓝图落盘 + skill 同步（save 即闭环）+
   assert.equal(u.name, '测试工作流')
   assert.equal(u.dsl.entry, 'a')
   assert.ok(u.dsl.nodes.every(n => n.label && n.goal))
+  const firstCustom = list.findIndex(w => !w.builtin)
+  assert.ok(firstCustom === -1 || list.slice(0, firstCustom).every(w => w.builtin), '内置模板置顶，用户模板排在其后')
 })
 
 test('save 蓝图级校验失败（生成器 exit 1）→ 回滚落盘并回传错误（原子性）', async () => {

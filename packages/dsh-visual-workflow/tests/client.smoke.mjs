@@ -173,19 +173,90 @@ test('模板列表渲染并打开全局编辑层', async () => {
   assert.ok(byText(container, '节点配置'), '默认选中首节点，节点表单渲染')
 })
 
-test('顶部操作区：按钮独立、提示文字可换行让位', async () => {
+test('顶部操作区：新增/删除节点使用图标分组样式', async () => {
   const toolbar = container.querySelector('.vwf-canvas-toolbar')
   assert.ok(toolbar, '顶部操作区渲染')
-  const labels = Array.from(toolbar.querySelectorAll('button')).map((el) => el.textContent)
-  assert.ok(labels.includes('＋ 新增节点'), '新增节点按钮独立存在')
-  assert.ok(labels.includes('− 删除节点'), '删除节点按钮带减号图标')
+  const actions = Array.from(toolbar.querySelectorAll('.vwf-toolbar-action'))
+  assert.ok(actions.length >= 2, '新增/删除节点成组展示')
+  const labels = Array.from(toolbar.querySelectorAll('.vwf-toolbar-action-label')).map((el) => el.textContent)
+  assert.ok(labels.includes('新增节点'), '新增节点按钮独立存在')
+  assert.ok(labels.includes('删除节点'), '删除节点按钮带减号图标')
+  assert.ok(toolbar.querySelectorAll('.vwf-toolbar-action-icon').length >= 2, '操作带圆形图标')
   assert.ok(toolbar.querySelector('.vwf-toolbar-hint'), '连接提示使用独立可换行区域')
   const css = styleText.join('\n')
   assert.ok(css.includes('.vwf-canvas-toolbar { display:flex;'), '操作区使用 flex 排布')
   assert.ok(css.includes('flex-wrap:wrap'), '窄屏允许操作区换行')
-  assert.ok(css.includes('.vwf-canvas-toolbar .vwf-btn { flex:0 0 auto;'), '按钮不压缩不变形')
-  assert.ok(css.includes('.vwf-toolbar-hint { flex:1 1 240px;'), '提示文字占用剩余空间并让位')
-  assert.ok(css.includes('.vwf-canvas-toolbar .vwf-btn.danger:disabled { color:var(--dsw-alias-state-error-primary, #e5484d); opacity:1;'), '删除节点禁用态保持完整红色')
+  assert.ok(css.includes('.vwf-toolbar-actions {'), '操作以分组胶囊承载')
+  assert.ok(css.includes('.vwf-toolbar-action.danger:disabled {'), '删除操作禁用态保持完整红色')
+})
+
+test('撤销/重做：恢复节点增删并清空重做分支', async () => {
+  const undoBtn = container.querySelector('.vwf-history-group .vwf-history-btn:first-child')
+  const redoBtn = container.querySelector('.vwf-history-group .vwf-history-btn:last-child')
+  assert.ok(undoBtn && redoBtn, '存在撤销/重做按钮')
+  assert.equal(undoBtn.disabled, true, '初始撤销禁用')
+  assert.equal(redoBtn.disabled, true, '初始重做禁用')
+  const addAction = container.querySelector('.vwf-toolbar-action:first-child')
+  const nodeLabels = () => Array.from(container.querySelectorAll('text.vwf-node-label')).map((el) => el.textContent)
+  await act(async () => {
+    addAction.click()
+    await flush()
+  })
+  assert.ok(nodeLabels().includes('节点2'), '新增后可撤销')
+  assert.equal(undoBtn.disabled, false, '撤销可用')
+  await act(async () => {
+    undoBtn.click()
+    await flush()
+  })
+  assert.ok(!nodeLabels().includes('节点2'), '撤销移除刚新增的节点')
+  assert.equal(redoBtn.disabled, false, '重做可用')
+  await act(async () => {
+    redoBtn.click()
+    await flush()
+  })
+  assert.ok(nodeLabels().includes('节点2'), '重做恢复节点')
+  await act(async () => {
+    undoBtn.click()
+    await flush()
+  })
+  assert.ok(!nodeLabels().includes('节点2'), '再次撤销回到初始状态，供后续测试复用')
+  const deleteAction = container.querySelector('.vwf-toolbar-action.danger')
+  assert.equal(deleteAction.disabled, false, '撤销后选中真实存在的首节点，删除按钮指向有效节点')
+  assert.ok(nodeLabels().includes('节点1'), '撤销后仍选中首个节点')
+
+  // JSON 非法中间态也可回退
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, '{"nodes":')
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+  })
+  assert.equal(undoBtn.disabled, false, '非法 JSON 输入后也可撤销')
+  await act(async () => {
+    undoBtn.click()
+    await flush()
+  })
+  const textarea = container.querySelector('textarea.vwf-json-edit')
+  assert.ok(textarea.value.includes('"node-1"'), '撤销恢复合法 JSON 草稿')
+  await act(async () => {
+    redoBtn.click()
+    await flush()
+  })
+  assert.equal(container.querySelector('textarea.vwf-json-edit').value, '{"nodes":', '重做恢复非法 JSON 中间态')
+  await act(async () => {
+    undoBtn.click()
+    await flush()
+  })
+  assert.ok(container.querySelector('textarea.vwf-json-edit').value.includes('"node-1"'), '再次撤销回到合法 JSON')
+  await act(async () => {
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
 })
 
 test('新增节点：画布出现新节点并选中', async () => {

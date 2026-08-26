@@ -593,7 +593,7 @@ return {
         const dsl = projectToVwf(bp)
         out.push({ id: bp.id, name: bp.displayName, description: bp.description || '', builtin: false, dsl: dsl })
       }
-      out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      out.sort((a, b) => (a.builtin === b.builtin ? (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) : a.builtin ? -1 : 1))
       return out
     }
 
