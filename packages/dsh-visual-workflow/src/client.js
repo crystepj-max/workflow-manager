@@ -6,7 +6,7 @@
 //
 //  画布（对应 ReactFlow 画布 + workflowGraph 布局）
 //   - 自动分层布局（success 主链最长路分层，LR），节点保持安全间距且不可手拖；
-//     回退边与跨节点边统一走上方外围车道，标签随车道路径避让节点内容
+//     前向跨节点边往下绕行、从右往左的回退边往上绕行，起始小圆点/终点箭头同色
 //   - 节点卡片 220x66（圆角 14、label + 类型小字、入口徽标）、$end 虚线圆形
 //     终止节点、左右连接把手；边带流动虚线动画 + 箭头；成功边/标签为蓝色、
 //     失败为红色、选中为主文字色加粗
@@ -341,9 +341,9 @@ return {
 .vwf-node-card { fill:var(--dsw-alias-bg-layer-2, #242424); stroke:var(--dsw-alias-border-l2, #333); stroke-width:1; }
 .vwf-node-kind { fill:var(--dsw-alias-label-tertiary, #8a8a8a); font-size:10px; letter-spacing:.14em; text-transform:uppercase; }
 .vwf-node-label { fill:var(--dsw-alias-label-primary, #e8e8e8); font-size:13px; font-weight:500; }
-.vwf-handle { fill:var(--dsw-alias-label-tertiary, #8a8a8a); stroke:var(--dsw-alias-bg-layer-2, #242424); stroke-width:2; }
+.vwf-handle { fill:transparent; stroke:transparent; stroke-width:0; }
 .vwf-handle-src { cursor:crosshair; }
-.vwf-handle-src:hover { fill:var(--dsw-alias-brand-primary, #4d9fff); }
+.vwf-handle-src:hover { fill:transparent; }
 .vwf-entry-badge { fill:var(--dsw-alias-bg-layer-1, #1e1e1e); stroke:var(--dsw-alias-border-l3, #444); }
 .vwf-entry-badge-text { fill:var(--dsw-alias-label-secondary, #9a9a9a); font-size:10px; }
 /* ── 滚动条常显样式（画布内纵向滚动 + 编辑层/面板/弹窗） ── */
@@ -446,11 +446,19 @@ return {
       return lanes
     }
 
-    // 边避让：跨节点/回路边统一走上方正交车道；同标签位置的重复边也改走独立车道。
+    // 边避让规则：
+    //   - 从左往右且需要绕行（跨 1+ 节点）→ 往下绕行；
+    //   - 从右往左（回退/失败）→ 往上绕行；
+    //   - 无遮挡的前向边 → 直连。
+    // 每个节点边框上的锚点按「上绕 / 直连 / 下绕」从上到下占用，保证同节点多边不重叠。
     function computeEdgeRoutes(edges, pos, lanes) {
       const routes = new Map()
-      const directLabelCounts = new Map()
-      let nextForwardLane = lanes.size
+      const infos = []
+      const sourceKindCount = new Map()
+      const targetKindCount = new Map()
+      const sourceOrdinal = new Map()
+      const targetOrdinal = new Map()
+      const laneCount = { up: 0, down: 0 }
       ;(edges || []).forEach((e, index) => {
         const a = pos[e.from]
         const b = pos[e.to]
@@ -473,26 +481,62 @@ return {
           return p.y < bottom && p.y + p.h > top
         })
         const backward = lanes.has(index)
-        let duplicateDirectLabel = false
-        // 只有最终仍保持直连的边才能占用“直连标签位置”；已因跨节点/回边绕行的边，
-        // 不应把某个中点标记为已占用，否则相邻直连边会被误判为标签冲突。
-        if (!backward && hits.length === 0) {
-          const directLabelKey = Math.round((x1 + x2) / 2) + ':' + Math.round((y1 + y2) / 2)
-          const count = directLabelCounts.get(directLabelKey) || 0
-          directLabelCounts.set(directLabelKey, count + 1)
-          duplicateDirectLabel = count > 0
+        // 跨节点定义：前向边的水平区段内存在任一无关节点（即使不与端点纵向相交）→ 下绕。
+        const kind = backward ? 'up' : (between.length > 0 ? 'down' : 'direct')
+        const sKey = e.from + '|' + kind
+        const tKey = e.to + '|' + kind
+        const sOrdinal = sourceOrdinal.get(sKey) || 0
+        const tOrdinal = targetOrdinal.get(tKey) || 0
+        sourceOrdinal.set(sKey, sOrdinal + 1)
+        targetOrdinal.set(tKey, tOrdinal + 1)
+        const sCounts = sourceKindCount.get(e.from) || { up: 0, direct: 0, down: 0, total: 0 }
+        sCounts[kind] += 1
+        sCounts.total += 1
+        sourceKindCount.set(e.from, sCounts)
+        const tCounts = targetKindCount.get(e.to) || { up: 0, direct: 0, down: 0, total: 0 }
+        tCounts[kind] += 1
+        tCounts.total += 1
+        targetKindCount.set(e.to, tCounts)
+        infos.push({ index, e, a, b, x1, y1, x2, y2, between, hits, kind, sOrdinal, tOrdinal })
+      })
+
+      // 锚点在节点右边框/左边框内均匀分布；类别顺序固定为 上绕 / 直连 / 下绕。
+      const borderAnchor = (id, side, kind, ordinal) => {
+        const counts = (side === 'source' ? sourceKindCount : targetKindCount).get(id)
+        const node = pos[id]
+        if (!counts || !node) return node.y + node.h / 2
+        const before = kind === 'up' ? 0 : kind === 'direct' ? counts.up : counts.up + counts.direct
+        const globalOrdinal = before + ordinal
+        const pad = 8
+        const safeTop = node.y + pad
+        const safeBottom = node.y + node.h - pad
+        if (counts.total === 1) return node.y + node.h / 2
+        return safeTop + (globalOrdinal + 0.5) * ((safeBottom - safeTop) / counts.total)
+      }
+
+      infos.forEach((info) => {
+        const { index, e, x1, y1, x2, y2, between, kind, sOrdinal, tOrdinal } = info
+        const yStart = borderAnchor(e.from, 'source', kind, sOrdinal)
+        const yEnd = borderAnchor(e.to, 'target', kind, tOrdinal)
+        if (kind === 'direct') {
+          routes.set(index, { kind, yStart, yEnd, routed: false })
+          return
         }
-        if (!backward && !duplicateDirectLabel && hits.length === 0) return
-        const lane = backward ? lanes.get(index) : nextForwardLane++
+        const lane = kind === 'up' ? laneCount.up++ : laneCount.down++
         const boundaryTop = Math.min(y1, y2, ...between.map(item => item.p.y))
-        const laneY = boundaryTop - EDGE_LANE_GAP - lane * EDGE_LANE_SEP
-        const channelStart = x1 + EDGE_ROUTE_STUB
-        const channelEnd = x2 - EDGE_ROUTE_STUB
+        const boundaryBottom = Math.max(y1, y2, ...between.map(item => item.p.y + item.p.h))
+        const laneY = kind === 'up'
+          ? boundaryTop - EDGE_LANE_GAP - lane * EDGE_LANE_SEP
+          : boundaryBottom + EDGE_LANE_GAP + lane * EDGE_LANE_SEP
         routes.set(index, {
+          kind,
+          yStart,
+          yEnd,
+          routed: true,
           laneY,
-          channelStart,
-          channelEnd,
-          labelX: (channelStart + channelEnd) / 2,
+          channelStart: x1 + EDGE_ROUTE_STUB,
+          channelEnd: x2 - EDGE_ROUTE_STUB,
+          labelX: (x1 + EDGE_ROUTE_STUB + x2 - EDGE_ROUTE_STUB) / 2,
           labelY: laneY,
         })
       })
@@ -561,16 +605,27 @@ return {
       allIds.forEach(id => { const p = pos[id]; if (p) { maxX = Math.max(maxX, p.x + p.w); maxY = Math.max(maxY, p.y + p.h) } })
       const lanes = computeBackwardLanes(dsl.edges || [], order)
       const routes = computeEdgeRoutes(dsl.edges || [], pos, lanes)
+      // 上绕车道计入上边界（不足时整体下移）；下绕车道计入下边界。
       let minRouteY = Infinity
-      routes.forEach(route => { minRouteY = Math.min(minRouteY, route.laneY) })
-      // 顶部车道也计入画布内容范围：不够时整体下移，避免回退/跨节点边被 SVG 上边界裁掉。
+      let maxRouteY = -Infinity
+      routes.forEach(route => {
+        if (!route.routed) return
+        minRouteY = Math.min(minRouteY, route.laneY)
+        maxRouteY = Math.max(maxRouteY, route.laneY + EDGE_LABEL_H)
+      })
       const routeShift = minRouteY < CANVAS_PAD ? CANVAS_PAD - minRouteY : 0
       if (routeShift > 0) {
         allIds.forEach(id => { if (pos[id]) pos[id].y += routeShift })
-        routes.forEach(route => { route.laneY += routeShift; route.labelY += routeShift })
+        routes.forEach(route => {
+          route.yStart += routeShift
+          route.yEnd += routeShift
+          if (route.routed) { route.laneY += routeShift; route.labelY += routeShift }
+        })
         maxY += routeShift
+        maxRouteY += routeShift
       }
-      return { pos, W: maxX + MARGIN_X, H: maxY + MARGIN_Y, lanes, routes, order }
+      const contentBottom = Math.max(maxY, maxRouteY > -Infinity ? maxRouteY : maxY)
+      return { pos, W: maxX + MARGIN_X, H: contentBottom + MARGIN_Y, lanes, routes, order }
     }
 
     function uniqueNodeId(dsl, base) {
@@ -800,29 +855,31 @@ return {
         const a = pos[e.from]
         const b = pos[e.to]
         if (!a || !b) return
-        const route = lay.routes.get(idx)
         const x1 = a.x + a.w
         const y1 = a.y + a.h / 2
         const x2 = b.x
         const y2 = b.y + b.h / 2
+        const route = lay.routes.get(idx) || { kind: 'direct', yStart: y1, yEnd: y2, routed: false }
         const isFail = e.on === 'failure'
         const color = isFail ? EDGE_FAIL : EDGE_OK
         const selected = props.selectedEdge === idx
         let d
         let labelX
         let labelY
-        if (route) {
+        if (route.routed) {
           const so = route.channelStart
           const to = route.channelEnd
           const laneY = route.laneY
-          d = 'M ' + x1 + ' ' + y1 + ' L ' + so + ' ' + y1 + ' L ' + so + ' ' + laneY + ' L ' + to + ' ' + laneY + ' L ' + to + ' ' + y2 + ' L ' + x2 + ' ' + y2
+          d = 'M ' + x1 + ' ' + route.yStart + ' L ' + so + ' ' + route.yStart + ' L ' + so + ' ' + laneY + ' L ' + to + ' ' + laneY + ' L ' + to + ' ' + route.yEnd + ' L ' + x2 + ' ' + route.yEnd
           labelX = route.labelX
           labelY = route.labelY
         } else {
           const mx = x1 + (x2 - x1) / 2
-          d = 'M ' + x1 + ' ' + y1 + ' C ' + mx + ' ' + y1 + ', ' + mx + ' ' + y2 + ', ' + x2 + ' ' + y2
+          const sy = route.yStart
+          const ey = route.yEnd
+          d = 'M ' + x1 + ' ' + sy + ' C ' + mx + ' ' + sy + ', ' + mx + ' ' + ey + ', ' + x2 + ' ' + ey
           labelX = mx
-          labelY = (y1 + y2) / 2
+          labelY = (sy + ey) / 2
         }
         // 标签按实际短文案（成功/失败）估算为固定小矩形；若与节点或已有标签相碰，
         // 沿垂直方向持续让位。节点/既有标签都是有限集合，不设固定次数上限。
@@ -841,14 +898,19 @@ return {
           className: 'vwf-edge-flow',
           stroke: selected ? EDGE_SELECTED : color,
           strokeWidth: selected ? 4.2 : (isFail ? 2 : 2.2),
-          opacity: isFail || route ? 0.92 : 1,
+          opacity: isFail || route.routed ? 0.92 : 1,
           markerEnd: 'url(#vwf-arrow' + (selected ? '-sel' : isFail ? '-fail' : '') + ')',
-          style: selected ? { filter: 'drop-shadow(0 0 4px rgba(255,255,255,.78))' } : undefined,
         }))
         edgeEls.push(h('path', {
           key: 'eh' + idx, d, className: 'vwf-edge-hit',
           style: { cursor: props.readOnly ? 'default' : 'pointer' },
           onClick: (ev) => { ev.stopPropagation(); if (!props.readOnly && props.onEdgeClick) props.onEdgeClick(idx) },
+        }))
+        // 起始点统一小圆点（颜色跟随边的状态），终点由箭头标识。
+        edgeEls.push(h('circle', {
+          key: 'sd' + idx, className: 'vwf-edge-start', cx: x1, cy: route.yStart, r: 4,
+          fill: selected ? EDGE_SELECTED : color,
+          stroke: selected ? EDGE_SELECTED : color, strokeWidth: 1,
         }))
         // 边标签统一显示 成功/失败；when 条件悬停可见（title），表单/JSON 面板可编辑
         const lbl = isFail ? t('edgeFailure') : t('edgeSuccess')
@@ -947,8 +1009,9 @@ return {
                 h('marker', { id: 'vwf-arrow-sel', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_SELECTED }))
               ),
               h('rect', { width: W, height: H, fill: 'url(#vwf-dots)', 'data-vwf-pane': 'true' }),
-              edgeEls,
+              // 节点在下、边在上：起点圆点和终点箭头落在边框上时不会被节点遮挡。
               nodeEls,
+              edgeEls,
               connectEl,
               labelEls
             )

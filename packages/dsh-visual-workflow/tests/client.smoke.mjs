@@ -284,6 +284,11 @@ test('画布任意非把手区域支持四向拖动且不修改工作流内容',
 test('点击边：成功/失败/选中颜色区分且边配置面板出现', async () => {
   const firstEdge = container.querySelectorAll('.vwf-edge-flow')[0]
   assert.equal(firstEdge.getAttribute('stroke'), '#2563eb', '默认 success 边使用固定蓝色，不随品牌色变黑')
+  assert.equal(container.querySelector('.vwf-edge-start').getAttribute('fill'), '#2563eb', '边起始点小圆点使用 success 蓝色')
+  const unselectedLabel = Array.from(container.querySelectorAll('text')).find((el) => el.textContent.includes('成功') && el.getAttribute('fill') === '#2563eb')
+  assert.equal(unselectedLabel.style.stroke, 'var(--dsw-alias-bg-base, #181818)', '未选中标签保留背景色描边以保证可读')
+  const css = styleText.join('\n')
+  assert.ok(css.includes('.vwf-handle { fill:transparent; stroke:transparent;'), '通用连接把手不再显示灰色圆点')
   await act(async () => {
     const hit = container.querySelector('.vwf-edge-hit')
     assert.ok(hit, '存在边命中路径')
@@ -294,10 +299,11 @@ test('点击边：成功/失败/选中颜色区分且边配置面板出现', asy
   assert.ok(byText(container, '删除边'), '边面板含删除按钮')
   assert.equal(firstEdge.getAttribute('stroke'), '#111827', '选中边使用黑色')
   assert.equal(firstEdge.getAttribute('stroke-width'), '4.2', '选中边加粗')
+  assert.equal(container.querySelector('.vwf-edge-start').getAttribute('fill'), '#111827', '选中边起始圆点同步变黑')
   const selectedLabel = Array.from(container.querySelectorAll('text')).find((el) => el.textContent.includes('成功') && el.getAttribute('fill') === '#111827')
   assert.ok(selectedLabel, '选中边标签同步使用主文字色')
   assert.equal(selectedLabel.getAttribute('font-weight'), '700', '选中边标签加粗')
-  assert.equal(selectedLabel.style.stroke, 'rgba(255,255,255,.82)', '黑色选中标签在深色画布上保留浅色描边')
+  assert.equal(selectedLabel.style.stroke, 'rgba(255,255,255,.82)', '选中黑色标签保留浅色描边以保证可读')
   assert.equal(container.querySelector('#vwf-arrow-sel path').getAttribute('fill'), '#111827', '选中边箭头同步使用黑色')
 })
 
@@ -532,6 +538,50 @@ test('防重叠：已绕行长边不影响相邻边保持直连', async () => {
   assert.ok(!paths[1].getAttribute('d').includes(' L '), '相邻边 B→C 不因长边占用标签中点而误绕行')
   assert.ok(!paths[2].getAttribute('d').includes(' L '), '普通相邻边 C→D 保持直连')
   assert.ok(paths[3].getAttribute('d').includes(' L '), '跨节点长边 A→D 继续外围绕行')
+})
+
+test('防重叠：同节点多条直连边按中心附近分层错开', async () => {
+  const dsl = {
+    id: 'multi-direct-fanout',
+    name: '多直连测试',
+    entry: 'a',
+    control: { maxRounds: 9 },
+    nodes: [
+      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'b', profile: 'dev', label: 'B' },
+      { id: 'c', profile: 'review', label: 'C' },
+    ],
+    edges: [
+      { from: 'a', to: 'b', on: 'success' },
+      { from: 'a', to: 'c', on: 'success' },
+      { from: 'b', to: '$end', on: 'success' },
+      { from: 'c', to: '$end', on: 'success' },
+    ],
+  }
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(dsl, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  const paths = Array.from(container.querySelectorAll('path.vwf-edge-flow'))
+  assert.ok(!paths[0].getAttribute('d').includes(' L ') && !paths[1].getAttribute('d').includes(' L '), '两条 A 出边都保持直连')
+  const startDots = Array.from(container.querySelectorAll('.vwf-edge-start'))
+  assert.notEqual(startDots[0].getAttribute('cy'), startDots[1].getAttribute('cy'), '同源多条直连边起始点错开')
+  const sourceNode = container.querySelector('g[data-node-id="a"]')
+  const nodeTop = Number(/translate\([-\d.]+,([-\d.]+)\)/.exec(sourceNode.getAttribute('transform'))[1])
+  for (const dot of [startDots[0], startDots[1]]) {
+    const cy = Number(dot.getAttribute('cy'))
+    assert.ok(cy >= nodeTop && cy <= nodeTop + 66, '起始圆点落在节点边框范围内')
+    assert.equal(sourceNode.compareDocumentPosition(dot) & 4, 4, '边起点绘制在节点之上')
+  }
 })
 
 test('防重叠：入口变化会触发画布布局重算', async () => {
