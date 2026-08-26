@@ -565,6 +565,57 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
       assert.equal(overlap, 0, '节点主体不得互相覆盖')
     }
   }
+
+  // 规则 6：所有边终点落在目标节点左边框垂直居中（不做目标锚点间隔）
+  const endYOf = (d) => Number(d.trim().split(/[\s,]+/).pop())
+  const nodeCenterY = (g) => {
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    const h = Number(g.querySelector('rect').getAttribute('height'))
+    return Number(m[2]) + h / 2
+  }
+  // 规则 6：每条边的终点都落在目标节点左边框垂直居中（数据驱动，取自 dsl 与 DOM 实测高度）
+  complexDsl.edges.forEach((e, i) => {
+    const g = svg.querySelector('g[data-node-id="' + e.to + '"]')
+    assert.ok(g, '画布存在目标节点 ' + e.to)
+    assert.equal(endYOf(paths[i].getAttribute('d')), nodeCenterY(g), '边 ' + i + ' 终点在 ' + e.to + ' 左边框垂直居中')
+  })
+  // 规则 5：同源起点按「上绕 → 直连 → 下绕」自上而下间隔，与边在 dsl 中的出现顺序无关；
+  // 所有起点圆点与对应边同色，且精确落在源节点右边框（transform.x + rect.width）。
+  const starts = Array.from(svg.querySelectorAll('circle.vwf-edge-start'))
+  assert.equal(starts.length, paths.length, '每条边有一个起点圆点')
+  const nodeRightX = (id) => {
+    const g = svg.querySelector('g[data-node-id="' + id + '"]')
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return Number(m[1]) + Number(g.querySelector('rect').getAttribute('width'))
+  }
+  complexDsl.edges.forEach((e, i) => {
+    assert.equal(starts[i].getAttribute('fill'), paths[i].getAttribute('stroke'), '边 ' + i + ' 起点圆点与边同色')
+    assert.equal(Number(starts[i].getAttribute('cx')), nodeRightX(e.from), '边 ' + i + ' 起点落在 ' + e.from + ' 右边框')
+  })
+  const rankOf = { up: 0, direct: 1, down: 2 }
+  // 路径类型判定：命令字母 + 数字序列解析（与空格/逗号格式无关）；直连为 C 曲线，绕行为 L 折线
+  const kindOf = (i) => {
+    const d = paths[i].getAttribute('d')
+    if (/C/.test(d)) return 'direct'
+    const nums = d.match(/-?[\d.]+/g).map(Number)
+    const yStart = nums[1]
+    const laneY = nums[5]
+    return laneY < yStart ? 'up' : 'down'
+  }
+  const perSource = new Map()
+  complexDsl.edges.forEach((e, i) => {
+    const list = perSource.get(e.from) || []
+    list.push({ idx: i, kind: kindOf(i) })
+    perSource.set(e.from, list)
+  })
+  for (const [src, list] of perSource) {
+    const cyOf = (idx) => Number(starts[idx].getAttribute('cy'))
+    const sorted = list.slice().sort((a, b) => rankOf[a.kind] - rankOf[b.kind] || a.idx - b.idx)
+    for (let k = 1; k < sorted.length; k += 1) {
+      assert.ok(cyOf(sorted[k].idx) > cyOf(sorted[k - 1].idx),
+        '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 自上而下间隔')
+    }
+  }
 })
 
 test('防重叠：入口变化会触发画布布局重算', async () => {
@@ -601,6 +652,44 @@ test('防重叠：入口变化会触发画布布局重算', async () => {
   assert.ok(yOf('a') < yOf('b'), 'entry=a 时 A 排在 B 上方')
   await act(async () => { await setDsl(makeDsl('b')) })
   assert.ok(yOf('b') < yOf('a'), 'entry 改为 b 后 B 排在 A 上方')
+})
+
+test('自环边：布局不进入死循环，终点仍在节点左边框垂直居中', async () => {
+  const selfLoopDsl = {
+    id: 'self-loop',
+    name: '自环测试',
+    entry: 'a',
+    control: { maxRounds: 9 },
+    nodes: [
+      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'b', profile: 'dev', label: 'B' },
+    ],
+    edges: [
+      { from: 'a', to: 'b', on: 'success' },
+      { from: 'a', to: 'a', on: 'success' },
+    ],
+  }
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(selfLoopDsl, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  const svg = container.querySelector('svg.vwf-svg')
+  const paths = Array.from(svg.querySelectorAll('path.vwf-edge-flow'))
+  assert.equal(paths.length, 2, '自环边正常渲染不崩溃')
+  const endYOf = (d) => Number(d.trim().split(/[\s,]+/).pop())
+  const aG = container.querySelector('g[data-node-id="a"]')
+  const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(aG.getAttribute('transform'))
+  const aCenterY = Number(m[2]) + Number(aG.querySelector('rect').getAttribute('height')) / 2
+  assert.equal(endYOf(paths[1].getAttribute('d')), aCenterY, '自环边终点仍在节点左边框垂直居中')
 })
 
 test('编辑器关闭：未保存草稿需要确认', async () => {

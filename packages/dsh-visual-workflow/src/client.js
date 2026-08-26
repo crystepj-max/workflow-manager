@@ -472,14 +472,13 @@ return {
     //   - 从左往右且需要绕行（跨 1+ 节点）→ 往下绕行；
     //   - 从右往左（回退/失败）→ 往上绕行；
     //   - 无遮挡的前向边 → 直连。
-    // 每个节点边框上的锚点按「上绕 / 直连 / 下绕」从上到下占用，保证同节点多边不重叠。
+    // 起点锚点在每个节点右边框上按「上绕 / 直连 / 下绕」从上到下占用；终点固定为目标
+    // 节点左边框垂直居中。保证同节点多边起点不重叠（规则 5/6）。
     function computeEdgeRoutes(edges, pos, lanes) {
       const routes = new Map()
       const infos = []
       const sourceKindCount = new Map()
-      const targetKindCount = new Map()
       const sourceOrdinal = new Map()
-      const targetOrdinal = new Map()
       const laneCount = { up: 0, down: 0 }
       ;(edges || []).forEach((e, index) => {
         const a = pos[e.from]
@@ -506,25 +505,18 @@ return {
         // 跨节点定义：前向边的水平区段内存在任一无关节点（即使不与端点纵向相交）→ 下绕。
         const kind = backward ? 'up' : (between.length > 0 ? 'down' : 'direct')
         const sKey = e.from + '|' + kind
-        const tKey = e.to + '|' + kind
         const sOrdinal = sourceOrdinal.get(sKey) || 0
-        const tOrdinal = targetOrdinal.get(tKey) || 0
         sourceOrdinal.set(sKey, sOrdinal + 1)
-        targetOrdinal.set(tKey, tOrdinal + 1)
         const sCounts = sourceKindCount.get(e.from) || { up: 0, direct: 0, down: 0, total: 0 }
         sCounts[kind] += 1
         sCounts.total += 1
         sourceKindCount.set(e.from, sCounts)
-        const tCounts = targetKindCount.get(e.to) || { up: 0, direct: 0, down: 0, total: 0 }
-        tCounts[kind] += 1
-        tCounts.total += 1
-        targetKindCount.set(e.to, tCounts)
-        infos.push({ index, e, a, b, x1, y1, x2, y2, between, hits, kind, sOrdinal, tOrdinal })
+        infos.push({ index, e, a, b, x1, y1, x2, y2, between, hits, kind, sOrdinal })
       })
 
-      // 锚点在节点右边框/左边框内均匀分布；类别顺序固定为 上绕 / 直连 / 下绕。
-      const borderAnchor = (id, side, kind, ordinal) => {
-        const counts = (side === 'source' ? sourceKindCount : targetKindCount).get(id)
+      // 起点锚点在节点右边框内均匀分布；类别顺序固定为 上绕 / 直连 / 下绕。
+      const borderAnchor = (id, kind, ordinal) => {
+        const counts = sourceKindCount.get(id)
         const node = pos[id]
         if (!counts || !node) return node.y + node.h / 2
         const before = kind === 'up' ? 0 : kind === 'direct' ? counts.up : counts.up + counts.direct
@@ -537,9 +529,10 @@ return {
       }
 
       infos.forEach((info) => {
-        const { index, e, x1, y1, x2, y2, between, kind, sOrdinal, tOrdinal } = info
-        const yStart = borderAnchor(e.from, 'source', kind, sOrdinal)
-        const yEnd = borderAnchor(e.to, 'target', kind, tOrdinal)
+        const { index, e, x1, y1, x2, y2, between, kind, sOrdinal } = info
+        const yStart = borderAnchor(e.from, kind, sOrdinal)
+        // #6：终点统一在节点左侧垂直居中，不做间隔。
+        const yEnd = y2
         if (kind === 'direct') {
           routes.set(index, { kind, yStart, yEnd, routed: false })
           return
@@ -584,6 +577,8 @@ return {
       while (changed && guard++ < 100) {
         changed = false
         for (const e of (dsl.edges || [])) {
+          // 自环边（防御脏数据）：不参与最长路 rank，避免自身 rank 无限自增
+          if (e.from === e.to) continue
           if (!idSet.has(e.from)) continue
           if (!(idSet.has(e.to) || e.to === END_NODE)) continue
           if (e.on !== 'success' && isBackwardEdge(e.from, e.to, order)) continue

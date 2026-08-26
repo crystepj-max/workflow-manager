@@ -1,0 +1,194 @@
+{
+  "passed": true,
+  "viewport": {
+    "w": 1440,
+    "h": 900
+  },
+  "dsl": {
+    "id": "anchors",
+    "name": "锚点测试",
+    "entry": "start",
+    "control": {
+      "maxRounds": 9
+    },
+    "nodes": [
+      {
+        "id": "start",
+        "profile": "dispatcher",
+        "label": "开始"
+      },
+      {
+        "id": "middle",
+        "profile": "dev",
+        "label": "汇总"
+      },
+      {
+        "id": "review",
+        "profile": "review",
+        "label": "复核"
+      }
+    ],
+    "edges": [
+      {
+        "from": "start",
+        "to": "middle",
+        "on": "success",
+        "when": "$.normal == true"
+      },
+      {
+        "from": "start",
+        "to": "middle",
+        "on": "success",
+        "when": "$.alternate == true"
+      },
+      {
+        "from": "middle",
+        "to": "review",
+        "on": "success"
+      },
+      {
+        "from": "start",
+        "to": "review",
+        "on": "success",
+        "when": "$.skip == true"
+      },
+      {
+        "from": "review",
+        "to": "middle",
+        "on": "failure"
+      },
+      {
+        "from": "review",
+        "to": "$end",
+        "on": "success"
+      }
+    ]
+  },
+  "edgeMetrics": {
+    "edgeCount": 6,
+    "perEdge": [
+      {
+        "index": 0,
+        "from": "start",
+        "to": "middle",
+        "kind": "direct",
+        "yStart": 89.33333333333333,
+        "yEndPath": 106,
+        "yEndTarget": 106,
+        "endCentered": true,
+        "sameColor": true,
+        "onRightBorder": true
+      },
+      {
+        "index": 1,
+        "from": "start",
+        "to": "middle",
+        "kind": "direct",
+        "yStart": 106,
+        "yEndPath": 106,
+        "yEndTarget": 106,
+        "endCentered": true,
+        "sameColor": true,
+        "onRightBorder": true
+      },
+      {
+        "index": 2,
+        "from": "middle",
+        "to": "review",
+        "kind": "direct",
+        "yStart": 106,
+        "yEndPath": 106,
+        "yEndTarget": 106,
+        "endCentered": true,
+        "sameColor": true,
+        "onRightBorder": true
+      },
+      {
+        "index": 3,
+        "from": "start",
+        "to": "review",
+        "kind": "down",
+        "yStart": 122.66666666666667,
+        "yEndPath": 106,
+        "yEndTarget": 106,
+        "endCentered": true,
+        "sameColor": true,
+        "onRightBorder": true
+      },
+      {
+        "index": 4,
+        "from": "review",
+        "to": "middle",
+        "kind": "up",
+        "yStart": 93.5,
+        "yEndPath": 106,
+        "yEndTarget": 106,
+        "endCentered": true,
+        "sameColor": true,
+        "onRightBorder": true
+      },
+      {
+        "index": 5,
+        "from": "review",
+        "to": "$end",
+        "kind": "direct",
+        "yStart": 118.5,
+        "yEndPath": 106,
+        "yEndTarget": 106,
+        "endCentered": true,
+        "sameColor": true,
+        "onRightBorder": true
+      }
+    ],
+    "sourceOrdering": {
+      "start": {
+        "order": [
+          {
+            "index": 0,
+            "kind": "direct",
+            "y": 89.33333333333333
+          },
+          {
+            "index": 1,
+            "kind": "direct",
+            "y": 106
+          },
+          {
+            "index": 3,
+            "kind": "down",
+            "y": 122.66666666666667
+          }
+        ],
+        "monotonic": true,
+        "sameBorder": true
+      },
+      "middle": {
+        "order": [
+          {
+            "index": 2,
+            "kind": "direct",
+            "y": 106
+          }
+        ],
+        "monotonic": true,
+        "sameBorder": true
+      },
+      "review": {
+        "order": [
+          {
+            "index": 4,
+            "kind": "up",
+            "y": 93.5
+          },
+          {
+            "index": 5,
+            "kind": "direct",
+            "y": 118.5
+          }
+        ],
+        "monotonic": true,
+        "sameBorder": true
+      }
+    }
+  }
+}
