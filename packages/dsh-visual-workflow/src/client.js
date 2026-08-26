@@ -131,6 +131,7 @@ return {
       refresh: '刷新列表',
       close: '关闭',
       unsavedDraft: '有未保存改动',
+      confirmDiscard: '放弃未保存的改动并关闭？',
       saved: '已保存 ',
       saveFailed: '保存失败：',
       deleted: '已删除 ',
@@ -228,6 +229,7 @@ return {
       refresh: 'Refresh',
       close: 'Close',
       unsavedDraft: 'Unsaved changes',
+      confirmDiscard: 'Discard unsaved changes and close?',
       saved: 'Saved ',
       saveFailed: 'Save failed: ',
       deleted: 'Deleted ',
@@ -1847,6 +1849,10 @@ return {
         setDirty(false)
       }
       const closeEditor = () => { setEditId(null); setWf(null); setDirty(false) }
+      const requestCloseEditor = () => {
+        if (dirty && !window.confirm(t('confirmDiscard'))) return
+        closeEditor()
+      }
       const onNew = () => {
         const d = Skeleton()
         setEditId(null)
@@ -1909,7 +1915,8 @@ return {
           className: 'vwf-editor-dialog',
           ref: editorDialogRef,
           'aria-label': t('title'),
-          onClick: (ev) => { if (ev.target === ev.currentTarget) closeEditor() },
+          onClick: (ev) => { if (ev.target === ev.currentTarget) requestCloseEditor() },
+          onCancel: (ev) => { ev.preventDefault(); requestCloseEditor() },
           onClose: closeEditor,
         },
           h('div', { className: 'vwf-editor-head' },
@@ -1918,7 +1925,7 @@ return {
             editingBuiltin ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null,
             dirty ? h('span', { className: 'vwf-badge', style: { color: 'var(--dsw-alias-state-warn-primary, #f59e0b)' } }, t('unsavedDraft')) : null,
             h('span', { className: 'vwf-spacer' }),
-            h('button', { className: 'vwf-btn sm', onClick: closeEditor }, t('close'))
+            h('button', { className: 'vwf-btn sm', onClick: requestCloseEditor }, t('close'))
           ),
           h('div', { className: 'vwf-editor-body' },
             h(Editor, {

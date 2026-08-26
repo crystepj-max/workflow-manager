@@ -522,6 +522,68 @@ test('防重叠：入口变化会触发画布布局重算', async () => {
   assert.ok(yOf('b') < yOf('a'), 'entry 改为 b 后 B 排在 A 上方')
 })
 
+test('编辑器关闭：未保存草稿需要确认', async () => {
+  // 用全新渲染隔离前序测试留下的编辑器状态
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+  })
+  // 打开编辑器
+  await act(async () => {
+    const editBtn = byText(fresh, '编辑')
+    assert.ok(editBtn, '存在编辑按钮')
+    editBtn.click()
+    await flush()
+  })
+  const dialog = fresh.querySelector('dialog.vwf-editor-dialog')
+  assert.ok(dialog, '编辑器打开')
+  // 制造未保存改动
+  await act(async () => {
+    const addBtn = byText(fresh, '新增节点')
+    assert.ok(addBtn, '存在新增节点按钮')
+    addBtn.click()
+    await flush()
+  })
+  // 拒绝关闭 → 询问后保留草稿
+  let confirmCalls = 0
+  dom.window.confirm = () => { confirmCalls += 1; return false }
+  await act(async () => {
+    fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
+    await flush()
+    assert.equal(confirmCalls, 1, 'Escape 关闭前询问放弃改动')
+    assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '拒绝后编辑器仍打开')
+  })
+  // 接受关闭 → 询问后关闭
+  dom.window.confirm = () => { confirmCalls += 1; return true }
+  await act(async () => {
+    fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
+    await flush()
+    assert.equal(confirmCalls, 2, '接受关闭前再次询问放弃改动')
+    assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '接受后编辑器关闭')
+  })
+  // 干净状态（无未保存改动）直接关闭，不询问
+  let cleanConfirmCalls = 0
+  dom.window.confirm = () => { cleanConfirmCalls += 1; return false }
+  await act(async () => {
+    byText(fresh, '编辑').click()
+    await flush()
+    assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '重新打开编辑器（干净状态）')
+  })
+  await act(async () => {
+    fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
+    await flush()
+    assert.equal(cleanConfirmCalls, 0, '无未保存改动不询问')
+    assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '干净编辑器直接关闭')
+  })
+  await act(async () => {
+    freshRoot.unmount()
+    fresh.remove()
+  })
+})
+
 test('清理：卸载冒烟测试根节点', async () => {
   await act(async () => {
     root.unmount()
