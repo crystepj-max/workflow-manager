@@ -410,6 +410,119 @@ test('保存成功路径：调用 save RPC', async () => {
   })
   assert.ok(state.saved.length >= 1, 'save RPC 被调用')
   assert.equal(state.saved[0].id, 'wf1')
+})
+
+test('防重叠：跨节点边与回边路走外围车道，标签避开中间节点', async () => {
+  const complexDsl = {
+    id: 'overlap-flow',
+    name: '防重叠测试',
+    entry: 'start',
+    control: { maxRounds: 9 },
+    nodes: [
+      { id: 'start', profile: 'dispatcher', label: '开始' },
+      { id: 'middle', profile: 'dev', label: '汇总' },
+      { id: 'review', profile: 'review', label: '复核' },
+    ],
+    edges: [
+      { from: 'start', to: 'middle', on: 'success', when: '$.normal == true' },
+      { from: 'start', to: 'middle', on: 'success', when: '$.alternate == true' },
+      { from: 'middle', to: 'review', on: 'success' },
+      { from: 'start', to: 'review', on: 'success', when: '$.skip == true' },
+      { from: 'review', to: 'middle', on: 'failure' },
+      { from: 'review', to: '$end', on: 'success' },
+    ],
+  }
+  await act(async () => {
+    byText(container, '编辑').click()
+    await flush()
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(complexDsl, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+
+  const svg = container.querySelector('svg.vwf-svg')
+  const paths = Array.from(svg.querySelectorAll('path.vwf-edge-flow'))
+  assert.ok(paths[3].getAttribute('d').includes(' L '), '跨节点 success 边改走正交外围车道')
+  assert.ok(paths[4].getAttribute('d').includes(' L '), 'failure 回路边改走正交外围车道')
+
+  const middleGroup = Array.from(svg.querySelectorAll('g')).find((g) => g.textContent.includes('汇总') && g.textContent.includes('worker'))
+  const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(middleGroup.getAttribute('transform'))
+  const middle = { x: Number(match[1]), y: Number(match[2]), w: 220, h: 66 }
+  const edgeLabels = Array.from(svg.querySelectorAll('text')).filter((el) => el.textContent.includes('成功') || el.textContent.includes('失败'))
+  assert.notEqual(
+    edgeLabels[0].getAttribute('x') + ':' + edgeLabels[0].getAttribute('y'),
+    edgeLabels[1].getAttribute('x') + ':' + edgeLabels[1].getAttribute('y'),
+    '同起终点的多条边标签不得完全重叠'
+  )
+  const skipLabel = edgeLabels[3]
+  const failureLabel = edgeLabels[4]
+  for (const label of [skipLabel, failureLabel]) {
+    const x = Number(label.getAttribute('x'))
+    const y = Number(label.getAttribute('y'))
+    const inside = x > middle.x && x < middle.x + middle.w && y > middle.y && y < middle.y + middle.h
+    assert.equal(inside, false, '边标签不得覆盖中间节点')
+  }
+
+  const groups = Array.from(svg.querySelectorAll('g')).filter((g) => g.querySelector('.vwf-node-card'))
+  const rects = groups.map((g) => {
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return { x: Number(m[1]), y: Number(m[2]), w: 220, h: 66 }
+  })
+  for (let i = 0; i < rects.length; i += 1) {
+    for (let j = i + 1; j < rects.length; j += 1) {
+      const a = rects[i]
+      const b = rects[j]
+      const overlap = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
+      assert.equal(overlap, 0, '节点主体不得互相覆盖')
+    }
+  }
+})
+
+test('防重叠：入口变化会触发画布布局重算', async () => {
+  const makeDsl = (entry) => ({
+    id: 'entry-layout',
+    name: '入口布局测试',
+    entry,
+    control: { maxRounds: 9 },
+    nodes: [
+      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'b', profile: 'dev', label: 'B' },
+    ],
+    edges: [{ from: 'a', to: '$end', on: 'success' }],
+  })
+  const setDsl = async (dsl) => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(dsl, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  }
+  const yOf = (id) => {
+    const g = container.querySelector('g[data-node-id="' + id + '"]')
+    const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return Number(match[2])
+  }
+  await act(async () => { await setDsl(makeDsl('a')) })
+  assert.ok(yOf('a') < yOf('b'), 'entry=a 时 A 排在 B 上方')
+  await act(async () => { await setDsl(makeDsl('b')) })
+  assert.ok(yOf('b') < yOf('a'), 'entry 改为 b 后 B 排在 A 上方')
+})
+
+test('清理：卸载冒烟测试根节点', async () => {
   await act(async () => {
     root.unmount()
   })

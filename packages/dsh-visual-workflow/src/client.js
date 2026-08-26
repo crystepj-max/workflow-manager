@@ -5,9 +5,8 @@
 // workflowGraph.ts）对 pkg-19 的编辑模块做整体改造：
 //
 //  画布（对应 ReactFlow 画布 + workflowGraph 布局）
-//   - 自动分层布局（success 主链最长路分层，LR），节点不可手拖——与 Gold-Band
-//     nodesDraggable=false 一致；回退边（failure/指向更早节点）走上方法车道
-//     布线（lane routing，同 computeBackwardLanes + WorkflowRoutedEdge 公式）
+//   - 自动分层布局（success 主链最长路分层，LR），节点保持安全间距且不可手拖；
+//     回退边与跨节点边统一走上方外围车道，标签随车道路径避让节点内容
 //   - 节点卡片 220x66（圆角 14、label + 类型小字、入口徽标）、$end 虚线圆形
 //     终止节点、左右连接把手；边带流动虚线动画 + 箭头 + 成功/失败标签
 //   - 交互：首次打开/重置时纵横居中；点选节点/边；从源把手拖出连线落到目标
@@ -357,8 +356,13 @@ return {
     const NODE_H = 66
     const TERM_W = 140
     const TERM_H = 44
-    const NODE_SEP = 72
+    const NODE_SEP = 88
     const RANK_SEP = 116
+    const EDGE_LANE_GAP = 82
+    const EDGE_LANE_SEP = 38
+    const EDGE_ROUTE_STUB = 34
+    const EDGE_LABEL_W = 36
+    const EDGE_LABEL_H = 18
     const MARGIN_X = 56
     const MARGIN_Y = 64
     const CANVAS_PAD = 24
@@ -438,6 +442,57 @@ return {
       return lanes
     }
 
+    // 边避让：跨节点/回路边统一走上方正交车道；同标签位置的重复边也改走独立车道。
+    function computeEdgeRoutes(edges, pos, lanes) {
+      const routes = new Map()
+      const directLabelCounts = new Map()
+      let nextForwardLane = lanes.size
+      ;(edges || []).forEach((e, index) => {
+        const a = pos[e.from]
+        const b = pos[e.to]
+        if (!a || !b) return
+        const x1 = a.x + a.w
+        const y1 = a.y + a.h / 2
+        const x2 = b.x
+        const y2 = b.y + b.h / 2
+        const left = Math.min(x1, x2)
+        const right = Math.max(x1, x2)
+        const top = Math.min(y1, y2) - 10
+        const bottom = Math.max(y1, y2) + 10
+        const between = Object.keys(pos).map(id => ({ id, p: pos[id] })).filter(item => {
+          const p = item.p
+          if (item.id === e.from || item.id === e.to) return false
+          return p.x < right && p.x + p.w > left
+        })
+        const hits = between.filter(item => {
+          const p = item.p
+          return p.y < bottom && p.y + p.h > top
+        })
+        const backward = lanes.has(index)
+        let duplicateDirectLabel = false
+        if (!backward) {
+          const directLabelKey = Math.round((x1 + x2) / 2) + ':' + Math.round((y1 + y2) / 2)
+          const count = directLabelCounts.get(directLabelKey) || 0
+          directLabelCounts.set(directLabelKey, count + 1)
+          duplicateDirectLabel = count > 0
+        }
+        if (!backward && !duplicateDirectLabel && hits.length === 0) return
+        const lane = backward ? lanes.get(index) : nextForwardLane++
+        const boundaryTop = Math.min(y1, y2, ...between.map(item => item.p.y))
+        const laneY = boundaryTop - EDGE_LANE_GAP - lane * EDGE_LANE_SEP
+        const channelStart = x1 + EDGE_ROUTE_STUB
+        const channelEnd = x2 - EDGE_ROUTE_STUB
+        routes.set(index, {
+          laneY,
+          channelStart,
+          channelEnd,
+          labelX: (channelStart + channelEnd) / 2,
+          labelY: laneY,
+        })
+      })
+      return routes
+    }
+
     // 分层布局：success/前向边最长路定 rank，rank 内按拓扑序纵向堆叠并整体居中
     function layoutGraph(dsl, extraTerminals) {
       const nodeIds = (dsl.nodes || []).map(n => n.id).filter(Boolean)
@@ -498,7 +553,18 @@ return {
       let maxX = 0
       let maxY = 0
       allIds.forEach(id => { const p = pos[id]; if (p) { maxX = Math.max(maxX, p.x + p.w); maxY = Math.max(maxY, p.y + p.h) } })
-      return { pos, W: maxX + MARGIN_X, H: maxY + MARGIN_Y, lanes: computeBackwardLanes(dsl.edges || [], order), order }
+      const lanes = computeBackwardLanes(dsl.edges || [], order)
+      const routes = computeEdgeRoutes(dsl.edges || [], pos, lanes)
+      let minRouteY = Infinity
+      routes.forEach(route => { minRouteY = Math.min(minRouteY, route.laneY) })
+      // 顶部车道也计入画布内容范围：不够时整体下移，避免回退/跨节点边被 SVG 上边界裁掉。
+      const routeShift = minRouteY < CANVAS_PAD ? CANVAS_PAD - minRouteY : 0
+      if (routeShift > 0) {
+        allIds.forEach(id => { if (pos[id]) pos[id].y += routeShift })
+        routes.forEach(route => { route.laneY += routeShift; route.labelY += routeShift })
+        maxY += routeShift
+      }
+      return { pos, W: maxX + MARGIN_X, H: maxY + MARGIN_Y, lanes, routes, order }
     }
 
     function uniqueNodeId(dsl, base) {
@@ -553,7 +619,7 @@ return {
       const panRef = React.useRef(null)
       const lay = React.useMemo(
         () => layoutGraph(dsl, props.visibleTerminals || []),
-        [JSON.stringify({ n: (dsl.nodes || []).map(n => n.id), e: (dsl.edges || []).map(e => [e.from, e.to, e.on]), v: props.visibleTerminals || [] })]
+        [JSON.stringify({ entry: dsl.entry || '', n: (dsl.nodes || []).map(n => n.id), e: (dsl.edges || []).map(e => [e.from, e.to, e.on]), v: props.visibleTerminals || [] })]
       )
       const pos = lay.pos
       const W = lay.W
@@ -723,11 +789,12 @@ return {
       // ── 边 ──
       const edgeEls = []
       const labelEls = []
+      const labelRects = []
       ;(dsl.edges || []).forEach((e, idx) => {
         const a = pos[e.from]
         const b = pos[e.to]
         if (!a || !b) return
-        const lane = lay.lanes.get(idx)
+        const route = lay.routes.get(idx)
         const x1 = a.x + a.w
         const y1 = a.y + a.h / 2
         const x2 = b.x
@@ -738,25 +805,37 @@ return {
         let d
         let labelX
         let labelY
-        if (lane !== undefined) {
-          const so = x1 + 34
-          const to = x2 - 34
-          const laneY = Math.min(y1, y2) - 82 - lane * 38
+        if (route) {
+          const so = route.channelStart
+          const to = route.channelEnd
+          const laneY = route.laneY
           d = 'M ' + x1 + ' ' + y1 + ' L ' + so + ' ' + y1 + ' L ' + so + ' ' + laneY + ' L ' + to + ' ' + laneY + ' L ' + to + ' ' + y2 + ' L ' + x2 + ' ' + y2
-          labelX = (so + to) / 2
-          labelY = laneY
+          labelX = route.labelX
+          labelY = route.labelY
         } else {
           const mx = x1 + (x2 - x1) / 2
           d = 'M ' + x1 + ' ' + y1 + ' C ' + mx + ' ' + y1 + ', ' + mx + ' ' + y2 + ', ' + x2 + ' ' + y2
           labelX = mx
           labelY = (y1 + y2) / 2
         }
+        // 标签按实际短文案（成功/失败）估算为固定小矩形；若与节点或已有标签相碰，
+        // 沿垂直方向持续让位。节点/既有标签都是有限集合，不设固定次数上限。
+        let labelBox = { x: labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
+        const boxesOverlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+        while (true) {
+          const hitsNode = Object.keys(pos).some(id => boxesOverlap(labelBox, pos[id]))
+          const hitsLabel = labelRects.some(rect => boxesOverlap(labelBox, rect))
+          if (!hitsNode && !hitsLabel) break
+          labelY += EDGE_LABEL_H
+          labelBox = { x: labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
+        }
+        labelRects.push(labelBox)
         edgeEls.push(h('path', {
           key: 'e' + idx, d, fill: 'none',
           className: 'vwf-edge-flow',
           stroke: selected ? ACCENT : color,
           strokeWidth: selected ? 3.4 : (isFail ? 2 : 2.2),
-          opacity: isFail || lane !== undefined ? 0.92 : 1,
+          opacity: isFail || route ? 0.92 : 1,
           markerEnd: 'url(#vwf-arrow' + (selected ? '-sel' : isFail ? '-fail' : '') + ')',
           style: selected ? { filter: 'drop-shadow(0 0 6px ' + ACCENT + ')' } : undefined,
         }))
@@ -786,7 +865,7 @@ return {
         const status = props.statusMap ? props.statusMap[id] : null
         if (isTerm) {
           nodeEls.push(h('g', {
-            key: 'n' + id, transform: 'translate(' + p.x + ',' + p.y + ')',
+            key: 'n' + id, 'data-node-id': id, transform: 'translate(' + p.x + ',' + p.y + ')',
             style: { cursor: props.readOnly ? 'default' : 'pointer' },
             onClick: (ev) => { ev.stopPropagation(); if (!props.readOnly && props.onTerminalClick) props.onTerminalClick(id) },
           },
@@ -798,7 +877,7 @@ return {
         }
         const stroke = selected ? ACCENT : invalid ? 'var(--dsw-alias-state-error-primary, #e5484d)' : status ? STATUS_COLOR[status] : 'var(--dsw-alias-border-l2, #333)'
         nodeEls.push(h('g', {
-          key: 'n' + id, transform: 'translate(' + p.x + ',' + p.y + ')',
+          key: 'n' + id, 'data-node-id': id, transform: 'translate(' + p.x + ',' + p.y + ')',
           style: { cursor: props.readOnly ? 'default' : 'pointer' },
           onClick: (ev) => { ev.stopPropagation(); if (!props.readOnly && props.onNodeClick) props.onNodeClick(id) },
         },
