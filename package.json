@@ -6,7 +6,9 @@
     "packages/*"
   ],
   "scripts": {
+    "dev:plugin": "node scripts/dev-plugin.mjs",
     "generate": "node scripts/generate.mjs",
+    "release:verify": "node scripts/release-verify.mjs",
     "validate": "node scripts/validate.mjs",
     "test": "node --test \"scripts/test/*.test.mjs\""
   }

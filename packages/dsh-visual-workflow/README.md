@@ -22,9 +22,45 @@ packages/dsh-visual-workflow/
 └── package.json           # @deepseek-ai/dsh-tools 对齐宿主 DSH v0.1.1-rc.2
 ```
 
-## 使用方式
+## 开发模式：动态插件快速迭代
 
-### 方式 A：组合包安装（产品形态）
+开发模式只用于版本内反馈。它使用独立的 `~/.dsh-workflow-dev`，不安装正式
+`dsh-visual-workflow` 组合包，也不修改产品 `$DSH_HOME`、凭据或 Profile：
+
+```bash
+# 查看隔离状态、联合版本标识和同步指引
+npm run dev:plugin
+
+# 首次启动时由 DSH 默认模板初始化 web Profile；之后保持该进程长期运行
+npm run dev:plugin -- start
+```
+
+开发 DSH 启动时使用系统分配的空闲端口，因此可以在产品 DSH 保持运行时并行启动；终端输出的实际地址用于打开开发会话。
+
+如果当前 shell 显式设置的 `DSH_HOME` 不是开发 Home，入口会拒绝执行。需要自定义隔离路径时
+使用 `VWF_DEV_DSH_HOME`；不得把它设为产品 Home。
+
+每次修改后的同步单位固定为一个联合版本：
+
+```text
+vwf-dev-<host+client 联合源码哈希>
+├── host   packages/dsh-visual-workflow/src/host.js
+└── client packages/dsh-visual-workflow/src/client.js
+```
+
+重新运行 `npm run dev:plugin` 可获得当前联合版本标识。在开发 DSH 会话中：
+
+1. 用 `cordis_define` 定义该版本，并在同一次 `code` 中同时提交 host 与 client；
+2. 用 `cordis_run` 把完整 Package 作为一次更新激活；
+3. 用 `cordis_inspect_self` 核对当前 Package / Run 的版本标识；
+4. 查看界面与宿主行为；下一次修改后用新的联合版本重复以上步骤。
+
+禁止单独更新 client 或 host。Cordis update 会先停止旧 Run；只提交一半会让另一半能力消失。
+结束开发时在同一会话中先用 `cordis_stop` 停止，再用 `cordis_undefine` 清理动态 Package。
+开发 DSH 重启后动态插件自动消失是正常行为。v0.1.0 不实现文件监听或本地命令自动操控动态插件，
+也不依赖 DSH 未公开接口。
+
+## 产品模式：正式安装与发布验收
 
 ```bash
 # 构建 bundle 产物（dist/host-entry.mjs + dist/client.js + dist/.src-stamp.json）
@@ -41,21 +77,12 @@ dsh --profile web --dump-config | grep visual-workflow   # 可见 patch 层
 
 - 包契约：`dsh.bundle.patch` → cordis.patch.yml（host 插件行）；`dsh.client` + `exports["./client"]` → dist/client.js（自包含经典脚本）
 - `scripts/build-bundle.mjs` 把 src/ 的闭包体包装为上述两种形态——单一事实源仍是 src/
-- 注意：动态插件（vwf-*）是进程级的，重启即消失；bundle 版持久存在，二者不要同时启用以免「工作流」入口双挂载
+- 正式包只安装到产品 DSH；开发 Home 中检测到该包时，`dev:plugin` 会报冲突并中止。
+- 动态开发态不是发布证据。准备发布时从仓库根执行 `npm run release:verify`，然后关闭开发 DSH、
+  完整重启产品 DSH，确认正式 VWF 从真实安装路径加载，并完成真实工作流 E2E 和版本功能验收。
+- 产品验收失败后必须退回开发模式修改 `src/`，重新执行完整发布流程；禁止修改 `dist/` 后继续验收。
 
-### 方式 B：动态插件（开发迭代）
-
-两个半都是**动态插件包格式**（plain JS、无 import/JSX，`return { name, inject, apply }` 闭包体），直接在支持 cordis 动态插件的会话中定义：
-
-```
-cordis_define:
-  plugin: vwf-2            # 插件 id（沿用 pkg-19 的 vwf-2 或新建）
-  code:
-    client: <src/client.js 内容>
-    host:   <src/host.js 内容>
-```
-
-激活后打开 DSH Web 设置页 → 「工作流」：
+正式或动态插件激活后，打开 DSH Web 设置页 → 「工作流」：
 
 - **模板库**：内置「开发工作流 2.0」（`.generated/<id>/`）+ 用户模板（`~/.dsh/visual-workflow/templates/<id>.json`）双根列表；新建 / 编辑（打开右侧 ≈1120px 大抽屉）/ 删除（confirm 确认）/ 刷新。
 - **编辑器**（抽屉内）：
