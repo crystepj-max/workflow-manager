@@ -135,6 +135,8 @@ return {
       close: '关闭',
       unsavedDraft: '有未保存改动',
       confirmDiscard: '放弃未保存的改动并关闭？',
+      discardCancel: '我再想想',
+      discardConfirm: '不改了',
       saved: '已保存 ',
       saveFailed: '保存失败：',
       deleted: '已删除 ',
@@ -235,6 +237,8 @@ return {
       close: 'Close',
       unsavedDraft: 'Unsaved changes',
       confirmDiscard: 'Discard unsaved changes and close?',
+      discardCancel: 'Not yet',
+      discardConfirm: 'Discard',
       saved: 'Saved ',
       saveFailed: 'Save failed: ',
       deleted: 'Deleted ',
@@ -343,6 +347,10 @@ return {
 .vwf-empty { display:grid; place-items:center; min-height:120px; border:1px dashed var(--dsw-alias-border-l2, #333); border-radius:10px; color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:12px; padding:16px; text-align:center; }
 .vwf-dialog-mask { position:fixed; inset:0; z-index:950; background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.45)); display:flex; align-items:center; justify-content:center; }
 .vwf-dialog { width:min(520px, 92vw); max-height:80vh; display:flex; flex-direction:column; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:14px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:10px; }
+.vwf-confirm-mask { position:fixed; inset:0; z-index:960; background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.45)); display:flex; align-items:center; justify-content:center; }
+.vwf-confirm { width:min(360px, 90vw); display:flex; flex-direction:column; gap:14px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:14px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:18px; }
+.vwf-confirm-title { font-size:14px; font-weight:600; color:var(--dsw-alias-label-primary, #e8e8e8); }
+.vwf-confirm-actions { display:flex; justify-content:flex-end; gap:8px; }
 .vwf-dialog-title { font-size:15px; font-weight:600; }
 .vwf-dialog-desc { font-size:12px; color:var(--dsw-alias-label-secondary, #9a9a9a); }
 .vwf-dialog-issues { max-height:300px; overflow:auto; display:flex; flex-direction:column; gap:6px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; padding:10px; background:var(--dsw-alias-bg-base, #181818); }
@@ -1994,6 +2002,7 @@ return {
       const [msg, setMsg] = React.useState(null)
       const [providers, setProviders] = React.useState([])
       const [roles, setRoles] = React.useState([])
+      const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false)
       const editorDialogRef = React.useRef(null)
       const editorOpen = !!wf
 
@@ -2029,9 +2038,9 @@ return {
         setWf(clone(w.dsl))
         setDirty(false)
       }
-      const closeEditor = () => { setEditId(null); setWf(null); setDirty(false) }
+      const closeEditor = () => { setConfirmDiscardOpen(false); setEditId(null); setWf(null); setDirty(false) }
       const requestCloseEditor = () => {
-        if (dirty && !window.confirm(t('confirmDiscard'))) return
+        if (dirty) { setConfirmDiscardOpen(true); return }
         closeEditor()
       }
       const onNew = () => {
@@ -2117,7 +2126,16 @@ return {
               onSaved: (id) => { onSaved(id); if (!editId) setEditId(id) },
               onScript,
             })
-          )
+          ),
+          confirmDiscardOpen ? h('div', { className: 'vwf-confirm-mask', onClick: () => setConfirmDiscardOpen(false) },
+            h('div', { className: 'vwf-confirm', onClick: (ev) => ev.stopPropagation() },
+              h('div', { className: 'vwf-confirm-title' }, t('confirmDiscard')),
+              h('div', { className: 'vwf-confirm-actions' },
+                h('button', { className: 'vwf-btn', onClick: () => setConfirmDiscardOpen(false) }, t('discardCancel')),
+                h('button', { className: 'vwf-btn danger', onClick: () => { setConfirmDiscardOpen(false); closeEditor() } }, t('discardConfirm'))
+              )
+            )
+          ) : null
         ) : null
       )
     }

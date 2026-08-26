@@ -1,0 +1,47 @@
+{
+  "passed": true,
+  "viewport": {
+    "w": 1440,
+    "h": 900
+  },
+  "modal": {
+    "maskPresent": true,
+    "dialogRect": {
+      "left": 521,
+      "top": 398.59375,
+      "right": 919,
+      "bottom": 501.390625,
+      "width": 398,
+      "height": 102.796875
+    },
+    "viewport": {
+      "w": 1440,
+      "h": 900
+    },
+    "centeredX": true,
+    "centeredY": true,
+    "borderRadius": "14px",
+    "background": "rgb(27, 27, 27)",
+    "shadow": true,
+    "buttons": [
+      "我再想想",
+      "不改了"
+    ],
+    "confirmCalls": 0,
+    "editorStillOpen": true
+  },
+  "interactions": {
+    "afterKeep": {
+      "maskGone": true,
+      "editorOpen": true
+    },
+    "afterMask": {
+      "maskGone": true,
+      "editorOpen": true
+    },
+    "afterDiscard": {
+      "dialogClosed": true,
+      "finalConfirmCalls": 0
+    }
+  }
+}

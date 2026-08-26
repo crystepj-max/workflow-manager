@@ -692,7 +692,7 @@ test('自环边：布局不进入死循环，终点仍在节点左边框垂直�
   assert.equal(endYOf(paths[1].getAttribute('d')), aCenterY, '自环边终点仍在节点左边框垂直居中')
 })
 
-test('编辑器关闭：未保存草稿需要确认', async () => {
+test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async () => {
   // 用全新渲染隔离前序测试留下的编辑器状态
   const fresh = document.createElement('div')
   document.body.appendChild(fresh)
@@ -717,26 +717,55 @@ test('编辑器关闭：未保存草稿需要确认', async () => {
     addBtn.click()
     await flush()
   })
-  // 拒绝关闭 → 询问后保留草稿
-  let confirmCalls = 0
-  dom.window.confirm = () => { confirmCalls += 1; return false }
+  // 阻断原生 confirm：确认层为产品样式，全程不得调用浏览器原生确认框
+  let nativeConfirmCalls = 0
+  const origConfirm = dom.window.confirm
+  dom.window.confirm = () => { nativeConfirmCalls += 1; return false }
+  // Escape → 弹出统一确认层，而不是浏览器原生 confirm
   await act(async () => {
     fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
     await flush()
-    assert.equal(confirmCalls, 1, 'Escape 关闭前询问放弃改动')
-    assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '拒绝后编辑器仍打开')
   })
-  // 接受关闭 → 询问后关闭
-  dom.window.confirm = () => { confirmCalls += 1; return true }
+  const confirmMask = fresh.querySelector('.vwf-confirm-mask')
+  assert.ok(confirmMask, '未保存关闭时显示统一样式确认弹窗')
+  assert.ok(confirmMask.querySelector('.vwf-confirm'), '确认层含产品样式对话框')
+  assert.ok(byText(fresh, '我再想想'), '存在「我再想想」按钮')
+  assert.ok(byText(fresh, '不改了'), '存在「不改了」按钮')
+  const maskRect = confirmMask.getBoundingClientRect ? confirmMask.getBoundingClientRect() : null
+  if (maskRect && maskRect.width) {
+    // jsdom 无法布局时跳过位置断言；真实 Chromium 证据另在 docs 中采集
+    assert.ok(Math.abs((maskRect.top + maskRect.height / 2) - (window.innerHeight / 2)) < 2, '确认弹窗纵向居中')
+    assert.ok(Math.abs((maskRect.left + maskRect.width / 2) - (window.innerWidth / 2)) < 2, '确认弹窗横向居中')
+  }
+  await act(async () => {
+    byText(fresh, '我再想想').click()
+    await flush()
+  })
+  assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '点击我再想想后编辑器仍打开')
+  assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '我再想想关闭确认弹窗')
+  // 再次取消 → 点击遮罩空白关闭（编辑器保留）
   await act(async () => {
     fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
     await flush()
-    assert.equal(confirmCalls, 2, '接受关闭前再次询问放弃改动')
-    assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '接受后编辑器关闭')
   })
+  assert.ok(fresh.querySelector('.vwf-confirm-mask'), '再次取消弹出确认层')
+  await act(async () => {
+    fresh.querySelector('.vwf-confirm-mask').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    await flush()
+  })
+  assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '点击遮罩后编辑器仍打开')
+  assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '点击遮罩关闭确认弹窗')
+  // 再次取消 → 点击「不改了」关闭
+  await act(async () => {
+    fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
+    await flush()
+    byText(fresh, '不改了').click()
+    await flush()
+  })
+  assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '点击不改了后编辑器关闭')
+  assert.equal(nativeConfirmCalls, 0, '全程未调用 window.confirm')
+  dom.window.confirm = origConfirm
   // 干净状态（无未保存改动）直接关闭，不询问
-  let cleanConfirmCalls = 0
-  dom.window.confirm = () => { cleanConfirmCalls += 1; return false }
   await act(async () => {
     byText(fresh, '编辑').click()
     await flush()
@@ -745,7 +774,7 @@ test('编辑器关闭：未保存草稿需要确认', async () => {
   await act(async () => {
     fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
     await flush()
-    assert.equal(cleanConfirmCalls, 0, '无未保存改动不询问')
+    assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '干净状态不显示确认弹窗')
     assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '干净编辑器直接关闭')
   })
   await act(async () => {
