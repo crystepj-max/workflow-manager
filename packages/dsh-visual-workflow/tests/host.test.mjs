@@ -577,15 +577,17 @@ test('模板名称必填（name 为空拒绝，save 同拒）', async () => {
   assert.equal(s.ok, false, 'save 拒绝空名称')
 })
 
-test('vwf.roles 无 fs 服务时回退内置六角色', async () => {
+test('vwf.roles 无 fs 服务时内置六角色常驻（builtin 标识）', async () => {
   const { handlers } = loadHost()
   const r = await call(handlers, 'vwf.roles')
   assert.ok(Array.isArray(r.roles))
   assert.ok(r.roles.some(x => x.id === 'dispatcher'))
   assert.ok(r.roles.some(x => x.id === 'closeout'))
+  assert.equal(r.roles.filter(x => x.builtin).length, 6, '无 fs 时仅内置常驻')
+  assert.ok(r.roles.every(x => x.builtin === true))
 })
 
-test('vwf.roles 经 fs 服务读工作区 dsh/roles/*.md（resolve→stat→listDir→readText 契约）', async () => {
+test('vwf.roles 经 fs 服务读工作区 dsh/roles 增强内置摘要（resolve→stat→listDir→readText 契约）', async () => {
   // 回归：旧实现把 'dsh/roles' 字符串直接传给 listDir（宿主 fs 服务期望 resolve 后的
   // target），任何真实服务都会抛错回退内置清单——改为按 fs 服务契约取目录。
   const fs = makeFs({
@@ -597,15 +599,180 @@ test('vwf.roles 经 fs 服务读工作区 dsh/roles/*.md（resolve→stat→list
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
   const r = await call(handlers, 'vwf.roles')
-  assert.deepEqual(r.roles.map(x => x.id).sort(), ['dev', 'dispatcher', 'review'], '仅 .md 且不含非角色文件')
+  assert.deepEqual(r.roles.map(x => x.id).sort(), ['accept', 'closeout', 'dev', 'dispatcher', 'review', 'test'], '内置常驻且不含非角色文件')
   const dp = r.roles.find(x => x.id === 'dispatcher')
+  assert.equal(dp.builtin, true)
   assert.ok(dp.summary.startsWith('你是 2.0'), '摘要取正文首行（跳过 frontmatter/标题）')
 })
 
-test('vwf.roles：仓库根无 dsh/roles 目录时回退内置六角色（静态/web 模式兜底）', async () => {
+test('vwf.roles：仓库根无 dsh/roles 目录时内置六角色常驻（静态/web 模式兜底）', async () => {
   const { handlers } = env()
   const r = await call(handlers, 'vwf.roles')
   assert.deepEqual(r.roles.map(x => x.id).sort(), ['accept', 'closeout', 'dev', 'dispatcher', 'review', 'test'])
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// issue-58 · 角色库：内置/自定义分类、创建、编辑、引用保护与安全删除
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('角色库：内置六角色常驻置前并带 builtin 标识，工作区额外 .md 归为自定义', async () => {
+  const fs = makeFs({
+    [REPO + '/dsh/roles/dispatcher.md']: '内置身份正文\n',
+    [REPO + '/dsh/roles/需求分析师.md']: '负责需求拆解。\n',
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const r = await call(handlers, 'vwf.roles')
+  assert.deepEqual(r.roles.map(x => x.id).slice(0, 6), ['dispatcher', 'dev', 'test', 'review', 'accept', 'closeout'], '内置六角色常驻且置前')
+  assert.equal(r.roles.find(x => x.id === 'dispatcher').builtin, true)
+  assert.equal(r.roles.find(x => x.id === 'dispatcher').summary, '内置身份正文', '内置摘要优先取工作区文件')
+  assert.equal(r.roles.find(x => x.id === '需求分析师').builtin, false, '内置集合之外的 .md 归为自定义')
+  assert.equal(r.roles.find(x => x.id === '需求分析师').id, '需求分析师')
+})
+
+test('角色库 get：内置详情（工作区正文）+ 自定义详情 + 未知 id 报错', async () => {
+  const fs = makeFs({
+    [REPO + '/dsh/roles/dispatcher.md']: '内置正文\n',
+    [REPO + '/dsh/roles/需求分析师.md']: '自定义正文\n',
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const b = await call(handlers, 'vwf.roles.get', { id: 'dispatcher' })
+  assert.equal(b.ok, true)
+  assert.equal(b.role.builtin, true)
+  assert.equal(b.role.content, '内置正文\n')
+  const c = await call(handlers, 'vwf.roles.get', { id: '需求分析师' })
+  assert.equal(c.ok, true)
+  assert.equal(c.role.builtin, false)
+  assert.equal(c.role.content, '自定义正文\n')
+  const miss = await call(handlers, 'vwf.roles.get', { id: 'nope' })
+  assert.equal(miss.ok, false)
+  assert.match(miss.errors[0].message, /角色不存在/)
+})
+
+test('角色库 create：落盘 dsh/roles/<name>.md；与内置/自定义重名、非法名、空内容全部拒绝', async () => {
+  const fs = makeFs({
+    [REPO + '/dsh/roles/dev.md']: '内置正文\n',
+    [REPO + '/dsh/roles/已有.md']: '已有自定义\n',
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const ok = await call(handlers, 'vwf.roles.create', { name: '需求分析师', content: '负责需求拆解。\n' })
+  assert.equal(ok.ok, true)
+  assert.equal(ok.role.builtin, false)
+  assert.ok(fs._files.has(REPO + '/dsh/roles/需求分析师.md'), '角色文件落盘')
+  // 与内置重名（大小写不敏感）
+  const dup1 = await call(handlers, 'vwf.roles.create', { name: 'Dev', content: 'x' })
+  assert.equal(dup1.ok, false)
+  assert.match(dup1.errors[0].message, /同名角色/)
+  // 与其他自定义重名
+  const dup2 = await call(handlers, 'vwf.roles.create', { name: '需求分析师', content: 'x' })
+  assert.equal(dup2.ok, false)
+  assert.match(dup2.errors[0].message, /同名角色/)
+  // 非法字符
+  const bad = await call(handlers, 'vwf.roles.create', { name: 'a/b', content: 'x' })
+  assert.equal(bad.ok, false)
+  assert.match(bad.errors[0].message, /非法字符/)
+  // 空内容
+  const noContent = await call(handlers, 'vwf.roles.create', { name: '空内容', content: '  ' })
+  assert.equal(noContent.ok, false)
+  assert.equal(noContent.errors[0].at, 'content')
+})
+
+test('角色库 usage：跨内置模板 + 用户模板统计节点引用', async () => {
+  const fs = makeFs({
+    [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: JSON.stringify({
+      id: 'dev-workflow-2-0', name: '内置流', entry: 'a',
+      nodes: [
+        { id: 'a', profile: '需求分析师', label: 'A' },
+        { id: 'b', profile: '需求分析师', label: 'B' },
+        { id: 'c', profile: 'dev', label: 'C' },
+      ],
+      edges: [],
+    }, null, 2) + '\n',
+    [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+    [USER_DIR + '/wf-a.json']: JSON.stringify({
+      id: 'wf-a', displayName: 'A', entry: 'n1',
+      nodes: [{ id: 'n1', profile: '需求分析师', label: 'N1', goal: 'g' }, { id: 'n2', profile: 'dev', label: 'N2', goal: 'g' }],
+      edges: [],
+    }),
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const u = await call(handlers, 'vwf.roles.usage', { id: '需求分析师' })
+  assert.equal(u.ok, true)
+  assert.equal(u.count, 3, '内置模板 2 + 用户模板 1')
+  assert.equal(u.refs.length, 2, '按工作流分组')
+  const builtinRef = u.refs.find(x => x.builtin)
+  assert.equal(builtinRef.workflowId, 'dev-workflow-2-0')
+  assert.equal(builtinRef.nodes.length, 2)
+})
+
+test('角色库 update：内容修改全局生效；被引用角色重命名阻止；零引用重命名放行；内置拒绝', async () => {
+  const fs = makeFs({
+    [REPO + '/dsh/roles/需求分析师.md']: '旧内容\n',
+    [USER_DIR + '/wf-a.json']: JSON.stringify({
+      id: 'wf-a', displayName: 'A', entry: 'n1',
+      nodes: [{ id: 'n1', profile: '需求分析师', label: 'N1', goal: 'g' }, { id: 'n2', profile: 'dev', label: 'N2', goal: 'g' }],
+      edges: [],
+    }),
+    [USER_DIR + '/wf-b.json']: JSON.stringify({
+      id: 'wf-b', displayName: 'B', entry: 'n1',
+      nodes: [{ id: 'n1', profile: '需求分析师', label: 'N1', goal: 'g' }],
+      edges: [],
+    }),
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  // 内容修改：引用存在也放行（引用按 id 共享配置，不是副本）
+  const upd = await call(handlers, 'vwf.roles.update', { id: '需求分析师', name: '需求分析师', content: '新内容\n' })
+  assert.equal(upd.ok, true)
+  assert.ok(fs._files.get(REPO + '/dsh/roles/需求分析师.md').startsWith('新内容'), '内容更新落盘')
+  // 重命名（有引用）→ 阻止并提示影响
+  const ren = await call(handlers, 'vwf.roles.update', { id: '需求分析师', name: '需求分析师V2', content: '新内容\n' })
+  assert.equal(ren.ok, false)
+  assert.match(ren.errors[0].message, /仍被 2 个节点使用/)
+  // 零引用角色重命名 → 写新文件 + 删旧文件
+  await call(handlers, 'vwf.roles.create', { name: '闲置角色', content: '闲置内容\n' })
+  const ren2 = await call(handlers, 'vwf.roles.update', { id: '闲置角色', name: '闲置角色V2', content: '闲置内容2\n' })
+  assert.equal(ren2.ok, true)
+  assert.equal(ren2.role.id, '闲置角色V2')
+  assert.ok(fs._files.has(REPO + '/dsh/roles/闲置角色V2.md'))
+  assert.ok(!fs._files.has(REPO + '/dsh/roles/闲置角色.md'), '重命名后旧文件删除')
+  // 内置角色阻止修改
+  const builtinUpd = await call(handlers, 'vwf.roles.update', { id: 'dispatcher', name: 'dispatcher', content: 'x' })
+  assert.equal(builtinUpd.ok, false)
+  assert.match(builtinUpd.errors[0].message, /内置角色只读/)
+})
+
+test('角色库 remove：内置拒绝；被引用角色阻止并携带引用位置；零引用删除', async () => {
+  const fs = makeFs({
+    [REPO + '/dsh/roles/需求分析师.md']: '正文\n',
+    [REPO + '/dsh/roles/闲置角色.md']: '正文2\n',
+    [USER_DIR + '/wf-a.json']: JSON.stringify({
+      id: 'wf-a', displayName: 'A', entry: 'n1',
+      nodes: [{ id: 'n1', profile: '需求分析师', label: 'N1', goal: 'g' }],
+      edges: [],
+    }),
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  // 内置拒绝
+  const b = await call(handlers, 'vwf.roles.remove', { id: 'dispatcher' })
+  assert.equal(b.ok, false)
+  assert.match(b.errors[0].message, /内置角色只读/)
+  // 被引用 → 阻止 + usage 详情（无强制删除）
+  const refd = await call(handlers, 'vwf.roles.remove', { id: '需求分析师' })
+  assert.equal(refd.ok, false)
+  assert.match(refd.errors[0].message, /仍被 1 个节点使用/)
+  assert.equal(refd.usage.count, 1)
+  assert.equal(refd.usage.refs[0].workflowId, 'wf-a')
+  assert.equal(refd.usage.refs[0].nodes[0].id, 'n1')
+  assert.ok(fs._files.has(REPO + '/dsh/roles/需求分析师.md'), '被引用角色未被删除')
+  // 零引用 → 删除
+  const ok = await call(handlers, 'vwf.roles.remove', { id: '闲置角色' })
+  assert.equal(ok.ok, true)
+  assert.ok(!fs._files.has(REPO + '/dsh/roles/闲置角色.md'))
 })
 
 test('内置双根：仓库 .generated 为空时从 ~/.dsh/.generated 加载（homeBuiltinDir 回归）', async () => {
