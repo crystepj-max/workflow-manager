@@ -291,9 +291,12 @@ return {
     // 内置根：.generated/<id>/vwf-dsl.json（生成物四件套之一，CI 先 npm run generate）
     // 双根：仓库 .generated（开发期最新）优先，宿主根 ~/.dsh/.generated（syncBuiltins 同步，
     // 会话无关）补缺失——默认工作流这类用户级内置模板在任意项目会话都可见
-    async function loadBuiltins() {
+    async function loadBuiltins(strict) {
       const out = new Map()
-      if (fs === undefined) return out
+      if (fs === undefined) {
+        if (strict) throw new Error('宿主文件能力不可用：无法扫描内置模板')
+        return out
+      }
       const p = await rootPaths()
       const roots = [p.builtinDir, p.packageBuiltinDir, p.homeBuiltinDir].filter(Boolean)
       for (const root of roots) {
@@ -301,7 +304,10 @@ return {
         try {
           const dir = await fs.resolve(root)
           entries = await fs.listDir(dir)
-        } catch (e) { continue }
+        } catch (e) {
+          if (strict) throw new Error('内置模板清单读取失败：' + String((e && e.message) || e))
+          continue
+        }
         for (const ent of entries || []) {
           if (!ent || typeof ent.name !== 'string' || !ent.name) continue
           try {
@@ -310,29 +316,46 @@ return {
             if (!info || info.type !== 'file') continue
             const dsl = JSON.parse(await fs.readText(target))
             if (dsl && typeof dsl.id === 'string' && dsl.id && !out.has(dsl.id)) out.set(dsl.id, dsl)
-          } catch (e) { /* 单个生成物损坏不影响其余 */ }
+          } catch (e) {
+            if (strict) throw new Error('内置模板读取失败：' + String((e && e.message) || e))
+            /* 单个生成物损坏不影响其余 */
+          }
         }
       }
       return out
     }
 
     // 用户根：~/.dsh/visual-workflow/templates/<id>.json（蓝图 JSON）
-    async function loadUserTemplates() {
+    // strict=true：清单/单文件读取失败即抛出（角色引用扫描等破坏性前置必须区分
+    // 「完整清单」与「失败清单」，不得把失败当空清单放行）。
+    async function loadUserTemplates(strict) {
       const out = new Map()
-      if (fs === undefined) return out
+      if (fs === undefined) {
+        if (strict) throw new Error('宿主文件能力不可用：无法扫描用户模板')
+        return out
+      }
       const p = await rootPaths()
-      if (!p.userDir) return out
+      if (!p.userDir) {
+        if (strict) throw new Error('无法解析用户模板目录')
+        return out
+      }
       let entries = null
       try {
         const dir = await fs.resolve(p.userDir)
         entries = await fs.listDir(dir)
-      } catch (e) { return out }
+      } catch (e) {
+        if (strict) throw new Error('用户模板清单读取失败：' + String((e && e.message) || e))
+        return out
+      }
       for (const ent of entries || []) {
         if (!ent || typeof ent.name !== 'string' || !/\.json$/i.test(ent.name)) continue
         try {
           const bp = JSON.parse(await fs.readText(ent.target))
           if (bp && typeof bp.id === 'string' && bp.id) out.set(bp.id, bp)
-        } catch (e) { /* 损坏的模板文件跳过 */ }
+        } catch (e) {
+          if (strict) throw new Error('用户模板读取失败：' + String((e && e.message) || e))
+          /* 损坏的模板文件跳过 */
+        }
       }
       return out
     }
@@ -1116,10 +1139,22 @@ return {
       const out = new Map()
       if (fs === undefined) return { files: out, state: 'error', message: '宿主文件能力不可用' }
       const roleDir = await roleDirPath()
+      // 只有「确认不存在」才归为 missing（可作为空清单放行）；resolve 失败可能是
+      // 瞬时路径错误、stat 失败是瞬态读错误——都按 error fail-closed，避免创建/
+      // 重命名把失败当空库放行而覆盖既有角色。
+      let dir = null
       try {
-        const dir = await fs.resolve(roleDir)
-        let info = null
-        try { info = await fs.stat(dir) } catch (e) { info = null }
+        dir = await fs.resolve(roleDir)
+      } catch (e) {
+        return { files: out, state: 'missing', message: '角色目录不存在：' + roleDir + '（' + String((e && e.message) || e) + '）' }
+      }
+      let info = null
+      try {
+        info = await fs.stat(dir)
+      } catch (e) {
+        return { files: out, state: 'error', message: '角色目录状态读取失败：' + String((e && e.message) || e) }
+      }
+      try {
         if (!info) return { files: out, state: 'missing', message: '角色目录不存在：' + roleDir }
         if (info.type !== 'directory') return { files: out, state: 'error', message: '角色目录不是目录：' + roleDir }
         const entries = (await fs.listDir(dir) || [])
@@ -1194,12 +1229,15 @@ return {
     // 才是当前真实状态）；新草稿（无 id）以 draft: 前缀键独立计入——未保存但引用该
     // 角色时禁止删除/重命名（P1：草稿随后保存会引用已删除的角色文件）。
     async function roleUsage(id, draftDsl) {
-      const [builtins, users] = await Promise.all([loadBuiltins(), loadUserTemplates()])
+      // strict：内置/用户模板清单或单文件读取失败时抛出（破坏性变更前置：失败 ≠ 零引用）
+      const [builtins, users] = await Promise.all([loadBuiltins(true), loadUserTemplates(true)])
       const wfRefs = new Map()
       const add = (workflowId, workflowName, builtin, dsl, draft) => {
         const nodes = []
         for (const n of (dsl.nodes || []) || []) {
-          if (n && n.profile === id) nodes.push({ id: n.id, label: n.label || n.id })
+          // 与文件名唯一性同一基准（roleKey：NFC + 小写）：大小写/规范化不敏感
+          // 文件系统上 profile 'Analyst' 同样引用 analyst.md 角色文件
+          if (n && typeof n.profile === 'string' && roleKey(n.profile) === roleKey(id)) nodes.push({ id: n.id, label: n.label || n.id })
         }
         if (!nodes.length) return
         const ref = { workflowId: String(workflowId), workflowName: String(workflowName), builtin: !!builtin, nodes }

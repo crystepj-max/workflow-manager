@@ -1481,7 +1481,12 @@ return {
         const editingCustom = !!(current && current.builtin === false)
         if (!editingCustom) { submitForm(name, draftContent); return }
         host.call('vwf.roles.usage', { id: current.id, draftDsl: props.draftDsl }).then((u) => {
-          const used = u && u.ok && u.count > 0
+          if (!u || u.ok !== true) {
+            // 宿主失败以 ok:false 解析（而非 reject）：同样必须保持表单打开。
+            setError(t('roleUsageFailed') + ((u && u.errors && u.errors[0] && u.errors[0].message) || ''))
+            return
+          }
+          const used = u.count > 0
           if (name !== current.id && used) {
             setError(fmt(t('roleRenameBlocked'), { n: u.count }))
             return

@@ -92,6 +92,7 @@ function makeRuntime() {
         return { ok: true, id: args.id }
       }
       case 'vwf.roles.usage': {
+        if (state.failUsage === 'resolved') return { ok: false, errors: [{ at: '$', message: '引用统计服务不可用' }] }
         if (state.failUsage) return Promise.reject(new Error('引用统计服务不可用'))
         const u = ROLE_USAGE[args.id] || { count: 0, refs: [] }
         const wfRefs = new Map()
@@ -850,6 +851,18 @@ test('角色库：自定义角色「基于此创建」克隆 + usage 失败时�
   assert.ok(mgr.querySelector('input.vwf-input'), 'usage 失败时表单保持打开')
   assert.ok(byText(mgr, '引用统计失败'), '展示引用统计失败原因')
   assert.equal(roleState.roles[contentIdx].content, beforeContent, 'usage 失败时不静默保存')
+  // 宿主以 ok:false 解析（而非 reject）同样 fail-closed
+  state.failUsage = 'resolved'
+  await act(async () => {
+    const saveBtn = byText(mgr, '保存角色')
+    assert.ok(saveBtn, '表单仍在（未被保存重置）')
+    saveBtn.click()
+    await flush()
+    await flush()
+  })
+  assert.ok(mgr.querySelector('input.vwf-input'), 'ok:false 解析时也保持表单打开')
+  assert.ok(byText(mgr, '引用统计失败'), 'ok:false 解析时展示错误原因')
+  assert.equal(roleState.roles[contentIdx].content, beforeContent, 'ok:false 解析时不静默保存')
   state.failUsage = false
   await act(async () => {
     freshRoot.unmount()

@@ -879,6 +879,74 @@ test('角色库 审查修复：重命名旧文件删除失败时回滚新文件'
   assert.ok(!fs._files.has(REPO + '/dsh/roles/闲置角色V2.md'), '新文件已回滚删除')
 })
 
+test('角色库 复审修复：工作流清单失败时 usage/remove fail-closed（失败 ≠ 零引用）', async () => {
+  const fs = makeFs({
+    [REPO + '/dsh/roles/需求分析师.md']: '正文\n',
+    [USER_DIR + '/wf-a.json']: JSON.stringify({
+      id: 'wf-a', displayName: 'A', entry: 'n1',
+      nodes: [{ id: 'n1', profile: '需求分析师', label: 'N1', goal: 'g' }],
+      edges: [],
+    }),
+  })
+  const sub = makeSubprocess({ fs })
+  // 用户模板清单读取失败（临时性错误，目录本身存在）
+  const origList = fs.listDir
+  fs.listDir = async (t) => {
+    const p = t && (t.displayPath || t.targetKey)
+    if (String(p).includes(USER_DIR)) throw new Error('EIO 模拟用户模板清单失败')
+    return origList(t)
+  }
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const u = await call(handlers, 'vwf.roles.usage', { id: '需求分析师' })
+  assert.equal(u.ok, false, '清单失败不得返回成功零引用')
+  assert.match(u.errors[0].message, /清单读取失败|读取失败/)
+  const rm = await call(handlers, 'vwf.roles.remove', { id: '需求分析师' })
+  assert.equal(rm.ok, false)
+  assert.match(rm.errors[0].message, /引用统计失败/)
+  assert.ok(fs._files.has(REPO + '/dsh/roles/需求分析师.md'), '清单失败时角色未被删除')
+  fs.listDir = origList
+})
+
+test('角色库 复审修复：角色目录 stat 异常按 error fail-closed（不归为 missing 放行）', async () => {
+  const fs = makeFs({
+    [REPO + '/dsh/roles/需求分析师.md']: '正文\n',
+  })
+  const origStat = fs.stat
+  // 角色目录存在但 stat 瞬时失败
+  fs.stat = async (t) => {
+    const p = t && (t.displayPath || t.targetKey)
+    if (String(p) === REPO + '/dsh/roles') throw new Error('EIO 模拟 stat 失败')
+    return origStat(t)
+  }
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const c = await call(handlers, 'vwf.roles.create', { name: '新角色', content: 'x\n' })
+  assert.equal(c.ok, false, 'stat 异常不得当空库放行（否则会覆盖既有角色）')
+  assert.match(c.errors[0].message, /状态读取失败|读取失败/)
+  fs.stat = origStat
+})
+
+test('角色库 复审修复：profile 引用按 roleKey 规范化匹配（大小写/规范化不敏感）', async () => {
+  const fs = makeFs({
+    [REPO + '/dsh/roles/analyst.md']: '正文\n',
+    [USER_DIR + '/wf-a.json']: JSON.stringify({
+      id: 'wf-a', displayName: 'A', entry: 'n1',
+      // profile 大小写与文件名不同：文件系统不敏感时实际解析到 analyst.md
+      nodes: [{ id: 'n1', profile: 'Analyst', label: 'N1', goal: 'g' }],
+      edges: [],
+    }),
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const u = await call(handlers, 'vwf.roles.usage', { id: 'analyst' })
+  assert.equal(u.ok, true)
+  assert.equal(u.count, 1, 'Analyst profile 计入 analyst 角色引用')
+  const rm = await call(handlers, 'vwf.roles.remove', { id: 'analyst' })
+  assert.equal(rm.ok, false)
+  assert.match(rm.errors[0].message, /仍被 1 个节点使用/)
+  assert.ok(fs._files.has(REPO + '/dsh/roles/analyst.md'), '被引用角色未被删除')
+})
+
 test('内置双根：仓库 .generated 为空时从 ~/.dsh/.generated 加载（homeBuiltinDir 回归）', async () => {
   // 回归：rootPaths 曾不返回 homeBuiltinDir，而 loadBuiltins 引用 p.homeBuiltinDir——
   // 任意非本仓库会话下内置模板列表为空。修复后宿主根内置模板可见。
