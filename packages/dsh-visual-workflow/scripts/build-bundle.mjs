@@ -12,9 +12,6 @@ import { fileURLToPath } from 'node:url'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const dist = join(root, 'dist')
 mkdirSync(dist, { recursive: true })
-// 静态组合包：__VWF_REPO__ = 工作流仓库根（含 .generated/scripts 的项目根），
-// 供 syncBuiltins 在 web profile（无 agent 会话）时兜底定位内置模板源。
-const vwfRepoRoot = dirname(dirname(root))
 
 const hostPath = join(root, 'src', 'host.js')
 const clientPath = join(root, 'src', 'client.js')
@@ -31,9 +28,14 @@ writeFileSync(
   join(dist, 'host-entry.mjs'),
   `// 由 scripts/build-bundle.mjs 生成——勿手改；源：src/host.js\n` +
   `import { defineTool as __vwfDefineTool } from '@deepseek-ai/dsh-tools';\n` +
+  `import { fileURLToPath } from 'node:url';\n` +
+  `import { dirname } from 'node:path';\n` +
   `const plugin = (() => {\n` +
   `const defineTool = __vwfDefineTool;\n` +
-  `const __VWF_REPO__ = ${JSON.stringify(vwfRepoRoot)};\n` +
+  `// 运行时从 bundle 自身位置推导仓库根（import.meta.url），不硬编码构建期路径：\n` +
+  `// bundle 位于 <repo>/packages/dsh-visual-workflow/dist/host-entry.mjs，向上 4 层即仓库根。\n` +
+  `// 动态模式（cordis_define）无此常量，宿主代码 typeof 检查自动回落到 repoRoot()。\n` +
+  `const __VWF_REPO_ROOT__ = (() => { try { return dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url))))) } catch (e) { return null } })();\n` +
   `${hostBody}\n})();\n` +
   `export const name = plugin.name;\n` +
   // 静态组合包行级激活必须等 webServer 与 tools 就绪：无 inject 的行会在

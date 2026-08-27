@@ -179,7 +179,7 @@ return {
     async function rootPaths() {
       const repo = repoRoot()
       const home = await dshHome()
-      const packageRepo = (typeof __VWF_REPO__ === 'string' && __VWF_REPO__) ? __VWF_REPO__ : null
+      const packageRepo = (typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) ? __VWF_REPO_ROOT__ : null
       const generatorRoot = packageRepo || repo
       return {
         repo: repo,
@@ -227,13 +227,13 @@ return {
       const p = await rootPaths()
       if (!p.homeBuiltinDir) return
       const policy = writePolicy()
-      // 源根：会话 cwd（动态模式）优先，打包期仓库根（静态 bundle 编译期注入
-      // __VWF_REPO__）与进程 cwd 兜底（web profile 无 agent 会话）
+      // 源根：会话 cwd（动态模式）优先，运行时 bundle 根（import.meta.url 推导）
+      // 与进程 cwd 兜底（web profile 无 agent 会话）
       const sources = []
       if (p.repo) sources.push(p.builtinDir)
       if (p.packageBuiltinDir && sources.indexOf(p.packageBuiltinDir) < 0) sources.push(p.packageBuiltinDir)
-      if (typeof __VWF_REPO__ === 'string' && __VWF_REPO__) {
-        const pkgRoot = __VWF_REPO__ + '/.generated'
+      if (typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) {
+        const pkgRoot = __VWF_REPO_ROOT__ + '/.generated'
         if (sources.indexOf(pkgRoot) < 0) sources.push(pkgRoot)
       }
       try {
@@ -450,7 +450,7 @@ return {
           // 读取组合包注入的仓库根，避免编辑器保存被误报为缺少校验内核。
           const roots = [
             repo,
-            (typeof __VWF_REPO__ === 'string' && __VWF_REPO__) ? __VWF_REPO__ : null,
+            (typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) ? __VWF_REPO_ROOT__ : null,
           ].filter(Boolean)
           for (const root of roots) {
             try {
@@ -1205,7 +1205,7 @@ return {
       return roles
     }
     // 单个角色详情：内置角色正文缺省时依次回退 工作区文件 → 打包仓库 dsh/roles
-    // （静态 bundle 注入的 __VWF_REPO__）→ 内置元数据合成占位正文。
+    // （静态 bundle 运行时推导的 __VWF_REPO_ROOT__）→ 内置元数据合成占位正文。
     async function getRoleDetail(id) {
       const inv = await readRoleFiles()
       const files = inv.files
@@ -1214,7 +1214,7 @@ return {
         const f = files.get(id)
         let content = f && f.content
         if (content == null) {
-          const roots = [(typeof __VWF_REPO__ === 'string' && __VWF_REPO__) ? __VWF_REPO__ : null].filter(Boolean)
+          const roots = [(typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) ? __VWF_REPO_ROOT__ : null].filter(Boolean)
           for (const root of roots) {
             try {
               const target = await fs.resolve(root + '/dsh/roles/' + id + '.md')

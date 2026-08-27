@@ -1021,8 +1021,8 @@ test('内置双根：仓库 .generated 为空时从 ~/.dsh/.generated 加载（h
 test('静态组合包：首次同步完成前也能直接读取包内内置模板', async () => {
   // 回归：页面首个 list RPC 可能早于异步宿主根同步；组合包本身携带的生成物
   // 应直接可读，不能把首屏是否为空交给同步任务的时序。
-  const previous = globalThis.__VWF_REPO__
-  globalThis.__VWF_REPO__ = REPO
+  const previous = globalThis.__VWF_REPO_ROOT__
+  globalThis.__VWF_REPO_ROOT__ = REPO
   try {
     const fs = makeFs({
       [REPO + '/.generated/default-workflow/vwf-dsl.json']: JSON.stringify({
@@ -1039,16 +1039,16 @@ test('静态组合包：首次同步完成前也能直接读取包内内置模�
     const list = await call(handlers, 'vwf.workflows.list')
     assert.ok(list.some(x => x.id === 'default-workflow'), '包内生成物可直接进入模板列表')
   } finally {
-    if (previous === undefined) delete globalThis.__VWF_REPO__
-    else globalThis.__VWF_REPO__ = previous
+    if (previous === undefined) delete globalThis.__VWF_REPO_ROOT__
+    else globalThis.__VWF_REPO_ROOT__ = previous
   }
 })
 
 test('静态组合包：项目路径不可用时仍从包内加载校验内核', async () => {
   // 回归：网页模式没有当前 agent 项目路径；校验内核随组合包仓库一起提供，
   // 保存模板不能因为 repoRoot 为空而被误报为“缺少 scripts/validate-core.cjs”。
-  const previous = globalThis.__VWF_REPO__
-  globalThis.__VWF_REPO__ = REPO
+  const previous = globalThis.__VWF_REPO_ROOT__
+  globalThis.__VWF_REPO_ROOT__ = REPO
   try {
     const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
     const { handlers } = loadHost({
@@ -1060,16 +1060,16 @@ test('静态组合包：项目路径不可用时仍从包内加载校验内核',
     assert.equal(v.ok, true, JSON.stringify(v.errors))
     assert.notEqual(v.errors && v.errors[0] && v.errors[0].message, '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）')
   } finally {
-    if (previous === undefined) delete globalThis.__VWF_REPO__
-    else globalThis.__VWF_REPO__ = previous
+    if (previous === undefined) delete globalThis.__VWF_REPO_ROOT__
+    else globalThis.__VWF_REPO_ROOT__ = previous
   }
 })
 
 test('静态组合包：另存为使用包内生成器，不使用宿主工作目录下的同名路径', async () => {
   // 回归：web profile 的 sandbox workspace 可能是 DSH 宿主仓库，
   // 生成器实际随 workflow-manager 组合包提供，不能拼接到宿主 workspace。
-  const previous = globalThis.__VWF_REPO__
-  globalThis.__VWF_REPO__ = REPO
+  const previous = globalThis.__VWF_REPO_ROOT__
+  globalThis.__VWF_REPO_ROOT__ = REPO
   try {
     const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
     const sub = makeSubprocess({ fs })
@@ -1090,8 +1090,8 @@ test('静态组合包：另存为使用包内生成器，不使用宿主工作�
       JSON.stringify(sub._calls),
     )
   } finally {
-    if (previous === undefined) delete globalThis.__VWF_REPO__
-    else globalThis.__VWF_REPO__ = previous
+    if (previous === undefined) delete globalThis.__VWF_REPO_ROOT__
+    else globalThis.__VWF_REPO_ROOT__ = previous
   }
 })
 
