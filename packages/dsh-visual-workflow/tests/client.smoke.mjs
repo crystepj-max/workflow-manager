@@ -44,9 +44,22 @@ const SEED_DSL = {
   ],
 }
 
+// ── 角色库假数据（issue-58）───────────────────────────────────────────────
+const roleState = {
+  roles: [
+    { id: 'dispatcher', name: '调度', summary: '调度角色', builtin: true, content: '调度角色正文\n职责：调度。\n' },
+    { id: 'dev', name: '开发', summary: '开发角色', builtin: true, content: '开发角色正文\n' },
+    { id: '需求分析师', name: '需求分析师', summary: '需求拆解', builtin: false, content: '需求分析正文\n' },
+  ],
+}
+// 模拟「需求分析师」被 node-1 引用（其余角色零引用）
+const ROLE_USAGE = {
+  '需求分析师': { count: 1, refs: [{ workflowId: 'wf1', workflowName: '测试流', builtin: false, nodes: [{ id: 'node-1', label: '节点1' }] }] },
+}
+
 // ── 组装动态客户端运行环境 ─────────────────────────────────────────────────
 function makeRuntime() {
-  const state = { failSave: false, saved: [] }
+  const state = { failSave: false, failUsage: false, saved: [] }
   const rpc = async (method, args) => {
     switch (method) {
       case 'vwf.workflows.list':
@@ -54,7 +67,44 @@ function makeRuntime() {
       case 'vwf.models':
         return { providers: [{ id: 'deepseek-official', models: ['deepseek-v4-pro', 'deepseek-v4-flash'] }] }
       case 'vwf.roles':
-        return { roles: [{ id: 'dispatcher', name: '调度', summary: '调度角色' }, { id: 'dev', name: '开发', summary: '开发角色' }] }
+        return { roles: roleState.roles.map(r => ({ id: r.id, name: r.name, summary: r.summary, builtin: r.builtin })) }
+      case 'vwf.roles.get': {
+        const role = roleState.roles.find(r => r.id === args.id)
+        return role ? { ok: true, role: { ...role } } : { ok: false, errors: [{ at: '$', message: '角色不存在：' + args.id }] }
+      }
+      case 'vwf.roles.create': {
+        const dup = roleState.roles.some(r => String(r.id).toLowerCase() === String(args.name).toLowerCase())
+        if (dup) return { ok: false, errors: [{ at: 'name', message: '已存在同名角色，请使用其他名称。' }] }
+        const role = { id: args.name, name: args.name, summary: String(args.content || '').split('\n')[0].slice(0, 80), builtin: false, content: args.content }
+        roleState.roles.push(role)
+        return { ok: true, role: { ...role } }
+      }
+      case 'vwf.roles.update': {
+        const idx = roleState.roles.findIndex(r => r.id === args.id)
+        if (idx < 0) return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + args.id }] }
+        const role = { ...roleState.roles[idx], id: args.name || args.id, name: args.name || args.id, content: args.content }
+        roleState.roles.splice(idx, 1, role)
+        return { ok: true, role: { ...role } }
+      }
+      case 'vwf.roles.remove': {
+        const idx = roleState.roles.findIndex(r => r.id === args.id)
+        if (idx >= 0) roleState.roles.splice(idx, 1)
+        return { ok: true, id: args.id }
+      }
+      case 'vwf.roles.usage': {
+        if (state.failUsage === 'resolved') return { ok: false, errors: [{ at: '$', message: '引用统计服务不可用' }] }
+        if (state.failUsage) return Promise.reject(new Error('引用统计服务不可用'))
+        const u = ROLE_USAGE[args.id] || { count: 0, refs: [] }
+        const wfRefs = new Map()
+        for (const ref of u.refs || []) wfRefs.set(String(ref.workflowId), { ...ref })
+        if (args.draftDsl && Array.isArray(args.draftDsl.nodes)) {
+          const draftId = args.draftDsl.id || ('draft:' + String(args.draftDsl.name || '未保存草稿'))
+          const nodes = args.draftDsl.nodes.filter(n => n && n.profile === args.id).map(n => ({ id: n.id, label: n.label || n.id }))
+          if (nodes.length) wfRefs.set(String(draftId), { workflowId: String(draftId), workflowName: String(args.draftDsl.name || args.draftDsl.id || '未保存草稿'), builtin: false, nodes, draft: true })
+        }
+        const refs = Array.from(wfRefs.values())
+        return { ok: true, id: args.id, count: refs.reduce((s, r) => s + (r.nodes || []).length, 0), refs }
+      }
       case 'vwf.validate':
         if (state.failSave) {
           return {
@@ -587,6 +637,233 @@ test('编辑器关闭：未保存草稿需要确认', async () => {
     assert.equal(cleanConfirmCalls, 0, '无未保存改动不询问')
     assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '干净编辑器直接关闭')
   })
+  await act(async () => {
+    freshRoot.unmount()
+    fresh.remove()
+  })
+})
+
+test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → 基于内置创建 → 有引用删除阻止 → 零引用删除', async () => {
+  // 用全新渲染隔离前序测试留下的编辑器/角色状态
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+  })
+  // 打开编辑器（画布右上角「角色库」常驻区含 管理角色/新增角色）
+  await act(async () => {
+    const editBtn = byText(fresh, '编辑')
+    assert.ok(editBtn, '存在编辑按钮')
+    editBtn.click()
+    await flush()
+  })
+  const roleZone = fresh.querySelector('.vwf-role-zone')
+  assert.ok(roleZone, '画布工具栏渲染角色库常驻区')
+  assert.ok(byText(roleZone, '角色库'), '角色库区域有可感知标识')
+  const zoneBtns = Array.from(roleZone.querySelectorAll('button')).map((b) => b.textContent)
+  assert.ok(zoneBtns.some(s => s.includes('管理角色')), '管理角色入口常驻')
+  assert.ok(zoneBtns.some(s => s.includes('新增角色')), '新增角色入口常驻（不随自定义角色数量消失）')
+  // 常驻区「新增角色」直达创建表单（不依赖分区列表中的按钮）
+  await act(async () => {
+    Array.from(roleZone.querySelectorAll('button')).find(b => b.textContent.includes('新增角色')).click()
+    await flush()
+  })
+  const createMgr = fresh.querySelector('.vwf-role-mgr')
+  assert.ok(createMgr, '新增角色打开创建表单')
+  assert.ok(createMgr.querySelector('input.vwf-input'), '创建表单提供名称输入')
+  assert.ok(byText(createMgr, '保存角色'), '创建表单提供保存')
+  await act(async () => {
+    Array.from(createMgr.querySelectorAll('button')).find(b => b.textContent === '关闭').click()
+    await flush()
+  })
+  assert.ok(!fresh.querySelector('.vwf-role-mgr'), '关闭后创建浮层消失')
+  // 节点配置不再提供角色管理/新增入口（仅保留角色下拉分组）
+  await act(async () => {
+    fresh.querySelector('.vwf-node-card').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    await flush()
+  })
+  const inspector = fresh.querySelector('.vwf-inspector')
+  assert.ok(inspector, '选中节点后显示节点配置')
+  const inspectorBtns = Array.from(inspector.querySelectorAll('button')).map((b) => b.textContent)
+  assert.ok(!inspectorBtns.some(s => s.includes('管理角色')), '节点配置不提供管理角色入口')
+  assert.ok(!inspectorBtns.some(s => s.includes('新增角色')), '节点配置不提供新增角色入口')
+  // 打开角色管理：内置/自定义分区
+  await act(async () => {
+    Array.from(roleZone.querySelectorAll('button')).find(b => b.textContent.includes('管理角色')).click()
+    await flush()
+  })
+  const mgr = fresh.querySelector('.vwf-role-mgr')
+  assert.ok(mgr, '角色管理浮层打开')
+  assert.ok(byText(mgr, '内置角色'), '内置角色分区渲染')
+  assert.ok(byText(mgr, '自定义角色'), '自定义角色分区渲染')
+  assert.ok(byText(mgr, '需求分析师'), '自定义角色列出')
+  const viewBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '查看')
+  assert.ok(viewBtns.length >= 1, '内置角色提供查看入口')
+  const editBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '编辑')
+  assert.ok(editBtns.length === 1, '内置角色不提供编辑入口（仅自定义）')
+  // 查看内置角色：只读 + 基于此角色创建
+  await act(async () => {
+    viewBtns[0].click()
+    await flush()
+  })
+  assert.ok(byText(mgr, '调度角色正文'), '查看内置角色完整配置')
+  const createFromBtn = byText(mgr, '基于此角色创建自定义角色')
+  assert.ok(createFromBtn, '内置查看页提供基于此角色创建')
+  await act(async () => {
+    createFromBtn.click()
+    await flush()
+  })
+  const nameInput = mgr.querySelector('input.vwf-input')
+  assert.equal(nameInput.value, 'dispatcher - 自定义', '建议临时名称预填')
+  // 改名并保存（零引用 → 直接保存，不弹影响确认）
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    setter.call(nameInput, '调度变体')
+    nameInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+  })
+  await act(async () => {
+    const saveBtn = byText(mgr, '保存角色')
+    assert.ok(saveBtn, '表单提供保存')
+    saveBtn.click()
+    await flush()
+    await flush()
+  })
+  assert.ok(byText(mgr, '调度变体'), '新角色立即出现在自定义列表')
+  // 删除被引用角色 → 阻止 + 引用位置详情
+  await act(async () => {
+    const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, '需求分析师'))
+    const delBtn = Array.from(row.querySelectorAll('button')).find(b => b.textContent === '删除')
+    delBtn.click()
+    await flush()
+  })
+  let mask = Array.from(fresh.querySelectorAll('.vwf-dialog-mask')).pop()
+  assert.ok(byText(mask, '无法删除自定义角色'), '有引用删除被阻止')
+  assert.ok(byText(mask, '仍被 1 个节点使用'), '提示引用数量')
+  assert.ok(byText(mask, '引用位置'), '展示引用位置详情')
+  await act(async () => {
+    const close = Array.from(mask.querySelectorAll('button')).find(b => b.textContent === '关闭')
+    close.click()
+    await flush()
+  })
+  assert.ok(roleState.roles.some(r => r.id === '需求分析师'), '被引用角色未被删除')
+  // 零引用角色 → 二次确认 → 删除成功
+  await act(async () => {
+    const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, '调度变体'))
+    const delBtn = Array.from(row.querySelectorAll('button')).find(b => b.textContent === '删除')
+    delBtn.click()
+    await flush()
+  })
+  mask = Array.from(fresh.querySelectorAll('.vwf-dialog-mask')).pop()
+  assert.ok(byText(mask, '确定删除「调度变体」吗？'), '零引用删除出现二次确认')
+  await act(async () => {
+    const del = Array.from(mask.querySelectorAll('button')).find(b => b.textContent === '删除')
+    del.click()
+    await flush()
+    await flush()
+  })
+  assert.ok(!byText(mgr, '调度变体'), '确认后角色从列表消失')
+  // 关闭角色管理：角色选择器随角色库刷新（分区 optgroup + 自定义项）
+  await act(async () => {
+    const close = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '关闭')
+    close.click()
+    await flush()
+  })
+  const roleSelect = Array.from(fresh.querySelectorAll('select.vwf-select')).find(s => Array.from(s.options).some(o => o.textContent.includes('需求分析师')))
+  assert.ok(roleSelect, '节点角色选择器存在')
+  const groups = roleSelect.querySelectorAll('optgroup')
+  assert.ok(groups.length >= 2, '角色选择器分组：内置/自定义')
+  assert.equal(groups[0].getAttribute('label'), '内置角色')
+  assert.ok(Array.from(roleSelect.options).some(o => o.textContent.includes('需求分析师')), '自定义角色出现在选择器')
+  assert.ok(!Array.from(roleSelect.options).some(o => o.textContent.includes('调度变体')), '已删除角色不在选择器')
+  await act(async () => {
+    freshRoot.unmount()
+    fresh.remove()
+  })
+})
+
+test('角色库：自定义角色「基于此创建」克隆 + usage 失败时表单 fail-closed', async () => {
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+  })
+  await act(async () => {
+    const editBtn = byText(fresh, '编辑')
+    assert.ok(editBtn, '存在编辑按钮')
+    editBtn.click()
+    await flush()
+  })
+  const roleZone = fresh.querySelector('.vwf-role-zone')
+  await act(async () => {
+    Array.from(roleZone.querySelectorAll('button')).find(b => b.textContent.includes('管理角色')).click()
+    await flush()
+  })
+  const mgr = fresh.querySelector('.vwf-role-mgr')
+  // 自定义行提供「基于此创建」
+  const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, '需求分析师'))
+  const cloneBtn = Array.from(row.querySelectorAll('button')).find(b => b.textContent === '基于此创建')
+  assert.ok(cloneBtn, '自定义角色行提供基于此创建')
+  await act(async () => {
+    cloneBtn.click()
+    await flush()
+    await flush()
+  })
+  const nameInput = mgr.querySelector('input.vwf-input')
+  assert.equal(nameInput.value, '需求分析师 - 自定义', '克隆建议名称预填')
+  assert.ok(mgr.querySelector('textarea').value.includes('需求分析正文'), '克隆正文预填')
+  // 保存走 create（不修改原角色）；存在同名草稿引用时改名后保存仍可创建
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    setter.call(nameInput, '需求分析师克隆')
+    nameInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    byText(mgr, '保存角色').click()
+    await flush()
+    await flush()
+  })
+  assert.ok(byText(mgr, '需求分析师克隆'), '克隆的新角色出现在列表')
+  assert.ok(roleState.roles.some(r => r.id === '需求分析师'), '原自定义角色未被修改')
+  // fail-closed：usage 查询失败 → 编辑保存被阻止（保持表单打开），不静默保存
+  state.failUsage = true
+  await act(async () => {
+    const editRow = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, '需求分析师'))
+    Array.from(editRow.querySelectorAll('button')).find(b => b.textContent === '编辑').click()
+    await flush()
+    await flush()
+  })
+  const contentIdx = roleState.roles.findIndex(r => r.id === '需求分析师')
+  const beforeContent = roleState.roles[contentIdx].content
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    const ta = mgr.querySelector('textarea')
+    setter.call(ta, '需求分析正文\n改动了\n')
+    ta.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    byText(mgr, '保存角色').click()
+    await flush()
+    await flush()
+  })
+  assert.ok(mgr.querySelector('input.vwf-input'), 'usage 失败时表单保持打开')
+  assert.ok(byText(mgr, '引用统计失败'), '展示引用统计失败原因')
+  assert.equal(roleState.roles[contentIdx].content, beforeContent, 'usage 失败时不静默保存')
+  // 宿主以 ok:false 解析（而非 reject）同样 fail-closed
+  state.failUsage = 'resolved'
+  await act(async () => {
+    const saveBtn = byText(mgr, '保存角色')
+    assert.ok(saveBtn, '表单仍在（未被保存重置）')
+    saveBtn.click()
+    await flush()
+    await flush()
+  })
+  assert.ok(mgr.querySelector('input.vwf-input'), 'ok:false 解析时也保持表单打开')
+  assert.ok(byText(mgr, '引用统计失败'), 'ok:false 解析时展示错误原因')
+  assert.equal(roleState.roles[contentIdx].content, beforeContent, 'ok:false 解析时不静默保存')
+  state.failUsage = false
   await act(async () => {
     freshRoot.unmount()
     fresh.remove()
