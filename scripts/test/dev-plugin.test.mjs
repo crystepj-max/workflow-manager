@@ -74,6 +74,7 @@ exit 0
         PATH: `${bin}:${process.env.PATH ?? ''}`,
         VWF_DEV_DSH_HOME: devHome,
         VWF_PRODUCT_DSH_HOME: productHome,
+        DSH_HOME: undefined,
       },
     })
 
@@ -103,6 +104,7 @@ test('PID 文件记录分离的 DSH 子进程，启动器结束后仍能识别�
       PATH: `${bin}:${process.env.PATH ?? ''}`,
       VWF_DEV_DSH_HOME: devHome,
       VWF_PRODUCT_DSH_HOME: productHome,
+      DSH_HOME: undefined,
     }
     mkdirSync(bin)
     writeFileSync(dshPath, `#!/bin/sh
