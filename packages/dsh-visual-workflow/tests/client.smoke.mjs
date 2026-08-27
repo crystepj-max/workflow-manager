@@ -259,6 +259,48 @@ test('撤销/重做：恢复节点增删并清空重做分支', async () => {
   })
 })
 
+test('撤销历史上限：连续编辑超过上限后撤销不越界（栈封顶 50）', async () => {
+  const undoBtn = container.querySelector('.vwf-history-group .vwf-history-btn:first-child')
+  const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+  await act(async () => {
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    const base = JSON.parse(textarea.value)
+    for (let i = 1; i <= 60; i += 1) {
+      const next = JSON.parse(JSON.stringify(base))
+      next.control = next.control || {}
+      next.control.maxRounds = (i % 9) + 1
+      setter.call(textarea, JSON.stringify(next, null, 2))
+      textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    }
+    await flush()
+  })
+  assert.equal(undoBtn.disabled, false, '60 次连续 JSON 编辑后可撤销')
+  let clicks = 0
+  for (let i = 0; i < 80; i += 1) {
+    if (undoBtn.disabled) break
+    await act(async () => {
+      undoBtn.click()
+      await flush()
+    })
+    clicks += 1
+  }
+  assert.ok(clicks <= 50, '撤销次数受历史上限约束（实际 ' + clicks + '）')
+  assert.ok(clicks >= 1, '至少可撤销一次')
+  assert.equal(undoBtn.disabled, true, '到达上限后撤销禁用')
+  const textarea = container.querySelector('textarea.vwf-json-edit')
+  const restored = JSON.parse(textarea.value)
+  assert.equal(restored.id, 'wf1', '撤销终点为封顶时保留的草稿（不越界、不损坏）')
+  assert.ok((restored.nodes || []).length > 0, '草稿结构未损坏')
+  await act(async () => {
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+})
+
 test('新增节点：画布出现新节点并选中', async () => {
   await act(async () => {
     const addBtn = byText(container, '新增节点')

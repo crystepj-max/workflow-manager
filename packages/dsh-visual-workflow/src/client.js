@@ -1393,12 +1393,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
       const [historyVersion, setHistoryVersion] = React.useState(0)
       const historyRef = React.useRef({ past: [], future: [] })
+      // 历史上限：防止长编辑会话（每键一次快照 = 深拷贝 DSL + 完整 JSON）内存无限增长
+      const HISTORY_MAX = 50
       const pushHistory = (beforeDsl, beforeJson, beforeJsonError) => {
         const h = historyRef.current
         const prev = h.past[h.past.length - 1]
         // 相邻快照相同（同一变更被两个入口记录，如 JSON 编辑与同步）只保留一次。
         if (prev && prev.json === beforeJson && prev.jsonError === (beforeJsonError || null) && JSON.stringify(prev.dsl) === JSON.stringify(beforeDsl)) return
         const selEdge = selectedEdgeIndex !== null && wf.edges && wf.edges[selectedEdgeIndex] ? wf.edges[selectedEdgeIndex] : null
+        if (h.past.length >= HISTORY_MAX) h.past.shift()
         h.past.push({
           dsl: clone(beforeDsl),
           json: beforeJson,
