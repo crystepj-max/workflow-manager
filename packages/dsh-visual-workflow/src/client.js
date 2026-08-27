@@ -643,13 +643,30 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         return safeTop + (slot + 0.5) * ((safeBottom - safeTop) / 3)
       }
 
+      // 平行直连边（同 from→to 的多条条件边）共享起点槽位与终点垂直居中，但曲线必须
+      // 相互分离：命中路径完全重叠时后画的 SVG path 会拦截所有画布点击，前一条边无法
+      // 在画布上选中（仅能经 JSON 编辑）——按平行序号给控制点做微小横向偏移。
+      const parallelDirect = new Map()
+      infos.forEach((info) => {
+        if (info.kind !== 'direct') return
+        const pk = info.e.from + '->' + info.e.to
+        const list = parallelDirect.get(pk) || []
+        list.push(info)
+        parallelDirect.set(pk, list)
+      })
+      const PARALLEL_SPREAD = 3
+
       infos.forEach((info) => {
         const { index, e, x1, y1, x2, y2, between, kind, sOrdinal } = info
         const yStart = borderAnchor(e.from, kind, sOrdinal)
         // #6：终点统一在节点左侧垂直居中，不做间隔。
         const yEnd = y2
         if (kind === 'direct') {
-          routes.set(index, { kind, yStart, yEnd, routed: false })
+          const pk = e.from + '->' + e.to
+          const list = parallelDirect.get(pk) || []
+          const parallelIndex = list.indexOf(info)
+          const parallelCount = list.length
+          routes.set(index, { kind, yStart, yEnd, routed: false, parallelIndex, parallelCount })
           return
         }
         const lane = kind === 'up' ? laneCount.up++ : laneCount.down++
@@ -1028,7 +1045,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           const mx = x1 + (x2 - x1) / 2
           const sy = route.yStart
           const ey = route.yEnd
-          d = 'M ' + x1 + ' ' + sy + ' C ' + mx + ' ' + sy + ', ' + mx + ' ' + ey + ', ' + x2 + ' ' + ey
+          // 平行直连边：共享起点槽位/终点锚点，控制点横向微偏移分离曲线与命中路径
+          const off = (route.parallelCount > 1 && route.parallelIndex != null)
+            ? (route.parallelIndex - (route.parallelCount - 1) / 2) * 3
+            : 0
+          d = 'M ' + x1 + ' ' + sy + ' C ' + (mx + off) + ' ' + sy + ', ' + (mx + off) + ' ' + ey + ', ' + x2 + ' ' + ey
           labelX = mx
           labelY = (sy + ey) / 2
         }

@@ -633,6 +633,9 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
   const paths = Array.from(svg.querySelectorAll('path.vwf-edge-flow'))
   assert.ok(paths[3].getAttribute('d').includes(' L '), '跨节点 success 边改走正交外围车道')
   assert.ok(paths[4].getAttribute('d').includes(' L '), 'failure 回路边改走正交外围车道')
+  // 平行直连边（start→middle 两条条件边）：共享起点槽位但曲线分离（命中路径不重叠，
+  // 否则后画的 path 会拦截所有点击，前一条边无法在画布上选中）
+  assert.notEqual(paths[0].getAttribute('d'), paths[1].getAttribute('d'), '平行直连边曲线相互分离')
 
   const middleGroup = Array.from(svg.querySelectorAll('g')).find((g) => g.textContent.includes('汇总') && g.textContent.includes('worker'))
   const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(middleGroup.getAttribute('transform'))
