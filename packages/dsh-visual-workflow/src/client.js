@@ -104,6 +104,7 @@ return {
       roleContentPlaceholder: '描述该角色的定位、职责、工作流程与产出要求（Markdown）。',
       roleContentHelp: '保存到工作区 dsh/roles/<角色名称>.md；运行时该文件内容将提供给本节点 AI。',
       createFromRole: '基于此角色创建自定义角色',
+      cloneFromRole: '基于此创建',
       builtinRoleBadge: '内置角色',
       customRoleBadge: '自定义角色',
       saveRole: '保存角色',
@@ -127,6 +128,7 @@ return {
       roleSaved: '角色已保存 ',
       roleDeleted: '角色已删除 ',
       roleSaveFailed: '保存失败：',
+      roleUsageFailed: '引用统计失败，未保存修改：',
       roleDeleteFailed: '删除失败：',
       agent: 'Agent',
       selectAgent: '选择 Agent',
@@ -245,6 +247,7 @@ return {
       roleContentPlaceholder: 'Describe the role positioning, duties, workflow and output requirements (Markdown).',
       roleContentHelp: 'Saved to dsh/roles/<role-name>.md in the workspace; the file content is given to the node AI at runtime.',
       createFromRole: 'Create custom role from this role',
+      cloneFromRole: 'Clone from this',
       builtinRoleBadge: 'Built-in',
       customRoleBadge: 'Custom',
       saveRole: 'Save Role',
@@ -268,6 +271,7 @@ return {
       roleSaved: 'Role saved ',
       roleDeleted: 'Role deleted ',
       roleSaveFailed: 'Save failed: ',
+      roleUsageFailed: 'Failed to read role usage; change not saved: ',
       roleDeleteFailed: 'Delete failed: ',
       agent: 'Agent',
       selectAgent: 'Select agent',
@@ -1434,11 +1438,24 @@ return {
         setError(null)
         setView('form')
       }
+      // 自定义角色克隆：与内置「基于此角色创建」同路径（详情预填 + 走 create），
+      // 但 current 保持 null —— create 分支用 current.builtin===false 判定编辑，
+      // 克隆自定义角色必须走新建，否则会被当作 update 修改原角色。
+      const openCloneCustom = (role) => {
+        setCurrent(null); setError(null); setView('form'); setFormMode('create')
+        host.call('vwf.roles.get', { id: role.id }).then((r) => {
+          if (r && r.ok) {
+            setDraftName(r.role.id + ' - 自定义')
+            setDraftContent(r.role.content || '')
+          } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
+        }).catch((e) => setError(String(e)))
+      }
       const validForm = () => {
         const name = draftName.trim()
         if (!name || name.length > 64 || /[\\/:*?"<>|\x00-\x1F\x7F]/.test(name)) { setError(t('roleNameInvalid')); return null }
         if (!draftContent.trim()) { setError(t('roleContentRequired')); return null }
-        const dup = (roles || []).some(r => String(r.id).toLowerCase() === name.toLowerCase() && (!current || r.id !== current.id))
+        const key = (s) => String(s || '').normalize('NFC').toLowerCase()
+        const dup = (roles || []).some(r => key(r.id) === key(name) && (!current || r.id !== current.id))
         if (dup) { setError(t('roleDupName')); return null }
         return name
       }
@@ -1447,7 +1464,7 @@ return {
         setError(null)
         setSaving(true)
         const call = editingCustom
-          ? host.call('vwf.roles.update', { id: current.id, name: name, content: content })
+          ? host.call('vwf.roles.update', { id: current.id, name: name, content: content, draftDsl: props.draftDsl })
           : host.call('vwf.roles.create', { name: name, content: content })
         call.then((r) => {
           if (r && r.ok) {
@@ -1463,7 +1480,7 @@ return {
         if (!name) return
         const editingCustom = !!(current && current.builtin === false)
         if (!editingCustom) { submitForm(name, draftContent); return }
-        host.call('vwf.roles.usage', { id: current.id }).then((u) => {
+        host.call('vwf.roles.usage', { id: current.id, draftDsl: props.draftDsl }).then((u) => {
           const used = u && u.ok && u.count > 0
           if (name !== current.id && used) {
             setError(fmt(t('roleRenameBlocked'), { n: u.count }))
@@ -1471,7 +1488,10 @@ return {
           }
           if (used) setConfirm({ kind: 'impact', usage: u, name: name, content: draftContent })
           else submitForm(name, draftContent)
-        }).catch(() => submitForm(name, draftContent))
+        }).catch((e) => {
+          // fail-closed：引用统计失败时保持表单打开并展示错误，禁止绕过影响确认保存。
+          setError(t('roleUsageFailed') + String(e))
+        })
       }
       const confirmSave = () => {
         if (!confirm || !confirm.name) return
@@ -1480,14 +1500,14 @@ return {
         submitForm(c.name, c.content)
       }
       const askDelete = (role) => {
-        host.call('vwf.roles.usage', { id: role.id }).then((u) => {
+        host.call('vwf.roles.usage', { id: role.id, draftDsl: props.draftDsl }).then((u) => {
           setConfirm({ kind: (u && u.ok && u.count > 0) ? 'blocked' : 'delete', role: role, usage: (u && u.ok) ? u : null })
         }).catch((e) => setError(String(e)))
       }
       const doDelete = () => {
         if (!confirm || !confirm.role) return
         setSaving(true)
-        host.call('vwf.roles.remove', { id: confirm.role.id }).then((r) => {
+        host.call('vwf.roles.remove', { id: confirm.role.id, draftDsl: props.draftDsl }).then((r) => {
           setConfirm(null)
           if (r && r.ok) {
             if (props.onChanged) props.onChanged()
@@ -1504,6 +1524,7 @@ return {
         role.builtin
           ? h('button', { className: 'vwf-btn sm', onClick: () => openView(role.id) }, t('viewRole'))
           : h('button', { className: 'vwf-btn sm', onClick: () => openEdit(role.id) }, t('editRole')),
+        !role.builtin ? h('button', { className: 'vwf-btn sm', onClick: () => openCloneCustom(role) }, t('cloneFromRole')) : null,
         !role.builtin ? h('button', { className: 'vwf-btn sm danger', onClick: () => askDelete(role) }, t('deleteRole')) : null
       )
       const builtinRows = (roles || []).filter(r => r.builtin)
@@ -1955,6 +1976,8 @@ return {
           initialCreate: roleUI === 'create',
           onClose: () => setRoleUI(null),
           onChanged: () => { if (props.onRolesChanged) props.onRolesChanged() },
+          // 开放草稿（本编辑器未保存的 wf）：删除/重命名前把草稿引用一并计入保护
+          draftDsl: wf,
         }) : null
       )
     }

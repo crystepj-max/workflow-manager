@@ -775,6 +775,110 @@ test('角色库 remove：内置拒绝；被引用角色阻止并携带引用位�
   assert.ok(!fs._files.has(REPO + '/dsh/roles/闲置角色.md'))
 })
 
+test('角色库 审查修复：NFC/大小写唯一性、仅写法差异重命名拒绝、Windows 保留名', async () => {
+  const fs = makeFs({
+    [REPO + '/dsh/roles/CaseRole.md']: '旧内容\n',
+    [REPO + '/dsh/roles/需求分析师.md']: '正文\n',
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  // NFC 等价名（é 规范化不同写法）→ 视为同名拒绝
+  const nfc = await call(handlers, 'vwf.roles.create', { name: 'Cr\u00e9dit', content: 'x\n' })
+  const nfd = await call(handlers, 'vwf.roles.create', { name: 'Cre\u0301dit', content: 'x\n' })
+  assert.equal(nfc.ok, true)
+  assert.equal(nfd.ok, false, 'NFD 写法与 NFC 同名应拒绝')
+  assert.match(nfd.errors[0].message, /同名角色/)
+  // 大小写等价名 → 拒绝
+  const caseDup = await call(handlers, 'vwf.roles.create', { name: 'caserole', content: 'x\n' })
+  assert.equal(caseDup.ok, false)
+  assert.match(caseDup.errors[0].message, /同名角色/)
+  // 仅大小写不同的重命名 → 拒绝（同一文件，写后删会删掉自己）
+  const caseRen = await call(handlers, 'vwf.roles.update', { id: 'CaseRole', name: 'caserole', content: 'x\n' })
+  assert.equal(caseRen.ok, false)
+  assert.match(caseRen.errors[0].message, /仅大小写/)
+  assert.ok(fs._files.has(REPO + '/dsh/roles/CaseRole.md'), '仅写法差异重命名不产生任何文件变更')
+  // Windows 保留设备名 → 拒绝
+  const con = await call(handlers, 'vwf.roles.create', { name: 'CON', content: 'x\n' })
+  assert.equal(con.ok, false)
+  assert.match(con.errors[0].message, /保留/)
+  const com1 = await call(handlers, 'vwf.roles.create', { name: 'com1', content: 'x\n' })
+  assert.equal(com1.ok, false)
+  assert.match(com1.errors[0].message, /保留/)
+})
+
+test('角色库 审查修复：纯内容编辑无需 subprocess；重命名仍要求 subprocess', async () => {
+  const fs = makeFs({ [REPO + '/dsh/roles/闲置角色.md']: '旧内容\n' })
+  // 无 subprocess 服务（静态/web profile 形态）
+  const { handlers } = loadHost({ fs, subprocess: undefined, sandboxPolicy })
+  const upd = await call(handlers, 'vwf.roles.update', { id: '闲置角色', name: '闲置角色', content: '新内容\n' })
+  assert.equal(upd.ok, true, JSON.stringify(upd))
+  assert.ok(fs._files.get(REPO + '/dsh/roles/闲置角色.md').startsWith('新内容'), '内容编辑仅依赖 fs')
+  const ren = await call(handlers, 'vwf.roles.update', { id: '闲置角色', name: '闲置角色V2', content: 'x\n' })
+  assert.equal(ren.ok, false)
+  assert.match(ren.errors[0].message, /子进程/)
+  assert.ok(fs._files.has(REPO + '/dsh/roles/闲置角色.md'), '重命名被拒绝时旧文件保留')
+})
+
+test('角色库 审查修复：目录读取失败 fail-closed（不当作空库放行）', async () => {
+  const fs = makeFs({ [REPO + '/dsh/roles/需求分析师.md']: '正文\n' })
+  // 模拟清单失败（瞬时宿主/文件系统错误）
+  const origList = fs.listDir
+  fs.listDir = async () => { throw new Error('EIO 模拟清单失败') }
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const c = await call(handlers, 'vwf.roles.create', { name: '新角色', content: 'x\n' })
+  assert.equal(c.ok, false, '清单失败时创建必须中止（不得当作空库放行）')
+  assert.match(c.errors[0].message, /读取失败/)
+  const u = await call(handlers, 'vwf.roles.update', { id: '需求分析师', name: '需求分析师', content: 'x\n' })
+  assert.equal(u.ok, false)
+  assert.match(u.errors[0].message, /读取失败/)
+  fs.listDir = origList
+})
+
+test('角色库 审查修复：开放草稿引用纳入 usage（删除/重命名保护）', async () => {
+  const fs = makeFs({
+    [REPO + '/dsh/roles/需求分析师.md']: '正文\n',
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const draft = {
+    id: 'draft-x', name: '草稿', entry: 'n1', control: { maxRounds: 3 },
+    nodes: [{ id: 'n1', profile: '需求分析师', label: 'N1', goal: 'g' }],
+    edges: [],
+  }
+  const u = await call(handlers, 'vwf.roles.usage', { id: '需求分析师', draftDsl: draft })
+  assert.equal(u.ok, true)
+  assert.equal(u.count, 1, '草稿引用也计入')
+  assert.equal(u.refs[0].draft, true)
+  // 仅草稿引用（无持久化引用）→ 删除仍被阻止
+  const rm = await call(handlers, 'vwf.roles.remove', { id: '需求分析师', draftDsl: draft })
+  assert.equal(rm.ok, false)
+  assert.match(rm.errors[0].message, /仍被 1 个节点使用/)
+  assert.match(rm.errors[0].message, /草稿|draft|未保存/)
+  assert.ok(fs._files.has(REPO + '/dsh/roles/需求分析师.md'), '草稿引用阻止删除时文件保留')
+})
+
+test('角色库 审查修复：重命名旧文件删除失败时回滚新文件', async () => {
+  const fs = makeFs({ [REPO + '/dsh/roles/闲置角色.md']: '旧内容\n' })
+  const sub = makeSubprocess({ fs })
+  const realSpawn = sub.spawn
+  const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
+  // 模拟：删除旧文件（闲置角色.md）的子进程失败
+  sub.spawn = (spec) => {
+    const argvStr = spec.argv.join(' ')
+    if (argvStr.includes('rmSync') && argvStr.includes('闲置角色.md')) {
+      return { pid: 1, done: Promise.resolve({ exitCode: 1, signal: null }), collected: { stdout: reader(''), stderr: reader('EACCES 模拟删除失败') }, terminate() {}, waitForExit: async () => true }
+    }
+    return realSpawn(spec)
+  }
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const ren = await call(handlers, 'vwf.roles.update', { id: '闲置角色', name: '闲置角色V2', content: '新内容\n' })
+  assert.equal(ren.ok, false)
+  assert.match(ren.errors[0].message, /已回滚/)
+  assert.ok(fs._files.has(REPO + '/dsh/roles/闲置角色.md'), '旧文件未被误删')
+  assert.ok(!fs._files.has(REPO + '/dsh/roles/闲置角色V2.md'), '新文件已回滚删除')
+})
+
 test('内置双根：仓库 .generated 为空时从 ~/.dsh/.generated 加载（homeBuiltinDir 回归）', async () => {
   // 回归：rootPaths 曾不返回 homeBuiltinDir，而 loadBuiltins 引用 p.homeBuiltinDir——
   // 任意非本仓库会话下内置模板列表为空。修复后宿主根内置模板可见。

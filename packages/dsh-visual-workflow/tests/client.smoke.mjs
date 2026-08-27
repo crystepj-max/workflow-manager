@@ -59,7 +59,7 @@ const ROLE_USAGE = {
 
 // ── 组装动态客户端运行环境 ─────────────────────────────────────────────────
 function makeRuntime() {
-  const state = { failSave: false, saved: [] }
+  const state = { failSave: false, failUsage: false, saved: [] }
   const rpc = async (method, args) => {
     switch (method) {
       case 'vwf.workflows.list':
@@ -92,8 +92,17 @@ function makeRuntime() {
         return { ok: true, id: args.id }
       }
       case 'vwf.roles.usage': {
+        if (state.failUsage) return Promise.reject(new Error('引用统计服务不可用'))
         const u = ROLE_USAGE[args.id] || { count: 0, refs: [] }
-        return { ok: true, id: args.id, count: u.count, refs: u.refs }
+        const wfRefs = new Map()
+        for (const ref of u.refs || []) wfRefs.set(String(ref.workflowId), { ...ref })
+        if (args.draftDsl && Array.isArray(args.draftDsl.nodes)) {
+          const draftId = args.draftDsl.id || ('draft:' + String(args.draftDsl.name || '未保存草稿'))
+          const nodes = args.draftDsl.nodes.filter(n => n && n.profile === args.id).map(n => ({ id: n.id, label: n.label || n.id }))
+          if (nodes.length) wfRefs.set(String(draftId), { workflowId: String(draftId), workflowName: String(args.draftDsl.name || args.draftDsl.id || '未保存草稿'), builtin: false, nodes, draft: true })
+        }
+        const refs = Array.from(wfRefs.values())
+        return { ok: true, id: args.id, count: refs.reduce((s, r) => s + (r.nodes || []).length, 0), refs }
       }
       case 'vwf.validate':
         if (state.failSave) {
@@ -768,6 +777,80 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
   assert.equal(groups[0].getAttribute('label'), '内置角色')
   assert.ok(Array.from(roleSelect.options).some(o => o.textContent.includes('需求分析师')), '自定义角色出现在选择器')
   assert.ok(!Array.from(roleSelect.options).some(o => o.textContent.includes('调度变体')), '已删除角色不在选择器')
+  await act(async () => {
+    freshRoot.unmount()
+    fresh.remove()
+  })
+})
+
+test('角色库：自定义角色「基于此创建」克隆 + usage 失败时表单 fail-closed', async () => {
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+  })
+  await act(async () => {
+    const editBtn = byText(fresh, '编辑')
+    assert.ok(editBtn, '存在编辑按钮')
+    editBtn.click()
+    await flush()
+  })
+  const roleZone = fresh.querySelector('.vwf-role-zone')
+  await act(async () => {
+    Array.from(roleZone.querySelectorAll('button')).find(b => b.textContent.includes('管理角色')).click()
+    await flush()
+  })
+  const mgr = fresh.querySelector('.vwf-role-mgr')
+  // 自定义行提供「基于此创建」
+  const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, '需求分析师'))
+  const cloneBtn = Array.from(row.querySelectorAll('button')).find(b => b.textContent === '基于此创建')
+  assert.ok(cloneBtn, '自定义角色行提供基于此创建')
+  await act(async () => {
+    cloneBtn.click()
+    await flush()
+    await flush()
+  })
+  const nameInput = mgr.querySelector('input.vwf-input')
+  assert.equal(nameInput.value, '需求分析师 - 自定义', '克隆建议名称预填')
+  assert.ok(mgr.querySelector('textarea').value.includes('需求分析正文'), '克隆正文预填')
+  // 保存走 create（不修改原角色）；存在同名草稿引用时改名后保存仍可创建
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    setter.call(nameInput, '需求分析师克隆')
+    nameInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    byText(mgr, '保存角色').click()
+    await flush()
+    await flush()
+  })
+  assert.ok(byText(mgr, '需求分析师克隆'), '克隆的新角色出现在列表')
+  assert.ok(roleState.roles.some(r => r.id === '需求分析师'), '原自定义角色未被修改')
+  // fail-closed：usage 查询失败 → 编辑保存被阻止（保持表单打开），不静默保存
+  state.failUsage = true
+  await act(async () => {
+    const editRow = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, '需求分析师'))
+    Array.from(editRow.querySelectorAll('button')).find(b => b.textContent === '编辑').click()
+    await flush()
+    await flush()
+  })
+  const contentIdx = roleState.roles.findIndex(r => r.id === '需求分析师')
+  const beforeContent = roleState.roles[contentIdx].content
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    const ta = mgr.querySelector('textarea')
+    setter.call(ta, '需求分析正文\n改动了\n')
+    ta.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    byText(mgr, '保存角色').click()
+    await flush()
+    await flush()
+  })
+  assert.ok(mgr.querySelector('input.vwf-input'), 'usage 失败时表单保持打开')
+  assert.ok(byText(mgr, '引用统计失败'), '展示引用统计失败原因')
+  assert.equal(roleState.roles[contentIdx].content, beforeContent, 'usage 失败时不静默保存')
+  state.failUsage = false
   await act(async () => {
     freshRoot.unmount()
     fresh.remove()
