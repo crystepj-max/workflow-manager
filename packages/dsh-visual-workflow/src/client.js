@@ -59,6 +59,8 @@ return {
       inspector: '配置面板',
       addNode: '新增节点',
       deleteNode: '删除节点',
+      undo: '撤销',
+      redo: '重做',
       addEndTarget: '添加结束节点',
       nodeConfig: '节点配置',
       edgeConfig: '边配置',
@@ -178,6 +180,8 @@ return {
       close: '关闭',
       unsavedDraft: '有未保存改动',
       confirmDiscard: '放弃未保存的改动并关闭？',
+      discardCancel: '我再想想',
+      discardConfirm: '不改了',
       saved: '已保存 ',
       saveFailed: '保存失败：',
       deleted: '已删除 ',
@@ -202,6 +206,8 @@ return {
       inspector: 'Inspector',
       addNode: 'Add Node',
       deleteNode: 'Delete Node',
+      undo: 'Undo',
+      redo: 'Redo',
       addEndTarget: 'Add End node',
       nodeConfig: 'Node Config',
       edgeConfig: 'Edge Config',
@@ -321,6 +327,8 @@ return {
       close: 'Close',
       unsavedDraft: 'Unsaved changes',
       confirmDiscard: 'Discard unsaved changes and close?',
+      discardCancel: 'Not yet',
+      discardConfirm: 'Discard',
       saved: 'Saved ',
       saveFailed: 'Save failed: ',
       deleted: 'Deleted ',
@@ -361,6 +369,9 @@ return {
 .vwf-btn.primary { border-color:var(--dsw-alias-brand-primary, #4d9fff); background:var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary, #4d9fff)); color:var(--dsw-alias-label-primary-foreground, #fff); }
 .vwf-btn.danger { color:var(--dsw-alias-state-error-primary, #e5484d); }
 .vwf-btn.danger:hover:not(:disabled) { background:var(--dsw-alias-interactive-bg-hover-danger, rgba(229,72,77,.12)); }
+/* 画布顶部删除操作保持完整红色；禁用态不用透明度混色，避免在深色画布上发黑。 */
+.vwf-canvas-toolbar .vwf-btn.danger,
+.vwf-canvas-toolbar .vwf-btn.danger:disabled { color:var(--dsw-alias-state-error-primary, #e5484d); opacity:1; -webkit-text-fill-color:currentColor; }
 .vwf-btn.ghost { border-color:transparent; background:transparent; }
 .vwf-btn.sm { padding:3px 10px; font-size:12px; border-radius:99px; }
 .vwf-badge { display:inline-block; padding:1px 8px; border-radius:99px; font-size:10px; border:1px solid var(--dsw-alias-border-l3, #444); color:var(--dsw-alias-label-secondary, #9a9a9a); }
@@ -400,6 +411,20 @@ return {
 .vwf-canvas-toolbar { display:flex; gap:8px; row-gap:6px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-layer-2, #242424); }
 .vwf-canvas-toolbar .vwf-btn { flex:0 0 auto; min-height:28px; white-space:nowrap; }
 .vwf-toolbar-hint { flex:1 1 240px; min-width:180px; margin-left:2px; line-height:1.45; overflow-wrap:anywhere; }
+/* 画布顶部操作按钮组：图标圆形 + 文案，与 Gold-Band 交互形态一致 */
+.vwf-toolbar-actions { display:inline-flex; align-items:stretch; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:999px; background:var(--dsw-alias-bg-layer-2, #242424); overflow:hidden; }
+.vwf-toolbar-action { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border:0; background:transparent; color:var(--dsw-alias-label-primary, #e8e8e8); cursor:pointer; font-size:12px; white-space:nowrap; }
+.vwf-toolbar-action + .vwf-toolbar-action { border-left:1px solid var(--dsw-alias-border-l2, #333); }
+.vwf-toolbar-action:hover:not(:disabled) { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.06)); }
+.vwf-toolbar-action .vwf-toolbar-action-icon { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:999px; background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); color:inherit; font-size:13px; }
+.vwf-toolbar-action.danger,
+.vwf-toolbar-action.danger:disabled { color:var(--dsw-alias-state-error-primary, #e5484d); opacity:1; -webkit-text-fill-color:currentColor; }
+.vwf-toolbar-action.danger:hover:not(:disabled) { background:rgba(229,72,77,.1); }
+.vwf-toolbar-action:disabled { cursor:not-allowed; }
+/* 显示名历史撤销/重做按钮组 */
+.vwf-history-group { display:inline-flex; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:999px; background:var(--dsw-alias-bg-layer-2, #242424); overflow:hidden; }
+.vwf-history-group .vwf-history-btn { border:0; border-radius:0; background:transparent; font-size:14px; min-width:28px; padding:3px 8px; }
+.vwf-history-group .vwf-history-btn:disabled { opacity:.45; cursor:not-allowed; }
 /* 角色库常驻区（issue-58 反馈）：画布右上角胶囊区；管理/新增入口不再依赖自定义角色数量 */
 .vwf-role-zone { margin-left:auto; display:inline-flex; align-items:center; gap:2px; padding:3px 6px 3px 12px; border:1px solid var(--dsw-alias-brand-primary, #4d9fff); border-radius:999px; background:var(--dsw-alias-bg-layer-2, #242424); flex:0 0 auto; }
 .vwf-role-zone-label { font-size:11px; font-weight:700; letter-spacing:.08em; color:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #4d9fff)); margin-right:8px; white-space:nowrap; }
@@ -415,6 +440,10 @@ return {
 .vwf-empty { display:grid; place-items:center; min-height:120px; border:1px dashed var(--dsw-alias-border-l2, #333); border-radius:10px; color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:12px; padding:16px; text-align:center; }
 .vwf-dialog-mask { position:fixed; inset:0; z-index:950; background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.45)); display:flex; align-items:center; justify-content:center; }
 .vwf-dialog { width:min(520px, 92vw); max-height:80vh; display:flex; flex-direction:column; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:14px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:10px; }
+.vwf-confirm-mask { position:fixed; inset:0; z-index:960; background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.45)); display:flex; align-items:center; justify-content:center; }
+.vwf-confirm { width:min(360px, 90vw); display:flex; flex-direction:column; gap:14px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:14px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:18px; }
+.vwf-confirm-title { font-size:14px; font-weight:600; color:var(--dsw-alias-label-primary, #e8e8e8); }
+.vwf-confirm-actions { display:flex; justify-content:flex-end; gap:8px; }
 .vwf-dialog-title { font-size:15px; font-weight:600; }
 .vwf-dialog-desc { font-size:12px; color:var(--dsw-alias-label-secondary, #9a9a9a); }
 .vwf-dialog-issues { max-height:300px; overflow:auto; display:flex; flex-direction:column; gap:6px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; padding:10px; background:var(--dsw-alias-bg-base, #181818); }
@@ -446,6 +475,11 @@ return {
 .vwf-node-kind { fill:var(--dsw-alias-label-tertiary, #8a8a8a); font-size:10px; letter-spacing:.14em; text-transform:uppercase; }
 .vwf-node-label { fill:var(--dsw-alias-label-primary, #e8e8e8); font-size:13px; font-weight:500; }
 .vwf-handle { fill:var(--dsw-alias-label-tertiary, #8a8a8a); stroke:var(--dsw-alias-bg-layer-2, #242424); stroke-width:2; }
+/* 节点左右连接把手（拖出/落入连线的源与目标指示）：默认隐藏，节点悬停时显示，
+   避免没有对应边的节点右侧出现无意义灰点（验收反馈）。 */
+.vwf-handle { opacity:0; pointer-events:none; transition:opacity .12s ease; }
+/* 悬停高亮：把手以品牌色圆环醒目显示，避免与边起点圆点（同类槽位）混淆而不可见 */
+g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-brand-primary, #4d9fff); stroke:var(--dsw-alias-bg-layer-2, #242424); stroke-width:3; filter:drop-shadow(0 0 4px var(--dsw-alias-brand-primary, #4d9fff)); }
 .vwf-handle-src { cursor:crosshair; }
 .vwf-handle-src:hover { fill:var(--dsw-alias-brand-primary, #4d9fff); }
 .vwf-entry-badge { fill:var(--dsw-alias-bg-layer-1, #1e1e1e); stroke:var(--dsw-alias-border-l3, #444); }
@@ -551,10 +585,18 @@ return {
     }
 
     // 边避让：跨节点/回路边统一走上方正交车道；同标签位置的重复边也改走独立车道。
+    // 边避让规则：
+    //   - 从左往右且需要绕行（跨 1+ 节点）→ 往下绕行；
+    //   - 从右往左（回退/失败）→ 往上绕行；
+    //   - 无遮挡的前向边 → 直连。
+    // 起点锚点在每个节点右边框上按「上绕 / 直连 / 下绕」从上到下占用；终点固定为目标
+    // 节点左边框垂直居中。保证同节点多边起点不重叠（规则 5/6）。
     function computeEdgeRoutes(edges, pos, lanes) {
       const routes = new Map()
-      const directLabelCounts = new Map()
-      let nextForwardLane = lanes.size
+      const infos = []
+      const sourceKindCount = new Map()
+      const sourceOrdinal = new Map()
+      const laneCount = { up: 0, down: 0 }
       ;(edges || []).forEach((e, index) => {
         const a = pos[e.from]
         const b = pos[e.to]
@@ -577,24 +619,71 @@ return {
           return p.y < bottom && p.y + p.h > top
         })
         const backward = lanes.has(index)
-        let duplicateDirectLabel = false
-        if (!backward) {
-          const directLabelKey = Math.round((x1 + x2) / 2) + ':' + Math.round((y1 + y2) / 2)
-          const count = directLabelCounts.get(directLabelKey) || 0
-          directLabelCounts.set(directLabelKey, count + 1)
-          duplicateDirectLabel = count > 0
+        // 跨节点定义：前向边的水平区段内存在任一无关节点（即使不与端点纵向相交）→ 下绕。
+        const kind = backward ? 'up' : (between.length > 0 ? 'down' : 'direct')
+        const sKey = e.from + '|' + kind
+        const sOrdinal = sourceOrdinal.get(sKey) || 0
+        sourceOrdinal.set(sKey, sOrdinal + 1)
+        const sCounts = sourceKindCount.get(e.from) || { up: 0, direct: 0, down: 0, total: 0 }
+        sCounts[kind] += 1
+        sCounts.total += 1
+        sourceKindCount.set(e.from, sCounts)
+        infos.push({ index, e, a, b, x1, y1, x2, y2, between, hits, kind, sOrdinal })
+      })
+
+      // 起点锚点固定 3 个槽位（验收反馈优化 3）：上绕=上槽、直连=中槽（与连线源把手
+      // 位置一致，即节点右边框垂直居中）、下绕=下槽；同类边共享同一槽位。
+      const borderAnchor = (id, kind, ordinal) => {
+        const node = pos[id]
+        if (!node) return 0
+        const pad = 8
+        const safeTop = node.y + pad
+        const safeBottom = node.y + node.h - pad
+        const slot = kind === 'up' ? 0 : kind === 'direct' ? 1 : 2
+        return safeTop + (slot + 0.5) * ((safeBottom - safeTop) / 3)
+      }
+
+      // 平行直连边（同 from→to 的多条条件边）共享起点槽位与终点垂直居中，但曲线必须
+      // 相互分离：命中路径完全重叠时后画的 SVG path 会拦截所有画布点击，前一条边无法
+      // 在画布上选中（仅能经 JSON 编辑）——按平行序号给控制点做微小横向偏移。
+      const parallelDirect = new Map()
+      infos.forEach((info) => {
+        if (info.kind !== 'direct') return
+        const pk = info.e.from + '->' + info.e.to
+        const list = parallelDirect.get(pk) || []
+        list.push(info)
+        parallelDirect.set(pk, list)
+      })
+      const PARALLEL_SPREAD = 3
+
+      infos.forEach((info) => {
+        const { index, e, x1, y1, x2, y2, between, kind, sOrdinal } = info
+        const yStart = borderAnchor(e.from, kind, sOrdinal)
+        // #6：终点统一在节点左侧垂直居中，不做间隔。
+        const yEnd = y2
+        if (kind === 'direct') {
+          const pk = e.from + '->' + e.to
+          const list = parallelDirect.get(pk) || []
+          const parallelIndex = list.indexOf(info)
+          const parallelCount = list.length
+          routes.set(index, { kind, yStart, yEnd, routed: false, parallelIndex, parallelCount })
+          return
         }
-        if (!backward && !duplicateDirectLabel && hits.length === 0) return
-        const lane = backward ? lanes.get(index) : nextForwardLane++
+        const lane = kind === 'up' ? laneCount.up++ : laneCount.down++
         const boundaryTop = Math.min(y1, y2, ...between.map(item => item.p.y))
-        const laneY = boundaryTop - EDGE_LANE_GAP - lane * EDGE_LANE_SEP
-        const channelStart = x1 + EDGE_ROUTE_STUB
-        const channelEnd = x2 - EDGE_ROUTE_STUB
+        const boundaryBottom = Math.max(y1, y2, ...between.map(item => item.p.y + item.p.h))
+        const laneY = kind === 'up'
+          ? boundaryTop - EDGE_LANE_GAP - lane * EDGE_LANE_SEP
+          : boundaryBottom + EDGE_LANE_GAP + lane * EDGE_LANE_SEP
         routes.set(index, {
+          kind,
+          yStart,
+          yEnd,
+          routed: true,
           laneY,
-          channelStart,
-          channelEnd,
-          labelX: (channelStart + channelEnd) / 2,
+          channelStart: x1 + EDGE_ROUTE_STUB,
+          channelEnd: x2 - EDGE_ROUTE_STUB,
+          labelX: (x1 + EDGE_ROUTE_STUB + x2 - EDGE_ROUTE_STUB) / 2,
           labelY: laneY,
         })
       })
@@ -620,6 +709,8 @@ return {
       while (changed && guard++ < 100) {
         changed = false
         for (const e of (dsl.edges || [])) {
+          // 自环边（防御脏数据）：不参与最长路 rank，避免自身 rank 无限自增
+          if (e.from === e.to) continue
           if (!idSet.has(e.from)) continue
           if (!(idSet.has(e.to) || e.to === END_NODE)) continue
           if (e.on !== 'success' && isBackwardEdge(e.from, e.to, order)) continue
@@ -663,16 +754,27 @@ return {
       allIds.forEach(id => { const p = pos[id]; if (p) { maxX = Math.max(maxX, p.x + p.w); maxY = Math.max(maxY, p.y + p.h) } })
       const lanes = computeBackwardLanes(dsl.edges || [], order)
       const routes = computeEdgeRoutes(dsl.edges || [], pos, lanes)
+      // 上绕车道计入上边界（不足时整体下移）；下绕车道计入下边界。
       let minRouteY = Infinity
-      routes.forEach(route => { minRouteY = Math.min(minRouteY, route.laneY) })
-      // 顶部车道也计入画布内容范围：不够时整体下移，避免回退/跨节点边被 SVG 上边界裁掉。
+      let maxRouteY = -Infinity
+      routes.forEach(route => {
+        if (!route.routed) return
+        minRouteY = Math.min(minRouteY, route.laneY)
+        maxRouteY = Math.max(maxRouteY, route.laneY + EDGE_LABEL_H)
+      })
       const routeShift = minRouteY < CANVAS_PAD ? CANVAS_PAD - minRouteY : 0
       if (routeShift > 0) {
         allIds.forEach(id => { if (pos[id]) pos[id].y += routeShift })
-        routes.forEach(route => { route.laneY += routeShift; route.labelY += routeShift })
+        routes.forEach(route => {
+          route.yStart += routeShift
+          route.yEnd += routeShift
+          if (route.routed) { route.laneY += routeShift; route.labelY += routeShift }
+        })
         maxY += routeShift
+        maxRouteY += routeShift
       }
-      return { pos, W: maxX + MARGIN_X, H: maxY + MARGIN_Y, lanes, routes, order }
+      const contentBottom = Math.max(maxY, maxRouteY > -Infinity ? maxRouteY : maxY)
+      return { pos, W: maxX + MARGIN_X, H: contentBottom + MARGIN_Y, lanes, routes, order }
     }
 
     function uniqueNodeId(dsl, base) {
@@ -738,6 +840,7 @@ return {
       const [scale, setScale] = React.useState(1)
       const [panOffset, setPanOffset] = React.useState({ x: 0, y: 0 })
       const [connect, setConnect] = React.useState(null) // {from, x, y}
+      const [hoverTarget, setHoverTarget] = React.useState(null) // 拖线时鼠标指向的目标节点（高亮）
       const [menu, setMenu] = React.useState(null) // {x, y}
       const panRef = React.useRef(null)
       const lay = React.useMemo(
@@ -886,6 +989,8 @@ return {
           const p2 = toGraph(me)
           if (!p2) return
           setConnect(c => (c ? { ...c, x: p2.x, y: p2.y } : c))
+          const hit = hitNode(p2)
+          setHoverTarget(prev => (prev === hit ? prev : hit))
         }
         const up = (ue) => {
           window.removeEventListener('pointermove', move)
@@ -893,6 +998,7 @@ return {
           const p2 = toGraph(ue)
           const target = hitNode(p2)
           setConnect(null)
+          setHoverTarget(null)
           if (target && target !== id && props.onConnect) props.onConnect(id, target)
         }
         window.addEventListener('pointermove', move)
@@ -917,29 +1023,35 @@ return {
         const a = pos[e.from]
         const b = pos[e.to]
         if (!a || !b) return
-        const route = lay.routes.get(idx)
         const x1 = a.x + a.w
         const y1 = a.y + a.h / 2
         const x2 = b.x
         const y2 = b.y + b.h / 2
+        const route = lay.routes.get(idx) || { kind: 'direct', yStart: y1, yEnd: y2, routed: false }
         const isFail = e.on === 'failure'
         const color = isFail ? EDGE_FAIL : EDGE_OK
         const selected = props.selectedEdge === idx
         let d
         let labelX
         let labelY
-        if (route) {
+        if (route.routed) {
           const so = route.channelStart
           const to = route.channelEnd
           const laneY = route.laneY
-          d = 'M ' + x1 + ' ' + y1 + ' L ' + so + ' ' + y1 + ' L ' + so + ' ' + laneY + ' L ' + to + ' ' + laneY + ' L ' + to + ' ' + y2 + ' L ' + x2 + ' ' + y2
+          d = 'M ' + x1 + ' ' + route.yStart + ' L ' + so + ' ' + route.yStart + ' L ' + so + ' ' + laneY + ' L ' + to + ' ' + laneY + ' L ' + to + ' ' + route.yEnd + ' L ' + x2 + ' ' + route.yEnd
           labelX = route.labelX
           labelY = route.labelY
         } else {
           const mx = x1 + (x2 - x1) / 2
-          d = 'M ' + x1 + ' ' + y1 + ' C ' + mx + ' ' + y1 + ', ' + mx + ' ' + y2 + ', ' + x2 + ' ' + y2
+          const sy = route.yStart
+          const ey = route.yEnd
+          // 平行直连边：共享起点槽位/终点锚点，控制点横向微偏移分离曲线与命中路径
+          const off = (route.parallelCount > 1 && route.parallelIndex != null)
+            ? (route.parallelIndex - (route.parallelCount - 1) / 2) * 3
+            : 0
+          d = 'M ' + x1 + ' ' + sy + ' C ' + (mx + off) + ' ' + sy + ', ' + (mx + off) + ' ' + ey + ', ' + x2 + ' ' + ey
           labelX = mx
-          labelY = (y1 + y2) / 2
+          labelY = (sy + ey) / 2
         }
         // 标签按实际短文案（成功/失败）估算为固定小矩形；若与节点或已有标签相碰，
         // 沿垂直方向持续让位。节点/既有标签都是有限集合，不设固定次数上限。
@@ -958,14 +1070,19 @@ return {
           className: 'vwf-edge-flow',
           stroke: selected ? EDGE_SELECTED : color,
           strokeWidth: selected ? 4.2 : (isFail ? 2 : 2.2),
-          opacity: isFail || route ? 0.92 : 1,
+          opacity: isFail || route.routed ? 0.92 : 1,
           markerEnd: 'url(#vwf-arrow' + (selected ? '-sel' : isFail ? '-fail' : '') + ')',
-          style: selected ? { filter: 'drop-shadow(0 0 4px rgba(255,255,255,.78))' } : undefined,
         }))
         edgeEls.push(h('path', {
           key: 'eh' + idx, d, className: 'vwf-edge-hit',
           style: { cursor: props.readOnly ? 'default' : 'pointer' },
           onClick: (ev) => { ev.stopPropagation(); if (!props.readOnly && props.onEdgeClick) props.onEdgeClick(idx) },
+        }))
+        // 起始点统一小圆点（颜色跟随边的状态），终点由箭头标识。
+        edgeEls.push(h('circle', {
+          key: 'sd' + idx, className: 'vwf-edge-start', cx: x1, cy: route.yStart, r: 4,
+          fill: selected ? EDGE_SELECTED : color,
+          stroke: selected ? EDGE_SELECTED : color, strokeWidth: 1,
         }))
         // 边标签统一显示 成功/失败；when 条件悬停可见（title），表单/JSON 面板可编辑
         const lbl = isFail ? t('edgeFailure') : t('edgeSuccess')
@@ -986,19 +1103,20 @@ return {
         const selected = props.selectedNode === id
         const invalid = !!(props.invalidNodes && props.invalidNodes.has(id))
         const status = props.statusMap ? props.statusMap[id] : null
+        const isConnectTarget = !!(connect && hoverTarget === id)
         if (isTerm) {
           nodeEls.push(h('g', {
             key: 'n' + id, 'data-node-id': id, transform: 'translate(' + p.x + ',' + p.y + ')',
             style: { cursor: props.readOnly ? 'default' : 'pointer' },
             onClick: (ev) => { ev.stopPropagation(); if (!props.readOnly && props.onTerminalClick) props.onTerminalClick(id) },
           },
-            h('rect', { width: p.w, height: p.h, rx: p.h / 2, fill: 'var(--dsw-alias-bg-layer-1, #1e1e1e)', stroke: 'var(--dsw-alias-border-l3, #555)', strokeWidth: 1, strokeDasharray: '5 4', opacity: 0.9 }),
+            h('rect', { width: p.w, height: p.h, rx: p.h / 2, fill: 'var(--dsw-alias-bg-layer-1, #1e1e1e)', stroke: isConnectTarget ? ACCENT : 'var(--dsw-alias-border-l3, #555)', strokeWidth: isConnectTarget ? 3 : 1, strokeDasharray: '5 4', opacity: 0.9, ...(isConnectTarget ? { 'data-vwf-connect-target': 'true' } : {}) }),
             h('text', { x: p.w / 2, y: p.h / 2 + 4, textAnchor: 'middle', fontSize: 12, fill: 'var(--dsw-alias-label-secondary, #9a9a9a)' }, t('endNode')),
             h('circle', { className: 'vwf-handle', cx: 0, cy: p.h / 2, r: 4 })
           ))
           return
         }
-        const stroke = selected ? ACCENT : invalid ? 'var(--dsw-alias-state-error-primary, #e5484d)' : status ? STATUS_COLOR[status] : 'var(--dsw-alias-border-l2, #333)'
+        const stroke = isConnectTarget ? ACCENT : selected ? ACCENT : invalid ? 'var(--dsw-alias-state-error-primary, #e5484d)' : status ? STATUS_COLOR[status] : 'var(--dsw-alias-border-l2, #333)'
         nodeEls.push(h('g', {
           key: 'n' + id, 'data-node-id': id, transform: 'translate(' + p.x + ',' + p.y + ')',
           style: { cursor: props.readOnly ? 'default' : 'pointer' },
@@ -1006,8 +1124,9 @@ return {
         },
           h('rect', {
             className: 'vwf-node-card', width: p.w, height: p.h, rx: 14,
-            stroke: stroke, strokeWidth: selected || invalid ? 2 : 1,
-            style: selected ? { filter: 'drop-shadow(0 0 8px ' + ACCENT + ')' } : invalid ? { filter: 'drop-shadow(0 0 6px var(--dsw-alias-state-error-primary, #e5484d))' } : undefined,
+            stroke: stroke, strokeWidth: isConnectTarget ? 3 : (selected || invalid ? 2 : 1),
+            ...(isConnectTarget ? { 'data-vwf-connect-target': 'true' } : {}),
+            style: isConnectTarget ? { filter: 'drop-shadow(0 0 10px ' + ACCENT + ')' } : selected ? { filter: 'drop-shadow(0 0 8px ' + ACCENT + ')' } : invalid ? { filter: 'drop-shadow(0 0 6px var(--dsw-alias-state-error-primary, #e5484d))' } : undefined,
           }),
           candidates.indexOf(id) >= 0 ? h('g', { key: 'eb' },
             h('rect', { className: 'vwf-entry-badge', x: -6, y: -9, width: 34, height: 16, rx: 8 }),
@@ -1676,8 +1795,97 @@ return {
       const [liveErrors, setLiveErrors] = React.useState([])
       const [roleUI, setRoleUI] = React.useState(null) // 角色管理浮层：null | 'list' | 'create'
       const validateTimerRef = React.useRef(null)
+      const validateSeqRef = React.useRef(0)
       const fitRef = React.useRef(null)
       const scrollToRef = React.useRef(null)
+      const scheduleValidate = (snapshot) => {
+        const seq = ++validateSeqRef.current
+        if (validateTimerRef.current) validateTimerRef.current()
+        validateTimerRef.current = ctx.timeout(() => {
+          host.call('vwf.validate', { dsl: snapshot }).then(r => {
+            if (seq !== validateSeqRef.current) return
+            setLiveErrors(r.ok ? [] : (r.errors || []))
+          }).catch(() => {})
+        }, VALIDATE_DEBOUNCE_MS)
+      }
+      const [historyVersion, setHistoryVersion] = React.useState(0)
+      const historyRef = React.useRef({ past: [], future: [] })
+      // 历史上限：防止长编辑会话（每键一次快照 = 深拷贝 DSL + 完整 JSON）内存无限增长
+      const HISTORY_MAX = 50
+      const pushHistory = (beforeDsl, beforeJson, beforeJsonError) => {
+        const h = historyRef.current
+        const prev = h.past[h.past.length - 1]
+        // 相邻快照相同（同一变更被两个入口记录，如 JSON 编辑与同步）只保留一次。
+        if (prev && prev.json === beforeJson && prev.jsonError === (beforeJsonError || null) && JSON.stringify(prev.dsl) === JSON.stringify(beforeDsl)) return
+        const selEdge = selectedEdgeIndex !== null && wf.edges && wf.edges[selectedEdgeIndex] ? wf.edges[selectedEdgeIndex] : null
+        if (h.past.length >= HISTORY_MAX) h.past.shift()
+        h.past.push({
+          dsl: clone(beforeDsl),
+          json: beforeJson,
+          jsonError: beforeJsonError || null,
+          selNode: selectedNodeId,
+          selEdgeSig: selEdge ? JSON.stringify({ from: selEdge.from || '', to: selEdge.to || '', on: selEdge.on || '', when: selEdge.when || '' }) : null,
+        })
+        h.future = []
+        setHistoryVersion(v => v + 1)
+      }
+      const applySnapshot = (entry) => {
+        const snapshot = normalizeEntry(entry.dsl)
+        // props.setWf 会同时置脏并同步父级草稿状态；与普通编辑走同一上层通道。
+        setWf(snapshot)
+        setJsonDraft(entry.json)
+        setJsonError(entry.jsonError || null)
+        setFieldErrors({})
+        setInvalidNodeIds(new Set())
+        setLiveErrors([])
+        const nodeStillExists = !!entry.selNode && (snapshot.nodes || []).some(n => n.id === entry.selNode)
+        if (nodeStillExists) {
+          setSelectedNodeId(entry.selNode)
+          setSelectedEdgeIndex(null)
+        } else {
+          setSelectedNodeId(null)
+          let edgeMatchIndex = null
+          if (entry.selEdgeSig) {
+            edgeMatchIndex = (snapshot.edges || []).findIndex(e => JSON.stringify({ from: e.from || '', to: e.to || '', on: e.on || '', when: e.when || '' }) === entry.selEdgeSig)
+          }
+          if (edgeMatchIndex !== null && edgeMatchIndex >= 0) setSelectedEdgeIndex(edgeMatchIndex)
+          else setSelectedEdgeIndex(null)
+        }
+        // 撤销/重做同样触发防抖校验，保持与普通编辑一致的实时校验状态。
+        scheduleValidate(snapshot)
+      }
+      const undo = () => {
+        const h = historyRef.current
+        if (!h.past.length) return
+        const previous = h.past.pop()
+        const currentEdge = selectedEdgeIndex !== null && wf.edges && wf.edges[selectedEdgeIndex] ? wf.edges[selectedEdgeIndex] : null
+        h.future.unshift({
+          dsl: clone(wf),
+          json: jsonDraft,
+          jsonError: jsonError,
+          selNode: selectedNodeId,
+          selEdgeSig: currentEdge ? JSON.stringify({ from: currentEdge.from || '', to: currentEdge.to || '', on: currentEdge.on || '', when: currentEdge.when || '' }) : null,
+        })
+        applySnapshot(previous)
+        setHistoryVersion(v => v + 1)
+      }
+      const redo = () => {
+        const h = historyRef.current
+        if (!h.future.length) return
+        const next = h.future.shift()
+        const currentEdge = selectedEdgeIndex !== null && wf.edges && wf.edges[selectedEdgeIndex] ? wf.edges[selectedEdgeIndex] : null
+        h.past.push({
+          dsl: clone(wf),
+          json: jsonDraft,
+          jsonError: jsonError,
+          selNode: selectedNodeId,
+          selEdgeSig: currentEdge ? JSON.stringify({ from: currentEdge.from || '', to: currentEdge.to || '', on: currentEdge.on || '', when: currentEdge.when || '' }) : null,
+        })
+        applySnapshot(next)
+        setHistoryVersion(v => v + 1)
+      }
+      const canUndo = historyRef.current.past.length > 0
+      const canRedo = historyRef.current.future.length > 0
 
       const selectedNode = selectedNodeId ? (wf.nodes || []).find(n => n.id === selectedNodeId) || null : null
       const selectedEdge = selectedEdgeIndex !== null ? (wf.edges || [])[selectedEdgeIndex] || null : null
@@ -1687,20 +1895,19 @@ return {
 
       // 变更同步：归一入口、清空校验标记、同步 JSON 草稿、通知上层、防抖实时校验
       const syncWorkflow = (next) => {
+        pushHistory(wf, jsonDraft, jsonError)
         const normalized = normalizeEntry(next)
         setFieldErrors({})
         setInvalidNodeIds(new Set())
         setJsonError(null)
+        setLiveErrors([])
         setWf(normalized)
         setJsonDraft(JSON.stringify(normalized, null, 2))
-        if (validateTimerRef.current) validateTimerRef.current()
-        validateTimerRef.current = ctx.timeout(() => {
-          host.call('vwf.validate', { dsl: normalized }).then(r => setLiveErrors(r.ok ? [] : (r.errors || []))).catch(() => {})
-        }, VALIDATE_DEBOUNCE_MS)
+        scheduleValidate(normalized)
       }
       React.useEffect(() => () => { if (validateTimerRef.current) validateTimerRef.current() }, [])
       React.useEffect(() => {
-        host.call('vwf.validate', { dsl: wf }).then(r => setLiveErrors(r.ok ? [] : (r.errors || []))).catch(() => {})
+        scheduleValidate(wf)
       }, [])
 
       const handleConnect = (from, to) => {
@@ -1833,6 +2040,7 @@ return {
       }
 
       const onJsonChange = (value) => {
+        pushHistory(wf, jsonDraft, jsonError)
         setJsonDraft(value)
         setJsonError(null)
         try {
@@ -1880,7 +2088,11 @@ return {
                   ),
                   h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('subtitle'))
                 ),
-                h('div', { className: 'vwf-row' },
+                h('div', { className: 'vwf-row', style: { gap: 6, alignItems: 'center' } },
+                  h('div', { className: 'vwf-history-group' },
+                    h('button', { className: 'vwf-btn sm ghost vwf-history-btn', disabled: !canUndo, title: t('undo'), onClick: undo }, '↶'),
+                    h('button', { className: 'vwf-btn sm ghost vwf-history-btn', disabled: !canRedo, title: t('redo'), onClick: redo }, '↷')
+                  ),
                   h('div', { className: 'vwf-row', style: { gap: 2 } },
                     h('button', { className: 'vwf-btn sm' + (tab === 'canvas' ? ' primary' : ''), onClick: () => setTab('canvas') }, t('canvas')),
                     h('button', { className: 'vwf-btn sm' + (tab === 'json' ? ' primary' : ''), onClick: () => setTab('json') }, 'JSON')
@@ -1891,8 +2103,16 @@ return {
                 )
               ),
               tab === 'canvas' ? h('div', { className: 'vwf-canvas-toolbar' },
-                h('button', { className: 'vwf-btn sm ghost', onClick: addNode }, '＋ ' + t('addNode')),
-                h('button', { className: 'vwf-btn sm ghost danger', disabled: !selectedNodeId, onClick: deleteSelectedNode }, t('deleteNode')),
+                h('div', { className: 'vwf-toolbar-actions' },
+                  h('button', { className: 'vwf-toolbar-action', onClick: addNode },
+                    h('span', { className: 'vwf-toolbar-action-icon' }, '＋'),
+                    h('span', { className: 'vwf-toolbar-action-label' }, t('addNode'))
+                  ),
+                  h('button', { className: 'vwf-toolbar-action danger', disabled: !selectedNodeId, onClick: deleteSelectedNode },
+                    h('span', { className: 'vwf-toolbar-action-icon' }, '−'),
+                    h('span', { className: 'vwf-toolbar-action-label' }, t('deleteNode'))
+                  )
+                ),
                 h('span', { className: 'vwf-muted-sm vwf-toolbar-hint' }, t('connectHint')),
                 h('div', { className: 'vwf-role-zone', title: t('roleMgmtHint') },
                   h('span', { className: 'vwf-role-zone-label' }, '🎭 ' + t('roleLibrary')),
@@ -2223,6 +2443,7 @@ return {
       const [msg, setMsg] = React.useState(null)
       const [providers, setProviders] = React.useState([])
       const [roles, setRoles] = React.useState([])
+      const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false)
       const editorDialogRef = React.useRef(null)
       const editorOpen = !!wf
 
@@ -2262,9 +2483,9 @@ return {
         setWf(clone(w.dsl))
         setDirty(false)
       }
-      const closeEditor = () => { setEditId(null); setWf(null); setDirty(false) }
+      const closeEditor = () => { setConfirmDiscardOpen(false); setEditId(null); setWf(null); setDirty(false) }
       const requestCloseEditor = () => {
-        if (dirty && !window.confirm(t('confirmDiscard'))) return
+        if (dirty) { setConfirmDiscardOpen(true); return }
         closeEditor()
       }
       const onNew = () => {
@@ -2351,7 +2572,16 @@ return {
               onScript,
               onRolesChanged: refetchRoles,
             })
-          )
+          ),
+          confirmDiscardOpen ? h('div', { className: 'vwf-confirm-mask', onClick: () => setConfirmDiscardOpen(false) },
+            h('div', { className: 'vwf-confirm', onClick: (ev) => ev.stopPropagation() },
+              h('div', { className: 'vwf-confirm-title' }, t('confirmDiscard')),
+              h('div', { className: 'vwf-confirm-actions' },
+                h('button', { className: 'vwf-btn', onClick: () => setConfirmDiscardOpen(false) }, t('discardCancel')),
+                h('button', { className: 'vwf-btn danger', onClick: () => { setConfirmDiscardOpen(false); closeEditor() } }, t('discardConfirm'))
+              )
+            )
+          ) : null
         ) : null
       )
     }

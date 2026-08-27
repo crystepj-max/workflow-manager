@@ -305,7 +305,8 @@ return {
           const dir = await fs.resolve(root)
           entries = await fs.listDir(dir)
         } catch (e) {
-          if (strict) throw new Error('内置模板清单读取失败：' + String((e && e.message) || e))
+          // 可选根目录确认不存在（ENOENT）→ 跳过继续下一个根；其余错误 strict 抛出
+          if (strict && !isMissingErr(e)) throw new Error('内置模板清单读取失败：' + String((e && e.message) || e))
           continue
         }
         for (const ent of entries || []) {
@@ -344,7 +345,8 @@ return {
         const dir = await fs.resolve(p.userDir)
         entries = await fs.listDir(dir)
       } catch (e) {
-        if (strict) throw new Error('用户模板清单读取失败：' + String((e && e.message) || e))
+        // 用户模板目录确认不存在（ENOENT）= 空清单；其余错误 strict 抛出
+        if (strict && !isMissingErr(e)) throw new Error('用户模板清单读取失败：' + String((e && e.message) || e))
         return out
       }
       for (const ent of entries || []) {
@@ -616,7 +618,7 @@ return {
         const dsl = projectToVwf(bp)
         out.push({ id: bp.id, name: bp.displayName, description: bp.description || '', builtin: false, dsl: dsl })
       }
-      out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      out.sort((a, b) => (a.builtin === b.builtin ? (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) : a.builtin ? -1 : 1))
       return out
     }
 
@@ -1127,6 +1129,8 @@ return {
     const roleKey = (s) => String(s || '').normalize('NFC').toLowerCase()
     // fs.resolve 句柄 → 子进程 argv 可用的绝对路径字符串（真实句柄含 displayPath）
     const pathOf = (h) => (typeof h === 'string') ? h : (h && (h.displayPath || h.targetKey)) || null
+    // 只有「确认不存在」（ENOENT 类）才算缺失目录；其余错误按瞬时 I/O 失败 fail-closed
+    const isMissingErr = (e) => /ENOENT|no such file|not exist|不存在/i.test(String((e && e.message) || e))
     // 目录优先级（与 vwf.roles 旧版一致）：发起会话仓库根（动态模式，即会话工作区）
     // → fs 服务默认 cwd 相对 'dsh/roles'（静态/web 模式无 agent 会话时兜底尝试）。
     async function roleDirPath() {
@@ -1146,7 +1150,9 @@ return {
       try {
         dir = await fs.resolve(roleDir)
       } catch (e) {
-        return { files: out, state: 'missing', message: '角色目录不存在：' + roleDir + '（' + String((e && e.message) || e) + '）' }
+        // 只有确认不存在（ENOENT）归 missing；resolve 的瞬时/宿主错误按 error fail-closed
+        if (isMissingErr(e)) return { files: out, state: 'missing', message: '角色目录不存在：' + roleDir }
+        return { files: out, state: 'error', message: '角色目录解析失败：' + String((e && e.message) || e) }
       }
       let info = null
       try {
@@ -1239,7 +1245,12 @@ return {
           // 文件系统上 profile 'Analyst' 同样引用 analyst.md 角色文件
           if (n && typeof n.profile === 'string' && roleKey(n.profile) === roleKey(id)) nodes.push({ id: n.id, label: n.label || n.id })
         }
-        if (!nodes.length) return
+        if (!nodes.length) {
+          // 草稿里已移除全部引用 → 草稿状态取代持久化快照（否则会将「将要保存的
+          // 状态」误判为仍被引用而阻止删除/重命名，直到保存后才解除）
+          if (draft) wfRefs.delete(String(workflowId))
+          return
+        }
         const ref = { workflowId: String(workflowId), workflowName: String(workflowName), builtin: !!builtin, nodes }
         if (draft) ref.draft = true
         wfRefs.set(ref.workflowId, ref)

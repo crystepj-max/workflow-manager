@@ -200,6 +200,8 @@ test('AC-3：save 新模板 → 蓝图落盘 + skill 同步（save 即闭环）+
   assert.equal(u.name, '测试工作流')
   assert.equal(u.dsl.entry, 'a')
   assert.ok(u.dsl.nodes.every(n => n.label && n.goal))
+  const firstCustom = list.findIndex(w => !w.builtin)
+  assert.ok(firstCustom === -1 || list.slice(0, firstCustom).every(w => w.builtin), '内置模板置顶，用户模板排在其后')
 })
 
 test('save 蓝图级校验失败（生成器 exit 1）→ 回滚落盘并回传错误（原子性）', async () => {
@@ -945,6 +947,54 @@ test('角色库 复审修复：profile 引用按 roleKey 规范化匹配（大�
   assert.equal(rm.ok, false)
   assert.match(rm.errors[0].message, /仍被 1 个节点使用/)
   assert.ok(fs._files.has(REPO + '/dsh/roles/analyst.md'), '被引用角色未被删除')
+})
+
+test('角色库 三审修复：可选根确认不存在（ENOENT）→ 跳过继续；草稿移除全部引用 → 解除保护', async () => {
+  const fs = makeFs({
+    [REPO + '/dsh/roles/需求分析师.md']: '正文\n',
+    [USER_DIR + '/wf-a.json']: JSON.stringify({
+      id: 'wf-a', displayName: 'A', entry: 'n1',
+      nodes: [{ id: 'n1', profile: '需求分析师', label: 'N1', goal: 'g' }],
+      edges: [],
+    }),
+  })
+  const sub = makeSubprocess({ fs })
+  const origList = fs.listDir
+  // 宿主根内置目录（~/.dsh/.generated）确认不存在 → strict 扫描应跳过而不是失败
+  fs.listDir = async (t) => {
+    const p = t && (t.displayPath || t.targetKey)
+    if (String(p).includes('/.dsh/.generated')) { throw new Error('ENOENT: no such file or directory') }
+    return origList(t)
+  }
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const u = await call(handlers, 'vwf.roles.usage', { id: '需求分析师' })
+  assert.equal(u.ok, true, '可选根 ENOENT 不阻断 usage')
+  assert.equal(u.count, 1, '跳过缺失根后仍统计到引用')
+  fs.listDir = origList
+  // 草稿移除全部引用 → 持久化引用被草稿状态取代（不再误阻止删除/重命名）
+  const draftNoRef = {
+    id: 'wf-a', name: 'A', entry: 'n1', control: { maxRounds: 3 },
+    nodes: [{ id: 'n1', profile: 'dev', label: 'N1', goal: 'g' }],
+    edges: [],
+  }
+  const u2 = await call(handlers, 'vwf.roles.usage', { id: '需求分析师', draftDsl: draftNoRef })
+  assert.equal(u2.ok, true)
+  assert.equal(u2.count, 0, '草稿移除引用后不再计入（待保存状态以草稿为准）')
+})
+
+test('角色库 三审修复：roleDir resolve 瞬时失败按 error fail-closed（ENOENT 才归 missing）', async () => {
+  const fs = makeFs({ [REPO + '/dsh/roles/需求分析师.md']: '正文\n' })
+  const origResolve = fs.resolve
+  fs.resolve = async (path) => {
+    if (path === REPO + '/dsh/roles') throw new Error('EIO 模拟 resolve 瞬时失败')
+    return origResolve(path)
+  }
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const c = await call(handlers, 'vwf.roles.create', { name: '新角色', content: 'x\n' })
+  assert.equal(c.ok, false, 'resolve 瞬时失败不得当空库放行')
+  assert.match(c.errors[0].message, /解析失败|读取失败/)
+  fs.resolve = origResolve
 })
 
 test('内置双根：仓库 .generated 为空时从 ~/.dsh/.generated 加载（homeBuiltinDir 回归）', async () => {

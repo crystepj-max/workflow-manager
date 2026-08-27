@@ -223,18 +223,132 @@ test('模板列表渲染并打开全局编辑层', async () => {
   assert.ok(byText(container, '节点配置'), '默认选中首节点，节点表单渲染')
 })
 
-test('顶部操作区：按钮独立、提示文字可换行让位', async () => {
+test('顶部操作区：新增/删除节点使用图标分组样式', async () => {
   const toolbar = container.querySelector('.vwf-canvas-toolbar')
   assert.ok(toolbar, '顶部操作区渲染')
-  const labels = Array.from(toolbar.querySelectorAll('button')).map((el) => el.textContent)
-  assert.ok(labels.includes('＋ 新增节点'), '新增节点按钮独立存在')
-  assert.ok(labels.includes('删除节点'), '删除节点按钮独立存在')
+  const actions = Array.from(toolbar.querySelectorAll('.vwf-toolbar-action'))
+  assert.ok(actions.length >= 2, '新增/删除节点成组展示')
+  const labels = Array.from(toolbar.querySelectorAll('.vwf-toolbar-action-label')).map((el) => el.textContent)
+  assert.ok(labels.includes('新增节点'), '新增节点按钮独立存在')
+  assert.ok(labels.includes('删除节点'), '删除节点按钮带减号图标')
+  assert.ok(toolbar.querySelectorAll('.vwf-toolbar-action-icon').length >= 2, '操作带圆形图标')
   assert.ok(toolbar.querySelector('.vwf-toolbar-hint'), '连接提示使用独立可换行区域')
   const css = styleText.join('\n')
   assert.ok(css.includes('.vwf-canvas-toolbar { display:flex;'), '操作区使用 flex 排布')
   assert.ok(css.includes('flex-wrap:wrap'), '窄屏允许操作区换行')
-  assert.ok(css.includes('.vwf-canvas-toolbar .vwf-btn { flex:0 0 auto;'), '按钮不压缩不变形')
-  assert.ok(css.includes('.vwf-toolbar-hint { flex:1 1 240px;'), '提示文字占用剩余空间并让位')
+  assert.ok(css.includes('.vwf-toolbar-actions {'), '操作以分组胶囊承载')
+  assert.ok(css.includes('.vwf-toolbar-action.danger:disabled {'), '删除操作禁用态保持完整红色')
+})
+
+test('撤销/重做：恢复节点增删并清空重做分支', async () => {
+  const undoBtn = container.querySelector('.vwf-history-group .vwf-history-btn:first-child')
+  const redoBtn = container.querySelector('.vwf-history-group .vwf-history-btn:last-child')
+  assert.ok(undoBtn && redoBtn, '存在撤销/重做按钮')
+  assert.equal(undoBtn.disabled, true, '初始撤销禁用')
+  assert.equal(redoBtn.disabled, true, '初始重做禁用')
+  const addAction = container.querySelector('.vwf-toolbar-action:first-child')
+  const nodeLabels = () => Array.from(container.querySelectorAll('text.vwf-node-label')).map((el) => el.textContent)
+  await act(async () => {
+    addAction.click()
+    await flush()
+  })
+  assert.ok(nodeLabels().includes('节点2'), '新增后可撤销')
+  assert.equal(undoBtn.disabled, false, '撤销可用')
+  await act(async () => {
+    undoBtn.click()
+    await flush()
+  })
+  assert.ok(!nodeLabels().includes('节点2'), '撤销移除刚新增的节点')
+  assert.equal(redoBtn.disabled, false, '重做可用')
+  await act(async () => {
+    redoBtn.click()
+    await flush()
+  })
+  assert.ok(nodeLabels().includes('节点2'), '重做恢复节点')
+  await act(async () => {
+    undoBtn.click()
+    await flush()
+  })
+  assert.ok(!nodeLabels().includes('节点2'), '再次撤销回到初始状态，供后续测试复用')
+  const deleteAction = container.querySelector('.vwf-toolbar-action.danger')
+  assert.equal(deleteAction.disabled, false, '撤销后选中真实存在的首节点，删除按钮指向有效节点')
+  assert.ok(nodeLabels().includes('节点1'), '撤销后仍选中首个节点')
+
+  // JSON 非法中间态也可回退
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, '{"nodes":')
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+  })
+  assert.equal(undoBtn.disabled, false, '非法 JSON 输入后也可撤销')
+  await act(async () => {
+    undoBtn.click()
+    await flush()
+  })
+  const textarea = container.querySelector('textarea.vwf-json-edit')
+  assert.ok(textarea.value.includes('"node-1"'), '撤销恢复合法 JSON 草稿')
+  await act(async () => {
+    redoBtn.click()
+    await flush()
+  })
+  assert.equal(container.querySelector('textarea.vwf-json-edit').value, '{"nodes":', '重做恢复非法 JSON 中间态')
+  await act(async () => {
+    undoBtn.click()
+    await flush()
+  })
+  assert.ok(container.querySelector('textarea.vwf-json-edit').value.includes('"node-1"'), '再次撤销回到合法 JSON')
+  await act(async () => {
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+})
+
+test('撤销历史上限：连续编辑超过上限后撤销不越界（栈封顶 50）', async () => {
+  const undoBtn = container.querySelector('.vwf-history-group .vwf-history-btn:first-child')
+  const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+  await act(async () => {
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    const base = JSON.parse(textarea.value)
+    for (let i = 1; i <= 60; i += 1) {
+      const next = JSON.parse(JSON.stringify(base))
+      next.control = next.control || {}
+      next.control.maxRounds = (i % 9) + 1
+      setter.call(textarea, JSON.stringify(next, null, 2))
+      textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    }
+    await flush()
+  })
+  assert.equal(undoBtn.disabled, false, '60 次连续 JSON 编辑后可撤销')
+  let clicks = 0
+  for (let i = 0; i < 80; i += 1) {
+    if (undoBtn.disabled) break
+    await act(async () => {
+      undoBtn.click()
+      await flush()
+    })
+    clicks += 1
+  }
+  assert.ok(clicks <= 50, '撤销次数受历史上限约束（实际 ' + clicks + '）')
+  assert.ok(clicks >= 1, '至少可撤销一次')
+  assert.equal(undoBtn.disabled, true, '到达上限后撤销禁用')
+  const textarea = container.querySelector('textarea.vwf-json-edit')
+  const restored = JSON.parse(textarea.value)
+  assert.equal(restored.id, 'wf1', '撤销终点为封顶时保留的草稿（不越界、不损坏）')
+  assert.ok((restored.nodes || []).length > 0, '草稿结构未损坏')
+  await act(async () => {
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
 })
 
 test('新增节点：画布出现新节点并选中', async () => {
@@ -289,7 +403,15 @@ test('拖拽连线：从节点右把手拖到结束节点创建新边', async ()
     assert.ok(handles.length >= 2, '存在源把手（node-1、node-2）')
     const srcHandle = handles[0]
     srcHandle.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 200, clientY: 80 }))
-    // 拖到 $end 节点位置（rank=1；node-2 加入后 $end 纵向居中于 y≈144..188 → 用 clientY 200）
+    // 拖到 $end 节点位置（rank=1：图形坐标 x∈[392,532]；scale=1.2 → clientX 500 → 416.7）
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 500, clientY: 200 }))
+    await flush()
+  })
+  // act 结束后 React 已提交：拖线指向的目标节点应带高亮标记
+  const targetHit = container.querySelector('[data-vwf-connect-target="true"]')
+  assert.ok(targetHit, '拖线指向目标节点时高亮标记出现')
+  assert.equal(targetHit.closest('g').getAttribute('data-node-id'), '$end', '高亮目标为拖动指向的节点')
+  await act(async () => {
     dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 480, clientY: 200 }))
     await flush()
   })
@@ -511,6 +633,9 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
   const paths = Array.from(svg.querySelectorAll('path.vwf-edge-flow'))
   assert.ok(paths[3].getAttribute('d').includes(' L '), '跨节点 success 边改走正交外围车道')
   assert.ok(paths[4].getAttribute('d').includes(' L '), 'failure 回路边改走正交外围车道')
+  // 平行直连边（start→middle 两条条件边）：共享起点槽位但曲线分离（命中路径不重叠，
+  // 否则后画的 path 会拦截所有点击，前一条边无法在画布上选中）
+  assert.notEqual(paths[0].getAttribute('d'), paths[1].getAttribute('d'), '平行直连边曲线相互分离')
 
   const middleGroup = Array.from(svg.querySelectorAll('g')).find((g) => g.textContent.includes('汇总') && g.textContent.includes('worker'))
   const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(middleGroup.getAttribute('transform'))
@@ -543,6 +668,75 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
       assert.equal(overlap, 0, '节点主体不得互相覆盖')
     }
   }
+
+  // 规则 6：所有边终点落在目标节点左边框垂直居中（不做目标锚点间隔）
+  const endYOf = (d) => Number(d.trim().split(/[\s,]+/).pop())
+  const nodeCenterY = (g) => {
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    const h = Number(g.querySelector('rect').getAttribute('height'))
+    return Number(m[2]) + h / 2
+  }
+  // 规则 6：每条边的终点都落在目标节点左边框垂直居中（数据驱动，取自 dsl 与 DOM 实测高度）
+  complexDsl.edges.forEach((e, i) => {
+    const g = svg.querySelector('g[data-node-id="' + e.to + '"]')
+    assert.ok(g, '画布存在目标节点 ' + e.to)
+    assert.equal(endYOf(paths[i].getAttribute('d')), nodeCenterY(g), '边 ' + i + ' 终点在 ' + e.to + ' 左边框垂直居中')
+  })
+  // 规则 5：同源起点按「上绕 → 直连 → 下绕」自上而下间隔，与边在 dsl 中的出现顺序无关；
+  // 所有起点圆点与对应边同色，且精确落在源节点右边框（transform.x + rect.width）。
+  const starts = Array.from(svg.querySelectorAll('circle.vwf-edge-start'))
+  assert.equal(starts.length, paths.length, '每条边有一个起点圆点')
+  const nodeRightX = (id) => {
+    const g = svg.querySelector('g[data-node-id="' + id + '"]')
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return Number(m[1]) + Number(g.querySelector('rect').getAttribute('width'))
+  }
+  complexDsl.edges.forEach((e, i) => {
+    assert.equal(starts[i].getAttribute('fill'), paths[i].getAttribute('stroke'), '边 ' + i + ' 起点圆点与边同色')
+    assert.equal(Number(starts[i].getAttribute('cx')), nodeRightX(e.from), '边 ' + i + ' 起点落在 ' + e.from + ' 右边框')
+  })
+  const rankOf = { up: 0, direct: 1, down: 2 }
+  // 路径类型判定：命令字母 + 数字序列解析（与空格/逗号格式无关）；直连为 C 曲线，绕行为 L 折线
+  const kindOf = (i) => {
+    const d = paths[i].getAttribute('d')
+    if (/C/.test(d)) return 'direct'
+    const nums = d.match(/-?[\d.]+/g).map(Number)
+    const yStart = nums[1]
+    const laneY = nums[5]
+    return laneY < yStart ? 'up' : 'down'
+  }
+  const perSource = new Map()
+  complexDsl.edges.forEach((e, i) => {
+    const list = perSource.get(e.from) || []
+    list.push({ idx: i, kind: kindOf(i) })
+    perSource.set(e.from, list)
+  })
+  for (const [src, list] of perSource) {
+    const cyOf = (idx) => Number(starts[idx].getAttribute('cy'))
+    const sorted = list.slice().sort((a, b) => rankOf[a.kind] - rankOf[b.kind] || a.idx - b.idx)
+    for (let k = 1; k < sorted.length; k += 1) {
+      // 优化 3：固定三槽位——同类边共享槽位（相等），跨类严格上升（上<直连<下）
+      assert.ok(cyOf(sorted[k].idx) >= cyOf(sorted[k - 1].idx),
+        '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 自下而下不降')
+      if (sorted[k].kind !== sorted[k - 1].kind) {
+        assert.ok(cyOf(sorted[k].idx) > cyOf(sorted[k - 1].idx),
+          '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 跨类严格上升')
+      }
+    }
+    // 直连槽位 = 节点右边框垂直居中（与连线源把手位置一致）
+    for (const item of sorted) {
+      if (item.kind === 'direct') {
+        const g = svg.querySelector('g[data-node-id="' + src + '"]')
+        const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+        const center = Number(m[2]) + Number(g.querySelector('rect').getAttribute('height')) / 2
+        assert.equal(cyOf(item.idx), center, '源 ' + src + ' 直连起点与节点右框垂直居中一致')
+      }
+    }
+  }
+  // 连接把手：默认隐藏（无对应边的节点右侧不出现无意义灰点），节点悬停时才显示
+  const handleCss = styleText.join('\n')
+  assert.ok(/\.vwf-handle\s*\{[^}]*opacity:\s*0/i.test(handleCss), '连接把手默认透明（悬停显示）')
+  assert.ok(/g:hover\s*>\s*\.vwf-handle\s*\{[^}]*opacity:\s*1/i.test(handleCss), '悬停节点时显示把手')
 })
 
 test('防重叠：入口变化会触发画布布局重算', async () => {
@@ -581,7 +775,45 @@ test('防重叠：入口变化会触发画布布局重算', async () => {
   assert.ok(yOf('b') < yOf('a'), 'entry 改为 b 后 B 排在 A 上方')
 })
 
-test('编辑器关闭：未保存草稿需要确认', async () => {
+test('自环边：布局不进入死循环，终点仍在节点左边框垂直居中', async () => {
+  const selfLoopDsl = {
+    id: 'self-loop',
+    name: '自环测试',
+    entry: 'a',
+    control: { maxRounds: 9 },
+    nodes: [
+      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'b', profile: 'dev', label: 'B' },
+    ],
+    edges: [
+      { from: 'a', to: 'b', on: 'success' },
+      { from: 'a', to: 'a', on: 'success' },
+    ],
+  }
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(selfLoopDsl, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  const svg = container.querySelector('svg.vwf-svg')
+  const paths = Array.from(svg.querySelectorAll('path.vwf-edge-flow'))
+  assert.equal(paths.length, 2, '自环边正常渲染不崩溃')
+  const endYOf = (d) => Number(d.trim().split(/[\s,]+/).pop())
+  const aG = container.querySelector('g[data-node-id="a"]')
+  const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(aG.getAttribute('transform'))
+  const aCenterY = Number(m[2]) + Number(aG.querySelector('rect').getAttribute('height')) / 2
+  assert.equal(endYOf(paths[1].getAttribute('d')), aCenterY, '自环边终点仍在节点左边框垂直居中')
+})
+
+test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async () => {
   // 用全新渲染隔离前序测试留下的编辑器状态
   const fresh = document.createElement('div')
   document.body.appendChild(fresh)
@@ -606,26 +838,55 @@ test('编辑器关闭：未保存草稿需要确认', async () => {
     addBtn.click()
     await flush()
   })
-  // 拒绝关闭 → 询问后保留草稿
-  let confirmCalls = 0
-  dom.window.confirm = () => { confirmCalls += 1; return false }
+  // 阻断原生 confirm：确认层为产品样式，全程不得调用浏览器原生确认框
+  let nativeConfirmCalls = 0
+  const origConfirm = dom.window.confirm
+  dom.window.confirm = () => { nativeConfirmCalls += 1; return false }
+  // Escape → 弹出统一确认层，而不是浏览器原生 confirm
   await act(async () => {
     fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
     await flush()
-    assert.equal(confirmCalls, 1, 'Escape 关闭前询问放弃改动')
-    assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '拒绝后编辑器仍打开')
   })
-  // 接受关闭 → 询问后关闭
-  dom.window.confirm = () => { confirmCalls += 1; return true }
+  const confirmMask = fresh.querySelector('.vwf-confirm-mask')
+  assert.ok(confirmMask, '未保存关闭时显示统一样式确认弹窗')
+  assert.ok(confirmMask.querySelector('.vwf-confirm'), '确认层含产品样式对话框')
+  assert.ok(byText(fresh, '我再想想'), '存在「我再想想」按钮')
+  assert.ok(byText(fresh, '不改了'), '存在「不改了」按钮')
+  const maskRect = confirmMask.getBoundingClientRect ? confirmMask.getBoundingClientRect() : null
+  if (maskRect && maskRect.width) {
+    // jsdom 无法布局时跳过位置断言；真实 Chromium 证据另在 docs 中采集
+    assert.ok(Math.abs((maskRect.top + maskRect.height / 2) - (window.innerHeight / 2)) < 2, '确认弹窗纵向居中')
+    assert.ok(Math.abs((maskRect.left + maskRect.width / 2) - (window.innerWidth / 2)) < 2, '确认弹窗横向居中')
+  }
+  await act(async () => {
+    byText(fresh, '我再想想').click()
+    await flush()
+  })
+  assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '点击我再想想后编辑器仍打开')
+  assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '我再想想关闭确认弹窗')
+  // 再次取消 → 点击遮罩空白关闭（编辑器保留）
   await act(async () => {
     fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
     await flush()
-    assert.equal(confirmCalls, 2, '接受关闭前再次询问放弃改动')
-    assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '接受后编辑器关闭')
   })
+  assert.ok(fresh.querySelector('.vwf-confirm-mask'), '再次取消弹出确认层')
+  await act(async () => {
+    fresh.querySelector('.vwf-confirm-mask').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    await flush()
+  })
+  assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '点击遮罩后编辑器仍打开')
+  assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '点击遮罩关闭确认弹窗')
+  // 再次取消 → 点击「不改了」关闭
+  await act(async () => {
+    fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
+    await flush()
+    byText(fresh, '不改了').click()
+    await flush()
+  })
+  assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '点击不改了后编辑器关闭')
+  assert.equal(nativeConfirmCalls, 0, '全程未调用 window.confirm')
+  dom.window.confirm = origConfirm
   // 干净状态（无未保存改动）直接关闭，不询问
-  let cleanConfirmCalls = 0
-  dom.window.confirm = () => { cleanConfirmCalls += 1; return false }
   await act(async () => {
     byText(fresh, '编辑').click()
     await flush()
@@ -634,7 +895,7 @@ test('编辑器关闭：未保存草稿需要确认', async () => {
   await act(async () => {
     fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
     await flush()
-    assert.equal(cleanConfirmCalls, 0, '无未保存改动不询问')
+    assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '干净状态不显示确认弹窗')
     assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '干净编辑器直接关闭')
   })
   await act(async () => {
