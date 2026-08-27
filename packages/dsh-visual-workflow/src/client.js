@@ -87,6 +87,51 @@ return {
       profile: '角色',
       selectProfile: '选择角色',
       profileHelp: '角色对应工作区 dsh/roles/<角色>.md 文件，运行时会把角色正文提供给 AI。',
+      manageRoles: '管理角色',
+      roleLibrary: '角色库',
+      roleManager: '角色管理',
+      roleMgmtHint: '节点配置负责选择角色，这里负责管理角色资产。',
+      builtinRoles: '内置角色',
+      customRoles: '自定义角色',
+      noCustomRoles: '暂无自定义角色',
+      newRole: '新增角色',
+      viewRole: '查看',
+      editRole: '编辑',
+      deleteRole: '删除',
+      back: '返回',
+      roleName: '角色名称',
+      roleNamePlaceholder: '例如：需求分析师',
+      roleFromSource: '来自「{src}」，保存后将创建独立副本。',
+      roleContent: '角色配置',
+      roleContentPlaceholder: '描述该角色的定位、职责、工作流程与产出要求（Markdown）。',
+      roleContentHelp: '保存到工作区 dsh/roles/<角色名称>.md；运行时该文件内容将提供给本节点 AI。',
+      createFromRole: '基于此角色创建自定义角色',
+      cloneFromRole: '基于此创建',
+      builtinRoleBadge: '内置角色',
+      customRoleBadge: '自定义角色',
+      saveRole: '保存角色',
+      cancelRole: '取消',
+      roleDupName: '已存在同名角色，请使用其他名称。',
+      roleNameRequired: '角色名称不能为空',
+      roleContentRequired: '角色配置不能为空',
+      roleNameInvalid: '角色名称不能为空，且最长 64 字符、不含非法字符（/\\:*?"<>|）',
+      roleViewBuiltin: '内置角色为系统标准模板：不可修改、不可删除，仅可查看、选择使用或基于其创建自定义角色。',
+      roleDeleteTitle: '确定删除「',
+      roleDeleteTitleSuffix: '」吗？',
+      roleDeleteDesc: '删除后该角色将无法恢复和继续使用。',
+      roleDeleteBlocked: '「{name}」仍被 {n} 个节点使用，无法删除。请先将这些节点更换为其他角色，解除全部引用后再删除。',
+      roleRenameBlocked: '该角色仍被 {n} 个节点使用，重命名会导致这些引用全部失效；请先解除引用，或使用「基于此角色创建自定义角色」新建变体。',
+      roleUsageConfirm: '此角色当前被 {n} 个工作流节点使用，保存修改后这些位置将共同使用新的角色配置。',
+      confirmSaveRole: '确认并保存',
+      roleRefs: '引用位置',
+      roleBlockedTitle: '无法删除自定义角色',
+      roleUsageTitle: '修改影响范围确认',
+      roleLoading: '加载中…',
+      roleSaved: '角色已保存 ',
+      roleDeleted: '角色已删除 ',
+      roleSaveFailed: '保存失败：',
+      roleUsageFailed: '引用统计失败，未保存修改：',
+      roleDeleteFailed: '删除失败：',
       agent: 'Agent',
       selectAgent: '选择 Agent',
       model: '模型',
@@ -189,6 +234,51 @@ return {
       profile: 'Profile',
       selectProfile: 'Select profile',
       profileHelp: 'A profile maps to dsh/roles/<profile>.md in the workspace; its content is provided to the AI at runtime.',
+      manageRoles: 'Manage roles',
+      roleLibrary: 'Role Library',
+      roleManager: 'Role Manager',
+      roleMgmtHint: 'Node config picks a role; this panel manages role assets.',
+      builtinRoles: 'Built-in Roles',
+      customRoles: 'Custom Roles',
+      noCustomRoles: 'No custom roles yet',
+      newRole: 'New Role',
+      viewRole: 'View',
+      editRole: 'Edit',
+      deleteRole: 'Delete',
+      back: 'Back',
+      roleName: 'Role name',
+      roleNamePlaceholder: 'e.g. Requirements Analyst',
+      roleFromSource: 'From "{src}"; saving creates an independent copy.',
+      roleContent: 'Role configuration',
+      roleContentPlaceholder: 'Describe the role positioning, duties, workflow and output requirements (Markdown).',
+      roleContentHelp: 'Saved to dsh/roles/<role-name>.md in the workspace; the file content is given to the node AI at runtime.',
+      createFromRole: 'Create custom role from this role',
+      cloneFromRole: 'Clone from this',
+      builtinRoleBadge: 'Built-in',
+      customRoleBadge: 'Custom',
+      saveRole: 'Save Role',
+      cancelRole: 'Cancel',
+      roleDupName: 'A role with the same name already exists; please use another name.',
+      roleNameRequired: 'Role name is required',
+      roleContentRequired: 'Role configuration is required',
+      roleNameInvalid: 'Role name is required, at most 64 chars, no illegal chars (/\\:*?"<>|)',
+      roleViewBuiltin: 'Built-in roles are system standard templates: read-only; you may view, select, or create a custom variant from one.',
+      roleDeleteTitle: 'Delete role "',
+      roleDeleteTitleSuffix: '"?',
+      roleDeleteDesc: 'After deletion the role cannot be recovered or reused.',
+      roleDeleteBlocked: '"{name}" is still used by {n} node(s) and cannot be deleted. Switch those nodes to another role first, then delete after all references are gone.',
+      roleRenameBlocked: 'This role is still used by {n} node(s); renaming would break those references. Remove the references first, or use "Create custom role from this role" to make a variant.',
+      roleUsageConfirm: 'This role is used by {n} node(s); after saving, those positions will share the new configuration.',
+      confirmSaveRole: 'Confirm & Save',
+      roleRefs: 'References',
+      roleBlockedTitle: 'Cannot delete custom role',
+      roleUsageTitle: 'Impact confirmation',
+      roleLoading: 'Loading…',
+      roleSaved: 'Role saved ',
+      roleDeleted: 'Role deleted ',
+      roleSaveFailed: 'Save failed: ',
+      roleUsageFailed: 'Failed to read role usage; change not saved: ',
+      roleDeleteFailed: 'Delete failed: ',
       agent: 'Agent',
       selectAgent: 'Select agent',
       model: 'Model',
@@ -335,6 +425,9 @@ return {
 .vwf-history-group { display:inline-flex; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:999px; background:var(--dsw-alias-bg-layer-2, #242424); overflow:hidden; }
 .vwf-history-group .vwf-history-btn { border:0; border-radius:0; background:transparent; font-size:14px; min-width:28px; padding:3px 8px; }
 .vwf-history-group .vwf-history-btn:disabled { opacity:.45; cursor:not-allowed; }
+/* 角色库常驻区（issue-58 反馈）：画布右上角胶囊区；管理/新增入口不再依赖自定义角色数量 */
+.vwf-role-zone { margin-left:auto; display:inline-flex; align-items:center; gap:2px; padding:3px 6px 3px 12px; border:1px solid var(--dsw-alias-brand-primary, #4d9fff); border-radius:999px; background:var(--dsw-alias-bg-layer-2, #242424); flex:0 0 auto; }
+.vwf-role-zone-label { font-size:11px; font-weight:700; letter-spacing:.08em; color:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #4d9fff)); margin-right:8px; white-space:nowrap; }
 .vwf-svg { display:block; user-select:none; touch-action:none; }
 .vwf-menu { position:absolute; z-index:20; min-width:160px; padding:4px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-overlay, #2d2d2d); box-shadow:0 8px 28px rgba(0,0,0,.4); }
 .vwf-menu-item { display:block; width:100%; text-align:left; padding:7px 10px; border:0; border-radius:7px; background:transparent; color:var(--dsw-alias-label-primary, #e8e8e8); font-size:12px; cursor:pointer; }
@@ -355,6 +448,17 @@ return {
 .vwf-dialog-desc { font-size:12px; color:var(--dsw-alias-label-secondary, #9a9a9a); }
 .vwf-dialog-issues { max-height:300px; overflow:auto; display:flex; flex-direction:column; gap:6px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; padding:10px; background:var(--dsw-alias-bg-base, #181818); }
 .vwf-dialog-issue { padding:6px 10px; border-radius:8px; background:var(--dsw-alias-bg-layer-2, #242424); color:var(--dsw-alias-state-error-primary, #e5484d); font-size:12px; }
+/* ── 角色库管理（issue-58）── */
+.vwf-role-mgr { width:min(780px, 94vw); max-height:88vh; display:flex; flex-direction:column; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:14px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:12px; overflow:hidden; }
+.vwf-role-mgr-body { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:10px; }
+.vwf-role-section-title { font-size:13px; font-weight:600; color:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #4d9fff)); margin-top:6px; }
+.vwf-role-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-layer-2, #242424); flex-wrap:wrap; }
+.vwf-role-row .vwf-role-name { font-weight:600; font-size:13px; }
+.vwf-role-row .vwf-role-summary { color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:400px; min-width:0; }
+.vwf-role-content { white-space:pre-wrap; font-size:11px; line-height:1.55; max-height:340px; overflow:auto; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; padding:10px; background:var(--dsw-alias-bg-base, #181818); }
+.vwf-role-refs { display:flex; flex-direction:column; gap:6px; max-height:200px; overflow:auto; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; padding:8px 10px; background:var(--dsw-alias-bg-base, #181818); font-size:11px; }
+.vwf-role-ref-line { color:var(--dsw-alias-label-secondary, #9a9a9a); }
+.vwf-role-empty { padding:14px; border:1px dashed var(--dsw-alias-border-l2, #333); border-radius:10px; color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:12px; text-align:center; }
 .vwf-status { font-size:11px; }
 .vwf-status.ok { color:var(--dsw-alias-state-success-primary, #34d399); }
 .vwf-status.err { color:var(--dsw-alias-state-error-primary, #e5484d); }
@@ -689,11 +793,26 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     }
 
     function VwfSelect(props) {
+      // 支持分组选项：option 带 group 时按连续 group 渲染 <optgroup>（角色选择区分
+      // 内置/自定义；无 group 的选项（占位、兜底值）平铺在 optgroup 之外）。
+      const renderOpt = (o) => h('option', { key: o.value, value: o.value, title: o.title || '' }, o.label)
+      const groups = []
+      const flat = []
+      let cur = null
+      for (const o of props.options || []) {
+        if (o && o.group) {
+          if (!cur || cur.group !== o.group) { cur = { group: o.group, items: [] }; groups.push(cur) }
+          cur.items.push(o)
+        } else {
+          flat.push(o)
+          cur = null
+        }
+      }
       return h('select', {
         className: 'vwf-select' + (props.invalid ? ' err' : ''),
         value: props.value,
         onChange: (ev) => props.onChange(ev.target.value),
-      }, (props.options || []).map(o => h('option', { key: o.value, value: o.value, title: o.title || '' }, o.label)))
+      }, flat.map(renderOpt).concat(groups.map(g => h('optgroup', { key: g.group, label: g.group }, g.items.map(renderOpt)))))
     }
 
     // ── SVG 画布（编辑态与运行看板共用；readOnly 时无把手/菜单/连线）─────────
@@ -1164,8 +1283,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       if (curModel && modelOpts.indexOf(curModel) < 0) modelOpts.push(curModel)
 
       const roles = props.roles || []
-      const roleOpts = roles.map(r => r.id)
-      if (node.profile && roleOpts.indexOf(node.profile) < 0) roleOpts.push(node.profile)
+      // 角色选择区分内置/自定义（issue-58）：分组下拉 + 空自定义提示 + 管理入口
+      const builtinRoles = roles.filter(r => r.builtin)
+      const customRoles = roles.filter(r => !r.builtin)
+      const roleLabel = (role) => (role && role.summary ? role.id + ' — ' + role.summary.slice(0, 24) : (role ? role.id : ''))
+      const roleOptions = [{ value: '', label: t('selectProfile') }]
+        .concat(builtinRoles.map(role => ({ value: role.id, label: roleLabel(role), title: role.summary || '', group: t('builtinRoles') })))
+        .concat(customRoles.map(role => ({ value: role.id, label: roleLabel(role), title: role.summary || '', group: t('customRoles') })))
+      // 当前值不在清单（旧工作流/宿主脏数据）时兜底保留展示
+      if (node.profile && !roles.some(r => r.id === node.profile)) roleOptions.push({ value: node.profile, label: node.profile, title: '' })
 
       return h('div', { className: 'vwf-section' },
         h('div', { className: 'vwf-row' },
@@ -1201,10 +1327,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         h(Field, { label: t('profile'), required: true, help: t('profileHelp'), errors: errorsFor('profile') },
           h(VwfSelect, {
             value: node.profile || '', invalid: errorsFor('profile').length > 0,
-            options: [{ value: '', label: t('selectProfile') }].concat(roleOpts.map(id => {
-              const role = roles.find(r => r.id === id)
-              return { value: id, label: role && role.summary ? id + ' — ' + role.summary.slice(0, 24) : id, title: role ? role.summary : '' }
-            })),
+            options: roleOptions,
             onChange: (v) => props.onUpdate(node.id, { profile: v || null }),
           })
         ),
@@ -1361,6 +1484,278 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       )
     }
 
+    // ── 角色库管理（issue-58）─────────────────────────────────────────────
+    // 从节点配置的「管理角色」进入：列表（内置/自定义分区）→ 查看内置（只读 +
+    // 基于此角色创建）→ 编辑/创建表单（名称唯一校验、被引用角色保存前影响范围
+    // 确认、重命名仅零引用放行）→ 删除（零引用二次确认 / 有引用阻止并展示引用
+    // 位置）。覆盖在编辑器之上（fixed 遮罩），节点未提交的草稿状态不受影响。
+    function RoleManager(props) {
+      const [roles, setRoles] = React.useState(null)
+      const [view, setView] = React.useState(props.initialCreate ? 'form' : 'list')
+      const [formMode, setFormMode] = React.useState(props.initialCreate ? 'create' : 'edit')
+      const [current, setCurrent] = React.useState(null) // 查看/编辑中的角色详情（创建来源）
+      const [draftName, setDraftName] = React.useState('')
+      const [draftContent, setDraftContent] = React.useState('')
+      const [error, setError] = React.useState(null)
+      const [confirm, setConfirm] = React.useState(null) // {kind:'delete'|'blocked'|'impact', role?, usage?, name?, content?}
+      const [saving, setSaving] = React.useState(false)
+      const refetch = React.useCallback(() => {
+        host.call('vwf.roles').then(r => setRoles((r && r.roles) || [])).catch(() => setRoles([]))
+      }, [])
+      React.useEffect(() => { refetch() }, [])
+      const fmt = (tpl, vars) => {
+        let s = String(tpl || '')
+        for (const k of Object.keys(vars || {})) s = s.split('{' + k + '}').join(String(vars[k]))
+        return s
+      }
+
+      const openView = (id) => {
+        setCurrent(null); setError(null); setView('view')
+        host.call('vwf.roles.get', { id }).then((r) => {
+          if (r && r.ok) setCurrent(r.role)
+          else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
+        }).catch((e) => setError(String(e)))
+      }
+      const openEdit = (id) => {
+        setCurrent(null); setError(null)
+        host.call('vwf.roles.get', { id }).then((r) => {
+          if (r && r.ok) {
+            setCurrent(r.role)
+            setDraftName(r.role.id)
+            setDraftContent(r.role.content || '')
+            setFormMode('edit')
+            setView('form')
+          } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
+        }).catch((e) => setError(String(e)))
+      }
+      const openCreate = (source) => {
+        setCurrent(source || null)
+        setDraftName(source ? source.id + ' - 自定义' : '')
+        setDraftContent(source ? (source.content || '') : '')
+        setFormMode('create')
+        setError(null)
+        setView('form')
+      }
+      // 自定义角色克隆：与内置「基于此角色创建」同路径（详情预填 + 走 create），
+      // 但 current 保持 null —— create 分支用 current.builtin===false 判定编辑，
+      // 克隆自定义角色必须走新建，否则会被当作 update 修改原角色。
+      const openCloneCustom = (role) => {
+        setCurrent(null); setError(null); setView('form'); setFormMode('create')
+        host.call('vwf.roles.get', { id: role.id }).then((r) => {
+          if (r && r.ok) {
+            setDraftName(r.role.id + ' - 自定义')
+            setDraftContent(r.role.content || '')
+          } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
+        }).catch((e) => setError(String(e)))
+      }
+      const validForm = () => {
+        const name = draftName.trim()
+        if (!name || name.length > 64 || /[\\/:*?"<>|\x00-\x1F\x7F]/.test(name)) { setError(t('roleNameInvalid')); return null }
+        if (!draftContent.trim()) { setError(t('roleContentRequired')); return null }
+        const key = (s) => String(s || '').normalize('NFC').toLowerCase()
+        const dup = (roles || []).some(r => key(r.id) === key(name) && (!current || r.id !== current.id))
+        if (dup) { setError(t('roleDupName')); return null }
+        return name
+      }
+      const submitForm = (name, content) => {
+        const editingCustom = !!(current && current.builtin === false)
+        setError(null)
+        setSaving(true)
+        const call = editingCustom
+          ? host.call('vwf.roles.update', { id: current.id, name: name, content: content, draftDsl: props.draftDsl })
+          : host.call('vwf.roles.create', { name: name, content: content })
+        call.then((r) => {
+          if (r && r.ok) {
+            if (props.onChanged) props.onChanged()
+            refetch()
+            setView('list')
+            setCurrent(null)
+          } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
+        }).catch((e) => setError(t('roleSaveFailed') + String(e))).then(() => setSaving(false))
+      }
+      const save = () => {
+        const name = validForm()
+        if (!name) return
+        const editingCustom = !!(current && current.builtin === false)
+        if (!editingCustom) { submitForm(name, draftContent); return }
+        host.call('vwf.roles.usage', { id: current.id, draftDsl: props.draftDsl }).then((u) => {
+          if (!u || u.ok !== true) {
+            // 宿主失败以 ok:false 解析（而非 reject）：同样必须保持表单打开。
+            setError(t('roleUsageFailed') + ((u && u.errors && u.errors[0] && u.errors[0].message) || ''))
+            return
+          }
+          const used = u.count > 0
+          if (name !== current.id && used) {
+            setError(fmt(t('roleRenameBlocked'), { n: u.count }))
+            return
+          }
+          if (used) setConfirm({ kind: 'impact', usage: u, name: name, content: draftContent })
+          else submitForm(name, draftContent)
+        }).catch((e) => {
+          // fail-closed：引用统计失败时保持表单打开并展示错误，禁止绕过影响确认保存。
+          setError(t('roleUsageFailed') + String(e))
+        })
+      }
+      const confirmSave = () => {
+        if (!confirm || !confirm.name) return
+        const c = confirm
+        setConfirm(null)
+        submitForm(c.name, c.content)
+      }
+      const askDelete = (role) => {
+        host.call('vwf.roles.usage', { id: role.id, draftDsl: props.draftDsl }).then((u) => {
+          setConfirm({ kind: (u && u.ok && u.count > 0) ? 'blocked' : 'delete', role: role, usage: (u && u.ok) ? u : null })
+        }).catch((e) => setError(String(e)))
+      }
+      const doDelete = () => {
+        if (!confirm || !confirm.role) return
+        setSaving(true)
+        host.call('vwf.roles.remove', { id: confirm.role.id, draftDsl: props.draftDsl }).then((r) => {
+          setConfirm(null)
+          if (r && r.ok) {
+            if (props.onChanged) props.onChanged()
+            refetch()
+          } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleDeleteFailed'))
+        }).catch((e) => setError(t('roleDeleteFailed') + String(e))).then(() => setSaving(false))
+      }
+
+      const roleRow = (role) => h('div', { key: role.id, className: 'vwf-role-row' },
+        h('span', { className: 'vwf-role-name' }, role.id),
+        h('span', { className: 'vwf-badge' + (role.builtin ? ' accent' : '') }, role.builtin ? t('builtinRoleBadge') : t('customRoleBadge')),
+        role.summary ? h('span', { className: 'vwf-role-summary' }, role.summary) : null,
+        h('span', { className: 'vwf-spacer' }),
+        role.builtin
+          ? h('button', { className: 'vwf-btn sm', onClick: () => openView(role.id) }, t('viewRole'))
+          : h('button', { className: 'vwf-btn sm', onClick: () => openEdit(role.id) }, t('editRole')),
+        !role.builtin ? h('button', { className: 'vwf-btn sm', onClick: () => openCloneCustom(role) }, t('cloneFromRole')) : null,
+        !role.builtin ? h('button', { className: 'vwf-btn sm danger', onClick: () => askDelete(role) }, t('deleteRole')) : null
+      )
+      const builtinRows = (roles || []).filter(r => r.builtin)
+      const customRows = (roles || []).filter(r => !r.builtin)
+
+      let body = null
+      if (view === 'list') {
+        body = h('div', null,
+          h('div', { className: 'vwf-muted-sm' }, t('roleMgmtHint')),
+          h('div', { className: 'vwf-role-section-title' }, t('builtinRoles')),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 } },
+            builtinRows.map(roleRow),
+            !builtinRows.length ? h('div', { className: 'vwf-role-empty' }, t('roleLoading')) : null
+          ),
+          h('div', { className: 'vwf-role-section-title' }, t('customRoles')),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 } },
+            customRows.map(roleRow),
+            !customRows.length ? h('div', { className: 'vwf-role-empty' }, t('noCustomRoles')) : null
+          ),
+          h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', marginTop: 8 } },
+            h('button', { className: 'vwf-btn primary', onClick: () => openCreate(null) }, '＋ ' + t('newRole'))
+          )
+        )
+      } else if (view === 'view') {
+        body = current
+          ? h('div', null,
+              h('div', { className: 'vwf-row' },
+                h('span', { className: 'vwf-dialog-title' }, current.name || current.id),
+                h('span', { className: 'vwf-badge accent' }, t('builtinRoleBadge'))
+              ),
+              h('div', { className: 'vwf-muted-sm' }, t('roleViewBuiltin')),
+              h('div', { className: 'vwf-role-section-title' }, t('roleContent')),
+              h('div', { className: 'vwf-role-content' }, current.content || ''),
+              h('div', { className: 'vwf-row', style: { marginTop: 8, gap: 8 } },
+                h('button', { className: 'vwf-btn primary', onClick: () => openCreate(current) }, t('createFromRole')),
+                h('button', { className: 'vwf-btn sm', onClick: () => { setError(null); setView('list'); setCurrent(null) } }, t('back'))
+              )
+            )
+          : h('div', { className: 'vwf-role-empty' }, t('roleLoading'))
+      } else {
+        body = h('div', null,
+          h('div', { className: 'vwf-row' },
+            h('span', { className: 'vwf-dialog-title' }, formMode === 'edit' ? t('editRole') + ' · ' + (current ? current.id : '') : t('newRole')),
+            current && current.builtin === false ? h('span', { className: 'vwf-badge' }, t('customRoleBadge')) : null
+          ),
+          current && current.builtin === false ? h('div', { className: 'vwf-muted-sm' }, fmt(t('roleFromSource'), { src: current.id })) : null,
+          h('div', { className: 'vwf-field' },
+            h('div', { className: 'vwf-field-label' }, t('roleName'), h('span', { className: 'req' }, '*')),
+            h('input', {
+              className: 'vwf-input', value: draftName, placeholder: t('roleNamePlaceholder'),
+              onChange: (ev) => setDraftName(ev.target.value),
+            })
+          ),
+          h('div', { className: 'vwf-field' },
+            h('div', { className: 'vwf-field-label' }, t('roleContent'), h(HelpDot, { text: t('roleContentHelp') }), h('span', { className: 'req' }, '*')),
+            h('textarea', {
+              className: 'vwf-textarea vwf-mono', rows: 12, value: draftContent, placeholder: t('roleContentPlaceholder'),
+              onChange: (ev) => setDraftContent(ev.target.value),
+            })
+          ),
+          h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8 } },
+            h('button', { className: 'vwf-btn', onClick: () => { setError(null); setView('list'); setCurrent(null) } }, t('cancelRole')),
+            h('button', { className: 'vwf-btn primary', disabled: saving, onClick: save }, t('saveRole'))
+          )
+        )
+      }
+
+      let overlay = null
+      if (confirm) {
+        if (confirm.kind === 'delete') {
+          overlay = h('div', { className: 'vwf-dialog-mask', style: { zIndex: 980 } },
+            h('div', { className: 'vwf-dialog' },
+              h('div', { className: 'vwf-dialog-title' }, t('roleDeleteTitle') + confirm.role.id + t('roleDeleteTitleSuffix')),
+              h('div', { className: 'vwf-dialog-desc' }, t('roleDeleteDesc')),
+              h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8 } },
+                h('button', { className: 'vwf-btn', onClick: () => setConfirm(null) }, t('cancelRole')),
+                h('button', { className: 'vwf-btn danger', disabled: saving, onClick: doDelete }, t('deleteRole'))
+              )
+            )
+          )
+        } else if (confirm.kind === 'blocked') {
+          const usage = confirm.usage || { count: 0, refs: [] }
+          overlay = h('div', { className: 'vwf-dialog-mask', style: { zIndex: 980 } },
+            h('div', { className: 'vwf-dialog' },
+              h('div', { className: 'vwf-dialog-title' }, t('roleBlockedTitle')),
+              h('div', { className: 'vwf-dialog-desc' }, fmt(t('roleDeleteBlocked'), { name: confirm.role.id, n: usage.count })),
+              (usage.refs || []).length ? h('div', null,
+                h('div', { className: 'vwf-muted-sm', style: { marginBottom: 4 } }, t('roleRefs')),
+                h('div', { className: 'vwf-role-refs' },
+                  usage.refs.map((w, wi) => h('div', { key: 'wf' + wi, className: 'vwf-role-ref-line' },
+                    (w.workflowName || w.workflowId) + (w.builtin ? '（' + t('builtinRoleBadge') + '）' : '') + '：' +
+                    w.nodes.map(n => n.label + '（' + n.id + '）').join('、')
+                  ))
+                )
+              ) : null,
+              h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
+                h('button', { className: 'vwf-btn primary', onClick: () => setConfirm(null) }, t('close'))
+              )
+            )
+          )
+        } else if (confirm.kind === 'impact') {
+          overlay = h('div', { className: 'vwf-dialog-mask', style: { zIndex: 980 } },
+            h('div', { className: 'vwf-dialog' },
+              h('div', { className: 'vwf-dialog-title' }, t('roleUsageTitle')),
+              h('div', { className: 'vwf-dialog-desc' }, fmt(t('roleUsageConfirm'), { n: confirm.usage.count })),
+              h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8 } },
+                h('button', { className: 'vwf-btn', onClick: () => setConfirm(null) }, t('cancelRole')),
+                h('button', { className: 'vwf-btn primary', onClick: confirmSave }, t('confirmSaveRole'))
+              )
+            )
+          )
+        }
+      }
+
+      return h('div', { className: 'vwf-dialog-mask', onClick: props.onClose },
+        h('div', { className: 'vwf-role-mgr', onClick: (ev) => ev.stopPropagation() },
+          h('div', { className: 'vwf-row' },
+            h('div', { className: 'vwf-dialog-title' }, t('roleManager')),
+            h('span', { className: 'vwf-spacer' }),
+            h('button', { className: 'vwf-btn sm', onClick: props.onClose }, t('close'))
+          ),
+          error ? h('div', { className: 'vwf-err-line' }, error) : null,
+          h('div', { className: 'vwf-role-mgr-body' }, body),
+          overlay
+        )
+      )
+    }
+
     // ── 编辑器（对应 WorkflowEditor：画布 + JSON 双 tab + 配置面板）──────────
     function Editor(props) {
       const wf = props.wf
@@ -1377,6 +1772,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const [pendingValidation, setPendingValidation] = React.useState(null)
       const [dialogOpen, setDialogOpen] = React.useState(false)
       const [liveErrors, setLiveErrors] = React.useState([])
+      const [roleUI, setRoleUI] = React.useState(null) // 角色管理浮层：null | 'list' | 'create'
       const validateTimerRef = React.useRef(null)
       const validateSeqRef = React.useRef(0)
       const fitRef = React.useRef(null)
@@ -1696,7 +2092,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     h('span', { className: 'vwf-toolbar-action-label' }, t('deleteNode'))
                   )
                 ),
-                h('span', { className: 'vwf-muted-sm vwf-toolbar-hint' }, t('connectHint'))
+                h('span', { className: 'vwf-muted-sm vwf-toolbar-hint' }, t('connectHint')),
+                h('div', { className: 'vwf-role-zone', title: t('roleMgmtHint') },
+                  h('span', { className: 'vwf-role-zone-label' }, '🎭 ' + t('roleLibrary')),
+                  h('button', { className: 'vwf-btn sm', onClick: () => setRoleUI('list') }, t('manageRoles')),
+                  h('button', { className: 'vwf-btn sm primary', onClick: () => setRoleUI('create') }, '＋ ' + t('newRole'))
+                )
               ) : null,
               tab === 'canvas'
                 ? h(Canvas, {
@@ -1774,7 +2175,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             selectedEdge ? h(EdgeInspector, { edge: selectedEdge, index: selectedEdgeIndex, dsl: wf, fieldErrors, onUpdate: updateEdge, onDelete: deleteSelectedEdge }) : null,
             !selectedNode && !selectedEdge ? h('div', { className: 'vwf-empty', style: { marginTop: 10 } }, t('selectHint')) : null
           )
-        )
+        ),
+        roleUI ? h(RoleManager, {
+          initialCreate: roleUI === 'create',
+          onClose: () => setRoleUI(null),
+          onChanged: () => { if (props.onRolesChanged) props.onRolesChanged() },
+          // 开放草稿（本编辑器未保存的 wf）：删除/重命名前把草稿引用一并计入保护
+          draftDsl: wf,
+        }) : null
       )
     }
 
@@ -2037,11 +2445,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }, [editorOpen])
 
       const refresh = React.useCallback(() => host.call('vwf.workflows.list').then((l) => setList(l || [])).catch(() => setList([])), [])
+      // 角色数据源独立抓手：角色库变更后立即刷新，让新建/编辑的角色马上进入节点选择器
+      const refetchRoles = React.useCallback(() => {
+        host.call('vwf.roles').then(r => { if (r && r.roles) setRoles(r.roles) }).catch(() => {})
+      }, [])
       React.useEffect(() => { refresh() }, [])
       React.useEffect(() => {
         host.call('vwf.models').then(r => { if (r && r.providers) setProviders(r.providers) }).catch(() => {})
-        host.call('vwf.roles').then(r => { if (r && r.roles) setRoles(r.roles) }).catch(() => {})
-      }, [])
+        refetchRoles()
+      }, [refetchRoles])
 
       const openEditor = (id) => {
         const w = (list || []).find(x => x.id === id)
@@ -2137,6 +2549,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               setWf: (next) => { setWf(next); setDirty(true) },
               onSaved: (id) => { onSaved(id); if (!editId) setEditId(id) },
               onScript,
+              onRolesChanged: refetchRoles,
             })
           ),
           confirmDiscardOpen ? h('div', { className: 'vwf-confirm-mask', onClick: () => setConfirmDiscardOpen(false) },

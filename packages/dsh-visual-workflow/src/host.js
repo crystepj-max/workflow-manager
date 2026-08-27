@@ -291,9 +291,12 @@ return {
     // 内置根：.generated/<id>/vwf-dsl.json（生成物四件套之一，CI 先 npm run generate）
     // 双根：仓库 .generated（开发期最新）优先，宿主根 ~/.dsh/.generated（syncBuiltins 同步，
     // 会话无关）补缺失——默认工作流这类用户级内置模板在任意项目会话都可见
-    async function loadBuiltins() {
+    async function loadBuiltins(strict) {
       const out = new Map()
-      if (fs === undefined) return out
+      if (fs === undefined) {
+        if (strict) throw new Error('宿主文件能力不可用：无法扫描内置模板')
+        return out
+      }
       const p = await rootPaths()
       const roots = [p.builtinDir, p.packageBuiltinDir, p.homeBuiltinDir].filter(Boolean)
       for (const root of roots) {
@@ -301,7 +304,10 @@ return {
         try {
           const dir = await fs.resolve(root)
           entries = await fs.listDir(dir)
-        } catch (e) { continue }
+        } catch (e) {
+          if (strict) throw new Error('内置模板清单读取失败：' + String((e && e.message) || e))
+          continue
+        }
         for (const ent of entries || []) {
           if (!ent || typeof ent.name !== 'string' || !ent.name) continue
           try {
@@ -310,29 +316,46 @@ return {
             if (!info || info.type !== 'file') continue
             const dsl = JSON.parse(await fs.readText(target))
             if (dsl && typeof dsl.id === 'string' && dsl.id && !out.has(dsl.id)) out.set(dsl.id, dsl)
-          } catch (e) { /* 单个生成物损坏不影响其余 */ }
+          } catch (e) {
+            if (strict) throw new Error('内置模板读取失败：' + String((e && e.message) || e))
+            /* 单个生成物损坏不影响其余 */
+          }
         }
       }
       return out
     }
 
     // 用户根：~/.dsh/visual-workflow/templates/<id>.json（蓝图 JSON）
-    async function loadUserTemplates() {
+    // strict=true：清单/单文件读取失败即抛出（角色引用扫描等破坏性前置必须区分
+    // 「完整清单」与「失败清单」，不得把失败当空清单放行）。
+    async function loadUserTemplates(strict) {
       const out = new Map()
-      if (fs === undefined) return out
+      if (fs === undefined) {
+        if (strict) throw new Error('宿主文件能力不可用：无法扫描用户模板')
+        return out
+      }
       const p = await rootPaths()
-      if (!p.userDir) return out
+      if (!p.userDir) {
+        if (strict) throw new Error('无法解析用户模板目录')
+        return out
+      }
       let entries = null
       try {
         const dir = await fs.resolve(p.userDir)
         entries = await fs.listDir(dir)
-      } catch (e) { return out }
+      } catch (e) {
+        if (strict) throw new Error('用户模板清单读取失败：' + String((e && e.message) || e))
+        return out
+      }
       for (const ent of entries || []) {
         if (!ent || typeof ent.name !== 'string' || !/\.json$/i.test(ent.name)) continue
         try {
           const bp = JSON.parse(await fs.readText(ent.target))
           if (bp && typeof bp.id === 'string' && bp.id) out.set(bp.id, bp)
-        } catch (e) { /* 损坏的模板文件跳过 */ }
+        } catch (e) {
+          if (strict) throw new Error('用户模板读取失败：' + String((e && e.message) || e))
+          /* 损坏的模板文件跳过 */
+        }
       }
       return out
     }
@@ -1082,10 +1105,14 @@ return {
       return { providers: out }
     })
 
-    // ── 角色列表（节点表单的角色选择器数据源）────────────────────────────────
-    // 读取会话工作区 dsh/roles/*.md（对应 Gold-Band 的角色库）；不可用时回退到
-    // 内置六角色清单。
-    const FALLBACK_ROLES = [
+    // ── 角色库（issue-58：内置/自定义分类 + 生命周期管理）─────────────────────
+    // 模型：内置角色 = 系统标准模板（dispatcher/dev/test/review/accept/closeout），
+    // 常驻、只读、可查看/选择/基于其创建自定义变体；自定义角色 = 工作区
+    // dsh/roles/ 下不属于内置集合的 *.md（与运行时 profile→<roleDir>/<id>.md
+    // 的消费契约一致：保存即被 wf_run 产出的脚本按原机制读取，无需运行时改造）。
+    // 引用 = 全部工作流（内置模板 + 用户模板）节点 profile 命中该角色 id 的计数，
+    // 删除/重命名前的安全保护以引用数裁决；内容修改则天然全局生效（引用按 id）。
+    const BUILTIN_ROLES = [
       { id: 'dispatcher', name: '调度', summary: '调度角色：三要素门禁、分支判定、分流转发' },
       { id: 'dev', name: '开发', summary: '开发角色：测试驱动施工，满足质量闸门' },
       { id: 'test', name: '测试', summary: '测试角色：运行态验证，证据驱动判定' },
@@ -1093,36 +1120,313 @@ return {
       { id: 'accept', name: '验收', summary: '验收角色：最终核验，人工验收门禁' },
       { id: 'closeout', name: '收口', summary: '收口角色：一致性收口与交接产物汇总' }
     ]
-    registerRpc('vwf.roles', async () => {
-      const fallback = () => ({ roles: FALLBACK_ROLES })
-      if (fs === undefined) return fallback()
-      // 目录优先级：发起会话仓库根（动态模式，即会话工作区）→ fs 服务默认 cwd 相对
-      // 'dsh/roles'（静态/web 模式无 agent 会话时兜底尝试）→ 内置六角色清单。
+    const BUILTIN_ROLE_IDS = BUILTIN_ROLES.map((r) => r.id)
+    const ROLE_NAME_MAX = 64
+    // 名称唯一性键：NFC 规范化 + 小写（macOS/Windows 默认文件系统对规范化/大小写
+    // 不敏感，未归一化会令等价名称指向同一文件而互相覆盖）。
+    const roleKey = (s) => String(s || '').normalize('NFC').toLowerCase()
+    // fs.resolve 句柄 → 子进程 argv 可用的绝对路径字符串（真实句柄含 displayPath）
+    const pathOf = (h) => (typeof h === 'string') ? h : (h && (h.displayPath || h.targetKey)) || null
+    // 目录优先级（与 vwf.roles 旧版一致）：发起会话仓库根（动态模式，即会话工作区）
+    // → fs 服务默认 cwd 相对 'dsh/roles'（静态/web 模式无 agent 会话时兜底尝试）。
+    async function roleDirPath() {
       const p = await rootPaths()
-      const roleDir = p.repo ? p.repo + '/dsh/roles' : 'dsh/roles'
+      return p.repo ? p.repo + '/dsh/roles' : 'dsh/roles'
+    }
+    // 读取角色目录：返回 { files: Map<id,{summary,content}>, state: ok|missing|error, message }。
+    // fail-closed：读取失败（而非目录缺失）必须阻断后续唯一性校验与变更。
+    async function readRoleFiles() {
+      const out = new Map()
+      if (fs === undefined) return { files: out, state: 'error', message: '宿主文件能力不可用' }
+      const roleDir = await roleDirPath()
+      // 只有「确认不存在」才归为 missing（可作为空清单放行）；resolve 失败可能是
+      // 瞬时路径错误、stat 失败是瞬态读错误——都按 error fail-closed，避免创建/
+      // 重命名把失败当空库放行而覆盖既有角色。
+      let dir = null
       try {
-        const dir = await fs.resolve(roleDir)
-        const info = await fs.stat(dir)
-        if (!info || info.type !== 'directory') return fallback()
+        dir = await fs.resolve(roleDir)
+      } catch (e) {
+        return { files: out, state: 'missing', message: '角色目录不存在：' + roleDir + '（' + String((e && e.message) || e) + '）' }
+      }
+      let info = null
+      try {
+        info = await fs.stat(dir)
+      } catch (e) {
+        return { files: out, state: 'error', message: '角色目录状态读取失败：' + String((e && e.message) || e) }
+      }
+      try {
+        if (!info) return { files: out, state: 'missing', message: '角色目录不存在：' + roleDir }
+        if (info.type !== 'directory') return { files: out, state: 'error', message: '角色目录不是目录：' + roleDir }
         const entries = (await fs.listDir(dir) || [])
           .filter(e => e && typeof e.name === 'string' && /\.md$/i.test(e.name))
           .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-        if (!entries.length) return fallback()
-        const roles = []
         for (const ent of entries) {
           const id = ent.name.replace(/\.md$/i, '')
           let summary = ''
+          let content = null
           try {
-            const text = String(await fs.readText(await fs.resolve(roleDir + '/' + ent.name)))
-            const firstLine = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('---') && !l.startsWith('id:') && !l.startsWith('name:') && !l.startsWith('summary') && !l.startsWith('createdAt') && !l.startsWith('updatedAt') && !l.startsWith('dynamicTemplate') && !l.startsWith('#'))[0]
+            content = String(await fs.readText(await fs.resolve(roleDir + '/' + ent.name)))
+            const firstLine = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('---') && !l.startsWith('id:') && !l.startsWith('name:') && !l.startsWith('summary') && !l.startsWith('createdAt') && !l.startsWith('updatedAt') && !l.startsWith('dynamicTemplate') && !l.startsWith('#'))[0]
             summary = (firstLine || '').slice(0, 80)
-          } catch (e) {}
-          roles.push({ id, name: id, summary })
+          } catch (e) { /* 单文件读取失败跳过摘要 */ }
+          out.set(id, { summary, content })
         }
-        return { roles: roles.length ? roles : FALLBACK_ROLES }
+        return { files: out, state: 'ok' }
       } catch (e) {
-        return fallback()
+        return { files: out, state: 'error', message: '角色目录读取失败：' + String((e && e.message) || e) }
       }
+    }
+    // 统一角色清单：内置六角色常驻（内容/摘要优先取工作区文件，缺失回退内置元数据），
+    // 自定义 = 角色目录中不属于内置集合的 *.md（按 id 字母序）。
+    // includeContent = true 时携带 content（null 值剔除，lossless-JSON 守卫）。
+    async function listLibraryRoles(includeContent) {
+      const inv = await readRoleFiles()
+      const files = inv.files
+      const roles = []
+      for (const b of BUILTIN_ROLES) {
+        const f = files.get(b.id)
+        const entry = { id: b.id, name: b.name, summary: (f && f.summary) || b.summary, builtin: true }
+        if (includeContent && f && f.content != null) entry.content = f.content
+        roles.push(entry)
+      }
+      const customIds = Array.from(files.keys()).filter(id => BUILTIN_ROLE_IDS.indexOf(id) < 0).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+      for (const id of customIds) {
+        const f = files.get(id)
+        const entry = { id, name: id, summary: f.summary || '', builtin: false }
+        if (includeContent) entry.content = f.content
+        roles.push(entry)
+      }
+      return roles
+    }
+    // 单个角色详情：内置角色正文缺省时依次回退 工作区文件 → 打包仓库 dsh/roles
+    // （静态 bundle 注入的 __VWF_REPO__）→ 内置元数据合成占位正文。
+    async function getRoleDetail(id) {
+      const inv = await readRoleFiles()
+      const files = inv.files
+      if (BUILTIN_ROLE_IDS.indexOf(id) >= 0) {
+        const meta = BUILTIN_ROLES.find(r => r.id === id)
+        const f = files.get(id)
+        let content = f && f.content
+        if (content == null) {
+          const roots = [(typeof __VWF_REPO__ === 'string' && __VWF_REPO__) ? __VWF_REPO__ : null].filter(Boolean)
+          for (const root of roots) {
+            try {
+              const target = await fs.resolve(root + '/dsh/roles/' + id + '.md')
+              const info = await fs.stat(target)
+              if (info && info.type === 'file') { content = String(await fs.readText(target)); break }
+            } catch (e) { /* 尝试下一个根 */ }
+          }
+        }
+        if (content == null) content = '# ' + meta.name + '（' + id + '）\n\n' + meta.summary + '\n\n> 当前工作区未包含该内置角色的完整定义（dsh/roles/' + id + '.md），角色仍可正常选择使用。'
+        return { id, name: meta.name, summary: (f && f.summary) || meta.summary, builtin: true, content }
+      }
+      const f = files.get(id)
+      if (!f) return null
+      return { id, name: id, summary: f.summary || '', builtin: false, content: f.content != null ? f.content : '' }
+    }
+    // 引用扫描：全部工作流（内置模板 + 用户模板）+ 可选的开放草稿 DSL。草稿引用按
+    // workflowId 去重替换（打开编辑器编辑既有模板时其持久化版本已被统计，草稿内容
+    // 才是当前真实状态）；新草稿（无 id）以 draft: 前缀键独立计入——未保存但引用该
+    // 角色时禁止删除/重命名（P1：草稿随后保存会引用已删除的角色文件）。
+    async function roleUsage(id, draftDsl) {
+      // strict：内置/用户模板清单或单文件读取失败时抛出（破坏性变更前置：失败 ≠ 零引用）
+      const [builtins, users] = await Promise.all([loadBuiltins(true), loadUserTemplates(true)])
+      const wfRefs = new Map()
+      const add = (workflowId, workflowName, builtin, dsl, draft) => {
+        const nodes = []
+        for (const n of (dsl.nodes || []) || []) {
+          // 与文件名唯一性同一基准（roleKey：NFC + 小写）：大小写/规范化不敏感
+          // 文件系统上 profile 'Analyst' 同样引用 analyst.md 角色文件
+          if (n && typeof n.profile === 'string' && roleKey(n.profile) === roleKey(id)) nodes.push({ id: n.id, label: n.label || n.id })
+        }
+        if (!nodes.length) return
+        const ref = { workflowId: String(workflowId), workflowName: String(workflowName), builtin: !!builtin, nodes }
+        if (draft) ref.draft = true
+        wfRefs.set(ref.workflowId, ref)
+      }
+      for (const dsl of builtins.values()) add(dsl.id, dsl.name, true, dsl, false)
+      for (const bp of users.values()) add(bp.id, bp.displayName, false, projectToVwf(bp), false)
+      if (draftDsl && Array.isArray(draftDsl.nodes)) {
+        const draftId = draftDsl.id || ('draft:' + String(draftDsl.name || '未保存草稿'))
+        add(draftId, draftDsl.name || '未保存草稿', false, draftDsl, true)
+      }
+      const refs = Array.from(wfRefs.values())
+      const count = refs.reduce((sum, r) => sum + (r.nodes || []).length, 0)
+      return { count, refs }
+    }
+    // 角色名称校验：非空 / 长度 / 文件系统安全字符 / 首尾点 / Windows 保留设备名；
+    // 唯一性单列（需排除自身）。
+    function validateRoleName(name) {
+      const v = String(name || '').trim()
+      if (!v) return '角色名称不能为空'
+      if (v.length > ROLE_NAME_MAX) return '角色名称过长（最多 ' + ROLE_NAME_MAX + ' 字符）'
+      if (/[\\/:*?"<>|\x00-\x1F\x7F]/.test(v)) return '角色名称包含非法字符'
+      if (/^\./.test(v) || /\.$/.test(v)) return '角色名称不能以点开头或结尾'
+      if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(v)) return '角色名称是系统保留名（如 CON/NUL/AUX），请换一个名称'
+      return null
+    }
+    // 名称唯一性（NFC 归一 + 大小写不敏感，兼容 macOS/Windows 文件系统）：内置 + 现有自定义。
+    // fail-closed：角色目录读取失败（非目录缺失）时抛错，调用方阻断变更。
+    async function roleNameTaken(name, excludeId) {
+      const key = roleKey(name)
+      if (!key) return true
+      for (const b of BUILTIN_ROLES) {
+        const bId = roleKey(b.id)
+        if (excludeId && roleKey(excludeId) === bId) continue
+        if (bId === key) return true
+      }
+      const inv = await readRoleFiles()
+      if (inv.state === 'error') throw new Error('角色库读取失败，无法验证名称唯一性：' + inv.message)
+      for (const id of inv.files.keys()) {
+        const idKey = roleKey(id)
+        if (excludeId && roleKey(excludeId) === idKey) continue
+        if (idKey === key) return true
+      }
+      return false
+    }
+
+    // 角色列表（节点表单的角色选择器 + 角色管理列表数据源）：内置常驻 + 自定义。
+    registerRpc('vwf.roles', async () => ({ roles: await listLibraryRoles(false) }))
+    // 角色详情（查看内置/编辑自定义前的完整配置）
+    registerRpc('vwf.roles.get', async (a) => {
+      const id = a && a.id
+      const role = id ? await getRoleDetail(id) : null
+      if (!role) return { ok: false, errors: [{ at: '$', message: '角色不存在：' + (id || '') }] }
+      return { ok: true, role }
+    })
+    // 引用统计（删除/修改前的保护提示数据源）：可携带开放草稿 DSL 一并计数
+    registerRpc('vwf.roles.usage', async (a) => {
+      const id = a && a.id
+      if (!id || typeof id !== 'string') return { ok: false, errors: [{ at: '$.id', message: '缺少角色 id' }] }
+      let u
+      try {
+        u = await roleUsage(id, a && a.draftDsl)
+      } catch (e) {
+        return { ok: false, errors: [{ at: '$', message: '引用统计失败：' + String((e && e.message) || e) }] }
+      }
+      return { ok: true, id, count: u.count, refs: u.refs }
+    })
+    // 空白新增 / 基于角色创建：校验名称与内容 → 写入工作区 dsh/roles/<name>.md
+    registerRpc('vwf.roles.create', async (a) => {
+      const name = String((a && a.name) || '').trim()
+      const content = a && typeof a.content === 'string' ? a.content : ''
+      if (fs === undefined) return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法创建角色' }] }
+      const badName = validateRoleName(name)
+      if (badName) return { ok: false, errors: [{ at: 'name', message: badName }] }
+      if (!content.trim()) return { ok: false, errors: [{ at: 'content', message: '角色配置不能为空' }] }
+      let conflict = false
+      try {
+        conflict = await roleNameTaken(name, null)
+      } catch (e) {
+        return { ok: false, errors: [{ at: '$', message: String((e && e.message) || e) }] }
+      }
+      if (conflict) {
+        return { ok: false, errors: [{ at: 'name', message: '已存在同名角色，请使用其他名称。' }] }
+      }
+      const roleDir = await roleDirPath()
+      try {
+        const target = await fs.resolve(roleDir + '/' + name + '.md')
+        await fs.writeText(target, content + (content.endsWith('\n') ? '' : '\n'), undefined, undefined, writePolicy())
+      } catch (e) {
+        return { ok: false, errors: [{ at: '$', message: '角色文件写入失败：' + String((e && e.message) || e) }] }
+      }
+      const role = await getRoleDetail(name)
+      return { ok: true, role }
+    })
+    // 编辑自定义角色：内容修改全局生效（引用按 id 天然共享）；重命名仅零引用时允许
+    // （引用按 id 字符串，重命名会令所有引用失效——服务端强制，客户端也先提示）。
+    // 仅重命名路径需要 subprocess（删除旧文件）；纯内容编辑只依赖 fs。
+    registerRpc('vwf.roles.update', async (a) => {
+      const id = a && a.id
+      const content = a && typeof a.content === 'string' ? a.content : null
+      const newName = String((a && a.name) || '').trim()
+      if (fs === undefined) return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法更新角色' }] }
+      if (!id || typeof id !== 'string') return { ok: false, errors: [{ at: '$.id', message: '缺少角色 id' }] }
+      if (BUILTIN_ROLE_IDS.indexOf(id) >= 0) {
+        return { ok: false, errors: [{ at: '$', message: '内置角色只读：' + id + ' 属于系统标准角色，不能修改；可基于其创建自定义角色。' }] }
+      }
+      const inv = await readRoleFiles()
+      if (inv.state === 'error') return { ok: false, errors: [{ at: '$', message: '角色库读取失败：' + inv.message }] }
+      if (!inv.files.has(id)) return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + id }] }
+      const target = newName && newName !== id ? newName : id
+      let isRename = target !== id
+      if (isRename) {
+        // 大小写/Unicode 规范化差异（NFC 归一后相同）指向同一文件：拒绝，避免
+        // 写后删把自己的文件删掉（P1）。
+        if (roleKey(target) === roleKey(id)) {
+          return { ok: false, errors: [{ at: 'name', message: '新名称与当前名称仅大小写或写法不同（指向同一文件），请保留原名称或改用不同名称。' }] }
+        }
+        const badName = validateRoleName(target)
+        if (badName) return { ok: false, errors: [{ at: 'name', message: badName }] }
+        try {
+          if (await roleNameTaken(target, id)) {
+            return { ok: false, errors: [{ at: 'name', message: '已存在同名角色，请使用其他名称。' }] }
+          }
+        } catch (e) {
+          return { ok: false, errors: [{ at: '$', message: String((e && e.message) || e) }] }
+        }
+        let u
+        try {
+          u = await roleUsage(id, a && a.draftDsl)
+        } catch (e) {
+          return { ok: false, errors: [{ at: '$', message: '引用统计失败：' + String((e && e.message) || e) }] }
+        }
+        if (u.count > 0) {
+          return { ok: false, errors: [{ at: 'name', message: '该角色仍被 ' + u.count + ' 个节点使用，重命名会导致这些引用全部失效；请先解除引用，或使用「基于此角色创建自定义角色」新建变体。' }] }
+        }
+        if (subprocess === undefined) return { ok: false, errors: [{ at: '$', message: '重命名需要子进程服务（删除旧角色文件）；当前宿主不可用，可先编辑内容或新建同名新角色。' }] }
+      }
+      if (content == null || !content.trim()) return { ok: false, errors: [{ at: 'content', message: '角色配置不能为空' }] }
+      const roleDir = await roleDirPath()
+      let newAbs = null
+      try {
+        newAbs = await fs.resolve(roleDir + '/' + target + '.md')
+        await fs.writeText(newAbs, content + (content.endsWith('\n') ? '' : '\n'), undefined, undefined, writePolicy())
+      } catch (e) {
+        return { ok: false, errors: [{ at: '$', message: '角色文件写入失败：' + String((e && e.message) || e) }] }
+      }
+      if (isRename) {
+        // 删除旧文件前经 fs 服务解析为绝对路径（避免相对 'dsh/roles' 在子进程 cwd=/ 下
+        // 指向错误位置）；删除失败则回滚刚写入的新文件，保持角色库原状。
+        let oldAbs = null
+        try { oldAbs = pathOf(await fs.resolve(roleDir + '/' + id + '.md')) } catch (e) { oldAbs = null }
+        const rmOld = oldAbs ? await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", oldAbs], { cwd: repoRoot() || '/' }) : { ok: false, detail: '旧角色文件路径解析失败' }
+        if (!rmOld.ok) {
+          const newPath = pathOf(newAbs)
+          const rmNew = newPath ? await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", newPath], { cwd: repoRoot() || '/' }) : null
+          return { ok: false, errors: [{ at: '$', message: '旧角色文件删除失败（已回滚新文件' + (rmNew && rmNew.ok ? '' : '，回滚失败，请手动清理 ') + '）：' + rmOld.detail }] }
+        }
+      }
+      const role = await getRoleDetail(target)
+      return { ok: true, role }
+    })
+    // 删除自定义角色：内置拒绝；存在任意引用 → 阻止并提供引用详情（无强制删除）。
+    registerRpc('vwf.roles.remove', async (a) => {
+      const id = a && a.id
+      if (fs === undefined || subprocess === undefined) return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法删除角色' }] }
+      if (!id || typeof id !== 'string') return { ok: false, errors: [{ at: '$.id', message: '缺少角色 id' }] }
+      if (BUILTIN_ROLE_IDS.indexOf(id) >= 0) {
+        return { ok: false, errors: [{ at: '$', message: '内置角色只读：' + id + ' 属于系统标准角色，不能删除' }] }
+      }
+      const inv = await readRoleFiles()
+      if (inv.state === 'error') return { ok: false, errors: [{ at: '$', message: '角色库读取失败：' + inv.message }] }
+      if (!inv.files.has(id)) return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + id }] }
+      let u
+      try {
+        u = await roleUsage(id, a && a.draftDsl)
+      } catch (e) {
+        return { ok: false, errors: [{ at: '$', message: '引用统计失败，已阻止删除：' + String((e && e.message) || e) }] }
+      }
+      if (u.count > 0) {
+        const draftHint = u.refs.some(r => r.draft) ? '（含未保存草稿的引用）' : ''
+        return { ok: false, errors: [{ at: '$', message: '「' + id + '」仍被 ' + u.count + ' 个节点使用' + draftHint + '。请先将这些节点更换为其他角色，解除全部引用后再删除。' }], usage: { count: u.count, refs: u.refs } }
+      }
+      const roleDir = await roleDirPath()
+      let abs = null
+      try { abs = pathOf(await fs.resolve(roleDir + '/' + id + '.md')) } catch (e) { abs = null }
+      const rm = abs ? await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", abs], { cwd: repoRoot() || '/' }) : { ok: false, detail: '角色文件路径解析失败' }
+      if (!rm.ok) return { ok: false, errors: [{ at: '$', message: '角色删除失败：' + rm.detail }] }
+      return { ok: true, id }
     })
 
     // ── 静态 bundle 模式：webServer RPC 路由（动态模式走 harness.handle）────
