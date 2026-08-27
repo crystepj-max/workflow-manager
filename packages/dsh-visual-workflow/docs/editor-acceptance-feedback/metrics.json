@@ -1,0 +1,97 @@
+{
+  "anchors": {
+    "nodes": {
+      "start": {
+        "x": 56,
+        "y": 64,
+        "w": 220,
+        "h": 66
+      },
+      "isolate": {
+        "x": 56,
+        "y": 218,
+        "w": 220,
+        "h": 66
+      },
+      "middle": {
+        "x": 392,
+        "y": 141,
+        "w": 220,
+        "h": 66
+      },
+      "review": {
+        "x": 728,
+        "y": 141,
+        "w": 220,
+        "h": 66
+      },
+      "$end": {
+        "x": 1064,
+        "y": 152,
+        "w": 140,
+        "h": 44
+      }
+    },
+    "edges": [
+      {
+        "cx": 276,
+        "cy": 97,
+        "fill": "#2563eb"
+      },
+      {
+        "cx": 276,
+        "cy": 97,
+        "fill": "#2563eb"
+      },
+      {
+        "cx": 612,
+        "cy": 174,
+        "fill": "#2563eb"
+      },
+      {
+        "cx": 276,
+        "cy": 113.66666666666667,
+        "fill": "#2563eb"
+      },
+      {
+        "cx": 948,
+        "cy": 157.33333333333334,
+        "fill": "var(--dsw-alias-state-error-primary, #f87171)"
+      },
+      {
+        "cx": 948,
+        "cy": 174,
+        "fill": "#2563eb"
+      }
+    ]
+  },
+  "handles": {
+    "defaultOpacity": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "hoverOpacity": [
+      {
+        "opacity": "1",
+        "fill": "rgb(77, 159, 255)",
+        "strokeW": "3px"
+      },
+      {
+        "opacity": "1",
+        "fill": "rgb(77, 159, 255)",
+        "strokeW": "3px"
+      }
+    ]
+  },
+  "connectTarget": {
+    "highlighted": true,
+    "nodeId": "isolate"
+  }
+}

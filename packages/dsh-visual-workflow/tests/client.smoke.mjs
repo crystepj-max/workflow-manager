@@ -311,7 +311,15 @@ test('拖拽连线：从节点右把手拖到结束节点创建新边', async ()
     assert.ok(handles.length >= 2, '存在源把手（node-1、node-2）')
     const srcHandle = handles[0]
     srcHandle.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 200, clientY: 80 }))
-    // 拖到 $end 节点位置（rank=1；node-2 加入后 $end 纵向居中于 y≈144..188 → 用 clientY 200）
+    // 拖到 $end 节点位置（rank=1：图形坐标 x∈[392,532]；scale=1.2 → clientX 500 → 416.7）
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 500, clientY: 200 }))
+    await flush()
+  })
+  // act 结束后 React 已提交：拖线指向的目标节点应带高亮标记
+  const targetHit = container.querySelector('[data-vwf-connect-target="true"]')
+  assert.ok(targetHit, '拖线指向目标节点时高亮标记出现')
+  assert.equal(targetHit.closest('g').getAttribute('data-node-id'), '$end', '高亮目标为拖动指向的节点')
+  await act(async () => {
     dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 480, clientY: 200 }))
     await flush()
   })
@@ -612,8 +620,22 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
     const cyOf = (idx) => Number(starts[idx].getAttribute('cy'))
     const sorted = list.slice().sort((a, b) => rankOf[a.kind] - rankOf[b.kind] || a.idx - b.idx)
     for (let k = 1; k < sorted.length; k += 1) {
-      assert.ok(cyOf(sorted[k].idx) > cyOf(sorted[k - 1].idx),
-        '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 自上而下间隔')
+      // 优化 3：固定三槽位——同类边共享槽位（相等），跨类严格上升（上<直连<下）
+      assert.ok(cyOf(sorted[k].idx) >= cyOf(sorted[k - 1].idx),
+        '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 自下而下不降')
+      if (sorted[k].kind !== sorted[k - 1].kind) {
+        assert.ok(cyOf(sorted[k].idx) > cyOf(sorted[k - 1].idx),
+          '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 跨类严格上升')
+      }
+    }
+    // 直连槽位 = 节点右边框垂直居中（与连线源把手位置一致）
+    for (const item of sorted) {
+      if (item.kind === 'direct') {
+        const g = svg.querySelector('g[data-node-id="' + src + '"]')
+        const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+        const center = Number(m[2]) + Number(g.querySelector('rect').getAttribute('height')) / 2
+        assert.equal(cyOf(item.idx), center, '源 ' + src + ' 直连起点与节点右框垂直居中一致')
+      }
     }
   }
   // 连接把手：默认隐藏（无对应边的节点右侧不出现无意义灰点），节点悬停时才显示

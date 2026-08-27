@@ -374,7 +374,8 @@ return {
 /* 节点左右连接把手（拖出/落入连线的源与目标指示）：默认隐藏，节点悬停时显示，
    避免没有对应边的节点右侧出现无意义灰点（验收反馈）。 */
 .vwf-handle { opacity:0; pointer-events:none; transition:opacity .12s ease; }
-g:hover > .vwf-handle { opacity:1; pointer-events:auto; }
+/* 悬停高亮：把手以品牌色圆环醒目显示，避免与边起点圆点（同类槽位）混淆而不可见 */
+g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-brand-primary, #4d9fff); stroke:var(--dsw-alias-bg-layer-2, #242424); stroke-width:3; filter:drop-shadow(0 0 4px var(--dsw-alias-brand-primary, #4d9fff)); }
 .vwf-handle-src { cursor:crosshair; }
 .vwf-handle-src:hover { fill:var(--dsw-alias-brand-primary, #4d9fff); }
 .vwf-entry-badge { fill:var(--dsw-alias-bg-layer-1, #1e1e1e); stroke:var(--dsw-alias-border-l3, #444); }
@@ -526,18 +527,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; }
         infos.push({ index, e, a, b, x1, y1, x2, y2, between, hits, kind, sOrdinal })
       })
 
-      // 起点锚点在节点右边框内均匀分布；类别顺序固定为 上绕 / 直连 / 下绕。
+      // 起点锚点固定 3 个槽位（验收反馈优化 3）：上绕=上槽、直连=中槽（与连线源把手
+      // 位置一致，即节点右边框垂直居中）、下绕=下槽；同类边共享同一槽位。
       const borderAnchor = (id, kind, ordinal) => {
-        const counts = sourceKindCount.get(id)
         const node = pos[id]
-        if (!counts || !node) return node.y + node.h / 2
-        const before = kind === 'up' ? 0 : kind === 'direct' ? counts.up : counts.up + counts.direct
-        const globalOrdinal = before + ordinal
+        if (!node) return 0
         const pad = 8
         const safeTop = node.y + pad
         const safeBottom = node.y + node.h - pad
-        if (counts.total === 1) return node.y + node.h / 2
-        return safeTop + (globalOrdinal + 0.5) * ((safeBottom - safeTop) / counts.total)
+        const slot = kind === 'up' ? 0 : kind === 'direct' ? 1 : 2
+        return safeTop + (slot + 0.5) * ((safeBottom - safeTop) / 3)
       }
 
       infos.forEach((info) => {
@@ -705,6 +704,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; }
       const [scale, setScale] = React.useState(1)
       const [panOffset, setPanOffset] = React.useState({ x: 0, y: 0 })
       const [connect, setConnect] = React.useState(null) // {from, x, y}
+      const [hoverTarget, setHoverTarget] = React.useState(null) // 拖线时鼠标指向的目标节点（高亮）
       const [menu, setMenu] = React.useState(null) // {x, y}
       const panRef = React.useRef(null)
       const lay = React.useMemo(
@@ -853,6 +853,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; }
           const p2 = toGraph(me)
           if (!p2) return
           setConnect(c => (c ? { ...c, x: p2.x, y: p2.y } : c))
+          const hit = hitNode(p2)
+          setHoverTarget(prev => (prev === hit ? prev : hit))
         }
         const up = (ue) => {
           window.removeEventListener('pointermove', move)
@@ -860,6 +862,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; }
           const p2 = toGraph(ue)
           const target = hitNode(p2)
           setConnect(null)
+          setHoverTarget(null)
           if (target && target !== id && props.onConnect) props.onConnect(id, target)
         }
         window.addEventListener('pointermove', move)
@@ -960,19 +963,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; }
         const selected = props.selectedNode === id
         const invalid = !!(props.invalidNodes && props.invalidNodes.has(id))
         const status = props.statusMap ? props.statusMap[id] : null
+        const isConnectTarget = !!(connect && hoverTarget === id)
         if (isTerm) {
           nodeEls.push(h('g', {
             key: 'n' + id, 'data-node-id': id, transform: 'translate(' + p.x + ',' + p.y + ')',
             style: { cursor: props.readOnly ? 'default' : 'pointer' },
             onClick: (ev) => { ev.stopPropagation(); if (!props.readOnly && props.onTerminalClick) props.onTerminalClick(id) },
           },
-            h('rect', { width: p.w, height: p.h, rx: p.h / 2, fill: 'var(--dsw-alias-bg-layer-1, #1e1e1e)', stroke: 'var(--dsw-alias-border-l3, #555)', strokeWidth: 1, strokeDasharray: '5 4', opacity: 0.9 }),
+            h('rect', { width: p.w, height: p.h, rx: p.h / 2, fill: 'var(--dsw-alias-bg-layer-1, #1e1e1e)', stroke: isConnectTarget ? ACCENT : 'var(--dsw-alias-border-l3, #555)', strokeWidth: isConnectTarget ? 3 : 1, strokeDasharray: '5 4', opacity: 0.9, ...(isConnectTarget ? { 'data-vwf-connect-target': 'true' } : {}) }),
             h('text', { x: p.w / 2, y: p.h / 2 + 4, textAnchor: 'middle', fontSize: 12, fill: 'var(--dsw-alias-label-secondary, #9a9a9a)' }, t('endNode')),
             h('circle', { className: 'vwf-handle', cx: 0, cy: p.h / 2, r: 4 })
           ))
           return
         }
-        const stroke = selected ? ACCENT : invalid ? 'var(--dsw-alias-state-error-primary, #e5484d)' : status ? STATUS_COLOR[status] : 'var(--dsw-alias-border-l2, #333)'
+        const stroke = isConnectTarget ? ACCENT : selected ? ACCENT : invalid ? 'var(--dsw-alias-state-error-primary, #e5484d)' : status ? STATUS_COLOR[status] : 'var(--dsw-alias-border-l2, #333)'
         nodeEls.push(h('g', {
           key: 'n' + id, 'data-node-id': id, transform: 'translate(' + p.x + ',' + p.y + ')',
           style: { cursor: props.readOnly ? 'default' : 'pointer' },
@@ -980,8 +984,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; }
         },
           h('rect', {
             className: 'vwf-node-card', width: p.w, height: p.h, rx: 14,
-            stroke: stroke, strokeWidth: selected || invalid ? 2 : 1,
-            style: selected ? { filter: 'drop-shadow(0 0 8px ' + ACCENT + ')' } : invalid ? { filter: 'drop-shadow(0 0 6px var(--dsw-alias-state-error-primary, #e5484d))' } : undefined,
+            stroke: stroke, strokeWidth: isConnectTarget ? 3 : (selected || invalid ? 2 : 1),
+            ...(isConnectTarget ? { 'data-vwf-connect-target': 'true' } : {}),
+            style: isConnectTarget ? { filter: 'drop-shadow(0 0 10px ' + ACCENT + ')' } : selected ? { filter: 'drop-shadow(0 0 8px ' + ACCENT + ')' } : invalid ? { filter: 'drop-shadow(0 0 6px var(--dsw-alias-state-error-primary, #e5484d))' } : undefined,
           }),
           candidates.indexOf(id) >= 0 ? h('g', { key: 'eb' },
             h('rect', { className: 'vwf-entry-badge', x: -6, y: -9, width: 34, height: 16, rx: 8 }),
