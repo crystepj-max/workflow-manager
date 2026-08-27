@@ -371,6 +371,10 @@ return {
 .vwf-node-kind { fill:var(--dsw-alias-label-tertiary, #8a8a8a); font-size:10px; letter-spacing:.14em; text-transform:uppercase; }
 .vwf-node-label { fill:var(--dsw-alias-label-primary, #e8e8e8); font-size:13px; font-weight:500; }
 .vwf-handle { fill:var(--dsw-alias-label-tertiary, #8a8a8a); stroke:var(--dsw-alias-bg-layer-2, #242424); stroke-width:2; }
+/* 节点左右连接把手（拖出/落入连线的源与目标指示）：默认隐藏，节点悬停时显示，
+   避免没有对应边的节点右侧出现无意义灰点（验收反馈）。 */
+.vwf-handle { opacity:0; pointer-events:none; transition:opacity .12s ease; }
+g:hover > .vwf-handle { opacity:1; pointer-events:auto; }
 .vwf-handle-src { cursor:crosshair; }
 .vwf-handle-src:hover { fill:var(--dsw-alias-brand-primary, #4d9fff); }
 .vwf-entry-badge { fill:var(--dsw-alias-bg-layer-1, #1e1e1e); stroke:var(--dsw-alias-border-l3, #444); }

@@ -616,6 +616,10 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
         '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 自上而下间隔')
     }
   }
+  // 连接把手：默认隐藏（无对应边的节点右侧不出现无意义灰点），节点悬停时才显示
+  const handleCss = styleText.join('\n')
+  assert.ok(/\.vwf-handle\s*\{[^}]*opacity:\s*0/i.test(handleCss), '连接把手默认透明（悬停显示）')
+  assert.ok(/g:hover\s*>\s*\.vwf-handle\s*\{[^}]*opacity:\s*1/i.test(handleCss), '悬停节点时显示把手')
 })
 
 test('防重叠：入口变化会触发画布布局重算', async () => {
