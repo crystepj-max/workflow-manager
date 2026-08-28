@@ -579,13 +579,13 @@ test('模板名称必填（name 为空拒绝，save 同拒）', async () => {
   assert.equal(s.ok, false, 'save 拒绝空名称')
 })
 
-test('vwf.roles 无 fs 服务时内置六角色常驻（builtin 标识）', async () => {
+test('vwf.roles 无 fs 服务时内置十角色常驻（builtin 标识）', async () => {
   const { handlers } = loadHost()
   const r = await call(handlers, 'vwf.roles')
   assert.ok(Array.isArray(r.roles))
   assert.ok(r.roles.some(x => x.id === 'dispatcher'))
   assert.ok(r.roles.some(x => x.id === 'closeout'))
-  assert.equal(r.roles.filter(x => x.builtin).length, 6, '无 fs 时仅内置常驻')
+  assert.equal(r.roles.filter(x => x.builtin).length, 10, '无 fs 时仅内置常驻')
   assert.ok(r.roles.every(x => x.builtin === true))
 })
 
@@ -601,23 +601,23 @@ test('vwf.roles 经 fs 服务读工作区 dsh/roles 增强内置摘要（resolve
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
   const r = await call(handlers, 'vwf.roles')
-  assert.deepEqual(r.roles.map(x => x.id).sort(), ['accept', 'closeout', 'dev', 'dispatcher', 'review', 'test'], '内置常驻且不含非角色文件')
+  assert.deepEqual(r.roles.map(x => x.id).sort(), ['accept', 'closeout', 'dev', 'dispatcher', 'evaluator', 'orchestrator', 'researcher', 'review', 'synthesizer', 'test'], '内置常驻且不含非角色文件')
   const dp = r.roles.find(x => x.id === 'dispatcher')
   assert.equal(dp.builtin, true)
   assert.ok(dp.summary.startsWith('你是 2.0'), '摘要取正文首行（跳过 frontmatter/标题）')
 })
 
-test('vwf.roles：仓库根无 dsh/roles 目录时内置六角色常驻（静态/web 模式兜底）', async () => {
+test('vwf.roles：仓库根无 dsh/roles 目录时内置十角色常驻（静态/web 模式兜底）', async () => {
   const { handlers } = env()
   const r = await call(handlers, 'vwf.roles')
-  assert.deepEqual(r.roles.map(x => x.id).sort(), ['accept', 'closeout', 'dev', 'dispatcher', 'review', 'test'])
+  assert.deepEqual(r.roles.map(x => x.id).sort(), ['accept', 'closeout', 'dev', 'dispatcher', 'evaluator', 'orchestrator', 'researcher', 'review', 'synthesizer', 'test'])
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
 // issue-58 · 角色库：内置/自定义分类、创建、编辑、引用保护与安全删除
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('角色库：内置六角色常驻置前并带 builtin 标识，工作区额外 .md 归为自定义', async () => {
+test('角色库：内置十角色常驻置前并带 builtin 标识，工作区额外 .md 归为自定义', async () => {
   const fs = makeFs({
     [REPO + '/dsh/roles/dispatcher.md']: '内置身份正文\n',
     [REPO + '/dsh/roles/需求分析师.md']: '负责需求拆解。\n',
@@ -625,7 +625,7 @@ test('角色库：内置六角色常驻置前并带 builtin 标识，工作区�
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
   const r = await call(handlers, 'vwf.roles')
-  assert.deepEqual(r.roles.map(x => x.id).slice(0, 6), ['dispatcher', 'dev', 'test', 'review', 'accept', 'closeout'], '内置六角色常驻且置前')
+  assert.deepEqual(r.roles.map(x => x.id).slice(0, 10), ['dispatcher', 'dev', 'test', 'review', 'accept', 'closeout', 'orchestrator', 'researcher', 'synthesizer', 'evaluator'], '内置十角色常驻且置前')
   assert.equal(r.roles.find(x => x.id === 'dispatcher').builtin, true)
   assert.equal(r.roles.find(x => x.id === 'dispatcher').summary, '内置身份正文', '内置摘要优先取工作区文件')
   assert.equal(r.roles.find(x => x.id === '需求分析师').builtin, false, '内置集合之外的 .md 归为自定义')

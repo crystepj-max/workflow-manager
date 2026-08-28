@@ -1108,8 +1108,9 @@ return {
     })
 
     // ── 角色库（issue-58：内置/自定义分类 + 生命周期管理）─────────────────────
-    // 模型：内置角色 = 系统标准模板（dispatcher/dev/test/review/accept/closeout），
-    // 常驻、只读、可查看/选择/基于其创建自定义变体；自定义角色 = 工作区
+    // 模型：内置角色 = 系统标准模板（dispatcher/dev/test/review/accept/closeout +
+    // orchestrator/researcher/synthesizer/evaluator），常驻、只读、可查看/选择/基于其创建
+    // 自定义变体；自定义角色 = 工作区
     // dsh/roles/ 下不属于内置集合的 *.md（与运行时 profile→<roleDir>/<id>.md
     // 的消费契约一致：保存即被 wf_run 产出的脚本按原机制读取，无需运行时改造）。
     // 引用 = 全部工作流（内置模板 + 用户模板）节点 profile 命中该角色 id 的计数，
@@ -1120,7 +1121,11 @@ return {
       { id: 'test', name: '测试', summary: '测试角色：运行态验证，证据驱动判定' },
       { id: 'review', name: '审核', summary: '审核角色：独立双轴审查' },
       { id: 'accept', name: '验收', summary: '验收角色：最终核验，人工验收门禁' },
-      { id: 'closeout', name: '收口', summary: '收口角色：一致性收口与交接产物汇总' }
+      { id: 'closeout', name: '收口', summary: '收口角色：一致性收口与交接产物汇总' },
+      { id: 'orchestrator', name: '探索统筹', summary: '探索统筹角色：理解复杂问题，设计互补研究视角并生成专家任务书' },
+      { id: 'researcher', name: '专家研究', summary: '专家研究角色：按指定专业视角独立研究，提供证据、反证和不确定性' },
+      { id: 'synthesizer', name: '综合分析', summary: '综合分析角色：综合独立观点，识别共识、分歧、关键假设和证据强弱' },
+      { id: 'evaluator', name: '结论评估', summary: '结论评估角色：独立判断研究是否足以支持结论，并决定结束或补充探索' }
     ]
     const BUILTIN_ROLE_IDS = BUILTIN_ROLES.map((r) => r.id)
     const ROLE_NAME_MAX = 64
@@ -1182,7 +1187,7 @@ return {
         return { files: out, state: 'error', message: '角色目录读取失败：' + String((e && e.message) || e) }
       }
     }
-    // 统一角色清单：内置六角色常驻（内容/摘要优先取工作区文件，缺失回退内置元数据），
+    // 统一角色清单：内置十角色常驻（内容/摘要优先取工作区文件，缺失回退内置元数据），
     // 自定义 = 角色目录中不属于内置集合的 *.md（按 id 字母序）。
     // includeContent = true 时携带 content（null 值剔除，lossless-JSON 守卫）。
     async function listLibraryRoles(includeContent) {
