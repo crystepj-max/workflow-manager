@@ -1,0 +1,43 @@
+name: Verify multi-perspective built-in
+
+on:
+  push:
+    branches:
+      - feat/multi-perspective-exploration
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/multi-perspective-exploration
+
+      - name: Install dependencies
+        run: npm install --no-package-lock
+
+      - name: Generate built-in artifacts
+        run: npm run generate
+
+      - name: Run engine tests
+        run: npm test
+
+      - name: Run plugin tests
+        working-directory: packages/dsh-visual-workflow
+        run: npm test
+
+      - name: Validate repository
+        run: npm run validate
+
+      - name: Remove temporary verifier
+        if: success()
+        run: |
+          rm .github/workflows/_verify-multi-perspective.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: remove temporary verification workflow"
+          git push origin HEAD:feat/multi-perspective-exploration
