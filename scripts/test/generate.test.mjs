@@ -19,8 +19,8 @@ test('S2 生成器：产物四件套齐全', () => {
   for (const rel of ['script.mjs', 'vwf-dsl.json', 'SKILL.md', 'meta.json']) {
     assert.ok(files.has(id + '/' + rel), '缺产物：' + rel);
   }
-  assert.equal(report.length, 2, '两个蓝图（dev-workflow-2-0 + default-workflow）都产出');
-  assert.equal(report[0].ok, true);
+  assert.deepEqual(report.map((r) => r.id).sort(), ['default-workflow', 'dev-workflow-2-0', 'multi-perspective-exploration'], '三套内置蓝图都产出');
+  assert.ok(report.every((r) => r.ok), JSON.stringify(report));
 });
 
 test('S2 生成器：route 折叠识别（FOLDS 注入）', () => {

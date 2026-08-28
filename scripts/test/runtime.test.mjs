@@ -360,12 +360,15 @@ test('fanout ITEM_CAP 与 AGENT_CAP 均在任何 agent() 前返回可读终态',
 // ---------- 候选五 C5 规则 B：角色文件文件名 ⊆ 模板声明（契约一致性，repo 级） ----------
 test('T8 契约一致性：dsh/roles/*.md 反引号文件名 ⊆ 模板 output.files ∪ {STATE.md}', () => {
   const declared = new Set(['STATE.md'])
-  tpl.nodes.forEach((n) => {
-    if (n.output && n.output.files && typeof n.output.files === 'object') Object.keys(n.output.files).forEach((p) => declared.add(p))
-  })
+  for (const name of readdirSync(tplDir).filter((f) => f.endsWith('.json'))) {
+    const blueprint = JSON.parse(readFileSync(path.join(tplDir, name), 'utf8'))
+    for (const n of blueprint.nodes || []) {
+      if (n.output && n.output.files && typeof n.output.files === 'object') Object.keys(n.output.files).forEach((p) => declared.add(p))
+    }
+  }
   const rolesDir = path.join(here, '../../dsh/roles')
   const roleNames = readdirSync(rolesDir).filter((f) => f.endsWith('.md'))
-  assert.ok(roleNames.length >= 6, '角色文件齐全')
+  assert.ok(roleNames.length >= 10, '角色文件齐全')
   const bad = []
   for (const f of roleNames) {
     const text = readFileSync(path.join(rolesDir, f), 'utf8')
