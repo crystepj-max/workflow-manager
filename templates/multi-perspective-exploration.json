@@ -1,0 +1,380 @@
+{
+  "id": "multi-perspective-exploration",
+  "displayName": "多视角探索",
+  "description": "针对复杂、开放性问题，由探索统筹动态设计多个互补专业视角并行独立研究，经综合分析识别共识、分歧、关键假设和证据强弱，再由独立评估决定结束或进行定点补充探索。",
+  "entry": "orchestrate",
+  "control": {
+    "maxRounds": 3
+  },
+  "onMaxRounds": "return",
+  "bindings": {
+    "models": {
+      "orchestrate": {
+        "provider": "kimi-coding",
+        "model": "k3"
+      },
+      "research": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-pro"
+      },
+      "synthesize": {
+        "provider": "kimi-coding",
+        "model": "k3"
+      },
+      "evaluate": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-pro"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "orchestrate",
+      "label": "探索统筹",
+      "profile": "orchestrator",
+      "goal": "理解用户真正需要解决的问题，判断当前研究条件并设计互补而非重复的专业视角。首次运行进行广度探索；若存在前轮综合与评估反馈，只针对未解决的关键问题设计定点补充探索，不重复已经充分研究的方向。输出专家任务书并写 `exploration-plan.md`。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "READY",
+                "BLOCKED"
+              ]
+            },
+            "research_question": {
+              "type": "string"
+            },
+            "research_mode": {
+              "type": "string",
+              "enum": [
+                "BROAD",
+                "TARGETED"
+              ]
+            },
+            "information_level": {
+              "type": "string",
+              "enum": [
+                "HIGH",
+                "MEDIUM",
+                "LOW"
+              ]
+            },
+            "strategy": {
+              "type": "string"
+            },
+            "experts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "expert_id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "perspective": {
+                    "type": "string"
+                  },
+                  "objective": {
+                    "type": "string"
+                  },
+                  "questions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "exclusions": {
+                    "type": "string"
+                  },
+                  "evidence_requirements": {
+                    "type": "string"
+                  },
+                  "counterevidence_requirement": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "expert_id",
+                  "name",
+                  "perspective",
+                  "objective",
+                  "questions",
+                  "scope",
+                  "exclusions",
+                  "evidence_requirements",
+                  "counterevidence_requirement"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "research_question",
+            "research_mode",
+            "information_level",
+            "strategy",
+            "experts",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        "successCondition": "$.status == \"READY\"",
+        "files": {
+          "exploration-plan.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "research",
+      "kind": "fanout",
+      "label": "专家研究",
+      "profile": "researcher",
+      "goal": "你收到的是一个独立专家任务书。严格只从该任务书指定的专业视角研究问题，不读取或推测其他专家的结论，不追求与其他专家一致。专家任务书如下：{{item}}",
+      "items": "$.results.orchestrate.experts",
+      "failOn": "all",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "expert_id": {
+              "type": "string"
+            },
+            "perspective": {
+              "type": "string"
+            },
+            "conclusion": {
+              "type": "string"
+            },
+            "key_evidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "key_assumptions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "counterevidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "uncertainties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "confidence": {
+              "type": "string",
+              "enum": [
+                "HIGH",
+                "MEDIUM",
+                "LOW"
+              ]
+            },
+            "follow_up": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expert_id",
+            "perspective",
+            "conclusion",
+            "key_evidence",
+            "key_assumptions",
+            "counterevidence",
+            "uncertainties",
+            "confidence",
+            "follow_up"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "synthesize",
+      "label": "综合分析",
+      "profile": "synthesizer",
+      "goal": "读取本轮专家研究的完整扇形聚合结果，并结合已有 `synthesis-report.md`（若为补充研究轮）重新形成完整观点地图。不得简单拼接或采用多数投票；重点识别共识、真正分歧、分歧背后的关键假设、证据质量、未解决问题和会改变最终结论的条件。写 `synthesis-report.md`。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "overall_conclusion": {
+              "type": "string"
+            },
+            "consensus": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "disagreements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "critical_assumptions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "evidence_assessment": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unresolved_questions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "decision_sensitivity": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "overall_conclusion",
+            "consensus",
+            "disagreements",
+            "critical_assumptions",
+            "evidence_assessment",
+            "unresolved_questions",
+            "decision_sensitivity"
+          ],
+          "additionalProperties": false
+        },
+        "files": {
+          "synthesis-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "evaluate",
+      "label": "结论评估",
+      "profile": "evaluator",
+      "goal": "独立评估 `synthesis-report.md` 是否已经足以支持当前结论。检查研究覆盖、专家独立性、证据质量、冲突处理和结论充分性。只有存在重要且实际可以继续解决的缺口时才要求补充探索；如果关键证据客观无法取得或继续研究不会显著提升判断质量，应判定 INSUFFICIENT 而不是无限循环。写 `evaluation-report.md`。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "verdict": {
+              "type": "string",
+              "enum": [
+                "PASS",
+                "NEEDS_RESEARCH",
+                "INSUFFICIENT"
+              ]
+            },
+            "needs_more_research": {
+              "type": "boolean"
+            },
+            "coverage": {
+              "type": "string"
+            },
+            "independence": {
+              "type": "string"
+            },
+            "evidence_quality": {
+              "type": "string"
+            },
+            "conflict_handling": {
+              "type": "string"
+            },
+            "conclusion_support": {
+              "type": "string"
+            },
+            "research_gap": {
+              "type": "string"
+            },
+            "next_research_brief": {
+              "type": "string"
+            },
+            "final_conclusion": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "verdict",
+            "needs_more_research",
+            "coverage",
+            "independence",
+            "evidence_quality",
+            "conflict_handling",
+            "conclusion_support",
+            "research_gap",
+            "next_research_brief",
+            "final_conclusion"
+          ],
+          "additionalProperties": false
+        },
+        "successCondition": "$.needs_more_research == false",
+        "files": {
+          "evaluation-report.md": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "orchestrate",
+      "to": "research",
+      "on": "success"
+    },
+    {
+      "from": "orchestrate",
+      "to": "$end",
+      "on": "failure"
+    },
+    {
+      "from": "research",
+      "to": "synthesize",
+      "on": "success"
+    },
+    {
+      "from": "research",
+      "to": "orchestrate",
+      "on": "failure"
+    },
+    {
+      "from": "synthesize",
+      "to": "evaluate",
+      "on": "success"
+    },
+    {
+      "from": "evaluate",
+      "to": "$end",
+      "on": "success"
+    },
+    {
+      "from": "evaluate",
+      "to": "orchestrate",
+      "on": "failure"
+    }
+  ],
+  "bundleRoles": true
+}
