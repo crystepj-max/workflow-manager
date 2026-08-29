@@ -121,6 +121,7 @@ npm test           # 引擎层行为与契约测试
 | `packages/dsh-visual-workflow/` | 可视化编辑与运行观测入口 |
 | `dsh/` | DSH 侧角色与 Skill 真源 |
 | `docs/design/` | 当前契约与设计文档 |
+| `docs/design/workflow-design-principles.md` | 长期工作流设计原则（方法论权威，#71） |
 | `docs/research/` | 调研结论 |
 | `specs/` | 已形成的规格 / OpenSpec |
 | `wayfinder/` | 决策地图与历史决策 |
@@ -135,12 +136,15 @@ npm test           # 引擎层行为与契约测试
 当前约定：
 
 1. `AGENTS.md`：项目共同硬规则；
-2. `CONTEXT.md`：统一术语；
-3. `docs/design/`：当前 Contract / 设计语义；
-4. `templates/`：具体 Workflow 的唯一事实源；
-5. `specs/` / `wayfinder/`：需求、设计决策与历史上下文；
-6. GitHub Issue / PR：施工与验收状态；
-7. `main`：实际已经进入产品基线的实现。
+2. `CONTEXT.md`：统一术语（描述当前 `main` 的兼容实现）；
+3. [`docs/design/workflow-design-principles.md`](docs/design/workflow-design-principles.md)：长期工作流设计原则（why / how to design；后续模板与角色应引用，不重复发明）；
+4. `docs/design/` 其余契约：当前 Contract / 设计语义；v0.1 产品规格见 [PR #84](https://github.com/crystepj-max/workflow-manager/pull/84)（合入前为 Target，合入后以该规格文件为准）；
+5. `templates/`：具体 Workflow 的唯一事实源；
+6. `specs/` / `wayfinder/`：需求、设计决策与历史上下文；
+7. GitHub Issue / PR：施工与验收状态；
+8. `main`：实际已经进入产品基线的实现。
+
+原则文档是跨版本方法论；产品规格是某一版本的实例。`CONTEXT.md` 在对应实现进入 `main` 前保持 Current，不提前改成 Target 语义。
 
 发现冲突时先做 Reality Reconciliation，再继续实现。过时设计应显式标记 Historical / Superseded，而不是继续作为 Agent 上下文。
 
