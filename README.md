@@ -179,6 +179,7 @@ npm test           # 引擎层行为与契约测试
 | `packages/dsh-visual-workflow/` | 可视化编辑与运行观测入口 |
 | `dsh/` | DSH 侧角色与 Skill 真源 |
 | `docs/design/` | 当前/目标 Contract 与设计文档 |
+| `docs/design/workflow-design-principles.md` | 长期工作流设计原则（方法论权威，#71） |
 | `docs/research/` | 调研结论 |
 | `specs/` | 已形成的规格 / OpenSpec |
 | `wayfinder/` | 决策地图与历史决策 |
@@ -191,12 +192,15 @@ npm test           # 引擎层行为与契约测试
 不同类型文档承担不同职责：
 
 1. `AGENTS.md`：项目共同硬规则；
-2. `docs/design/workflow-manager-v0.1-final-product-spec.md`：v0.1 正式产品目标规格；
-3. `CONTEXT.md`：当前实现术语与兼容语义；
-4. `templates/`：当前 main 中具体 Workflow 的唯一事实源；
-5. `roadmap.md`：版本顺序和实施依赖；
-6. GitHub Issue / PR：施工范围、迁移和验收状态；
-7. `main`：实际已经进入产品基线的实现。
+2. [`docs/design/workflow-design-principles.md`](docs/design/workflow-design-principles.md)：长期工作流设计原则（why / how to design；后续模板与角色应引用，不重复发明）；
+3. `docs/design/workflow-manager-v0.1-final-product-spec.md`：v0.1 正式产品目标规格（本版本实例）；
+4. `CONTEXT.md`：当前实现术语与兼容语义；
+5. `templates/`：当前 main 中具体 Workflow 的唯一事实源；
+6. `roadmap.md`：版本顺序和实施依赖；
+7. GitHub Issue / PR：施工范围、迁移和验收状态；
+8. `main`：实际已经进入产品基线的实现。
+
+原则文档是跨版本方法论；产品规格是某一版本的实例。`CONTEXT.md` 在对应实现进入 `main` 前保持 Current，不提前改成 Target 语义。
 
 当目标规格与当前实现不同，这是正常的“迁移中状态”；Agent 必须明确自己是在维护兼容基线还是实施 v0.1 目标，不能把两者静默混合。
 

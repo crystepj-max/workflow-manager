@@ -79,6 +79,8 @@ Run 创建时冻结 Workflow、Role、Provider / Model 与关键运行配置。v
 
 ## 4. 全局设计原则 R1–R6
 
+展开定义、四套模板方法论与新增角色/模板检查清单见长期方法论文档 [`workflow-design-principles.md`](workflow-design-principles.md)（#71）。本节只保留本版本规格需要的摘要。
+
 1. **R1**：Node 报告专业结果，不报告 next node；
 2. **R2**：Blueprint 把 Business Outcome 映射为路由；
 3. **R3**：Formal Record 使用不可覆盖 Revision；
