@@ -5,10 +5,17 @@
 // 产物：.scratch/worktrees/<branch>/ 与 <worktree>/.agent-runs/<run_id>/run.json
 
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const DEFAULT_BUDGET = 3
+
+export function branchName(runId) {
+  // 分支名携带 run_id（净化）：同 issue 的二次/派生 Run 不撞分支（契约支持额度耗尽后派生新 Run）
+  const sanitized = String(runId).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+  return `dev-${sanitized}`
+}
 
 function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
@@ -35,23 +42,32 @@ function parseArgs(argv) {
 function main() {
   const { issue, runId, base, budget } = parseArgs(process.argv.slice(2))
   const repo = git(['rev-parse', '--show-toplevel'])
-  const branch = `dev-issue-${issue}`
+  const branch = branchName(runId)
+  const runDirRel = join('.agent-runs', runId)
 
   git(['fetch', 'origin', base], repo)
   const baseRef = `origin/${base}`
   const baseCommit = git(['rev-parse', baseRef], repo)
+  const worktreeDir = `.scratch/worktrees/${branch}`
+  const worktreePath = join(repo, worktreeDir)
 
+  // 幂等：同 run_id 的既有 worktree/run 目录直接复用，不重复建分支
+  const existingRunJson = join(worktreePath, runDirRel, 'run.json')
   if (git(['branch', '--list', branch], repo)) {
-    console.error(`分支已存在: ${branch}`)
+    if (existsSync(existingRunJson)) {
+      const existing = JSON.parse(readFileSync(existingRunJson, 'utf-8'))
+      if (existing.run_id === runId) {
+        console.log(JSON.stringify({ worktree: worktreePath, runDir: join(worktreePath, runDirRel), identity: existing, reused: true }, null, 2))
+        return
+      }
+    }
+    console.error(`分支已存在且不属于本 Run: ${branch}（换用不同 run_id 或先清理旧 workspace）`)
     process.exit(1)
   }
   git(['branch', branch, baseRef], repo)
-
-  const worktreeDir = `.scratch/worktrees/${branch}`
-  const worktreePath = join(repo, worktreeDir)
   git(['worktree', 'add', worktreeDir, branch], repo)
 
-  const runDir = join(worktreePath, '.agent-runs', runId)
+  const runDir = join(worktreePath, runDirRel)
   mkdirSync(runDir, { recursive: true })
 
   const identity = {
@@ -70,6 +86,7 @@ function main() {
     ...identity,
     rollback_budget: budget,
     rollback_used: 0,
+    rollback_history: [],
     created_at: new Date().toISOString(),
   }
   writeFileSync(join(runDir, 'run.json'), JSON.stringify(runState, null, 2) + '\n')
@@ -77,4 +94,6 @@ function main() {
   console.log(JSON.stringify({ worktree: worktreePath, runDir, identity }, null, 2))
 }
 
-main()
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main()
+}

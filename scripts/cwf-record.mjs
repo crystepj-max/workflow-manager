@@ -53,7 +53,13 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
   const schema = loadSchema(runDir)
   if (flags.stage) run.stage = flags.stage
   if (flags.attempt !== undefined) run.attempt = flags.attempt
-  run.current_head = currentHead(runDir)
+  // 必须 fail closed：取不到真实 HEAD 即中止，不得静默复用旧值伪造 Proof 绑定（§2 不变量 3）
+  try {
+    run.current_head = currentHead(runDir)
+  } catch (e) {
+    console.error(`无法读取当前工作区真实 HEAD（${e.message}）：write 中止，Proof 不得绑定未观察的修订`)
+    process.exit(1)
+  }
 
   const record = {
     record_type: recordType,
@@ -97,12 +103,8 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
 }
 
 function currentHead(runDir) {
-  // runDir 所在 git 工作区的 HEAD（worktree 场景 = 该 worktree 分支 HEAD）
-  try {
-    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot(runDir), encoding: 'utf-8' }).trim()
-  } catch {
-    return loadRun(runDir).current_head
-  }
+  // runDir 所在 git 工作区的 HEAD（worktree 场景 = 该 worktree 分支 HEAD）；失败即抛错（fail closed）
+  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot(runDir), encoding: 'utf-8' }).trim()
 }
 
 function cmdCheck(runDir, files) {
@@ -127,14 +129,29 @@ function cmdRollback(runDir, rootCause) {
   }
   const run = loadRun(runDir)
   const budget = run.rollback_budget ?? 3
-  // 先查容量：被拒的回退边未执行，不得递增额度（契约 §4.3 保留原 Outcome、不执行该边）
+  // 持久化所选回退边（§4.1 一次一条边；历史供升级/重放审计）
+  const entry = {
+    at: new Date().toISOString(),
+    source_stage: run.stage,
+    root_cause: rootCause,
+    target_stage: rootCause,
+    attempt: run.attempt,
+  }
+  run.rollback_history = [...(run.rollback_history || []), entry]
+  // 先查容量：被拒边不递增，但持久化生命周期迁移（§4.3：WAITING_HUMAN + MAX_ROUNDS_REACHED）
   if (run.rollback_used >= budget) {
-    console.error(`自动回退额度耗尽（${run.rollback_used}/${budget}）：按契约 §4.3 保留原 Outcome，升级人工（MAX_ROUNDS_REACHED）`)
+    entry.rejected = true
+    entry.reason = 'MAX_ROUNDS_REACHED'
+    run.lifecycle = 'WAITING_HUMAN'
+    run.lifecycle_reason = 'MAX_ROUNDS_REACHED'
+    saveRun(runDir, run)
+    console.error(`自动回退额度耗尽（${run.rollback_used}/${budget}）：按契约 §4.3 保留原 Outcome，升级人工（MAX_ROUNDS_REACHED，已持久化到 run.json）`)
     process.exit(1)
   }
   run.rollback_used += 1
+  entry.counter = `${run.rollback_used}/${budget}`
   saveRun(runDir, run)
-  console.log(`回退已记录：根因=${rootCause}，额度 ${run.rollback_used}/${budget}`)
+  console.log(`回退已记录：根因=${rootCause}（${run.stage}→${rootCause}），额度 ${run.rollback_used}/${budget}`)
 }
 
 function parseFlags(args) {
