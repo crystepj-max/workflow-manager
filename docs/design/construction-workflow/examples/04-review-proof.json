@@ -1,0 +1,25 @@
+{
+  "record_type": "review_proof",
+  "record_version": "v0.1.8",
+  "created_at": "2026-08-30T07:30:00Z",
+  "produced_by": "external:codex-reviewer",
+  "run": {
+    "run_id": "cwf-103-bootstrap-01",
+    "issue_or_task_identity": "#112",
+    "workspace_id": "wt-dev-102serias",
+    "repository": "crystepj-max/workflow-manager",
+    "base_ref": "main",
+    "base_commit": "fc5ce7750fe644b86cba7cbd3914d6a158f41060",
+    "work_branch": "dev-#102serias",
+    "current_head": "c8d86254b963435bae107c9259ac2145cf04ef82",
+    "stage": "review",
+    "attempt": 2
+  },
+  "payload": {
+    "verdict": "approve",
+    "findings": [],
+    "verified_branch": "dev-#102serias",
+    "verified_head": "c8d86254b963435bae107c9259ac2145cf04ef82",
+    "independent_session": true
+  }
+}

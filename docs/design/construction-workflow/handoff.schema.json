@@ -1,0 +1,734 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "docs/design/construction-workflow/handoff.schema.json",
+  "title": "Construction Workflow Portable Handoff / Evidence Record",
+  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.8，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["record_type", "record_version", "created_at", "produced_by", "run", "payload"],
+  "properties": {
+    "record_type": {
+      "description": "七类记录之一",
+      "enum": [
+        "requirements_baseline",
+        "design_package",
+        "dev_handoff",
+        "review_proof",
+        "test_proof",
+        "acceptance_package",
+        "closeout_summary"
+      ]
+    },
+    "record_version": {
+      "description": "记录 schema 版本，与契约版本同步",
+      "const": "v0.1.8"
+    },
+    "created_at": {
+      "$ref": "#/definitions/isoDateTime"
+    },
+    "produced_by": {
+      "description": "产生者 Role/会话标识",
+      "$ref": "#/definitions/nonEmptyText"
+    },
+    "run": {
+      "$ref": "#/definitions/portableRunIdentity"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "oneOf": [
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "requirements_baseline" },
+        "payload": { "$ref": "#/definitions/requirementsBaselinePayload" },
+        "run": { "properties": { "stage": { "const": "requirements" } } }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "design_package" },
+        "payload": { "$ref": "#/definitions/designPackagePayload" },
+        "run": { "properties": { "stage": { "const": "design" } } }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "dev_handoff" },
+        "payload": { "$ref": "#/definitions/devHandoffPayload" },
+        "run": { "properties": { "stage": { "const": "dev" } } }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "review_proof" },
+        "payload": { "$ref": "#/definitions/reviewProofPayload" },
+        "run": { "properties": { "stage": { "const": "review" } } }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "test_proof" },
+        "payload": { "$ref": "#/definitions/testProofPayload" },
+        "run": { "properties": { "stage": { "const": "test" } } }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "acceptance_package" },
+        "payload": { "$ref": "#/definitions/acceptancePackagePayload" },
+        "run": { "properties": { "stage": { "const": "human_acceptance" } } }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "closeout_summary" },
+        "payload": { "$ref": "#/definitions/closeoutSummaryPayload" },
+        "run": { "properties": { "stage": { "const": "closeout" } } }
+      }
+    }
+  ],
+  "definitions": {
+    "isoDateTime": {
+      "description": "ISO 8601 UTC 时间",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "portableRunIdentity": {
+      "description": "Portable Run Identity 最小字段集（#103 列举，契约 §7.1）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "issue_or_task_identity",
+        "workspace_id",
+        "repository",
+        "base_ref",
+        "base_commit",
+        "work_branch",
+        "current_head",
+        "stage",
+        "attempt"
+      ],
+      "properties": {
+        "run_id": { "$ref": "#/definitions/nonEmptyText" },
+        "issue_or_task_identity": { "$ref": "#/definitions/nonEmptyText" },
+        "workspace_id": { "$ref": "#/definitions/nonEmptyText" },
+        "repository": { "$ref": "#/definitions/nonEmptyText" },
+        "base_ref": { "$ref": "#/definitions/nonEmptyText" },
+        "base_commit": { "$ref": "#/definitions/nonEmptyText" },
+        "work_branch": { "$ref": "#/definitions/nonEmptyText" },
+        "current_head": { "$ref": "#/definitions/nonEmptyText" },
+        "stage": {
+          "enum": [
+            "requirements",
+            "design",
+            "dev",
+            "review",
+            "test",
+            "human_acceptance",
+            "closeout"
+          ]
+        },
+        "attempt": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "rootCause": {
+      "description": "回退根因分类（契约 §4.1）",
+      "enum": ["dev", "design", "requirements"]
+    },
+    "nonEmptyText": {
+      "description": "非空白字符串（proof 绑定等，契约 §7.3）",
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "requirementsBaselinePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "scope", "acceptance", "gaps", "status", "outcome"],
+      "properties": {
+        "goal": { "$ref": "#/definitions/nonEmptyText" },
+        "outcome": {
+          "description": "Requirements 阶段整体专业结果（契约 §6.3 基元：baseline-ready 待确认 / awaiting-human-input 缺口挂起 / revised 回退后重出）",
+          "enum": ["baseline_ready", "awaiting_human_input", "revised"]
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["include", "exclude"],
+          "properties": {
+            "include": { "type": "array", "items": { "$ref": "#/definitions/nonEmptyText" } },
+            "exclude": { "type": "array", "items": { "$ref": "#/definitions/nonEmptyText" } }
+          }
+        },
+        "acceptance": { "type": "array", "items": { "$ref": "#/definitions/nonEmptyText" } },
+        "gaps": {
+          "description": "缺失要素必须显式列出，不得编造（契约 §3.1）",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["element", "suggestion"],
+            "properties": {
+              "element": { "type": "string" },
+              "suggestion": { "type": "string" }
+            }
+          }
+        },
+        "clarification_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["topic", "decision"],
+            "properties": {
+              "topic": { "type": "string" },
+              "decision": { "type": "string" }
+            }
+          }
+        },
+        "status": {
+          "description": "draft 不得作为下游冻结输入；confirmed 才是 BASELINE_CONFIRMED（契约 §3.1/§5.1）",
+          "enum": ["draft", "confirmed"]
+        },
+        "baseline_revision": { "type": "string" },
+        "human_confirmation": {
+          "description": "人工确认记录（BASELINE_CONFIRMED），AI 不得代填",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["confirmed_by", "confirmed_at"],
+          "properties": {
+            "confirmed_by": { "$ref": "#/definitions/nonEmptyText" },
+            "confirmed_at": { "$ref": "#/definitions/isoDateTime" }
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["status"],
+          "properties": { "status": { "const": "draft" } },
+          "not": { "required": ["human_confirmation"] }
+        },
+        {
+          "required": ["status", "baseline_revision", "human_confirmation"],
+          "properties": {
+            "status": { "const": "confirmed" },
+            "gaps": { "maxItems": 0 },
+            "acceptance": { "minItems": 1 },
+            "goal": { "$ref": "#/definitions/nonEmptyText" },
+            "scope": {
+              "properties": {
+                "include": { "minItems": 1 },
+                "exclude": { "minItems": 1 }
+              }
+            }
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "awaiting_human_input" } }
+          },
+          "then": {
+            "description": "挂起等输入时必须显式声明缺口（契约 §3.1，不得编造也不得空挂）",
+            "required": ["gaps"],
+            "properties": { "gaps": { "minItems": 1 } }
+          }
+        },
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "baseline_ready" } }
+          },
+          "then": {
+            "description": "基线就绪（待人工确认）时不得残留未解决缺口",
+            "properties": { "gaps": { "maxItems": 0 } }
+          }
+        }
+      ]
+    },
+    "designPackagePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "outcome", "decision_required"],
+      "properties": {
+        "summary": { "type": "string" },
+        "outcome": {
+          "description": "Design 阶段整体专业结果（契约 §6.3 基元：package-ready / decision-required / requirements-issue）",
+          "enum": ["package_ready", "decision_required", "requirements_issue"]
+        },
+        "affected_modules": { "type": "array", "items": { "$ref": "#/definitions/nonEmptyText" } },
+        "risks": { "type": "array", "items": { "$ref": "#/definitions/nonEmptyText" } },
+        "open_questions": { "type": "array", "items": { "$ref": "#/definitions/nonEmptyText" } },
+        "decision_required": {
+          "description": "true 时 Controller 挂起等人工决策（契约 §5.2 判据）",
+          "type": "boolean"
+        },
+        "decision_required_reasons": {
+          "description": "命中判据的说明；decision_required=true 时必填（契约 §5.2）",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/nonEmptyText" }
+        },
+        "decision_request": {
+          "description": "待决决策包（契约 §5.3）：挂起人工裁决前必须携带的决策点、候选项与推荐理由；与已决 decision 不同字段，已决后保留作为裁决上下文",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["question", "options", "recommendation"],
+          "properties": {
+            "question": { "$ref": "#/definitions/nonEmptyText" },
+            "options": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "tradeoffs"],
+                "properties": {
+                  "name": { "$ref": "#/definitions/nonEmptyText" },
+                  "tradeoffs": { "$ref": "#/definitions/nonEmptyText" }
+                }
+              }
+            },
+            "recommendation": { "$ref": "#/definitions/nonEmptyText" }
+          }
+        },
+        "decision": {
+          "description": "Human Decision Record（不可覆盖，契约 §5）：人工已决记录；仅允许出现在命中条件门的 package 上",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["question", "options", "chosen", "rationale", "decided_by", "decided_at"],
+          "properties": {
+            "question": { "type": "string" },
+            "options": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "tradeoffs"],
+                "properties": {
+                  "name": { "$ref": "#/definitions/nonEmptyText" },
+                  "tradeoffs": { "$ref": "#/definitions/nonEmptyText" }
+                }
+              }
+            },
+            "chosen": { "$ref": "#/definitions/nonEmptyText" },
+            "rationale": { "type": "string" },
+            "decided_by": { "$ref": "#/definitions/nonEmptyText" },
+            "decided_at": { "$ref": "#/definitions/isoDateTime" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["decision_required"],
+            "properties": { "decision_required": { "const": true } }
+          },
+          "then": {
+            "description": "命中 §5.2 条件门必须说明判据依据，供人工决策包使用",
+            "required": ["decision_required_reasons"]
+          }
+        },
+        {
+          "if": {
+            "required": ["decision"],
+            "properties": { "decision": { "type": "object" } }
+          },
+          "then": {
+            "description": "Decision Record 只能出现在命中 §5.2 条件门的 package 上，且必须保留裁决时呈递的 decision_request（chosen 必须属于呈递候选集，契约 §5.3）",
+            "required": ["decision_required", "decision_request"],
+            "properties": { "decision_required": { "const": true } }
+          }
+        },
+        {
+          "if": {
+            "required": ["decision_required"],
+            "properties": { "decision_required": { "const": true } },
+            "not": { "required": ["decision"] }
+          },
+          "then": {
+            "description": "条件门命中且未决 ⇒ outcome=decision_required（Controller 挂起等人工决策，契约 §5.2）",
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "decision_required" } }
+          }
+        },
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "decision_required" } }
+          },
+          "then": {
+            "description": "outcome=decision_required ⇒ 门标记置位、未决（decision 缺席）且必须携带 decision_request 决策包供人工裁决（契约 §5.2/§5.3）",
+            "required": ["decision_required", "decision_request"],
+            "properties": { "decision_required": { "const": true } },
+            "not": { "required": ["decision"] }
+          }
+        },
+        {
+          "if": {
+            "required": ["decision_request"],
+            "properties": { "decision_request": { "type": "object" } }
+          },
+          "then": {
+            "description": "decision_request 只能出现在命中条件门的 package 上",
+            "required": ["decision_required"],
+            "properties": { "decision_required": { "const": true } }
+          }
+        }
+      ]
+    },
+    "devHandoffPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "outcome", "changes", "self_check"],
+      "properties": {
+        "summary": { "type": "string" },
+        "outcome": {
+          "description": "Dev 阶段整体专业结果（契约 §6.3 基元：handoff-ready / blocked / design-issue / requirements-issue）",
+          "enum": ["handoff_ready", "blocked", "design_issue", "requirements_issue"]
+        },
+        "blocked_reason": {
+          "description": "outcome=blocked 时必填：可恢复的外部/技术条件说明，供 hold(<reason>) 路由与恢复判定（契约 §6.3/§6.4）",
+          "$ref": "#/definitions/nonEmptyText"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["area", "description"],
+            "properties": {
+              "area": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "self_check": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["check", "result"],
+            "properties": {
+              "check": { "type": "string" },
+              "result": { "enum": ["pass", "fail", "blocked", "not_applicable"] }
+            }
+          }
+        },
+        "notes": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "blocked" } }
+          },
+          "then": {
+            "description": "blocked 必须说明可恢复条件，供 hold(<reason>) 路由（契约 §6.4）",
+            "required": ["blocked_reason"]
+          }
+        },
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "handoff_ready" } }
+          },
+          "then": {
+            "description": "handoff_ready 要求自验清单非空且无 fail/blocked 项（契约 §3.3 完成判定）",
+            "required": ["self_check"],
+            "properties": {
+              "self_check": {
+                "minItems": 1,
+                "items": {
+                  "properties": {
+                    "result": { "enum": ["pass", "not_applicable"] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "reviewProofPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "findings", "verified_branch", "verified_head", "independent_session"],
+      "properties": {
+        "verdict": { "enum": ["approve", "request_changes"] },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["finding", "root_cause"],
+            "properties": {
+              "finding": { "type": "string" },
+              "root_cause": { "$ref": "#/definitions/rootCause" }
+            }
+          }
+        },
+        "verified_branch": { "$ref": "#/definitions/nonEmptyText" },
+        "verified_head": { "$ref": "#/definitions/nonEmptyText" },
+        "independent_session": {
+          "description": "独立证明者原则：审核会话必须独立于开发会话（契约 §2 不变量 2）",
+          "enum": [true]
+        }
+      },
+      "if": {
+        "required": ["verdict"],
+        "properties": { "verdict": { "const": "request_changes" } }
+      },
+      "then": {
+        "description": "request-changes 必须至少携带一条带根因分类的 finding，否则路由悬空（契约 §3.4/§6.5）",
+        "required": ["findings"],
+        "properties": {
+          "findings": { "minItems": 1 }
+        }
+      }
+    },
+    "testProofPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "acceptance_mapping", "verified_branch", "verified_head", "independent_session"],
+      "properties": {
+        "verdict": { "enum": ["pass", "fail", "blocked"] },
+        "acceptance_mapping": {
+          "description": "与 baseline 验收标准逐条映射",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["acceptance_item", "result"],
+            "properties": {
+              "acceptance_item": { "type": "string" },
+              "result": { "enum": ["pass", "fail", "blocked", "not_verified"] }
+            }
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["finding", "root_cause"],
+            "properties": {
+              "finding": { "type": "string" },
+              "root_cause": { "$ref": "#/definitions/rootCause" }
+            }
+          }
+        },
+        "environment": { "type": "string" },
+        "blocked_reason": {
+          "description": "verdict=blocked 时必填：可恢复的外部/技术条件说明，供 hold(<reason>) 路由与恢复判定（契约 §6.3/§6.4）",
+          "$ref": "#/definitions/nonEmptyText"
+        },
+        "verified_branch": { "$ref": "#/definitions/nonEmptyText" },
+        "verified_head": { "$ref": "#/definitions/nonEmptyText" },
+        "independent_session": {
+          "description": "独立证明者原则：测试会话必须独立于开发会话（契约 §2 不变量 2）",
+          "enum": [true]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["verdict"],
+            "properties": { "verdict": { "const": "pass" } }
+          },
+          "then": {
+            "description": "pass 要求非空且逐项全 pass 的验收映射（契约 §3.5 完成判定）",
+            "required": ["acceptance_mapping"],
+            "properties": {
+              "acceptance_mapping": {
+                "minItems": 1,
+                "items": {
+                  "properties": {
+                    "result": { "const": "pass" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["verdict"],
+            "properties": { "verdict": { "const": "fail" } }
+          },
+          "then": {
+            "description": "fail 必须至少携带一条带根因分类的 finding，否则 §4.1 路由悬空（契约 §6.5）",
+            "required": ["findings"],
+            "properties": {
+              "findings": { "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["verdict"],
+            "properties": { "verdict": { "const": "blocked" } }
+          },
+          "then": {
+            "description": "blocked 必须说明可恢复条件，供 hold(<reason>) 路由（契约 §6.4）",
+            "required": ["blocked_reason"]
+          }
+        }
+      ]
+    },
+    "acceptancePackagePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "assembled"],
+      "properties": {
+        "status": { "enum": ["awaiting_decision", "decided"] },
+        "assembled": {
+          "description": "证据汇总：§3.6 定义的五类前置记录引用 + Integration Checkpoint 结果",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "requirements_baseline_ref",
+            "design_package_ref",
+            "dev_handoff_ref",
+            "review_proof_ref",
+            "test_proof_ref",
+            "integration_checkpoint"
+          ],
+          "properties": {
+            "requirements_baseline_ref": { "$ref": "#/definitions/nonEmptyText" },
+            "design_package_ref": { "$ref": "#/definitions/nonEmptyText" },
+            "dev_handoff_ref": { "$ref": "#/definitions/nonEmptyText" },
+            "review_proof_ref": { "$ref": "#/definitions/nonEmptyText" },
+            "test_proof_ref": { "$ref": "#/definitions/nonEmptyText" },
+            "integration_checkpoint": {
+            "description": "结构化 checkpoint 结果（契约 §7.3）：target 已前进时必须已重跑受影响 Proof",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["target_ref", "target_head_at_check", "target_advanced", "proofs_state"],
+            "properties": {
+              "target_ref": { "$ref": "#/definitions/nonEmptyText" },
+              "target_head_at_check": { "$ref": "#/definitions/nonEmptyText" },
+              "target_advanced": { "type": "boolean" },
+              "proofs_state": { "enum": ["still_valid", "rerun_completed"] },
+              "notes": { "type": "string" }
+            },
+            "if": {
+              "required": ["target_advanced"],
+              "properties": { "target_advanced": { "const": true } }
+            },
+            "then": {
+              "description": "target 已前进 ⇒ 受影响 Proof 必须已重跑（契约 §7.3）",
+              "properties": { "proofs_state": { "const": "rerun_completed" } }
+            }
+          }
+          }
+        },
+        "decision": {
+          "description": "人工决策，AI 不得代签（契约 §3.6）",
+          "enum": ["accept", "reject", "user_accepted"]
+        },
+        "decided_by": { "$ref": "#/definitions/nonEmptyText" },
+        "decided_at": { "$ref": "#/definitions/isoDateTime" },
+        "feedback": { "$ref": "#/definitions/nonEmptyText" },
+        "rejection_root_cause": { "$ref": "#/definitions/rootCause" },
+        "verified_branch": { "$ref": "#/definitions/nonEmptyText" },
+        "verified_head": { "$ref": "#/definitions/nonEmptyText" }
+      },
+      "oneOf": [
+        {
+          "required": ["status"],
+          "properties": { "status": { "const": "awaiting_decision" } },
+          "not": {
+            "anyOf": [
+              { "required": ["decision"] },
+              { "required": ["decided_by"] },
+              { "required": ["decided_at"] },
+              { "required": ["feedback"] },
+              { "required": ["rejection_root_cause"] },
+              { "required": ["verified_head"] }
+            ]
+          }
+        },
+        {
+          "required": [
+            "status",
+            "decision",
+            "decided_by",
+            "decided_at",
+            "verified_branch",
+            "verified_head"
+          ],
+          "properties": { "status": { "const": "decided" } }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "required": ["decision"],
+            "properties": { "decision": { "const": "reject" } }
+          },
+          "then": {
+            "description": "reject 必须携带 feedback 与根因指向，否则 Controller 无法按 §3.6 路由",
+            "required": ["feedback", "rejection_root_cause"]
+          }
+        },
+        {
+          "if": {
+            "required": ["decision"],
+            "properties": { "decision": { "const": "user_accepted" } }
+          },
+          "then": {
+            "description": "user_accepted 必须以 feedback 说明知情接受的差异（契约 §3.6 特殊语义）",
+            "required": ["feedback"]
+          }
+        }
+      ]
+    },
+    "closeoutSummaryPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deliverables", "integration", "records_retained", "acceptance_outcome", "acceptance_package_ref"],
+      "properties": {
+        "deliverables": { "type": "array", "items": { "$ref": "#/definitions/nonEmptyText" } },
+        "acceptance_package_ref": {
+          "description": "必须指向已 decided 的 acceptance package；Controller 归档前校验其 status=decided（契约 §3.6→§3.7 审计链）",
+          "$ref": "#/definitions/nonEmptyText"
+        },
+        "integration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["checkpoint"],
+          "properties": {
+            "pr": { "$ref": "#/definitions/nonEmptyText" },
+            "merge_commit": { "$ref": "#/definitions/nonEmptyText" },
+            "checkpoint": { "type": "string" }
+          },
+          "anyOf": [
+            { "required": ["pr"] },
+            { "required": ["merge_commit"] }
+          ]
+        },
+        "leftovers": { "type": "array", "items": { "$ref": "#/definitions/nonEmptyText" } },
+        "acceptance_outcome": {
+          "description": "保留验收决议：user_accepted 异常必须延续到收口，作为 Completion 权威事实，不得洗成普通交付（契约 §3.7/§6.3）",
+          "enum": ["accept", "user_accepted"]
+        },
+        "records_retained": {
+          "description": "归档保留声明（契约 §8.5）",
+          "enum": [true]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "record_type": "design_package",
+  "record_version": "v0.1.8",
+  "created_at": "2026-08-30T06:45:00Z",
+  "produced_by": "dsh:construction-bootstrap",
+  "run": {
+    "run_id": "cwf-103-bootstrap-01",
+    "issue_or_task_identity": "#112",
+    "workspace_id": "wt-dev-102serias",
+    "repository": "crystepj-max/workflow-manager",
+    "base_ref": "main",
+    "base_commit": "fc5ce7750fe644b86cba7cbd3914d6a158f41060",
+    "work_branch": "dev-#102serias",
+    "current_head": "fc5ce7750fe644b86cba7cbd3914d6a158f41060",
+    "stage": "design",
+    "attempt": 1
+  },
+  "payload": {
+    "summary": "契约文档按 §0 定位 / §1 术语 / §2 主链不变量 / §3 Stage 四要素 / §4 回退升级 / §5 人工门边界 / §6 Outcome-Routing 兼容组织；§7–§9 稳定占位给 #113/#114",
+    "outcome": "package_ready",
+    "affected_modules": [
+      "docs/design/construction-workflow-portable-contract.md"
+    ],
+    "risks": [
+      "与 legacy dev-workflow-2-0 语义混淆（已用 §0 显式切割）",
+      "额度耗尽语义若沿用 legacy FAILED_MAX_ROUNDS 将与 #73 冲突（已采用 WAITING_HUMAN）"
+    ],
+    "open_questions": [],
+    "decision_required": false,
+    "decision_required_reasons": [
+      "主链决断已由 #102 A1–A5 预先做出",
+      "文件布局由 #103 授权实现期确定，属执行自由度而非方向取舍"
+    ]
+  }
+}

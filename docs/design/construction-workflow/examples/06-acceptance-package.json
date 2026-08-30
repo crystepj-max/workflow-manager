@@ -1,0 +1,40 @@
+{
+  "record_type": "acceptance_package",
+  "record_version": "v0.1.8",
+  "created_at": "2026-08-30T08:00:00Z",
+  "produced_by": "dsh:construction-bootstrap",
+  "run": {
+    "run_id": "cwf-103-bootstrap-01",
+    "issue_or_task_identity": "#112",
+    "workspace_id": "wt-dev-102serias",
+    "repository": "crystepj-max/workflow-manager",
+    "base_ref": "main",
+    "base_commit": "fc5ce7750fe644b86cba7cbd3914d6a158f41060",
+    "work_branch": "dev-#102serias",
+    "current_head": "c8d86254b963435bae107c9259ac2145cf04ef82",
+    "stage": "human_acceptance",
+    "attempt": 1
+  },
+  "payload": {
+    "status": "decided",
+    "assembled": {
+      "requirements_baseline_ref": "examples/01-requirements-baseline.json",
+      "design_package_ref": "examples/02-design-package.json",
+      "dev_handoff_ref": "examples/03-dev-handoff.json",
+      "review_proof_ref": "examples/04-review-proof.json",
+      "test_proof_ref": "examples/05-test-proof.json",
+      "integration_checkpoint": {
+        "target_ref": "main",
+        "target_head_at_check": "fc5ce7750fe644b86cba7cbd3914d6a158f41060",
+        "target_advanced": false,
+        "proofs_state": "still_valid",
+        "notes": "PR #115 target=main，base_commit 为 target 祖先最新状态，无需重跑 Proof"
+      }
+    },
+    "decision": "accept",
+    "decided_by": "human:maintainer",
+    "decided_at": "2026-08-30T08:05:00Z",
+    "verified_branch": "dev-#102serias",
+    "verified_head": "c8d86254b963435bae107c9259ac2145cf04ef82"
+  }
+}

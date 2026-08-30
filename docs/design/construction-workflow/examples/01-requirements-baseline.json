@@ -1,0 +1,58 @@
+{
+  "record_type": "requirements_baseline",
+  "record_version": "v0.1.8",
+  "created_at": "2026-08-30T06:30:00Z",
+  "produced_by": "dsh:construction-bootstrap",
+  "run": {
+    "run_id": "cwf-103-bootstrap-01",
+    "issue_or_task_identity": "#112",
+    "workspace_id": "wt-dev-102serias",
+    "repository": "crystepj-max/workflow-manager",
+    "base_ref": "main",
+    "base_commit": "fc5ce7750fe644b86cba7cbd3914d6a158f41060",
+    "work_branch": "dev-#102serias",
+    "current_head": "fc5ce7750fe644b86cba7cbd3914d6a158f41060",
+    "stage": "requirements",
+    "attempt": 1
+  },
+  "payload": {
+    "goal": "产出一文档形式冻结的建设·完整功能开发 Portable Contract，作为 DSH Profile 与 External Profile 的共同唯一业务语义源",
+    "scope": {
+      "include": [
+        "docs/design/construction-workflow-portable-contract.md 契约正文",
+        "共享 handoff schema 与示例"
+      ],
+      "exclude": [
+        "DSH Runtime 实现 / #105 Profile",
+        "External Profile runbook（#104）",
+        "templates/*.json 蓝图与生成产物",
+        "legacy dev-workflow-2-0 改名复用"
+      ]
+    },
+    "acceptance": [
+      "7 阶段逐一覆盖，每阶段含输入/专业输出/Proof/回退根因",
+      "Human Acceptance 与 Human Decision 边界明确",
+      "回退语义：默认额度 3、按根因回节点、耗尽升级人工、不篡改专业结果",
+      "Outcome/Routing 兼容原则成文",
+      "Design 自动推进 vs 条件式 Human Decision 判据明确"
+    ],
+    "gaps": [],
+    "outcome": "baseline_ready",
+    "clarification_decisions": [
+      {
+        "topic": "主链语义决断",
+        "decision": "由父 epic #102 A1–A5 预先做出，本 Run 无需重新决断"
+      },
+      {
+        "topic": "文件布局",
+        "decision": "#103 显式授权实现期结合仓库现状确定"
+      }
+    ],
+    "status": "confirmed",
+    "baseline_revision": "v1",
+    "human_confirmation": {
+      "confirmed_by": "crystepj-max",
+      "confirmed_at": "2026-08-30T07:05:00Z"
+    }
+  }
+}
