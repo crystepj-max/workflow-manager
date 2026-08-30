@@ -11,23 +11,25 @@
     "base_ref": "main",
     "base_commit": "fc5ce7750fe644b86cba7cbd3914d6a158f41060",
     "work_branch": "dev-#102serias",
-    "current_head": "2b5a7c79a0c3a61392611a363c25062b9074f98d",
+    "current_head": "c8d86254b963435bae107c9259ac2145cf04ef82",
     "stage": "test",
-    "attempt": 1
+    "attempt": 2
   },
   "payload": {
     "verdict": "pass",
     "acceptance_mapping": [
       { "acceptance_item": "7 阶段逐一覆盖且每阶段含四要素", "result": "pass" },
       { "acceptance_item": "Decision/Acceptance 边界明确", "result": "pass" },
-      { "acceptance_item": "回退语义（额度 3/根因路由/耗尽升级/不篡改）成文", "result": "pass" },
-      { "acceptance_item": "Outcome/Routing 兼容原则成文", "result": "pass" },
+      { "acceptance_item": "回退语义（额度 3/单边根因路由/耗尽升级/不篡改）成文", "result": "pass" },
+      { "acceptance_item": "Outcome/Routing 兼容原则（含 blocked→hold 路由）成文", "result": "pass" },
       { "acceptance_item": "Design 条件门判据明确", "result": "pass" },
-      { "acceptance_item": "根因分回 Requirements/Design/Dev 的规则成文", "result": "pass" }
+      { "acceptance_item": "Run/Workspace 契约与七类交接包 schema 成文且机械校验通过", "result": "pass" },
+      { "acceptance_item": "一致性矩阵、引用规范与冻结条款完整", "result": "pass" }
     ],
     "findings": [],
-    "environment": "workspace .scratch/worktrees/dev-#102serias @ 2b5a7c7，结构核验脚本",
+    "environment": "workspace .scratch/worktrees/dev-#102serias @ c8d8625，结构核验脚本 + ajv-cli 正负例校验",
     "verified_branch": "dev-#102serias",
-    "verified_head": "2b5a7c79a0c3a61392611a363c25062b9074f98d"
+    "verified_head": "c8d86254b963435bae107c9259ac2145cf04ef82",
+    "independent_session": true
   }
 }

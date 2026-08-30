@@ -11,23 +11,32 @@
     "base_ref": "main",
     "base_commit": "fc5ce7750fe644b86cba7cbd3914d6a158f41060",
     "work_branch": "dev-#102serias",
-    "current_head": "2b5a7c79a0c3a61392611a363c25062b9074f98d",
+    "current_head": "c8d86254b963435bae107c9259ac2145cf04ef82",
     "stage": "dev",
-    "attempt": 1
+    "attempt": 2
   },
   "payload": {
-    "summary": "落地 Portable Contract v0.1-draft §0–§6（主链 Stage 语义与回退/路由原则），提交 2b5a7c7",
+    "summary": "落地 Portable Contract v0.1.1 全量（#112 §0–§6、#113 §7–§8 + schema/示例、#114 §9 一致性矩阵与冻结、PR #115 Review 修复），最终提交 c8d8625",
     "changes": [
       {
         "area": "docs/design/construction-workflow-portable-contract.md",
-        "description": "新增 250 行：固定主链与六条不变量、7 Stage 四要素、根因路由与回退额度 3、WAITING_HUMAN 耗尽语义、Decision/Acceptance 边界、Design 条件门判据、Outcome/Routing 兼容原则，§7–§9 骨架占位"
+        "description": "契约正文 v0.1.1：固定主链与不变量、7 Stage 四要素、根因路由与单边回退额度 3、WAITING_HUMAN 耗尽语义、hold/BLOCKED 路由、Decision/Acceptance 边界、Outcome/Routing 兼容、Run/Workspace、七类交接包、一致性矩阵与引用规范、冻结"
+      },
+      {
+        "area": "docs/design/construction-workflow/handoff.schema.json",
+        "description": "七类交接包统一 schema v0.1.1：draft-07，含 13 处条件收紧（独立会话、五类前置引用、状态机互斥、pass/fail/blocked 条件、record_type↔stage 绑定等）"
+      },
+      {
+        "area": "docs/design/construction-workflow/examples/",
+        "description": "七类示例各一，取材本 Run 真实场景，绑定 v0.1.1 完成点 HEAD"
       }
     ],
     "self_check": [
       { "check": "7 Stage × 四要素覆盖脚本核验", "result": "pass" },
       { "check": "章节结构 §0–§9 完整性核验", "result": "pass" },
+      { "check": "schema 机械校验：7 正例 valid + 16 负例全部 invalid（ajv-cli，精确匹配）", "result": "pass" },
       { "check": "npm run generate / npm run validate", "result": "not_applicable" }
     ],
-    "notes": "纯文档变更，未修改蓝图与生成规则"
+    "notes": "纯文档变更，未修改蓝图与生成规则；attempt 2 = PR #115 首轮 Review 打回后的修复轮"
   }
 }

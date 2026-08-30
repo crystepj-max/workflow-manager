@@ -307,23 +307,23 @@ Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, 
 | `produced_by` | 产生者 Role/会话标识 |
 | `run` | §7.1 portable run identity 全量内嵌 |
 
-信封保证每份记录自带 run/workspace/source HEAD 关联（#103 要求）。
+信封保证每份记录自带 run/workspace/source HEAD 关联（#103 要求）；`record_type` 与 `run.stage` 必须按 §8.1 的映射一一对应（如 `review_proof` 记录的 `run.stage` 必须为 `review`）。
 
 ### 8.3 payload 要素
 
 必选/可选字段以 §8.4 schema 为准；语义要点：
 
 - **requirements_baseline**：三要素 + `gaps`（缺失必须显式，不得编造）+ 澄清决策 + 状态机 `draft` → `confirmed`（`confirmed` 必须含 `baseline_revision` 与人工确认记录；`draft` 不得作为下游冻结输入）；
-- **design_package**：summary + `decision_required` 标记与判据命中说明（§5.2）+（触发时）Decision Record；
+- **design_package**：summary + `decision_required` 标记；`decision_required=true` 必须附非空 `decision_required_reasons`（§5.2）；Decision Record 只能出现在命中条件门的 package 上，Controller 在 `decision_required=true` 且无 Decision Record 时必须挂起（§5.2），不得放行；
 - **dev_handoff**：改动摘要 + 自验清单；
-- **review_proof / test_proof**：结论 + 逐项 findings（带根因分类 dev/design/requirements，§4.1）+ `verified_branch`/`verified_head` + `independent_session=true`（不变量 2，review 与 test 同样要求）；`request_changes` 必须至少含一条 finding；`pass` 必须带非空且逐项全 pass 的验收映射；
+- **review_proof / test_proof**：结论 + 逐项 findings（带根因分类 dev/design/requirements，§4.1）+ `verified_branch`/`verified_head` + `independent_session=true`（不变量 2，review 与 test 同样要求）；条件约束：`request_changes`/`fail` 必须至少含一条 finding；`pass` 必须带非空且逐项全 pass 的验收映射；`blocked` 必须带 `blocked_reason`（供 `hold(<reason>)` 路由与恢复判定，§6.4）；
 - **acceptance_package**：`assembled`（**五类前置记录引用**：baseline / design package / dev handoff / review proof / test proof + checkpoint 结果）+ 人工决策状态机（`awaiting_decision` → `decided`，两态字段互斥；`decided` 必含 `verified_branch`/`verified_head`；`reject` 必含 `feedback` 与 `rejection_root_cause`；AI 不得代签）；
-- **closeout_summary**：交付清单 + 集成结果（PR / merge commit 至少其一）+ **`acceptance_outcome`（保留 `user_accepted` 异常到收口）** + `records_retained=true`。
+- **closeout_summary**：交付清单 + 集成结果（PR / merge commit 至少其一）+ **`acceptance_package_ref`（必须指向已 `decided` 的验收包，Controller 归档前校验）** + `acceptance_outcome`（保留 `user_accepted` 异常到收口）+ `records_retained=true`。
 
 ### 8.4 Schema、示例与机械校验
 
 - Schema：`docs/design/construction-workflow/handoff.schema.json`（JSON Schema draft-07）
-- 示例：`docs/design/construction-workflow/examples/01…07-*.json`（七类各一；取材于本契约开发 Run 的真实场景，其中 review/test/acceptance/closeout 为 **schema 演示值**，不代表本 Run 已发生对应的独立审核、测试或人工签收记录）
+- 示例：`docs/design/construction-workflow/examples/01…07-*.json`（七类各一；取材于本契约开发 Run 的真实场景，其中 review/test/acceptance/closeout 为 **schema 演示值**，不代表本 Run 已发生对应的独立审核、测试或人工签收记录）。示例链统一绑定到 **v0.1.1 内容完成点 HEAD（`c8d8625`）**：patch 级修订不前移示例链的 HEAD 绑定，仅 major/minor 语义变更时重新生成示例链
 - 机械校验（可执行验证）：
 
 ```bash

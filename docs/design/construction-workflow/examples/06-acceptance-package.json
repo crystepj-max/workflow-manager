@@ -11,7 +11,7 @@
     "base_ref": "main",
     "base_commit": "fc5ce7750fe644b86cba7cbd3914d6a158f41060",
     "work_branch": "dev-#102serias",
-    "current_head": "2b5a7c79a0c3a61392611a363c25062b9074f98d",
+    "current_head": "c8d86254b963435bae107c9259ac2145cf04ef82",
     "stage": "human_acceptance",
     "attempt": 1
   },

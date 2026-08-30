@@ -42,49 +42,56 @@
       "required": ["record_type", "payload"],
       "properties": {
         "record_type": { "const": "requirements_baseline" },
-        "payload": { "$ref": "#/definitions/requirementsBaselinePayload" }
+        "payload": { "$ref": "#/definitions/requirementsBaselinePayload" },
+        "run": { "properties": { "stage": { "const": "requirements" } } }
       }
     },
     {
       "required": ["record_type", "payload"],
       "properties": {
         "record_type": { "const": "design_package" },
-        "payload": { "$ref": "#/definitions/designPackagePayload" }
+        "payload": { "$ref": "#/definitions/designPackagePayload" },
+        "run": { "properties": { "stage": { "const": "design" } } }
       }
     },
     {
       "required": ["record_type", "payload"],
       "properties": {
         "record_type": { "const": "dev_handoff" },
-        "payload": { "$ref": "#/definitions/devHandoffPayload" }
+        "payload": { "$ref": "#/definitions/devHandoffPayload" },
+        "run": { "properties": { "stage": { "const": "dev" } } }
       }
     },
     {
       "required": ["record_type", "payload"],
       "properties": {
         "record_type": { "const": "review_proof" },
-        "payload": { "$ref": "#/definitions/reviewProofPayload" }
+        "payload": { "$ref": "#/definitions/reviewProofPayload" },
+        "run": { "properties": { "stage": { "const": "review" } } }
       }
     },
     {
       "required": ["record_type", "payload"],
       "properties": {
         "record_type": { "const": "test_proof" },
-        "payload": { "$ref": "#/definitions/testProofPayload" }
+        "payload": { "$ref": "#/definitions/testProofPayload" },
+        "run": { "properties": { "stage": { "const": "test" } } }
       }
     },
     {
       "required": ["record_type", "payload"],
       "properties": {
         "record_type": { "const": "acceptance_package" },
-        "payload": { "$ref": "#/definitions/acceptancePackagePayload" }
+        "payload": { "$ref": "#/definitions/acceptancePackagePayload" },
+        "run": { "properties": { "stage": { "const": "human_acceptance" } } }
       }
     },
     {
       "required": ["record_type", "payload"],
       "properties": {
         "record_type": { "const": "closeout_summary" },
-        "payload": { "$ref": "#/definitions/closeoutSummaryPayload" }
+        "payload": { "$ref": "#/definitions/closeoutSummaryPayload" },
+        "run": { "properties": { "stage": { "const": "closeout" } } }
       }
     }
   ],
@@ -230,7 +237,9 @@
           "type": "boolean"
         },
         "decision_required_reasons": {
+          "description": "命中判据的说明；decision_required=true 时必填（契约 §5.2）",
           "type": "array",
+          "minItems": 1,
           "items": { "type": "string" }
         },
         "decision": {
@@ -258,7 +267,30 @@
             "decided_at": { "$ref": "#/definitions/isoDateTime" }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["decision_required"],
+            "properties": { "decision_required": { "const": true } }
+          },
+          "then": {
+            "description": "命中 §5.2 条件门必须说明判据依据，供人工决策包使用",
+            "required": ["decision_required_reasons"]
+          }
+        },
+        {
+          "if": {
+            "required": ["decision"],
+            "properties": { "decision": { "type": "object" } }
+          },
+          "then": {
+            "description": "Decision Record 只能出现在命中 §5.2 条件门的 package 上",
+            "required": ["decision_required"],
+            "properties": { "decision_required": { "const": true } }
+          }
+        }
+      ]
     },
     "devHandoffPayload": {
       "type": "object",
@@ -362,6 +394,11 @@
           }
         },
         "environment": { "type": "string" },
+        "blocked_reason": {
+          "description": "verdict=blocked 时必填：可恢复的外部/技术条件说明，供 hold(<reason>) 路由与恢复判定（契约 §6.3/§6.4）",
+          "type": "string",
+          "minLength": 1
+        },
         "verified_branch": { "type": "string" },
         "verified_head": { "type": "string" },
         "independent_session": {
@@ -369,24 +406,51 @@
           "enum": [true]
         }
       },
-      "if": {
-        "required": ["verdict"],
-        "properties": { "verdict": { "const": "pass" } }
-      },
-      "then": {
-        "description": "pass 要求非空且逐项全 pass 的验收映射（契约 §3.5 完成判定）",
-        "required": ["acceptance_mapping"],
-        "properties": {
-          "acceptance_mapping": {
-            "minItems": 1,
-            "items": {
-              "properties": {
-                "result": { "const": "pass" }
+      "allOf": [
+        {
+          "if": {
+            "required": ["verdict"],
+            "properties": { "verdict": { "const": "pass" } }
+          },
+          "then": {
+            "description": "pass 要求非空且逐项全 pass 的验收映射（契约 §3.5 完成判定）",
+            "required": ["acceptance_mapping"],
+            "properties": {
+              "acceptance_mapping": {
+                "minItems": 1,
+                "items": {
+                  "properties": {
+                    "result": { "const": "pass" }
+                  }
+                }
               }
             }
           }
+        },
+        {
+          "if": {
+            "required": ["verdict"],
+            "properties": { "verdict": { "const": "fail" } }
+          },
+          "then": {
+            "description": "fail 必须至少携带一条带根因分类的 finding，否则 §4.1 路由悬空（契约 §6.5）",
+            "required": ["findings"],
+            "properties": {
+              "findings": { "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["verdict"],
+            "properties": { "verdict": { "const": "blocked" } }
+          },
+          "then": {
+            "description": "blocked 必须说明可恢复条件，供 hold(<reason>) 路由（契约 §6.4）",
+            "required": ["blocked_reason"]
+          }
         }
-      }
+      ]
     },
     "acceptancePackagePayload": {
       "type": "object",
@@ -465,9 +529,13 @@
     "closeoutSummaryPayload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["deliverables", "integration", "records_retained", "acceptance_outcome"],
+      "required": ["deliverables", "integration", "records_retained", "acceptance_outcome", "acceptance_package_ref"],
       "properties": {
         "deliverables": { "type": "array", "items": { "type": "string" } },
+        "acceptance_package_ref": {
+          "description": "必须指向已 decided 的 acceptance package；Controller 归档前校验其 status=decided（契约 §3.6→§3.7 审计链）",
+          "type": "string"
+        },
         "integration": {
           "type": "object",
           "additionalProperties": false,
