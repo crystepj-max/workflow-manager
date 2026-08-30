@@ -1,6 +1,6 @@
 # 建设 · 完整功能开发 Portable Contract
 
-> **版本**：v0.1-draft（§1–§6 由 #112 落地；§7–§8 由 #113 填充；§9 由 #114 填充并执行整文档冻结）
+> **版本**：**v0.1（内容冻结 2026-08-30；§1–§6 由 #112、§7–§8 由 #113、§9 由 #114 依次落地；冻结与修订规则见 §9.3；Run 级人工验收随 PR #115 进行）**
 > **来源**：#102（epic，A1–A5 节为本契约的决断依据）、#103（本契约的任务 issue）
 > **消费者**：DSH Execution Profile（#105）、External Coding Agent Profile（#104，Codex/Cursor）
 > **纪律**：两个 Profile 只通过引用本契约工作，不得复制或分叉业务语义；本契约是 executor 中立的，只定义产品语义，不定义实现字段（实现字段由各 Profile 的 Adapter 映射）。
@@ -336,4 +336,72 @@ Closeout 归档时，七类记录与全部 Proof 必须保留并可按 `run_id` 
 
 ## 9. 一致性矩阵、引用规范与冻结
 
-> **由 #114 填充**：与 #71/#77/#72/#73/#78/#93 的逐项一致性矩阵、双 Profile 引用规范条款、冻结版本标记与修订规则。
+### 9.1 关联 issue 一致性矩阵
+
+| 关联 issue | 方向要点 | 契约对齐位置 | 差异说明 |
+|---|---|---|---|
+| #71 全局《工作流设计原则》 | 建立通用设计原则与方法论文档（尚未落地） | §0/§2 遵循同一决断源（#102 A1–A5） | 无冲突：层不同——#71 是通用原则，本契约是建设业务语义；#71 落地后本契约引用之，不重复定义通用原则 |
+| #77 Business Outcome Routing | 技术执行与业务结果分离；Producer/Router 分离；禁止 `next_node`；Node Result 权威；额度耗尽保留原 Outcome | §6 全节；§4.3 耗尽行为（`WAITING_HUMAN + MAX_ROUNDS_REACHED`） | 兼容 shim 而非分叉：Bootstrap 期 Controller 使用 §6.3/§6.4 基元枚举驱动；#77 落地后按 §6.6 映射为正式 field path + route + `countRound`，字段名以 #77 为权威 |
+| #72 受控人工决策 | Decision（方向取舍）与验收（是否通过）解耦；默认自动推进；决策包要素；Decision Record 不可覆盖；`BASELINE_UPDATED` 回基线；`USER_ACCEPTED` 不改写 baseline | §5 全节；§3.1 固定门；§3.2 条件门；§3.6 `USER_ACCEPTED` | 无冲突：本契约把 #72 框架能力实例化到建设主链固定位置（requirements 确认门 + design 条件门），不设独立 Decision 业务节点，符合「Decision 是框架能力」原则 |
+| #73 自动回退额度 | 额度统一解释为自动回退额度；路径显式声明是否消耗；初次执行/内部 REVISE/WAITING_HUMAN/技术重试不计；人工触发显式记录；额度只限制自动路由 | §4.2 计数原则；§4.3 耗尽行为 | 无冲突：契约默认额度 3 来自 #102 决断；`countRound` 等字段名由 #73 实现定，契约只保留产品语义 |
+| #78 Formal Records / Provenance | 正式记录版本、依赖链与证明失效 | §8 全节；§7.1 映射承诺 | 兼容前身而非平行模型：七类记录是 #78 的轻量前身；#78 落地后 Revision/依赖链/证明失效以 #78 为权威，映射迁移不丢历史 |
+| #93 Workspace / Resource Isolation | Logical Run 工作区与共享资源隔离 Runtime | §7.2 `ISOLATED_WRITE`；§7.4 映射声明 | Bootstrap 先行：以 Profile 层 worktree/branch 纪律提前实现隔离语义，不等 #93 Runtime；#93 落地后强制职责移交 Runtime，`workspace_id` 映射其 workspace 标识 |
+
+补充关联：#79（Logical Run/Snapshot）在 §7.1 有映射承诺（`run_id` → `logical_run_id`）；#102 A1–A5 为上表全部行的共同决断源。
+
+**结论：六个关联 issue 逐项对齐，无未解释冲突。**
+
+### 9.2 双 Profile 引用规范
+
+1. DSH Profile（#105）与 External Profile（#104，Codex/Cursor）**只通过引用本契约获得业务语义**：Stage 语义、Role 职责、Handoff/Proof 类型、workspace/HEAD 要求、回退根因、Human Acceptance 规则；
+2. 禁止任一 Profile 复制契约正文片段到自身文档后独立维护；引用允许摘要 + 指向本文件小节锚点；
+3. 禁止 Profile 私有扩展业务语义：执行器差异只允许存在于调用/挂起/恢复/工具映射（Adapter 层）；认为语义不足时，走 §9.3 修订本契约，而不是在 Profile 侧先做；
+4. External Profile 的 runbook（#104）是「如何把契约映射到 Codex/Cursor 工具环境」的说明，不是第二份业务定义；
+5. 发现某 Profile 行为与本契约冲突时，以本契约为准裁决（§0 冲突裁决顺序）。
+
+### 9.3 冻结与修订规则
+
+- 本版冻结标记：**v0.1，2026-08-30**（#112 → #113 → #114 三工单依次落地后整文档冻结）；
+- 修订必须：① 在本节追加版本历史行（版本、日期、动机、关联 issue）；② 与受影响 Runtime issue（#77/#72/#73/#78/#79/#93）重新对齐矩阵（§9.1）；③ 先改契约、后改 Profile，禁止 Profile 先行分叉；
+- Runtime 字段调整纪律（继承 #103）：#77/#78/#79/#93 落地导致的字段命名调整，必须提供**新旧映射**且历史 Dogfood Run 可追溯，不丢历史；
+- 冻结解除条件：仅当主链结构、人工门、额度语义任一发生变化时升 major 版本；措辞/示例修正升 patch。
+
+版本历史：
+
+| 版本 | 日期 | 变更 | 关联 |
+|---|---|---|---|
+| v0.1 | 2026-08-30 | 初版冻结：主链语义、Run/Workspace、七类交接包、一致性矩阵 | #112 #113 #114 |
+
+### 9.4 #103 九条验收清单证据映射
+
+| #103 验收标准 | 证据小节 |
+|---|---|
+| 一份共享 Portable Contract 完整覆盖建设主链 | §2（主链与不变量）+ §3（七 Stage） |
+| 明确各 Stage 输入、专业输出、Proof、回退来源 | §3.1–3.7（每节四要素） |
+| 明确 Human Acceptance 与 Human Decision 边界 | §5.1–5.4 |
+| 明确 worktree/branch/HEAD/Integration Checkpoint | §7.2、§7.3 |
+| 明确 Dogfood portable run identity | §7.1 |
+| 明确七类交接/证据包 | §8.1–8.5 |
+| 与 #71、#77、#72、#73、#78、#93 无产品语义冲突 | §9.1（逐项矩阵，无未解释冲突） |
+| DSH/External Profile 只引用本 Contract，不复制语义 | §0 纪律 + §9.2 |
+| #105 可直接消费，不重新定义语义 | §9.5 |
+
+### 9.5 #105 可消费性核验
+
+#105「DSH Dogfood 验收」11 项逐项对应契约小节：
+
+| # | #105 验收项 | 契约小节 |
+|---|---|---|
+| 1 | Requirements baseline + 人确认 | §3.1 + §5.1（固定门） |
+| 2 | Design | §3.2 |
+| 3 | Dev 在独立 worktree | §3.3 + §7.2 |
+| 4 | Review 独立验证 | §3.4 + §2 不变量 2 |
+| 5 | Test 独立验证 | §3.5 |
+| 6 | Human Acceptance | §3.6 |
+| 7 | Closeout | §3.7 |
+| 8 | 至少 1 条业务打回路径 | §4.1 + §4.2（review/test 回退消耗额度） |
+| 9 | branch/HEAD Proof | §7.3 + §8.3 |
+| 10 | Integration Checkpoint | §7.3 + §8.3（`assembled.integration_checkpoint`） |
+| 11 | 最终 PR/merge 按仓库规则执行 | §3.7（Closeout 交付集成）+ §7.3 |
+
+**结论：#105 可直接引用本契约执行 Bootstrap Run，无需重新定义建设工作流语义。**
