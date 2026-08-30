@@ -583,7 +583,7 @@ test('vwf.roles 无 fs 服务时内置角色常驻（builtin 标识）', async (
   const { handlers } = loadHost()
   const r = await call(handlers, 'vwf.roles')
   assert.ok(Array.isArray(r.roles))
-  assert.ok(r.roles.some(x => x.id === 'dispatcher'))
+  assert.ok(!r.roles.some(x => x.id === 'dispatcher'), 'dispatcher 已退出内置身份（issue-81 迁为自定义）')
   assert.ok(r.roles.some(x => x.id === 'closeout'))
   assert.ok(r.roles.length > 0, '无 fs 时内置仍常驻')
   assert.ok(r.roles.every(x => x.builtin === true), '无 fs 时仅内置常驻（数量不写死，随注册表演进）')
@@ -605,7 +605,7 @@ test('vwf.roles 经 fs 服务读工作区 dsh/roles 增强内置摘要（resolve
   assert.ok(!ids.some(id => String(id).includes('NOT_ROLE')), '非 .md 文件不识别为角色')
   assert.ok(ids.includes('dev') && ids.includes('closeout'), '内置常驻（不校验完整清单，避免随注册表演进而改测试）')
   const dp = r.roles.find(x => x.id === 'dispatcher')
-  assert.equal(dp.builtin, true)
+  assert.equal(dp.builtin, false, 'dispatcher 保留文件但归为自定义（issue-81）')
   assert.ok(dp.summary.startsWith('你是 2.0'), '摘要取正文首行（跳过 frontmatter/标题）')
 })
 
@@ -630,6 +630,29 @@ test('内置角色注册表结构不变量：id 唯一、为稳定英文，中�
   }
 })
 
+test('dispatcher 迁为自定义后历史引用不丢失：仍可解析、引用仍被统计', async () => {
+  // issue-81 验收第 6 条：dispatcher 退出内置身份，但引用它的历史工作流不能失效。
+  // 迁移做法是不动 dsh/roles/dispatcher.md、只把它移出内置集合，因此 profile
+  // 'dispatcher' 的解析路径完全不变。
+  const fs = makeFs({
+    [REPO + '/dsh/roles/dispatcher.md']: '调度角色正文\n',
+    [USER_DIR + '/wf-old.json']: JSON.stringify({
+      id: 'wf-old', displayName: '历史流程', entry: 'n1',
+      nodes: [{ id: 'n1', profile: 'dispatcher', label: '调度', goal: 'g' }],
+      edges: [],
+    }),
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const r = await call(handlers, 'vwf.roles')
+  const dp = r.roles.find(x => x.id === 'dispatcher')
+  assert.ok(dp, '历史角色仍出现在角色库')
+  assert.equal(dp.builtin, false, '身份已变为自定义')
+  const u = await call(handlers, 'vwf.roles.usage', { id: 'dispatcher' })
+  assert.equal(u.ok, true)
+  assert.ok(u.count >= 1, `历史引用仍被统计（实际 ${u.count}）`)
+})
+
 // ═══════════════════════════════════════════════════════════════════════════
 // issue-58 · 角色库：内置/自定义分类、创建、编辑、引用保护与安全删除
 // ═══════════════════════════════════════════════════════════════════════════
@@ -646,23 +669,27 @@ test('角色库：内置角色常驻置前并带 builtin 标识，工作区额�
   const lastBuiltin = r.roles.reduce((acc, x, i) => (x.builtin === true ? i : acc), -1)
   assert.ok(lastBuiltin >= 0, '内置角色常驻')
   assert.ok(firstCustom === -1 || lastBuiltin < firstCustom, '内置角色全部排在自定义角色之前')
-  assert.equal(r.roles.find(x => x.id === 'dispatcher').builtin, true)
-  assert.equal(r.roles.find(x => x.id === 'dispatcher').summary, '内置身份正文', '内置摘要优先取工作区文件')
+  assert.equal(r.roles.find(x => x.id === 'dispatcher').builtin, false, 'dispatcher 已迁为自定义角色')
   assert.equal(r.roles.find(x => x.id === '需求分析师').builtin, false, '内置集合之外的 .md 归为自定义')
   assert.equal(r.roles.find(x => x.id === '需求分析师').id, '需求分析师')
 })
 
 test('角色库 get：内置详情（工作区正文）+ 自定义详情 + 未知 id 报错', async () => {
   const fs = makeFs({
-    [REPO + '/dsh/roles/dispatcher.md']: '内置正文\n',
+    [REPO + '/dsh/roles/dev.md']: '内置正文\n',
+    [REPO + '/dsh/roles/dispatcher.md']: '迁移后的自定义正文\n',
     [REPO + '/dsh/roles/需求分析师.md']: '自定义正文\n',
   })
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
-  const b = await call(handlers, 'vwf.roles.get', { id: 'dispatcher' })
+  const b = await call(handlers, 'vwf.roles.get', { id: 'dev' })
   assert.equal(b.ok, true)
   assert.equal(b.role.builtin, true)
   assert.equal(b.role.content, '内置正文\n')
+  // issue-81：dispatcher 退出内置后仍可通过 get 取到，只是身份变为自定义
+  const d = await call(handlers, 'vwf.roles.get', { id: 'dispatcher' })
+  assert.equal(d.ok, true)
+  assert.equal(d.role.builtin, false, 'dispatcher 迁为自定义后依然可取，历史引用不失效')
   const c = await call(handlers, 'vwf.roles.get', { id: '需求分析师' })
   assert.equal(c.ok, true)
   assert.equal(c.role.builtin, false)
@@ -761,8 +788,8 @@ test('角色库 update：内容修改全局生效；被引用角色重命名阻�
   assert.equal(ren2.role.id, '闲置角色V2')
   assert.ok(fs._files.has(REPO + '/dsh/roles/闲置角色V2.md'))
   assert.ok(!fs._files.has(REPO + '/dsh/roles/闲置角色.md'), '重命名后旧文件删除')
-  // 内置角色阻止修改
-  const builtinUpd = await call(handlers, 'vwf.roles.update', { id: 'dispatcher', name: 'dispatcher', content: 'x' })
+  // 内置角色阻止修改（issue-81 后 dispatcher 已非内置，改用仍在内置的 dev）
+  const builtinUpd = await call(handlers, 'vwf.roles.update', { id: 'dev', name: 'dev', content: 'x' })
   assert.equal(builtinUpd.ok, false)
   assert.match(builtinUpd.errors[0].message, /内置角色只读/)
 })
@@ -779,8 +806,8 @@ test('角色库 remove：内置拒绝；被引用角色阻止并携带引用位�
   })
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
-  // 内置拒绝
-  const b = await call(handlers, 'vwf.roles.remove', { id: 'dispatcher' })
+  // 内置拒绝（issue-81 后 dispatcher 已非内置，改用仍在内置的 dev）
+  const b = await call(handlers, 'vwf.roles.remove', { id: 'dev' })
   assert.equal(b.ok, false)
   assert.match(b.errors[0].message, /内置角色只读/)
   // 被引用 → 阻止 + usage 详情（无强制删除）
