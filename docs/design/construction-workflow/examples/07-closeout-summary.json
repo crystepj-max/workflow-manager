@@ -1,6 +1,6 @@
 {
   "record_type": "closeout_summary",
-  "record_version": "v0.1.7",
+  "record_version": "v0.1.8",
   "created_at": "2026-08-30T08:20:00Z",
   "produced_by": "dsh:construction-bootstrap",
   "run": {

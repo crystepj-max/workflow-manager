@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "docs/design/construction-workflow/handoff.schema.json",
   "title": "Construction Workflow Portable Handoff / Evidence Record",
-  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.7，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
+  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.8，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
   "type": "object",
   "additionalProperties": false,
   "required": ["record_type", "record_version", "created_at", "produced_by", "run", "payload"],
@@ -21,7 +21,7 @@
     },
     "record_version": {
       "description": "记录 schema 版本，与契约版本同步",
-      "const": "v0.1.7"
+      "const": "v0.1.8"
     },
     "created_at": {
       "$ref": "#/definitions/isoDateTime"
@@ -295,7 +295,7 @@
                 "required": ["name", "tradeoffs"],
                 "properties": {
                   "name": { "$ref": "#/definitions/nonEmptyText" },
-                  "tradeoffs": { "type": "string" }
+                  "tradeoffs": { "$ref": "#/definitions/nonEmptyText" }
                 }
               }
             },
@@ -318,7 +318,7 @@
                 "required": ["name", "tradeoffs"],
                 "properties": {
                   "name": { "$ref": "#/definitions/nonEmptyText" },
-                  "tradeoffs": { "type": "string" }
+                  "tradeoffs": { "$ref": "#/definitions/nonEmptyText" }
                 }
               }
             },
@@ -346,8 +346,8 @@
             "properties": { "decision": { "type": "object" } }
           },
           "then": {
-            "description": "Decision Record 只能出现在命中 §5.2 条件门的 package 上",
-            "required": ["decision_required"],
+            "description": "Decision Record 只能出现在命中 §5.2 条件门的 package 上，且必须保留裁决时呈递的 decision_request（chosen 必须属于呈递候选集，契约 §5.3）",
+            "required": ["decision_required", "decision_request"],
             "properties": { "decision_required": { "const": true } }
           }
         },
