@@ -139,11 +139,12 @@ function cmdCheck(runDir, files) {
   process.exit(allOk ? 0 : 1)
 }
 
-function cmdRollback(runDir, rootCause) {
+function cmdRollback(runDir, rootCause, flags) {
   if (!['dev', 'design', 'requirements'].includes(rootCause)) {
     console.error(`非法根因: ${rootCause}（合法值: dev / design / requirements）`)
     process.exit(2)
   }
+  const byHuman = flags.by === 'human'
   const run = loadRun(runDir)
   const budget = run.rollback_budget ?? 3
   // 持久化所选回退边（§4.1 一次一条边；历史供升级/重放审计）
@@ -155,8 +156,12 @@ function cmdRollback(runDir, rootCause) {
     attempt: run.attempt,
   }
   run.rollback_history = [...(run.rollback_history || []), entry]
-  // 先查容量：被拒边不递增，但持久化生命周期迁移（§4.3：WAITING_HUMAN + MAX_ROUNDS_REACHED）
-  if (run.rollback_used >= budget) {
+  if (byHuman) {
+    // 人工触发的回退不消耗也不检查自动额度（§4.2：Decision/Acceptance 打回显式记录但不耗额度）
+    entry.human_triggered = true
+    entry.counter = 'human'
+  } else if (run.rollback_used >= budget) {
+    // 先查容量：被拒边不递增，但持久化生命周期迁移（§4.3：WAITING_HUMAN + MAX_ROUNDS_REACHED）
     entry.rejected = true
     entry.reason = 'MAX_ROUNDS_REACHED'
     run.lifecycle = 'WAITING_HUMAN'
@@ -164,15 +169,48 @@ function cmdRollback(runDir, rootCause) {
     saveRun(runDir, run)
     console.error(`自动回退额度耗尽（${run.rollback_used}/${budget}）：按契约 §4.3 保留原 Outcome，升级人工（MAX_ROUNDS_REACHED，已持久化到 run.json）`)
     process.exit(1)
+  } else {
+    run.rollback_used += 1
+    entry.counter = `${run.rollback_used}/${budget}`
   }
-  run.rollback_used += 1
-  entry.counter = `${run.rollback_used}/${budget}`
-  // 回退被接受 ⇒ 持久化目标 Stage 迁移并推进 attempt（下一次写入使用新 attempt 文件名，不覆盖触发回退的 proof）
+  // 回退被接受 ⇒ 持久化目标 Stage 迁移并推进 attempt（下一次写入使用新 attempt 文件名，不覆盖触发回退的 proof）；
+  // 成功迁移清除挂起态（人工追加额度后的恢复由此生效）
   run.stage = rootCause
   run.attempt += 1
   entry.attempt_after = run.attempt
+  delete run.lifecycle
+  delete run.lifecycle_reason
   saveRun(runDir, run)
-  console.log(`回退已记录：根因=${rootCause}（stage→${rootCause}，attempt→${run.attempt}），额度 ${run.rollback_used}/${budget}`)
+  const tag = byHuman ? '（人工触发，不耗自动额度）' : `，额度 ${run.rollback_used}/${budget}`
+  console.log(`回退已记录：根因=${rootCause}（stage→${rootCause}，attempt→${run.attempt}）${tag}`)
+}
+
+function cmdBudget(runDir, target, flags) {
+  const n = parseInt(target, 10)
+  if (!Number.isInteger(n) || n < 0) {
+    console.error(`非法额度: ${target}`)
+    process.exit(2)
+  }
+  if (!flags.decidedBy) {
+    console.error('人工调整额度必须携带 --decided-by（契约 §4.2：额度变化显式记录，不得隐式恢复）')
+    process.exit(2)
+  }
+  const run = loadRun(runDir)
+  const from = run.rollback_budget ?? 3
+  run.budget_adjustments = [...(run.budget_adjustments || []), {
+    at: new Date().toISOString(),
+    from, to: n,
+    reason: flags.reason || '',
+    decided_by: flags.decidedBy,
+  }]
+  run.rollback_budget = n
+  // 人工决策恢复 Run：清除额度耗尽挂起态
+  if (run.lifecycle_reason === 'MAX_ROUNDS_REACHED') {
+    delete run.lifecycle
+    delete run.lifecycle_reason
+  }
+  saveRun(runDir, run)
+  console.log(`回退额度调整：${from} → ${n}（decided_by=${flags.decidedBy}，已入账 budget_adjustments）`)
 }
 
 function parseFlags(args) {
@@ -182,6 +220,9 @@ function parseFlags(args) {
     if (args[i] === '--produced-by') flags.producedBy = args[++i]
     else if (args[i] === '--stage') flags.stage = args[++i]
     else if (args[i] === '--attempt') flags.attempt = parseInt(args[++i], 10)
+    else if (args[i] === '--by') flags.by = args[++i]
+    else if (args[i] === '--reason') flags.reason = args[++i]
+    else if (args[i] === '--decided-by') flags.decidedBy = args[++i]
     else rest.push(args[i])
   }
   return { flags, rest }
@@ -205,10 +246,16 @@ function main() {
     cmdCheck(rest[0], rest.slice(1))
   } else if (cmd === 'rollback') {
     if (rest.length !== 2) {
-      console.error('用法: rollback <runDir> <root_cause>')
+      console.error('用法: rollback <runDir> <root_cause> [--by human]')
       process.exit(2)
     }
-    cmdRollback(rest[0], rest[1])
+    cmdRollback(rest[0], rest[1], flags)
+  } else if (cmd === 'budget') {
+    if (rest.length !== 2) {
+      console.error('用法: budget <runDir> <n> --decided-by <who> [--reason <text>]')
+      process.exit(2)
+    }
+    cmdBudget(rest[0], rest[1], flags)
   } else {
     console.error('未知子命令:', cmd)
     process.exit(2)

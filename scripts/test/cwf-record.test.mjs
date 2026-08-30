@@ -122,14 +122,38 @@ test('rollback：额度记账、耗尽持久化生命周期、追加额度后可
   assert.equal(runState.rollback_history.length, 4)
   assert.equal(runState.rollback_history[3].rejected, true)
 
-  // 人工追加额度到 4 后，下一次回退可执行（契约 §4.2 显式记录追加）
-  runState.rollback_budget = 4
-  delete runState.lifecycle
-  delete runState.lifecycle_reason
-  writeFileSync(join(runDir, 'run.json'), JSON.stringify(runState, null, 2))
+  // 人工追加额度（budget 子命令显式入账并恢复挂起态）后，下一次回退可执行且挂起态自动清除
+  const rb = run(['budget', runDir, '4', '--reason', '人工决策追加', '--decided-by', 'tester'])
+  assert.equal(rb.code, 0, rb.out)
+  assert.match(rb.out, /3 → 4/)
+  const midState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(midState.budget_adjustments.length, 1)
+  assert.equal(midState.budget_adjustments[0].decided_by, 'tester')
+  assert.equal(midState.lifecycle, undefined) // 恢复：挂起态已清除
   const r2 = run(['rollback', runDir, 'dev'])
   assert.equal(r2.code, 0, r2.out)
   assert.match(r2.out, /额度 4\/4/)
+  const after = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(after.lifecycle, undefined) // 成功回退自身也清除挂起态
+})
+
+test('rollback：人工触发不耗自动额度（验收 reject / 耗尽后人工选择回退）', () => {
+  const { runDir } = makeRunDir()
+  // 先用尽自动额度
+  for (let i = 0; i < 3; i++) run(['rollback', runDir, 'dev'])
+  const exhausted = run(['rollback', runDir, 'dev'])
+  assert.equal(exhausted.code, 1)
+  // 人工触发：绕过额度检查，不递增计数，仍推进 stage/attempt 并留痕
+  const r = run(['rollback', runDir, 'dev', '--by', 'human'])
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.out, /人工触发，不耗自动额度/)
+  const runState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(runState.rollback_used, 3) // 未消耗
+  assert.equal(runState.stage, 'dev')
+  assert.equal(runState.attempt, 5) // 3 次自动 + 1 次人工
+  const last = runState.rollback_history.at(-1)
+  assert.equal(last.human_triggered, true)
+  assert.equal(runState.lifecycle, undefined) // 人工回退恢复挂起态
 })
 
 test('write：非 git 工作区 fail closed（不得绑定未观察的 HEAD）', () => {

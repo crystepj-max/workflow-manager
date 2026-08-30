@@ -12,15 +12,15 @@ import { pathToFileURL } from 'node:url'
 const DEFAULT_BUDGET = 3
 
 export function branchName(runId) {
-  // 分支名携带 run_id（净化）：同 issue 的二次/派生 Run 不撞分支（契约支持额度耗尽后派生新 Run）
-  const sanitized = String(runId).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
-  return `dev-${sanitized}`
+  // run_id 已被 assertRunIdSafe 限定为净化形态，分支名直接拼接——单射，无归一化碰撞
+  return `dev-${runId}`
 }
 
 export function assertRunIdSafe(runId) {
-  // run 目录为 .agent-runs/<run_id> 单一路径分量；下游按上溯两级定位仓库根，禁止分隔符/穿越
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(String(runId))) {
-    throw new Error(`非法 run_id: ${runId}（仅允许字母/数字/下划线/连字符，禁止路径分隔符与穿越）`)
+  // run_id 同时充当分支名与 run 目录名：限定为已净化的小写连字符形态，
+  // 既防路径穿越（/ 与 ..），也保证分支命名单射（不再做有损归一化）
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(String(runId))) {
+    throw new Error(`非法 run_id: ${runId}（须为小写字母/数字/连字符的已净化形态，如 cwf-123-01）`)
   }
 }
 
@@ -79,11 +79,16 @@ function main() {
           base_ref: base,
           rollback_budget: budget,
         })
+        // 校验 worktree 实际 git 分支与记录一致（防止检出被切换后 lineage 自相矛盾）
+        const actualBranch = git(['rev-parse', '--abbrev-ref', 'HEAD'], worktreePath)
+        if (actualBranch !== existing.work_branch) {
+          mismatches.push(`worktree 当前分支(${actualBranch}≠${existing.work_branch})`)
+        }
         if (mismatches.length === 0) {
           console.log(JSON.stringify({ worktree: worktreePath, runDir: join(worktreePath, runDirRel), identity: existing, reused: true }, null, 2))
           return
         }
-        console.error(`run_id 相同但身份不一致，拒绝静默复用: ${mismatches.join('；')}`)
+        console.error(`run_id 相同但状态不一致，拒绝静默复用: ${mismatches.join('；')}`)
         process.exit(1)
       }
     }
