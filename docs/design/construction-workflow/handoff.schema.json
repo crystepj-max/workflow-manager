@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "docs/design/construction-workflow/handoff.schema.json",
   "title": "Construction Workflow Portable Handoff / Evidence Record",
-  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.3，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
+  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.4，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
   "type": "object",
   "additionalProperties": false,
   "required": ["record_type", "record_version", "created_at", "produced_by", "run", "payload"],
@@ -21,14 +21,14 @@
     },
     "record_version": {
       "description": "记录 schema 版本，与契约版本同步",
-      "const": "v0.1.3"
+      "const": "v0.1.4"
     },
     "created_at": {
       "$ref": "#/definitions/isoDateTime"
     },
     "produced_by": {
       "description": "产生者 Role/会话标识",
-      "type": "string"
+      "$ref": "#/definitions/nonEmptyText"
     },
     "run": {
       "$ref": "#/definitions/portableRunIdentity"
@@ -118,14 +118,14 @@
         "attempt"
       ],
       "properties": {
-        "run_id": { "type": "string" },
-        "issue_or_task_identity": { "type": "string" },
-        "workspace_id": { "type": "string" },
-        "repository": { "type": "string" },
-        "base_ref": { "type": "string" },
-        "base_commit": { "type": "string" },
-        "work_branch": { "type": "string" },
-        "current_head": { "type": "string" },
+        "run_id": { "$ref": "#/definitions/nonEmptyText" },
+        "issue_or_task_identity": { "$ref": "#/definitions/nonEmptyText" },
+        "workspace_id": { "$ref": "#/definitions/nonEmptyText" },
+        "repository": { "$ref": "#/definitions/nonEmptyText" },
+        "base_ref": { "$ref": "#/definitions/nonEmptyText" },
+        "base_commit": { "$ref": "#/definitions/nonEmptyText" },
+        "work_branch": { "$ref": "#/definitions/nonEmptyText" },
+        "current_head": { "$ref": "#/definitions/nonEmptyText" },
         "stage": {
           "enum": [
             "requirements",
@@ -154,7 +154,7 @@
       "additionalProperties": false,
       "required": ["goal", "scope", "acceptance", "gaps", "status", "outcome"],
       "properties": {
-        "goal": { "type": "string" },
+        "goal": { "$ref": "#/definitions/nonEmptyText" },
         "outcome": {
           "description": "Requirements 阶段整体专业结果（契约 §6.3 基元：baseline-ready 待确认 / awaiting-human-input 缺口挂起 / revised 回退后重出）",
           "enum": ["baseline_ready", "awaiting_human_input", "revised"]
@@ -205,7 +205,7 @@
           "additionalProperties": false,
           "required": ["confirmed_by", "confirmed_at"],
           "properties": {
-            "confirmed_by": { "type": "string" },
+            "confirmed_by": { "$ref": "#/definitions/nonEmptyText" },
             "confirmed_at": { "$ref": "#/definitions/isoDateTime" }
           }
         }
@@ -298,9 +298,9 @@
                 }
               }
             },
-            "chosen": { "type": "string" },
+            "chosen": { "$ref": "#/definitions/nonEmptyText" },
             "rationale": { "type": "string" },
-            "decided_by": { "type": "string" },
+            "decided_by": { "$ref": "#/definitions/nonEmptyText" },
             "decided_at": { "$ref": "#/definitions/isoDateTime" }
           }
         }
@@ -571,11 +571,11 @@
             "integration_checkpoint"
           ],
           "properties": {
-            "requirements_baseline_ref": { "type": "string" },
-            "design_package_ref": { "type": "string" },
-            "dev_handoff_ref": { "type": "string" },
-            "review_proof_ref": { "type": "string" },
-            "test_proof_ref": { "type": "string" },
+            "requirements_baseline_ref": { "$ref": "#/definitions/nonEmptyText" },
+            "design_package_ref": { "$ref": "#/definitions/nonEmptyText" },
+            "dev_handoff_ref": { "$ref": "#/definitions/nonEmptyText" },
+            "review_proof_ref": { "$ref": "#/definitions/nonEmptyText" },
+            "test_proof_ref": { "$ref": "#/definitions/nonEmptyText" },
             "integration_checkpoint": { "type": "string" }
           }
         },
@@ -583,12 +583,12 @@
           "description": "人工决策，AI 不得代签（契约 §3.6）",
           "enum": ["accept", "reject", "user_accepted"]
         },
-        "decided_by": { "type": "string" },
+        "decided_by": { "$ref": "#/definitions/nonEmptyText" },
         "decided_at": { "$ref": "#/definitions/isoDateTime" },
         "feedback": { "type": "string" },
         "rejection_root_cause": { "$ref": "#/definitions/rootCause" },
         "verified_branch": { "$ref": "#/definitions/nonEmptyText" },
-        "verified_head": { "type": "string" }
+        "verified_head": { "$ref": "#/definitions/nonEmptyText" }
       },
       "oneOf": [
         {
@@ -634,15 +634,15 @@
         "deliverables": { "type": "array", "items": { "type": "string" } },
         "acceptance_package_ref": {
           "description": "必须指向已 decided 的 acceptance package；Controller 归档前校验其 status=decided（契约 §3.6→§3.7 审计链）",
-          "type": "string"
+          "$ref": "#/definitions/nonEmptyText"
         },
         "integration": {
           "type": "object",
           "additionalProperties": false,
           "required": ["checkpoint"],
           "properties": {
-            "pr": { "type": "string" },
-            "merge_commit": { "type": "string" },
+            "pr": { "$ref": "#/definitions/nonEmptyText" },
+            "merge_commit": { "$ref": "#/definitions/nonEmptyText" },
             "checkpoint": { "type": "string" }
           },
           "anyOf": [
