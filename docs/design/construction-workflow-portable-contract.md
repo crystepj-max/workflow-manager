@@ -1,6 +1,6 @@
 # 建设 · 完整功能开发 Portable Contract
 
-> **版本**：**v0.1.4（2026-08-30 冻结，同日按 PR #115 Codex Review 多轮修复升 patch；§1–§6 由 #112、§7–§8 由 #113、§9 由 #114 依次落地；Run 级人工验收随 PR #115 进行）**
+> **版本**：**v0.1.5（2026-08-30 冻结，同日按 PR #115 Codex Review 多轮修复升 patch；§1–§6 由 #112、§7–§8 由 #113、§9 由 #114 依次落地；Run 级人工验收随 PR #115 进行）**
 > **来源**：#102（epic，A1–A5 节为本契约的决断依据）、#103（本契约的任务 issue）
 > **消费者**：DSH Execution Profile（#105）、External Coding Agent Profile（#104，Codex/Cursor）
 > **纪律**：两个 Profile 只通过引用本契约工作，不得复制或分叉业务语义；本契约是 executor 中立的，只定义产品语义，不定义实现字段（实现字段由各 Profile 的 Adapter 映射）。
@@ -302,7 +302,7 @@ Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, 
 | 字段 | 语义 |
 |---|---|
 | `record_type` | 七者之一 |
-| `record_version` | 记录 schema 版本（当前 v0.1.4） |
+| `record_version` | 记录 schema 版本（当前 v0.1.5） |
 | `created_at` | ISO 8601 时间 |
 | `produced_by` | 产生者 Role/会话标识 |
 | `run` | §7.1 portable run identity 全量内嵌 |
@@ -314,10 +314,10 @@ Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, 
 必选/可选字段以 §8.4 schema 为准；语义要点：
 
 - **requirements_baseline**：三要素 + **整体 `outcome`**（`baseline_ready` / `awaiting_human_input` / `revised`，§6.3 基元）+ `gaps`（缺失必须显式，不得编造）+ 澄清决策 + 状态机 `draft` → `confirmed`（`confirmed` 必须含 `baseline_revision` 与人工确认记录，且**无残留 gaps、验收标准非空、goal/scope 非空**；`draft` 不得作为下游冻结输入）；`outcome=awaiting_human_input` 必须带非空 `gaps`，`outcome=baseline_ready` 必须无残留 gaps；
-- **design_package**：summary + **整体 `outcome`**（`package_ready` / `decision_required` / `requirements_issue`，§6.3 基元）+ `decision_required` 标记；`outcome=decision_required` ⇔ `decision_required=true`（双向 schema 约束）且必须附非空 `decision_required_reasons`（§5.2）；Decision Record 只能出现在命中条件门的 package 上，Controller 在 `decision_required=true` 且无 Decision Record 时必须挂起（§5.2），不得放行；
+- **design_package**：summary + **整体 `outcome`**（`package_ready` / `decision_required` / `requirements_issue`，§6.3 基元）+ `decision_required` 标记；门状态机两态：**命中条件门且未决 ⇒ `outcome=decision_required`**（schema 双向约束）且必须附非空 `decision_required_reasons`（§5.2），Controller 必须挂起不得放行；**人工决策记录后 ⇒ 翻转为 `package_ready`**，Decision Record 作为过门证据保留在该 package 上（schema 仅允许 Decision Record 出现在命中条件门的 package 上）；`requirements_issue` 为根因上报，由 Controller 按 §4.1 路由；
 - **dev_handoff**：改动摘要 + **整体 `outcome`**（`handoff_ready` / `blocked` / `design_issue` / `requirements_issue`，§6.3 基元）+ 自验清单；`outcome=blocked` 必须附 `blocked_reason`（供 `hold(<reason>)` 路由与恢复判定）；`outcome=handoff_ready` 要求自验清单非空且无 fail/blocked 项（§3.3 完成判定）；`design_issue`/`requirements_issue` 为根因上报，由 Controller 按 §4.1 路由；
 - **review_proof / test_proof**：结论 + 逐项 findings（带根因分类 dev/design/requirements，§4.1）+ `verified_branch`/`verified_head` + `independent_session=true`（不变量 2，review 与 test 同样要求）；条件约束：`request_changes`/`fail` 必须至少含一条 finding；`pass` 必须带非空且逐项全 pass 的验收映射；`blocked` 必须带 `blocked_reason`（供 `hold(<reason>)` 路由与恢复判定，§6.4）；
-- **acceptance_package**：`assembled`（**五类前置记录引用**：baseline / design package / dev handoff / review proof / test proof + checkpoint 结果）+ 人工决策状态机（`awaiting_decision` → `decided`，两态字段互斥；`decided` 必含 `verified_branch`/`verified_head`；`reject` 必含 `feedback` 与 `rejection_root_cause`；AI 不得代签）。Controller 在**呈递或签收前**必须校验证据链：① 各引用记录 `record_type` 与产生 Stage 正确；② review `verdict=approve`、test `verdict=pass`（fail/blocked 不得进入验收）；③ 全部引用同 Run / 同 workspace lineage；④ 各 Proof `verified_head` 与当前 HEAD 一致（否则按 §7.3 重跑）；⑤ 引用 baseline `status=confirmed` 且无残留 gaps；⑥ 引用 design `outcome=package_ready`（命中过条件门的必须已带 Decision Record）；⑦ 引用 dev `outcome=handoff_ready`；⑧ test `acceptance_mapping` 与引用 baseline 的验收标准逐条**完整且无重复**对应（防漏测项）——任一不满足即不得呈递或签收；
+- **acceptance_package**：`assembled`（**五类前置记录引用**：baseline / design package / dev handoff / review proof / test proof + checkpoint 结果）+ 人工决策状态机（`awaiting_decision` → `decided`，两态字段互斥；`decided` 必含 `verified_branch`/`verified_head`；`reject` 必含 `feedback` 与 `rejection_root_cause`；AI 不得代签）。Controller 在**呈递或签收前**必须校验证据链：① 各引用记录 `record_type` 与产生 Stage 正确；② 普通 `accept` 要求 review `verdict=approve` 且 test `verdict=pass`；**`user_accepted` 例外**——允许携带 fail/blocked 证据链知情接受，但必须附 `feedback` 说明接受的差异（§3.6 特殊语义，不得伪造测试证据）；③ 全部引用同 Run / 同 workspace lineage；④ 各 Proof `verified_head` 与当前 HEAD 一致（否则按 §7.3 重跑）；⑤ 引用 baseline `status=confirmed` 且无残留 gaps；⑥ 引用 design `outcome=package_ready`（命中过条件门的必须已带 Decision Record）；⑦ 引用 dev `outcome=handoff_ready`；⑧ test `acceptance_mapping` 与引用 baseline 的验收标准逐条**完整且无重复**对应（防漏测项；`user_accepted` 场景下该项为「完整映射 + 已知差异说明」）——任一不满足即不得呈递或签收；
 - **closeout_summary**：交付清单 + 集成结果（PR / merge commit 至少其一）+ **`acceptance_package_ref`（必须指向已 `decided` 的验收包）** + `acceptance_outcome`（保留 `user_accepted` 异常到收口）+ `records_retained=true`。Controller 归档前双重校验：① 引用包 `status=decided`；② 引用包 `decision` ∈ {`accept`, `user_accepted`} 且与 `acceptance_outcome` 一致——引用包 `decision=reject` 时**不得归档**，按 §3.6 打回根因路由。
 
 ### 8.4 Schema、示例与机械校验
@@ -377,6 +377,7 @@ Closeout 归档时，七类记录与全部 Proof 必须保留并可按 `run_id` 
 | v0.1.2 | 2026-08-30 | Codex Review 修复（二/三）：dev/design 增加整体 `outcome` 基元与一致性双向约束、`handoff_ready` 自验非空约束、closeout 引用决策一致性规则、`record_type`↔`run.stage` 绑定、示例链 decided 修正 | PR #115 Review |
 | v0.1.3 | 2026-08-30 | Codex Review 修复（四/五）：requirements 整体 `outcome` 基元与缺口条件、confirmed 分支完整性收紧（无 gaps、要素非空）、全部 `verified_*` 绑定非空约束、acceptance 证据链五项 Controller 校验 | PR #115 Review |
 | v0.1.4 | 2026-08-30 | Codex Review 修复（六）：证据链校验扩展上游完成态（baseline confirmed / design package_ready / dev handoff_ready）与验收映射完整覆盖、acceptance `verified_head` 补非空（上轮尾逗号漏网）、Run identity 8 字段与签名/引用/集成标识类字段全面非空约束 | PR #115 Review |
+| v0.1.5 | 2026-08-30 | Codex Review 修复（七）：design 门状态机改两态——未决 ⇒ outcome=decision_required，已决 ⇒ 翻转 package_ready 并保留 Decision Record 作过门证据（消除已决 gated package 永久无法验收的死锁）；user_accepted 例外通道——允许 fail/blocked 证据链知情接受但必须附 feedback 说明差异（§3.6 路径可达，无需伪造证据） | PR #115 Review |
 
 ### 9.4 #103 九条验收清单证据映射
 

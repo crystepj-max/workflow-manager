@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "docs/design/construction-workflow/handoff.schema.json",
   "title": "Construction Workflow Portable Handoff / Evidence Record",
-  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.4，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
+  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.5，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
   "type": "object",
   "additionalProperties": false,
   "required": ["record_type", "record_version", "created_at", "produced_by", "run", "payload"],
@@ -21,7 +21,7 @@
     },
     "record_version": {
       "description": "记录 schema 版本，与契约版本同步",
-      "const": "v0.1.4"
+      "const": "v0.1.5"
     },
     "created_at": {
       "$ref": "#/definitions/isoDateTime"
@@ -330,10 +330,11 @@
         {
           "if": {
             "required": ["decision_required"],
-            "properties": { "decision_required": { "const": true } }
+            "properties": { "decision_required": { "const": true } },
+            "not": { "required": ["decision"] }
           },
           "then": {
-            "description": "命中条件门时整体 outcome 必须为 decision_required（契约 §6.3 一致性）",
+            "description": "条件门命中且未决 ⇒ outcome=decision_required（Controller 挂起等人工决策，契约 §5.2）",
             "required": ["outcome"],
             "properties": { "outcome": { "const": "decision_required" } }
           }
@@ -344,9 +345,10 @@
             "properties": { "outcome": { "const": "decision_required" } }
           },
           "then": {
-            "description": "outcome=decision_required 时必须置位条件门标记（契约 §6.3 一致性）",
+            "description": "outcome=decision_required ⇒ 门标记置位且未决（已决的过门 package 翻转为 package_ready 并保留 Decision Record 作为过门证据）",
             "required": ["decision_required"],
-            "properties": { "decision_required": { "const": true } }
+            "properties": { "decision_required": { "const": true } },
+            "not": { "required": ["decision"] }
           }
         }
       ]
@@ -617,14 +619,28 @@
           "properties": { "status": { "const": "decided" } }
         }
       ],
-      "if": {
-        "required": ["decision"],
-        "properties": { "decision": { "const": "reject" } }
-      },
-      "then": {
-        "description": "reject 必须携带 feedback 与根因指向，否则 Controller 无法按 §3.6 路由",
-        "required": ["feedback", "rejection_root_cause"]
-      }
+      "allOf": [
+        {
+          "if": {
+            "required": ["decision"],
+            "properties": { "decision": { "const": "reject" } }
+          },
+          "then": {
+            "description": "reject 必须携带 feedback 与根因指向，否则 Controller 无法按 §3.6 路由",
+            "required": ["feedback", "rejection_root_cause"]
+          }
+        },
+        {
+          "if": {
+            "required": ["decision"],
+            "properties": { "decision": { "const": "user_accepted" } }
+          },
+          "then": {
+            "description": "user_accepted 必须以 feedback 说明知情接受的差异（契约 §3.6 特殊语义）",
+            "required": ["feedback"]
+          }
+        }
+      ]
     },
     "closeoutSummaryPayload": {
       "type": "object",
