@@ -4,7 +4,7 @@
 >
 > 需求源：[issue #71](https://github.com/crystepj-max/workflow-manager/issues/71)
 >
-> 与 v0.1 产品规格的关系：本文回答 **为什么这样设计、以后如何继续设计**。v0.1 的具体角色清单、四套流程实例、Lifecycle 枚举落地与实施依赖，见 [PR #84](https://github.com/crystepj-max/workflow-manager/pull/84) 的 `docs/design/workflow-manager-v0.1-final-product-spec.md`（合入 `main` 前以该 PR 为准）。规格中的原则摘要应回指本文；本文引用规格中的已决实例，不把实施清单复制成第二份规格。
+> 与 v0.1 产品规格的关系：本文回答 **为什么这样设计、以后如何继续设计**。v0.1 的具体角色清单、四套流程实例、Lifecycle 枚举落地与实施依赖，见 [`docs/design/workflow-manager-v0.1-final-product-spec.md`](workflow-manager-v0.1-final-product-spec.md)。规格中的原则摘要回指本文；本文引用规格中的已决实例，不把实施清单复制成第二份规格。
 >
 > Current vs Target：`CONTEXT.md` 与旧「开发工作流 2.0」文档描述 **当前 main 的兼容实现**。在对应能力进入 `main` 之前，不得把 Target 语义写进 Current 文档。实现合入后必须同步 Current 文档，避免两套口径静默并存。
 
