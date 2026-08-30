@@ -129,6 +129,8 @@ const realIo = {
   statSync: (p) => fs.statSync(p),
   unlinkSync: (p) => fs.unlinkSync(p),
   rmdirSync: (p) => fs.rmdirSync(p),
+  // issue-81：collectBuiltinRoles 读角色源用
+  readFileSync: (p, o) => fs.readFileSync(p, o),
 }
 
 test('C4 原子写盘-成功：三件套落盘且与 generateUserSkill 内容一致，无暂存残留', () => {
@@ -174,4 +176,41 @@ test('C4 原子写盘-更新失败：旧版本目录不受影响（换入未发�
     assert.equal(r.ok, false)
     assert.equal(readFileSync(path.join(finalDir, 'OLD.md'), 'utf8'), '旧版本', '更新失败时旧版本完整保留')
   } finally { rmTmp(tmp) }
+})
+
+// ── Codex PR#124 第三轮 P1（评论 3889725489）：用户 skill 捆绑内置角色定义 ──
+// 产品工作区通常没有 dsh/roles/ 树，generateUserSkill 只产出三件套，运行时找不到
+// 新内置角色定义。writeUserSkill 在 save 闭环时把蓝图引用的角色文件随 skill 一起
+// 写到 roles/ 子目录，compileViaPipeline 命中即带出 roleDir，运行时自包含。
+test('S3 用户 skill 捆绑蓝图引用的内置角色定义（issue-81，产品工作区无 dsh/roles/ 时自定义工作流可运行）', () => {
+  const tmp = makeTmp()
+  try {
+    const r = writeUserSkill(bp, tmp, realIo)
+    assert.equal(r.ok, true, r.error)
+    // bp = dev-workflow-2-0 模板，节点 profile = dispatcher/dev/review/test/accept/closeout
+    const rolesDir = path.join(r.dir, 'roles')
+    const roleFiles = fs.readdirSync(rolesDir).sort()
+    for (const id of ['dispatcher', 'dev', 'review', 'test', 'accept', 'closeout']) {
+      assert.ok(roleFiles.includes(id + '.md'), '角色已捆绑：' + id)
+    }
+    // 内容与源一致
+    const srcDir = path.join(here, '..', '..', 'dsh', 'roles')
+    assert.equal(
+      readFileSync(path.join(r.dir, 'roles', 'dispatcher.md'), 'utf8'),
+      readFileSync(path.join(srcDir, 'dispatcher.md'), 'utf8'),
+      'dispatcher 内容与源一致'
+    )
+    // 三件套仍在
+    for (const rel of ['SKILL.md', 'script.mjs', 'meta.json']) {
+      assert.ok(fs.existsSync(path.join(r.dir, rel)), '三件套仍在：' + rel)
+    }
+  } finally { rmTmp(tmp) }
+})
+
+// ── Codex PR#124 第三轮 P1（评论 3889725481）：roleRef 工作区优先 + 打包兜底 ──
+test('S4 roleRef 工作区优先 + 打包角色包兜底（编辑迁移角色后 bundled run 读到工作区内容）', () => {
+  const { script } = compileBlueprint(bp)
+  assert.ok(script.includes('工作区 dsh/roles/'), 'roleRef 工作区优先语义')
+  assert.ok(script.includes('打包角色包'), 'roleRef 打包角色包兜底语义')
+  assert.ok(script.includes("A.roleDir || 'dsh/roles'"), 'roleRef 保留 A.roleDir 兜底链路')
 })

@@ -683,6 +683,25 @@ test('迁移角色在产品工作区经打包快照可见且可编辑（不回�
   assert.equal(fs._files.get(REPO + '/.generated/default-workflow/roles/dispatcher.md'), '打包快照正文\n', '.generated 打包快照未被改写')
 })
 
+test('打包回退角色同名 create 被拒绝（Codex PR#124 第三轮 P2，评论 3889725486）', async () => {
+  // 迁移角色经打包快照只读回退可见时，roleNameTaken 必须把它计入唯一性校验，
+  // 避免 vwf.roles.create({name:'dispatcher'}) 静默成功创建同名工作区文件。
+  const fs = makeFs({
+    [REPO + '/.generated/default-workflow/roles/dispatcher.md']: '打包快照正文\n',
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  // 角色库列出 dispatcher（打包回退可见）
+  const r = await call(handlers, 'vwf.roles')
+  assert.ok(r.roles.find(x => x.id === 'dispatcher'), '打包回退角色可见')
+  // create 同名 → 必须拒绝
+  const dup = await call(handlers, 'vwf.roles.create', { name: 'dispatcher', content: '尝试覆盖\n' })
+  assert.equal(dup.ok, false)
+  assert.match(dup.errors[0].message, /同名角色/)
+  // 工作区未被静默写入
+  assert.ok(!fs._files.has(REPO + '/dsh/roles/dispatcher.md'), '工作区未被静默写入')
+})
+
 // ═══════════════════════════════════════════════════════════════════════════
 // issue-58 · 角色库：内置/自定义分类、创建、编辑、引用保护与安全删除
 // ═══════════════════════════════════════════════════════════════════════════

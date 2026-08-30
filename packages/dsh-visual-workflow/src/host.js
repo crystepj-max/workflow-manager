@@ -1310,8 +1310,9 @@ return {
       if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(v)) return '角色名称是系统保留名（如 CON/NUL/AUX），请换一个名称'
       return null
     }
-    // 名称唯一性（NFC 归一 + 大小写不敏感，兼容 macOS/Windows 文件系统）：内置 + 现有自定义。
-    // fail-closed：角色目录读取失败（非目录缺失）时抛错，调用方阻断变更。
+    // 名称唯一性（NFC 归一 + 大小写不敏感，兼容 macOS/Windows 文件系统）：内置 + 现有自定义
+    // + 打包回退角色（Codex PR#124 第三轮 P2，评论 3889725486）。fail-closed：角色目录读取
+    // 失败（非目录缺失）时抛错，调用方阻断变更。
     async function roleNameTaken(name, excludeId) {
       const key = roleKey(name)
       if (!key) return true
@@ -1327,6 +1328,18 @@ return {
         if (excludeId && roleKey(excludeId) === idKey) continue
         if (idKey === key) return true
       }
+      // 打包回退角色（Codex PR#124 第三轮 P2）：迁移角色经 bundledLegacyRoles 只读回退
+      // 可见时，同名 create 必须返回冲突——否则用户在角色库看到 dispatcher 已列出，
+      // create({name:'dispatcher'}) 却静默成功，绕过唯一性校验创建同名工作区文件。
+      // 打包回退读取失败不影响主校验（已覆盖内置 + 工作区，fail-closed 已在上文处理）。
+      try {
+        const bundled = await bundledLegacyRoles()
+        for (const id of bundled.keys()) {
+          const idKey = roleKey(id)
+          if (excludeId && roleKey(excludeId) === idKey) continue
+          if (idKey === key) return true
+        }
+      } catch (e) { /* 打包回退读取失败不影响主校验链路 */ }
       return false
     }
 

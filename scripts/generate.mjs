@@ -150,7 +150,12 @@ export function compileBlueprint(bp, opts = {}) {
     'function roleRef(name) {',
     opts.noRole
       ? '  return \'【角色定义】原型模式：本节点无角色文件要求，以 goal 为唯一依据。\\n\''
-      : '  return \'【角色定义】开工前先用读文件工具读取 \' + (A.roleDir || \'dsh/roles\') + \'/\' + name + \'.md（相对当前工作区根目录），严格遵循其中的定位、工作流程、产出模板、判定标准与硬规则——该文件是你在本节点的唯一角色依据。\\n\'',
+      // Codex PR#124 第三轮 P1（评论 3889725481）：工作区优先，打包角色包兜底。
+      // 编辑 dispatcher 等迁移角色时种子到工作区 dsh/roles/，但 bundleRoles 模板
+      // 仍向引擎传 c.roleDir（打包快照路径），旧 roleRef 只读打包快照，工作区编辑
+      // 不生效。改为先读工作区 dsh/roles/<name>.md，缺失再读 A.roleDir 打包快照——
+      // 既不修改 .generated（生成产物身份不变），又让工作区编辑对 bundled run 生效。
+      : '  return \'【角色定义】开工前先用读文件工具读取工作区 dsh/roles/\' + name + \'.md（相对当前工作区根目录，工作区优先）；若该文件不存在，则改读打包角色包 \' + (A.roleDir || \'dsh/roles\') + \'/\' + name + \'.md。严格遵循其中的定位、工作流程、产出模板、判定标准与硬规则——该文件是你在本节点的唯一角色依据。\\n\'',
     '}',
     'function runtimeCtx(nodeId, extra, goalOverride) {',
     '  const n = BYID[nodeId]',
@@ -399,11 +404,40 @@ export function generateUserSkill(bp) {
   ]);
 }
 
+// ---------- 内置角色定义捆绑（issue-81：Codex PR#124 第三轮 P1，评论 3889725489）----------
+// 自定义工作流（user skill）在产品工作区运行时，工作区通常没有 dsh/roles/ 树。
+// generateUserSkill 只产出三件套，没有 roles/ 目录，导致 compileViaPipeline 不带 roleDir，
+// 运行时 roleRef 让 agent 读 dsh/roles/<profile>.md 却找不到——新增的 7 个内置角色
+// （requirements/designer/evaluator/diagnose/orchestrator/researcher/synthesizer）
+// 在自定义工作流里实际无法运行。修复：save 闭环时把蓝图节点引用到的角色文件随 skill
+// 一起写到 roles/ 子目录，compileViaPipeline 命中即带出 roleDir，运行时自包含。
+// 角色源缺失或某角色文件不存在时静默跳过——可能是自定义角色（运行时按工作区 dsh/roles 解析）。
+const DEFAULT_ROLES_DIR = path.join(__dirname, '..', 'dsh', 'roles')
+export function collectBuiltinRoles(bp, rolesDir = DEFAULT_ROLES_DIR, io = fs) {
+  const out = new Map()
+  if (!bp || !Array.isArray(bp.nodes)) return out
+  const profiles = new Set()
+  for (const n of bp.nodes) {
+    if (n && typeof n.profile === 'string' && n.profile) profiles.add(n.profile)
+  }
+  for (const profile of profiles) {
+    const file = path.join(rolesDir, profile + '.md')
+    try {
+      const content = io.readFileSync(file, 'utf8')
+      out.set('roles/' + profile + '.md', content)
+    } catch (e) { /* 角色源缺失或该角色文件不存在：跳过（自定义角色运行时按工作区 dsh/roles 解析） */ }
+  }
+  return out
+}
+
 // ---------- 用户 skill 原子写盘（候选四 T-IMP-14） ----------
 // 失败零残留：先写暂存目录 → 原子换入（同父目录 rename）→ 任一步失败清理暂存并报错。
 // 更新场景：旧版本目录在换入前整体移除——失败时旧版本不受影响（换入未发生）。
 // io 可注入（测试用）；删除用 unlink/rmdir（避免宿主 NODE_OPTIONS safe-delete 钩子）。
-export function writeUserSkill(bp, skillDir, io = fs) {
+// rolesDir 可注入（测试用）：默认 <repo>/dsh/roles/，save 闭环时捆绑蓝图引用的内置角色定义
+// （issue-81：Codex PR#124 第三轮 P1，评论 3889725489——产品工作区无 dsh/roles/ 时
+// 自定义工作流仍可运行）。
+export function writeUserSkill(bp, skillDir, io = fs, rolesDir = DEFAULT_ROLES_DIR) {
   const finalDir = path.join(path.resolve(skillDir), bp.id);
   const stage = finalDir + '.tmp-' + process.pid + '-' + Date.now();
   const removeTree = (dir) => {
@@ -420,7 +454,14 @@ export function writeUserSkill(bp, skillDir, io = fs) {
   };
   try {
     io.mkdirSync(stage, { recursive: true });
-    for (const [rel, content] of generateUserSkill(bp)) io.writeFileSync(path.join(stage, rel), content);
+    const base = generateUserSkill(bp)
+    // issue-81：捆绑蓝图引用的内置角色定义（产品工作区无 dsh/roles/ 时自定义工作流可运行）
+    for (const [rel, content] of collectBuiltinRoles(bp, rolesDir, io)) base.set(rel, content)
+    for (const [rel, content] of base) {
+      const p = path.join(stage, rel)
+      io.mkdirSync(path.dirname(p), { recursive: true })
+      io.writeFileSync(p, content)
+    }
     removeTree(finalDir);            // 原子换入前半：移除旧版
     io.renameSync(stage, finalDir);  // 同父目录 rename = 原子换入
     return { ok: true, dir: finalDir };
