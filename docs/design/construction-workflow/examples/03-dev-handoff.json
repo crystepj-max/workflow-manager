@@ -1,6 +1,6 @@
 {
   "record_type": "dev_handoff",
-  "record_version": "v0.1.1",
+  "record_version": "v0.1.2",
   "created_at": "2026-08-30T07:10:00Z",
   "produced_by": "dsh:construction-bootstrap",
   "run": {
@@ -17,6 +17,7 @@
   },
   "payload": {
     "summary": "落地 Portable Contract v0.1.1 全量（#112 §0–§6、#113 §7–§8 + schema/示例、#114 §9 一致性矩阵与冻结、PR #115 Review 修复），最终提交 c8d8625",
+    "outcome": "handoff_ready",
     "changes": [
       {
         "area": "docs/design/construction-workflow-portable-contract.md",

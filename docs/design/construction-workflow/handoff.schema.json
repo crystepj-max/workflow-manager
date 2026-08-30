@@ -21,7 +21,7 @@
     },
     "record_version": {
       "description": "记录 schema 版本，与契约版本同步",
-      "const": "v0.1.1"
+      "const": "v0.1.2"
     },
     "created_at": {
       "$ref": "#/definitions/isoDateTime"
@@ -295,9 +295,18 @@
     "devHandoffPayload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["summary", "changes", "self_check"],
+      "required": ["summary", "outcome", "changes", "self_check"],
       "properties": {
         "summary": { "type": "string" },
+        "outcome": {
+          "description": "Dev 阶段整体专业结果（契约 §6.3 基元：handoff-ready / blocked / design-issue / requirements-issue）",
+          "enum": ["handoff_ready", "blocked", "design_issue", "requirements_issue"]
+        },
+        "blocked_reason": {
+          "description": "outcome=blocked 时必填：可恢复的外部/技术条件说明，供 hold(<reason>) 路由与恢复判定（契约 §6.3/§6.4）",
+          "type": "string",
+          "minLength": 1
+        },
         "changes": {
           "type": "array",
           "items": {
@@ -323,7 +332,19 @@
           }
         },
         "notes": { "type": "string" }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "blocked" } }
+          },
+          "then": {
+            "description": "blocked 必须说明可恢复条件，供 hold(<reason>) 路由（契约 §6.4）",
+            "required": ["blocked_reason"]
+          }
+        }
+      ]
     },
     "reviewProofPayload": {
       "type": "object",

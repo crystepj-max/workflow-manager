@@ -1,6 +1,6 @@
 # 建设 · 完整功能开发 Portable Contract
 
-> **版本**：**v0.1.1（2026-08-30 冻结，同日按 PR #115 Codex Review 修复升 patch；§1–§6 由 #112、§7–§8 由 #113、§9 由 #114 依次落地；Run 级人工验收随 PR #115 进行）**
+> **版本**：**v0.1.2（2026-08-30 冻结，同日按 PR #115 Codex Review 两轮修复升 patch；§1–§6 由 #112、§7–§8 由 #113、§9 由 #114 依次落地；Run 级人工验收随 PR #115 进行）**
 > **来源**：#102（epic，A1–A5 节为本契约的决断依据）、#103（本契约的任务 issue）
 > **消费者**：DSH Execution Profile（#105）、External Coding Agent Profile（#104，Codex/Cursor）
 > **纪律**：两个 Profile 只通过引用本契约工作，不得复制或分叉业务语义；本契约是 executor 中立的，只定义产品语义，不定义实现字段（实现字段由各 Profile 的 Adapter 映射）。
@@ -315,7 +315,7 @@ Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, 
 
 - **requirements_baseline**：三要素 + `gaps`（缺失必须显式，不得编造）+ 澄清决策 + 状态机 `draft` → `confirmed`（`confirmed` 必须含 `baseline_revision` 与人工确认记录；`draft` 不得作为下游冻结输入）；
 - **design_package**：summary + `decision_required` 标记；`decision_required=true` 必须附非空 `decision_required_reasons`（§5.2）；Decision Record 只能出现在命中条件门的 package 上，Controller 在 `decision_required=true` 且无 Decision Record 时必须挂起（§5.2），不得放行；
-- **dev_handoff**：改动摘要 + 自验清单；
+- **dev_handoff**：改动摘要 + **整体 `outcome`**（`handoff_ready` / `blocked` / `design_issue` / `requirements_issue`，§6.3 基元）+ 自验清单；`outcome=blocked` 必须附 `blocked_reason`（供 `hold(<reason>)` 路由与恢复判定）；`design_issue`/`requirements_issue` 为根因上报，由 Controller 按 §4.1 路由；
 - **review_proof / test_proof**：结论 + 逐项 findings（带根因分类 dev/design/requirements，§4.1）+ `verified_branch`/`verified_head` + `independent_session=true`（不变量 2，review 与 test 同样要求）；条件约束：`request_changes`/`fail` 必须至少含一条 finding；`pass` 必须带非空且逐项全 pass 的验收映射；`blocked` 必须带 `blocked_reason`（供 `hold(<reason>)` 路由与恢复判定，§6.4）；
 - **acceptance_package**：`assembled`（**五类前置记录引用**：baseline / design package / dev handoff / review proof / test proof + checkpoint 结果）+ 人工决策状态机（`awaiting_decision` → `decided`，两态字段互斥；`decided` 必含 `verified_branch`/`verified_head`；`reject` 必含 `feedback` 与 `rejection_root_cause`；AI 不得代签）；
 - **closeout_summary**：交付清单 + 集成结果（PR / merge commit 至少其一）+ **`acceptance_package_ref`（必须指向已 `decided` 的验收包，Controller 归档前校验）** + `acceptance_outcome`（保留 `user_accepted` 异常到收口）+ `records_retained=true`。
@@ -374,6 +374,7 @@ Closeout 归档时，七类记录与全部 Proof 必须保留并可按 `run_id` 
 |---|---|---|---|
 | v0.1 | 2026-08-30 | 初版冻结：主链语义、Run/Workspace、七类交接包、一致性矩阵 | #112 #113 #114 |
 | v0.1.1 | 2026-08-30 | Codex Review 修复：`blocked` 路由（`hold` → Run `BLOCKED`）、`USER_ACCEPTED` 保留到 closeout、多根因单边回退计数、schema 九处条件收紧、示例链一致性修正 | PR #115 Review |
+| v0.1.2 | 2026-08-30 | Codex Review 修复（二）：dev_handoff 增加整体 `outcome` 与 `blocked_reason` 条件、closeout 引用必须指向 decided 验收包的示例链修正、`record_type`↔`run.stage` 绑定、design 条件门双向约束 | PR #115 Review |
 
 ### 9.4 #103 九条验收清单证据映射
 

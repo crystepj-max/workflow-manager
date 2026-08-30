@@ -1,6 +1,6 @@
 {
   "record_type": "acceptance_package",
-  "record_version": "v0.1.1",
+  "record_version": "v0.1.2",
   "created_at": "2026-08-30T08:00:00Z",
   "produced_by": "dsh:construction-bootstrap",
   "run": {
@@ -16,7 +16,7 @@
     "attempt": 1
   },
   "payload": {
-    "status": "awaiting_decision",
+    "status": "decided",
     "assembled": {
       "requirements_baseline_ref": "examples/01-requirements-baseline.json",
       "design_package_ref": "examples/02-design-package.json",
@@ -24,6 +24,11 @@
       "review_proof_ref": "examples/04-review-proof.json",
       "test_proof_ref": "examples/05-test-proof.json",
       "integration_checkpoint": "PR #115 target=main，base_commit 为 target 祖先最新状态，无需重跑 Proof"
-    }
+    },
+    "decision": "accept",
+    "decided_by": "human:maintainer",
+    "decided_at": "2026-08-30T08:05:00Z",
+    "verified_branch": "dev-#102serias",
+    "verified_head": "c8d86254b963435bae107c9259ac2145cf04ef82"
   }
 }
