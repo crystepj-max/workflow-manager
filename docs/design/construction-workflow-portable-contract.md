@@ -1,6 +1,6 @@
 # 建设 · 完整功能开发 Portable Contract
 
-> **版本**：**v0.1（内容冻结 2026-08-30；§1–§6 由 #112、§7–§8 由 #113、§9 由 #114 依次落地；冻结与修订规则见 §9.3；Run 级人工验收随 PR #115 进行）**
+> **版本**：**v0.1.1（2026-08-30 冻结，同日按 PR #115 Codex Review 修复升 patch；§1–§6 由 #112、§7–§8 由 #113、§9 由 #114 依次落地；Run 级人工验收随 PR #115 进行）**
 > **来源**：#102（epic，A1–A5 节为本契约的决断依据）、#103（本契约的任务 issue）
 > **消费者**：DSH Execution Profile（#105）、External Coding Agent Profile（#104，Codex/Cursor）
 > **纪律**：两个 Profile 只通过引用本契约工作，不得复制或分叉业务语义；本契约是 executor 中立的，只定义产品语义，不定义实现字段（实现字段由各 Profile 的 Adapter 映射）。
@@ -114,10 +114,10 @@ requirements -> design -> dev -> review -> test -> human acceptance -> closeout
 
 - **目的**：只整理、冻结、交付；不重新开发、测试或审查。
 - **输入**：通过的 acceptance proof + 本 Run 全部记录。
-- **专业输出**：closeout summary——交付清单、冻结记录、PR/merge 结果、遗留事项。
-- **Proof**：closeout summary + 最终集成结果（PR 编号/merge commit）。
+- **专业输出**：closeout summary——交付清单、冻结记录、**验收决议（`accept` / `user_accepted`，必须保留）**、遗留事项。
+- **Proof**：closeout summary + 最终集成结果（PR 编号 / merge commit 至少其一）。
 - **回退根因**：**无回退出口**。若发现交付物与 Proof 不符，属完整性违约，升级人工处理，不作为回退。
-- **完成判定**：交付完成，Run 归档（记录保留要求见 §7/§8）。
+- **完成判定**：交付完成，Run 归档（记录保留要求见 §7/§8）。`user_accepted` 是合法交付决议：Completion 权威事实以 closeout 保留的验收决议为准，不得把「知情接受的异常交付」洗成普通交付（对齐 #72 与 v0.1 规格 Completion Type）。
 
 ## 4. 回退与升级语义
 
@@ -129,7 +129,7 @@ requirements -> design -> dev -> review -> test -> human acceptance -> closeout
 | 设计问题 | Design（§3.2） | review/test 发现方案不可行、接口不成立 |
 | 实现问题 | Dev（§3.3） | review request-changes、test 失败的常规缺陷 |
 
-判定纪律：**产生 findings 的 Role 必须给出根因分类**（这是专业结果的一部分）；Controller 按分类路由，不重估专业判断。同一 findings 内允许多根因并存，Controller 拆分路由，分别消耗额度（见 4.2 的声明规则）。
+判定纪律：**产生 findings 的 Role 必须给出根因分类**（这是专业结果的一部分）；Controller 按分类路由，不重估专业判断。同一 findings 允许多根因并存，但**一次回退只执行一条回退边、消耗 1 点额度**：Controller 按根因优先级选择本次回退目标（requirements > design > dev，先修上游）；其余 findings 原样保留在记录中，由回退重做后的下一轮 review/test 复验（边级计数语义对齐 #73 与设计原则 11 的 `countRound`）。
 
 ### 4.2 自动回退额度
 
@@ -219,9 +219,11 @@ requirements -> design -> dev -> review -> test -> human acceptance -> closeout
 | human acceptance | （人工）accept / reject / user-accepted |
 | closeout | delivered |
 
+两类易混结果在此明确：`blocked` 基元仅用于**可恢复的外部/技术条件**（环境不可用、Provider 额度、鉴权失效等），不是业务失败；业务性受阻必须以 `decision-required` 或根因报告表达。节点的业务 `blocked` 结果不等于 Run Lifecycle 的 `BLOCKED` 状态（对齐 workflow-design-principles §3.2/§3.3）。closeout 的 `delivered` 必须携带验收决议（`accept` / `user_accepted`），它是 Completion 的权威事实来源（§3.7）。
+
 ### 6.4 路由动作基元
 
-Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, <root-cause>)`（回退，受额度约束）/ `await-human(<reason>)`（挂起）/ `escalate`（升级）。额度耗尽时 `rollback` 不可用，唯一出路是 `await-human(MAX_ROUNDS_REACHED)`。
+Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, <root-cause>)`（回退，受额度约束，一次一条边）/ `await-human(<reason>)`（挂起等人工决策）/ `hold(<reason>)`（Run 进入 `BLOCKED`：可恢复外部/技术条件，不消耗额度，条件恢复后重入同一 Stage）/ `escalate`（升级）。`blocked` 专业结果路由到 `hold`；额度耗尽时 `rollback` 不可用，唯一出路是 `await-human(MAX_ROUNDS_REACHED)`。
 
 ### 6.5 悬空禁止
 
@@ -300,7 +302,7 @@ Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, 
 | 字段 | 语义 |
 |---|---|
 | `record_type` | 七者之一 |
-| `record_version` | 记录 schema 版本（当前 v0.1） |
+| `record_version` | 记录 schema 版本（当前 v0.1.1） |
 | `created_at` | ISO 8601 时间 |
 | `produced_by` | 产生者 Role/会话标识 |
 | `run` | §7.1 portable run identity 全量内嵌 |
@@ -311,12 +313,12 @@ Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, 
 
 必选/可选字段以 §8.4 schema 为准；语义要点：
 
-- **requirements_baseline**：三要素 + `gaps`（缺失必须显式，不得编造）+ 澄清决策 + 人工确认（`BASELINE_CONFIRMED` 后回填）；
+- **requirements_baseline**：三要素 + `gaps`（缺失必须显式，不得编造）+ 澄清决策 + 状态机 `draft` → `confirmed`（`confirmed` 必须含 `baseline_revision` 与人工确认记录；`draft` 不得作为下游冻结输入）；
 - **design_package**：summary + `decision_required` 标记与判据命中说明（§5.2）+（触发时）Decision Record；
 - **dev_handoff**：改动摘要 + 自验清单；
-- **review_proof / test_proof**：结论 + 逐项 findings（带根因分类 dev/design/requirements，§4.1）+ `verified_branch`/`verified_head`；review 另需 `independent_session=true`（不变量 2）；
-- **acceptance_package**：`assembled`（引用 review/test proof + checkpoint 结果）+ 人工决策状态机（`awaiting_decision` → `decided`，决策枚举 `accept`/`reject`/`user_accepted`，AI 不得代签）；
-- **closeout_summary**：交付清单 + 集成结果 + `records_retained=true`。
+- **review_proof / test_proof**：结论 + 逐项 findings（带根因分类 dev/design/requirements，§4.1）+ `verified_branch`/`verified_head` + `independent_session=true`（不变量 2，review 与 test 同样要求）；`request_changes` 必须至少含一条 finding；`pass` 必须带非空且逐项全 pass 的验收映射；
+- **acceptance_package**：`assembled`（**五类前置记录引用**：baseline / design package / dev handoff / review proof / test proof + checkpoint 结果）+ 人工决策状态机（`awaiting_decision` → `decided`，两态字段互斥；`decided` 必含 `verified_branch`/`verified_head`；`reject` 必含 `feedback` 与 `rejection_root_cause`；AI 不得代签）；
+- **closeout_summary**：交付清单 + 集成结果（PR / merge commit 至少其一）+ **`acceptance_outcome`（保留 `user_accepted` 异常到收口）** + `records_retained=true`。
 
 ### 8.4 Schema、示例与机械校验
 
@@ -340,7 +342,7 @@ Closeout 归档时，七类记录与全部 Proof 必须保留并可按 `run_id` 
 
 | 关联 issue | 方向要点 | 契约对齐位置 | 差异说明 |
 |---|---|---|---|
-| #71 全局《工作流设计原则》 | 建立通用设计原则与方法论文档（尚未落地） | §0/§2 遵循同一决断源（#102 A1–A5） | 无冲突：层不同——#71 是通用原则，本契约是建设业务语义；#71 落地后本契约引用之，不重复定义通用原则 |
+| #71 全局《工作流设计原则》 | 已落地：`docs/design/workflow-design-principles.md`（原则 10 人工验收业务阶段、原则 11 自动回退额度、Run Lifecycle、Node Outcome / Completion Type） | §3.6/§3.7（原则 10）；§4.2/§4.3（原则 11 同义）；§6.3/§6.4（Lifecycle `BLOCKED` 与节点业务 `blocked` 的区分、Completion 权威事实）；§8 | 无冲突：本契约是该原则在「建设」模板上的业务实例化；通用措辞以原则文档为权威，实现字段以各 Runtime issue 为权威 |
 | #77 Business Outcome Routing | 技术执行与业务结果分离；Producer/Router 分离；禁止 `next_node`；Node Result 权威；额度耗尽保留原 Outcome | §6 全节；§4.3 耗尽行为（`WAITING_HUMAN + MAX_ROUNDS_REACHED`） | 兼容 shim 而非分叉：Bootstrap 期 Controller 使用 §6.3/§6.4 基元枚举驱动；#77 落地后按 §6.6 映射为正式 field path + route + `countRound`，字段名以 #77 为权威 |
 | #72 受控人工决策 | Decision（方向取舍）与验收（是否通过）解耦；默认自动推进；决策包要素；Decision Record 不可覆盖；`BASELINE_UPDATED` 回基线；`USER_ACCEPTED` 不改写 baseline | §5 全节；§3.1 固定门；§3.2 条件门；§3.6 `USER_ACCEPTED` | 无冲突：本契约把 #72 框架能力实例化到建设主链固定位置（requirements 确认门 + design 条件门），不设独立 Decision 业务节点，符合「Decision 是框架能力」原则 |
 | #73 自动回退额度 | 额度统一解释为自动回退额度；路径显式声明是否消耗；初次执行/内部 REVISE/WAITING_HUMAN/技术重试不计；人工触发显式记录；额度只限制自动路由 | §4.2 计数原则；§4.3 耗尽行为 | 无冲突：契约默认额度 3 来自 #102 决断；`countRound` 等字段名由 #73 实现定，契约只保留产品语义 |
@@ -371,6 +373,7 @@ Closeout 归档时，七类记录与全部 Proof 必须保留并可按 `run_id` 
 | 版本 | 日期 | 变更 | 关联 |
 |---|---|---|---|
 | v0.1 | 2026-08-30 | 初版冻结：主链语义、Run/Workspace、七类交接包、一致性矩阵 | #112 #113 #114 |
+| v0.1.1 | 2026-08-30 | Codex Review 修复：`blocked` 路由（`hold` → Run `BLOCKED`）、`USER_ACCEPTED` 保留到 closeout、多根因单边回退计数、schema 九处条件收紧、示例链一致性修正 | PR #115 Review |
 
 ### 9.4 #103 九条验收清单证据映射
 

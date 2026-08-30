@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "docs/design/construction-workflow/handoff.schema.json",
   "title": "Construction Workflow Portable Handoff / Evidence Record",
-  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1，#113；#78 Formal Records 的兼容前身）",
+  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.1，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
   "type": "object",
   "additionalProperties": false,
   "required": ["record_type", "record_version", "created_at", "produced_by", "run", "payload"],
@@ -21,7 +21,7 @@
     },
     "record_version": {
       "description": "记录 schema 版本，与契约版本同步",
-      "const": "v0.1"
+      "const": "v0.1.1"
     },
     "created_at": {
       "$ref": "#/definitions/isoDateTime"
@@ -137,10 +137,20 @@
       "description": "回退根因分类（契约 §4.1）",
       "enum": ["dev", "design", "requirements"]
     },
+    "verifiedBinding": {
+      "description": "Proof 绑定：只对 verified_head 有效（契约 §7.3）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verified_branch", "verified_head"],
+      "properties": {
+        "verified_branch": { "type": "string" },
+        "verified_head": { "type": "string" }
+      }
+    },
     "requirementsBaselinePayload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["goal", "scope", "acceptance", "gaps"],
+      "required": ["goal", "scope", "acceptance", "gaps", "status"],
       "properties": {
         "goal": { "type": "string" },
         "scope": {
@@ -178,9 +188,13 @@
             }
           }
         },
+        "status": {
+          "description": "draft 不得作为下游冻结输入；confirmed 才是 BASELINE_CONFIRMED（契约 §3.1/§5.1）",
+          "enum": ["draft", "confirmed"]
+        },
         "baseline_revision": { "type": "string" },
         "human_confirmation": {
-          "description": "人工确认后回填（BASELINE_CONFIRMED）",
+          "description": "人工确认记录（BASELINE_CONFIRMED），AI 不得代填",
           "type": "object",
           "additionalProperties": false,
           "required": ["confirmed_by", "confirmed_at"],
@@ -189,7 +203,18 @@
             "confirmed_at": { "$ref": "#/definitions/isoDateTime" }
           }
         }
-      }
+      },
+      "oneOf": [
+        {
+          "required": ["status"],
+          "properties": { "status": { "const": "draft" } },
+          "not": { "required": ["human_confirmation"] }
+        },
+        {
+          "required": ["status", "baseline_revision", "human_confirmation"],
+          "properties": { "status": { "const": "confirmed" } }
+        }
+      ]
     },
     "designPackagePayload": {
       "type": "object",
@@ -292,12 +317,23 @@
           "description": "独立证明者原则：审核会话必须独立于开发会话（契约 §2 不变量 2）",
           "enum": [true]
         }
+      },
+      "if": {
+        "required": ["verdict"],
+        "properties": { "verdict": { "const": "request_changes" } }
+      },
+      "then": {
+        "description": "request-changes 必须至少携带一条带根因分类的 finding，否则路由悬空（契约 §3.4/§6.5）",
+        "required": ["findings"],
+        "properties": {
+          "findings": { "minItems": 1 }
+        }
       }
     },
     "testProofPayload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["verdict", "acceptance_mapping", "verified_branch", "verified_head"],
+      "required": ["verdict", "acceptance_mapping", "verified_branch", "verified_head", "independent_session"],
       "properties": {
         "verdict": { "enum": ["pass", "fail", "blocked"] },
         "acceptance_mapping": {
@@ -327,7 +363,29 @@
         },
         "environment": { "type": "string" },
         "verified_branch": { "type": "string" },
-        "verified_head": { "type": "string" }
+        "verified_head": { "type": "string" },
+        "independent_session": {
+          "description": "独立证明者原则：测试会话必须独立于开发会话（契约 §2 不变量 2）",
+          "enum": [true]
+        }
+      },
+      "if": {
+        "required": ["verdict"],
+        "properties": { "verdict": { "const": "pass" } }
+      },
+      "then": {
+        "description": "pass 要求非空且逐项全 pass 的验收映射（契约 §3.5 完成判定）",
+        "required": ["acceptance_mapping"],
+        "properties": {
+          "acceptance_mapping": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "result": { "const": "pass" }
+              }
+            }
+          }
+        }
       }
     },
     "acceptancePackagePayload": {
@@ -337,11 +395,21 @@
       "properties": {
         "status": { "enum": ["awaiting_decision", "decided"] },
         "assembled": {
-          "description": "证据汇总：引用 review/test proof 与 Integration Checkpoint 结果",
+          "description": "证据汇总：§3.6 定义的五类前置记录引用 + Integration Checkpoint 结果",
           "type": "object",
           "additionalProperties": false,
-          "required": ["review_proof_ref", "test_proof_ref", "integration_checkpoint"],
+          "required": [
+            "requirements_baseline_ref",
+            "design_package_ref",
+            "dev_handoff_ref",
+            "review_proof_ref",
+            "test_proof_ref",
+            "integration_checkpoint"
+          ],
           "properties": {
+            "requirements_baseline_ref": { "type": "string" },
+            "design_package_ref": { "type": "string" },
+            "dev_handoff_ref": { "type": "string" },
             "review_proof_ref": { "type": "string" },
             "test_proof_ref": { "type": "string" },
             "integration_checkpoint": { "type": "string" }
@@ -353,23 +421,51 @@
         },
         "decided_by": { "type": "string" },
         "decided_at": { "$ref": "#/definitions/isoDateTime" },
-        "feedback": { "type": "string" }
+        "feedback": { "type": "string" },
+        "rejection_root_cause": { "$ref": "#/definitions/rootCause" },
+        "verified_branch": { "type": "string" },
+        "verified_head": { "type": "string" }
       },
       "oneOf": [
         {
           "required": ["status"],
-          "properties": { "status": { "const": "awaiting_decision" } }
+          "properties": { "status": { "const": "awaiting_decision" } },
+          "not": {
+            "anyOf": [
+              { "required": ["decision"] },
+              { "required": ["decided_by"] },
+              { "required": ["decided_at"] },
+              { "required": ["feedback"] },
+              { "required": ["rejection_root_cause"] },
+              { "required": ["verified_head"] }
+            ]
+          }
         },
         {
-          "required": ["status", "decision", "decided_by", "decided_at"],
+          "required": [
+            "status",
+            "decision",
+            "decided_by",
+            "decided_at",
+            "verified_branch",
+            "verified_head"
+          ],
           "properties": { "status": { "const": "decided" } }
         }
-      ]
+      ],
+      "if": {
+        "required": ["decision"],
+        "properties": { "decision": { "const": "reject" } }
+      },
+      "then": {
+        "description": "reject 必须携带 feedback 与根因指向，否则 Controller 无法按 §3.6 路由",
+        "required": ["feedback", "rejection_root_cause"]
+      }
     },
     "closeoutSummaryPayload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["deliverables", "integration", "records_retained"],
+      "required": ["deliverables", "integration", "records_retained", "acceptance_outcome"],
       "properties": {
         "deliverables": { "type": "array", "items": { "type": "string" } },
         "integration": {
@@ -380,9 +476,17 @@
             "pr": { "type": "string" },
             "merge_commit": { "type": "string" },
             "checkpoint": { "type": "string" }
-          }
+          },
+          "anyOf": [
+            { "required": ["pr"] },
+            { "required": ["merge_commit"] }
+          ]
         },
         "leftovers": { "type": "array", "items": { "type": "string" } },
+        "acceptance_outcome": {
+          "description": "保留验收决议：user_accepted 异常必须延续到收口，作为 Completion 权威事实，不得洗成普通交付（契约 §3.7/§6.3）",
+          "enum": ["accept", "user_accepted"]
+        },
         "records_retained": {
           "description": "归档保留声明（契约 §8.5）",
           "enum": [true]
