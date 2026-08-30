@@ -1,0 +1,250 @@
+# 建设 · 完整功能开发 Portable Contract
+
+> **版本**：v0.1-draft（§1–§6 由 #112 落地；§7–§8 由 #113 填充；§9 由 #114 填充并执行整文档冻结）
+> **来源**：#102（epic，A1–A5 节为本契约的决断依据）、#103（本契约的任务 issue）
+> **消费者**：DSH Execution Profile（#105）、External Coding Agent Profile（#104，Codex/Cursor）
+> **纪律**：两个 Profile 只通过引用本契约工作，不得复制或分叉业务语义；本契约是 executor 中立的，只定义产品语义，不定义实现字段（实现字段由各 Profile 的 Adapter 映射）。
+
+## 0. 定位
+
+本契约冻结「建设 · 完整功能开发」工作流的**可移植业务语义**：固定主链、各 Stage 的输入/专业输出/Proof/回退根因、人工门边界、回退与升级规则、Outcome/Routing 兼容原则。
+
+它**不是**：
+
+- 一份 DSH Runtime 实现说明（Runtime 由 #77/#72/#73/#78/#93/#79 逐项落地）；
+- 第二份 Workflow 业务定义（各 Profile 不得各自维护语义副本）；
+- legacy `dev-workflow-2-0` 的改名（legacy 主链无 requirements/design 阶段，与本契约主链不同）。
+
+冲突裁决顺序：本契约 > 各 Profile 私有说明 > 各执行器默认行为。与 #77/#72/#73/#78/#93 的正式 Runtime 能力收敛后，以正式 Runtime 语义为权威（见 §6.6、§9）。
+
+## 1. 术语
+
+| 术语 | 定义 |
+|---|---|
+| **Run** | 一次建设工作流的完整执行实例，对应一个 issue/逻辑任务（identity 字段见 §7） |
+| **Stage** | 主链上的一个固定业务阶段（§3 的七者之一） |
+| **Role** | 执行某个 Stage 专业工作的 agent 会话；只产出专业结果，不做路由决策 |
+| **Controller** | Portable Profile 内驱动流程的控制器/runbook；解析专业结果并决定路由、挂起、升级 |
+| **专业结果** | Role 对其 Stage 问题的结论、findings、证据的集合；是权威事实源 |
+| **Proof** | 与专业结果绑定的可验证证据，必须关联实际验证的 workspace/branch/HEAD（字段见 §7） |
+| **回退** | 已离开某 Stage 后，因后续阶段暴露问题而返回上游 Stage 重新产生成果 |
+| **自动回退额度** | Run 级计数，限制 Controller 自动执行回退路由的能力（§4） |
+| **挂起（AWAITING / WAITING_HUMAN）** | 流程暂停等待人工输入或决策；不是失败终态 |
+| **升级** | 额度耗尽或完整性违约时，把决策权交还人工；专业结果原样保留 |
+| **冻结基线** | 经人工确认后不再变动的产物版本；变动必须生成新 Revision 并重新确认 |
+
+## 2. 固定主链与不变量
+
+主链七阶段，顺序固定，任何 Profile 不得增删、改名或重排：
+
+```text
+requirements -> design -> dev -> review -> test -> human acceptance -> closeout
+```
+
+**不变量**：
+
+1. **顺序固定**：review 先于 test（review 通过的 HEAD 才进入 test）；human acceptance 先于 closeout。
+2. **独立证明者**：review 与 test 的执行会话必须独立于 dev 会话；允许顺序调用独立会话，禁止同一会话自证。
+3. **Proof 绑定真实现场**：一切 Proof 必须绑定实际验证的 workspace/branch/HEAD（§7 定义字段）。
+4. **无旁路**：不允许跳过 human acceptance 直接 closeout；不允许绕过 review/test 直接 acceptance（Profile 不得以工具限制为由取消独立证明）。
+5. **挂起优于编造**：任何 Stage 信息不足、等待人工、额度耗尽时，流程挂起并保留原始专业结果；禁止编造、篡改或静默改写。
+6. **一份语义**：两个 Profile 对上述全部语义只有本契约一个来源。
+
+## 3. Stage 契约
+
+每个 Stage 按四要素描述：**输入 / 专业输出 / Proof / 回退根因**。Role 只报告本 Stage 的专业结果；是否前进、回退、挂起由 Controller 依本节规则决定。
+
+### 3.1 Requirements — 需求基线
+
+- **目的**：把 issue/原始需求加工为可执行需求，经人工确认后冻结为 baseline，成为后续全部 Stage 的唯一范围依据。
+- **输入**：issue/需求原文与全部评论、仓库现状、既有契约/ADR、既往分析产物。
+- **专业输出**：requirements baseline——含三要素（任务目标 / 涉及范围 / 验收标准）与澄清决策记录；无法得出的要素必须显式标注「缺失 + 补齐建议」，不得编造。
+- **Proof**：baseline 文档（带版本标识）+ 人工确认记录（确认人、时间、被确认版本）。
+- **回退根因**：本 Stage 是**需求/范围类问题的根因汇入点**——接收下游一切需求类回退；被回退后生成新 Revision，重新走人工确认。
+- **完成判定**：baseline 通过人工确认（Decision Record：`BASELINE_CONFIRMED`，见 §5），形成冻结版本。
+- **挂起条件**：三要素存在缺口且无人可问 → 挂起（`awaiting-human-input`），保留缺口清单，等待人工补齐后重入。
+
+### 3.2 Design — 方案设计
+
+- **目的**：在冻结 baseline 范围内产出可执行方案与决策点清单。
+- **输入**：冻结的 requirements baseline。
+- **专业输出**：design package——方案、受影响模块/接口/数据、风险、未决问题清单、`decision_required` 标记（true/false + 判据命中说明，判据见 §5.2）。
+- **Proof**：design package；（条件门触发时）对应的 Human Decision Record。
+- **回退根因**：发现 baseline 缺陷、歧义或范围变化 → 回 **Requirements**（生成新 Revision，不直接修改 baseline）；本 Stage 同时接收下游一切设计类回退。
+- **完成判定**：package 完整，且 `decision_required=true` 时决策已记录。默认自动推进，不设固定人工门。
+
+### 3.3 Dev — 开发实现
+
+- **目的**：在隔离 workspace 中按冻结方案实现，自验满足验收标准。
+- **输入**：冻结 design package + 隔离 workspace（独立 branch/worktree，规则见 §7）。
+- **专业输出**：实现（代码/文档）+ dev handoff（改动摘要、自验记录与结果、影响面说明）。
+- **Proof**：实现与自验记录绑定 work_branch + current_head。
+- **回退根因**：开发中的内部迭代（实现问题自修复）**不算回退**（#73：节点内部 REVISE 不计额度）；本 Stage 接收下游一切实现类回退。
+- **完成判定**：自验通过且 dev handoff 完整。
+
+### 3.4 Review — 独立审核
+
+- **目的**：由独立会话审核实现与冻结方案/baseline 的一致性。
+- **输入**：dev handoff + 实际 workspace/branch/HEAD。
+- **专业输出**：review proof——结论（approve / request-changes）、逐条 findings、**每条 finding 的根因分类**（dev / design / requirements）、verified branch/HEAD。
+- **Proof**：review proof 绑定 verified workspace/branch/HEAD；审核会话与开发会话独立（不变量 2）。
+- **回退根因**：request-changes 时按每条 finding 的根因路由：实现 → **Dev**、设计 → **Design**、需求 → **Requirements**；未标注或确实无法分类的 finding，默认由 **Dev** 承接（Dev 判断属设计/需求问题后可再报告，由 Controller 按新根因再次路由，仍消耗该次回退额度）。
+- **完成判定**：approve 且 review proof 落盘。
+
+### 3.5 Test — 独立测试
+
+- **目的**：由独立会话验证行为满足 baseline 验收标准。
+- **输入**：review 结论为 approve 的 HEAD 所对应 workspace。
+- **专业输出**：test proof——执行结果、与验收标准的逐条映射、执行环境、失败项根因分类（dev / design / requirements）、verified branch/HEAD。
+- **Proof**：test proof 绑定**实际执行验证**的 HEAD，不得引用未验证的 HEAD。
+- **回退根因**：与 §3.4 相同的根因路由规则。
+- **完成判定**：baseline 全部验收标准有对应通过结果，test proof 落盘。
+
+### 3.6 Human Acceptance — 人工验收
+
+- **目的**：人工对交付成果做正式业务签收。这是主链上唯一的固定人工业务节点；**AI 不代签**。
+- **输入**：acceptance package——requirements baseline + design package + dev handoff + review proof + test proof（+ Integration Checkpoint 结果，规则见 §7）。
+- **输出**（人工，非 Role）：acceptance decision——accept / reject（reject 必须附 feedback 及其根因指向）。
+- **Proof**：acceptance proof——验收人、结论、时间、verified HEAD。
+- **回退根因**：reject 按 feedback 根因路由（默认 **Dev**；暴露设计/需求问题按根因回对应 Stage）。**人工打回不消耗自动回退额度**，但计入 Run 历史。
+- **特殊语义**：人工知情接受未完全满足 baseline 的结果时，使用 `USER_ACCEPTED`（#72），不得改写 baseline 制造 PASS。
+- **完成判定**：accept（或 USER_ACCEPTED）记录落盘，产生 acceptance proof。
+
+### 3.7 Closeout — 收口
+
+- **目的**：只整理、冻结、交付；不重新开发、测试或审查。
+- **输入**：通过的 acceptance proof + 本 Run 全部记录。
+- **专业输出**：closeout summary——交付清单、冻结记录、PR/merge 结果、遗留事项。
+- **Proof**：closeout summary + 最终集成结果（PR 编号/merge commit）。
+- **回退根因**：**无回退出口**。若发现交付物与 Proof 不符，属完整性违约，升级人工处理，不作为回退。
+- **完成判定**：交付完成，Run 归档（记录保留要求见 §7/§8）。
+
+## 4. 回退与升级语义
+
+### 4.1 根因路由
+
+| 根因分类 | 回退目标 | 典型来源 |
+|---|---|---|
+| 需求/范围问题 | Requirements（§3.1） | review/test 发现范围错、验收标准错、baseline 歧义 |
+| 设计问题 | Design（§3.2） | review/test 发现方案不可行、接口不成立 |
+| 实现问题 | Dev（§3.3） | review request-changes、test 失败的常规缺陷 |
+
+判定纪律：**产生 findings 的 Role 必须给出根因分类**（这是专业结果的一部分）；Controller 按分类路由，不重估专业判断。同一 findings 内允许多根因并存，Controller 拆分路由，分别消耗额度（见 4.2 的声明规则）。
+
+### 4.2 自动回退额度
+
+- 默认额度：**3 / Run**（语义对齐 #73：额度统一解释为自动回退额度，限制的是 Controller 的自动路由能力）。
+- 计数原则：
+  - 首次执行任何 Stage 不计；
+  - review / test 触发的回退边：**消耗额度**；
+  - Dev 内部迭代（自修复）：不计；
+  - 挂起（AWAITING / WAITING_HUMAN / PAUSED）不计；
+  - 技术重试（会话崩溃、工具故障重跑）不消耗业务额度；
+  - 人工触发（Decision / Acceptance 打回）不消耗自动额度，但显式记录；
+  - Human Decision 之后额度是否追加/重置，必须在 Decision Record 中显式记录，不得隐式恢复。
+
+### 4.3 额度耗尽行为
+
+额度耗尽且最新专业结果仍要求回退时：
+
+1. 原 Outcome **原样保留并持久化**，不篡改、不降级为失败；
+2. Controller 不执行该自动回退边；
+3. Run 进入挂起：`WAITING_HUMAN`，reason = `MAX_ROUNDS_REACHED`（对齐 #77/#73；**不是** legacy 的 `FAILED_MAX_ROUNDS` 终态）;
+4. 人工决策包必须展示：原 Outcome、历史尝试、剩余问题、继续的成本/收益/风险、可选方向（接受当前结果 / 追加额度 / 按根因回退 / 停止 / 派生新 Run）。
+
+### 4.4 升级（区别于回退）
+
+两类事件走升级而非回退：额度耗尽（§4.3）与完整性违约（Proof 与交付物不符、Closeout 发现证据链断裂）。升级保留全部现场，决策权交人工。
+
+## 5. Human Decision 与 Human Acceptance 边界
+
+### 5.1 概念边界（对齐 #72）
+
+| 维度 | Human Decision（受控人工决策） | Human Acceptance（人工验收） |
+|---|---|---|
+| 回答的问题 | 系统不能替用户做的**方向取舍**：选哪个选项、如何处理 | 交付成果**是否通过/完成** |
+| 在主链中的位置 | Stage 内的门（非独立业务节点）：requirements 的固定确认门、design 的条件门、额度耗尽等升级门 | 主链第六阶段的固定业务节点 |
+| 触发 | 固定门必然触发；条件门命中判据才触发；升级时必然触发 | 到达即触发，唯一且必须 |
+| 记录 | Decision Record（不可覆盖），注明选项与理由 | Acceptance Proof（验收人/结论/时间/HEAD） |
+| 打回语义 | 结果枚举如 `BASELINE_UPDATED`：目标/范围/硬要求改变 → 回 Requirements 生成新 Revision | reject 打回，按 feedback 根因路由 |
+| 挂起表现 | WAITING_HUMAN（持久化要求见 #72，映射见 §7/§8） | WAITING_HUMAN |
+
+### 5.2 Design 条件门判据
+
+`decision_required=true` 当且仅当命中下列之一（Role 报告命中情况，Controller 据此挂起，不重估专业判断）：
+
+1. 存在多个可行方案且权衡实质（成本/风险/架构方向），又无既有决策或契约可引用；
+2. 方案引入新的对外契约、新依赖或破坏性变更；
+3. 方案与既有决策/契约冲突，或需要推翻既有决策；
+4. 出现安全、数据、权限等高风险面的新决策点。
+
+未命中 → 自动推进，不打扰用户（#72：默认自动推进，不得因一般不确定性随意升级）。
+
+### 5.3 决策包要求
+
+任何 Human Decision 必须向决策者提供：目标、当前状态、决策点、候选项、各选项的成本/收益/风险/影响、推荐理由（对齐 #72）。决策缺失或超时 → 保持挂起，**不得由 AI 代答**。
+
+### 5.4 禁止事项
+
+- 禁止 AI 代签 Decision Record 或 Acceptance Proof；
+- 禁止改写 baseline / Outcome 制造 PASS（含用 `USER_ACCEPTED` 以外的任何方式表达「知情接受」）；
+- 禁止把本应回 Requirements 的范围变更当作 Design/Dev 内部决策处理（Human Decision ≠ 修改 Baseline）；
+- 禁止将 Acceptance 当 Decision 用（跳过验收直接做方向裁决），或反之。
+
+## 6. Outcome / Routing 兼容原则
+
+### 6.1 Producer / Router 分离
+
+- **Role = Outcome Producer**：只报告本 Stage 专业结果（结论、findings、根因分类、证据）；
+- **Controller = Router**：解析专业结果，依 §3/§4 决定前进、回退、挂起、升级；
+- **Role 不得输出 `next_node` 或任何拓扑目标字段**；路由意图只能由 Controller 判定。
+
+### 6.2 专业结果与流程状态两层分离
+
+- 合法的非 PASS 专业结果（review 的 request-changes、test 的失败项、design 的 decision_required）**不是 failure**，不得为适配执行器状态机而篡改；
+- 技术执行失败（会话崩溃、工具不可用）与业务结果区分记录；
+- 专业结果（Node Result）是权威事实源；Run 层只镜像 Completion 摘要（对齐 #77）。
+
+### 6.3 本契约的专业结果基元
+
+建设主链各 Stage 的专业结果必须可归纳为以下基元（Bootstrap 期间 Controller 可用自有枚举表达，但必须可无歧义映射）：
+
+| Stage | 专业结果基元 |
+|---|---|
+| requirements | baseline-ready（待人工确认）/ awaiting-human-input（缺口挂起）/ revised |
+| design | package-ready / decision-required / requirements-issue（根因回退报告） |
+| dev | handoff-ready / blocked（受阻说明）/ design-issue / requirements-issue |
+| review | approve / request-changes（逐条 finding 带根因分类） |
+| test | pass / fail（逐项带根因分类）/ blocked |
+| human acceptance | （人工）accept / reject / user-accepted |
+| closeout | delivered |
+
+### 6.4 路由动作基元
+
+Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, <root-cause>)`（回退，受额度约束）/ `await-human(<reason>)`（挂起）/ `escalate`（升级）。额度耗尽时 `rollback` 不可用，唯一出路是 `await-human(MAX_ROUNDS_REACHED)`。
+
+### 6.5 悬空禁止
+
+每个可路由的专业结果都必须有明确去向（前进、回退、挂起、升级之一），不得出现「规格提到了结果，但没有任何 route」的悬空状态（对齐 #77）。
+
+### 6.6 与 #77 正式 Runtime 的收敛
+
+#77（Business Outcome Routing 与 Completion Mapping）落地后：
+
+- §6.3/§6.4 的基元映射为正式 Outcome field path + route + `countRound` 声明（是否消耗额度，对齐 #73）；
+- 字段命名以 #77 实现为权威，本契约只保留产品语义；
+- 映射必须完整且不丢历史（Bootstrap 期间的 Run 记录仍可追溯）。
+
+---
+
+## 7. Portable Run / Workspace Contract
+
+> **由 #113 填充**：portable run identity 最小字段集、ISOLATED_WRITE workspace 规则、worktree/branch/HEAD 约束、Integration Checkpoint、与 #93/#79 的映射兼容声明。
+
+## 8. Portable Handoff / Evidence Package
+
+> **由 #113 填充**：七类交接/证据包（requirements baseline / design package / dev handoff / review proof / test proof / acceptance package / closeout summary）的统一 schema、示例、与 #78 Formal Records 的映射承诺。
+
+## 9. 一致性矩阵、引用规范与冻结
+
+> **由 #114 填充**：与 #71/#77/#72/#73/#78/#93 的逐项一致性矩阵、双 Profile 引用规范条款、冻结版本标记与修订规则。
