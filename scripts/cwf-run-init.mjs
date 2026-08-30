@@ -17,6 +17,22 @@ export function branchName(runId) {
   return `dev-${sanitized}`
 }
 
+export function assertRunIdSafe(runId) {
+  // run 目录为 .agent-runs/<run_id> 单一路径分量；下游按上溯两级定位仓库根，禁止分隔符/穿越
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(String(runId))) {
+    throw new Error(`非法 run_id: ${runId}（仅允许字母/数字/下划线/连字符，禁止路径分隔符与穿越）`)
+  }
+}
+
+export function findIdentityMismatch(stored, requested) {
+  // 幂等复用前校验身份一致：run_id 相同不代表 issue/base/budget 相同
+  const mismatches = []
+  if (stored.issue_or_task_identity !== requested.issue_or_task_identity) mismatches.push(`issue(${stored.issue_or_task_identity}≠${requested.issue_or_task_identity})`)
+  if (stored.base_ref !== requested.base_ref) mismatches.push(`base_ref(${stored.base_ref}≠${requested.base_ref})`)
+  if ((stored.rollback_budget ?? DEFAULT_BUDGET) !== requested.rollback_budget) mismatches.push(`budget(${stored.rollback_budget}≠${requested.rollback_budget})`)
+  return mismatches
+}
+
 function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
 }
@@ -27,6 +43,7 @@ function parseArgs(argv) {
     console.error('用法: node scripts/cwf-run-init.mjs <issue_id> <run_id> [--base <ref>] [--budget <n>]')
     process.exit(2)
   }
+  assertRunIdSafe(runId)
   const opts = { base: 'main', budget: DEFAULT_BUDGET }
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === '--base') opts.base = rest[++i]
@@ -57,8 +74,17 @@ function main() {
     if (existsSync(existingRunJson)) {
       const existing = JSON.parse(readFileSync(existingRunJson, 'utf-8'))
       if (existing.run_id === runId) {
-        console.log(JSON.stringify({ worktree: worktreePath, runDir: join(worktreePath, runDirRel), identity: existing, reused: true }, null, 2))
-        return
+        const mismatches = findIdentityMismatch(existing, {
+          issue_or_task_identity: `#${issue}`,
+          base_ref: base,
+          rollback_budget: budget,
+        })
+        if (mismatches.length === 0) {
+          console.log(JSON.stringify({ worktree: worktreePath, runDir: join(worktreePath, runDirRel), identity: existing, reused: true }, null, 2))
+          return
+        }
+        console.error(`run_id 相同但身份不一致，拒绝静默复用: ${mismatches.join('；')}`)
+        process.exit(1)
       }
     }
     console.error(`分支已存在且不属于本 Run: ${branch}（换用不同 run_id 或先清理旧 workspace）`)

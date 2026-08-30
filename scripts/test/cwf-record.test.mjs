@@ -157,3 +157,35 @@ test('check：对既有记录只校验', () => {
   assert.equal(r.code, 0, r.out)
   assert.match(r.out, /valid/)
 })
+
+test('rollback 成功后 stage/attempt 推进（不覆盖触发回退的 proof）', () => {
+  const { runDir } = makeRunDir()
+  const r = run(['rollback', runDir, 'dev'])
+  assert.equal(r.code, 0, r.out)
+  const runState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(runState.stage, 'dev')
+  assert.equal(runState.attempt, 2)
+  assert.equal(runState.rollback_history[0].attempt_after, 2)
+})
+
+test('write：proof 绑定与真实工作区比对（不一致拒绝，一致放行）', () => {
+  const { root, runDir } = makeRunDir()
+  const realHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const realBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const mkProof = (head, branch) => {
+    const p = join(runDir, `proof-${head === realHead ? 'ok' : 'bad'}.json`)
+    writeFileSync(p, JSON.stringify({
+      verdict: 'approve', findings: [], verified_branch: branch, verified_head: head,
+      independent_session: true,
+    }))
+    return p
+  }
+  // 绑定不符 → 拒绝（§7.3）
+  const bad = run(['write', runDir, 'review_proof', mkProof('deadbeef', realBranch), '--stage', 'review'])
+  assert.equal(bad.code, 1)
+  assert.match(bad.out, /Proof 绑定与工作区不符/)
+  assert.equal(existsSync(join(runDir, 'review_proof.a1.json')), false)
+  // 绑定一致 → 放行
+  const ok = run(['write', runDir, 'review_proof', mkProof(realHead, realBranch), '--stage', 'review'])
+  assert.equal(ok.code, 0, ok.out)
+})

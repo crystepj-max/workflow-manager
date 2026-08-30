@@ -88,6 +88,23 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
     process.exit(1)
   }
 
+  // Proof 绑定校验（§7.3）：payload 的 verified_* 必须与真实工作区一致，而非仅非空
+  if (record.payload && (record.payload.verified_head !== undefined || record.payload.verified_branch !== undefined)) {
+    const actualBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot(runDir), encoding: 'utf-8' }).trim()
+    const mismatches = []
+    if (record.payload.verified_head !== run.current_head) {
+      mismatches.push(`verified_head(${record.payload.verified_head}) ≠ 当前 HEAD(${run.current_head})`)
+    }
+    if (record.payload.verified_branch !== actualBranch) {
+      mismatches.push(`verified_branch(${record.payload.verified_branch}) ≠ 当前分支(${actualBranch})`)
+    }
+    if (mismatches.length > 0) {
+      console.error(`${recordType} Proof 绑定与工作区不符，拒绝写入（契约 §7.3）：`)
+      for (const m of mismatches) console.error(`  ${m}`)
+      process.exit(1)
+    }
+  }
+
   // attempt 戳文件名 + index 索引：回退重跑的旧记录不得被覆盖（契约 §8.5）
   const fileName = `${recordType}.a${run.attempt}.json`
   const out = join(runDir, fileName)
@@ -150,8 +167,12 @@ function cmdRollback(runDir, rootCause) {
   }
   run.rollback_used += 1
   entry.counter = `${run.rollback_used}/${budget}`
+  // 回退被接受 ⇒ 持久化目标 Stage 迁移并推进 attempt（下一次写入使用新 attempt 文件名，不覆盖触发回退的 proof）
+  run.stage = rootCause
+  run.attempt += 1
+  entry.attempt_after = run.attempt
   saveRun(runDir, run)
-  console.log(`回退已记录：根因=${rootCause}（${run.stage}→${rootCause}），额度 ${run.rollback_used}/${budget}`)
+  console.log(`回退已记录：根因=${rootCause}（stage→${rootCause}，attempt→${run.attempt}），额度 ${run.rollback_used}/${budget}`)
 }
 
 function parseFlags(args) {
