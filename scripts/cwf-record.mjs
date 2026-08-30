@@ -9,7 +9,7 @@
 //       —— 记录一次自动回退（root_cause ∈ dev/design/requirements）；超额度打印升级提示并 exit 1
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { validateRecord } from './cwf-validate.mjs'
 
@@ -82,8 +82,16 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
     process.exit(1)
   }
 
-  const out = join(runDir, `${recordType}.json`)
+  // attempt 戳文件名 + index 索引：回退重跑的旧记录不得被覆盖（契约 §8.5）
+  const fileName = `${recordType}.a${run.attempt}.json`
+  const out = join(runDir, fileName)
   writeFileSync(out, JSON.stringify(record, null, 2) + '\n')
+  const indexPath = join(runDir, 'index.json')
+  const index = existsSync(indexPath)
+    ? JSON.parse(readFileSync(indexPath, 'utf-8'))
+    : {}
+  index[recordType] = fileName
+  writeFileSync(indexPath, JSON.stringify(index, null, 2) + '\n')
   saveRun(runDir, run)
   console.log(`${out} valid（stage=${run.stage} attempt=${run.attempt}）`)
 }
@@ -118,13 +126,13 @@ function cmdRollback(runDir, rootCause) {
     process.exit(2)
   }
   const run = loadRun(runDir)
-  run.rollback_used = (run.rollback_used || 0) + 1
   const budget = run.rollback_budget ?? 3
-  if (run.rollback_used > budget) {
-    console.error(`自动回退额度耗尽（${run.rollback_used} > ${budget}）：按契约 §4.3 保留原 Outcome，升级人工（MAX_ROUNDS_REACHED）`)
-    saveRun(runDir, run)
+  // 先查容量：被拒的回退边未执行，不得递增额度（契约 §4.3 保留原 Outcome、不执行该边）
+  if (run.rollback_used >= budget) {
+    console.error(`自动回退额度耗尽（${run.rollback_used}/${budget}）：按契约 §4.3 保留原 Outcome，升级人工（MAX_ROUNDS_REACHED）`)
     process.exit(1)
   }
+  run.rollback_used += 1
   saveRun(runDir, run)
   console.log(`回退已记录：根因=${rootCause}，额度 ${run.rollback_used}/${budget}`)
 }

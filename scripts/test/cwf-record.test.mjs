@@ -47,11 +47,35 @@ test('write：组装信封、校验并落盘，回写 run.json stage/attempt', (
   }))
   const r = run(['write', runDir, 'requirements_baseline', payload, '--produced-by', 'test-suite', '--stage', 'requirements'])
   assert.equal(r.code, 0, r.out)
-  const written = JSON.parse(readFileSync(join(runDir, 'requirements_baseline.json'), 'utf-8'))
+  const written = JSON.parse(readFileSync(join(runDir, 'requirements_baseline.a1.json'), 'utf-8'))
   assert.equal(written.record_type, 'requirements_baseline')
   assert.equal(written.produced_by, 'test-suite')
   assert.equal(written.run.run_id, 'cwf-test-01')
   assert.match(written.record_version, /^v0\.1\.\d+$/)
+  const index = JSON.parse(readFileSync(join(runDir, 'index.json'), 'utf-8'))
+  assert.equal(index.requirements_baseline, 'requirements_baseline.a1.json')
+})
+
+test('write：重跑不覆盖旧记录，index 指向最新 attempt', () => {
+  const { runDir } = makeRunDir()
+  const payload = join(runDir, 'payload.json')
+  writeFileSync(payload, JSON.stringify({
+    goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
+    gaps: [], outcome: 'baseline_ready', status: 'draft',
+  }))
+  run(['write', runDir, 'requirements_baseline', payload])
+  // 同一记录第二次写入（如确认后刷新）：同 attempt 覆盖同文件
+  const again = run(['write', runDir, 'requirements_baseline', payload])
+  assert.equal(again.code, 0)
+  assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), true)
+  assert.equal(existsSync(join(runDir, 'requirements_baseline.a2.json')), false)
+  // attempt 2 写入 → 新文件 + index 前移
+  const r2 = run(['write', runDir, 'requirements_baseline', payload, '--attempt', '2'])
+  assert.equal(r2.code, 0, r2.out)
+  assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), true) // 旧 attempt 保留
+  assert.equal(existsSync(join(runDir, 'requirements_baseline.a2.json')), true)
+  const index = JSON.parse(readFileSync(join(runDir, 'index.json'), 'utf-8'))
+  assert.equal(index.requirements_baseline, 'requirements_baseline.a2.json')
 })
 
 test('write：非法 payload 拒绝落盘', () => {
@@ -62,20 +86,28 @@ test('write：非法 payload 拒绝落盘', () => {
   assert.equal(r.code, 1)
   assert.match(r.out, /校验失败/)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.json')), false)
+  assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
 })
 
-test('rollback：额度记账与耗尽升级', () => {
+test('rollback：额度记账与耗尽升级（被拒边不计数，追加额度后可继续）', () => {
   const { runDir } = makeRunDir()
   for (let i = 1; i <= 3; i++) {
     const r = run(['rollback', runDir, 'dev'])
     assert.equal(r.code, 0, r.out)
     assert.match(r.out, new RegExp(`额度 ${i}/3`))
   }
+  // 第 4 次被拒且不递增
   const r = run(['rollback', runDir, 'dev'])
   assert.equal(r.code, 1)
   assert.match(r.out, /额度耗尽.*升级人工.*MAX_ROUNDS_REACHED/s)
-  const runState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
-  assert.equal(runState.rollback_used, 4) // 原样保留并持久化，不回滚计数
+  let runState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(runState.rollback_used, 3)
+  // 人工追加额度到 4 后，下一次回退可执行（契约 §4.2 显式记录追加）
+  runState.rollback_budget = 4
+  writeFileSync(join(runDir, 'run.json'), JSON.stringify(runState, null, 2))
+  const r2 = run(['rollback', runDir, 'dev'])
+  assert.equal(r2.code, 0, r2.out)
+  assert.match(r2.out, /额度 4\/4/)
 })
 
 test('check：对既有记录只校验', () => {
