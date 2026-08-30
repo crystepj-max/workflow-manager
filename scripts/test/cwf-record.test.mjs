@@ -149,8 +149,12 @@ test('rollback：人工触发不耗自动额度（验收 reject / 耗尽后人�
   for (let i = 0; i < 3; i++) run(['rollback', runDir, 'dev'])
   const exhausted = run(['rollback', runDir, 'dev'])
   assert.equal(exhausted.code, 1)
+  // 人工触发必须携带归属：无 --decided-by 拒绝（防伪造 human_triggered）
+  const noAttr = run(['rollback', runDir, 'dev', '--by', 'human'])
+  assert.equal(noAttr.code, 2)
+  assert.match(noAttr.out, /--decided-by/)
   // 人工触发：绕过额度检查，不递增计数，仍推进 stage/attempt 并留痕
-  const r = run(['rollback', runDir, 'dev', '--by', 'human'])
+  const r = run(['rollback', runDir, 'dev', '--by', 'human', '--decided-by', 'tester', '--reason', '验收打回'])
   assert.equal(r.code, 0, r.out)
   assert.match(r.out, /人工触发，不耗自动额度/)
   const runState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
@@ -159,6 +163,8 @@ test('rollback：人工触发不耗自动额度（验收 reject / 耗尽后人�
   assert.equal(runState.attempt, 5) // 3 次自动 + 1 次人工
   const last = runState.rollback_history.at(-1)
   assert.equal(last.human_triggered, true)
+  assert.equal(last.decided_by, 'tester')
+  assert.equal(last.reason, '验收打回')
   assert.equal(runState.lifecycle, undefined) // 人工回退恢复挂起态
 })
 
@@ -173,6 +179,17 @@ test('write：非 git 工作区 fail closed（不得绑定未观察的 HEAD）',
   assert.equal(r.code, 1)
   assert.match(r.out, /真实 HEAD|中止/)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
+})
+
+test('budget：畸形调额拒绝（4junk / 负数 / 空串）', () => {
+  const { runDir } = makeRunDir()
+  for (const bad of ['4junk', '-1', 'nope']) {
+    const r = run(['budget', runDir, bad, '--decided-by', 'tester'])
+    assert.equal(r.code, 2)
+    assert.match(r.out, /非法回退额度/)
+  }
+  const runState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(runState.rollback_budget, 3) // 未被污染
 })
 
 test('write：分支切换后拒绝写入（lineage 不一致）', () => {

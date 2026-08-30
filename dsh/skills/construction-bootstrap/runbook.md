@@ -1,6 +1,6 @@
 # 建设工作流 Bootstrap · Controller Runbook
 
-本 runbook 是 Portable Contract（`docs/design/construction-workflow-portable-contract.md`）的 DSH 驱动细则。契约锚点引用均为该文档小节。
+本 runbook 是 Portable Contract 的 DSH 驱动细则。契约锚点引用均为契约文档小节；安装后的权威契约副本在 `<SKILL_DIR>/assets/construction-workflow-portable-contract.md`（源仓库内 = `docs/design/construction-workflow-portable-contract.md`）。
 
 > **脚本路径约定**：下文 `scripts/cwf-*.mjs` 指「随 skill 安装的运行资产副本」——安装后在 `<SKILL_DIR>/assets/`（自包含，外仓库可用）；在本源仓库内开发时也可直接用仓库 `scripts/` 路径。run-init 会把 `handoff.schema.json` 提供到目标 worktree 的 `.agent-runs/schema/`，记录/校验脚本优先读取该副本。
 
@@ -10,7 +10,7 @@
 node scripts/cwf-run-init.mjs <issue编号> <run_id>
 ```
 
-- 产出：独立分支 `dev-issue-<N>` + worktree `.scratch/worktrees/dev-issue-<N>` + run 目录 `.agent-runs/<run_id>/run.json`（含 portable run identity 与回退额度计数）。
+- 产出：独立分支 `dev-<run_id>` + worktree `.scratch/worktrees/dev-<run_id>` + run 目录 `.agent-runs/<run_id>/run.json`（含 portable run identity 与回退额度计数）。run_id 须为已净化小写连字符形态（如 `cwf-<issue>-01`）。
 - **之后全部工作在该 worktree 内进行**；run.json 是本 Run 的事实锚点（契约 §7.1）。
 - 会话内的 stage/attempt 推进都经 `cwf-record.mjs write` 回写 run.json，不留口头状态。
 

@@ -16,6 +16,7 @@ cp -R "$SRC/dsh/skills/construction-bootstrap" "$SKILL_DIR"
 mkdir -p "$SKILL_DIR/assets"
 cp "$SRC"/scripts/cwf-*.mjs "$SKILL_DIR/assets/"
 cp "$SRC/docs/design/construction-workflow/handoff.schema.json" "$SKILL_DIR/assets/"
+cp "$SRC/docs/design/construction-workflow-portable-contract.md" "$SKILL_DIR/assets/"
 
 echo "installed -> $SKILL_DIR"
 find "$SKILL_DIR" -type f | sort

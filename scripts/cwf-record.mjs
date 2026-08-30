@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { validateRecord } from './cwf-validate.mjs'
+import { parseBudget } from './cwf-run-init.mjs'
 
 const RECORD_TYPES = [
   'requirements_baseline',
@@ -160,6 +161,10 @@ function cmdRollback(runDir, rootCause, flags) {
     process.exit(2)
   }
   const byHuman = flags.by === 'human'
+  if (byHuman && !flags.decidedBy) {
+    console.error('人工触发回退必须携带 --decided-by（建议同时 --reason）：无归属的人工记录等于绕过额度与验收门（契约 §4.2/§5.3）')
+    process.exit(2)
+  }
   const run = loadRun(runDir)
   const budget = run.rollback_budget ?? 3
   // 持久化所选回退边（§4.1 一次一条边；历史供升级/重放审计）
@@ -174,6 +179,8 @@ function cmdRollback(runDir, rootCause, flags) {
   if (byHuman) {
     // 人工触发的回退不消耗也不检查自动额度（§4.2：Decision/Acceptance 打回显式记录但不耗额度）
     entry.human_triggered = true
+    entry.decided_by = flags.decidedBy
+    if (flags.reason) entry.reason = flags.reason
     entry.counter = 'human'
   } else if (run.rollback_used >= budget) {
     // 先查容量：被拒边不递增，但持久化生命周期迁移（§4.3：WAITING_HUMAN + MAX_ROUNDS_REACHED）
@@ -201,9 +208,11 @@ function cmdRollback(runDir, rootCause, flags) {
 }
 
 function cmdBudget(runDir, target, flags) {
-  const n = parseInt(target, 10)
-  if (!Number.isInteger(n) || n < 0) {
-    console.error(`非法额度: ${target}`)
+  let n
+  try {
+    n = parseBudget(target)
+  } catch (e) {
+    console.error(e.message)
     process.exit(2)
   }
   if (!flags.decidedBy) {
