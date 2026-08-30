@@ -388,12 +388,14 @@ return {
         edges: bp.edges.map((e) => {
           const o = { from: e.from, to: e.to, on: e.on }
           if (e.when !== undefined) o.when = e.when
+          if (e.result !== undefined) o.result = e.result
           return o
         }),
       }
       // 业务规则字段（候选二 Q7，与 generate.mjs projectToVwf 一致）
       if (bp.onMaxRounds !== undefined) out.onMaxRounds = bp.onMaxRounds
       if (bp.heteroCheck) out.heteroCheck = true
+      if (bp.humanDecision !== undefined) out.humanDecision = bp.humanDecision
       return out
     }
     // 逆投影（save 落盘格式：蓝图 JSON；候选二 Q7：业务规则字段 onMaxRounds/
@@ -422,6 +424,7 @@ return {
         edges: (dsl.edges || []).map((e) => {
           const o = { from: e.from, to: e.to, on: e.on }
           if (e.when !== undefined) o.when = e.when
+          if (e.result !== undefined) o.result = e.result
           return o
         }),
       }
@@ -429,6 +432,7 @@ return {
       if (dsl.control && dsl.control.maxRounds != null) bp.control = { maxRounds: dsl.control.maxRounds }
       if (dsl.onMaxRounds !== undefined) bp.onMaxRounds = dsl.onMaxRounds
       if (dsl.heteroCheck) bp.heteroCheck = true
+      if (dsl.humanDecision !== undefined) bp.humanDecision = dsl.humanDecision
       if (Object.keys(models).length) bp.bindings = { models: models }
       return bp
     }
@@ -630,14 +634,45 @@ return {
     // 约束②（同 taskId 互斥）：该 taskId 最新未接管的记录处于活跃态时拒绝新
     // 启动。活跃判定不依赖 workflow/start 事件到达时机（start() 返回与 worker
     // 线程事件投递之间有空窗）：登记时即置 tag.active=true，workflow/end 清除；
-    // AWAITING_HUMAN_* 终态由 runs 记录状态兜住。entry 续跑放行，并把同 taskId
-    // 前序 AWAITING_HUMAN 记录标记 supersededBy（旧卡片自动退出门禁队列）。
+    // AWAITING_HUMAN_* 终态由 runs 记录状态兜住。WAITING_HUMAN 仅匹配的
+    // decision_id 续跑放行；残留 AWAITING_HUMAN_* 仍靠 entry 续跑放行；并把同
+    // taskId 前序等待记录标记 supersededBy（旧卡片自动退出门禁队列）。
     // 约束①③（并行隔离 / closeout 串行）在客户端看板呈现：数据本就按 runId
     // 隔离，列表 + 门禁队列 + 并行警示条见 client.js Dashboard。
     const runTags = new Map()
+    function isHumanWaitStatus(status) {
+      const s = String(status || '')
+      return s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0
+    }
     function isActiveStatus(status) {
       const s = String(status || '')
-      return s === 'running' || s.indexOf('AWAITING_HUMAN_') === 0
+      return s === 'running' || isHumanWaitStatus(s)
+    }
+    function dslUsesHumanDecision(dsl) {
+      if (!dsl || typeof dsl !== 'object') return false
+      if (dsl.humanDecision !== undefined) return true
+      const edges = Array.isArray(dsl.edges) ? dsl.edges : []
+      return edges.some((e) => e && (e.to === '$human-decision' || e.from === '$human-decision'))
+    }
+    function applyHumanDecisionValue(rec, val) {
+      if (!rec || !val || typeof val !== 'object') return
+      if (typeof val.decision_id === 'string' && val.decision_id) rec.decisionId = val.decision_id
+      if (typeof val.reason === 'string' && val.reason) rec.reason = val.reason
+      if (val.decision_package && typeof val.decision_package === 'object') rec.decisionPackage = val.decision_package
+      if (val.control_event && typeof val.control_event === 'object') rec.controlEvent = val.control_event
+      if (val.blocked_edge && typeof val.blocked_edge === 'object') rec.blockedEdge = val.blocked_edge
+      if (val.results && typeof val.results === 'object') rec.results = val.results
+      if (Array.isArray(val.history)) rec.history = val.history
+      if (typeof val.node === 'string' && val.node) rec.node = val.node
+      if (typeof val.round === 'number') rec.round = val.round
+    }
+    async function parkedHumanDecision(taskId) {
+      const hit = latestTagByTaskId(taskId)
+      if (!hit) return null
+      let rec = runs.get(hit.runId)
+      if (!rec) rec = await loadRunFromDisk(hit.runId)
+      if (!rec || rec.status !== 'WAITING_HUMAN') return null
+      return rec
     }
     // Map 保持插入序 = 启动序：取同 taskId 最后插入且未被续跑接管的记录
     function latestTagByTaskId(taskId) {
@@ -669,8 +704,8 @@ return {
         if (rid === newRunId || !tag || tag.taskId !== taskId || tag.supersededBy) continue
         const rec = runs.get(rid)
         const parked = rec
-          ? String(rec.status).indexOf('AWAITING_HUMAN_') === 0
-          : String(tag.lastStatus || '').indexOf('AWAITING_HUMAN_') === 0
+          ? isHumanWaitStatus(rec.status)
+          : isHumanWaitStatus(tag.lastStatus)
         if (parked) {
           tag.supersededBy = newRunId
           requestRunPersist(rid)
@@ -699,7 +734,7 @@ return {
     // 终态集合（评审 PRRT_kwDOT57Tec6bfXfm/6b6ZN3）：节点 id 允许非 ASCII/
     // 空白/标点（AWAITING_HUMAN_验收、FAILED_AT_调度A 等），前缀类用 .+ 宽匹配；
     // fanout cap 失败态（FAILED_ITEM_CAP/FAILED_AGENT_CAP）同为脚本终态
-    const TERMINAL_STATUS_RE = /^(DONE|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ERROR)$/
+    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ERROR)$/
     function canonicalStop(result) {
       const v = result && result.value
       const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
@@ -766,6 +801,15 @@ return {
         workflowId: tag ? String(tag.workflowId || '') : '',
         startedAt: rec.startedAt != null ? rec.startedAt : (tag && tag.startedAt != null ? tag.startedAt : null),
         supersededBy: tag && tag.supersededBy ? String(tag.supersededBy) : '',
+        decision_id: rec.decisionId ? String(rec.decisionId) : '',
+        reason: rec.reason ? String(rec.reason) : '',
+        decision_package: rec.decisionPackage || null,
+        control_event: rec.controlEvent || null,
+        blocked_edge: rec.blockedEdge || null,
+        results: rec.results || null,
+        history: rec.history || null,
+        node: rec.node ? String(rec.node) : '',
+        round: typeof rec.round === 'number' ? rec.round : null,
         updatedAt: Date.now(),
       }
     }
@@ -855,6 +899,15 @@ return {
         logs: Array.isArray(data.logs) ? data.logs.map((l) => String(l)).slice(-50) : [],
         agents: Array.isArray(data.agents) ? data.agents.filter((a) => a && typeof a === 'object').map((a) => ({ seq: a.seq, label: String(a.label || ''), phase: a.phase ? String(a.phase) : '', outcome: String(a.outcome || '') })) : [],
         startedAt: typeof data.startedAt === 'number' ? data.startedAt : null,
+        decisionId: typeof data.decision_id === 'string' && data.decision_id ? data.decision_id : null,
+        reason: typeof data.reason === 'string' && data.reason ? data.reason : '',
+        decisionPackage: data.decision_package && typeof data.decision_package === 'object' ? data.decision_package : null,
+        controlEvent: data.control_event && typeof data.control_event === 'object' ? data.control_event : null,
+        blockedEdge: data.blocked_edge && typeof data.blocked_edge === 'object' ? data.blocked_edge : null,
+        results: data.results && typeof data.results === 'object' ? data.results : null,
+        history: Array.isArray(data.history) ? data.history : null,
+        node: typeof data.node === 'string' ? data.node : '',
+        round: typeof data.round === 'number' ? data.round : null,
       })
       if (data.taskId || data.workflowId) {
         const status = typeof data.status === 'string' && data.status ? data.status : 'unknown'
@@ -934,7 +987,7 @@ return {
         if (hydrated.has(it.id) || runs.has(it.id)) continue
         const d = it.data
         const st = typeof d.status === 'string' ? d.status : ''
-        if (String(st).indexOf('AWAITING_HUMAN_') !== 0) continue
+        if (!isHumanWaitStatus(st)) continue
         if (typeof d.supersededBy === 'string' && d.supersededBy) continue
         if (!d.taskId && !d.workflowId) continue
         runTags.set(d.id, {
@@ -1046,7 +1099,10 @@ return {
       const tag = runTags.get(id) || null
       return { found: true, state: { id: id, meta: s.meta, status: s.status, phase: s.phase, logs: s.logs, agents: s.agents,
         taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: s.startedAt != null ? s.startedAt : (tag ? tag.startedAt : null),
-        supersededBy: tag && tag.supersededBy ? tag.supersededBy : '' } }
+        supersededBy: tag && tag.supersededBy ? tag.supersededBy : '',
+        decision_id: s.decisionId || '', reason: s.reason || '',
+        decision_package: s.decisionPackage || null, control_event: s.controlEvent || null,
+        blocked_edge: s.blockedEdge || null, results: s.results || null } }
     })
     // 多 run 并行（#19）：运行清单（最新在前），看板列表/门禁队列/并行警示的数据源
     registerRpc('vwf.runs.list', async () => {
@@ -1055,7 +1111,8 @@ return {
         const tag = runTags.get(rid) || null
         out.push({ id: rid, name: (rec.meta && rec.meta.name) || '', status: rec.status, phase: rec.phase || '',
           taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: rec.startedAt != null ? rec.startedAt : (tag ? tag.startedAt : null),
-          supersededBy: tag && tag.supersededBy ? tag.supersededBy : '' })
+          supersededBy: tag && tag.supersededBy ? tag.supersededBy : '',
+          decision_id: rec.decisionId || '', reason: rec.reason || '' })
       }
       // 按时间倒序（评审 PRRT_kwDOT57Tec6b6it9）：按需水合会把窗口外旧记录追加到
       // runs map 尾部，若依赖插入序反转，选中的旧 run 会跳到清单最前并驻留；按
@@ -1510,7 +1567,7 @@ return {
     if (agents !== undefined) {
       const tool = dtools.define({
         name: 'wf_run',
-        description: '运行一个可视化工作流（DSL 图）：校验并编译为 workflow 脚本后交给引擎执行。args.templateId 用内置/用户模板，或 args.dsl 传自定义图。返回运行状态；人工验收节点会以 AWAITING_HUMAN_<node> 状态暂停，等待人工裁决后以 entry=节点id + approved=true/false 续跑。',
+        description: '运行一个可视化工作流（DSL 图）：校验并编译为 workflow 脚本后交给引擎执行。args.templateId 用内置/用户模板，或 args.dsl 传自定义图。返回运行状态；Human Decision 以 WAITING_HUMAN 暂停，用 decision_id + user_choice 续跑；残留人工门禁以 AWAITING_HUMAN_<node> 暂停，用 entry + approved 续跑。',
         parameters: {
           templateId: { type: 'string', description: '内置/用户工作流 id，如 dev-workflow-2-0' },
           dsl: { type: 'object', additionalProperties: true, description: '自定义工作流 DSL（nodes/edges/control）' },
@@ -1524,10 +1581,14 @@ return {
           issueComments: { type: 'string', description: 'issue 评论' },
           requirement: { type: 'string', description: '原始需求文本（无 issue 时）' },
           entry: { type: 'string', description: '续跑入口节点 id' },
-          approved: { type: 'boolean', description: '人工验收续跑裁决（true 通过 / false 打回）' },
+          approved: { type: 'boolean', description: '残留人工门禁续跑裁决（true 通过）；Human Decision 禁止此字段' },
           feedback: { type: 'string', description: '人工打回意见（续跑）' },
           startRound: { type: 'number', description: '续跑起始轮次' },
-          history: { type: 'array', description: '前次打回历史（续跑）' }
+          history: { type: 'array', description: '前次打回历史（续跑）' },
+          decision_id: { type: 'string', description: 'Human Decision 续跑：稳定 decision_id' },
+          user_choice: { type: 'string', description: 'Human Decision 续跑：Decision Result（如 STOP / USER_ACCEPTED / ADD_BUDGET）' },
+          blocked_edge: { type: 'object', additionalProperties: true, description: 'ADD_BUDGET 时被额度拦住的自动边 { from, to, on }' },
+          results: { type: 'object', additionalProperties: true, description: '续跑时带回的节点结果快照' },
         },
         output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
         async execute(args) {
@@ -1536,10 +1597,27 @@ return {
           // 先等启动回载完成（评审 PRRT_kwDOT57Tec6b6Iu1）：否则互斥判定可能与
           // 磁盘门禁水合竞速，重启后立刻续跑会漏判占用
           try { if (runsHydration) await runsHydration } catch (e) { /* 回载失败已留痕 */ }
-          const blocker = (args && args.entry) ? null : taskMutexBlocker(String((args && args.taskId) || ''))
+          const isHdResume = !!(args && args.decision_id)
+          const isLegacyResume = !!(args && args.entry)
+          const isResume = isHdResume || isLegacyResume
+          const blocker = taskMutexBlocker(String((args && args.taskId) || ''))
           if (blocker) {
-            return '错误：任务 ' + args.taskId + ' 已有进行中的运行 ' + blocker.runId + '（状态 ' + blocker.status +
-              '）：同 taskId 串行互斥。如该运行停在人工门禁，请带 entry=<节点id> 与 approved 续跑；并行任务请换一个 taskId。'
+            const st = String(blocker.status || '')
+            let allow = false
+            if (st === 'WAITING_HUMAN') {
+              let rec = runs.get(blocker.runId)
+              if (!rec) rec = await loadRunFromDisk(blocker.runId)
+              const parkedId = rec && rec.decisionId ? String(rec.decisionId) : ''
+              allow = isHdResume && (!parkedId || parkedId === String(args.decision_id))
+            } else if (st.indexOf('AWAITING_HUMAN_') === 0) {
+              allow = isLegacyResume
+            } else {
+              allow = isResume
+            }
+            if (!allow) {
+              return '错误：任务 ' + args.taskId + ' 已有进行中的运行 ' + blocker.runId + '（状态 ' + blocker.status +
+                '）：同 taskId 串行互斥。WAITING_HUMAN 请带 decision_id 与 user_choice 续跑；残留门禁请带 entry=<节点id> 与 approved；并行任务请换一个 taskId。'
+            }
           }
           let dsl = null
           let fromTemplate = false
@@ -1552,6 +1630,19 @@ return {
           } else {
             return '错误：必须提供 templateId 或 dsl'
           }
+          if (dslUsesHumanDecision(dsl) && args && args.approved !== undefined) {
+            return '错误：Human Decision 续跑禁止 approved，请传 decision_id 与 user_choice'
+          }
+          if (isHdResume) {
+            const parked = await parkedHumanDecision(String((args && args.taskId) || ''))
+            if (parked) {
+              if (args.blocked_edge == null && parked.blockedEdge) args.blocked_edge = parked.blockedEdge
+              if (args.results == null && parked.results) args.results = parked.results
+              if (args.history == null && parked.history) args.history = parked.history
+              if (args.startRound == null && parked.round != null) args.startRound = parked.round
+              if (!args.entry && parked.node) args.entry = parked.node
+            }
+          }
           const v = await validatePipeline(dsl)
           if (!v.ok) return 'DSL 校验失败：' + JSON.stringify(v.errors)
           const c = await compileViaPipeline(v.sanitized, { fromTemplate })
@@ -1562,11 +1653,12 @@ return {
           const scriptArgs = {
             taskId: args.taskId, runDir: args.runDir, roleDir: args.roleDir || c.roleDir, baseBranch: args.baseBranch,
             issueRef: args.issueRef, issueTitle: args.issueTitle, issueBody: args.issueBody, issueComments: args.issueComments,
-            requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history
+            requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
+            decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
           }
           const run = engineNow.start({ script: c.script, meta: c.meta, args: scriptArgs, parent: parent })
           // 启动边界自登记（workflow/start 事件无 taskId，见 runTags 注释）；
-          // entry 续跑把同 taskId 前序门禁记录标记接管，旧卡片退出门禁队列
+          // entry / decision_id 续跑把同 taskId 前序门禁记录标记接管，旧卡片退出门禁队列
           runTags.set(String(run.id), {
             taskId: String(args.taskId || ''),
             workflowId: String(args.templateId || (v.sanitized && v.sanitized.id) || ''),
@@ -1576,16 +1668,20 @@ return {
           // 启动边界同步落一份快照：workflow/start 事件可能晚于 tag 登记到达，
           // 这里保证进行中的 run 在 start 后即有含 taskId 的可见快照（#40 AC2）
           requestRunPersist(String(run.id))
-          if (args.entry) supersedeParked(String(args.taskId), String(run.id))
+          if (isResume) supersedeParked(String(args.taskId), String(run.id))
           const result = await run.result
           // 权威终态回写（见 canonicalStop 注释）：completed 时以脚本返回为准
-          // （DONE / AWAITING_HUMAN_* / FAILED_*），cancelled/error 保持事件原样。
+          // （DONE / WAITING_HUMAN / AWAITING_HUMAN_* / FAILED_*），cancelled/error 保持事件原样。
           // 注意：wf_run 回执保持引擎原样 stopReason/value 不做翻译（runtime-host
           // 套件 H1/H2 钉住该契约）；看板/互斥语义只消费这里回写的 runs 状态
           const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
           if (canon) {
             const rec = runs.get(String(run.id))
-            if (rec) { rec.status = canon; requestRunPersist(String(run.id)) }
+            if (rec) {
+              rec.status = canon
+              applyHumanDecisionValue(rec, result && result.value)
+              requestRunPersist(String(run.id))
+            }
           }
           return JSON.stringify({ runId: String(run.id), stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
         }

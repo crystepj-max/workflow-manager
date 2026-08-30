@@ -3,11 +3,13 @@
 > 本仓库的共享领域语言：架构评审 / 设计 / 实现会话的权威词汇来源。新增术语在此登记。
 > 由 improve-codebase-architecture 会话（候选三收口）懒创建。决策记录见 `wayfinder/MAP.md` 与
 > `docs/design/`；本文件只收词汇，不收决策。
+>
+> **Current / Target：** 上文到「流程与协作层」为止描述 **当前 main 已实现** 的词。文末「v0.1 目标词汇」登记 Target 规格里已出现、但代码尚未替换的词，供 #77 / #87 等决策使用。机器结构保持英文；本表给中文注释，不是把字段改成中文。
 
 ## 核心对象
 
 - **蓝图（blueprint）**：`templates/*.json`，工作流唯一事实源——人只改它，生成物禁手改。
-- **生成物（artifact）**：`.generated/<id>/` 四件套（script.mjs / vwf-dsl.json / SKILL.md / meta.json），gitignore + 重生成比对保护。
+- **生成物（artifact）**：`.generated/<id>/` 四件套（`script.mjs` / `vwf-dsl.json` / `SKILL.md` / `meta.json`），gitignore + 重生成比对保护。其中 `SKILL.md` 含 **runbook（操作手册）**：按脚本返回状态告诉主会话下一步怎么做。
 - **节点 / 边 / 入口 / $end**：蓝图图结构。边分 success（成功/打回后继续）与 failure（打回/终止）两类。
 
 ## 引擎层（框架，与业务无关）
@@ -78,14 +80,15 @@
   最近 20 条日志。**与模板库无关**（两者常被混指）。
 - **三约束（多 run 并行，#19）**：① 并行隔离——数据按 runId 天然分账，看板列表互不串扰；
   ② **同 taskId 互斥**——wf_run 启动边界拒绝（runTag 登记 taskId，`active` 镜像不依赖事件到达时机，
-  `workflow/end` 清除；AWAITING_HUMAN_* 视为占用；entry 续跑放行并 supersede 旧门禁记录）；
+  `workflow/end` 清除；`WAITING_HUMAN` 与 `AWAITING_HUMAN_*` 均视为占用；`WAITING_HUMAN` 仅匹配的 `decision_id` 续跑放行，残留 `AWAITING_HUMAN_*` 仍靠 entry 续跑放行，并 supersede 旧等待记录）；
   ③ closeout 串行提示——≥2 活跃 run 时看板警示条（提示非强制）。配套 UI = 门禁卡片队列
   （一次裁决一张，首张「裁决中」其余「排队 #n」）。
 - **runTag**：wf_run 启动时自登记的 `{taskId, workflowId, startedAt, active, supersededBy}`。
   `workflow/start` 事件载荷只有 `{id, meta}` 不含 taskId，事件流拿不到的信息只能启动边界自己记；
   平台 workflow 工具直起的 run 无 tag（列表照常展示，不参与互斥）。
 - **子代理表格**：看板那张四列表（序号 / 名称 / 阶段 / 结果）——**一行 = 一次真实的子代理调用**
-  （非一行一节点），数据来自 `workflow/agent-start|agent-end` 事件，只有 label 与 outcome，
+  （非一行一节点），数据来自 `workflow/agent-start|agent-end` 事件，只有 label（显示名）与
+  outcome（此处 = 子代理调用是否完成/失败/进行中，**不是**节点业务结果），
   **不含子代理返回的内容**。
 - **编辑器抽屉 / 画布 / 节点卡片 / Inspector**：点「编辑」滑出的大面板 = 抽屉；抽屉内左侧可拖拽连线的
   流程图 = 画布，图上的方块 = 节点卡片（副标题印节点类型）；右侧字段表单 = Inspector（配置面板）。
@@ -106,9 +109,9 @@
 - **ITEM_CAP / AGENT_CAP**：引擎上限 `maxItemsPerCall`（默认 4096，单次 parallel/pipeline 项数）与
   `maxTotalAgents`（默认 1000，单 run 子代理总数）。
 - **cap 前置断言**：在真正起子代理**之前**自检数量并给出可读错误，而非跑到一半被引擎掐断。
-- **返回状态机**：脚本终态字符串——`DONE` / `AWAITING_HUMAN_<节点id>` / `FAILED_AT_<节点id>` /
-  `FAILED_MAX_ROUNDS` / `TECHNICAL_FAILURE` / `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` /
-  `ERROR`；生成的 SKILL.md runbook 必须逐个覆盖。
+- **返回状态机（engine status，引擎返回状态）**：脚本终态字符串——`DONE`（完成）/ `WAITING_HUMAN`（Human Decision 等待，node/reason/Package 为独立字段）/ `STOPPED`（控制类 STOP）/ `AWAITING_HUMAN_<节点id>`（残留人工门禁）/ `FAILED_AT_<节点id>`（停在该节点）/
+  `FAILED_MAX_ROUNDS`（超过打回上限）/ `TECHNICAL_FAILURE`（技术执行失败）/ `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` /
+  `ERROR`；生成的 `SKILL.md` **runbook（操作手册）** 必须逐个覆盖。这是底层引擎一次执行的返回值，不是 Target 的 Run Lifecycle（运行生命周期）。
 - **执行路径（D5 正式化）**：编辑器「获取脚本」→ 粘贴主会话 → 平台 `workflow` 工具执行；
   `wf_run` 仅在引擎可达时条件注册。**推论：脚本返回值只回到主会话，插件进程拿不到**——
   看板只能看到事件流（阶段 / 子代理 / 日志）。
@@ -148,3 +151,94 @@
   `dsh-cordis`（必须在 DSH 会话对着插件运行时开发）。
 - **storageDomain（历史方案）**：DSH 宿主持久化域；P2-D3 原定用它存模板与运行记录，
   T2（#17）改双轨方案（宿主目录文件 + save 即生成 skill）后不再依赖。
+
+## v0.1 目标词汇（尚未进入 main）
+
+> 原则：机器字段/枚举保持英文；本表只给中文注释。此处**不是**当前运行时行为。
+> 决策记录见 #87 与 `.scratch/business-outcome-routing/`。`$human-decision`、`ROUTE_HALTED` 已由 #87 采纳为 Target 词汇。
+
+### 易混对照
+
+| 英文 | 中文 | 不要当成 |
+|---|---|---|
+| Business Outcome / Node Business Outcome | 节点业务结果（专业判断，如 `PASS`） | 子代理事件里的 outcome（完成/失败/进行中） |
+| Decision Result | 决策结果（用户结构化选择，如 `USER_ACCEPTED`） | 节点业务结果；也不是旧的 `approved`（批准布尔） |
+| Completion Type | 完成类型（`COMPLETED` 的业务原因） | Run Lifecycle（运行生命周期）或节点业务结果 |
+| Human Decision | 人工决策（框架能力：系统不能代选时请人拍板） | Human Acceptance（人工验收，业务阶段）；也不是 manualCheck（人工门禁，旧二态审批） |
+| engine status | 引擎返回状态（一次脚本 `start()` 的字符串，如 `DONE`） | Run Lifecycle（用户级一次任务的状态） |
+| `APPROVE` | 审核业务结果「批准」 | `approved`（旧续跑载荷里的真/假） |
+| `maxRounds`（Current） | 打回上限（failure 边 `round++`） | `maxRounds`（Target）= 自动回退额度 |
+
+### 三层结果
+
+- **Run Lifecycle（运行生命周期）**：整个 Logical Run（逻辑运行，用户意义上的一次任务）的状态。框架固定：`READY`（就绪）/ `RUNNING`（运行中）/ `WAITING_HUMAN`（等待人工）/ `PAUSED`（已暂停）/ `BLOCKED`（受阻，可恢复的外部条件）/ `COMPLETED`（已完成）/ `STOPPED`（已停止）/ `FAILED`（失败，不可安全恢复）。仅后三者为终态。由 #79 承接。
+- **Logical Run（逻辑运行）**：用户从开始到结束的一次完整任务。不等于底层引擎一次 `start()`。
+- **Execution Segment（执行片段）**：底层引擎的一次执行；一次逻辑运行可含多段。
+- **Node Business Outcome（节点业务结果，常简称 Outcome）**：节点自己的专业判断，也是路由依据。字段名不得写死为 `outcome`；路径可配置（如 `$.outcome` / `$.decision`）。
+- **Completion Type（完成类型）**：说明一次 `COMPLETED` 以什么业务原因结束。权威源是终态节点结构化结果；Run 层只镜像摘要。
+- **Run Summary（运行摘要）**：逻辑运行上供搜索/筛选/看板用的 Completion 镜像，不是权威源。
+- **results[node]（节点结果槽）**：脚本返回体里该节点的结构化输出；Target 下这是业务结果的权威事实。
+
+### 路由与蓝图
+
+- **Business Outcome Routing（业务结果路由）**：Blueprint（蓝图）把节点业务结果映射到下一跳。节点不输出 `next_node`（下一节点）。由 #77 承接。
+- **Completion Mapping（完成类型映射）**：把终态节点某字段映射为完成类型。
+- **producer（生产者）**：哪个节点/能力产出该业务结果。
+- **field path（字段路径）**：从结构化输出里读业务结果的路径，如 `$.outcome`。
+- **route（路由）**：某枚举值对应的下一跳（前向节点 / 回退节点 / 人工决策 / 结束）。
+- **Schema / Blueprint Schema（蓝图结构契约）**：蓝图 JSON 允许哪些字段、如何校验。
+- **Schema hook（契约挂钩）**：只落字段与校验，运行时行为由邻 issue 实现。
+- **reserved id（保留标识）**：拓扑里留给框架的 id：`$end`（结束）、`$entry`（入口）、`$new-round`（新一轮）、`$human-decision`（人工决策保留目标，#87）。
+- **`$end`（结束）**：边的合法终点，表示工作流结束。
+- **`$human-decision`（人工决策保留目标）**：与 `$end` 同类的框架点，不是 Role、无 LLM。入边 = 触发停机的业务结果；出边 = 决策结果路由（#77 校验接受，运行时不走）。#87。
+- **kind（节点种类）**：如 `worker`（工人节点）/ `fanout`（扇出）。人工决策不是一种 kind（#87 否决 Q4-B）。
+- **profile（角色档案）**：节点绑定的能力角色。人工决策按原则不是通用角色。
+- **Outcome Preset（业务结果预设）**：内置常用枚举与推荐字段，供编辑器复用；不强制字段名叫 `outcome`。
+- **expand–contract（扩缩兼容）**：新旧形态并存，旧蓝图零迁移仍可跑。
+
+### 人工决策
+
+- **Human Decision（人工决策）**：框架能力。系统不能代替用户做的取舍、风险接受、最终签字、额度耗尽。由 #72 承接。
+- **Human Acceptance（人工验收）**：业务阶段（人最终签字），不是每个模板都有的框架默认节点。
+- **Decision Result（决策结果）**：用户结构化选择，例如 `USER_ACCEPTED`（用户接受当前结果）/ `ADD_BUDGET`（追加额度）/ `STOP`（停止）。经业务结果路由决定后续流向。
+- **Decision Package（决策材料包）**：展示给用户的上下文、选项、成本/收益/风险、推荐。
+- **Decision Record（决策记录）**：用户选择的不可覆盖正式记录。
+- **manualCheck（人工门禁）**：Current 的二态审批：产出后挂起，续跑靠 `approved`（批准布尔）。
+- **approved（批准）**：旧续跑载荷里的真/假。不是审核业务结果 `APPROVE`，也不是决策结果。
+- **resume（续跑载荷）**：挂起后再启动同一段执行时带上的参数。
+- **最小停机**：命中人工决策路由时停止自动流转并保留节点业务结果，但不实现决策材料包/多选项/决策记录。
+
+### 额度与停机
+
+- **countRound（本边是否计数）**：该业务回退边是否消耗自动回退额度。由 #73 承接会计。
+- **maxRounds（Target：自动回退额度）**：允许自动跨节点回上游再产出的次数；初次执行不计。Current 仍是 failure 边打回上限。
+- **MAX_ROUNDS_REACHED（额度耗尽）**：Lifecycle（运行生命周期）上 `WAITING_HUMAN` 的 reason（原因码）。不是 `FAILED_MAX_ROUNDS`。
+- **FAILED_MAX_ROUNDS（超过打回上限）**：Current 引擎返回状态；旧蓝图过渡期仍用。
+- **WAITING_HUMAN（等待人工）**：Run Lifecycle 值。进入条件包括人工决策与额度耗尽。由 #79/#72 承接，#77 不宣称自己实现了该生命周期。
+- **ROUTE_HALTED（路由停机）**：#77 引擎段返回状态（#87）。表示蓝图要求不要自动走下一步。payload 含 `reason`、`node`、原样 `results`。不是运行生命周期。命中 `$human-decision` 时 `reason=HUMAN_DECISION`。#77 不因额度耗尽发此状态。
+- **reason（原因码）**：停机/等待的结构化原因，如 `HUMAN_DECISION`（人工决策）或 `MAX_ROUNDS_REACHED`（额度耗尽）。
+- **payload（返回体载荷）**：引擎返回状态附带的数据对象。
+- **过渡预算闸门**：#77 不做（#87 Q6）。`countRound` 只校验与往返无损；真闸门归 #73。
+
+### 常用业务结果 / 完成类型枚举（机器英文）
+
+- **PASS（通过）**
+- **OPTIMIZE（需优化，回执行）**
+- **CONFIRM（需确认，升人工决策）**
+- **NEEDS_RESEARCH（需补充研究）**
+- **INSUFFICIENT（证据不足；可为合法完成类型）**
+- **RECONFIRM_REQUIRED（需重新确认基线；由执行节点产生，不是评估节点裁决）**
+- **REQUEST_CHANGES（请求修改）**
+- **APPROVE（审核通过，业务结果）**
+- **USER_ACCEPTED（用户接受当前结果，决策结果/完成类型来源）**
+- **EVALUATION_PASSED（评估通过，完成类型）**
+
+### #87 已锁定（交付边界）
+
+- #77 交付：蓝图契约 + 保留目标 `$human-decision` + 命中入边时 `ROUTE_HALTED`（`reason=HUMAN_DECISION`）+ 不改写节点业务结果 + 脚本返回体解析完成类型摘要 + `countRound` 落盘但不计数。
+- #72 交付：决策材料包、多选项、决策记录、恢复后走 `$human-decision` 出边、把 `ROUTE_HALTED` 映射为 `WAITING_HUMAN`。
+- #73 交付：额度会计与耗尽产品语义；#77 不做过渡预算闸门。
+- #79 交付：逻辑运行、运行生命周期、把完成类型摘要持久化到运行摘要；不把新语义写入当前 `runs` 事件流。
+- 旧 `manualCheck` / `FAILED_MAX_ROUNDS` / `AWAITING_HUMAN_<id>` 对未迁移蓝图保持兼容。
+- #77 不发 `WAITING_HUMAN`，也不把 `MAX_ROUNDS_REACHED` 写成引擎状态。
+

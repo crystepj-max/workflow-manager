@@ -101,6 +101,25 @@ test('F5 人工门禁通用语义：挂起 + 续跑载荷；通过 → 走成功
   assert.deepEqual(r2.agentCalls.map((c) => c.label), ['finish'])
 })
 
+test('#117 残留门禁 1A：approved:false 再挂起且不进 failure / success 下游', async () => {
+  const first = await runEngine(mini, {
+    dispatch: { complete: true },
+    work: { status: 'completed' },
+    gate: { verdict: 'ok' },
+  })
+  assert.equal(first.result.status, 'AWAITING_HUMAN_gate')
+  const r2 = await runEngine(mini, {
+    gate: { verdict: 'ok' },
+    finish: { done: true },
+  }, {
+    entry: 'gate', approved: false, startRound: first.result.resume.startRound, history: first.result.resume.history, feedback: 'no',
+  })
+  assert.equal(r2.result.status, 'AWAITING_HUMAN_gate')
+  assert.ok(!r2.agentCalls.some((c) => c.label === 'finish'), '不得走进 success 下游')
+  assert.notEqual(r2.result.status, 'ENDED_NO_FAILURE_EDGE')
+  assert.ok(!String(r2.result.status).startsWith('FAILED_AT_'), '不得走 failure 目标')
+})
+
 test('F6 格式验收：作业不合格（违反 schema）→ 判失败 → 技术失败/打回路径', async () => {
   const { result, agentCalls } = await runEngine(mini, { dispatch: { foo: 1 } })
   assert.equal(result.status, 'TECHNICAL_FAILURE')

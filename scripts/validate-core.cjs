@@ -13,12 +13,29 @@
 'use strict'
 
 const COND_RE = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
-const RESERVED = ['$end', '$entry', '$new-round']
+const HUMAN_DECISION_ID = '$human-decision'
+const RESERVED = ['$end', '$entry', '$new-round', HUMAN_DECISION_ID]
+const FRAMEWORK_TO = ['$end', HUMAN_DECISION_ID]
+const FRAMEWORK_FROM = [HUMAN_DECISION_ID]
 const FILES_KINDS = ['json', 'markdown', 'text']
 const ON_MAX_ROUNDS = ['return', 'auto-reschedule']
 const MAX_ROUNDS_CAP = 9 // 系统约定上限：编辑器最大可设 9 轮（用户意见 Q7）
 const FANOUT_ITEMS_ARGS_RE = /^\$\.args(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
 const FANOUT_ITEMS_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
+const HD_RESULT_RE = /^[A-Z][A-Z0-9_]*$/
+const HD_REASONS = ['HUMAN_ACCEPTANCE', 'ESCALATED_DECISION', 'MAX_ROUNDS_REACHED']
+const HD_CONTROL_RESULTS = ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP']
+const HD_PACKAGE_REQUIRED = ['why', 'current_state', 'options', 'subsequent_effects']
+const HD_PACKAGE_OPTIONAL_UNKNOWN = ['cost', 'benefit', 'risk', 'recommendation']
+const HD_EVENT_FIELDS = [
+  'record_kind', 'trigger', 'lifecycle_at_request', 'decision_id', 'run_ref',
+  'node_id', 'attempt', 'reason', 'triggering_node_outcome', 'decision_package',
+  'user_choice', 'impact', 'subsequent_path', 'created_at',
+]
+const HD_RESUME_FIELDS = ['decision_id', 'user_choice']
+const HD_EVENT_RECORD_KIND = 'DECISION'
+const HD_EVENT_TRIGGER = 'SYSTEM_REQUEST'
+const HD_UNKNOWN = 'UNKNOWN'
 
 // ---------- 错误坐标 → 编辑器 fieldKey ----------
 function fieldKeyOf(at) {
@@ -35,7 +52,44 @@ function fieldKeyOf(at) {
   // 工作流级业务规则字段（编辑器控件标红）
   if (at === '$.heteroCheck') return 'heteroCheck'
   if (at === '$.onMaxRounds') return 'onMaxRounds'
+  if (at === '$.approved') return 'approved'
+  if (at === '$.humanDecision') return 'humanDecision'
+  if (at.startsWith('$.humanDecision.')) return 'humanDecision:' + at.slice('$.humanDecision.'.length)
   return undefined
+}
+
+function edgeTouchesHumanDecision(e) {
+  return !!(e && (e.to === HUMAN_DECISION_ID || e.from === HUMAN_DECISION_ID))
+}
+
+function blueprintUsesHumanDecision(bp) {
+  if (!bp || typeof bp !== 'object') return false
+  if (bp.humanDecision !== undefined) return true
+  const edges = Array.isArray(bp.edges) ? bp.edges : []
+  return edges.some(edgeTouchesHumanDecision)
+}
+
+// success 后继：把 $human-decision 当透明跳点（入边停机、出边仍参与走通性）。
+function successSuccessors(from, edges, ids) {
+  const out = []
+  const hopped = {}
+  const visit = (src) => {
+    edges.forEach((e) => {
+      if (!e || e.from !== src || e.on !== 'success') return
+      if (e.to === '$end') return
+      if (e.to === HUMAN_DECISION_ID) {
+        if (!hopped[HUMAN_DECISION_ID]) {
+          hopped[HUMAN_DECISION_ID] = true
+          visit(HUMAN_DECISION_ID)
+        }
+        return
+      }
+      if (ids && !ids[e.to]) return
+      out.push(e.to)
+    })
+  }
+  visit(from)
+  return out
 }
 
 // ---------- 结构层 ----------
@@ -57,20 +111,30 @@ function deriveEntryCandidates(nodes, edges) {
   nodes.forEach((n) => { if (n && n.id) ids[n.id] = true })
   const incoming = {}
   edges.forEach((e) => {
-    if (!e || !ids[e.from] || !ids[e.to]) return
-    if (e.on === 'success' && e.to !== '$end') incoming[e.to] = true
+    if (!e || e.on !== 'success') return
+    if (!e.to || e.to === '$end' || e.to === HUMAN_DECISION_ID || !ids[e.to]) return
+    const fromOk = ids[e.from] || e.from === HUMAN_DECISION_ID
+    if (!fromOk) return
+    incoming[e.to] = true
   })
   return nodes.map((n) => n && n.id).filter((id) => id && !incoming[id])
 }
 
+function nodeIdMap(nodes) {
+  const ids = {}
+  nodes.forEach((n) => { if (n && n.id) ids[n.id] = true })
+  return ids
+}
+
 function reachable(entry, nodes, edges) {
+  const ids = nodeIdMap(nodes)
   const reach = {}
   const stack = [entry]
   while (stack.length) {
     const cur = stack.pop()
     if (reach[cur]) continue
     reach[cur] = true
-    edges.forEach((e) => { if (e && e.from === cur && e.on === 'success' && e.to !== '$end' && !reach[e.to]) stack.push(e.to) })
+    successSuccessors(cur, edges, ids).forEach((to) => { if (!reach[to]) stack.push(to) })
   }
   return reach
 }
@@ -83,22 +147,23 @@ function successPathExists(from, to, edges) {
     if (cur === to) return true
     if (seen[cur]) continue
     seen[cur] = true
-    edges.forEach((e) => {
-      if (e && e.from === cur && e.on === 'success' && e.to !== '$end' && !seen[e.to]) stack.push(e.to)
+    successSuccessors(cur, edges, null).forEach((next) => {
+      if (!seen[next]) stack.push(next)
     })
   }
   return false
 }
 
 function hasSuccessCycle(entry, nodes, edges) {
+  const ids = nodeIdMap(nodes)
   const color = {}
   let cyclic = false
   const dfs = (u) => {
     color[u] = 1
-    edges.forEach((e) => {
-      if (cyclic || e.from !== u || e.on !== 'success' || e.to === '$end') return
-      if (color[e.to] === 1) { cyclic = true; return }
-      if (color[e.to] === undefined) dfs(e.to)
+    successSuccessors(u, edges, ids).forEach((v) => {
+      if (cyclic) return
+      if (color[v] === 1) { cyclic = true; return }
+      if (color[v] === undefined) dfs(v)
     })
     color[u] = 2
   }
@@ -151,8 +216,10 @@ function validateStructure(nodes, edges, opts) {
   edges.forEach((e, i) => {
     const at = '$.edges[' + i + ']'
     if (!e || typeof e !== 'object') { err(at, '边必须是对象'); return }
-    if (!e.from || !ids[e.from]) err(at + '.from', '边的来源节点 ' + e.from + ' 不存在')
-    if (!e.to || (e.to !== '$end' && !ids[e.to])) err(at + '.to', '边的目标节点 ' + e.to + ' 不存在')
+    const fromOk = e.from && (ids[e.from] || FRAMEWORK_FROM.includes(e.from))
+    const toOk = e.to && (ids[e.to] || FRAMEWORK_TO.includes(e.to))
+    if (!fromOk) err(at + '.from', '边的来源节点 ' + e.from + ' 不存在')
+    if (!toOk) err(at + '.to', '边的目标节点 ' + e.to + ' 不存在')
     if (e.on !== 'success' && e.on !== 'failure') { err(at + '.on', 'on ∈ { success, failure }'); return }
     if (e.when !== undefined) {
       if (e.on !== 'success') err(at + '.when', 'when 只允许用于 success 边')
@@ -270,6 +337,11 @@ function validateBlueprint(bp, opts) {
     }
     if (n.manualCheck) err('$.nodes[' + n.id + '].manualCheck', 'fanout 节点禁止 manualCheck')
     if (n.verifyBranch) err('$.nodes[' + n.id + '].verifyBranch', 'fanout 节点禁止 verifyBranch')
+    bp.edges.forEach((e, i) => {
+      if (e && e.from === n.id && e.to === HUMAN_DECISION_ID) {
+        err('$.nodes[' + n.id + '].kind', 'fanout 节点禁止升级到 Human Decision（坐标 edge:' + i + ':to）')
+      }
+    })
     if (!bp.edges.some((e) => e && e.from === n.id && e.on === 'failure')) {
       err('$.nodes[' + n.id + '].kind', 'fanout 节点必须有 failure 出边')
     }
@@ -336,6 +408,70 @@ function validateBlueprint(bp, opts) {
     }
   }
 
+  // Human Decision（#116）：拓扑已在结构层允许 $human-decision；此处钉契约键与互斥。
+  {
+    const usesHd = blueprintUsesHumanDecision(bp)
+    if (usesHd) {
+      if (bp.approved !== undefined) {
+        err('$.approved', '使用 Human Decision 的蓝图禁止 approved（残留门禁续跑字段；新路径用 decision_id / user_choice）')
+      }
+      bp.nodes.forEach((n) => {
+        if (n && n.approved !== undefined) {
+          err('$.nodes[' + n.id + '].approved', '使用 Human Decision 的蓝图禁止节点 approved')
+        }
+        if (n && n.manualCheck) {
+          err('$.nodes[' + n.id + '].manualCheck', 'Human Decision 与残留 manualCheck 不得同图（新蓝图只走 HD，残留门禁冷冻至废弃）')
+        }
+      })
+    }
+    if (bp.humanDecision !== undefined) {
+      const hd = bp.humanDecision
+      if (!hd || typeof hd !== 'object' || Array.isArray(hd)) {
+        err('$.humanDecision', 'humanDecision 必须是对象')
+      } else if (hd.maxRoundsReachedOptions !== undefined) {
+        const opts = hd.maxRoundsReachedOptions
+        const at = '$.humanDecision.maxRoundsReachedOptions'
+        if (!Array.isArray(opts) || opts.length === 0) {
+          err(at, '额度耗尽默认控制选项可覆盖但不可删到零（至少保留一项 USER_ACCEPTED | ADD_BUDGET | STOP）')
+        } else {
+          const seen = {}
+          opts.forEach((name, i) => {
+            if (!HD_CONTROL_RESULTS.includes(name)) {
+              err(at, 'maxRoundsReachedOptions[' + i + '] 须为 USER_ACCEPTED | ADD_BUDGET | STOP，当前：' + name)
+            } else if (seen[name]) {
+              err(at, 'maxRoundsReachedOptions 不得重复：' + name)
+            }
+            seen[name] = true
+          })
+        }
+      }
+    }
+    const seenHdResults = {}
+    bp.edges.forEach((e, i) => {
+      if (!e) return
+      const at = '$.edges[' + i + ']'
+      if (e.to === HUMAN_DECISION_ID && e.on === 'failure') {
+        err(at + '.on', '升 Human Decision 的入边须为 success（failure 边仍表示打回）')
+      }
+      if (e.from !== HUMAN_DECISION_ID) return
+      if (e.on !== 'success') {
+        err(at + '.on', '$human-decision 出边须为 success，用 result 区分 Decision Result')
+        return
+      }
+      if (typeof e.result !== 'string' || !e.result.trim()) {
+        err(at + '.result', '$human-decision 出边必须带 result（业务 Decision Result id）')
+      } else if (HD_CONTROL_RESULTS.includes(e.result)) {
+        err(at + '.result', '控制类 Result（USER_ACCEPTED / ADD_BUDGET / STOP）由框架解释，不得作为蓝图出边 result')
+      } else if (!HD_RESULT_RE.test(e.result)) {
+        err(at + '.result', 'result 须为 SCREAMING_SNAKE（如 SHIP），当前：' + e.result)
+      } else if (seenHdResults[e.result]) {
+        err(at + '.result', 'Decision Result 重复：' + e.result)
+      } else {
+        seenHdResults[e.result] = true
+      }
+    })
+  }
+
   // 契约一致性（候选五 C5 规则 A）：goal 中反引号引用的文件名必须全局声明
   // （某节点 output.files ∪ 保留文件 STATE.md）——output.files 为权威，改一处漏一处即红
   {
@@ -358,4 +494,22 @@ function validateBlueprint(bp, opts) {
   return { ok: errors.length === 0, errors, warnings, counts: { nodes: bp.nodes.length, edges: bp.edges.length } }
 }
 
-module.exports = { validateStructure, validateBlueprint, deriveEntryCandidates, extractFileTokens, COND_RE, MAX_ROUNDS_CAP }
+module.exports = {
+  validateStructure,
+  validateBlueprint,
+  deriveEntryCandidates,
+  extractFileTokens,
+  blueprintUsesHumanDecision,
+  COND_RE,
+  MAX_ROUNDS_CAP,
+  HUMAN_DECISION_ID,
+  HD_REASONS,
+  HD_CONTROL_RESULTS,
+  HD_PACKAGE_REQUIRED,
+  HD_PACKAGE_OPTIONAL_UNKNOWN,
+  HD_EVENT_FIELDS,
+  HD_RESUME_FIELDS,
+  HD_EVENT_RECORD_KIND,
+  HD_EVENT_TRIGGER,
+  HD_UNKNOWN,
+}

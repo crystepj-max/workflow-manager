@@ -24,6 +24,7 @@
 | `onMaxRounds` | 可选 | `'return'`（默认）\| `'auto-reschedule'` | DSH 增强：超限自动回调度做失败归因（D4）；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
 | `heteroCheck` | 可选 | 布尔，默认 false | DSH 增强：注入 dev↔review 异源运行日志（T-06 定稿后：v2 起异源由 save/validate 全局强制，本字段退化为运行时日志开关）；置 true 时须存在 dev 与 review 节点；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
 | `bindings.models` | 可选 | 对象：`{ <nodeId>: {provider?, model?} }` | 模型绑定（D2 节点粒度）；键必须都是节点 id；缺省 = 宿主默认 |
+| `humanDecision.maxRoundsReachedOptions` | 可选 | 非空数组，元素 ∈ `USER_ACCEPTED` \| `ADD_BUDGET` \| `STOP` | 额度耗尽时展示的控制类 Result；**缺省 = 三项全开**；可覆盖为非空子集，**删到零则拒**（#116） |
 | `nodes` | ✅ | 数组，≥1 | 见 2.2 |
 | `edges` | ✅ | 数组 | 见 2.3 |
 
@@ -31,7 +32,7 @@
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `id` | ✅ | 唯一；不得使用保留 id `$end`/`$entry`/`$new-round`；必须有出边 |
+| `id` | ✅ | 唯一；不得使用保留 id `$end`/`$entry`/`$new-round`/`$human-decision`；必须有出边 |
 | `label` | 可选 | 展示名（缺省 = id） |
 | `kind` | 可选 | `worker`（缺省）\| `fanout`；既有节点不写 `kind` 时语义不变 |
 | `profile` | ✅ | 角色名，对应 `dsh/roles/<profile>.md` |
@@ -48,9 +49,28 @@
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `from` / `to` | ✅ | 节点 id；`to` 可为 `$end`（结束）；`from` 不得为保留 id |
-| `on` | ✅ | `'success'` \| `'failure'` |
-| `when` | 可选 | 仅 success 边；`$.path ==|!= value`；多 success 出边必须**全部**带 when；failure 边最多一条 |
+| `from` / `to` | ✅ | 节点 id；`to` 可为 `$end`（结束）或 `$human-decision`（升 Human Decision）；`from` 可为 `$human-decision`（决策结果出边）。`$human-decision` 不是节点、无 LLM |
+| `on` | ✅ | `'success'` \| `'failure'`；升 HD 的入边与 HD 出边均为 `success` |
+| `when` | 可选 | 仅普通节点 success 边；`$.path ==|!= value`；多 success 出边必须**全部**带 when；failure 边最多一条 |
+| `result` | HD 出边必填 | 业务 Decision Result id（`SCREAMING_SNAKE`，如 `SHIP`）。**不得**占用框架控制类 `USER_ACCEPTED` / `ADD_BUDGET` / `STOP` |
+
+### 2.4 Human Decision 控制面键名（#116 钉死；机器英文）
+
+> 新蓝图走本协议；残留 `manualCheck` 仍用 `AWAITING_HUMAN_<id>` + `approved`。本表只锁字段名，挂起运行时由 #118 起实现。
+
+| 面 | 英文键 | 取值 / 说明 |
+|---|---|---|
+| 保留目标 | `$human-decision` | 与 `$end` 同类的框架点。入边 = 声明升级；出边 `result` = 业务选项 |
+| 等待状态 | `WAITING_HUMAN` | 引擎返回 `status`；`node` / `reason` / 请求材料为**独立字段**，不拼进状态字符串 |
+| reason 枚举 | `HUMAN_ACCEPTANCE` / `ESCALATED_DECISION` / `MAX_ROUNDS_REACHED` | 同一套 HD 运行时，用 reason 区分因由 |
+| 控制类 Result | `USER_ACCEPTED` / `ADD_BUDGET` / `STOP` | 仅框架解释，不写在蓝图出边 `result` 上 |
+| Package 硬必填 | `why` / `current_state` / `options` / `subsequent_effects` | 缺一不得挂起。`options` = `[{ id }]`；`subsequent_effects` = `{ [id]: string }` |
+| Package 可显式未知 | `cost` / `benefit` / `risk` / `recommendation` | 值为 `"UNKNOWN"` 时仍可挂起 |
+| 控制面事件 | `record_kind` / `trigger` / `lifecycle_at_request` / `decision_id` / `run_ref` / `node_id` / `attempt` / `reason` / `triggering_node_outcome` / `decision_package` / `user_choice` / `impact` / `subsequent_path` / `created_at` | `record_kind=DECISION`，`trigger=SYSTEM_REQUEST`，`lifecycle_at_request=WAITING_HUMAN`；追加-only，`decision_id` 不可覆盖 |
+| 续跑 args | `decision_id` / `user_choice` | 新路径；**禁止**再传 `approved`。残留门禁续跑仍用 `approved` |
+| 过渡身份 | `taskId` | #79 交付 `logical_run_id` 前的恢复身份 |
+
+规则摘要：使用 HD 的蓝图禁止顶层/节点 `approved`，禁止与 `manualCheck` 同图；fanout 节点禁止边到 `$human-decision`。
 
 ## 3. 校验规则（两层，D5）
 
@@ -62,7 +82,7 @@
 > `requireModels` 选项——宿主编辑器产品收紧）。引擎 ESM import；宿主经 fs 读源码、
 > vm 内求值缓存（热路径内存执行）。错误统一携带坐标键 `fieldKey`
 > （`node:<id>:<field>` / `edge:<i>:<field>` / `control:<field>` / `heteroCheck` /
-> `onMaxRounds`）；前端文案翻译列为优化任务（MAP Not yet specified）。
+> `onMaxRounds` / `humanDecision:<field>` / `approved`）；前端文案翻译列为优化任务（MAP Not yet specified）。
 
 1. `id` 匹配 kebab-case；`displayName` 非空；无 `name` 字段（单标识，D1）。
 2. `onMaxRounds ∈ {return, auto-reschedule}`。
@@ -72,7 +92,8 @@
 6. `output.files`（若给）：键为合法相对路径（非空、不以 `/` 开头或结尾、不含 `..`、不覆盖保留文件 `STATE.md`）；值为 `json|markdown|text` 枚举。
 7. **异源硬规则（v2 生效，T-06）**：凡含 `dev` 与 `review` 节点的蓝图（按节点 `id` 或 `profile` 识别——编辑器新建节点默认 id 为 node-N，以角色表达 dev/review 时同样纳入），save/update/validate 一律校验其 `bindings.models`——任一缺失 → 拒（「无法证明异源，请显式配置」）；完全同模型（provider+model 相同）→ 拒；同 provider 不同 model（弱异源）→ 通过 + warning；不同 provider → 通过。无 dev/review 节点的蓝图跳过。错误消息沿用 `errors[]` 结构（at=`bindings.models`，含实际 provider/model 与修复指引）。
 8. `control.maxRounds`（若给）：**1-9 的整数（系统约定上限 9，候选二 Q7）**——0/负数/小数/非数/超 9 一律拒绝（坐标键 `control:maxRounds`）。
-9. **fanout 专属规则**：`kind ∈ {worker, fanout}`；fanout 必须有合法 `items`、含 `{{item}}` 的 `goal` 和 failure 出边，禁止 `output.successCondition` / `manualCheck` / `verifyBranch`；`failOn` 仅接受 `any` / `all` / 非负整数。`$.results.<节点id>` 引用必须存在且沿 success 边先于当前节点。worker 出现 `items` / `failOn` 拒绝。所有错误携带对应 `node:<id>:<field>` 坐标。
+9. **fanout 专属规则**：`kind ∈ {worker, fanout}`；fanout 必须有合法 `items`、含 `{{item}}` 的 `goal` 和 failure 出边，禁止 `output.successCondition` / `manualCheck` / `verifyBranch` / 升级到 `$human-decision`；`failOn` 仅接受 `any` / `all` / 非负整数。`$.results.<节点id>` 引用必须存在且沿 success 边先于当前节点。worker 出现 `items` / `failOn` 拒绝。所有错误携带对应 `node:<id>:<field>` 坐标。
+10. **Human Decision（#116）**：`$human-decision` 为保留 id（可作边的 `to`/`from`，不得作节点 id）。走通性把该点当透明跳点。HD 出边必填互异的业务 `result`。`humanDecision.maxRoundsReachedOptions` 若给则非空且 ⊆ 控制类三元组。使用 HD 的蓝图拒绝 `approved` 与 `manualCheck`。
 
 ### 3.2 DSL 结构规则（与校验内核结构层对齐；原 host `validateDsl` 已删除）
 
@@ -137,11 +158,11 @@ fanout 节点的 `kind` / `items` / `failOn` 必须双向透传；编辑器保�
 |---|---|---|
 | 结构验证 | `output.schema` | agent 返回须通过 schema 校验；失败 → `TECHNICAL_FAILURE`（终止或走 failure 边） |
 | 值验证 | `output.successCondition` | 满足 → success 出边；不满足 → failure 出边（打回） |
-| 人工确认 | `manualCheck: true` | AI 核验产出后挂起，主会话裁决：通过 → `approved` 续跑走 success 出边；不通过 → `feedback` + `startRound+1` 续跑走 failure 出边 |
+| 人工确认 | `manualCheck: true` | **残留行为（#95=1A，冷冻至废弃）**：AI 核验产出后挂起 `AWAITING_HUMAN_<id>`；`approved === true` 续跑只走 success 出边；**非 true（含 false）再挂起，不走 failure**。新蓝图用 Human Decision，禁止再写 `approved`。 |
 | 无验证 | 无 `output` 且非 manualCheck | ok=true 自动走 success 出边 |
 
 - 组合示例：accept 节点 = 结构验证 + 人工确认（AI 核验产双报告，**人工不代签**）；review 节点 = 结构验证 + 值验证（`$.verdict != "REQUEST_CHANGES"`）；route 节点 = 仅结构验证 + 边 `when` 分流。
-- 判定失败路径统一走 failure 边（打回/终止），success 边不得成环。
+- 判定失败路径：值验证失败走 failure 边（打回/终止）；残留 `manualCheck` 非 true **不走** failure（见上表）。success 边不得成环。
 
 ### 6.3 模型档位与权限管控
 
