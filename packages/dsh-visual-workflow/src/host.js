@@ -1117,12 +1117,23 @@ return {
     //
     // issue-81：旧 `dispatcher` 已退出内置身份，迁为自定义角色。其定义文件保留在
     // dsh/roles/ 原位，因此引用它的历史工作流无需任何改动即可继续工作。
+    // issue-81 正式 12 角色：通用基础能力 8 个 + 专业能力 4 个。
+    // 顺序即角色库「内置」分组的展示顺序，与产品规格 §8 名单一致。
     const BUILTIN_ROLES = [
+      // ── 通用基础能力 ──
+      { id: 'requirements', name: '需求分析', summary: '需求分析角色：三要素门禁，产出需求基线' },
+      { id: 'designer', name: '方案设计', summary: '方案设计角色：实施路径、关键取舍与风险' },
       { id: 'dev', name: '开发', summary: '开发角色：测试驱动施工，满足质量闸门' },
+      { id: 'review', name: '审核', summary: '审核角色：规范与需求符合性、代码质量双轴审查' },
       { id: 'test', name: '测试', summary: '测试角色：运行态验证，证据驱动判定' },
-      { id: 'review', name: '审核', summary: '审核角色：独立双轴审查' },
-      { id: 'accept', name: '验收', summary: '验收角色：最终核验，人工验收门禁' },
-      { id: 'closeout', name: '收口', summary: '收口角色：一致性收口与交接产物汇总' }
+      { id: 'evaluator', name: '评估', summary: '评估角色：按节点评价契约独立评估，场景差异由节点表达' },
+      { id: 'accept', name: '验收助手', summary: '验收助手角色：对照验收标准最终核验并等待人工签字' },
+      { id: 'closeout', name: '收口', summary: '收口角色：一致性收口与交接产物汇总' },
+      // ── 专业能力 ──
+      { id: 'diagnose', name: '缺陷诊断', summary: '缺陷诊断角色：先取证后结论，收敛到根因' },
+      { id: 'orchestrator', name: '探索统筹', summary: '探索统筹角色：设计研究方案与专家任务书' },
+      { id: 'researcher', name: '专家研究', summary: '专家研究角色：按任务书独立取证，含反证' },
+      { id: 'synthesizer', name: '综合分析', summary: '综合分析角色：把独立判断整合为可决策的观点地图' },
     ]
     const BUILTIN_ROLE_IDS = BUILTIN_ROLES.map((r) => r.id)
     const ROLE_NAME_MAX = 64

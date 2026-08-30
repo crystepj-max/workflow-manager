@@ -624,6 +624,9 @@ test('内置角色注册表结构不变量：id 唯一、为稳定英文，中�
   const r = await call(handlers, 'vwf.roles')
   const ids = r.roles.map(x => x.id)
   assert.equal(new Set(ids).size, ids.length, 'id 不允许重复')
+  // 数量按下限护栏而非精确值：issue-81 正式体系为 12 个，后续扩充无需改测试，
+  // 但误删角色会被此处拦下。清单本身是单一来源，测试不复制它。
+  assert.ok(ids.length >= 12, `内置角色不得少于 12 个（当前 ${ids.length}）`)
   for (const role of r.roles) {
     assert.match(role.id, /^[a-z][a-z0-9-]*$/, `机器 ID 必须为稳定英文：${role.id}`)
     assert.ok(role.name && String(role.name).trim().length > 0, `中文名不得为空：${role.id}`)
