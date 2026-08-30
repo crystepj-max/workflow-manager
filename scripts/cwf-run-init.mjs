@@ -16,6 +16,14 @@ export function branchName(runId) {
   return `dev-${runId}`
 }
 
+export function parseBudget(str) {
+  // 完整非负整数校验：NaN / 3junk / 负数一律拒绝
+  if (!/^\d+$/.test(String(str))) {
+    throw new Error(`非法回退额度: ${str}（须为非负整数）`)
+  }
+  return parseInt(str, 10)
+}
+
 export function assertRunIdSafe(runId) {
   // run_id 同时充当分支名与 run 目录名：限定为已净化的小写连字符形态，
   // 既防路径穿越（/ 与 ..），也保证分支命名单射（不再做有损归一化）
@@ -46,10 +54,15 @@ function parseArgs(argv) {
   assertRunIdSafe(runId)
   const opts = { base: 'main', budget: DEFAULT_BUDGET }
   for (let i = 0; i < rest.length; i++) {
-    if (rest[i] === '--base') opts.base = rest[++i]
-    else if (rest[i] === '--budget') opts.budget = parseInt(rest[++i], 10)
-    else {
-      console.error(`未知参数: ${rest[i]}`)
+    try {
+      if (rest[i] === '--base') opts.base = rest[++i]
+      else if (rest[i] === '--budget') opts.budget = parseBudget(rest[++i])
+      else {
+        console.error(`未知参数: ${rest[i]}`)
+        process.exit(2)
+      }
+    } catch (e) {
+      console.error(e.message)
       process.exit(2)
     }
   }
@@ -100,6 +113,13 @@ function main() {
 
   const runDir = join(worktreePath, runDirRel)
   mkdirSync(runDir, { recursive: true })
+  // 提供 handoff schema 到目标 workspace（外仓库无本仓库 docs 路径；资产随 skill 分发）
+  const scriptDir = new URL('.', import.meta.url).pathname
+  const schemaSrcLocal = join(scriptDir, 'handoff.schema.json')
+  const schemaSrcRepo = join(scriptDir, '..', 'docs', 'design', 'construction-workflow', 'handoff.schema.json')
+  const schemaSrc = existsSync(schemaSrcLocal) ? schemaSrcLocal : schemaSrcRepo
+  mkdirSync(join(worktreePath, '.agent-runs', 'schema'), { recursive: true })
+  writeFileSync(join(worktreePath, '.agent-runs', 'schema', 'handoff.schema.json'), readFileSync(schemaSrc))
 
   const identity = {
     run_id: runId,

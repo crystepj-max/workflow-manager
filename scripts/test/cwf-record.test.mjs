@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, cpSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, cpSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { dirname } from 'node:path'
@@ -187,6 +187,37 @@ test('write：分支切换后拒绝写入（lineage 不一致）', () => {
   assert.equal(r.code, 1)
   assert.match(r.out, /与 run\.work_branch.*不一致/)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
+})
+
+test('write：过期 --attempt 拒绝（不得回退 attempt 覆盖旧 proof）', () => {
+  const { runDir } = makeRunDir()
+  const payload = join(runDir, 'payload.json')
+  writeFileSync(payload, JSON.stringify({
+    goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
+    gaps: [], outcome: 'baseline_ready', status: 'draft',
+  }))
+  // 回退推进 attempt 到 2 后，stale 的 --attempt 1 必须被拒
+  run(['rollback', runDir, 'dev'])
+  const r = run(['write', runDir, 'requirements_baseline', payload, '--attempt', '1'])
+  assert.equal(r.code, 1)
+  assert.match(r.out, /拒绝过期 attempt/)
+  assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
+})
+
+test('schema 解析：run 目录提供副本优先，无 docs 路径也能工作', () => {
+  const { root, runDir } = makeRunDir()
+  // 删除仓库 docs 路径的 schema，仅保留 run 侧提供副本
+  rmSync(join(root, 'docs'), { recursive: true, force: true })
+  const schemaDir = join(root, '.agent-runs', 'schema')
+  mkdirSync(schemaDir, { recursive: true })
+  cpSync(schemaSrc, join(schemaDir, 'handoff.schema.json'))
+  const payload = join(runDir, 'payload.json')
+  writeFileSync(payload, JSON.stringify({
+    goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
+    gaps: [], outcome: 'baseline_ready', status: 'draft',
+  }))
+  const r = run(['write', runDir, 'requirements_baseline', payload])
+  assert.equal(r.code, 0, r.out)
 })
 
 test('check：对既有记录只校验', () => {

@@ -2,6 +2,8 @@
 
 本 runbook 是 Portable Contract（`docs/design/construction-workflow-portable-contract.md`）的 DSH 驱动细则。契约锚点引用均为该文档小节。
 
+> **脚本路径约定**：下文 `scripts/cwf-*.mjs` 指「随 skill 安装的运行资产副本」——安装后在 `<SKILL_DIR>/assets/`（自包含，外仓库可用）；在本源仓库内开发时也可直接用仓库 `scripts/` 路径。run-init 会把 `handoff.schema.json` 提供到目标 worktree 的 `.agent-runs/schema/`，记录/校验脚本优先读取该副本。
+
 ## 0. Run 引导
 
 ```bash

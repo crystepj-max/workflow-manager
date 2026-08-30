@@ -19,10 +19,12 @@ description: "在 DSH 会话中驱动「建设 · 完整功能开发」Bootstrap
 
 | 脚本 | 用途 |
 |---|---|
-| `scripts/cwf-run-init.mjs` | Run 引导：从 target 建分支 + worktree + run 目录 + portable run identity（契约 §7.1） |
-| `scripts/cwf-record.mjs` | 证据记录：组装信封 + schema 校验 + 落盘；回退额度记账（§4.2） |
+| `scripts/cwf-run-init.mjs` | Run 引导：从 target 建分支 + worktree + run 目录 + portable run identity（契约 §7.1），并把 handoff schema 提供到目标 workspace |
+| `scripts/cwf-record.mjs` | 证据记录：组装信封 + schema 校验 + 落盘；回退额度记账（§4.2）；`--by human` 人工回退；`budget` 人工调额入账 |
 | `scripts/cwf-checkpoint.mjs` | Integration Checkpoint：从实际仓库状态计算 target 是否前进（§7.3） |
 | `scripts/cwf-validate.mjs` | 零依赖 JSON Schema 校验器（七类交接包机械校验） |
+
+> 安装后这些脚本与 schema 随 skill 分发到 `<SKILL_DIR>/assets/`（自包含，外仓库可直接调用）。
 
 ## 前置条件
 

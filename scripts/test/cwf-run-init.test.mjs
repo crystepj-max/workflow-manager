@@ -1,7 +1,7 @@
 // cwf-run-init.mjs 纯逻辑测试（分支命名、run_id 安全、身份比对）
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { branchName, assertRunIdSafe, findIdentityMismatch } from '../cwf-run-init.mjs'
+import { branchName, assertRunIdSafe, findIdentityMismatch, parseBudget } from '../cwf-run-init.mjs'
 
 test('branchName：run_id 直接进分支名（单射）', () => {
   assert.equal(branchName('cwf-123-01'), 'dev-cwf-123-01')
@@ -24,4 +24,13 @@ test('findIdentityMismatch：幂等复用前校验身份一致', () => {
   assert.equal(findIdentityMismatch(stored, { ...same, issue_or_task_identity: '#124' }).length, 1)
   assert.equal(findIdentityMismatch(stored, { ...same, base_ref: 'dev' }).length, 1)
   assert.equal(findIdentityMismatch(stored, { ...same, rollback_budget: 5 }).length, 1)
+})
+
+test('parseBudget：完整非负整数校验', () => {
+  assert.equal(parseBudget('3'), 3)
+  assert.equal(parseBudget('0'), 0)
+  assert.throws(() => parseBudget('nope'), /非法回退额度/)
+  assert.throws(() => parseBudget('3junk'), /非法回退额度/)
+  assert.throws(() => parseBudget('-1'), /非法回退额度/)
+  assert.throws(() => parseBudget(''), /非法回退额度/)
 })

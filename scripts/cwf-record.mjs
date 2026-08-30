@@ -29,6 +29,9 @@ function repoRoot(runDir) {
 }
 
 function schemaPath(runDir) {
+  // run-init 会把 schema 提供到 .agent-runs/schema/（外仓库自包含分发）；本仓库直接读 docs 版
+  const provisioned = join(runDir, '..', 'schema', 'handoff.schema.json')
+  if (existsSync(provisioned)) return provisioned
   return join(repoRoot(runDir), 'docs/design/construction-workflow/handoff.schema.json')
 }
 
@@ -52,7 +55,14 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
   const run = loadRun(runDir)
   const schema = loadSchema(runDir)
   if (flags.stage) run.stage = flags.stage
-  if (flags.attempt !== undefined) run.attempt = flags.attempt
+  if (flags.attempt !== undefined) {
+    // attempt 只许前进：过期覆盖会毁掉旧 attempt 的 proof（§8.5 保留纪律）
+    if (flags.attempt < run.attempt) {
+      console.error(`拒绝过期 attempt 覆盖：--attempt ${flags.attempt} < 当前 ${run.attempt}（契约 §8.5）`)
+      process.exit(1)
+    }
+    run.attempt = flags.attempt
+  }
   // 必须 fail closed：取不到真实 HEAD 即中止，不得静默复用旧值伪造 Proof 绑定（§2 不变量 3）
   try {
     run.current_head = currentHead(runDir)
