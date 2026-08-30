@@ -1,68 +1,102 @@
 # workflow-manager
 
-面向复杂软件研发的 **AI 协作工作流系统**。
+面向复杂软件研发与通用知识工作的 **AI 协作工作流系统**。
 
-Workflow Manager 不只负责“按顺序调用 Agent”。它希望解决更核心的问题：在一个真实软件研发任务里，让正确的角色在正确阶段获得最小且权威的上下文，明确自己的责任与权限，用可验证证据完成交接，并把范围变更、最终验收、合并发布等关键决策保留给人。
+Workflow Manager 不只是“按顺序调用 Agent”。它希望把 Workflow、Role、模型、人工决策、运行快照、正式成果和验证证据组织成一个可配置、可运行、可干预、可恢复、可追溯的协作系统。
 
-当前以 DSH 作为首个运行环境，后续再逐步支持 Codex、Claude Code 等 Coding Agent。跨 Agent 是执行能力，不是项目最高层目标。
+当前以 DeepSeek Harness（DSH）作为首个运行环境。Codex、Claude Code 等 Coding Agent 属于后续执行器扩展，不反向定义 Workflow Manager 的产品模型。
 
-## 项目目标
+## 当前状态
 
-项目长期围绕五类能力演进：
+项目处于 **v0.1 正式工作流体系收敛阶段**。
 
-1. **Context Pointer（上下文指针）**：节点按需引用需求、设计、项目规则、角色规则、Skill 与历史证据，而不是复制整份项目知识。
-2. **责任与证据契约**：每个角色明确输入、输出、非目标、可修改范围和必须提交的验证证据。
-3. **人工授权边界**：局部开发 / 测试 / 审核尽量自主推进；范围变化、高风险实施、最终验收、合并发布等动作由人授权。
-4. **多角色协作**：不仅支持多个独立任务并行，还要支持同一需求中的开发轨、测试轨等不同责任角色并行并在 Gate 汇合。
-5. **执行器可替换**：协作规则稳定后，同一 Workflow 可以逐步交给不同 Coding Agent 执行。
+必须区分两件事：
 
-完整版本规划见 [`roadmap.md`](./roadmap.md)。
+- **当前 main 已实现基线**：现有 Blueprint/Skill/VWF Runtime 能力；
+- **v0.1 目标规格**：正在按 #76–#83 实施的正式 Workflow/Run/Role 模型。
 
-## 当前已具备
+目标规格不是“main 已经具备”的能力清单。实现、Review 和验收必须同时核对实际代码与目标规格。
 
-截至 2026-08-25，项目已经具备第一阶段可用底座：
+权威目标规格：[`docs/design/workflow-manager-v0.1-final-product-spec.md`](./docs/design/workflow-manager-v0.1-final-product-spec.md)  
+完整版本规划：[`roadmap.md`](./roadmap.md)
 
-- Blueprint 作为具体 Workflow 的唯一事实源；
-- 单一编译与校验语义；
-- runtime harness 行为回归；
-- DSH / vwf 双入口统一；
-- 可视化模板库与编辑器；
-- 保存 Blueprint 后同步生成可运行 Skill；
-- 工作分支隔离与验证分支 / HEAD 留痕；
-- 测试、审核、人工验收与失败打回；
-- 多 run 并行、同 taskId 互斥、人工门禁排队；
-- `fanOut` 受限并行子任务与结果聚合；
-- DSH 静态组合包基础安装形态；
-- 默认工作流与角色自包含分发。
+## 当前 main 已具备
 
-当前下一阶段重点不是继续扩大量执行器或独立分发，而是补齐 **上下文、责任、权限、证据和同需求多角色协作**。
+截至 2026-08-30，已经形成的可用底座包括：
 
-## 协作模型
+- `templates/*.json` Blueprint 作为具体 Workflow 的唯一事实源；
+- 单一校验/生成链和行为回归；
+- 可视化模板库、画布编辑器和配置面板；
+- 保存 Blueprint 后生成/更新可运行 Skill；
+- Built-in / Custom Role Library 基础能力（#58 / PR #61）；
+- Git worktree 工作隔离与验证分支/HEAD 留痕；
+- 测试、审核、人工门禁与失败回路；
+- 受限 Fan-out 与结果聚合（#18 / PR #38）；
+- 多 run 并行、同 taskId 互斥、人工门禁排队（#19 / PR #41、#44）；
+- legacy engine-run 运行历史跨 DSH 重启持久化（#40 / PR #50）；
+- DSH 静态组合包产品形态；
+- 版本内开发模式 / 发布前产品模式的长期双轨规则。
 
-```text
-权威上下文
-需求 / 设计 / AGENTS / 决策 / Skill / 历史证据
-        │
-        ▼
-协作契约
-责任 / 输入 / 输出 / Evidence / 权限 / Gate / 状态
-        │
-        ▼
-协作执行
-开发轨 / 测试轨 / Review / 人工裁决 / 汇合
-        │
-        ▼
-执行器
-DSH / Codex / Claude Code / Other Agent
-```
+这些能力仍包含早期契约，例如 `success/failure` 二态业务路由、`AWAITING_HUMAN_*` / `FAILED_MAX_ROUNDS` 等字符串状态，以及旧 Built-in Workflow/Role 集合。它们是当前兼容基线，不是 v0.1 新设计目标。
 
-核心原则：
+## v0.1 正式目标
 
-> **上下文 → 责任 → 权限 → 证据 → 协作 → 执行器。**
+### 四套正式 Built-in Workflow
+
+1. **建设 · 完整功能开发**  
+   需求分析 → 方案设计 → 开发 → 独立审核 → 独立测试 → 人工验收 → 收口
+2. **优化 · 快速迭代**  
+   目标确认 → 执行 → 评估 → 收口
+3. **诊断 · 缺陷修复**  
+   缺陷诊断 → 修复 → 审核 → 回归验证 → 收口
+4. **探索 · 多视角探索**  
+   探索统筹 → 专家研究 Fan-out → 综合分析 → 结论评估
+
+探索模板总研究轮次最多 **3 轮（包含首次 BROAD）**；自动 TARGETED 补充最多 2 轮。
+
+历史 `default-workflow` 和 `dev-workflow-2-0` 将迁移为 Custom Workflow，不继续作为系统正式标准。
+
+### 12 个正式 Built-in Role
+
+通用能力：
+
+- `requirements` — 需求分析
+- `designer` — 方案设计
+- `dev` — 开发
+- `review` — 审核
+- `test` — 测试
+- `evaluator` — 评估
+- `accept` — 验收助手
+- `closeout` — 收口
+
+专业能力：
+
+- `diagnose` — 缺陷诊断
+- `orchestrator` — 探索统筹
+- `researcher` — 专家研究
+- `synthesizer` — 综合分析
+
+旧 `dispatcher` 迁移为 Custom Role。
+
+### 统一 Runtime/契约
+
+v0.1 的核心升级包括：
+
+- Business Outcome Routing：合法业务结果不再伪装成 failure；
+- Completion Mapping：终态业务原因来自节点结构化结果；
+- Formal Records / Revision / Provenance；
+- Logical Run / Execution Segment；
+- 固定 Lifecycle：`READY / RUNNING / WAITING_HUMAN / PAUSED / BLOCKED / COMPLETED / STOPPED / FAILED`；
+- Run Snapshot Revision；v0.1 运行中只允许修改 Provider / Model；
+- Human Decision；
+- Pause / Interrupt / Run Guidance / Resume；
+- `maxRounds` 统一为自动回退额度，回退路径通过 `countRound` 决定是否消耗；
+- Static Validation + Provider/Model Preflight Probe；
+- Skill/Chat/未来插件入口共享同一 Logical Run Runtime。
 
 ## 单一事实源架构
 
-具体 Workflow 仍以 Blueprint 为唯一事实源：
+当前实现仍遵循：
 
 ```text
 templates/<id>.json
@@ -75,33 +109,55 @@ templates/<id>.json
    ├── SKILL.md
    └── meta.json
    │
-   ├─ vwf：可视化编辑 / 保存 / 运行观测
+   ├─ VWF：可视化编辑 / 保存 / 运行观测
    └─ DSH：生成 Skill 执行
 ```
 
 约束：
 
-- 人工只修改 Blueprint 或对应的权威规则文件；
-- `.generated/` 永远是生成物，不作为人工修改源；
-- 同一 Blueprint 不允许由多套不同业务语义解释；
-- Workflow / Contract 变更必须有行为回归保护。
+- 人工只修改 Blueprint 或对应权威规则文件；
+- `.generated/` 是生成物，不作为人工修改源；
+- 同一 Blueprint 不允许多套业务解释；
+- Blueprint / Contract 变更必须有行为回归保护；
+- v0.1 Runtime 升级必须向后兼容现有 Custom Workflow，不能要求所有用户资产一次性迁移后才能运行。
 
-## 当前与下一阶段
+## 当前实施主线
 
-| 能力 | 状态 |
-|---|---|
-| Blueprint / 编译 / 校验 / 行为测试 | ✅ 已完成基线 |
-| 可视化编辑与 Skill 闭环 | ✅ 已完成基线 |
-| 工作分支隔离 / Review / 人工门禁 | ✅ 已完成基线 |
-| 多 run 并行 | ✅ 已完成（#19） |
-| fanOut 同类子任务并行 | ✅ 已完成（#18 / PR #38） |
-| 运行历史跨进程恢复 | ⚠️ Reality Reconciliation（#40 当前 GitHub 状态仍为 open） |
-| 节点级 Context Pointer | ⏳ v0.2 |
-| 责任 / 权限 / Evidence 正式契约 | ⏳ v0.2 |
-| S / M / L 实施准入 | ⏳ v0.2 |
-| 同一需求多角色并行协作 | ⏳ v0.3 |
-| Codex / Claude Code 等执行器 | ⏳ v0.4 |
-| ACP / 动态规划 / 独立分发 | 后置 |
+```text
+#71 全局原则
+  ↓
+#77 Outcome Routing / Completion
+#72 Human Decision
+#73 自动回退额度
+#78 Formal Records / Provenance
+  ↓
+#79 Logical Run / Snapshot / Lifecycle
+#80 Pause / Guidance / Resume
+#74 Preflight Probe
+  ↓
+#81 12 Roles
+#82 四正式 Built-in Workflows
+#83 Skill/Chat Invocation
+  ↓
+#75 UI/交互实施拆分
+```
+
+实施总览：#76。
+
+Draft PR #70 已关闭且未合并。`feat/multi-perspective-exploration` 分支只作为 #81/#82 的素材库，不得整包直接合入 main。
+
+## 独立分发后置
+
+早期 P2 Epic #6 已关闭为 superseded。以下课题继续保留，但不属于当前 v0.1 frontier：
+
+- #21 独立仓库 + GitHub 分发；
+- #45–#48 独立分发相关决策。
+
+这些 Issue 必须在正式 Workflow/Runtime/资产边界稳定后重新基于届时 main 取证，不能直接按旧目录和打包假设实施。
+
+## 外部兼容性
+
+#35 跟踪 Minke / DSH 版本兼容问题。它与 Workflow Runtime 产品设计分离：只有当某个版本明确把 Minke 列为支持宿主时，才进入该版本发布门槛。
 
 ## 常用命令
 
@@ -111,60 +167,61 @@ npm run validate   # 蓝图校验 + 测试 + 重生成一致性检查
 npm test           # 引擎层行为与契约测试
 ```
 
+发布前还必须遵循 `AGENTS.md` 的开发模式 / 产品模式双轨：开发态验证不是发布证据，正式发布必须重建产物、完整重启 DSH 并执行真实 E2E。
+
 ## 目录
 
 | 路径 | 说明 |
 |---|---|
-| `templates/` | 具体 Workflow Blueprint，唯一事实源 |
+| `templates/` | 当前具体 Workflow Blueprint，唯一事实源 |
 | `.generated/` | 生成物，禁止手改 |
 | `scripts/` | 编译、校验、行为测试与生成流程 |
 | `packages/dsh-visual-workflow/` | 可视化编辑与运行观测入口 |
 | `dsh/` | DSH 侧角色与 Skill 真源 |
-| `docs/design/` | 当前契约与设计文档 |
+| `docs/design/` | 当前/目标 Contract 与设计文档 |
+| `docs/design/workflow-design-principles.md` | 长期工作流设计原则（方法论权威，#71） |
 | `docs/research/` | 调研结论 |
 | `specs/` | 已形成的规格 / OpenSpec |
 | `wayfinder/` | 决策地图与历史决策 |
-| `AGENTS.md` | 项目共同规则 |
-| `CONTEXT.md` | 项目统一术语 |
+| `AGENTS.md` | 项目共同硬规则 |
+| `CONTEXT.md` | 当前实现领域术语；目标语义以 v0.1 最终规格为准 |
 | `roadmap.md` | 产品 / 架构路线图 |
 
 ## 文档权威性
 
-当文档、Issue 和实际实现存在冲突时，不允许默默选一个继续施工。
-
-当前约定：
+不同类型文档承担不同职责：
 
 1. `AGENTS.md`：项目共同硬规则；
-2. `CONTEXT.md`：统一术语；
-3. `docs/design/`：当前 Contract / 设计语义；
-4. `templates/`：具体 Workflow 的唯一事实源；
-5. `specs/` / `wayfinder/`：需求、设计决策与历史上下文；
-6. GitHub Issue / PR：施工与验收状态；
-7. `main`：实际已经进入产品基线的实现。
+2. [`docs/design/workflow-design-principles.md`](docs/design/workflow-design-principles.md)：长期工作流设计原则（why / how to design；后续模板与角色应引用，不重复发明）；
+3. `docs/design/workflow-manager-v0.1-final-product-spec.md`：v0.1 正式产品目标规格（本版本实例）；
+4. `CONTEXT.md`：当前实现术语与兼容语义；
+5. `templates/`：当前 main 中具体 Workflow 的唯一事实源；
+6. `roadmap.md`：版本顺序和实施依赖；
+7. GitHub Issue / PR：施工范围、迁移和验收状态；
+8. `main`：实际已经进入产品基线的实现。
 
-发现冲突时先做 Reality Reconciliation，再继续实现。过时设计应显式标记 Historical / Superseded，而不是继续作为 Agent 上下文。
+原则文档是跨版本方法论；产品规格是某一版本的实例。`CONTEXT.md` 在对应实现进入 `main` 前保持 Current，不提前改成 Target 语义。
 
-## 开发指引
+当目标规格与当前实现不同，这是正常的“迁移中状态”；Agent 必须明确自己是在维护兼容基线还是实施 v0.1 目标，不能把两者静默混合。
 
-1. 新增或修改 Workflow：修改 `templates/` 中 Blueprint → 生成 → `npm run validate` → 用生成 Skill 或 vwf 做行为验证。
-2. 修改协作规则：同时检查 Contract、角色、行为测试与文档是否需要同步，不允许只改其中一份解释。
-3. 大型需求先完成需求分析和决策收敛；后续 Roadmap 将把 S / M / L 实施准入正式纳入 Workflow。
-4. 新增执行器前，优先确认现有协作契约是否已经能够表达该执行器需要承担的责任；不要为了某个 Agent 新复制一套 Workflow。
+过时设计应显式标记 Historical / Superseded / Deferred，而不是继续作为新施工依据。
 
-## 路线图原则
-
-当前资源优先级：
+## 路线图
 
 ```text
-v0.1 可信基线与现实对账
+v0.1  Formal Workflow Foundation
+      Blueprint / Outcome / Formal Records / Logical Run / Snapshot / 12 Roles / 四模板
   ↓
-v0.2 Context / Responsibility / Authorization / Evidence
+v0.2  Product Interaction & Governance
+      UI / Context / Responsibility / Permission / Evidence / S-M-L
   ↓
-v0.3 同需求多角色协作
+v0.3  同一需求多角色协作
   ↓
-v0.4 多 Coding Agent 执行器
+v0.4  多 Coding Agent 执行器
   ↓
-v0.5+ 专业 Profile / ACP / 动态规划 / 分发
+v0.5+ 专业 Profile / 动态规划 / 协议与生态
+  ↓
+Later  独立分发（#21 / #45–#48 重新评估）
 ```
 
 详见 [`roadmap.md`](./roadmap.md)。
