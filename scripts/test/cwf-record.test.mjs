@@ -118,7 +118,7 @@ test('check：对既有记录只校验', () => {
     gaps: [], outcome: 'baseline_ready', status: 'draft',
   }))
   run(['write', runDir, 'requirements_baseline', payload])
-  const r = run(['check', runDir, join(runDir, 'requirements_baseline.json')])
+  const r = run(['check', runDir, join(runDir, 'requirements_baseline.a1.json')])
   assert.equal(r.code, 0, r.out)
   assert.match(r.out, /valid/)
 })
