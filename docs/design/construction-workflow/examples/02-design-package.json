@@ -1,6 +1,6 @@
 {
   "record_type": "design_package",
-  "record_version": "v0.1.5",
+  "record_version": "v0.1.6",
   "created_at": "2026-08-30T06:45:00Z",
   "produced_by": "dsh:construction-bootstrap",
   "run": {

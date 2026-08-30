@@ -1,6 +1,6 @@
 {
   "record_type": "review_proof",
-  "record_version": "v0.1.5",
+  "record_version": "v0.1.6",
   "created_at": "2026-08-30T07:30:00Z",
   "produced_by": "external:codex-reviewer",
   "run": {
