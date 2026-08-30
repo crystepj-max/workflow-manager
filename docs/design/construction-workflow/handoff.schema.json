@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "docs/design/construction-workflow/handoff.schema.json",
   "title": "Construction Workflow Portable Handoff / Evidence Record",
-  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.6，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
+  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.7，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
   "type": "object",
   "additionalProperties": false,
   "required": ["record_type", "record_version", "created_at", "produced_by", "run", "payload"],
@@ -21,7 +21,7 @@
     },
     "record_version": {
       "description": "记录 schema 版本，与契约版本同步",
-      "const": "v0.1.6"
+      "const": "v0.1.7"
     },
     "created_at": {
       "$ref": "#/definitions/isoDateTime"
@@ -279,8 +279,31 @@
           "minItems": 1,
           "items": { "$ref": "#/definitions/nonEmptyText" }
         },
+        "decision_request": {
+          "description": "待决决策包（契约 §5.3）：挂起人工裁决前必须携带的决策点、候选项与推荐理由；与已决 decision 不同字段，已决后保留作为裁决上下文",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["question", "options", "recommendation"],
+          "properties": {
+            "question": { "$ref": "#/definitions/nonEmptyText" },
+            "options": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "tradeoffs"],
+                "properties": {
+                  "name": { "$ref": "#/definitions/nonEmptyText" },
+                  "tradeoffs": { "type": "string" }
+                }
+              }
+            },
+            "recommendation": { "$ref": "#/definitions/nonEmptyText" }
+          }
+        },
         "decision": {
-          "description": "Human Decision Record（不可覆盖，契约 §5）",
+          "description": "Human Decision Record（不可覆盖，契约 §5）：人工已决记录；仅允许出现在命中条件门的 package 上",
           "type": "object",
           "additionalProperties": false,
           "required": ["question", "options", "chosen", "rationale", "decided_by", "decided_at"],
@@ -346,10 +369,21 @@
             "properties": { "outcome": { "const": "decision_required" } }
           },
           "then": {
-            "description": "outcome=decision_required ⇒ 门标记置位且未决（已决的过门 package 翻转为 package_ready 并保留 Decision Record 作为过门证据）",
-            "required": ["decision_required"],
+            "description": "outcome=decision_required ⇒ 门标记置位、未决（decision 缺席）且必须携带 decision_request 决策包供人工裁决（契约 §5.2/§5.3）",
+            "required": ["decision_required", "decision_request"],
             "properties": { "decision_required": { "const": true } },
             "not": { "required": ["decision"] }
+          }
+        },
+        {
+          "if": {
+            "required": ["decision_request"],
+            "properties": { "decision_request": { "type": "object" } }
+          },
+          "then": {
+            "description": "decision_request 只能出现在命中条件门的 package 上",
+            "required": ["decision_required"],
+            "properties": { "decision_required": { "const": true } }
           }
         }
       ]
@@ -577,7 +611,27 @@
             "dev_handoff_ref": { "$ref": "#/definitions/nonEmptyText" },
             "review_proof_ref": { "$ref": "#/definitions/nonEmptyText" },
             "test_proof_ref": { "$ref": "#/definitions/nonEmptyText" },
-            "integration_checkpoint": { "type": "string" }
+            "integration_checkpoint": {
+            "description": "结构化 checkpoint 结果（契约 §7.3）：target 已前进时必须已重跑受影响 Proof",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["target_ref", "target_head_at_check", "target_advanced", "proofs_state"],
+            "properties": {
+              "target_ref": { "$ref": "#/definitions/nonEmptyText" },
+              "target_head_at_check": { "$ref": "#/definitions/nonEmptyText" },
+              "target_advanced": { "type": "boolean" },
+              "proofs_state": { "enum": ["still_valid", "rerun_completed"] },
+              "notes": { "type": "string" }
+            },
+            "if": {
+              "required": ["target_advanced"],
+              "properties": { "target_advanced": { "const": true } }
+            },
+            "then": {
+              "description": "target 已前进 ⇒ 受影响 Proof 必须已重跑（契约 §7.3）",
+              "properties": { "proofs_state": { "const": "rerun_completed" } }
+            }
+          }
           }
         },
         "decision": {
