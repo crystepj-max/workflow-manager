@@ -1,0 +1,30 @@
+{
+  "record_type": "review_proof",
+  "record_version": "v0.1",
+  "created_at": "2026-08-30T07:30:00Z",
+  "produced_by": "external:codex-reviewer",
+  "run": {
+    "run_id": "cwf-103-bootstrap-01",
+    "issue_or_task_identity": "#112",
+    "workspace_id": "wt-dev-102serias",
+    "repository": "crystepj-max/workflow-manager",
+    "base_ref": "main",
+    "base_commit": "fc5ce7750fe644b86cba7cbd3914d6a158f41060",
+    "work_branch": "dev-#102serias",
+    "current_head": "2b5a7c79a0c3a61392611a363c25062b9074f98d",
+    "stage": "review",
+    "attempt": 1
+  },
+  "payload": {
+    "verdict": "request_changes",
+    "findings": [
+      {
+        "finding": "§4.2 计数原则中「同一 findings 多根因拆分路由」的额度消耗描述与 §4.1 表格未互相引用，易误读",
+        "root_cause": "dev"
+      }
+    ],
+    "verified_branch": "dev-#102serias",
+    "verified_head": "2b5a7c79a0c3a61392611a363c25062b9074f98d",
+    "independent_session": true
+  }
+}

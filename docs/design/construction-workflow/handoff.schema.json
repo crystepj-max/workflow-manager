@@ -1,0 +1,393 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "docs/design/construction-workflow/handoff.schema.json",
+  "title": "Construction Workflow Portable Handoff / Evidence Record",
+  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1，#113；#78 Formal Records 的兼容前身）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["record_type", "record_version", "created_at", "produced_by", "run", "payload"],
+  "properties": {
+    "record_type": {
+      "description": "七类记录之一",
+      "enum": [
+        "requirements_baseline",
+        "design_package",
+        "dev_handoff",
+        "review_proof",
+        "test_proof",
+        "acceptance_package",
+        "closeout_summary"
+      ]
+    },
+    "record_version": {
+      "description": "记录 schema 版本，与契约版本同步",
+      "const": "v0.1"
+    },
+    "created_at": {
+      "$ref": "#/definitions/isoDateTime"
+    },
+    "produced_by": {
+      "description": "产生者 Role/会话标识",
+      "type": "string"
+    },
+    "run": {
+      "$ref": "#/definitions/portableRunIdentity"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "oneOf": [
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "requirements_baseline" },
+        "payload": { "$ref": "#/definitions/requirementsBaselinePayload" }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "design_package" },
+        "payload": { "$ref": "#/definitions/designPackagePayload" }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "dev_handoff" },
+        "payload": { "$ref": "#/definitions/devHandoffPayload" }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "review_proof" },
+        "payload": { "$ref": "#/definitions/reviewProofPayload" }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "test_proof" },
+        "payload": { "$ref": "#/definitions/testProofPayload" }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "acceptance_package" },
+        "payload": { "$ref": "#/definitions/acceptancePackagePayload" }
+      }
+    },
+    {
+      "required": ["record_type", "payload"],
+      "properties": {
+        "record_type": { "const": "closeout_summary" },
+        "payload": { "$ref": "#/definitions/closeoutSummaryPayload" }
+      }
+    }
+  ],
+  "definitions": {
+    "isoDateTime": {
+      "description": "ISO 8601 UTC 时间",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "portableRunIdentity": {
+      "description": "Portable Run Identity 最小字段集（#103 列举，契约 §7.1）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "issue_or_task_identity",
+        "workspace_id",
+        "repository",
+        "base_ref",
+        "base_commit",
+        "work_branch",
+        "current_head",
+        "stage",
+        "attempt"
+      ],
+      "properties": {
+        "run_id": { "type": "string" },
+        "issue_or_task_identity": { "type": "string" },
+        "workspace_id": { "type": "string" },
+        "repository": { "type": "string" },
+        "base_ref": { "type": "string" },
+        "base_commit": { "type": "string" },
+        "work_branch": { "type": "string" },
+        "current_head": { "type": "string" },
+        "stage": {
+          "enum": [
+            "requirements",
+            "design",
+            "dev",
+            "review",
+            "test",
+            "human_acceptance",
+            "closeout"
+          ]
+        },
+        "attempt": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "rootCause": {
+      "description": "回退根因分类（契约 §4.1）",
+      "enum": ["dev", "design", "requirements"]
+    },
+    "requirementsBaselinePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "scope", "acceptance", "gaps"],
+      "properties": {
+        "goal": { "type": "string" },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["include", "exclude"],
+          "properties": {
+            "include": { "type": "array", "items": { "type": "string" } },
+            "exclude": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "acceptance": { "type": "array", "items": { "type": "string" } },
+        "gaps": {
+          "description": "缺失要素必须显式列出，不得编造（契约 §3.1）",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["element", "suggestion"],
+            "properties": {
+              "element": { "type": "string" },
+              "suggestion": { "type": "string" }
+            }
+          }
+        },
+        "clarification_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["topic", "decision"],
+            "properties": {
+              "topic": { "type": "string" },
+              "decision": { "type": "string" }
+            }
+          }
+        },
+        "baseline_revision": { "type": "string" },
+        "human_confirmation": {
+          "description": "人工确认后回填（BASELINE_CONFIRMED）",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["confirmed_by", "confirmed_at"],
+          "properties": {
+            "confirmed_by": { "type": "string" },
+            "confirmed_at": { "$ref": "#/definitions/isoDateTime" }
+          }
+        }
+      }
+    },
+    "designPackagePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "decision_required"],
+      "properties": {
+        "summary": { "type": "string" },
+        "affected_modules": { "type": "array", "items": { "type": "string" } },
+        "risks": { "type": "array", "items": { "type": "string" } },
+        "open_questions": { "type": "array", "items": { "type": "string" } },
+        "decision_required": {
+          "description": "true 时 Controller 挂起等人工决策（契约 §5.2 判据）",
+          "type": "boolean"
+        },
+        "decision_required_reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "decision": {
+          "description": "Human Decision Record（不可覆盖，契约 §5）",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["question", "options", "chosen", "rationale", "decided_by", "decided_at"],
+          "properties": {
+            "question": { "type": "string" },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "tradeoffs"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "tradeoffs": { "type": "string" }
+                }
+              }
+            },
+            "chosen": { "type": "string" },
+            "rationale": { "type": "string" },
+            "decided_by": { "type": "string" },
+            "decided_at": { "$ref": "#/definitions/isoDateTime" }
+          }
+        }
+      }
+    },
+    "devHandoffPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "changes", "self_check"],
+      "properties": {
+        "summary": { "type": "string" },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["area", "description"],
+            "properties": {
+              "area": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "self_check": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["check", "result"],
+            "properties": {
+              "check": { "type": "string" },
+              "result": { "enum": ["pass", "fail", "blocked", "not_applicable"] }
+            }
+          }
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "reviewProofPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "findings", "verified_branch", "verified_head", "independent_session"],
+      "properties": {
+        "verdict": { "enum": ["approve", "request_changes"] },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["finding", "root_cause"],
+            "properties": {
+              "finding": { "type": "string" },
+              "root_cause": { "$ref": "#/definitions/rootCause" }
+            }
+          }
+        },
+        "verified_branch": { "type": "string" },
+        "verified_head": { "type": "string" },
+        "independent_session": {
+          "description": "独立证明者原则：审核会话必须独立于开发会话（契约 §2 不变量 2）",
+          "enum": [true]
+        }
+      }
+    },
+    "testProofPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "acceptance_mapping", "verified_branch", "verified_head"],
+      "properties": {
+        "verdict": { "enum": ["pass", "fail", "blocked"] },
+        "acceptance_mapping": {
+          "description": "与 baseline 验收标准逐条映射",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["acceptance_item", "result"],
+            "properties": {
+              "acceptance_item": { "type": "string" },
+              "result": { "enum": ["pass", "fail", "blocked", "not_verified"] }
+            }
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["finding", "root_cause"],
+            "properties": {
+              "finding": { "type": "string" },
+              "root_cause": { "$ref": "#/definitions/rootCause" }
+            }
+          }
+        },
+        "environment": { "type": "string" },
+        "verified_branch": { "type": "string" },
+        "verified_head": { "type": "string" }
+      }
+    },
+    "acceptancePackagePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "assembled"],
+      "properties": {
+        "status": { "enum": ["awaiting_decision", "decided"] },
+        "assembled": {
+          "description": "证据汇总：引用 review/test proof 与 Integration Checkpoint 结果",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["review_proof_ref", "test_proof_ref", "integration_checkpoint"],
+          "properties": {
+            "review_proof_ref": { "type": "string" },
+            "test_proof_ref": { "type": "string" },
+            "integration_checkpoint": { "type": "string" }
+          }
+        },
+        "decision": {
+          "description": "人工决策，AI 不得代签（契约 §3.6）",
+          "enum": ["accept", "reject", "user_accepted"]
+        },
+        "decided_by": { "type": "string" },
+        "decided_at": { "$ref": "#/definitions/isoDateTime" },
+        "feedback": { "type": "string" }
+      },
+      "oneOf": [
+        {
+          "required": ["status"],
+          "properties": { "status": { "const": "awaiting_decision" } }
+        },
+        {
+          "required": ["status", "decision", "decided_by", "decided_at"],
+          "properties": { "status": { "const": "decided" } }
+        }
+      ]
+    },
+    "closeoutSummaryPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deliverables", "integration", "records_retained"],
+      "properties": {
+        "deliverables": { "type": "array", "items": { "type": "string" } },
+        "integration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["checkpoint"],
+          "properties": {
+            "pr": { "type": "string" },
+            "merge_commit": { "type": "string" },
+            "checkpoint": { "type": "string" }
+          }
+        },
+        "leftovers": { "type": "array", "items": { "type": "string" } },
+        "records_retained": {
+          "description": "归档保留声明（契约 §8.5）",
+          "enum": [true]
+        }
+      }
+    }
+  }
+}

@@ -239,11 +239,100 @@ Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, 
 
 ## 7. Portable Run / Workspace Contract
 
-> **由 #113 填充**：portable run identity 最小字段集、ISOLATED_WRITE workspace 规则、worktree/branch/HEAD 约束、Integration Checkpoint、与 #93/#79 的映射兼容声明。
+### 7.1 Portable Run Identity（最小字段集）
+
+每个 Run 自始至终携带以下最小身份字段（与 #103 列举一致）；七类交接记录的信封全量内嵌它（§8.2）：
+
+| 字段 | 语义 |
+|---|---|
+| `run_id` | 本 Run 的稳定标识，Profile 生成，Run 存续期不变 |
+| `issue_or_task_identity` | 驱动本 Run 的 issue/任务标识 |
+| `workspace_id` | 本 Run 的隔离 workspace 标识 |
+| `repository` | 目标仓库 |
+| `base_ref` | 起点 ref（如 main） |
+| `base_commit` | 起点 commit（开工时 target 的 HEAD） |
+| `work_branch` | 本 Run 的工作分支 |
+| `current_head` | 工作分支当前 HEAD，随 Run 推进更新 |
+| `stage` | 当前 Stage（§3 七者之一） |
+| `attempt` | 当前 Stage 执行轮次（从 1 起） |
+
+映射承诺：#79（Logical Run / Snapshot）落地后，`run_id` 映射 `logical_run_id`，其余字段映射 Snapshot 对应字段；映射必须可追溯，历史 Dogfood Run 不得因字段调整而丢失（#103 纪律：调整需有映射，不丢历史）。
+
+### 7.2 Workspace 规则
+
+- 默认 **`ISOLATED_WRITE`**（消费 #93）：每个 Run 使用独立 branch + 独立 worktree；禁止在共享 main cwd 中直接开发；
+- 同一 Run 的 requirements/design/dev/review/test/accept 记录引用**同一 workspace lineage**（同一 `workspace_id` + branch 谱系）；
+- 多 Agent 并行时不同 Run 的 workspace 相互隔离，避免同片代码混写；跨 Run 合流走 Integration Checkpoint（§7.3）；
+- Profile 差异只允许存在于 workspace 的创建/清理机制，不允许存在于隔离语义本身。
+
+### 7.3 Proof 绑定与 Integration Checkpoint
+
+- Proof 绑定沿用仓库既有命名：`verified_branch` / `verified_head`（对齐 equivalence-checklist 维度 5 约定）；workspace 关联由信封 `run.workspace_id` 承载（§8.2）；Proof 只对 `verified_head` 有效；
+- **Integration Checkpoint**：最终集成（PR/merge）前执行——若 target 已前进（`base_commit` 之后 target 有新提交），必须 sync 后**重跑受影响的 Proof**（至少 review/test；acceptance package 重组后才可签收）；
+- checkpoint 结果记入 acceptance package 的 `assembled.integration_checkpoint`（§8.3）。
+
+### 7.4 与 #93 的映射声明
+
+`ISOLATED_WRITE` 与 workspace/branch 隔离是 #93 Workspace/Resource Isolation 的 Bootstrap 前身：#93 Runtime 落地后，隔离强制职责移交 Runtime，`workspace_id` 映射 #93 的 workspace 标识；本节语义不与 #93 最终模型冲突，字段以其为权威。
 
 ## 8. Portable Handoff / Evidence Package
 
-> **由 #113 填充**：七类交接/证据包（requirements baseline / design package / dev handoff / review proof / test proof / acceptance package / closeout summary）的统一 schema、示例、与 #78 Formal Records 的映射承诺。
+### 8.1 七类记录
+
+两个 Profile 在每个 Stage 产出的可审计交接/证据包使用统一 schema：
+
+| 记录类型 | 产生 Stage | 作用 |
+|---|---|---|
+| `requirements_baseline` | requirements | 冻结需求基线 + 人工确认记录 |
+| `design_package` | design | 方案 + 决策点 + Decision Record |
+| `dev_handoff` | dev | 改动摘要 + 自验记录 |
+| `review_proof` | review | 独立审核结论 + findings（带根因分类） |
+| `test_proof` | test | 独立测试结果 + 验收标准映射 |
+| `acceptance_package` | human acceptance | 证据汇总 + 人工验收决策 |
+| `closeout_summary` | closeout | 交付清单 + 集成结果 + 保留声明 |
+
+这七类是 #78 Formal Records 的**兼容前身**：#78 落地后，Revision/依赖链/证明失效以 #78 为权威，本节记录映射过去，不丢历史。
+
+### 8.2 统一信封
+
+每份记录 = 信封 + payload。信封字段：
+
+| 字段 | 语义 |
+|---|---|
+| `record_type` | 七者之一 |
+| `record_version` | 记录 schema 版本（当前 v0.1） |
+| `created_at` | ISO 8601 时间 |
+| `produced_by` | 产生者 Role/会话标识 |
+| `run` | §7.1 portable run identity 全量内嵌 |
+
+信封保证每份记录自带 run/workspace/source HEAD 关联（#103 要求）。
+
+### 8.3 payload 要素
+
+必选/可选字段以 §8.4 schema 为准；语义要点：
+
+- **requirements_baseline**：三要素 + `gaps`（缺失必须显式，不得编造）+ 澄清决策 + 人工确认（`BASELINE_CONFIRMED` 后回填）；
+- **design_package**：summary + `decision_required` 标记与判据命中说明（§5.2）+（触发时）Decision Record；
+- **dev_handoff**：改动摘要 + 自验清单；
+- **review_proof / test_proof**：结论 + 逐项 findings（带根因分类 dev/design/requirements，§4.1）+ `verified_branch`/`verified_head`；review 另需 `independent_session=true`（不变量 2）；
+- **acceptance_package**：`assembled`（引用 review/test proof + checkpoint 结果）+ 人工决策状态机（`awaiting_decision` → `decided`，决策枚举 `accept`/`reject`/`user_accepted`，AI 不得代签）；
+- **closeout_summary**：交付清单 + 集成结果 + `records_retained=true`。
+
+### 8.4 Schema、示例与机械校验
+
+- Schema：`docs/design/construction-workflow/handoff.schema.json`（JSON Schema draft-07）
+- 示例：`docs/design/construction-workflow/examples/01…07-*.json`（七类各一；取材于本契约开发 Run 的真实场景，其中 review/test/acceptance/closeout 为 **schema 演示值**，不代表本 Run 已发生对应的独立审核、测试或人工签收记录）
+- 机械校验（可执行验证）：
+
+```bash
+npm_config_cache=.scratch/npm-cache npx --yes ajv-cli@5 validate \
+  -s docs/design/construction-workflow/handoff.schema.json \
+  -d "docs/design/construction-workflow/examples/*.json"
+```
+
+### 8.5 保留要求
+
+Closeout 归档时，七类记录与全部 Proof 必须保留并可按 `run_id` 检索（对应 closeout 的 `records_retained`）；删除或清理归档记录属完整性违约，走 §4.4 升级，不作为回退。
 
 ## 9. 一致性矩阵、引用规范与冻结
 
