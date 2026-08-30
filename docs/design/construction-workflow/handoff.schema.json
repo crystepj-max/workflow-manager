@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "docs/design/construction-workflow/handoff.schema.json",
   "title": "Construction Workflow Portable Handoff / Evidence Record",
-  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.1，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
+  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.2，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
   "type": "object",
   "additionalProperties": false,
   "required": ["record_type", "record_version", "created_at", "produced_by", "run", "payload"],
@@ -226,9 +226,13 @@
     "designPackagePayload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["summary", "decision_required"],
+      "required": ["summary", "outcome", "decision_required"],
       "properties": {
         "summary": { "type": "string" },
+        "outcome": {
+          "description": "Design 阶段整体专业结果（契约 §6.3 基元：package-ready / decision-required / requirements-issue）",
+          "enum": ["package_ready", "decision_required", "requirements_issue"]
+        },
         "affected_modules": { "type": "array", "items": { "type": "string" } },
         "risks": { "type": "array", "items": { "type": "string" } },
         "open_questions": { "type": "array", "items": { "type": "string" } },
@@ -289,6 +293,28 @@
             "required": ["decision_required"],
             "properties": { "decision_required": { "const": true } }
           }
+        },
+        {
+          "if": {
+            "required": ["decision_required"],
+            "properties": { "decision_required": { "const": true } }
+          },
+          "then": {
+            "description": "命中条件门时整体 outcome 必须为 decision_required（契约 §6.3 一致性）",
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "decision_required" } }
+          }
+        },
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "decision_required" } }
+          },
+          "then": {
+            "description": "outcome=decision_required 时必须置位条件门标记（契约 §6.3 一致性）",
+            "required": ["decision_required"],
+            "properties": { "decision_required": { "const": true } }
+          }
         }
       ]
     },
@@ -342,6 +368,26 @@
           "then": {
             "description": "blocked 必须说明可恢复条件，供 hold(<reason>) 路由（契约 §6.4）",
             "required": ["blocked_reason"]
+          }
+        },
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "handoff_ready" } }
+          },
+          "then": {
+            "description": "handoff_ready 要求自验清单非空且无 fail/blocked 项（契约 §3.3 完成判定）",
+            "required": ["self_check"],
+            "properties": {
+              "self_check": {
+                "minItems": 1,
+                "items": {
+                  "properties": {
+                    "result": { "enum": ["pass", "not_applicable"] }
+                  }
+                }
+              }
+            }
           }
         }
       ]

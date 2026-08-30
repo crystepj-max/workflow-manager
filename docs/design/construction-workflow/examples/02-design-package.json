@@ -17,6 +17,7 @@
   },
   "payload": {
     "summary": "契约文档按 §0 定位 / §1 术语 / §2 主链不变量 / §3 Stage 四要素 / §4 回退升级 / §5 人工门边界 / §6 Outcome-Routing 兼容组织；§7–§9 稳定占位给 #113/#114",
+    "outcome": "package_ready",
     "affected_modules": [
       "docs/design/construction-workflow-portable-contract.md"
     ],
