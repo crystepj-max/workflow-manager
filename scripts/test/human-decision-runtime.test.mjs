@@ -176,3 +176,44 @@ test('#119 ADD_BUDGET 保留原 Outcome 并从被拦边续跑', async () => {
   assert.equal(r2.result.control_event.subsequent_path, 'finish')
   assert.equal(r2.result.control_event.decision_id, halt.result.decision_id)
 })
+
+test('#121 业务 Result 沿蓝图 $human-decision 出边续跑且不改写原 Outcome', async () => {
+  const halt = await runHd({ 执行: workOk })
+  assert.equal(halt.result.status, 'WAITING_HUMAN')
+  const requestEvent = halt.result.control_event
+  const r2 = await runHd({ 收口: { done: true } }, {
+    entry: halt.result.node,
+    decision_id: halt.result.decision_id,
+    user_choice: 'SHIP',
+    results: halt.result.results,
+  })
+  assert.equal(r2.result.status, 'DONE')
+  assert.equal(r2.result.decision_id, halt.result.decision_id)
+  assert.equal(r2.result.user_choice, 'SHIP')
+  assert.equal(r2.result.results.work.status, 'confirm', '触发时 Node Outcome 不得改写')
+  assert.notEqual(r2.result.results.work.status, 'PASS')
+  assert.equal(r2.result.results.finish.done, true)
+  assert.deepEqual(r2.agentCalls.map((c) => c.label), ['收口'], '不得重跑触发节点')
+  const ev = r2.result.control_event
+  assert.ok(ev, '须追加选择事件')
+  assert.equal(ev.decision_id, halt.result.decision_id)
+  assert.equal(ev.user_choice, 'SHIP')
+  assert.equal(ev.subsequent_path, 'finish')
+  assert.equal(requestEvent.user_choice, null, '原请求事件不得覆盖')
+})
+
+test('#121 无对应出边的业务选择被拒绝并保持等待', async () => {
+  const halt = await runHd({ 执行: workOk })
+  const r2 = await runHd({ 收口: { done: true } }, {
+    entry: halt.result.node,
+    decision_id: halt.result.decision_id,
+    user_choice: 'HOLD',
+    results: halt.result.results,
+  })
+  assert.equal(r2.result.status, 'WAITING_HUMAN', '无出边须保持等待')
+  assert.equal(r2.result.decision_id, halt.result.decision_id, 'decision_id 不可覆盖')
+  assert.equal(r2.result.results.work.status, 'confirm')
+  assert.ok(!r2.agentCalls.some((c) => c.label === '收口'), '拒绝选择不得续跑下游')
+  assert.equal(r2.result.control_event.user_choice, null)
+  assert.equal(r2.result.rejected_choice, 'HOLD')
+})

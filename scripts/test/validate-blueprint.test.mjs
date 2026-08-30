@@ -427,8 +427,9 @@ test('#116 HD 与 manualCheck 同图拒绝；出边 result 不得占用控制类
   assert.ok(r1.errors.some((e) => String(e.message).includes('manualCheck')), JSON.stringify(r1.errors));
 
   const ctrl = hdClone();
-  ctrl.edges[1].result = 'STOP';
+  const hdOut = ctrl.edges.find((e) => e.from === '$human-decision');
+  hdOut.result = 'STOP';
   const r2 = validateBlueprint(ctrl);
   assert.equal(r2.ok, false);
-  assert.ok(r2.errors.some((e) => e.fieldKey === 'edge:1:result'), JSON.stringify(r2.errors));
+  assert.ok(r2.errors.some((e) => String(e.fieldKey || '').endsWith(':result')), JSON.stringify(r2.errors));
 });

@@ -50,7 +50,7 @@
 
 - **三要素**：调度节点校验 issue 的 目标/范围/验收标准（内置图纸业务规则）。
 - **打回与轮次（round / maxRounds）**：failure 边驱动的重做循环与上限。
-- **分流折叠**：两路同路径条件分流的节点折叠为脚本内 if（零 LLM）——**双入口统一生效**
+- **分流折叠**：恰两路 success 出边、同一路径、`== true` / `== false` 的节点折叠为脚本内 if（零 LLM）——**双入口统一生效**；字符串枚举 `when`（如 confirm/auto）不折叠。
   （T-IMP-12 后 vwf 运行层同样折叠；编辑器图仍保留 route 节点展示）。折叠转发源 = when 路径的
   schema 声明节点（候选三修复：原取入边来源导致跳测试环节）。
 - **可信度闸门（verifyBranch）**：验证节点开工分支自检 + `verified_branch`/`verified_head` 硬校验。
@@ -112,6 +112,7 @@
 - **返回状态机（engine status，引擎返回状态）**：脚本终态字符串——`DONE`（完成）/ `WAITING_HUMAN`（Human Decision 等待，node/reason/Package 为独立字段）/ `STOPPED`（控制类 STOP）/ `AWAITING_HUMAN_<节点id>`（残留人工门禁）/ `FAILED_AT_<节点id>`（停在该节点）/
   `FAILED_MAX_ROUNDS`（超过打回上限）/ `TECHNICAL_FAILURE`（技术执行失败）/ `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` /
   `ERROR`；生成的 `SKILL.md` **runbook（操作手册）** 必须逐个覆盖。这是底层引擎一次执行的返回值，不是 Target 的 Run Lifecycle（运行生命周期）。
+- **rejected_choice**：业务 Decision Result 无匹配 `$human-decision` 出边时，引擎返回体上的被拒选项；`status` 仍为 `WAITING_HUMAN`，`decision_id` 不变，请求事件 `user_choice` 保持 null。
 - **执行路径（D5 正式化）**：编辑器「获取脚本」→ 粘贴主会话 → 平台 `workflow` 工具执行；
   `wf_run` 仅在引擎可达时条件注册。**推论：脚本返回值只回到主会话，插件进程拿不到**——
   看板只能看到事件流（阶段 / 子代理 / 日志）。

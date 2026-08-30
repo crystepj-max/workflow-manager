@@ -9,6 +9,8 @@ import { dirname, join } from 'node:path'
 
 import { loadHost } from './helpers/load-host.mjs'
 import { REPO, DSH_HOME, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
+import { compileBlueprint } from '../../../scripts/generate.mjs'
+import { runGeneratedScript, makeAgentScript } from '../../../scripts/test/helpers/runtime-harness.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const RUNS_DIR = DSH_HOME + '/visual-workflow/runs'
@@ -477,5 +479,73 @@ test('#120 刷新后 decision_id 续跑从落盘带回 blocked_edge 与 results'
   b.events.get('workflow/start')({ id: 'rb-1', meta: { name: 'x' } })
   settleRun(engB, b.events, 'rb-1', 'DONE')
   await p2
+})
+
+test('#122 刷新后 decision_id 与 Package 仍在；业务 Result 续跑同一 taskId', async () => {
+  const hd = JSON.parse(readFileSync(join(here, '..', '..', '..', 'scripts', 'test', 'fixtures', 'human-decision-blueprint.json'), 'utf8'))
+  const { script } = compileBlueprint(hd)
+  const halt = await runGeneratedScript(script, {
+    args: { taskId: 'issue-e2e' },
+    agent: makeAgentScript({
+      执行: { status: 'confirm', why: '需要人决定是否交付', current_state: '待拍板' },
+    }),
+  })
+  assert.equal(halt.result.status, 'WAITING_HUMAN')
+  assert.ok(halt.result.decision_package.why)
+
+  const engA = makeEngine()
+  const a = engineEnv(engA)
+  const wfRunA = a.definedTools.find((t) => t.name === 'wf_run')
+  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-e2e' })
+  await until(() => engA.starts.length >= 1, 'A 启动')
+  a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(engA, a.events, 'run-1', halt.result.status, {
+    decision_id: halt.result.decision_id,
+    reason: halt.result.reason,
+    node: halt.result.node,
+    decision_package: halt.result.decision_package,
+    results: halt.result.results,
+    control_event: halt.result.control_event,
+  })
+  await p1
+  await drain()
+
+  const engB = makeEngine('rb-')
+  const b = loadHost({
+    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
+  })
+  let s = null
+  await until(async () => { s = await call(b.handlers, 'vwf.state', { runId: 'run-1' }); return s.found }, 'B 回载')
+  assert.equal(s.state.status, 'WAITING_HUMAN')
+  assert.equal(s.state.decision_id, halt.result.decision_id)
+  assert.equal(s.state.decision_package.why, halt.result.decision_package.why)
+  const wfRunB = b.definedTools.find((t) => t.name === 'wf_run')
+  const p2 = wfRunB.execute({
+    templateId: 'dev-workflow-2-0', taskId: 'issue-e2e',
+    decision_id: halt.result.decision_id, user_choice: 'SHIP',
+  })
+  await until(() => engB.starts.length >= 1, 'SHIP 续跑')
+  const passed = engB.starts[0].args
+  assert.equal(passed.taskId, 'issue-e2e')
+  assert.equal(passed.user_choice, 'SHIP')
+  assert.equal(passed.results.work.status, 'confirm')
+  const resumed = await runGeneratedScript(script, {
+    args: passed,
+    agent: makeAgentScript({ 收口: { done: true } }),
+  })
+  assert.equal(resumed.result.status, 'DONE')
+  assert.equal(resumed.result.taskId, 'issue-e2e')
+  assert.equal(resumed.result.results.finish.done, true)
+  assert.equal(resumed.result.control_event.user_choice, 'SHIP')
+  assert.equal(halt.result.control_event.user_choice, null, '原请求事件不得覆盖')
+  b.events.get('workflow/start')({ id: 'rb-1', meta: { name: 'x' } })
+  settleRun(engB, b.events, 'rb-1', resumed.result.status, {
+    decision_id: resumed.result.decision_id, user_choice: 'SHIP',
+  })
+  await p2
+  const parked = await call(b.handlers, 'vwf.state', { runId: 'run-1' })
+  assert.equal(parked.state.supersededBy, 'rb-1')
+  assert.equal(parked.state.control_event.user_choice, null)
 })
 

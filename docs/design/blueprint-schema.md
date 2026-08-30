@@ -67,7 +67,7 @@
 | Package 硬必填 | `why` / `current_state` / `options` / `subsequent_effects` | 缺一不得挂起。`options` = `[{ id }]`；`subsequent_effects` = `{ [id]: string }` |
 | Package 可显式未知 | `cost` / `benefit` / `risk` / `recommendation` | 值为 `"UNKNOWN"` 时仍可挂起 |
 | 控制面事件 | `record_kind` / `trigger` / `lifecycle_at_request` / `decision_id` / `run_ref` / `node_id` / `attempt` / `reason` / `triggering_node_outcome` / `decision_package` / `user_choice` / `impact` / `subsequent_path` / `created_at` | `record_kind=DECISION`，`trigger=SYSTEM_REQUEST`，`lifecycle_at_request=WAITING_HUMAN`；追加-only，`decision_id` 不可覆盖 |
-| 续跑 args | `decision_id` / `user_choice` | 新路径；**禁止**再传 `approved`。残留门禁续跑仍用 `approved` |
+| 续跑 args | `decision_id` / `user_choice` | 新路径；**禁止**再传 `approved`。业务 `user_choice` 匹配 `$human-decision` 出边 `result` 后续跑到 `to`（不改写触发节点 Outcome）；无匹配出边则保持 `WAITING_HUMAN`。残留门禁续跑仍用 `approved` |
 | 过渡身份 | `taskId` | #79 交付 `logical_run_id` 前的恢复身份 |
 
 规则摘要：使用 HD 的蓝图禁止顶层/节点 `approved`，禁止与 `manualCheck` 同图；fanout 节点禁止边到 `$human-decision`。

@@ -43,7 +43,8 @@
     }
   ],
   "edges": [
-    { "from": "work", "to": "$human-decision", "on": "success" },
+    { "from": "work", "to": "$human-decision", "on": "success", "when": "$.status == \"confirm\"" },
+    { "from": "work", "to": "finish", "on": "success", "when": "$.status == \"auto\"" },
     { "from": "$human-decision", "to": "finish", "on": "success", "result": "SHIP" },
     { "from": "finish", "to": "$end", "on": "success" }
   ]
