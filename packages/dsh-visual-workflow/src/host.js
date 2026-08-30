@@ -1208,11 +1208,26 @@ return {
         if (includeContent && f && f.content != null) entry.content = f.content
         roles.push(entry)
       }
+      // 打包回退（Codex PR#124 第二轮 P1）：产品工作区无 dsh/roles/dispatcher.md 时，
+      // 迁出内置但被 bundleRoles 模板引用的历史角色从打包快照只读回退到自定义分组，
+      // 不写入 .generated。用户编辑时种子到工作区 dsh/roles/。
+      let bundledLegacy = null
+      try { bundledLegacy = await bundledLegacyRoles() } catch (e) { bundledLegacy = new Map() }
       const customIds = Array.from(files.keys()).filter(id => BUILTIN_ROLE_IDS.indexOf(id) < 0).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+      const seenCustom = new Set(customIds)
       for (const id of customIds) {
         const f = files.get(id)
         const entry = { id, name: id, summary: f.summary || '', builtin: false }
         if (includeContent) entry.content = f.content
+        roles.push(entry)
+      }
+      // 打包回退角色排在已落盘自定义角色之后（可见但非首选）
+      const bundledIds = Array.from(bundledLegacy.keys()).filter(id => !seenCustom.has(id)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+      for (const id of bundledIds) {
+        const content = bundledLegacy.get(id) || ''
+        const firstLine = content.split('\n').find(l => l.trim()) || ''
+        const entry = { id, name: id, summary: firstLine, builtin: false }
+        if (includeContent) entry.content = content
         roles.push(entry)
       }
       return roles
@@ -1240,8 +1255,14 @@ return {
         return { id, name: meta.name, summary: (f && f.summary) || meta.summary, builtin: true, content }
       }
       const f = files.get(id)
-      if (!f) return null
-      return { id, name: id, summary: f.summary || '', builtin: false, content: f.content != null ? f.content : '' }
+      if (f) return { id, name: id, summary: f.summary || '', builtin: false, content: f.content != null ? f.content : '' }
+      // 打包回退（Codex PR#124 第二轮 P1）：工作区无文件时，从打包快照只读回退
+      let bundledLegacy = null
+      try { bundledLegacy = await bundledLegacyRoles() } catch (e) { return null }
+      const content = bundledLegacy.get(id)
+      if (content == null) return null
+      const firstLine = content.split('\n').find(l => l.trim()) || ''
+      return { id, name: id, summary: firstLine, builtin: false, content }
     }
     // 引用扫描：全部工作流（内置模板 + 用户模板）+ 可选的开放草稿 DSL。草稿引用按
     // workflowId 去重替换（打开编辑器编辑既有模板时其持久化版本已被统计，草稿内容
@@ -1331,35 +1352,36 @@ return {
       return { ok: true, id, count: u.count, refs: u.refs }
     })
     // 空白新增 / 基于角色创建：校验名称与内容 → 写入工作区 dsh/roles/<name>.md
-    // 打包副本刷新：bundleRoles 模板的角色包（.generated/<tpl>/roles/<id>.md 等）
-    // 是生成时的快照，copyTree 对已存在文件跳过不覆盖。自定义角色（如迁移后的
-    // dispatcher）被编辑后，若不同步刷新，引用该角色的内置模板会继续读到旧快照，
-    // 违背「内容修改全局生效」的角色库语义（Codex PR#124 P1）。
-    // 仅刷新四类打包根中已存在的同名快照，尽力而为：单文件失败不影响其余。
-    async function refreshBundledRoleCopies(id, content) {
-      if (fs === undefined || !id || typeof id !== 'string') return
+    // 打包角色包回退（Codex PR#124 第二轮 P1）：bundleRoles 模板自带 roles/ 快照，
+    // 其中可能包含已迁出内置集合的历史自定义角色（如 dispatcher）。产品工作区没有
+    // 仓库 dsh/roles/，这类角色必须仍以「自定义」身份可见、可编辑，否则从角色库消失。
+    // 权威来源仍是工作区 dsh/roles/（用户状态）；打包快照只读回退，**绝不回写**——
+    // .generated 是生成产物，写入会变成可被重生成覆盖的用户状态（第二轮 P1 撤销项）。
+    async function bundledLegacyRoles() {
+      const out = new Map()
+      if (fs === undefined) return out
       let p = null
-      try { p = await rootPaths() } catch (e) { return }
+      try { p = await rootPaths() } catch (e) { return out }
       const spots = [p && p.builtinDir, p && p.packageBuiltinDir, p && p.homeBuiltinDir, p && p.skillRoot]
-      const policy = writePolicy()
-      const body = content + (content.endsWith('\n') ? '' : '\n')
       for (const spot of spots) {
         if (!spot) continue
         let entries = null
         try { entries = await fs.listDir(await fs.resolve(spot)) } catch (e) { continue }
         for (const ent of entries || []) {
           if (!ent || ent.type !== 'directory' || !ent.name || ent.name === 'roles') continue
-          const snap = spot + '/' + ent.name + '/roles/' + id + '.md'
-          let target = null
-          try { target = await fs.resolve(snap) } catch (e) { continue }
-          let exists = false
-          try { const st = await fs.stat(target); exists = !!(st && st.type === 'file') } catch (e) { }
-          if (!exists) continue
-          try {
-            await fs.writeText(target, body, undefined, undefined, policy)
-          } catch (e) { /* 单文件刷新失败不影响其余 */ }
+          let roleEnts = null
+          try { roleEnts = await fs.listDir(await fs.resolve(spot + '/' + ent.name + '/roles')) } catch (e) { continue }
+          for (const rf of roleEnts || []) {
+            if (!rf || rf.type !== 'file' || !rf.name || !rf.name.endsWith('.md')) continue
+            const id = rf.name.slice(0, -3)
+            if (!id || BUILTIN_ROLE_IDS.indexOf(id) >= 0 || out.has(id)) continue
+            try {
+              out.set(id, String(await fs.readText(await fs.resolve(spot + '/' + ent.name + '/roles/' + rf.name))))
+            } catch (e) { /* 单文件读取失败不影响其余 */ }
+          }
         }
       }
+      return out
     }
 
     registerRpc('vwf.roles.create', async (a) => {
@@ -1385,7 +1407,6 @@ return {
       } catch (e) {
         return { ok: false, errors: [{ at: '$', message: '角色文件写入失败：' + String((e && e.message) || e) }] }
       }
-      await refreshBundledRoleCopies(name, content)
       const role = await getRoleDetail(name)
       return { ok: true, role }
     })
@@ -1403,7 +1424,14 @@ return {
       }
       const inv = await readRoleFiles()
       if (inv.state === 'error') return { ok: false, errors: [{ at: '$', message: '角色库读取失败：' + inv.message }] }
-      if (!inv.files.has(id)) return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + id }] }
+      // 存在性判定：工作区有文件，或打包回退可见（Codex PR#124 第二轮 P1）。
+      // 后者代表产品工作区无 dsh/roles/<id>.md 但 bundleRoles 模板自带该角色快照——
+      // 编辑时种子到工作区，.generated 不被改写。
+      let bundledLegacy = null
+      if (!inv.files.has(id)) {
+        try { bundledLegacy = await bundledLegacyRoles() } catch (e) { bundledLegacy = new Map() }
+        if (!bundledLegacy.has(id)) return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + id }] }
+      }
       const target = newName && newName !== id ? newName : id
       let isRename = target !== id
       if (isRename) {
@@ -1453,9 +1481,9 @@ return {
           return { ok: false, errors: [{ at: '$', message: '旧角色文件删除失败（已回滚新文件' + (rmNew && rmNew.ok ? '' : '，回滚失败，请手动清理 ') + '）：' + rmOld.detail }] }
         }
       }
-      // 打包副本同步刷新：bundleRoles 模板引用本角色时，其 roles/ 快照必须跟上，
-      // 否则内置模板继续使用旧内容（Codex PR#124 P1）。
-      await refreshBundledRoleCopies(target, content)
+      // 编辑打包回退角色（工作区无文件、定义来自内置模板角色包）时，此处写入
+      // 即完成「种子到自定义角色库」；运行时经 roleRef 的工作区优先链路读到新内容，
+      // .generated 打包快照保持生成产物身份、不被改写（Codex PR#124 第二轮 P1）。
       const role = await getRoleDetail(target)
       return { ok: true, role }
     })

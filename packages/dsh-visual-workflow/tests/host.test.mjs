@@ -656,22 +656,31 @@ test('dispatcher 迁为自定义后历史引用不丢失：仍可解析、引用
   assert.ok(u.count >= 1, `历史引用仍被统计（实际 ${u.count}）`)
 })
 
-test('编辑自定义角色同步刷新打包副本（bundleRoles 快照跟随更新）', async () => {
-  // Codex PR#124 P1 回归：bundleRoles 模板的角色包是生成期快照，copyTree 对已存在
-  // 文件跳过不覆盖。dispatcher 迁为自定义后若编辑其内容，内置模板必须读到新内容，
-  // 而不是继续使用旧快照（否则违背「内容修改全局生效」的角色库语义）。
+test('迁移角色在产品工作区经打包快照可见且可编辑（不回写 .generated）', async () => {
+  // Codex PR#124 第二轮 P1：dispatcher 迁出内置后，产品工作区没有 dsh/roles/dispatcher.md，
+  // 必须仍以「自定义」身份从 bundleRoles 模板的角色包只读回退可见。编辑时种子到工作区
+  // dsh/roles/，绝不回写 .generated（生成产物不得承载用户状态）。
   const fs = makeFs({
-    [REPO + '/dsh/roles/dispatcher.md']: '旧内容\n',
-    [REPO + '/.generated/default-workflow/roles/dispatcher.md']: '旧内容\n',
-    [DSH_HOME + '/.generated/default-workflow/roles/dispatcher.md']: '旧内容\n',
+    [REPO + '/.generated/default-workflow/roles/dispatcher.md']: '打包快照正文\n',
   })
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
-  const r = await call(handlers, 'vwf.roles.update', { id: 'dispatcher', name: 'dispatcher', content: '新内容\n' })
-  assert.equal(r.ok, true, JSON.stringify(r.errors || ''))
-  assert.ok(fs._files.get(REPO + '/dsh/roles/dispatcher.md').startsWith('新内容'), '工作区角色文件已更新')
-  assert.ok(fs._files.get(REPO + '/.generated/default-workflow/roles/dispatcher.md').startsWith('新内容'), '仓库打包副本已刷新')
-  assert.ok(fs._files.get(DSH_HOME + '/.generated/default-workflow/roles/dispatcher.md').startsWith('新内容'), '用户级打包副本已刷新')
+  // 1) 产品工作区（无 dsh/roles/dispatcher.md）→ 仍出现在自定义分组
+  const r = await call(handlers, 'vwf.roles')
+  const dp = r.roles.find(x => x.id === 'dispatcher')
+  assert.ok(dp, '打包回退：迁移角色仍可见')
+  assert.equal(dp.builtin, false, '身份为自定义')
+  // 2) 详情可取
+  const d = await call(handlers, 'vwf.roles.get', { id: 'dispatcher' })
+  assert.equal(d.ok, true)
+  assert.equal(d.role.builtin, false)
+  assert.equal(d.role.content, '打包快照正文\n', '详情回退到打包快照内容')
+  // 3) 编辑 → 种子到工作区 dsh/roles/，.generated 不被改写
+  const upd = await call(handlers, 'vwf.roles.update', { id: 'dispatcher', name: 'dispatcher', content: '编辑后的新内容\n' })
+  assert.equal(upd.ok, true, JSON.stringify(upd.errors || ''))
+  assert.ok(fs._files.has(REPO + '/dsh/roles/dispatcher.md'), '种子到工作区 dsh/roles/')
+  assert.equal(fs._files.get(REPO + '/dsh/roles/dispatcher.md'), '编辑后的新内容\n', '工作区文件为编辑后内容')
+  assert.equal(fs._files.get(REPO + '/.generated/default-workflow/roles/dispatcher.md'), '打包快照正文\n', '.generated 打包快照未被改写')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
