@@ -656,6 +656,24 @@ test('dispatcher 迁为自定义后历史引用不丢失：仍可解析、引用
   assert.ok(u.count >= 1, `历史引用仍被统计（实际 ${u.count}）`)
 })
 
+test('编辑自定义角色同步刷新打包副本（bundleRoles 快照跟随更新）', async () => {
+  // Codex PR#124 P1 回归：bundleRoles 模板的角色包是生成期快照，copyTree 对已存在
+  // 文件跳过不覆盖。dispatcher 迁为自定义后若编辑其内容，内置模板必须读到新内容，
+  // 而不是继续使用旧快照（否则违背「内容修改全局生效」的角色库语义）。
+  const fs = makeFs({
+    [REPO + '/dsh/roles/dispatcher.md']: '旧内容\n',
+    [REPO + '/.generated/default-workflow/roles/dispatcher.md']: '旧内容\n',
+    [DSH_HOME + '/.generated/default-workflow/roles/dispatcher.md']: '旧内容\n',
+  })
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const r = await call(handlers, 'vwf.roles.update', { id: 'dispatcher', name: 'dispatcher', content: '新内容\n' })
+  assert.equal(r.ok, true, JSON.stringify(r.errors || ''))
+  assert.ok(fs._files.get(REPO + '/dsh/roles/dispatcher.md').startsWith('新内容'), '工作区角色文件已更新')
+  assert.ok(fs._files.get(REPO + '/.generated/default-workflow/roles/dispatcher.md').startsWith('新内容'), '仓库打包副本已刷新')
+  assert.ok(fs._files.get(DSH_HOME + '/.generated/default-workflow/roles/dispatcher.md').startsWith('新内容'), '用户级打包副本已刷新')
+})
+
 // ═══════════════════════════════════════════════════════════════════════════
 // issue-58 · 角色库：内置/自定义分类、创建、编辑、引用保护与安全删除
 // ═══════════════════════════════════════════════════════════════════════════

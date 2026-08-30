@@ -1331,6 +1331,37 @@ return {
       return { ok: true, id, count: u.count, refs: u.refs }
     })
     // 空白新增 / 基于角色创建：校验名称与内容 → 写入工作区 dsh/roles/<name>.md
+    // 打包副本刷新：bundleRoles 模板的角色包（.generated/<tpl>/roles/<id>.md 等）
+    // 是生成时的快照，copyTree 对已存在文件跳过不覆盖。自定义角色（如迁移后的
+    // dispatcher）被编辑后，若不同步刷新，引用该角色的内置模板会继续读到旧快照，
+    // 违背「内容修改全局生效」的角色库语义（Codex PR#124 P1）。
+    // 仅刷新四类打包根中已存在的同名快照，尽力而为：单文件失败不影响其余。
+    async function refreshBundledRoleCopies(id, content) {
+      if (fs === undefined || !id || typeof id !== 'string') return
+      let p = null
+      try { p = await rootPaths() } catch (e) { return }
+      const spots = [p && p.builtinDir, p && p.packageBuiltinDir, p && p.homeBuiltinDir, p && p.skillRoot]
+      const policy = writePolicy()
+      const body = content + (content.endsWith('\n') ? '' : '\n')
+      for (const spot of spots) {
+        if (!spot) continue
+        let entries = null
+        try { entries = await fs.listDir(await fs.resolve(spot)) } catch (e) { continue }
+        for (const ent of entries || []) {
+          if (!ent || ent.type !== 'directory' || !ent.name || ent.name === 'roles') continue
+          const snap = spot + '/' + ent.name + '/roles/' + id + '.md'
+          let target = null
+          try { target = await fs.resolve(snap) } catch (e) { continue }
+          let exists = false
+          try { const st = await fs.stat(target); exists = !!(st && st.type === 'file') } catch (e) { }
+          if (!exists) continue
+          try {
+            await fs.writeText(target, body, undefined, undefined, policy)
+          } catch (e) { /* 单文件刷新失败不影响其余 */ }
+        }
+      }
+    }
+
     registerRpc('vwf.roles.create', async (a) => {
       const name = String((a && a.name) || '').trim()
       const content = a && typeof a.content === 'string' ? a.content : ''
@@ -1354,6 +1385,7 @@ return {
       } catch (e) {
         return { ok: false, errors: [{ at: '$', message: '角色文件写入失败：' + String((e && e.message) || e) }] }
       }
+      await refreshBundledRoleCopies(name, content)
       const role = await getRoleDetail(name)
       return { ok: true, role }
     })
@@ -1421,6 +1453,9 @@ return {
           return { ok: false, errors: [{ at: '$', message: '旧角色文件删除失败（已回滚新文件' + (rmNew && rmNew.ok ? '' : '，回滚失败，请手动清理 ') + '）：' + rmOld.detail }] }
         }
       }
+      // 打包副本同步刷新：bundleRoles 模板引用本角色时，其 roles/ 快照必须跟上，
+      // 否则内置模板继续使用旧内容（Codex PR#124 P1）。
+      await refreshBundledRoleCopies(target, content)
       const role = await getRoleDetail(target)
       return { ok: true, role }
     })

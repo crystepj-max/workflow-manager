@@ -92,7 +92,7 @@
 
 | 产物 | 位置 |
 |---|---|
-| 实现代码与测试 | PR #124（`dev-#81-Built-in-Roles`，4 提交） |
+| 实现代码与测试 | PR #124（`dev-#81-Built-in-Roles`） |
 | 需求分析（三要素 + size 判定 + 依赖现状） | `specs/issue-81-built-in-roles/requirements-analysis.md` |
 | 8 张工单记录（含验收证据） | `specs/issue-81-built-in-roles/issues/01–08` |
 | 本收口报告 | `specs/issue-81-built-in-roles/CLOSEOUT.md` |
@@ -101,7 +101,14 @@
 | 能力边界原则 | `docs/design/workflow-design-principles.md` §1 / §10 / §13 |
 | 探索三角色素材来源 | 分支 `feat/multi-perspective-exploration`（PR #70，仅素材） |
 
----
+## 6.5 Codex 审查意见处置（2026-08-30）
+
+两条审查意见均在本 Issue 范围内，均已整改：
+
+| 意见 | 处置 |
+|---|---|
+| **P1** `dispatcher` 编辑后打包快照不跟随 | 新增 `refreshBundledRoleCopies`：角色创建/更新后同步刷新四类打包根中已存在的同名快照；新增回归测试断言仓库级与用户级副本均已刷新 |
+| **P2** 契约一致性 T8 被临时豁免 | **撤销豁免、恢复 T8 原强度**；角色定义不再声明产物文件名（改为「由所在模板的输出契约声明」） |
 
 ## 7. 关联
 
