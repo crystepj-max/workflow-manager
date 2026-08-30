@@ -88,9 +88,14 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
     process.exit(1)
   }
 
+  // lineage 不变量（§7.2）：每次写入都要求实际分支与 run.work_branch 一致；
   // Proof 绑定校验（§7.3）：payload 的 verified_* 必须与真实工作区一致，而非仅非空
+  const actualBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot(runDir), encoding: 'utf-8' }).trim()
+  if (actualBranch !== run.work_branch) {
+    console.error(`当前分支(${actualBranch}) 与 run.work_branch(${run.work_branch}) 不一致，拒绝写入（契约 §7.2 lineage）`)
+    process.exit(1)
+  }
   if (record.payload && (record.payload.verified_head !== undefined || record.payload.verified_branch !== undefined)) {
-    const actualBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot(runDir), encoding: 'utf-8' }).trim()
     const mismatches = []
     if (record.payload.verified_head !== run.current_head) {
       mismatches.push(`verified_head(${record.payload.verified_head}) ≠ 当前 HEAD(${run.current_head})`)
@@ -204,10 +209,13 @@ function cmdBudget(runDir, target, flags) {
     decided_by: flags.decidedBy,
   }]
   run.rollback_budget = n
-  // 人工决策恢复 Run：清除额度耗尽挂起态
-  if (run.lifecycle_reason === 'MAX_ROUNDS_REACHED') {
+  // 只有新额度确实能容纳下一次自动回退时才恢复挂起态；无扩容则保持 WAITING_HUMAN
+  if (run.lifecycle_reason === 'MAX_ROUNDS_REACHED' && n > (run.rollback_used || 0)) {
     delete run.lifecycle
     delete run.lifecycle_reason
+    console.log('额度扩容生效，Run 恢复运行')
+  } else if (run.lifecycle_reason === 'MAX_ROUNDS_REACHED') {
+    console.log(`额度未扩容（${n} <= 已用 ${run.rollback_used}），Run 保持 WAITING_HUMAN`)
   }
   saveRun(runDir, run)
   console.log(`回退额度调整：${from} → ${n}（decided_by=${flags.decidedBy}，已入账 budget_adjustments）`)

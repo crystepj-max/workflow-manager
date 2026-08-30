@@ -28,7 +28,7 @@ function makeRunDir({ withGit = true } = {}) {
   }, null, 2))
   if (withGit) {
     // fail-closed HEAD 依赖真实 git 工作区
-    execFileSync('git', ['init', '-q'], { cwd: root })
+    execFileSync('git', ['init', '-q', '-b', 'dev-cwf-test-01'], { cwd: root })
     execFileSync('git', ['config', 'user.email', 't@t'], { cwd: root })
     execFileSync('git', ['config', 'user.name', 't'], { cwd: root })
     execFileSync('git', ['add', '-A'], { cwd: root })
@@ -122,12 +122,18 @@ test('rollback：额度记账、耗尽持久化生命周期、追加额度后可
   assert.equal(runState.rollback_history.length, 4)
   assert.equal(runState.rollback_history[3].rejected, true)
 
+  // 无扩容调整（仍为 3）→ 保持挂起，不误恢复
+  const noop = run(['budget', runDir, '3', '--reason', '无扩容确认', '--decided-by', 'tester'])
+  assert.equal(noop.code, 0)
+  assert.match(noop.out, /保持 WAITING_HUMAN/)
+  let midState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(midState.lifecycle, 'WAITING_HUMAN')
   // 人工追加额度（budget 子命令显式入账并恢复挂起态）后，下一次回退可执行且挂起态自动清除
   const rb = run(['budget', runDir, '4', '--reason', '人工决策追加', '--decided-by', 'tester'])
   assert.equal(rb.code, 0, rb.out)
   assert.match(rb.out, /3 → 4/)
-  const midState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
-  assert.equal(midState.budget_adjustments.length, 1)
+  midState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(midState.budget_adjustments.length, 2)
   assert.equal(midState.budget_adjustments[0].decided_by, 'tester')
   assert.equal(midState.lifecycle, undefined) // 恢复：挂起态已清除
   const r2 = run(['rollback', runDir, 'dev'])
@@ -166,6 +172,20 @@ test('write：非 git 工作区 fail closed（不得绑定未观察的 HEAD）',
   const r = run(['write', runDir, 'requirements_baseline', payload])
   assert.equal(r.code, 1)
   assert.match(r.out, /真实 HEAD|中止/)
+  assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
+})
+
+test('write：分支切换后拒绝写入（lineage 不一致）', () => {
+  const { root, runDir } = makeRunDir()
+  execFileSync('git', ['checkout', '-q', '-b', 'other-branch'], { cwd: root })
+  const payload = join(runDir, 'payload.json')
+  writeFileSync(payload, JSON.stringify({
+    goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
+    gaps: [], outcome: 'baseline_ready', status: 'draft',
+  }))
+  const r = run(['write', runDir, 'requirements_baseline', payload])
+  assert.equal(r.code, 1)
+  assert.match(r.out, /与 run\.work_branch.*不一致/)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
 })
 
