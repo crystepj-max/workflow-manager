@@ -208,6 +208,8 @@ function deepEqual(a, b) {
   return ka.every(k => k in b && deepEqual(a[k], b[k]))
 }
 
+export { deepEqual }
+
 export function validateRecord(schema, data) {
   const errors = []
   validate(schema, data, '', schema, errors, 0)

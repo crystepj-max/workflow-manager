@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { validateRecord } from './cwf-validate.mjs'
+import { validateRecord, deepEqual } from './cwf-validate.mjs'
 import { parseBudget } from './cwf-run-init.mjs'
 
 const RECORD_TYPES = [
@@ -136,6 +136,14 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
     const existing = JSON.parse(readFileSync(outPath, 'utf-8'))
     if (isFinalized(existing)) {
       console.error(`${outPath} 已是终结态记录，不可覆盖——请推进 attempt（rollback）或 reverify 后重写（契约 §8.5/§5）`)
+      process.exit(1)
+    }
+    // awaiting→decided 成熟刷新：呈递给人工的 assembled 证据包不得被改写（签收对呈递版本，§3.6）
+    if (recordType === 'acceptance_package'
+        && existing.payload?.status === 'awaiting_decision'
+        && record.payload?.status === 'decided'
+        && !deepEqual(existing.payload.assembled, record.payload.assembled)) {
+      console.error('awaiting→decided 刷新不得改写已呈递的 assembled 证据包（契约 §3.6：签收对象即呈递版本）')
       process.exit(1)
     }
   }
@@ -326,6 +334,8 @@ function cmdReverify(runDir, flags) {
   // 保留原 HEAD 绑定的旧 proof（§8.5）；不是回退，不耗额度
   const run = loadRun(runDir)
   assertRunBranch(runDir, run)
+  // 同步刷新身份锚点：sync 后 run.current_head 必须反映实际工作区（§7.1）
+  run.current_head = currentHead(runDir)
   run.attempt += 1
   run.rollback_history = [...(run.rollback_history || []), {
     at: new Date().toISOString(),

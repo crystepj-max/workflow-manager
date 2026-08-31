@@ -384,6 +384,59 @@ test('archive：--separate-git-dir 布局下主检出经 worktree list 推导，
   assert.equal(existsSync(join(main, '.agent-runs', 'schema', 'handoff.schema.json')), true)
 })
 
+test('write：awaiting→decided 成熟刷新禁止改写 assembled（签收对呈递版本）', () => {
+  const { root, runDir } = makeRunDir()
+  const realHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const realBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const assembled = {
+    requirements_baseline_ref: 'r', design_package_ref: 'd', dev_handoff_ref: 'v',
+    review_proof_ref: 'rp', test_proof_ref: 'tp',
+    integration_checkpoint: { target_ref: 'main', target_head_at_check: realHead, target_advanced: false, proofs_state: 'still_valid' },
+  }
+  const mk = (name, status, extra = {}) => {
+    const f = join(runDir, name)
+    writeFileSync(f, JSON.stringify({ status, assembled, ...extra }))
+    return f
+  }
+  // awaiting 写入
+  assert.equal(run(['write', runDir, 'acceptance_package', mk('a1.json', 'awaiting_decision'), '--produced-by', 'test-suite', '--stage', 'human_acceptance']).code, 0)
+  // decided 且 assembled 不变 → 允许成熟刷新
+  assert.equal(run(['write', runDir, 'acceptance_package', mk('a2.json', 'decided', { decision: 'accept', decided_by: 'x', decided_at: '2026-08-30T08:00:00Z', verified_branch: realBranch, verified_head: realHead }), '--produced-by', 'test-suite', '--stage', 'human_acceptance']).code, 0)
+})
+
+test('write：awaiting→decided 改写 assembled 拒绝', () => {
+  const { root, runDir } = makeRunDir()
+  const realHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const realBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const assembled = {
+    requirements_baseline_ref: 'r', design_package_ref: 'd', dev_handoff_ref: 'v',
+    review_proof_ref: 'rp', test_proof_ref: 'tp',
+    integration_checkpoint: { target_ref: 'main', target_head_at_check: realHead, target_advanced: false, proofs_state: 'still_valid' },
+  }
+  const mk = (name, status, extra = {}) => {
+    const f = join(runDir, name)
+    writeFileSync(f, JSON.stringify({ status, assembled, ...extra }))
+    return f
+  }
+  run(['write', runDir, 'acceptance_package', mk('a1.json', 'awaiting_decision'), '--produced-by', 'test-suite', '--stage', 'human_acceptance'])
+  // decided 且 assembled 被改 → 拒绝
+  const r = run(['write', runDir, 'acceptance_package', mk('a2.json', 'decided', { assembled: { ...assembled, review_proof_ref: 'tampered' }, decision: 'accept', decided_by: 'x', decided_at: '2026-08-30T08:00:00Z', verified_branch: realBranch, verified_head: realHead }), '--produced-by', 'test-suite', '--stage', 'human_acceptance'])
+  assert.equal(r.code, 1)
+  assert.match(r.out, /不得改写已呈递的 assembled/)
+})
+
+test('reverify 同步刷新 run.current_head', () => {
+  const { root, runDir } = makeRunDir()
+  // 产生新提交后 reverify → run.json current_head 应反映实际 HEAD
+  writeFileSync(join(root, 'x.txt'), 'x')
+  execFileSync('git', ['add', '-A'], { cwd: root })
+  execFileSync('git', ['commit', '-q', '-m', 'x'], { cwd: root })
+  const realHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  run(['reverify', runDir, '--reason', 'checkpoint sync'])
+  const runState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(runState.current_head, realHead)
+})
+
 test('check：对既有记录只校验', () => {
   const { runDir } = makeRunDir()
   const payload = join(runDir, 'payload.json')
