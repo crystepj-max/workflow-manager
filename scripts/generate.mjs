@@ -126,9 +126,14 @@ export function compileBlueprint(bp, opts = {}) {
   const autoReschedule = bp.onMaxRounds === 'auto-reschedule';
   // 内置角色清单：opts 注入优先（测试用），否则读宿主注册表并缓存
   const builtinRoleIds = opts.builtinRoleIds || builtinRoleIdsCached();
-  // 内置角色正文（#129 遗留项 2）：临时/未保存图编译自包含——正文内联进 ROLE_DEFS，
-  // roleRef 对内置角色直接返回内联定义，不依赖工作区 dsh/roles 或打包角色包。
-  const builtinRoleDefs = opts.builtinRoleDefs || loadBuiltinRoleDefs(builtinRoleIds);
+  // 内置角色正文（#129 遗留项 2）：临时/未保存图编译自包含——正文内联进 ROLE_DEFS。
+  // 只内联蓝图实际引用到的内置角色（Codex PR#130 P1，评论 3900290054）：全部 12 个
+  // 内联会让最小临时图编译产物 >65KB，超过宿主 runNode stdout maxBytes:64*1024 捕获
+  // 上限（host.js:137），JSON.parse 前被截断/拒绝，vwf.script / wf_run 临时图崩溃。
+  const referencedProfiles = new Set((bp.nodes || []).map((n) => n && n.profile).filter(Boolean))
+  const allDefs = opts.builtinRoleDefs || loadBuiltinRoleDefs(builtinRoleIds);
+  const builtinRoleDefs = {};
+  for (const id of Object.keys(allDefs)) if (referencedProfiles.has(id)) builtinRoleDefs[id] = allDefs[id];
 
   const lines = [
     'const A = args || {}',
