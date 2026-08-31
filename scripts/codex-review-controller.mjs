@@ -47,6 +47,10 @@ export function extendDecision(state, amount = 1) {
   return { ok: true, maxRounds: state.maxRounds + 1 };
 }
 
+export function hasReviewIdentity(reviewToken) {
+  return typeof reviewToken === 'string' && reviewToken.trim().length > 0;
+}
+
 export function buildReviewPrompt(round, maxRounds, extensionReason = '') {
   if (round === 1) {
     return `@codex review 第 1/${maxRounds} 轮完整审查：围绕当前 Issue/PR 的验收条件检查需求符合性、正确性、回归风险、证据与必要边界条件。请区分必须在本 PR 修复的阻塞问题与可作为 follow-up 的非阻塞建议。`;
@@ -146,7 +150,21 @@ async function saveState(token, repo, number, stateComment, state) {
   return postComment(token, repo, number, body);
 }
 
-async function handleNext({ token, repo, number, actor, stateComment, state, head }) {
+async function triggerReview({ token, reviewToken, repo, number, body }) {
+  if (!hasReviewIdentity(reviewToken)) {
+    await postComment(token, repo, number, '⛔ Controller 尚未配置可被 Codex 识别的触发身份，本次请求**不消耗 Review 轮次**。请先配置仓库 Secret `CODEX_REVIEW_TOKEN`，其身份必须已经连接 Codex 与 GitHub，然后重新执行同一条 `/codex-review next` 或 `/codex-review retry`。');
+    return false;
+  }
+  try {
+    await postComment(reviewToken, repo, number, body);
+    return true;
+  } catch (error) {
+    await postComment(token, repo, number, `⛔ Codex Review 触发身份调用失败，本次请求**不消耗 Review 轮次**。请检查 \`CODEX_REVIEW_TOKEN\` 后重试。错误：${sanitizeText(error.message)}`);
+    return false;
+  }
+}
+
+async function handleNext({ token, reviewToken, repo, number, actor, stateComment, state, head }) {
   const decision = nextDecision(state, head);
   if (!decision.ok) {
     if (decision.reason === 'EXHAUSTED') {
@@ -160,17 +178,20 @@ async function handleNext({ token, repo, number, actor, stateComment, state, hea
     return;
   }
 
+  const extensionReason = state.extensions.at(-1)?.reason ?? '';
+  const prompt = `${buildReviewPrompt(decision.round, state.maxRounds, extensionReason)}\n\n<!-- codex-review-controller-trigger round:${decision.round} head:${head} -->`;
+  const triggered = await triggerReview({ token, reviewToken, repo, number, body: prompt });
+  if (!triggered) return;
+
   state.round = decision.round;
   state.lastHead = head;
   state.status = 'REVIEW_REQUESTED';
   state.updatedAt = new Date().toISOString();
   state.lastRequestedBy = actor;
   await saveState(token, repo, number, stateComment, state);
-  const extensionReason = state.extensions.at(-1)?.reason ?? '';
-  await postComment(token, repo, number, `${buildReviewPrompt(state.round, state.maxRounds, extensionReason)}\n\n<!-- codex-review-controller-trigger round:${state.round} head:${head} -->`);
 }
 
-async function handleRetry({ token, repo, number, actor, stateComment, state, head }) {
+async function handleRetry({ token, reviewToken, repo, number, actor, stateComment, state, head }) {
   const decision = retryDecision(state, head);
   if (!decision.ok) {
     const message = decision.reason === 'NO_ROUND'
@@ -179,13 +200,16 @@ async function handleRetry({ token, repo, number, actor, stateComment, state, he
     await postComment(token, repo, number, `ℹ️ ${message}`);
     return;
   }
+  const extensionReason = state.extensions.at(-1)?.reason ?? '';
+  const prompt = `${buildReviewPrompt(state.round, state.maxRounds, extensionReason)}\n\n> Controller：这是 Round ${state.round} 的服务/工具故障重试，不增加业务轮次。\n\n<!-- codex-review-controller-retry round:${state.round} head:${head} -->`;
+  const triggered = await triggerReview({ token, reviewToken, repo, number, body: prompt });
+  if (!triggered) return;
+
   state.status = 'RETRY_REQUESTED';
   state.retries = (state.retries ?? 0) + 1;
   state.updatedAt = new Date().toISOString();
   state.lastRequestedBy = actor;
   await saveState(token, repo, number, stateComment, state);
-  const extensionReason = state.extensions.at(-1)?.reason ?? '';
-  await postComment(token, repo, number, `${buildReviewPrompt(state.round, state.maxRounds, extensionReason)}\n\n> Controller：这是 Round ${state.round} 的服务/工具故障重试，不增加业务轮次。\n\n<!-- codex-review-controller-retry round:${state.round} head:${head} -->`);
 }
 
 async function handleExtend({ token, repo, number, actor, stateComment, state, command }) {
@@ -214,7 +238,7 @@ async function handleExtend({ token, repo, number, actor, stateComment, state, c
   await postComment(token, repo, number, `✅ @${actor} 已人工追加 **1 轮** Codex Review，最大轮次变为 **${state.maxRounds}**。原因：${command.reason}\n\n追加额度不会自动触发审查；完成针对阻塞项的修改并提交新版本后，再使用 \`/codex-review next\`。`);
 }
 
-export async function runController(event, { token, repo }) {
+export async function runController(event, { token, reviewToken, repo }) {
   if (!event.issue?.pull_request) return { handled: false, reason: 'NOT_PR' };
   const command = parseCommand(event.comment?.body);
   if (!command) return { handled: false, reason: 'NOT_COMMAND' };
@@ -235,7 +259,7 @@ export async function runController(event, { token, repo }) {
   const pr = await githubRequest(token, `/repos/${repo}/pulls/${number}`);
   const head = pr.head.sha;
   const actor = event.comment.user.login;
-  const context = { token, repo, number, actor, stateComment, state, head, command };
+  const context = { token, reviewToken, repo, number, actor, stateComment, state, head, command };
 
   if (command.type === 'next') await handleNext(context);
   if (command.type === 'retry') await handleRetry(context);
@@ -246,10 +270,11 @@ export async function runController(event, { token, repo }) {
 async function main() {
   const eventPath = process.argv[2] ?? process.env.GITHUB_EVENT_PATH;
   const token = process.env.GITHUB_TOKEN;
+  const reviewToken = process.env.CODEX_REVIEW_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
   if (!eventPath || !token || !repo) throw new Error('缺少 GITHUB_EVENT_PATH / GITHUB_TOKEN / GITHUB_REPOSITORY');
   const event = JSON.parse(await fs.readFile(eventPath, 'utf8'));
-  await runController(event, { token, repo });
+  await runController(event, { token, reviewToken, repo });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
