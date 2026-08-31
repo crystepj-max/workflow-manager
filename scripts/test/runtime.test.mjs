@@ -363,6 +363,8 @@ test('T8 契约一致性：dsh/roles/*.md 反引号文件名 ⊆ 模板 output.f
   tpl.nodes.forEach((n) => {
     if (n.output && n.output.files && typeof n.output.files === 'object') Object.keys(n.output.files).forEach((p) => declared.add(p))
   })
+  // 角色（#81）只表达能力，不声明产物契约：具体产物文件名由所在模板的
+  // output.files 提供。探索模板（#82）落地其蓝图时再引入自己的产物名。
   const rolesDir = path.join(here, '../../dsh/roles')
   const roleNames = readdirSync(rolesDir).filter((f) => f.endsWith('.md'))
   assert.ok(roleNames.length >= 6, '角色文件齐全')

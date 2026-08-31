@@ -47,7 +47,8 @@ const SEED_DSL = {
 // ── 角色库假数据（issue-58）───────────────────────────────────────────────
 const roleState = {
   roles: [
-    { id: 'dispatcher', name: '调度', summary: '调度角色', builtin: true, content: '调度角色正文\n职责：调度。\n' },
+    // issue-81：dispatcher 已退出内置身份，迁为自定义角色
+    { id: 'dispatcher', name: '调度', summary: '调度角色', builtin: false, content: '调度角色正文\n职责：调度。\n' },
     { id: 'dev', name: '开发', summary: '开发角色', builtin: true, content: '开发角色正文\n' },
     { id: '需求分析师', name: '需求分析师', summary: '需求拆解', builtin: false, content: '需求分析正文\n' },
   ],
@@ -963,13 +964,14 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
   const viewBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '查看')
   assert.ok(viewBtns.length >= 1, '内置角色提供查看入口')
   const editBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '编辑')
-  assert.ok(editBtns.length === 1, '内置角色不提供编辑入口（仅自定义）')
+  // issue-81 后自定义角色为 dispatcher + 需求分析师两个；内置仅剩 dev，不提供编辑入口
+  assert.ok(editBtns.length === 2, '内置角色不提供编辑入口（仅自定义）')
   // 查看内置角色：只读 + 基于此角色创建
   await act(async () => {
     viewBtns[0].click()
     await flush()
   })
-  assert.ok(byText(mgr, '调度角色正文'), '查看内置角色完整配置')
+  assert.ok(byText(mgr, '开发角色正文'), '查看内置角色完整配置')
   const createFromBtn = byText(mgr, '基于此角色创建自定义角色')
   assert.ok(createFromBtn, '内置查看页提供基于此角色创建')
   await act(async () => {
@@ -977,7 +979,7 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
     await flush()
   })
   const nameInput = mgr.querySelector('input.vwf-input')
-  assert.equal(nameInput.value, 'dispatcher - 自定义', '建议临时名称预填')
+  assert.equal(nameInput.value, 'dev - 自定义', '建议临时名称预填')
   // 改名并保存（零引用 → 直接保存，不弹影响确认）
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
