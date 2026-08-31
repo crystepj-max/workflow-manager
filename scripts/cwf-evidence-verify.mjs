@@ -67,8 +67,9 @@ export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false, live 
 
   // ② review approve + test pass（user_accepted 例外放宽）
   if (relaxedUserAccepted) {
-    const okFb = typeof ap.payload?.feedback === 'string' && /\S/.test(ap.payload.feedback)
-    check('②', 'user_accepted 例外：feedback 非空说明差异', okFb, okFb ? 'ok' : 'feedback 缺失')
+    // 例外可达性（PR #132 Review）：签收在引擎校验之后，feedback 由 schema 在签收写入时强制——
+    // 此处只放行证据链并提示该强制点，不得在 awaiting 态要求 feedback
+    check('②', 'user_accepted 例外：允许 fail/blocked 证据链知情接受', true, '放行；签收写入时 schema 强制 feedback（§3.6）')
   } else {
     const ok = review?.payload?.verdict === 'approve' && test?.payload?.verdict === 'pass'
     check('②', 'review approve 且 test pass', ok, ok ? 'ok' : `review=${review?.payload?.verdict} test=${test?.payload?.verdict}`)
@@ -97,7 +98,14 @@ export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false, live 
   if (liveNow && run.current_head !== liveNow.head) {
     badHead.push(`run.json current_head(${run.current_head}) 落后于实况——先 reverify`)
   }
-  check('④', 'Proof 绑定实况 HEAD/branch', badHead.length === 0, badHead.join('; ') || 'ok')
+  // 同项附带 Integration Checkpoint 条件不变量（§7.3）：引擎不经 schema，此处直验
+  const ckpt = refs.integration_checkpoint
+  if (!ckpt || typeof ckpt !== 'object') {
+    badHead.push('integration_checkpoint 缺失')
+  } else if (ckpt.target_advanced === true && ckpt.proofs_state !== 'rerun_completed') {
+    badHead.push('checkpoint target 已前进但 proofs_state≠rerun_completed（受影响 Proof 未重跑）')
+  }
+  check('④', 'Proof 绑定实况 HEAD/branch 且 checkpoint 条件不变量成立', badHead.length === 0, badHead.join('; ') || 'ok')
 
   // ⑤ baseline confirmed 且无残留 gaps
   const ok5 = baseline?.payload?.status === 'confirmed' && (baseline.payload.gaps || []).length === 0
