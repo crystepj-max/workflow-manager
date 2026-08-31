@@ -1485,6 +1485,19 @@ function hdDsl() {
   }
 }
 
+function outcomeDsl() {
+  const bp = JSON.parse(readFileSync(join(here, '..', '..', '..', 'scripts', 'test', 'fixtures', 'outcome-evaluate-mini.json'), 'utf8'))
+  const models = (bp.bindings && bp.bindings.models) || {}
+  return {
+    id: bp.id,
+    name: bp.displayName,
+    entry: bp.entry,
+    control: bp.control,
+    nodes: bp.nodes.map((n) => ({ ...n, label: n.label || n.id, model: models[n.id] })),
+    edges: bp.edges,
+  }
+}
+
 test('#120 Human Decision 投影往返：result / humanDecision 经 validate/save 无损', async () => {
   const { handlers, fs } = env()
   const dsl = hdDsl()
@@ -1556,5 +1569,46 @@ test('#120 新蓝图续跑拒绝 approved；残留门禁占用行为不变', asy
   assert.equal(s1.state.supersededBy, 'run-2')
   settleRun(eng, events, 'run-2', 'DONE')
   await p2
+})
+
+test('#128 业务结果投影往返：outcome / countRound / completionPath 经 validate/save/list 无损', async () => {
+  const { handlers, fs } = env()
+  const dsl = outcomeDsl()
+  const v = await call(handlers, 'vwf.validate', { dsl })
+  assert.equal(v.ok, true, JSON.stringify(v.errors))
+  const saved = await call(handlers, 'vwf.workflows.save', { dsl })
+  assert.equal(saved.ok, true, JSON.stringify(saved.errors))
+  const bp = JSON.parse(fs._files.get(USER_DIR + '/outcome-evaluate-mini.json'))
+  const opt = bp.edges.find((e) => e.outcome === 'OPTIMIZE')
+  assert.equal(opt.countRound, true)
+  assert.equal(Object.prototype.hasOwnProperty.call(opt, 'on'), false)
+  const ev = bp.nodes.find((n) => n.id === 'evaluate')
+  assert.equal(ev.output.outcomePath, '$.verdict')
+  assert.equal(ev.output.completionPath, '$.completion_type')
+  const listed = (await call(handlers, 'vwf.workflows.list')).find((item) => item.id === 'outcome-evaluate-mini')
+  const listedOpt = listed.dsl.edges.find((e) => e.outcome === 'OPTIMIZE')
+  assert.equal(listedOpt.countRound, true)
+  assert.equal(Object.prototype.hasOwnProperty.call(listedOpt, 'on'), false)
+  assert.equal(listed.dsl.nodes.find((n) => n.id === 'evaluate').output.completionPath, '$.completion_type')
+})
+
+test('#128 ROUTE_HALTED / ENDED_NO_OUTCOME_EDGE 回写为权威终态且释放占用', async () => {
+  const eng = makeEngine()
+  const { handlers, events, definedTools } = engineEnv(eng)
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-rh' })
+  await until(() => eng.starts.length >= 1, 'ROUTE_HALTED 启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-1', 'ROUTE_HALTED', { reason: 'HUMAN_DECISION', node: 'evaluate' })
+  await p1
+  const s1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
+  assert.equal(s1.state.status, 'ROUTE_HALTED', 'value.status 回写覆盖事件层 completed')
+  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-rh' })
+  await until(() => eng.starts.length >= 2, 'ROUTE_HALTED 后同 taskId 可再启动')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-2', 'ENDED_NO_OUTCOME_EDGE')
+  await p2
+  const s2 = await call(handlers, 'vwf.state', { runId: 'run-2' })
+  assert.equal(s2.state.status, 'ENDED_NO_OUTCOME_EDGE')
 })
 

@@ -183,9 +183,19 @@
 ### 路由与蓝图
 
 - **Business Outcome Routing（业务结果路由）**：Blueprint（蓝图）把节点业务结果映射到下一跳。节点不输出 `next_node`（下一节点）。由 #77 承接。
-- **Completion Mapping（完成类型映射）**：把终态节点某字段映射为完成类型。
+- **Completion Mapping（完成类型映射）**：把走进 `$end` 的那个节点上的 `output.completionPath` 映射为完成类型（#92）。
 - **producer（生产者）**：哪个节点/能力产出该业务结果。
-- **field path（字段路径）**：从结构化输出里读业务结果的路径，如 `$.outcome`。
+- **field path（字段路径）**：从结构化输出里读业务结果的路径。新模式写在节点 `output.outcomePath`（#88），如 `"$.verdict"`。
+- **outcomePath（业务结果字段路径）**：新模式节点级字段（#88）。有则走业务边 `outcome` + 可选技术边 `on: "technical"`；无则走旧 `success/failure`。
+- **completionPath（完成类型字段路径）**：节点级可选字段（#92）。语法与 `outcomePath` 相同，允许二者相等。声明则必须有 schema、路径在内、叶子为 `string`；该节点必须有结构边到 `$end`。仅 `DONE` 时读 `results[node]`，写入 `completion: { type, node, path } | null`。
+- **outcome（边上的业务结果取值）**：新模式业务边字段，与 `outcomePath` 指向的值等值匹配。与 `on` 互斥。
+- **on: technical（技术边）**：新模式技术失败通道（#88），每节点最多一条；没有则 `TECHNICAL_FAILURE`。
+- **ENDED_NO_OUTCOME_EDGE（无匹配业务结果边）**：新模式运行时未命中任何业务边且非技术失败；不改写 `results[node]`（#88）。
+- **结构边（structural edge）**：参与入口判定与可达性的边 = 旧 `on: success` ∪ 新业务 `outcome` 边（#90）。`failure` / `technical` 不是结构边。
+- **SCC（Strongly Connected Component，强连通分量）**：有向图里「互相到得了」的一坨节点。A 能走到 B 且 B 能走回 A，则同属一个 SCC。无自环的单节点自己也是一个（平凡）SCC。自环（self-loop）是大小为 1 但有环的 SCC。
+- **出口（SCC exit）**：离开某个 SCC 的结构边，目标是 SCC 外的节点、`$end` 或 `$human-decision`。#90：新模式允许 `outcome` 环，当且仅当每个非平凡业务 SCC 至少有一条出口。
+- **入边（incoming edge）**：指向某节点的结构边。有入边则该节点不是入口。`failure` / `technical` 入边不计入。
+- **悬空（dangling）**：规格或 schema 里出现了某 Outcome，但没有生产者、字段路径或路由（#77 / #91）。
 - **route（路由）**：某枚举值对应的下一跳（前向节点 / 回退节点 / 人工决策 / 结束）。
 - **Schema / Blueprint Schema（蓝图结构契约）**：蓝图 JSON 允许哪些字段、如何校验。
 - **Schema hook（契约挂钩）**：只落字段与校验，运行时行为由邻 issue 实现。
@@ -194,7 +204,8 @@
 - **`$human-decision`（人工决策保留目标）**：与 `$end` 同类的框架点，不是 Role、无 LLM。入边 = 触发停机的业务结果；出边 = 决策结果路由（#77 校验接受，运行时不走）。#87。
 - **kind（节点种类）**：如 `worker`（工人节点）/ `fanout`（扇出）。人工决策不是一种 kind（#87 否决 Q4-B）。
 - **profile（角色档案）**：节点绑定的能力角色。人工决策按原则不是通用角色。
-- **Outcome Preset（业务结果预设）**：内置常用枚举与推荐字段，供编辑器复用；不强制字段名叫 `outcome`。
+- **Outcome Preset（业务结果预设）**：可选的推荐枚举+路径，机器可读 JSON（#91：`docs/design/outcome-presets.json`）。校验不强制选用；#75 做选择器。不扫描 goal / 角色文案。
+- **可穷举（enumerable）**：新模式 `outcomePath` 指向的 schema 必须是 `enum` / `const` / `oneOf` 常量，或 `boolean`（视为 `{true, false}`）。自由字符串无法证明不悬空（#91）。
 - **expand–contract（扩缩兼容）**：新旧形态并存，旧蓝图零迁移仍可跑。
 
 ### 人工决策
@@ -242,4 +253,37 @@
 - #79 交付：逻辑运行、运行生命周期、把完成类型摘要持久化到运行摘要；不把新语义写入当前 `runs` 事件流。
 - 旧 `manualCheck` / `FAILED_MAX_ROUNDS` / `AWAITING_HUMAN_<id>` 对未迁移蓝图保持兼容。
 - #77 不发 `WAITING_HUMAN`，也不把 `MAX_ROUNDS_REACHED` 写成引擎状态。
+
+### #88 已锁定（蓝图编码）
+
+- 双模式：无 `outcomePath` 的节点保持现行 `successCondition` / `on` / `when`。
+- 新模式：`output.outcomePath` + 业务边 `{ outcome, countRound? }` + 可选 `{ on: "technical" }`。
+- 新模式禁止 `when`、`successCondition`、`on: success|failure`。
+- `$human-decision` 可作 `from`/`to`；其出边只能是业务边。
+- 缺匹配业务边 → `ENDED_NO_OUTCOME_EDGE`，不改写节点结果。
+- fanout 禁止 `outcomePath`（#89）。
+
+### #90 已锁定（走通性）
+
+- 结构边 = success ∪ `outcome`；`$human-decision` 出边计入可达，运行时仍停机。
+- 旧模式继续禁止 success 环。新模式允许有出口的业务 SCC；无出口环拒绝。
+- `technical` 自环合法，不并入业务 SCC。走通性不看 `countRound`。有环 E2E 联合 #73/#82。
+
+### #91 已锁定（完整性与 Preset）
+
+- 新模式：枚举值与 `outcome` 出边一一对应；无 enum 的自由字符串拒绝。
+- `$human-decision`：有入边才要求 ≥1 条出边；决策结果封闭枚举归 #72。
+- Preset 为可选 JSON 目录；不扫文案。
+
+### #92 已锁定（Completion Mapping）
+
+- 节点级可选 `output.completionPath`（含旧模式）；必须有结构边到 `$end`。fanout 禁止（#89）。
+- 仅 `DONE` 上 `completion: { type, node, path } | null`；缺值不改写节点结果。停机/失败不加该字段。
+- 摘要只派生，节点赢。#79 原样抄到 Run Summary。`$human-decision` → `$end` 归 #72。
+
+### #89 已锁定（Fanout）
+
+- fanout 不参与 Business Outcome Routing / Completion Mapping。
+- 禁止 `outcomePath`、`completionPath`、`outcome` 边、`on: technical`。
+- `failOn` 仍走旧 failure（技术聚合失败）。探索业务结果写在 Evaluator。
 

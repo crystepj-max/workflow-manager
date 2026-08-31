@@ -386,9 +386,12 @@ return {
           return o
         }),
         edges: bp.edges.map((e) => {
-          const o = { from: e.from, to: e.to, on: e.on }
+          const o = { from: e.from, to: e.to }
+          if (e.on !== undefined) o.on = e.on
           if (e.when !== undefined) o.when = e.when
           if (e.result !== undefined) o.result = e.result
+          if (e.outcome !== undefined) o.outcome = e.outcome
+          if (e.countRound !== undefined) o.countRound = e.countRound
           return o
         }),
       }
@@ -422,9 +425,12 @@ return {
         entry: dsl.entry,
         nodes: nodes,
         edges: (dsl.edges || []).map((e) => {
-          const o = { from: e.from, to: e.to, on: e.on }
+          const o = { from: e.from, to: e.to }
+          if (e.on !== undefined) o.on = e.on
           if (e.when !== undefined) o.when = e.when
           if (e.result !== undefined) o.result = e.result
+          if (e.outcome !== undefined) o.outcome = e.outcome
+          if (e.countRound !== undefined) o.countRound = e.countRound
           return o
         }),
       }
@@ -734,7 +740,7 @@ return {
     // 终态集合（评审 PRRT_kwDOT57Tec6bfXfm/6b6ZN3）：节点 id 允许非 ASCII/
     // 空白/标点（AWAITING_HUMAN_验收、FAILED_AT_调度A 等），前缀类用 .+ 宽匹配；
     // fanout cap 失败态（FAILED_ITEM_CAP/FAILED_AGENT_CAP）同为脚本终态
-    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ERROR)$/
+    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
     function canonicalStop(result) {
       const v = result && result.value
       const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')

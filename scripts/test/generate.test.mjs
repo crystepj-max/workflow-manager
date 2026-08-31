@@ -98,6 +98,24 @@ test('#116 投影：humanDecision 与 HD 出边 result 进入 DSL', () => {
   assert.equal(out.result, 'SHIP');
 });
 
+test('#128 投影：outcome / countRound / completionPath 透传，业务边不伪造 on', () => {
+  const bp = JSON.parse(readFileSync(path.join(here, 'fixtures/outcome-evaluate-mini.json'), 'utf8'));
+  const dsl = projectToVwf(bp);
+  const ev = dsl.nodes.find((n) => n.id === 'evaluate');
+  assert.equal(ev.output.outcomePath, '$.verdict');
+  assert.equal(ev.output.completionPath, '$.completion_type');
+  const opt = dsl.edges.find((e) => e.outcome === 'OPTIMIZE');
+  assert.equal(opt.to, 'execute');
+  assert.equal(opt.countRound, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(opt, 'on'), false);
+  const tech = dsl.edges.find((e) => e.on === 'technical');
+  assert.equal(tech.from, 'evaluate');
+  assert.equal(Object.prototype.hasOwnProperty.call(tech, 'outcome'), false);
+  const hdOut = dsl.edges.find((e) => e.from === '$human-decision');
+  assert.equal(hdOut.outcome, 'USER_ACCEPTED');
+  assert.equal(Object.prototype.hasOwnProperty.call(hdOut, 'on'), false);
+});
+
 test('fanout 编译与 skill 包装幂等，runbook 覆盖 cap 终态', () => {
   assert.equal(compileBlueprint(fanoutBp).script, compileBlueprint(fanoutBp).script);
   const skill = skillWrap(fanoutBp);
