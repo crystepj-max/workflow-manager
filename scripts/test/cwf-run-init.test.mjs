@@ -33,6 +33,8 @@ test('parseBudget：完整非负整数校验', () => {
   assert.throws(() => parseBudget('3junk'), /非法回退额度/)
   assert.throws(() => parseBudget('-1'), /非法回退额度/)
   assert.throws(() => parseBudget(''), /非法回退额度/)
+  assert.throws(() => parseBudget('9'.repeat(20)), /非法回退额度/) // Infinity
+  assert.throws(() => parseBudget(String(Number.MAX_SAFE_INTEGER + 1)), /非法回退额度/)
 })
 
 test('ensureGitExclude：幂等追加本地排除', async () => {

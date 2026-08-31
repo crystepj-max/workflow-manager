@@ -188,12 +188,40 @@ test('write：--attempt 严格正整数解析（2junk / 1.9 / 0 拒绝）', () =
     goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
     gaps: [], outcome: 'baseline_ready', status: 'draft',
   }))
-  for (const bad of ['2junk', '1.9', '0', '-2']) {
+  for (const bad of ['2junk', '1.9', '0', '-2', '9'.repeat(20)]) {
     const r = run(['write', runDir, 'requirements_baseline', payload, '--attempt', bad])
     assert.equal(r.code, 2)
     assert.match(r.out, /非法 --attempt/)
   }
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false) // 全未落盘
+})
+
+test('reverify：checkpoint 重跑推进修订且不耗额度', () => {
+  const { runDir } = makeRunDir()
+  const r = run(['reverify', runDir, '--reason', 'checkpoint sync'])
+  assert.equal(r.code, 0, r.out)
+  const runState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(runState.attempt, 2)
+  assert.equal(runState.rollback_used, 0) // 不耗额度
+  assert.equal(runState.rollback_history.at(-1).kind, 'reverify')
+})
+
+test('write：未知 -- 选项与多余位置参数拒绝（防 provenance 静默污染）', () => {
+  const { runDir } = makeRunDir()
+  const payload = join(runDir, 'payload.json')
+  writeFileSync(payload, JSON.stringify({
+    goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
+    gaps: [], outcome: 'baseline_ready', status: 'draft',
+  }))
+  // 拼错的归属选项
+  const r1 = run(['write', runDir, 'requirements_baseline', payload, '--produced_by', 'reviewer'])
+  assert.equal(r1.code, 2)
+  assert.match(r1.out, /未知选项/)
+  // 多余位置参数
+  const r2 = run(['write', runDir, 'requirements_baseline', payload, 'extra'])
+  assert.equal(r2.code, 2)
+  assert.match(r2.out, /位置参数须恰好 3 个/)
+  assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
 })
 
 test('rollback：--by 非法值拒绝（防拼写错误静默落到自动路径）', () => {

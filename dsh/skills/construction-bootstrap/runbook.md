@@ -70,7 +70,7 @@ node "$CWF_ASSETS/cwf-record.mjs" write .agent-runs/<run_id> requirements_baseli
 node "$CWF_ASSETS/cwf-checkpoint.mjs" .agent-runs/<run_id>
 ```
 
-   target 已前进 → 先 sync + 重跑受影响 Proof，再 `--proofs-rerun`。
+   target 已前进 → 先 sync，再执行 `node "$CWF_ASSETS/cwf-record.mjs" reverify <runDir> --reason "checkpoint sync"` 推进 Proof 修订（保留原 HEAD 记录，不耗额度），重跑受影响 Proof（review/test 新 attempt 文件），再 `--proofs-rerun`。
 4. 组装 `assembled`（五类引用 + 结构化 checkpoint），`write acceptance_package`（status=awaiting_decision），呈递人工。
 5. 人工裁决后回填 `status=decided` + `decision` + `decided_by/at` + `verified_branch/head`（+ reject 时 feedback/根因），重新 `write`。
 

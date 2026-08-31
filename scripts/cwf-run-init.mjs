@@ -46,7 +46,11 @@ export function parseBudget(str) {
   if (!/^\d+$/.test(String(str))) {
     throw new Error(`非法回退额度: ${str}（须为非负整数）`)
   }
-  return parseInt(str, 10)
+  const n = parseInt(str, 10)
+  if (!Number.isSafeInteger(n)) {
+    throw new Error(`非法回退额度: ${str}（超出安全整数范围）`)
+  }
+  return n
 }
 
 export function assertRunIdSafe(runId) {

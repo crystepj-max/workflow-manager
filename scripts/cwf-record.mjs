@@ -244,6 +244,22 @@ function cmdBudget(runDir, target, flags) {
   console.log(`回退额度调整：${from} → ${n}（decided_by=${flags.decidedBy}，已入账 budget_adjustments）`)
 }
 
+function cmdReverify(runDir, flags) {
+  // Integration Checkpoint sync 后的 Proof 重跑（§7.3）：推进 attempt 产生新修订文件，
+  // 保留原 HEAD 绑定的旧 proof（§8.5）；不是回退，不耗额度
+  const run = loadRun(runDir)
+  run.attempt += 1
+  run.rollback_history = [...(run.rollback_history || []), {
+    at: new Date().toISOString(),
+    source_stage: run.stage,
+    kind: 'reverify',
+    attempt_after: run.attempt,
+    ...(flags.reason ? { reason: flags.reason } : {}),
+  }]
+  saveRun(runDir, run)
+  console.log(`Proof 重跑修订推进：attempt→${run.attempt}（新修订文件，不耗回退额度）`)
+}
+
 function parseFlags(args) {
   const flags = {}
   const rest = []
@@ -256,11 +272,20 @@ function parseFlags(args) {
         console.error(`非法 --attempt 值: ${raw}（须为正整数）`)
         process.exit(2)
       }
-      flags.attempt = parseInt(raw, 10)
+      const parsed = parseInt(raw, 10)
+      if (!Number.isSafeInteger(parsed)) {
+        console.error(`非法 --attempt 值: ${raw}（超出安全整数范围）`)
+        process.exit(2)
+      }
+      flags.attempt = parsed
     }
     else if (args[i] === '--by') flags.by = args[++i]
     else if (args[i] === '--reason') flags.reason = args[++i]
     else if (args[i] === '--decided-by') flags.decidedBy = args[++i]
+    else if (args[i].startsWith('--')) {
+      console.error(`未知选项: ${args[i]}（拼写错误会静默污染 provenance，拒绝执行）`)
+      process.exit(2)
+    }
     else rest.push(args[i])
   }
   return { flags, rest }
@@ -270,11 +295,11 @@ function main() {
   const [cmd, ...args] = process.argv.slice(2)
   const { flags, rest } = parseFlags(args)
   if (cmd === 'write') {
-    const [runDir, recordType, payloadPath] = rest
-    if (!runDir || !recordType || !payloadPath) {
-      console.error('用法: write <runDir> <record_type> <payload.json> [--produced-by X] [--stage S] [--attempt N]')
+    if (rest.length !== 3) {
+      console.error('用法: write <runDir> <record_type> <payload.json> [--produced-by X] [--stage S] [--attempt N]（位置参数须恰好 3 个）')
       process.exit(2)
     }
+    const [runDir, recordType, payloadPath] = rest
     cmdWrite(runDir, recordType, payloadPath, flags)
   } else if (cmd === 'check') {
     if (rest.length < 2) {
@@ -288,6 +313,12 @@ function main() {
       process.exit(2)
     }
     cmdRollback(rest[0], rest[1], flags)
+  } else if (cmd === 'reverify') {
+    if (rest.length !== 1) {
+      console.error('用法: reverify <runDir> [--reason <text>]')
+      process.exit(2)
+    }
+    cmdReverify(rest[0], flags)
   } else if (cmd === 'budget') {
     if (rest.length !== 2) {
       console.error('用法: budget <runDir> <n> --decided-by <who> [--reason <text>]')
