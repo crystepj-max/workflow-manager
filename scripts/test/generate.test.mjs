@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { compileBlueprint, generateAll, generateUserSkill, projectToVwf, skillWrap, writeUserSkill } from '../generate.mjs';
+import { compileBlueprint, generateAll, generateUserSkill, projectToVwf, skillWrap, writeUserSkill, collectBuiltinRoles, loadBuiltinRoleIds } from '../generate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tplDir = path.join(here, '../../templates');
@@ -129,6 +129,8 @@ const realIo = {
   statSync: (p) => fs.statSync(p),
   unlinkSync: (p) => fs.unlinkSync(p),
   rmdirSync: (p) => fs.rmdirSync(p),
+  // issue-81：collectBuiltinRoles 读角色源用
+  readFileSync: (p, o) => fs.readFileSync(p, o),
 }
 
 test('C4 原子写盘-成功：三件套落盘且与 generateUserSkill 内容一致，无暂存残留', () => {
@@ -174,4 +176,63 @@ test('C4 原子写盘-更新失败：旧版本目录不受影响（换入未发�
     assert.equal(r.ok, false)
     assert.equal(readFileSync(path.join(finalDir, 'OLD.md'), 'utf8'), '旧版本', '更新失败时旧版本完整保留')
   } finally { rmTmp(tmp) }
+})
+
+// ── Codex PR#124 第三轮 P1（评论 3889725489）：用户 skill 捆绑内置角色定义 ──
+// 产品工作区通常没有 dsh/roles/ 树，generateUserSkill 只产出三件套，运行时找不到
+// 新内置角色定义。writeUserSkill 在 save 闭环时把蓝图引用的角色文件随 skill 一起
+// 写到 roles/ 子目录，compileViaPipeline 命中即带出 roleDir，运行时自包含。
+test('S3 用户 skill 捆绑蓝图引用的内置角色定义（issue-81，产品工作区无 dsh/roles/ 时自定义工作流可运行）', () => {
+  const tmp = makeTmp()
+  try {
+    const r = writeUserSkill(bp, tmp, realIo)
+    assert.equal(r.ok, true, r.error)
+    // bp = dev-workflow-2-0 模板，节点 profile = dispatcher/dev/review/test/accept/closeout
+    const rolesDir = path.join(r.dir, 'roles')
+    const roleFiles = fs.readdirSync(rolesDir).sort()
+    for (const id of ['dispatcher', 'dev', 'review', 'test', 'accept', 'closeout']) {
+      assert.ok(roleFiles.includes(id + '.md'), '角色已捆绑：' + id)
+    }
+    // 内容与源一致
+    const srcDir = path.join(here, '..', '..', 'dsh', 'roles')
+    assert.equal(
+      readFileSync(path.join(r.dir, 'roles', 'dispatcher.md'), 'utf8'),
+      readFileSync(path.join(srcDir, 'dispatcher.md'), 'utf8'),
+      'dispatcher 内容与源一致'
+    )
+    // 三件套仍在
+    for (const rel of ['SKILL.md', 'script.mjs', 'meta.json']) {
+      assert.ok(fs.existsSync(path.join(r.dir, rel)), '三件套仍在：' + rel)
+    }
+  } finally { rmTmp(tmp) }
+})
+
+// ── Codex PR#124 第三轮 P1（评论 3889725481）：roleRef 工作区优先 + 打包兜底 ──
+test('S4 roleRef：内置角色以打包快照优先，自定义角色以工作区优先（Codex 第四轮 P1）', () => {
+  // 回归：第三轮把「工作区优先」套用到所有角色，导致项目里一份旧版 dsh/roles/dev.md
+  // 会静默覆盖模板自带的版本化内置角色定义（内置角色本应只读且随模板版本分发）。
+  const ids = ['dev', 'closeout']
+  const { script } = compileBlueprint(bp, { builtinRoleIds: ids })
+  assert.ok(script.includes('const BUILTIN_ROLE_IDS = ["dev","closeout"]'), '注入内置角色清单')
+  assert.ok(script.includes('BUILTIN_ROLE_IDS.indexOf(name) >= 0'), '按内置/自定义分流')
+  assert.ok(script.includes('_b ? [_bundle, _ws] : [_ws, _bundle]'), '内置先打包、自定义先工作区')
+  assert.ok(script.includes("A.roleDir || 'dsh/roles'"), '保留 A.roleDir 打包兜底链路')
+  assert.ok(script.includes("'dsh/roles/' + name + '.md'"), '保留工作区路径')
+})
+
+test('S4 内置角色清单：单一来源为宿主注册表，解析失败 loud-fail', () => {
+  const ids = loadBuiltinRoleIds()
+  assert.ok(ids.length >= 12, `内置角色不少于 12 个（实际 ${ids.length}）`)
+  assert.ok(ids.includes('requirements') && ids.includes('synthesizer'), '含新增角色')
+  assert.ok(!ids.includes('dispatcher'), 'dispatcher 已迁出内置')
+  assert.throws(() => loadBuiltinRoleIds('const BUILTIN_ROLES = []'), /解析失败/, '空清单应报错')
+  assert.throws(() => loadBuiltinRoleIds(''), /解析失败/, '找不到数组应报错')
+})
+
+test('S4 捆绑角色：profile 含路径穿越被拒绝（Codex 第四轮 P1）', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'roles-'))
+  fs.writeFileSync(path.join(dir, 'dev.md'), '内置角色正文\n')
+  const traversal = { nodes: [{ id: 'n1', profile: '../../AGENTS' }, { id: 'n2', profile: 'a/b' }, { id: 'n3', profile: 'dev' }] }
+  const out = collectBuiltinRoles(traversal, dir)
+  assert.deepEqual([...out.keys()], ['roles/dev.md'], '仅安全标识被捆绑')
 })

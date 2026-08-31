@@ -29,6 +29,8 @@
 
 - 使用的钩子：`agent(prompt, { label, schema, ...provider/model })`、`phase(title)`、`log(message)`；**未用** `pipeline`/`parallel`。
 - 角色注入：**角色提示词不进 args**——各节点 agent 开工时自行读 `roleDir/<role>.md`（`roleRef`，mjs:162-165），单一事实源 = `dsh/roles/*.md`（README:71-74）。六角色：dispatcher/dev/test/review/accept/closeout。
+
+> 本文记录的是历史 2.0 脚本（已退役）的语义快照。当前正式体系见 issue #81 / #82：内置角色为 **12 个**，`dispatcher` 已迁为 Custom Role（定义文件保留在原位，历史引用不受影响）。
 - 运行上下文：`ctx()`（mjs:171-184）注入 taskId/repoPath/runDir/baseBranch/workBranch/worktree/STATE.md 契约 + 最终回复要求。
 - 结构化闸门：每个节点 `agent()` 带 `schema`（六套 schema 定义于 mjs:66-156），校验失败 agent 返回 null → `TECHNICAL_FAILURE`（mjs:307 等）。
 - 异源检查：脚本内 `modelTag()` 比对 dev/review 的 provider/model（mjs:46-54），**仅 warning 不拦截**（弱异源容忍）；模型经 `A.models[role] = {provider, model}` 注入（`mo()`，mjs:56-63）。

@@ -1108,19 +1108,32 @@ return {
     })
 
     // ── 角色库（issue-58：内置/自定义分类 + 生命周期管理）─────────────────────
-    // 模型：内置角色 = 系统标准模板（dispatcher/dev/test/review/accept/closeout），
+    // 模型：内置角色 = 系统正式角色（issue-81 的 12 角色），
     // 常驻、只读、可查看/选择/基于其创建自定义变体；自定义角色 = 工作区
     // dsh/roles/ 下不属于内置集合的 *.md（与运行时 profile→<roleDir>/<id>.md
     // 的消费契约一致：保存即被 wf_run 产出的脚本按原机制读取，无需运行时改造）。
     // 引用 = 全部工作流（内置模板 + 用户模板）节点 profile 命中该角色 id 的计数，
     // 删除/重命名前的安全保护以引用数裁决；内容修改则天然全局生效（引用按 id）。
+    //
+    // issue-81：旧 `dispatcher` 已退出内置身份，迁为自定义角色。其定义文件保留在
+    // dsh/roles/ 原位，因此引用它的历史工作流无需任何改动即可继续工作。
+    // issue-81 正式 12 角色：通用基础能力 8 个 + 专业能力 4 个。
+    // 顺序即角色库「内置」分组的展示顺序，与产品规格 §8 名单一致。
     const BUILTIN_ROLES = [
-      { id: 'dispatcher', name: '调度', summary: '调度角色：三要素门禁、分支判定、分流转发' },
+      // ── 通用基础能力 ──
+      { id: 'requirements', name: '需求分析', summary: '需求分析角色：三要素门禁，产出需求基线' },
+      { id: 'designer', name: '方案设计', summary: '方案设计角色：实施路径、关键取舍与风险' },
       { id: 'dev', name: '开发', summary: '开发角色：测试驱动施工，满足质量闸门' },
+      { id: 'review', name: '审核', summary: '审核角色：规范与需求符合性、代码质量双轴审查' },
       { id: 'test', name: '测试', summary: '测试角色：运行态验证，证据驱动判定' },
-      { id: 'review', name: '审核', summary: '审核角色：独立双轴审查' },
-      { id: 'accept', name: '验收', summary: '验收角色：最终核验，人工验收门禁' },
-      { id: 'closeout', name: '收口', summary: '收口角色：一致性收口与交接产物汇总' }
+      { id: 'evaluator', name: '评估', summary: '评估角色：按节点评价契约独立评估，场景差异由节点表达' },
+      { id: 'accept', name: '验收助手', summary: '验收助手角色：对照验收标准最终核验并等待人工签字' },
+      { id: 'closeout', name: '收口', summary: '收口角色：一致性收口与交接产物汇总' },
+      // ── 专业能力 ──
+      { id: 'diagnose', name: '缺陷诊断', summary: '缺陷诊断角色：先取证后结论，收敛到根因' },
+      { id: 'orchestrator', name: '探索统筹', summary: '探索统筹角色：设计研究方案与专家任务书' },
+      { id: 'researcher', name: '专家研究', summary: '专家研究角色：按任务书独立取证，含反证' },
+      { id: 'synthesizer', name: '综合分析', summary: '综合分析角色：把独立判断整合为可决策的观点地图' },
     ]
     const BUILTIN_ROLE_IDS = BUILTIN_ROLES.map((r) => r.id)
     const ROLE_NAME_MAX = 64
@@ -1195,11 +1208,26 @@ return {
         if (includeContent && f && f.content != null) entry.content = f.content
         roles.push(entry)
       }
+      // 打包回退（Codex PR#124 第二轮 P1）：产品工作区无 dsh/roles/dispatcher.md 时，
+      // 迁出内置但被 bundleRoles 模板引用的历史角色从打包快照只读回退到自定义分组，
+      // 不写入 .generated。用户编辑时种子到工作区 dsh/roles/。
+      let bundledLegacy = null
+      try { bundledLegacy = await bundledLegacyRoles() } catch (e) { bundledLegacy = new Map() }
       const customIds = Array.from(files.keys()).filter(id => BUILTIN_ROLE_IDS.indexOf(id) < 0).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+      const seenCustom = new Set(customIds)
       for (const id of customIds) {
         const f = files.get(id)
         const entry = { id, name: id, summary: f.summary || '', builtin: false }
         if (includeContent) entry.content = f.content
+        roles.push(entry)
+      }
+      // 打包回退角色排在已落盘自定义角色之后（可见但非首选）
+      const bundledIds = Array.from(bundledLegacy.keys()).filter(id => !seenCustom.has(id)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+      for (const id of bundledIds) {
+        const content = bundledLegacy.get(id) || ''
+        const firstLine = content.split('\n').find(l => l.trim()) || ''
+        const entry = { id, name: id, summary: firstLine, builtin: false }
+        if (includeContent) entry.content = content
         roles.push(entry)
       }
       return roles
@@ -1227,8 +1255,14 @@ return {
         return { id, name: meta.name, summary: (f && f.summary) || meta.summary, builtin: true, content }
       }
       const f = files.get(id)
-      if (!f) return null
-      return { id, name: id, summary: f.summary || '', builtin: false, content: f.content != null ? f.content : '' }
+      if (f) return { id, name: id, summary: f.summary || '', builtin: false, content: f.content != null ? f.content : '' }
+      // 打包回退（Codex PR#124 第二轮 P1）：工作区无文件时，从打包快照只读回退
+      let bundledLegacy = null
+      try { bundledLegacy = await bundledLegacyRoles() } catch (e) { return null }
+      const content = bundledLegacy.get(id)
+      if (content == null) return null
+      const firstLine = content.split('\n').find(l => l.trim()) || ''
+      return { id, name: id, summary: firstLine, builtin: false, content }
     }
     // 引用扫描：全部工作流（内置模板 + 用户模板）+ 可选的开放草稿 DSL。草稿引用按
     // workflowId 去重替换（打开编辑器编辑既有模板时其持久化版本已被统计，草稿内容
@@ -1276,8 +1310,9 @@ return {
       if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(v)) return '角色名称是系统保留名（如 CON/NUL/AUX），请换一个名称'
       return null
     }
-    // 名称唯一性（NFC 归一 + 大小写不敏感，兼容 macOS/Windows 文件系统）：内置 + 现有自定义。
-    // fail-closed：角色目录读取失败（非目录缺失）时抛错，调用方阻断变更。
+    // 名称唯一性（NFC 归一 + 大小写不敏感，兼容 macOS/Windows 文件系统）：内置 + 现有自定义
+    // + 打包回退角色（Codex PR#124 第三轮 P2，评论 3889725486）。fail-closed：角色目录读取
+    // 失败（非目录缺失）时抛错，调用方阻断变更。
     async function roleNameTaken(name, excludeId) {
       const key = roleKey(name)
       if (!key) return true
@@ -1293,6 +1328,18 @@ return {
         if (excludeId && roleKey(excludeId) === idKey) continue
         if (idKey === key) return true
       }
+      // 打包回退角色（Codex PR#124 第三轮 P2）：迁移角色经 bundledLegacyRoles 只读回退
+      // 可见时，同名 create 必须返回冲突——否则用户在角色库看到 dispatcher 已列出，
+      // create({name:'dispatcher'}) 却静默成功，绕过唯一性校验创建同名工作区文件。
+      // 打包回退读取失败不影响主校验（已覆盖内置 + 工作区，fail-closed 已在上文处理）。
+      try {
+        const bundled = await bundledLegacyRoles()
+        for (const id of bundled.keys()) {
+          const idKey = roleKey(id)
+          if (excludeId && roleKey(excludeId) === idKey) continue
+          if (idKey === key) return true
+        }
+      } catch (e) { /* 打包回退读取失败不影响主校验链路 */ }
       return false
     }
 
@@ -1318,6 +1365,38 @@ return {
       return { ok: true, id, count: u.count, refs: u.refs }
     })
     // 空白新增 / 基于角色创建：校验名称与内容 → 写入工作区 dsh/roles/<name>.md
+    // 打包角色包回退（Codex PR#124 第二轮 P1）：bundleRoles 模板自带 roles/ 快照，
+    // 其中可能包含已迁出内置集合的历史自定义角色（如 dispatcher）。产品工作区没有
+    // 仓库 dsh/roles/，这类角色必须仍以「自定义」身份可见、可编辑，否则从角色库消失。
+    // 权威来源仍是工作区 dsh/roles/（用户状态）；打包快照只读回退，**绝不回写**——
+    // .generated 是生成产物，写入会变成可被重生成覆盖的用户状态（第二轮 P1 撤销项）。
+    async function bundledLegacyRoles() {
+      const out = new Map()
+      if (fs === undefined) return out
+      let p = null
+      try { p = await rootPaths() } catch (e) { return out }
+      const spots = [p && p.builtinDir, p && p.packageBuiltinDir, p && p.homeBuiltinDir, p && p.skillRoot]
+      for (const spot of spots) {
+        if (!spot) continue
+        let entries = null
+        try { entries = await fs.listDir(await fs.resolve(spot)) } catch (e) { continue }
+        for (const ent of entries || []) {
+          if (!ent || ent.type !== 'directory' || !ent.name || ent.name === 'roles') continue
+          let roleEnts = null
+          try { roleEnts = await fs.listDir(await fs.resolve(spot + '/' + ent.name + '/roles')) } catch (e) { continue }
+          for (const rf of roleEnts || []) {
+            if (!rf || rf.type !== 'file' || !rf.name || !rf.name.endsWith('.md')) continue
+            const id = rf.name.slice(0, -3)
+            if (!id || BUILTIN_ROLE_IDS.indexOf(id) >= 0 || out.has(id)) continue
+            try {
+              out.set(id, String(await fs.readText(await fs.resolve(spot + '/' + ent.name + '/roles/' + rf.name))))
+            } catch (e) { /* 单文件读取失败不影响其余 */ }
+          }
+        }
+      }
+      return out
+    }
+
     registerRpc('vwf.roles.create', async (a) => {
       const name = String((a && a.name) || '').trim()
       const content = a && typeof a.content === 'string' ? a.content : ''
@@ -1358,7 +1437,14 @@ return {
       }
       const inv = await readRoleFiles()
       if (inv.state === 'error') return { ok: false, errors: [{ at: '$', message: '角色库读取失败：' + inv.message }] }
-      if (!inv.files.has(id)) return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + id }] }
+      // 存在性判定：工作区有文件，或打包回退可见（Codex PR#124 第二轮 P1）。
+      // 后者代表产品工作区无 dsh/roles/<id>.md 但 bundleRoles 模板自带该角色快照——
+      // 编辑时种子到工作区，.generated 不被改写。
+      let bundledLegacy = null
+      if (!inv.files.has(id)) {
+        try { bundledLegacy = await bundledLegacyRoles() } catch (e) { bundledLegacy = new Map() }
+        if (!bundledLegacy.has(id)) return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + id }] }
+      }
       const target = newName && newName !== id ? newName : id
       let isRename = target !== id
       if (isRename) {
@@ -1408,6 +1494,9 @@ return {
           return { ok: false, errors: [{ at: '$', message: '旧角色文件删除失败（已回滚新文件' + (rmNew && rmNew.ok ? '' : '，回滚失败，请手动清理 ') + '）：' + rmOld.detail }] }
         }
       }
+      // 编辑打包回退角色（工作区无文件、定义来自内置模板角色包）时，此处写入
+      // 即完成「种子到自定义角色库」；运行时经 roleRef 的工作区优先链路读到新内容，
+      // .generated 打包快照保持生成产物身份、不被改写（Codex PR#124 第二轮 P1）。
       const role = await getRoleDetail(target)
       return { ok: true, role }
     })
@@ -1421,7 +1510,6 @@ return {
       }
       const inv = await readRoleFiles()
       if (inv.state === 'error') return { ok: false, errors: [{ at: '$', message: '角色库读取失败：' + inv.message }] }
-      if (!inv.files.has(id)) return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + id }] }
       let u
       try {
         u = await roleUsage(id, a && a.draftDsl)
@@ -1431,6 +1519,17 @@ return {
       if (u.count > 0) {
         const draftHint = u.refs.some(r => r.draft) ? '（含未保存草稿的引用）' : ''
         return { ok: false, errors: [{ at: '$', message: '「' + id + '」仍被 ' + u.count + ' 个节点使用' + draftHint + '。请先将这些节点更换为其他角色，解除全部引用后再删除。' }], usage: { count: u.count, refs: u.refs } }
+      }
+      // 打包回退角色（Codex PR#124 第四轮 P2，评论 3889756925）：工作区无文件、
+      // 定义来自内置模板角色包，只能读取不能删除——删它等于改生成产物。此前在统计
+      // 引用前就返回「自定义角色不存在」，界面上可点删除却必然失败且提示不准确。
+      if (!inv.files.has(id)) {
+        let bundledLegacy = null
+        try { bundledLegacy = await bundledLegacyRoles() } catch (e) { bundledLegacy = new Map() }
+        if (bundledLegacy.has(id)) {
+          return { ok: false, errors: [{ at: '$', message: '「' + id + '」的定义来自内置模板自带的角色包（生成产物），不在自定义角色库中，无法在此删除；如需停用，请在模板中把引用替换为其他角色。' }] }
+        }
+        return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + id }] }
       }
       const roleDir = await roleDirPath()
       let abs = null
