@@ -224,6 +224,15 @@ test('write：未知 -- 选项与多余位置参数拒绝（防 provenance 静�
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
 })
 
+test('write/rollback：值选项缺值拒绝（--by 无值不得静默落自动路径）', () => {
+  const { runDir } = makeRunDir()
+  const r = run(['rollback', runDir, 'dev', '--by'])
+  assert.equal(r.code, 2)
+  assert.match(r.out, /缺值/)
+  const runState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(runState.rollback_used, 0)
+})
+
 test('rollback：--by 非法值拒绝（防拼写错误静默落到自动路径）', () => {
   const { runDir } = makeRunDir()
   const r = run(['rollback', runDir, 'dev', '--by', 'huma', '--decided-by', 'tester'])
@@ -278,7 +287,7 @@ test('write：过期 --attempt 拒绝（不得回退 attempt 覆盖旧 proof）'
   }))
   // 回退推进 attempt 到 2 后，stale 的 --attempt 1 必须被拒
   run(['rollback', runDir, 'dev'])
-  const r = run(['write', runDir, 'requirements_baseline', payload, '--attempt', '1'])
+  const r = run(['write', runDir, 'requirements_baseline', payload, '--attempt', '1', '--produced-by', 'test-suite'])
   assert.equal(r.code, 1)
   assert.match(r.out, /拒绝过期 attempt/)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)

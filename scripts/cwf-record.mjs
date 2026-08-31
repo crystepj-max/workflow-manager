@@ -308,14 +308,24 @@ function cmdReverify(runDir, flags) {
   console.log(`Proof 重跑修订推进：attempt→${run.attempt}（新修订文件，不耗回退额度）`)
 }
 
+function takeValue(args, i, name) {
+  // 值选项缺值（结尾或后跟另一选项）即拒绝，不得静默存 undefined
+  const v = args[i + 1]
+  if (v === undefined || v.startsWith('--')) {
+    console.error(`选项 ${name} 缺值`)
+    process.exit(2)
+  }
+  return v
+}
+
 function parseFlags(args) {
   const flags = {}
   const rest = []
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--produced-by') flags.producedBy = args[++i]
-    else if (args[i] === '--stage') flags.stage = args[++i]
+    if (args[i] === '--produced-by') { flags.producedBy = takeValue(args, i, args[i]); i++ }
+    else if (args[i] === '--stage') { flags.stage = takeValue(args, i, args[i]); i++ }
     else if (args[i] === '--attempt') {
-      const raw = args[++i]
+      const raw = takeValue(args, i, args[i]); i++
       if (!/^[1-9]\d*$/.test(raw)) {
         console.error(`非法 --attempt 值: ${raw}（须为正整数）`)
         process.exit(2)
@@ -327,9 +337,9 @@ function parseFlags(args) {
       }
       flags.attempt = parsed
     }
-    else if (args[i] === '--by') flags.by = args[++i]
-    else if (args[i] === '--reason') flags.reason = args[++i]
-    else if (args[i] === '--decided-by') flags.decidedBy = args[++i]
+    else if (args[i] === '--by') { flags.by = takeValue(args, i, args[i]); i++ }
+    else if (args[i] === '--reason') { flags.reason = takeValue(args, i, args[i]); i++ }
+    else if (args[i] === '--decided-by') { flags.decidedBy = takeValue(args, i, args[i]); i++ }
     else if (args[i].startsWith('--')) {
       console.error(`未知选项: ${args[i]}（拼写错误会静默污染 provenance，拒绝执行）`)
       process.exit(2)
