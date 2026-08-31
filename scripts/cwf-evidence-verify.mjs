@@ -17,16 +17,31 @@ const STAGE_MAP = {
   test_proof: 'test',
 }
 
-function liveState(runDir) {
-  // Proof 绑定比对的实况源：不信任 run.json 可变缓存（§7.3）
+function liveState(runDir, run) {
+  // Proof 绑定比对的实况源：不信任 run.json 可变缓存（§7.3）。
+  // 归档态检测（PR #132 Review）：run 已归档到主检出时实况分支 ≠ run.work_branch，
+  // 不得拿主检出的 HEAD/分支去比对开发期 proof——回退 run.json 历史值
   const wt = join(runDir, '..', '..')
   try {
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: wt, encoding: 'utf-8' }).trim()
+    if (branch !== run.work_branch) return null
     return {
       head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: wt, encoding: 'utf-8' }).trim(),
-      branch: execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: wt, encoding: 'utf-8' }).trim(),
+      branch,
     }
   } catch {
-    return null // 归档态（worktree 已移除）回退 run.json
+    return null
+  }
+}
+
+function liveTarget(runDir, run) {
+  // 实况 target HEAD（防 checkpoint 过期：自记录后 target 再前进须拦截）
+  const wt = join(runDir, '..', '..')
+  try {
+    execFileSync('git', ['fetch', 'origin', run.base_ref], { cwd: wt, stdio: 'pipe' })
+    return execFileSync('git', ['rev-parse', `origin/${run.base_ref}`], { cwd: wt, encoding: 'utf-8' }).trim()
+  } catch {
+    return null // 离线/归档态：跳过实况比对
   }
 }
 
@@ -86,7 +101,7 @@ export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false, live 
   check('③', '同 Run/workspace lineage', okLineage, okLineage ? 'ok' : `run_id=${[...runIds]} ws=${[...workspaces]} br=${[...branches]}`)
 
   // ④ Proof HEAD/branch 与实况一致（§7.3）：不信任 run.json 缓存
-  const liveNow = live || liveState(runDir)
+  const liveNow = live || liveState(runDir, run)
   const refHead = liveNow ? liveNow.head : run.current_head
   const refBranch = liveNow ? liveNow.branch : run.work_branch
   const badHead = []
@@ -98,12 +113,23 @@ export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false, live 
   if (liveNow && run.current_head !== liveNow.head) {
     badHead.push(`run.json current_head(${run.current_head}) 落后于实况——先 reverify`)
   }
-  // 同项附带 Integration Checkpoint 条件不变量（§7.3）：引擎不经 schema，此处直验
+  // 同项附带 Integration Checkpoint 条件不变量与实况复核（§7.3）：引擎不经 schema，此处直验
   const ckpt = refs.integration_checkpoint
   if (!ckpt || typeof ckpt !== 'object') {
     badHead.push('integration_checkpoint 缺失')
-  } else if (ckpt.target_advanced === true && ckpt.proofs_state !== 'rerun_completed') {
-    badHead.push('checkpoint target 已前进但 proofs_state≠rerun_completed（受影响 Proof 未重跑）')
+  } else {
+    if (ckpt.target_advanced === true && ckpt.proofs_state !== 'rerun_completed') {
+      badHead.push('checkpoint target 已前进但 proofs_state≠rerun_completed（受影响 Proof 未重跑）')
+    }
+    // checkpoint 实况复核：自记录后 target 再前进 / 声称未前进但实况已前进 → 拒绝
+    const liveT = live && 'targetHead' in live ? live.targetHead : liveTarget(runDir, run)
+    if (liveT) {
+      if (ckpt.target_head_at_check !== liveT) {
+        badHead.push(`checkpoint 过期：target 自记录（${ckpt.target_head_at_check}）后又前进（现 ${liveT}）——重新执行 checkpoint`)
+      } else if (ckpt.target_advanced === false && liveT !== run.base_commit) {
+        badHead.push('checkpoint 称未前进但实况 target 已前进')
+      }
+    }
   }
   check('④', 'Proof 绑定实况 HEAD/branch 且 checkpoint 条件不变量成立', badHead.length === 0, badHead.join('; ') || 'ok')
 
@@ -147,10 +173,11 @@ export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false, live 
   }
   check('⑧', '验收映射完整无重复（accept 场景全 pass）', ok8, detail8)
 
-  // ⑨ review/test 产生者异于 dev（异源自证禁令）
+  // ⑨ review/test 产生者异于 dev 且独立会话标志为真（异源自证禁令 + 自声明缺一不可）
   const ok9 = review && test && dev
     && review.produced_by !== dev.produced_by && test.produced_by !== dev.produced_by
-  check('⑨', 'review/test 与 dev 异源（produced_by）', Boolean(ok9), ok9 ? 'ok' : `review=${review?.produced_by} test=${test?.produced_by} dev=${dev?.produced_by}`)
+    && review.payload?.independent_session === true && test.payload?.independent_session === true
+  check('⑨', 'review/test 与 dev 异源且独立会话标志为真', Boolean(ok9), ok9 ? 'ok' : `produced_by(review=${review?.produced_by} test=${test?.produced_by} dev=${dev?.produced_by}) independent_session(review=${review?.payload?.independent_session} test=${test?.payload?.independent_session})`)
 
   return { ok: checks.every(c => c.ok), checks }
 }

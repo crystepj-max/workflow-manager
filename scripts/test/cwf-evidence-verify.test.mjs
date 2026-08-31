@@ -20,7 +20,7 @@ function makeRunDir(mutate) {
   mkdirSync(runDir, { recursive: true })
   const run = {
     run_id: 'cwf-ev-01', issue_or_task_identity: '#999', workspace_id: 'wt-ev',
-    repository: 'r', base_ref: 'main', base_commit: 'abc', work_branch: BRANCH,
+    repository: 'r', base_ref: 'main', base_commit: HEAD, work_branch: BRANCH,
     current_head: HEAD, stage: 'human_acceptance', attempt: 1,
   }
   const env = (record_type, stage, produced_by, payload) => ({
@@ -76,7 +76,7 @@ function checkOk(result, id) {
 }
 
 test('正例：完整合法证据链全部九项通过', () => {
-  const result = verifyEvidenceChain(makeRunDir())
+  const result = verifyEvidenceChain(makeRunDir(), { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } })
   assert.equal(result.ok, true, JSON.stringify(result.checks, null, 1))
   assert.equal(result.checks.length, 9)
 })
@@ -181,10 +181,10 @@ test('④ checkpoint 条件不变量：target 已前进但未重跑被拒', () =
 
 test('④ 实况 HEAD 为准：proof 绑定滞后 run.json 被拒，run.json 缓存滞后实况被拒', () => {
   // 新增提交后实况 HEAD 前进，proof 还绑旧 HEAD → 拒
-  const staleProof = verifyEvidenceChain(makeRunDir(), { live: { head: 'head-new', branch: BRANCH } })
+  const staleProof = verifyEvidenceChain(makeRunDir(), { live: { head: 'head-new', branch: BRANCH, targetHead: HEAD } })
   assert.equal(checkOk(staleProof, '④'), false)
   // run.json current_head 落后于实况 → 拒（先 reverify）
-  const staleRun = verifyEvidenceChain(makeRunDir((_rs, run) => { run.current_head = 'older' }), { live: { head: HEAD, branch: BRANCH } })
+  const staleRun = verifyEvidenceChain(makeRunDir((_rs, run) => { run.current_head = 'older' }), { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } })
   assert.equal(checkOk(staleRun, '④'), false)
 })
 
@@ -205,6 +205,29 @@ test('⑥ 命中门但缺 decision_request 被拒（呈递候选集丢失）', (
     // 注意：无 decision_request
   }))
   assert.equal(checkOk(r, '⑥'), false)
+})
+
+test('④ checkpoint 实况复核：记录后 target 再前进被拒；称未前进但实况已前进被拒', () => {
+  // 记录后 target 前进 → 拒
+  const moved = verifyEvidenceChain(makeRunDir(), { live: { head: HEAD, branch: BRANCH, targetHead: 'newer' } })
+  assert.equal(checkOk(moved, '④'), false)
+  // 记录称未前进但实况已前进 → 拒
+  const lied = verifyEvidenceChain(makeRunDir(rs => {
+    rs['acceptance_package.a1.json'].payload.assembled.integration_checkpoint.target_advanced = false
+  }), { live: { head: HEAD, branch: BRANCH, targetHead: 'not-base' } })
+  assert.equal(checkOk(lied, '④'), false)
+})
+
+test('④ 归档态回退 run.json（实况分支 ≠ run.work_branch 时不拿主检出比对）', () => {
+  const r = verifyEvidenceChain(makeRunDir(), { live: null })
+  assert.equal(checkOk(r, '④'), true) // 无 git → run.json 历史值，全过
+})
+
+test('⑨ 独立会话标志缺失/为假被拒（即使 produced_by 异源）', () => {
+  const r = verifyEvidenceChain(makeRunDir(rs => {
+    delete rs['test_proof.a1.json'].payload.independent_session
+  }), { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } })
+  assert.equal(checkOk(r, '⑨'), false)
 })
 
 test('⑨ review/test 与 dev 同源被拒', () => {
