@@ -40,14 +40,20 @@ function builtinRoleIdsCached() {
 // 打包角色包即可拿到角色定义；stale 产物缺 ROLE_DEFS 时 roleRef 安全回退到读文件路径。
 // 仅收录内置角色（ids 即内置清单）；角色文件缺失/非法 id 时跳过，保留读路径回退。
 // rolesDir 默认 <repo>/dsh/roles（与 collectBuiltinRoles 同源，编译期内联 = 打包快照）。
+// 角色文件安全读取（与 collectBuiltinRoles 共享）：标识只允许中英文/数字/下划线/短横线，
+// 且解析后路径必须仍在角色源目录内（路径穿越防护）；文件缺失/非法返回 null。
+function readRoleFileSafe(rolesDir, id, io) {
+  if (!/^[\w一-龥-]+$/.test(id)) return null
+  const file = path.join(rolesDir, id + '.md')
+  const rel = path.relative(rolesDir, file)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return null
+  try { return io.readFileSync(file, 'utf8') } catch (e) { return null }
+}
 export function loadBuiltinRoleDefs(ids, rolesDir = DEFAULT_ROLES_DIR, io = fs) {
   const out = {};
   for (const id of ids) {
-    if (!/^[\w一-龥-]+$/.test(id)) continue;
-    const file = path.join(rolesDir, id + '.md');
-    const rel = path.relative(rolesDir, file);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
-    try { out[id] = io.readFileSync(file, 'utf8'); } catch (e) { /* 缺失跳过：运行时走读路径回退 */ }
+    const content = readRoleFileSafe(rolesDir, id, io);
+    if (content != null) out[id] = content;
   }
   return out;
 }
@@ -197,10 +203,12 @@ export function compileBlueprint(bp, opts = {}) {
     opts.noRole
       ? '  return \'【角色定义】原型模式：本节点无角色文件要求，以 goal 为唯一依据。\\n\''
       // 内置角色正文优先内联（#129 遗留项 2）：编译期内联 = 打包快照同源，临时编译
-      // 自包含；stale 产物缺 ROLE_DEFS 时（ROLE_DEFS && 守卫）安全回退到读文件路径。
+      // 自包含；stale 产物缺 ROLE_DEFS 声明时（typeof 三元守卫，评论 3900312838）
+      // 显式回退 undefined 走读文件路径——`ROLE_DEFS && …` 会抛 ReferenceError，
+      // `typeof !== 'undefined' && …` 会得到 false（而非 undefined）误触发内联分支。
       // 自定义角色（如迁移后的 dispatcher）不在 ROLE_DEFS，继续走工作区优先读路径。
       : [
-          '  const _def = ROLE_DEFS && ROLE_DEFS[name]',
+          '  const _def = typeof ROLE_DEFS === \'undefined\' ? undefined : ROLE_DEFS[name]',
           '  if (_def !== undefined) return \'【角色定义】（内置角色，编译期内联，与打包快照同源）：\\n\' + _def',
           '  const _b = BUILTIN_ROLE_IDS.indexOf(name) >= 0',
         ].join('\n'),
@@ -476,17 +484,12 @@ export function collectBuiltinRoles(bp, rolesDir = DEFAULT_ROLES_DIR, io = fs) {
     if (n && typeof n.profile === 'string' && n.profile) profiles.add(n.profile)
   }
   for (const profile of profiles) {
-    // 安全校验（Codex PR#124 第四轮 P1，评论 3889756923）：profile 此前只校验非空，
-    // '../../AGENTS' 之类会被拼出 roles/ 目录之外的路径，随 skill 写到暂存目录外。
-    // 角色标识只允许中英文/数字/下划线/短横线，且解析后必须仍在角色源目录内。
-    if (!/^[\w一-龥-]+$/.test(profile)) continue
-    const file = path.join(rolesDir, profile + '.md')
-    const rel = path.relative(rolesDir, file)
-    if (rel.startsWith('..') || path.isAbsolute(rel)) continue
-    try {
-      const content = io.readFileSync(file, 'utf8')
-      out.set('roles/' + profile + '.md', content)
-    } catch (e) { /* 角色源缺失或该角色文件不存在：跳过（自定义角色运行时按工作区 dsh/roles 解析） */ }
+    // 安全读取（readRoleFileSafe 共享，Codex PR#124 第四轮 P1，评论 3889756923）：
+    // profile 此前只校验非空，'../../AGENTS' 之类会被拼出 roles/ 目录之外的路径，
+    // 随 skill 写到暂存目录外。角色标识只允许中英文/数字/下划线/短横线且路径必须在
+    // 角色源目录内；文件缺失/非法返回 null → 跳过（自定义角色运行时按工作区 dsh/roles 解析）。
+    const content = readRoleFileSafe(rolesDir, profile, io)
+    if (content != null) out.set('roles/' + profile + '.md', content)
   }
   return out
 }

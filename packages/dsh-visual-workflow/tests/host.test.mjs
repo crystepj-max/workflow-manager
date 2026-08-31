@@ -778,6 +778,10 @@ test('内置角色详情：打包快照优先于工作区旧版同名文件（#1
     assert.equal(d.ok, true)
     assert.equal(d.role.content, '打包快照 dev 正文\n', '内置角色详情应优先取打包快照（与运行时 roleRef 同源）')
     assert.equal(d.role.summary, '打包快照 dev 正文', '摘要与展示内容同源')
+    // 角色列表（vwf.roles）内置摘要同样本快照优先——旧版工作区文件不再以旧版摘要出现
+    const r = await call(handlers, 'vwf.roles')
+    const devInList = r.roles.find(x => x.id === 'dev')
+    assert.equal(devInList.summary, '打包快照 dev 正文', '角色列表内置摘要同取打包快照（#129 遗留项 1）')
   } finally {
     delete globalThis.__VWF_REPO_ROOT__
   }

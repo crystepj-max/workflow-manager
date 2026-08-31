@@ -227,7 +227,7 @@ test('S5 内置角色正文编译期内联：ROLE_DEFS 注入 + roleRef 优先�
   const { script } = compileBlueprint(bp, { builtinRoleIds: ['dev'] })
   assert.ok(script.includes('const ROLE_DEFS = '), '编译脚本应注入 ROLE_DEFS')
   assert.ok(script.includes(JSON.stringify(devContent)), '内置角色 dev 正文应内联进 ROLE_DEFS（临时编译自包含，不依赖 dsh/roles 存在）')
-  assert.ok(script.includes('ROLE_DEFS && ROLE_DEFS[name]'), 'roleRef 应优先读内联定义；stale 产物缺 ROLE_DEFS 时安全回退读路径')
+  assert.ok(script.includes("typeof ROLE_DEFS === 'undefined' ? undefined : ROLE_DEFS[name]"), 'roleRef 应优先读内联定义；stale 产物缺 ROLE_DEFS 声明时 typeof 三元守卫显式回退 undefined（评论 3900312838）')
   assert.ok(script.includes('【角色定义】（内置角色，编译期内联'), '内联分支应有明确标识')
   // 注入覆盖：测试/宿主可显式传 builtinRoleDefs（不依赖磁盘角色源）
   const { script: s2 } = compileBlueprint(bp, { builtinRoleIds: ['dev'], builtinRoleDefs: { dev: '内联测试正文\n' } })

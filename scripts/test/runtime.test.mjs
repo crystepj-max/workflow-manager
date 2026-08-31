@@ -65,6 +65,24 @@ test('F-内置角色内联：work(dev) 节点 prompt 含 dsh/roles/dev.md 正文
   assert.ok(work.prompt.includes(marker), 'work(dev) 的 prompt 应含内联角色正文（编译期内联，运行时不依赖 dsh/roles 存在）')
 })
 
+// ── #129 遗留项 2 回归：stale 产物（#81..#129 之间编译、无 ROLE_DEFS 声明的磁盘 script.mjs）
+// 被 compileViaPipeline 复用时不崩溃，roleRef 回退到读文件路径（评论 3900312838）──
+test('F-stale 产物无 ROLE_DEFS 声明：roleRef 不崩溃并回退读路径', async () => {
+  const devContent = readFileSync(path.join(here, '..', '..', 'dsh', 'roles', 'dev.md'), 'utf8')
+  const marker = devContent.split('\n').map(l => l.trim()).find(l => l && !l.startsWith('---') && !l.startsWith('#')) || devContent.slice(0, 40)
+  const { script } = compileBlueprint(mini)
+  assert.ok(script.includes('const ROLE_DEFS = '), '夹具卫生：新编译含 ROLE_DEFS')
+  // 模拟 #81..#129 之间生成的磁盘产物：ROLE_DEFS 是单行 JSON（正文 \n 已转义），整行移除
+  const stale = script.replace(/const ROLE_DEFS = \{[^\n]*\n/, '')
+  assert.ok(!stale.includes('const ROLE_DEFS = '), 'stale 模拟：已移除 ROLE_DEFS 声明')
+  const agent = makeAgentScript({ dispatch: { complete: true }, work: { status: 'completed' }, gate: { verdict: 'ok' } })
+  const { agentCalls } = await runGeneratedScript(stale, { args: {}, agent })
+  const work = agentCalls.find((c) => c.label === 'work')
+  assert.ok(work, 'work 节点应出场（无崩溃）')
+  assert.ok(work.prompt.includes('dsh/roles/dev.md'), '无 ROLE_DEFS 声明时回退到读文件路径提示')
+  assert.ok(!work.prompt.includes(marker), 'stale 产物不再内联正文')
+})
+
 test('F2 走通性-失败出口：判定失败 + failure 边指向终点 → FAILED_AT_节点', async () => {
   const { result } = await runEngine(mini, { dispatch: { complete: false } })
   assert.equal(result.status, 'FAILED_AT_dispatch')
