@@ -60,11 +60,20 @@ node scripts/cwf-record.mjs write .agent-runs/<run_id> requirements_baseline pay
 
 ```bash
 node scripts/cwf-checkpoint.mjs .agent-runs/<run_id>          # 集成检查点
-node scripts/cwf-record.mjs write .agent-runs/<run_id> acceptance_package assembled.json --stage human_acceptance
+node scripts/cwf-record.mjs write .agent-runs/<run_id> acceptance_package assembled.json --produced-by <你的会话标识> --stage human_acceptance
 node scripts/cwf-evidence-verify.mjs .agent-runs/<run_id>     # §8.3 九项机器校验，非 0 不得呈递
+# 人工知情接受（user_accepted）场景改用例外通道：
+node scripts/cwf-evidence-verify.mjs .agent-runs/<run_id> --decision user_accepted
 ```
 
 呈递用户裁决：accept / reject（feedback + 根因）/ user_accepted（知情接受差异，feedback 必填）。**AI 不代签**。裁决后回填 decided 字段重新写入（成熟刷新；assembled 不得改写）。
+
+**收口序列（契约 §3.7，accept 之后）**：PR 按仓库规则创建/合并 → 写 closeout_summary（交付清单 + 集成结果 + acceptance 引用 + `records_retained=true`）→ 归档：
+
+```bash
+node scripts/cwf-record.mjs write .agent-runs/<run_id> closeout_summary closeout.json --produced-by <你的会话标识> --stage closeout
+node scripts/cwf-record.mjs archive .agent-runs/<run_id>   # 证据归档到主检出后，worktree 才可移除
+```
 
 ### 8. Rollback（根因路由回退）— §4.1/§4.2
 
