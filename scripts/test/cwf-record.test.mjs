@@ -361,6 +361,29 @@ test('archive：run 证据复制到主检出 .agent-runs（worktree 可移除）
   assert.equal(existsSync(join(dest, 'run.json')), true)
 })
 
+test('archive：--separate-git-dir 布局下主检出经 worktree list 推导，schema 连带归档', () => {
+  // git init --separate-git-dir：common gitdir 在检出之外
+  const main = mkdtempSync(join(tmpdir(), 'cwf-main-'))
+  const gd = mkdtempSync(join(tmpdir(), 'cwf-gd-'))
+  execFileSync('git', ['init', '-q', '-b', 'dev-x', '--separate-git-dir', gd, main])
+  execFileSync('git', ['config', 'user.email', 't@t'], { cwd: main })
+  execFileSync('git', ['config', 'user.name', 't'], { cwd: main })
+  writeFileSync(join(main, 'README.md'), '# test\n')
+  execFileSync('git', ['add', '-A'], { cwd: main })
+  execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: main })
+  const runDir = join(main, '.agent-runs', 'cwf-sep-01')
+  mkdirSync(runDir, { recursive: true })
+  writeFileSync(join(runDir, 'run.json'), JSON.stringify({ run_id: 'cwf-sep-01', work_branch: 'dev-x' }))
+  writeFileSync(join(runDir, 'evidence.json'), '{}')
+  mkdirSync(join(main, '.agent-runs', 'schema'), { recursive: true })
+  writeFileSync(join(main, '.agent-runs', 'schema', 'handoff.schema.json'), '{}')
+  const r = run(['archive', runDir])
+  assert.equal(r.code, 0, r.out)
+  // 归档目标必须是主检出自身（不是 gitdir 的父目录）
+  assert.equal(existsSync(join(main, '.agent-runs', 'cwf-sep-01', 'evidence.json')), true)
+  assert.equal(existsSync(join(main, '.agent-runs', 'schema', 'handoff.schema.json')), true)
+})
+
 test('check：对既有记录只校验', () => {
   const { runDir } = makeRunDir()
   const payload = join(runDir, 'payload.json')

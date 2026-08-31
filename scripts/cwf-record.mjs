@@ -11,6 +11,7 @@
 import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { validateRecord } from './cwf-validate.mjs'
 import { parseBudget } from './cwf-run-init.mjs'
 
@@ -30,10 +31,12 @@ function repoRoot(runDir) {
 }
 
 function schemaPath(runDir) {
-  // run-init 会把 schema 提供到 .agent-runs/schema/（外仓库自包含分发）；本仓库直接读 docs 版
+  // 三级兜底：run 目录提供副本 → 仓库 docs 版 → 随 skill 分发的资产副本（归档态/外仓库）
   const provisioned = join(runDir, '..', 'schema', 'handoff.schema.json')
   if (existsSync(provisioned)) return provisioned
-  return join(repoRoot(runDir), 'docs/design/construction-workflow/handoff.schema.json')
+  const repoPath = join(repoRoot(runDir), 'docs/design/construction-workflow/handoff.schema.json')
+  if (existsSync(repoPath)) return repoPath
+  return join(dirname(fileURLToPath(import.meta.url)), 'handoff.schema.json')
 }
 
 function loadSchema(runDir) {
@@ -298,9 +301,11 @@ function cmdArchive(runDir) {
   const wt = repoRoot(runDir)
   let mainRoot
   try {
-    const commonDirRaw = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: wt, encoding: 'utf-8' }).trim()
-    // git 可能输出相对路径（相对 git 调用的 cwd）：必须以 wt 为基准解析，不能用进程 cwd
-    mainRoot = dirname(resolve(wt, commonDirRaw))
+    // 主检出 = worktree list 的首个条目：与 gitdir 布局无关（--separate-git-dir 也正确）
+    const list = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: wt, encoding: 'utf-8' })
+    const first = list.split('\n').find(l => l.startsWith('worktree '))
+    if (!first) throw new Error('worktree list 为空')
+    mainRoot = first.slice('worktree '.length).trim()
   } catch (e) {
     console.error(`无法定位主检出（${e.message}），归档中止`)
     process.exit(1)
@@ -308,6 +313,11 @@ function cmdArchive(runDir) {
   const dest = join(mainRoot, '.agent-runs', run.run_id)
   mkdirSync(dest, { recursive: true })
   cpSync(runDir, dest, { recursive: true })
+  // 连带归档提供到 run 侧的 schema（worktree 移除后归档记录仍可被校验）
+  const schemaSrcDir = join(wt, '.agent-runs', 'schema')
+  if (existsSync(schemaSrcDir)) {
+    cpSync(schemaSrcDir, join(mainRoot, '.agent-runs', 'schema'), { recursive: true })
+  }
   console.log(`已归档 ${runDir} -> ${dest}（worktree 可安全移除，证据随主检出保留）`)
 }
 
