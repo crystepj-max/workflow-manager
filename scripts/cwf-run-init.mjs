@@ -6,14 +6,25 @@
 
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const DEFAULT_BUDGET = 3
 
 export function branchName(runId) {
   // run_id 已被 assertRunIdSafe 限定为净化形态，分支名直接拼接——单射，无归一化碰撞
   return `dev-${runId}`
+}
+
+export function repoSlugFromUrl(url) {
+  // 与 hostname 无关地剥离认证信息（https://token@host/org/repo、git@host:org/repo 均可）
+  let u = String(url).trim()
+  u = u.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '') // 协议
+  u = u.replace(/^[^@/]+@/, '')                    // userinfo（token/用户名）
+  u = u.replace(/\.git$/, '')
+  u = u.replace(/^([^:/]+)[:/]/, '$1/')            // host:path → host/path
+  if (u.startsWith('github.com/')) u = u.slice('github.com/'.length)
+  return u
 }
 
 export function ensureGitExclude(gitDir, entries) {
@@ -135,7 +146,7 @@ function main() {
   const runDir = join(worktreePath, runDirRel)
   mkdirSync(runDir, { recursive: true })
   // 提供 handoff schema 到目标 workspace（外仓库无本仓库 docs 路径；资产随 skill 分发）
-  const scriptDir = new URL('.', import.meta.url).pathname
+  const scriptDir = dirname(fileURLToPath(import.meta.url))
   const schemaSrcLocal = join(scriptDir, 'handoff.schema.json')
   const schemaSrcRepo = join(scriptDir, '..', 'docs', 'design', 'construction-workflow', 'handoff.schema.json')
   const schemaSrc = existsSync(schemaSrcLocal) ? schemaSrcLocal : schemaSrcRepo
@@ -146,7 +157,7 @@ function main() {
     run_id: runId,
     issue_or_task_identity: `#${issue}`,
     workspace_id: `wt-${branch}`,
-    repository: git(['remote', 'get-url', 'origin'], repo).replace(/^.*github\.com[:/]/, '').replace(/\.git$/, ''),
+    repository: repoSlugFromUrl(git(['remote', 'get-url', 'origin'], repo)),
     base_ref: base,
     base_commit: baseCommit,
     work_branch: branch,

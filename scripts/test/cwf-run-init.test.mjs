@@ -1,7 +1,7 @@
 // cwf-run-init.mjs 纯逻辑测试（分支命名、run_id 安全、身份比对）
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { branchName, assertRunIdSafe, findIdentityMismatch, parseBudget, ensureGitExclude } from '../cwf-run-init.mjs'
+import { branchName, assertRunIdSafe, findIdentityMismatch, parseBudget, ensureGitExclude, repoSlugFromUrl } from '../cwf-run-init.mjs'
 
 test('branchName：run_id 直接进分支名（单射）', () => {
   assert.equal(branchName('cwf-123-01'), 'dev-cwf-123-01')
@@ -49,4 +49,13 @@ test('ensureGitExclude：幂等追加本地排除', async () => {
   // 幂等：重复调用不追加
   const second = ensureGitExclude(dir, ['.scratch/'])
   assert.deepEqual(second, [])
+})
+
+test('repoSlugFromUrl：剥离认证信息（与 hostname 无关）', () => {
+  assert.equal(repoSlugFromUrl('https://github.com/org/repo.git'), 'org/repo')
+  assert.equal(repoSlugFromUrl('https://token123@github.com/org/repo.git'), 'org/repo')
+  assert.equal(repoSlugFromUrl('git@github.com:org/repo.git'), 'org/repo')
+  // GHE/其他 host：认证剥离，host 保留（不留凭据）
+  assert.equal(repoSlugFromUrl('https://token@github.acme.example/org/repo.git'), 'github.acme.example/org/repo')
+  assert.equal(repoSlugFromUrl('git@git.internal:org/repo.git'), 'git.internal/org/repo')
 })

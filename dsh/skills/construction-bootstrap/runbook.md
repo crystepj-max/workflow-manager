@@ -2,12 +2,12 @@
 
 本 runbook 是 Portable Contract 的 DSH 驱动细则。契约锚点引用均为契约文档小节；安装后的权威契约副本在 `<SKILL_DIR>/assets/construction-workflow-portable-contract.md`（源仓库内 = `docs/design/construction-workflow-portable-contract.md`）。
 
-> **脚本路径约定**：下文 `scripts/cwf-*.mjs` 指「随 skill 安装的运行资产副本」——安装后在 `<SKILL_DIR>/assets/`（自包含，外仓库可用）；在本源仓库内开发时也可直接用仓库 `scripts/` 路径。run-init 会把 `handoff.schema.json` 提供到目标 worktree 的 `.agent-runs/schema/`，记录/校验脚本优先读取该副本。
+> **脚本路径约定**：下文命令使用 `$CWF_ASSETS/cwf-*.mjs` 形式——`CWF_ASSETS` 在 skill 安装态 = `<SKILL_DIR>/assets`（自包含，外仓库可用），在本源仓库内开发时 = 仓库 `scripts`。执行前先设置：`CWF_ASSETS=<SKILL_DIR>/assets`（或仓库内 `CWF_ASSETS=scripts`）。run-init 会把 `handoff.schema.json` 提供到目标 worktree 的 `.agent-runs/schema/`，记录/校验脚本优先读取该副本。
 
 ## 0. Run 引导
 
 ```bash
-node scripts/cwf-run-init.mjs <issue编号> <run_id>
+node "$CWF_ASSETS/cwf-run-init.mjs" <issue编号> <run_id>
 ```
 
 - 产出：独立分支 `dev-<run_id>` + worktree `.scratch/worktrees/dev-<run_id>` + run 目录 `.agent-runs/<run_id>/run.json`（含 portable run identity 与回退额度计数）。run_id 须为已净化小写连字符形态（如 `cwf-<issue>-01`）。
@@ -20,7 +20,7 @@ node scripts/cwf-run-init.mjs <issue编号> <run_id>
 2. 写入草案记录：
 
 ```bash
-node scripts/cwf-record.mjs write .agent-runs/<run_id> requirements_baseline payload.json \
+node "$CWF_ASSETS/cwf-record.mjs" write .agent-runs/<run_id> requirements_baseline payload.json \
   --produced-by <本会话标识> --stage requirements
 ```
 
@@ -52,7 +52,7 @@ node scripts/cwf-record.mjs write .agent-runs/<run_id> requirements_baseline pay
 2. 产出 review proof：`verdict` + findings（逐条 `root_cause` ∈ dev/design/requirements）+ 真实 `verified_branch`/`verified_head`。
 3. 路由（controller 判定）：
    - `approve` → 推进 Test；
-   - `request_changes` → **单边回退**：按根因优先级选一条边（requirements > design > dev，§4.1），执行 `node scripts/cwf-record.mjs rollback <runDir> <root_cause>`（额度记账，耗尽自动拒绝并提示升级 §4.3），带 feedback 打回目标 Stage。
+   - `request_changes` → **单边回退**：按根因优先级选一条边（requirements > design > dev，§4.1），执行 `node "$CWF_ASSETS/cwf-record.mjs" rollback <runDir> <root_cause>`（额度记账，耗尽自动拒绝并提示升级 §4.3），带 feedback 打回目标 Stage。
 
 ## 5. Test（独立测试）— 契约 §3.5
 
@@ -67,7 +67,7 @@ node scripts/cwf-record.mjs write .agent-runs/<run_id> requirements_baseline pay
 3. 执行 Integration Checkpoint：
 
 ```bash
-node scripts/cwf-checkpoint.mjs .agent-runs/<run_id>
+node "$CWF_ASSETS/cwf-checkpoint.mjs" .agent-runs/<run_id>
 ```
 
    target 已前进 → 先 sync + 重跑受影响 Proof，再 `--proofs-rerun`。

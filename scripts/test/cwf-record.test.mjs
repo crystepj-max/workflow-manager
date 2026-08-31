@@ -181,6 +181,21 @@ test('write：非 git 工作区 fail closed（不得绑定未观察的 HEAD）',
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
 })
 
+test('write：--attempt 严格正整数解析（2junk / 1.9 / 0 拒绝）', () => {
+  const { runDir } = makeRunDir()
+  const payload = join(runDir, 'payload.json')
+  writeFileSync(payload, JSON.stringify({
+    goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
+    gaps: [], outcome: 'baseline_ready', status: 'draft',
+  }))
+  for (const bad of ['2junk', '1.9', '0', '-2']) {
+    const r = run(['write', runDir, 'requirements_baseline', payload, '--attempt', bad])
+    assert.equal(r.code, 2)
+    assert.match(r.out, /非法 --attempt/)
+  }
+  assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false) // 全未落盘
+})
+
 test('rollback：--by 非法值拒绝（防拼写错误静默落到自动路径）', () => {
   const { runDir } = makeRunDir()
   const r = run(['rollback', runDir, 'dev', '--by', 'huma', '--decided-by', 'tester'])

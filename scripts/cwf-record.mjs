@@ -250,7 +250,14 @@ function parseFlags(args) {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--produced-by') flags.producedBy = args[++i]
     else if (args[i] === '--stage') flags.stage = args[++i]
-    else if (args[i] === '--attempt') flags.attempt = parseInt(args[++i], 10)
+    else if (args[i] === '--attempt') {
+      const raw = args[++i]
+      if (!/^[1-9]\d*$/.test(raw)) {
+        console.error(`非法 --attempt 值: ${raw}（须为正整数）`)
+        process.exit(2)
+      }
+      flags.attempt = parseInt(raw, 10)
+    }
     else if (args[i] === '--by') flags.by = args[++i]
     else if (args[i] === '--reason') flags.reason = args[++i]
     else if (args[i] === '--decided-by') flags.decidedBy = args[++i]
