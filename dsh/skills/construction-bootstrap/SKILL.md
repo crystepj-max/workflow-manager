@@ -29,7 +29,7 @@ description: "在 DSH 会话中驱动「建设 · 完整功能开发」Bootstrap
 ## 前置条件
 
 - 当前会话工作区 = 目标仓库；`git` / `gh` 可用；
-- 契约文档与 schema 在 `docs/design/`；
+- 契约文档与 schema 随 skill 分发于 `<SKILL_DIR>/assets/`（`construction-workflow-portable-contract.md` 与 `handoff.schema.json`；在本源仓库内开发时也可读 `docs/design/` 原版）；
 - 目标 issue 在 GitHub 可访问（`gh` 已认证）。
 
 ## 使用方式

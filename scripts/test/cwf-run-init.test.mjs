@@ -1,7 +1,7 @@
 // cwf-run-init.mjs 纯逻辑测试（分支命名、run_id 安全、身份比对）
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { branchName, assertRunIdSafe, findIdentityMismatch, parseBudget } from '../cwf-run-init.mjs'
+import { branchName, assertRunIdSafe, findIdentityMismatch, parseBudget, ensureGitExclude } from '../cwf-run-init.mjs'
 
 test('branchName：run_id 直接进分支名（单射）', () => {
   assert.equal(branchName('cwf-123-01'), 'dev-cwf-123-01')
@@ -33,4 +33,20 @@ test('parseBudget：完整非负整数校验', () => {
   assert.throws(() => parseBudget('3junk'), /非法回退额度/)
   assert.throws(() => parseBudget('-1'), /非法回退额度/)
   assert.throws(() => parseBudget(''), /非法回退额度/)
+})
+
+test('ensureGitExclude：幂等追加本地排除', async () => {
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { readFileSync, existsSync } = await import('node:fs')
+  const dir = mkdtempSync(join(tmpdir(), 'cwf-excl-'))
+  const first = ensureGitExclude(dir, ['.scratch/', '.agent-runs/'])
+  assert.deepEqual(first, ['.scratch/', '.agent-runs/'])
+  const content = readFileSync(join(dir, 'info', 'exclude'), 'utf-8')
+  assert.match(content, /\.scratch\//)
+  assert.match(content, /\.agent-runs\//)
+  // 幂等：重复调用不追加
+  const second = ensureGitExclude(dir, ['.scratch/'])
+  assert.deepEqual(second, [])
 })

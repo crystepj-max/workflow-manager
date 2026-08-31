@@ -160,6 +160,10 @@ function cmdRollback(runDir, rootCause, flags) {
     console.error(`非法根因: ${rootCause}（合法值: dev / design / requirements）`)
     process.exit(2)
   }
+  if (flags.by !== undefined && flags.by !== 'human') {
+    console.error(`非法 --by 值: ${flags.by}（仅支持 human；拼写错误会静默落到自动路径）`)
+    process.exit(2)
+  }
   const byHuman = flags.by === 'human'
   if (byHuman && !flags.decidedBy) {
     console.error('人工触发回退必须携带 --decided-by（建议同时 --reason）：无归属的人工记录等于绕过额度与验收门（契约 §4.2/§5.3）')

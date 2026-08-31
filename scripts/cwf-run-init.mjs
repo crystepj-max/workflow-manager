@@ -16,6 +16,20 @@ export function branchName(runId) {
   return `dev-${runId}`
 }
 
+export function ensureGitExclude(gitDir, entries) {
+  // 写入 git 本地排除（info/exclude，不污染仓库 .gitignore）：幂等追加
+  const infoDir = join(gitDir, 'info')
+  mkdirSync(infoDir, { recursive: true })
+  const excl = join(infoDir, 'exclude')
+  const cur = existsSync(excl) ? readFileSync(excl, 'utf-8') : ''
+  const lines = cur.split('\n').map(l => l.trim())
+  const add = entries.filter(e => !lines.includes(e))
+  if (add.length > 0) {
+    writeFileSync(excl, cur + (cur === '' || cur.endsWith('\n') ? '' : '\n') + add.join('\n') + '\n')
+  }
+  return add
+}
+
 export function parseBudget(str) {
   // 完整非负整数校验：NaN / 3junk / 负数一律拒绝
   if (!/^\d+$/.test(String(str))) {
@@ -110,6 +124,13 @@ function main() {
   }
   git(['branch', branch, baseRef], repo)
   git(['worktree', 'add', worktreeDir, branch], repo)
+
+  // run 产物不得入库（仓库安全规则）：目标仓库可能未 ignore .scratch/ 与 .agent-runs/，
+  // 写 git 本地 info/exclude（不改动仓库跟踪的 .gitignore）
+  const mainGitDir = git(['rev-parse', '--git-dir'], repo)
+  ensureGitExclude(mainGitDir, ['.scratch/', '.agent-runs/'])
+  const wtGitDir = git(['rev-parse', '--git-dir'], worktreePath)
+  ensureGitExclude(wtGitDir, ['.agent-runs/', '.scratch/'])
 
   const runDir = join(worktreePath, runDirRel)
   mkdirSync(runDir, { recursive: true })

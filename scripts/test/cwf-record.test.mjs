@@ -181,6 +181,15 @@ test('write：非 git 工作区 fail closed（不得绑定未观察的 HEAD）',
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
 })
 
+test('rollback：--by 非法值拒绝（防拼写错误静默落到自动路径）', () => {
+  const { runDir } = makeRunDir()
+  const r = run(['rollback', runDir, 'dev', '--by', 'huma', '--decided-by', 'tester'])
+  assert.equal(r.code, 2)
+  assert.match(r.out, /非法 --by 值/)
+  const runState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(runState.rollback_used, 0) // 未污染
+})
+
 test('budget：畸形调额拒绝（4junk / 负数 / 空串）', () => {
   const { runDir } = makeRunDir()
   for (const bad of ['4junk', '-1', 'nope']) {
