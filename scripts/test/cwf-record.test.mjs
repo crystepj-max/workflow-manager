@@ -437,6 +437,31 @@ test('reverify 同步刷新 run.current_head', () => {
   assert.equal(runState.current_head, realHead)
 })
 
+test('write：dev_handoff handoff_ready 即终结，blocked 允许刷新（3891543026）', () => {
+  const { root, runDir } = makeRunDir()
+  const mk = (name, outcome) => {
+    const f = join(runDir, name)
+    writeFileSync(f, JSON.stringify({ summary: 's', outcome, changes: [], self_check: [{ check: 'c', result: 'pass' }] }))
+    return f
+  }
+  // handoff_ready 写入后同 attempt 重写拒绝
+  assert.equal(run(['write', runDir, 'dev_handoff', mk('d1.json', 'handoff_ready'), '--produced-by', 'test-suite', '--stage', 'dev']).code, 0)
+  const rewrite = run(['write', runDir, 'dev_handoff', mk('d2.json', 'handoff_ready'), '--produced-by', 'test-suite', '--stage', 'dev'])
+  assert.equal(rewrite.code, 1)
+  assert.match(rewrite.out, /终结态记录/)
+})
+
+test('write：dev_handoff blocked 允许同 attempt 刷新（可恢复态）', () => {
+  const { runDir } = makeRunDir()
+  const mk = (name) => {
+    const f = join(runDir, name)
+    writeFileSync(f, JSON.stringify({ summary: 's', outcome: 'blocked', blocked_reason: '环境不可用', changes: [], self_check: [{ check: 'c', result: 'blocked' }] }))
+    return f
+  }
+  assert.equal(run(['write', runDir, 'dev_handoff', mk('d1.json'), '--produced-by', 'test-suite', '--stage', 'dev']).code, 0)
+  assert.equal(run(['write', runDir, 'dev_handoff', mk('d2.json'), '--produced-by', 'test-suite', '--stage', 'dev']).code, 0) // 刷新允许
+})
+
 test('check：对既有记录只校验', () => {
   const { runDir } = makeRunDir()
   const payload = join(runDir, 'payload.json')
