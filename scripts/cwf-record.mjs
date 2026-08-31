@@ -148,6 +148,31 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
     }
   }
 
+  // closeout 收口双重校验（契约 §8.3）：所引验收包必须已 decided、非 reject、
+  // 且 decision 与 acceptance_outcome 一致——不得归档无效或错配的完结
+  if (recordType === 'closeout_summary') {
+    const ref = record.payload.acceptance_package_ref
+    const apPath = join(runDir, ref)
+    if (!existsSync(apPath)) {
+      console.error(`closeout 引用的验收包不存在: ${ref}`)
+      process.exit(1)
+    }
+    const ap = JSON.parse(readFileSync(apPath, 'utf-8'))
+    const problems = []
+    if (ap.record_type !== 'acceptance_package') problems.push(`引用类型错误: ${ap.record_type}`)
+    if (ap.payload?.status !== 'decided') problems.push(`验收包未决: status=${ap.payload?.status}`)
+    if (ap.payload?.decision === 'reject') problems.push('验收包为 reject——不得收口')
+    if (ap.payload?.decision && ap.payload.decision !== record.payload.acceptance_outcome) {
+      problems.push(`acceptance_outcome(${record.payload.acceptance_outcome}) ≠ 引用包 decision(${ap.payload.decision})`)
+    }
+    if (ap.run?.run_id !== run.run_id) problems.push(`引用包不属于本 Run（${ap.run?.run_id}）`)
+    if (problems.length > 0) {
+      console.error('closeout 引用校验失败（契约 §8.3）：')
+      for (const p2 of problems) console.error(`  ${p2}`)
+      process.exit(1)
+    }
+  }
+
   // attempt 戳文件名 + index 索引：回退重跑的旧记录不得被覆盖（契约 §8.5）
   const fileName = `${recordType}.a${run.attempt}.json`
   const out = join(runDir, fileName)

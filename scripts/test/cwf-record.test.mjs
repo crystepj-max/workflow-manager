@@ -462,6 +462,62 @@ test('write：dev_handoff blocked 允许同 attempt 刷新（可恢复态）', (
   assert.equal(run(['write', runDir, 'dev_handoff', mk('d2.json'), '--produced-by', 'test-suite', '--stage', 'dev']).code, 0) // 刷新允许
 })
 
+test('closeout：引用验收包交叉校验（未决/reject/错配/跨 Run 全拒，一致放行）', () => {
+  const { root, runDir } = makeRunDir()
+  const realHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const realBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const mk = (name, status, extra = {}) => {
+    const f = join(runDir, name)
+    writeFileSync(f, JSON.stringify({
+      status,
+      assembled: {
+        requirements_baseline_ref: 'r', design_package_ref: 'd', dev_handoff_ref: 'v',
+        review_proof_ref: 'rp', test_proof_ref: 'tp',
+        integration_checkpoint: { target_ref: 'main', target_head_at_check: realHead, target_advanced: false, proofs_state: 'still_valid' },
+      },
+      ...extra,
+    }))
+    return f
+  }
+  const writeCloseout = (outcome) => {
+    const f = join(runDir, 'co.json')
+    writeFileSync(f, JSON.stringify({
+      deliverables: ['x'], integration: { pr: '#1', checkpoint: 'c' },
+      acceptance_package_ref: 'acceptance_package.a1.json', acceptance_outcome: outcome, records_retained: true,
+    }))
+    return run(['write', runDir, 'closeout_summary', f, '--produced-by', 'test-suite', '--stage', 'closeout'])
+  }
+  // 未决 → 拒
+  run(['write', runDir, 'acceptance_package', mk('a-await.json', 'awaiting_decision'), '--produced-by', 'test-suite', '--stage', 'human_acceptance'])
+  assert.equal(writeCloseout('accept').code, 1)
+  // reject → 拒
+  run(['write', runDir, 'acceptance_package', mk('a-reject.json', 'decided', { decision: 'reject', decided_by: 'x', decided_at: '2026-08-31T00:00:00Z', feedback: 'f', rejection_root_cause: 'dev', verified_branch: realBranch, verified_head: realHead }), '--produced-by', 'test-suite', '--stage', 'human_acceptance'])
+  // 注意：同 attempt 同文件成熟——改用新文件名引用拒绝态
+  const badRef = writeCloseout('accept')
+  // 上面的 writeCloseout 引用 acceptance_package.a1.json，但该文件从未被写过（mk 只写 payload 文件）——先补真实引用目标
+  const ap = join(runDir, 'acceptance_package.a1.json')
+  writeFileSync(ap, JSON.stringify({
+    record_type: 'acceptance_package', record_version: 'v0.1.8', created_at: '2026-08-31T00:00:00Z',
+    produced_by: 'x', run: { run_id: 'cwf-test-01', issue_or_task_identity: '#999', workspace_id: 'wt-test', repository: 'crystepj-max/workflow-manager', base_ref: 'main', base_commit: 'abc', work_branch: realBranch, current_head: realHead, stage: 'human_acceptance', attempt: 1 },
+    payload: { status: 'decided', assembled: {}, decision: 'reject', decided_by: 'x', decided_at: '2026-08-31T00:00:00Z', feedback: 'f', rejection_root_cause: 'dev', verified_branch: realBranch, verified_head: realHead },
+  }))
+  const rReject = writeCloseout('accept')
+  assert.equal(rReject.code, 1)
+  assert.match(rReject.out, /reject/)
+  // outcome 与 decision 错配 → 拒
+  writeFileSync(ap, JSON.stringify({
+    record_type: 'acceptance_package', record_version: 'v0.1.8', created_at: '2026-08-31T00:00:00Z',
+    produced_by: 'x', run: { run_id: 'cwf-test-01', issue_or_task_identity: '#999', workspace_id: 'wt-test', repository: 'crystepj-max/workflow-manager', base_ref: 'main', base_commit: 'abc', work_branch: realBranch, current_head: realHead, stage: 'human_acceptance', attempt: 1 },
+    payload: { status: 'decided', assembled: {}, decision: 'user_accepted', decided_by: 'x', decided_at: '2026-08-31T00:00:00Z', feedback: 'f', verified_branch: realBranch, verified_head: realHead },
+  }))
+  const rMismatch = writeCloseout('accept')
+  assert.equal(rMismatch.code, 1)
+  assert.match(rMismatch.out, /acceptance_outcome/)
+  // 一致 → 放行
+  const rOk = run(['write', runDir, 'closeout_summary', (() => { const f = join(runDir, 'co-ok.json'); writeFileSync(f, JSON.stringify({ deliverables: ['x'], integration: { pr: '#1', checkpoint: 'c' }, acceptance_package_ref: 'acceptance_package.a1.json', acceptance_outcome: 'user_accepted', records_retained: true })); return f })(), '--produced-by', 'test-suite', '--stage', 'closeout'])
+  assert.equal(rOk.code, 0, rOk.out)
+})
+
 test('check：对既有记录只校验', () => {
   const { runDir } = makeRunDir()
   const payload = join(runDir, 'payload.json')
