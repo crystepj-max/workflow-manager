@@ -9,8 +9,8 @@
 //       —— 记录一次自动回退（root_cause ∈ dev/design/requirements）；超额度打印升级提示并 exit 1
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { validateRecord } from './cwf-validate.mjs'
 import { parseBudget } from './cwf-run-init.mjs'
 
@@ -291,6 +291,26 @@ function cmdBudget(runDir, target, flags) {
   console.log(`回退额度调整：${from} → ${n}（decided_by=${flags.decidedBy}，已入账 budget_adjustments）`)
 }
 
+function cmdArchive(runDir) {
+  // 收口前归档：worktree 是一次性的（git worktree remove 会连同 .agent-runs 删除），
+  // run 证据必须复制到主检出的 .agent-runs/（随主检出存续，不落库）
+  const run = loadRun(runDir)
+  const wt = repoRoot(runDir)
+  let mainRoot
+  try {
+    const commonDirRaw = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: wt, encoding: 'utf-8' }).trim()
+    // git 可能输出相对路径（相对 git 调用的 cwd）：必须以 wt 为基准解析，不能用进程 cwd
+    mainRoot = dirname(resolve(wt, commonDirRaw))
+  } catch (e) {
+    console.error(`无法定位主检出（${e.message}），归档中止`)
+    process.exit(1)
+  }
+  const dest = join(mainRoot, '.agent-runs', run.run_id)
+  mkdirSync(dest, { recursive: true })
+  cpSync(runDir, dest, { recursive: true })
+  console.log(`已归档 ${runDir} -> ${dest}（worktree 可安全移除，证据随主检出保留）`)
+}
+
 function cmdReverify(runDir, flags) {
   // Integration Checkpoint sync 后的 Proof 重跑（§7.3）：推进 attempt 产生新修订文件，
   // 保留原 HEAD 绑定的旧 proof（§8.5）；不是回退，不耗额度
@@ -371,6 +391,12 @@ function main() {
       process.exit(2)
     }
     cmdRollback(rest[0], rest[1], flags)
+  } else if (cmd === 'archive') {
+    if (rest.length !== 1) {
+      console.error('用法: archive <runDir>')
+      process.exit(2)
+    }
+    cmdArchive(rest[0])
   } else if (cmd === 'reverify') {
     if (rest.length !== 1) {
       console.error('用法: reverify <runDir> [--reason <text>]')

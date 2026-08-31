@@ -345,6 +345,22 @@ test('write：无归属（缺 --produced-by 且无 DSH_SESSION_ID）fail closed'
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
 })
 
+test('archive：run 证据复制到主检出 .agent-runs（worktree 可移除）', () => {
+  const { root, runDir } = makeRunDir()
+  // 模拟 worktree 布局：把 run 目录挪进 <root>/.scratch/worktrees/dev-x/ 下
+  const wt = join(root, '.scratch', 'worktrees', 'dev-x')
+  mkdirSync(join(wt, '.agent-runs'), { recursive: true })
+  const wtRunDir = join(wt, '.agent-runs', 'cwf-test-01')
+  cpSync(runDir, wtRunDir, { recursive: true })
+  writeFileSync(join(wtRunDir, 'evidence.json'), '{}')
+  const r = run(['archive', wtRunDir])
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.out, /已归档/)
+  const dest = join(root, '.agent-runs', 'cwf-test-01')
+  assert.equal(existsSync(join(dest, 'evidence.json')), true)
+  assert.equal(existsSync(join(dest, 'run.json')), true)
+})
+
 test('check：对既有记录只校验', () => {
   const { runDir } = makeRunDir()
   const payload = join(runDir, 'payload.json')

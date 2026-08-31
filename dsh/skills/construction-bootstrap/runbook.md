@@ -86,7 +86,13 @@ node "$CWF_ASSETS/cwf-record.mjs" rollback .agent-runs/<run_id> <rejection_root_
 
 1. 只整理/冻结/交付；交付清单 + 集成结果（PR/merge 至少其一）+ `acceptance_package_ref`（引用已决验收包）+ `acceptance_outcome`（保留 user_accepted 异常）+ `records_retained=true`。
 2. PR 按仓库规则创建/合并；合并后 issue 关闭与复选框勾选属收口记账。
-3. `write closeout_summary` 归档。run 目录（.agent-runs/<run_id>/）完整保留，可按 run_id 检索（§8.5）。
+3. **证据归档**（§8.5 前置）：worktree 是一次性的——写 closeout_summary 之前必须先把 run 证据归档到主检出：
+
+```bash
+node "$CWF_ASSETS/cwf-record.mjs" archive .agent-runs/<run_id>
+```
+
+4. `write closeout_summary` 归档声明。run 目录（主检出 `.agent-runs/<run_id>/`）完整保留，可按 run_id 检索（§8.5）。
 
 ## 通用规则
 

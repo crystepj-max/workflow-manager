@@ -22,6 +22,10 @@ export function verifyRerunEvidence({ synced, currentHead, attempt, proofs }) {
       errors.push(`缺少当前 attempt 的 ${rt} 记录（index.json 无指向）`)
       continue
     }
+    if (rec.record_type !== rt) {
+      errors.push(`index 指向的 ${rt} 记录实际 record_type=${rec.record_type}——类型不符（index 可能被指向同一记录）`)
+      continue
+    }
     if (rec.run?.attempt !== attempt) {
       errors.push(`${rt} 记录 attempt(${rec.run?.attempt}) ≠ 当前 attempt(${attempt})——先 reverify 再重跑`)
     }
