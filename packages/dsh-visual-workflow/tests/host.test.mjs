@@ -764,6 +764,29 @@ test('角色库 get：内置详情（工作区正文）+ 自定义详情 + 未�
   assert.match(miss.errors[0].message, /角色不存在/)
 })
 
+test('内置角色详情：打包快照优先于工作区旧版同名文件（#129 遗留项 1）', async () => {
+  // 运行时 roleRef（#81 身份切分）对内置角色先读打包快照再回退工作区；编辑器详情
+  // 必须同序——否则工作区一份旧版/本地改过的 dsh/roles/dev.md 会让界面展示与执行口径不一致。
+  globalThis.__VWF_REPO_ROOT__ = REPO
+  try {
+    const fs = seedFs({
+      [REPO + '/dsh/roles/dev.md']: '打包快照 dev 正文\n',
+      [SESSION_REPO + '/dsh/roles/dev.md']: '工作区旧版 dev 正文\n',
+    })
+    const { handlers } = env({ extra: { fs, agents: { currentInitiator: () => ({ session: { header: { cwd: SESSION_REPO } } }) } } })
+    const d = await call(handlers, 'vwf.roles.get', { id: 'dev' })
+    assert.equal(d.ok, true)
+    assert.equal(d.role.content, '打包快照 dev 正文\n', '内置角色详情应优先取打包快照（与运行时 roleRef 同源）')
+    assert.equal(d.role.summary, '打包快照 dev 正文', '摘要与展示内容同源')
+    // 角色列表（vwf.roles）内置摘要同样本快照优先——旧版工作区文件不再以旧版摘要出现
+    const r = await call(handlers, 'vwf.roles')
+    const devInList = r.roles.find(x => x.id === 'dev')
+    assert.equal(devInList.summary, '打包快照 dev 正文', '角色列表内置摘要同取打包快照（#129 遗留项 1）')
+  } finally {
+    delete globalThis.__VWF_REPO_ROOT__
+  }
+})
+
 test('角色库 create：落盘 dsh/roles/<name>.md；与内置/自定义重名、非法名、空内容全部拒绝', async () => {
   const fs = makeFs({
     [REPO + '/dsh/roles/dev.md']: '内置正文\n',

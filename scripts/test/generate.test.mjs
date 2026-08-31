@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { compileBlueprint, generateAll, generateUserSkill, projectToVwf, skillWrap, writeUserSkill, collectBuiltinRoles, loadBuiltinRoleIds } from '../generate.mjs';
+import { compileBlueprint, generateAll, generateUserSkill, projectToVwf, skillWrap, writeUserSkill, collectBuiltinRoles, loadBuiltinRoleIds, loadBuiltinRoleDefs } from '../generate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tplDir = path.join(here, '../../templates');
@@ -218,6 +218,45 @@ test('S4 roleRef：内置角色以打包快照优先，自定义角色以工作�
   assert.ok(script.includes('_b ? [_bundle, _ws] : [_ws, _bundle]'), '内置先打包、自定义先工作区')
   assert.ok(script.includes("A.roleDir || 'dsh/roles'"), '保留 A.roleDir 打包兜底链路')
   assert.ok(script.includes("'dsh/roles/' + name + '.md'"), '保留工作区路径')
+})
+
+// ── #129 遗留项 2：临时/未保存图编译自包含（内置角色正文编译期内联 ROLE_DEFS）──
+test('S5 内置角色正文编译期内联：ROLE_DEFS 注入 + roleRef 优先内联 + stale 产物安全回退', () => {
+  const devContent = readFileSync(path.join(here, '..', '..', 'dsh', 'roles', 'dev.md'), 'utf8')
+  assert.ok(devContent.includes('你是开发 Agent'), '夹具卫生：dev.md 存在且非空')
+  const { script } = compileBlueprint(bp, { builtinRoleIds: ['dev'] })
+  assert.ok(script.includes('const ROLE_DEFS = '), '编译脚本应注入 ROLE_DEFS')
+  assert.ok(script.includes(JSON.stringify(devContent)), '内置角色 dev 正文应内联进 ROLE_DEFS（临时编译自包含，不依赖 dsh/roles 存在）')
+  assert.ok(script.includes("typeof ROLE_DEFS === 'undefined' ? undefined : ROLE_DEFS[name]"), 'roleRef 应优先读内联定义；stale 产物缺 ROLE_DEFS 声明时 typeof 三元守卫显式回退 undefined（评论 3900312838）')
+  assert.ok(script.includes('【角色定义】（内置角色，编译期内联'), '内联分支应有明确标识')
+  // 注入覆盖：测试/宿主可显式传 builtinRoleDefs（不依赖磁盘角色源）
+  const { script: s2 } = compileBlueprint(bp, { builtinRoleIds: ['dev'], builtinRoleDefs: { dev: '内联测试正文\n' } })
+  assert.ok(s2.includes(JSON.stringify('内联测试正文\n')), 'opts.builtinRoleDefs 可注入覆盖磁盘读取')
+})
+
+// ── Codex PR#130 P1（评论 3900290054）：内联仅限蓝图引用角色，避免临时编译 stdout 超 64KB ──
+test('S6 内联仅限蓝图引用内置角色：最小图产物 < 宿主 64KB stdout 捕获上限，且 12 角色均可加载', () => {
+  const mini = JSON.parse(readFileSync(path.join(here, 'fixtures', 'hello-blueprint.json'), 'utf8'))
+  const devContent = readFileSync(path.join(here, '..', '..', 'dsh', 'roles', 'dev.md'), 'utf8')
+  const orchContent = readFileSync(path.join(here, '..', '..', 'dsh', 'roles', 'orchestrator.md'), 'utf8')
+  const { script } = compileBlueprint(mini)
+  assert.ok(script.includes(JSON.stringify(devContent)), '引用到的内置角色（dev）内联')
+  assert.ok(!script.includes(JSON.stringify(orchContent)), '未引用内置角色（orchestrator）不内联——避免全量内联撑爆 stdout')
+  assert.ok(Buffer.byteLength(script, 'utf8') < 64 * 1024, '最小图编译产物 < 64KB（宿主 runNode maxBytes:64*1024，host.js:137）')
+  // 覆盖验收：12 个内置角色均可被内联加载（按引用过滤只影响单图体积，不影响能力面）
+  const all = loadBuiltinRoleDefs(loadBuiltinRoleIds())
+  assert.equal(Object.keys(all).length, 12, '12 个内置角色均可加载内联')
+  // 全 12 内置角色各一节点的合法图（Codex PR#130 第二轮 P1，评论 3900291469）：JSON 响应
+  // 必须 < 编译路径捕获上限（host.js runNode maxBytes: 1MB）——引用过滤不足以兜住该最坏情况。
+  const ids = loadBuiltinRoleIds()
+  const twelve = { id: 't12', control: { maxRounds: 3 }, nodes: [], edges: [] }
+  for (const [i, rid] of ids.entries()) {
+    twelve.nodes.push({ id: 'n' + i, profile: rid, label: rid, goal: 'g' })
+    if (i > 0) twelve.edges.push({ from: 'n' + (i - 1), to: 'n' + i, on: 'success' })
+  }
+  const { script: s12 } = compileBlueprint(twelve)
+  const resp12 = JSON.stringify({ ok: true, script: s12, meta: {} })
+  assert.ok(Buffer.byteLength(resp12, 'utf8') < 1024 * 1024, '12 角色全用图的 JSON 响应 < 编译路径 1MB 捕获上限（host.js runNode maxBytes）')
 })
 
 test('S4 内置角色清单：单一来源为宿主注册表，解析失败 loud-fail', () => {

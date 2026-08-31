@@ -134,8 +134,8 @@ return {
           env: { NODE_OPTIONS: undefined },
           stdio: {
             stdin: 'ignore',
-            stdout: { maxBytes: 64 * 1024 },
-            stderr: { maxBytes: 64 * 1024 },
+            stdout: { maxBytes: (opts && opts.maxBytes) || 64 * 1024 },
+            stderr: { maxBytes: (opts && opts.maxBytes) || 64 * 1024 },
           },
           graceMs: (opts && opts.graceMs) || 30000,
         })
@@ -588,7 +588,10 @@ return {
       } catch (e) {
         return { ok: false, detail: '临时蓝图写入失败：' + String((e && e.message) || e) }
       }
-      const r = await runNode([p.generator, 'compile', tmp], { cwd: p.generatorRoot, graceMs: 30000 })
+      // 编译 stdout 传输上限提到 1MB（Codex PR#130 第二轮 P1）：合法的「12 内置角色各
+      // 一节点」图的 JSON 响应约 66KB 已超默认 64KB——支持的图必须能被传输，不能静默截断。
+      // 引用过滤（generate.mjs ROLE_DEFS）已减小典型图体积，1MB 兜底覆盖全角色最坏情况。
+      const r = await runNode([p.generator, 'compile', tmp], { cwd: p.generatorRoot, graceMs: 30000, maxBytes: 1024 * 1024 })
       try { await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", tmp], { cwd: p.generatorRoot }) } catch (e) {}
       if (!r.ok) return { ok: false, detail: r.detail }
       try {
@@ -1150,6 +1153,26 @@ return {
       const p = await rootPaths()
       return p.repo ? p.repo + '/dsh/roles' : 'dsh/roles'
     }
+    // 角色正文摘要：取首个有意义行（跳过 frontmatter 键/标题），截 80 字符；空则回退 fallback。
+    // readRoleFiles 与 getRoleDetail 共用，保证「列表摘要/详情摘要/展示正文」口径一致。
+    const summarizeRole = (content, fallback = '') => {
+      if (typeof content !== 'string') return fallback
+      const firstLine = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('---') && !l.startsWith('id:') && !l.startsWith('name:') && !l.startsWith('summary') && !l.startsWith('createdAt') && !l.startsWith('updatedAt') && !l.startsWith('dynamicTemplate') && !l.startsWith('#'))[0]
+      return (firstLine || fallback).slice(0, 80)
+    }
+    // 内置角色打包快照（#129 遗留项 1）：__VWF_REPO_ROOT__/dsh/roles/<id>.md——与运行时
+    // roleRef 编译期内联同源（generate.mjs DEFAULT_ROLES_DIR 即同一目录）。读不到返回 null。
+    async function readBuiltinRoleSnapshot(id) {
+      const roots = [(typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) ? __VWF_REPO_ROOT__ : null].filter(Boolean)
+      for (const root of roots) {
+        try {
+          const target = await fs.resolve(root + '/dsh/roles/' + id + '.md')
+          const info = await fs.stat(target)
+          if (info && info.type === 'file') return String(await fs.readText(target))
+        } catch (e) { /* 尝试下一个根 */ }
+      }
+      return null
+    }
     // 读取角色目录：返回 { files: Map<id,{summary,content}>, state: ok|missing|error, message }。
     // fail-closed：读取失败（而非目录缺失）必须阻断后续唯一性校验与变更。
     async function readRoleFiles() {
@@ -1185,8 +1208,7 @@ return {
           let content = null
           try {
             content = String(await fs.readText(await fs.resolve(roleDir + '/' + ent.name)))
-            const firstLine = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('---') && !l.startsWith('id:') && !l.startsWith('name:') && !l.startsWith('summary') && !l.startsWith('createdAt') && !l.startsWith('updatedAt') && !l.startsWith('dynamicTemplate') && !l.startsWith('#'))[0]
-            summary = (firstLine || '').slice(0, 80)
+            summary = summarizeRole(content)
           } catch (e) { /* 单文件读取失败跳过摘要 */ }
           out.set(id, { summary, content })
         }
@@ -1203,9 +1225,16 @@ return {
       const files = inv.files
       const roles = []
       for (const b of BUILTIN_ROLES) {
+        // 内置角色摘要/内容与详情、运行时 roleRef 同序（#129 遗留项 1）：打包快照优先、
+        // 工作区回退——否则旧版 dsh/roles/<id>.md 会以旧版摘要/正文出现在角色列表，
+        // 与详情/执行口径不一致。
+        const snap = await readBuiltinRoleSnapshot(b.id)
         const f = files.get(b.id)
-        const entry = { id: b.id, name: b.name, summary: (f && f.summary) || b.summary, builtin: true }
-        if (includeContent && f && f.content != null) entry.content = f.content
+        const entry = { id: b.id, name: b.name, summary: snap != null ? summarizeRole(snap, b.summary) : ((f && f.summary) || b.summary), builtin: true }
+        if (includeContent) {
+          const content = snap != null ? snap : (f && f.content != null ? f.content : null)
+          if (content != null) entry.content = content
+        }
         roles.push(entry)
       }
       // 打包回退（Codex PR#124 第二轮 P1）：产品工作区无 dsh/roles/dispatcher.md 时，
@@ -1232,27 +1261,26 @@ return {
       }
       return roles
     }
-    // 单个角色详情：内置角色正文缺省时依次回退 工作区文件 → 打包仓库 dsh/roles
-    // （静态 bundle 运行时推导的 __VWF_REPO_ROOT__）→ 内置元数据合成占位正文。
+    // 单个角色详情：内置角色定义来源顺序与运行时 roleRef 对齐（#129 遗留项 1）——
+    // 打包快照（__VWF_REPO_ROOT__/dsh/roles，编译期内联同源）→ 工作区 dsh/roles 回退
+    // → 内置元数据合成占位正文。否则工作区一份旧版/本地改过的同名文件会盖过模板自带
+    // 的版本化定义，编辑器展示与执行口径不一致。自定义角色仍以工作区为准（打包只读兜底）。
     async function getRoleDetail(id) {
       const inv = await readRoleFiles()
       const files = inv.files
       if (BUILTIN_ROLE_IDS.indexOf(id) >= 0) {
         const meta = BUILTIN_ROLES.find(r => r.id === id)
-        const f = files.get(id)
-        let content = f && f.content
+        // 内置角色定义来源顺序与运行时 roleRef 对齐（#129 遗留项 1）：打包快照 →
+        // 工作区 dsh/roles 回退 → 元数据占位兜底。否则工作区一份旧版/本地改过的
+        // 同名文件会盖过模板自带的版本化定义，编辑器展示与执行口径不一致。
+        let content = await readBuiltinRoleSnapshot(id)
         if (content == null) {
-          const roots = [(typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) ? __VWF_REPO_ROOT__ : null].filter(Boolean)
-          for (const root of roots) {
-            try {
-              const target = await fs.resolve(root + '/dsh/roles/' + id + '.md')
-              const info = await fs.stat(target)
-              if (info && info.type === 'file') { content = String(await fs.readText(target)); break }
-            } catch (e) { /* 尝试下一个根 */ }
-          }
+          const f = files.get(id)
+          content = f && f.content
         }
         if (content == null) content = '# ' + meta.name + '（' + id + '）\n\n' + meta.summary + '\n\n> 当前工作区未包含该内置角色的完整定义（dsh/roles/' + id + '.md），角色仍可正常选择使用。'
-        return { id, name: meta.name, summary: (f && f.summary) || meta.summary, builtin: true, content }
+        // 摘要与展示正文同源（summarizeRole），占位正文回退注册表摘要
+        return { id, name: meta.name, summary: summarizeRole(content, meta.summary), builtin: true, content }
       }
       const f = files.get(id)
       if (f) return { id, name: id, summary: f.summary || '', builtin: false, content: f.content != null ? f.content : '' }
