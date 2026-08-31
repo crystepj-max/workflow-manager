@@ -73,6 +73,14 @@ node "$CWF_ASSETS/cwf-checkpoint.mjs" .agent-runs/<run_id>
    target 已前进 → 先 sync，再执行 `node "$CWF_ASSETS/cwf-record.mjs" reverify <runDir> --reason "checkpoint sync"` 推进 Proof 修订（保留原 HEAD 记录，不耗额度），重跑受影响 Proof（review/test 新 attempt 文件），再 `--proofs-rerun`。
 4. 组装 `assembled`（五类引用 + 结构化 checkpoint），`write acceptance_package`（status=awaiting_decision），呈递人工。
 5. 人工裁决后回填 `status=decided` + `decision` + `decided_by/at` + `verified_branch/head`（+ reject 时 feedback/根因），重新 `write`。
+6. **reject 路由**：验收 reject ≠ 进 closeout——执行人工触发回退（不耗自动额度，§4.2）：
+
+```bash
+node "$CWF_ASSETS/cwf-record.mjs" rollback .agent-runs/<run_id> <rejection_root_cause> \
+  --by human --decided-by <验收人> --reason "acceptance reject: <feedback 摘要>"
+```
+
+   随后按根因回到目标 Stage 重入（实现问题回 Dev，设计问题回 Design，需求/范围回 Requirements——§4.1 根因路由表）。
 
 ## 7. Closeout（收口）— 契约 §3.7
 

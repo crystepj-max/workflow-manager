@@ -49,6 +49,11 @@ function saveRun(runDir, run) {
 }
 
 function cmdWrite(runDir, recordType, payloadPath, flags) {
+  const producer = flags.producedBy || process.env.DSH_SESSION_ID
+  if (!producer) {
+    console.error('必须提供 --produced-by（或环境变量 DSH_SESSION_ID）：无归属记录会破坏证据链 §8.3 ⑨ 的异源判定')
+    process.exit(2)
+  }
   if (!RECORD_TYPES.includes(recordType)) {
     console.error(`未知 record_type: ${recordType}（合法值: ${RECORD_TYPES.join(' / ')}）`)
     process.exit(2)
@@ -76,7 +81,7 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
     record_type: recordType,
     record_version: schema.properties.record_version.const,
     created_at: new Date().toISOString(),
-    produced_by: flags.producedBy || process.env.DSH_SESSION_ID || 'unknown',
+    produced_by: producer,
     run: {
       run_id: run.run_id,
       issue_or_task_identity: run.issue_or_task_identity,
@@ -121,6 +126,17 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
     }
   }
 
+  // 已终结记录不可覆盖（§8.5 保留 + 不可覆盖 Decision Record §5）：
+  // 同 attempt 内仅允许「未终结成熟刷新」（baseline draft→confirmed、acceptance awaiting→decided）
+  const outPath = join(runDir, `${recordType}.a${run.attempt}.json`)
+  if (existsSync(outPath)) {
+    const existing = JSON.parse(readFileSync(outPath, 'utf-8'))
+    if (isFinalized(existing)) {
+      console.error(`${outPath} 已是终结态记录，不可覆盖——请推进 attempt（rollback）或 reverify 后重写（契约 §8.5/§5）`)
+      process.exit(1)
+    }
+  }
+
   // attempt 戳文件名 + index 索引：回退重跑的旧记录不得被覆盖（契约 §8.5）
   const fileName = `${recordType}.a${run.attempt}.json`
   const out = join(runDir, fileName)
@@ -153,6 +169,20 @@ function assertRunBranch(runDir, run) {
 function currentHead(runDir) {
   // runDir 所在 git 工作区的 HEAD（worktree 场景 = 该 worktree 分支 HEAD）；失败即抛错（fail closed）
   return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot(runDir), encoding: 'utf-8' }).trim()
+}
+
+function isFinalized(existing) {
+  const p = existing && existing.payload
+  if (!p) return false
+  switch (existing.record_type) {
+    case 'acceptance_package': return p.status === 'decided'          // 人工签收即终结
+    case 'design_package': return p.decision !== undefined            // 含已决 Decision Record 即终结
+    case 'requirements_baseline': return p.status === 'confirmed'     // 冻结基线即终结（变动走新 Revision/attempt）
+    case 'review_proof':
+    case 'test_proof':
+    case 'closeout_summary': return true                              // proof/收口一次写入即终结
+    default: return false                                             // dev_handoff 允许同 attempt 技术重试刷新
+  }
 }
 
 function cmdCheck(runDir, files) {

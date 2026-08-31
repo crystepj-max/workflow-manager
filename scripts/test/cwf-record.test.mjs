@@ -71,14 +71,14 @@ test('write：重跑不覆盖旧记录，index 指向最新 attempt', () => {
     goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
     gaps: [], outcome: 'baseline_ready', status: 'draft',
   }))
-  run(['write', runDir, 'requirements_baseline', payload])
+  run(['write', runDir, 'requirements_baseline', payload, '--produced-by', 'test-suite'])
   // 同一记录第二次写入（如确认后刷新）：同 attempt 覆盖同文件
-  const again = run(['write', runDir, 'requirements_baseline', payload])
+  const again = run(['write', runDir, 'requirements_baseline', payload, '--produced-by', 'test-suite'])
   assert.equal(again.code, 0)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), true)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a2.json')), false)
   // attempt 2 写入 → 新文件 + index 前移
-  const r2 = run(['write', runDir, 'requirements_baseline', payload, '--attempt', '2'])
+  const r2 = run(['write', runDir, 'requirements_baseline', payload, '--attempt', '2', '--produced-by', 'test-suite'])
   assert.equal(r2.code, 0, r2.out)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), true) // 旧 attempt 保留
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a2.json')), true)
@@ -90,7 +90,7 @@ test('write：非法 payload 拒绝落盘', () => {
   const { runDir } = makeRunDir()
   const payload = join(runDir, 'bad.json')
   writeFileSync(payload, JSON.stringify({ goal: 'g' })) // 缺 scope/acceptance/gaps/status/outcome
-  const r = run(['write', runDir, 'requirements_baseline', payload])
+  const r = run(['write', runDir, 'requirements_baseline', payload, '--produced-by', 'test-suite'])
   assert.equal(r.code, 1)
   assert.match(r.out, /校验失败/)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.json')), false)
@@ -175,7 +175,7 @@ test('write：非 git 工作区 fail closed（不得绑定未观察的 HEAD）',
     goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
     gaps: [], outcome: 'baseline_ready', status: 'draft',
   }))
-  const r = run(['write', runDir, 'requirements_baseline', payload])
+  const r = run(['write', runDir, 'requirements_baseline', payload, '--produced-by', 'test-suite'])
   assert.equal(r.code, 1)
   assert.match(r.out, /真实 HEAD|中止/)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
@@ -263,7 +263,7 @@ test('write：分支切换后拒绝写入（lineage 不一致）', () => {
     goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
     gaps: [], outcome: 'baseline_ready', status: 'draft',
   }))
-  const r = run(['write', runDir, 'requirements_baseline', payload])
+  const r = run(['write', runDir, 'requirements_baseline', payload, '--produced-by', 'test-suite'])
   assert.equal(r.code, 1)
   assert.match(r.out, /与 run\.work_branch.*不一致/)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
@@ -296,8 +296,44 @@ test('schema 解析：run 目录提供副本优先，无 docs 路径也能工作
     goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
     gaps: [], outcome: 'baseline_ready', status: 'draft',
   }))
-  const r = run(['write', runDir, 'requirements_baseline', payload])
+  const r = run(['write', runDir, 'requirements_baseline', payload, '--produced-by', 'test-suite'])
   assert.equal(r.code, 0, r.out)
+})
+
+test('write：已终结记录同 attempt 覆盖拒绝（§8.5/§5），未终结成熟刷新允许', () => {
+  const { root, runDir } = makeRunDir()
+  const mk = (name, obj) => { const f = join(runDir, name); writeFileSync(f, JSON.stringify(obj)); return f }
+  const draft = mk('p1.json', { goal: 'g', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'], gaps: [], outcome: 'baseline_ready', status: 'draft' })
+  const confirmed = mk('p2.json', { goal: 'g', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'], gaps: [], outcome: 'baseline_ready', status: 'confirmed', baseline_revision: 'v1', human_confirmation: { confirmed_by: 'x', confirmed_at: '2026-08-30T08:00:00Z' } })
+  // draft → confirmed 同 attempt 成熟刷新：允许
+  assert.equal(run(['write', runDir, 'requirements_baseline', draft, '--produced-by', 'test-suite']).code, 0)
+  assert.equal(run(['write', runDir, 'requirements_baseline', confirmed, '--produced-by', 'test-suite']).code, 0)
+  // confirmed 已终结：再覆盖拒绝
+  const again = run(['write', runDir, 'requirements_baseline', confirmed, '--produced-by', 'test-suite'])
+  assert.equal(again.code, 1)
+  assert.match(again.out, /终结态记录.*不可覆盖/)
+  // proof 一次写入即终结：同 attempt 重写拒绝
+  const realHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const realBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const proof = mk('proof.json', { verdict: 'approve', findings: [], verified_branch: realBranch, verified_head: realHead, independent_session: true })
+  assert.equal(run(['write', runDir, 'review_proof', proof, '--produced-by', 'test-suite', '--stage', 'review']).code, 0)
+  const rewrite = run(['write', runDir, 'review_proof', proof, '--produced-by', 'test-suite', '--stage', 'review'])
+  assert.equal(rewrite.code, 1)
+  assert.match(rewrite.out, /终结态记录.*不可覆盖/)
+})
+
+test('write：无归属（缺 --produced-by 且无 DSH_SESSION_ID）fail closed', () => {
+  const { runDir } = makeRunDir()
+  const payload = join(runDir, 'payload.json')
+  writeFileSync(payload, JSON.stringify({
+    goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
+    gaps: [], outcome: 'baseline_ready', status: 'draft',
+  }))
+  // 显式清空 DSH_SESSION_ID（本测试运行环境可能自带）
+  const r = run(['write', runDir, 'requirements_baseline', payload], { env: { ...process.env, DSH_SESSION_ID: '' } })
+  assert.equal(r.code, 2)
+  assert.match(r.out, /--produced-by/)
+  assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
 })
 
 test('check：对既有记录只校验', () => {
@@ -307,7 +343,7 @@ test('check：对既有记录只校验', () => {
     goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
     gaps: [], outcome: 'baseline_ready', status: 'draft',
   }))
-  run(['write', runDir, 'requirements_baseline', payload])
+  run(['write', runDir, 'requirements_baseline', payload, '--produced-by', 'test-suite'])
   const r = run(['check', runDir, join(runDir, 'requirements_baseline.a1.json')])
   assert.equal(r.code, 0, r.out)
   assert.match(r.out, /valid/)
@@ -336,11 +372,11 @@ test('write：proof 绑定与真实工作区比对（不一致拒绝，一致放
     return p
   }
   // 绑定不符 → 拒绝（§7.3）
-  const bad = run(['write', runDir, 'review_proof', mkProof('deadbeef', realBranch), '--stage', 'review'])
+  const bad = run(['write', runDir, 'review_proof', mkProof('deadbeef', realBranch), '--stage', 'review', '--produced-by', 'test-suite'])
   assert.equal(bad.code, 1)
   assert.match(bad.out, /Proof 绑定与工作区不符/)
   assert.equal(existsSync(join(runDir, 'review_proof.a1.json')), false)
   // 绑定一致 → 放行
-  const ok = run(['write', runDir, 'review_proof', mkProof(realHead, realBranch), '--stage', 'review'])
+  const ok = run(['write', runDir, 'review_proof', mkProof(realHead, realBranch), '--stage', 'review', '--produced-by', 'test-suite'])
   assert.equal(ok.code, 0, ok.out)
 })
