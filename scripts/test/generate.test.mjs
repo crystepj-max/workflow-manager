@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { compileBlueprint, generateAll, generateUserSkill, projectToVwf, skillWrap, writeUserSkill } from '../generate.mjs';
+import { compileBlueprint, generateAll, generateUserSkill, projectToVwf, skillWrap, writeUserSkill, collectBuiltinRoles, loadBuiltinRoleIds } from '../generate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tplDir = path.join(here, '../../templates');
@@ -208,9 +208,31 @@ test('S3 用户 skill 捆绑蓝图引用的内置角色定义（issue-81，产�
 })
 
 // ── Codex PR#124 第三轮 P1（评论 3889725481）：roleRef 工作区优先 + 打包兜底 ──
-test('S4 roleRef 工作区优先 + 打包角色包兜底（编辑迁移角色后 bundled run 读到工作区内容）', () => {
-  const { script } = compileBlueprint(bp)
-  assert.ok(script.includes('工作区 dsh/roles/'), 'roleRef 工作区优先语义')
-  assert.ok(script.includes('打包角色包'), 'roleRef 打包角色包兜底语义')
-  assert.ok(script.includes("A.roleDir || 'dsh/roles'"), 'roleRef 保留 A.roleDir 兜底链路')
+test('S4 roleRef：内置角色以打包快照优先，自定义角色以工作区优先（Codex 第四轮 P1）', () => {
+  // 回归：第三轮把「工作区优先」套用到所有角色，导致项目里一份旧版 dsh/roles/dev.md
+  // 会静默覆盖模板自带的版本化内置角色定义（内置角色本应只读且随模板版本分发）。
+  const ids = ['dev', 'closeout']
+  const { script } = compileBlueprint(bp, { builtinRoleIds: ids })
+  assert.ok(script.includes('const BUILTIN_ROLE_IDS = ["dev","closeout"]'), '注入内置角色清单')
+  assert.ok(script.includes('BUILTIN_ROLE_IDS.indexOf(name) >= 0'), '按内置/自定义分流')
+  assert.ok(script.includes('_b ? [_bundle, _ws] : [_ws, _bundle]'), '内置先打包、自定义先工作区')
+  assert.ok(script.includes("A.roleDir || 'dsh/roles'"), '保留 A.roleDir 打包兜底链路')
+  assert.ok(script.includes("'dsh/roles/' + name + '.md'"), '保留工作区路径')
+})
+
+test('S4 内置角色清单：单一来源为宿主注册表，解析失败 loud-fail', () => {
+  const ids = loadBuiltinRoleIds()
+  assert.ok(ids.length >= 12, `内置角色不少于 12 个（实际 ${ids.length}）`)
+  assert.ok(ids.includes('requirements') && ids.includes('synthesizer'), '含新增角色')
+  assert.ok(!ids.includes('dispatcher'), 'dispatcher 已迁出内置')
+  assert.throws(() => loadBuiltinRoleIds('const BUILTIN_ROLES = []'), /解析失败/, '空清单应报错')
+  assert.throws(() => loadBuiltinRoleIds(''), /解析失败/, '找不到数组应报错')
+})
+
+test('S4 捆绑角色：profile 含路径穿越被拒绝（Codex 第四轮 P1）', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'roles-'))
+  fs.writeFileSync(path.join(dir, 'dev.md'), '内置角色正文\n')
+  const traversal = { nodes: [{ id: 'n1', profile: '../../AGENTS' }, { id: 'n2', profile: 'a/b' }, { id: 'n3', profile: 'dev' }] }
+  const out = collectBuiltinRoles(traversal, dir)
+  assert.deepEqual([...out.keys()], ['roles/dev.md'], '仅安全标识被捆绑')
 })

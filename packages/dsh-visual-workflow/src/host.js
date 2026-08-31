@@ -1510,7 +1510,6 @@ return {
       }
       const inv = await readRoleFiles()
       if (inv.state === 'error') return { ok: false, errors: [{ at: '$', message: '角色库读取失败：' + inv.message }] }
-      if (!inv.files.has(id)) return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + id }] }
       let u
       try {
         u = await roleUsage(id, a && a.draftDsl)
@@ -1520,6 +1519,17 @@ return {
       if (u.count > 0) {
         const draftHint = u.refs.some(r => r.draft) ? '（含未保存草稿的引用）' : ''
         return { ok: false, errors: [{ at: '$', message: '「' + id + '」仍被 ' + u.count + ' 个节点使用' + draftHint + '。请先将这些节点更换为其他角色，解除全部引用后再删除。' }], usage: { count: u.count, refs: u.refs } }
+      }
+      // 打包回退角色（Codex PR#124 第四轮 P2，评论 3889756925）：工作区无文件、
+      // 定义来自内置模板角色包，只能读取不能删除——删它等于改生成产物。此前在统计
+      // 引用前就返回「自定义角色不存在」，界面上可点删除却必然失败且提示不准确。
+      if (!inv.files.has(id)) {
+        let bundledLegacy = null
+        try { bundledLegacy = await bundledLegacyRoles() } catch (e) { bundledLegacy = new Map() }
+        if (bundledLegacy.has(id)) {
+          return { ok: false, errors: [{ at: '$', message: '「' + id + '」的定义来自内置模板自带的角色包（生成产物），不在自定义角色库中，无法在此删除；如需停用，请在模板中把引用替换为其他角色。' }] }
+        }
+        return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + id }] }
       }
       const roleDir = await roleDirPath()
       let abs = null

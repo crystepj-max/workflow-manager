@@ -15,6 +15,26 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TPL_DIR = path.join(__dirname, '..', 'templates');
 const DEFAULT_OUT_DIR = path.join(__dirname, '..', '.generated');
 
+// ---------- 内置角色清单（单一来源 = 宿主注册表 host.js BUILTIN_ROLES）----------
+// 生成脚本需区分「内置角色」与「自定义角色」：内置角色只读、以打包快照为准（Codex
+// PR#124 第四轮 P1，评论 3889756922），自定义角色以工作区 dsh/roles 为准。此处不在
+// 本文件复制名单，改注册表即生效；解析失败 loud-fail，避免静默退化成全部走工作区。
+export function loadBuiltinRoleIds(hostSrc) {
+  const src = hostSrc === undefined
+    ? fs.readFileSync(path.join(__dirname, '..', 'packages', 'dsh-visual-workflow', 'src', 'host.js'), 'utf8')
+    : hostSrc;
+  const block = /const BUILTIN_ROLES = \[([\s\S]*?)\n\s*\]/.exec(src);
+  if (!block) throw new Error('内置角色清单解析失败：未在 host.js 找到 BUILTIN_ROLES 数组');
+  const ids = Array.from(block[1].matchAll(/\{\s*id:\s*'([^']+)'/g)).map((m) => m[1]);
+  if (!ids.length) throw new Error('内置角色清单解析失败：BUILTIN_ROLES 中未解析到任何 id');
+  return ids;
+}
+let _builtinRoleIdsCache = null;
+function builtinRoleIdsCached() {
+  if (!_builtinRoleIdsCache) _builtinRoleIdsCache = loadBuiltinRoleIds();
+  return _builtinRoleIdsCache;
+}
+
 // ---------- vwf 侧投影（契约 §4.1；候选二 Q7 修订：业务规则字段进入 DSL） ----------
 export function projectToVwf(bp) {
   const models = (bp.bindings && bp.bindings.models) || {};
@@ -81,6 +101,8 @@ export function compileBlueprint(bp, opts = {}) {
   const folds = foldableNodes(bp);
   const hetero = bp.heteroCheck && models.dev && models.review;
   const autoReschedule = bp.onMaxRounds === 'auto-reschedule';
+  // 内置角色清单：opts 注入优先（测试用），否则读宿主注册表并缓存
+  const builtinRoleIds = opts.builtinRoleIds || builtinRoleIdsCached();
 
   const lines = [
     'const A = args || {}',
@@ -94,6 +116,8 @@ export function compileBlueprint(bp, opts = {}) {
     'const EDGES = ' + JSON.stringify(bp.edges),
     'const MODELS = ' + JSON.stringify(models),
     'const FOLDS = ' + JSON.stringify(folds),
+    // 内置角色清单（单一来源 = 宿主注册表）：roleRef 据此决定内置/自定义读取优先级
+    'const BUILTIN_ROLE_IDS = ' + JSON.stringify(builtinRoleIds),
     'const BYID = {}',
     'for (const n of NODES) BYID[n.id] = n',
   ];
@@ -150,12 +174,17 @@ export function compileBlueprint(bp, opts = {}) {
     'function roleRef(name) {',
     opts.noRole
       ? '  return \'【角色定义】原型模式：本节点无角色文件要求，以 goal 为唯一依据。\\n\''
-      // Codex PR#124 第三轮 P1（评论 3889725481）：工作区优先，打包角色包兜底。
-      // 编辑 dispatcher 等迁移角色时种子到工作区 dsh/roles/，但 bundleRoles 模板
-      // 仍向引擎传 c.roleDir（打包快照路径），旧 roleRef 只读打包快照，工作区编辑
-      // 不生效。改为先读工作区 dsh/roles/<name>.md，缺失再读 A.roleDir 打包快照——
-      // 既不修改 .generated（生成产物身份不变），又让工作区编辑对 bundled run 生效。
-      : '  return \'【角色定义】开工前先用读文件工具读取工作区 dsh/roles/\' + name + \'.md（相对当前工作区根目录，工作区优先）；若该文件不存在，则改读打包角色包 \' + (A.roleDir || \'dsh/roles\') + \'/\' + name + \'.md。严格遵循其中的定位、工作流程、产出模板、判定标准与硬规则——该文件是你在本节点的唯一角色依据。\\n\'',
+      // 内置 vs 自定义走不同优先级（Codex PR#124 第四轮 P1，评论 3889756922）：
+      // - 内置角色只读且随模板版本分发，必须以打包快照为准，再回退工作区同名文件；
+      //   否则项目里一份旧版 dsh/roles/dev.md 会静默覆盖模板自带的版本化角色定义。
+      // - 自定义角色（如迁移后的 dispatcher）以工作区 dsh/roles 为准，再回退打包
+      //   快照——这样编辑种子到工作区后对 bundled run 立即生效，且不回写 .generated。
+      : '  const _b = BUILTIN_ROLE_IDS.indexOf(name) >= 0',
+    '  const _ws = \'dsh/roles/\' + name + \'.md\'',
+    '  const _bundle = (A.roleDir || \'dsh/roles\') + \'/\' + name + \'.md\'',
+    '  const _order = _b ? [_bundle, _ws] : [_ws, _bundle]',
+    '  const _uniq = _order.filter((p, i) => _order.indexOf(p) === i)',
+    '  return \'【角色定义】开工前先用读文件工具依次尝试读取以下路径中的角色文件（前者优先，读不到再读后者）：\' + _uniq.join(\'、\') + \'。严格遵循其中的定位、工作流程、产出模板、判定标准与硬规则——首个读到的文件是你在本节点的唯一角色依据。\\n\'',
     '}',
     'function runtimeCtx(nodeId, extra, goalOverride) {',
     '  const n = BYID[nodeId]',
@@ -421,7 +450,13 @@ export function collectBuiltinRoles(bp, rolesDir = DEFAULT_ROLES_DIR, io = fs) {
     if (n && typeof n.profile === 'string' && n.profile) profiles.add(n.profile)
   }
   for (const profile of profiles) {
+    // 安全校验（Codex PR#124 第四轮 P1，评论 3889756923）：profile 此前只校验非空，
+    // '../../AGENTS' 之类会被拼出 roles/ 目录之外的路径，随 skill 写到暂存目录外。
+    // 角色标识只允许中英文/数字/下划线/短横线，且解析后必须仍在角色源目录内。
+    if (!/^[\w一-龥-]+$/.test(profile)) continue
     const file = path.join(rolesDir, profile + '.md')
+    const rel = path.relative(rolesDir, file)
+    if (rel.startsWith('..') || path.isAbsolute(rel)) continue
     try {
       const content = io.readFileSync(file, 'utf8')
       out.set('roles/' + profile + '.md', content)
