@@ -192,7 +192,8 @@ function isFinalized(existing) {
     case 'review_proof':
     case 'test_proof':
     case 'closeout_summary': return true                              // proof/收口一次写入即终结
-    default: return false                                             // dev_handoff 允许同 attempt 技术重试刷新
+    case 'dev_handoff': return p.outcome === 'handoff_ready'          // 交接就绪即终结（3891543026）；blocked 等可恢复态允许刷新
+    default: return false
   }
 }
 

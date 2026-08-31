@@ -62,7 +62,13 @@ node "$CWF_ASSETS/cwf-record.mjs" write .agent-runs/<run_id> requirements_baseli
 
 ## 6. Human Acceptance（人工验收）— 契约 §3.6
 
-1. 执行 **§8.3 九项证据链校验**（当前人工逐条执行；#123 交付后由 `cwf-evidence-verify` 机器化）：record_type↔stage 映射、上游完成态（baseline confirmed / design package_ready / dev handoff_ready / review approve / test pass）、同 Run lineage、Proof HEAD 与当前一致、映射完整覆盖、produced_by 异源、chosen∈呈递候选集。
+1. 执行 **§8.3 九项证据链校验**（机器化）：
+
+```bash
+node "$CWF_ASSETS/cwf-evidence-verify.mjs" .agent-runs/<run_id>
+```
+
+   逐项输出判定；exit 非 0 即不得呈递或签收。人工知情接受（user_accepted）加 `--decision user_accepted`（②⑧ 放宽，feedback 必填说明差异）。
 2. `user_accepted` 例外：允许携带 fail/blocked 证据链知情接受，必须附 feedback 说明差异（不得伪造证据）。
 3. 执行 Integration Checkpoint：
 
