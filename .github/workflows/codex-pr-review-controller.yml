@@ -25,4 +25,5 @@ jobs:
         run: node scripts/codex-review-controller.mjs "$GITHUB_EVENT_PATH"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODEX_REVIEW_TOKEN: ${{ secrets.CODEX_REVIEW_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}

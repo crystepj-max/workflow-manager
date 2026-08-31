@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildReviewPrompt,
   extendDecision,
+  hasReviewIdentity,
   initialState,
   nextDecision,
   parseCommand,
@@ -60,6 +61,13 @@ test('只有额度耗尽后才允许一次追加一轮', () => {
   assert.deepEqual(extendDecision({ ...initialState(), round: 2 }), { ok: false, reason: 'NOT_EXHAUSTED' });
   assert.deepEqual(extendDecision({ ...initialState(), round: 3 }), { ok: true, maxRounds: 4 });
   assert.deepEqual(extendDecision({ ...initialState(), round: 3 }, 2), { ok: false, reason: 'ONLY_ONE' });
+});
+
+test('没有独立触发身份时必须 fail closed', () => {
+  assert.equal(hasReviewIdentity(undefined), false);
+  assert.equal(hasReviewIdentity(''), false);
+  assert.equal(hasReviewIdentity('   '), false);
+  assert.equal(hasReviewIdentity('token-present'), true);
 });
 
 test('第 2/3 轮提示词明确收敛范围', () => {
