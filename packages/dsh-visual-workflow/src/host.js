@@ -134,8 +134,8 @@ return {
           env: { NODE_OPTIONS: undefined },
           stdio: {
             stdin: 'ignore',
-            stdout: { maxBytes: 64 * 1024 },
-            stderr: { maxBytes: 64 * 1024 },
+            stdout: { maxBytes: (opts && opts.maxBytes) || 64 * 1024 },
+            stderr: { maxBytes: (opts && opts.maxBytes) || 64 * 1024 },
           },
           graceMs: (opts && opts.graceMs) || 30000,
         })
@@ -588,7 +588,10 @@ return {
       } catch (e) {
         return { ok: false, detail: '临时蓝图写入失败：' + String((e && e.message) || e) }
       }
-      const r = await runNode([p.generator, 'compile', tmp], { cwd: p.generatorRoot, graceMs: 30000 })
+      // 编译 stdout 传输上限提到 1MB（Codex PR#130 第二轮 P1）：合法的「12 内置角色各
+      // 一节点」图的 JSON 响应约 66KB 已超默认 64KB——支持的图必须能被传输，不能静默截断。
+      // 引用过滤（generate.mjs ROLE_DEFS）已减小典型图体积，1MB 兜底覆盖全角色最坏情况。
+      const r = await runNode([p.generator, 'compile', tmp], { cwd: p.generatorRoot, graceMs: 30000, maxBytes: 1024 * 1024 })
       try { await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", tmp], { cwd: p.generatorRoot }) } catch (e) {}
       if (!r.ok) return { ok: false, detail: r.detail }
       try {

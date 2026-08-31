@@ -246,6 +246,17 @@ test('S6 内联仅限蓝图引用内置角色：最小图产物 < 宿主 64KB st
   // 覆盖验收：12 个内置角色均可被内联加载（按引用过滤只影响单图体积，不影响能力面）
   const all = loadBuiltinRoleDefs(loadBuiltinRoleIds())
   assert.equal(Object.keys(all).length, 12, '12 个内置角色均可加载内联')
+  // 全 12 内置角色各一节点的合法图（Codex PR#130 第二轮 P1，评论 3900291469）：JSON 响应
+  // 必须 < 编译路径捕获上限（host.js runNode maxBytes: 1MB）——引用过滤不足以兜住该最坏情况。
+  const ids = loadBuiltinRoleIds()
+  const twelve = { id: 't12', control: { maxRounds: 3 }, nodes: [], edges: [] }
+  for (const [i, rid] of ids.entries()) {
+    twelve.nodes.push({ id: 'n' + i, profile: rid, label: rid, goal: 'g' })
+    if (i > 0) twelve.edges.push({ from: 'n' + (i - 1), to: 'n' + i, on: 'success' })
+  }
+  const { script: s12 } = compileBlueprint(twelve)
+  const resp12 = JSON.stringify({ ok: true, script: s12, meta: {} })
+  assert.ok(Buffer.byteLength(resp12, 'utf8') < 1024 * 1024, '12 角色全用图的 JSON 响应 < 编译路径 1MB 捕获上限（host.js runNode maxBytes）')
 })
 
 test('S4 内置角色清单：单一来源为宿主注册表，解析失败 loud-fail', () => {
