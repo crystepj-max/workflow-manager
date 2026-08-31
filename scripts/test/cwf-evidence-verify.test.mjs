@@ -173,6 +173,34 @@ test('⑧ user_accepted 例外：完整映射但含 fail，feedback 必填', () 
   assert.equal(relaxed.ok, true, JSON.stringify(relaxed.checks, null, 1)) // 例外通道放行
 })
 
+test('④ 实况 HEAD 为准：proof 绑定滞后 run.json 被拒，run.json 缓存滞后实况被拒', () => {
+  // 新增提交后实况 HEAD 前进，proof 还绑旧 HEAD → 拒
+  const staleProof = verifyEvidenceChain(makeRunDir(), { live: { head: 'head-new', branch: BRANCH } })
+  assert.equal(checkOk(staleProof, '④'), false)
+  // run.json current_head 落后于实况 → 拒（先 reverify）
+  const staleRun = verifyEvidenceChain(makeRunDir((_rs, run) => { run.current_head = 'older' }), { live: { head: HEAD, branch: BRANCH } })
+  assert.equal(checkOk(staleRun, '④'), false)
+})
+
+test('③ 全部记录同写错误 workspace_id（与 run.json 不符）被拒', () => {
+  const r = verifyEvidenceChain(makeRunDir(rs => {
+    for (const rec of Object.values(rs)) rec.run.workspace_id = 'ws-wrong'
+  }))
+  assert.equal(checkOk(r, '③'), false)
+})
+
+test('⑥ 命中门但缺 decision_request 被拒（呈递候选集丢失）', () => {
+  const r = verifyEvidenceChain(makeRunDir(rs => {
+    const p = rs['design_package.json'].payload
+    p.outcome = 'package_ready'
+    p.decision_required = true
+    p.decision_required_reasons = ['r']
+    p.decision = { question: 'q', options: [{ name: 'A', tradeoffs: 't' }], chosen: 'A', rationale: 'r', decided_by: 'x', decided_at: '2026-08-31T00:00:00Z' }
+    // 注意：无 decision_request
+  }))
+  assert.equal(checkOk(r, '⑥'), false)
+})
+
 test('⑨ review/test 与 dev 同源被拒', () => {
   const r = verifyEvidenceChain(makeRunDir(rs => {
     rs['review_proof.a1.json'].produced_by = 'dsh:dev'

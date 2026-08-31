@@ -4,6 +4,7 @@
 //   默认校验 accept 路径；--decision user_accepted 启用知情接受例外（②⑧ 放宽，feedback 必填）
 // 输出逐项 JSON 判定；exit 0 全部通过，exit 1 任一失败
 
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -16,11 +17,25 @@ const STAGE_MAP = {
   test_proof: 'test',
 }
 
+function liveState(runDir) {
+  // Proof 绑定比对的实况源：不信任 run.json 可变缓存（§7.3）
+  const wt = join(runDir, '..', '..')
+  try {
+    return {
+      head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: wt, encoding: 'utf-8' }).trim(),
+      branch: execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: wt, encoding: 'utf-8' }).trim(),
+    }
+  } catch {
+    return null // 归档态（worktree 已移除）回退 run.json
+  }
+}
+
 function loadJson(p) {
   return JSON.parse(readFileSync(p, 'utf-8'))
 }
 
-export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false } = {}) {
+export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false, live = null } = {}) {
+  // live：实况 HEAD/branch 注入（测试）或缺省从 git 读取——Proof 绑定比对以实况为准，不信任 run.json 缓存
   const checks = []
   const check = (id, name, ok, detail) => checks.push({ id, name, ok, detail })
 
@@ -66,16 +81,23 @@ export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false } = {}
   const branches = new Set(all.map(r => r.run?.work_branch))
   const okLineage = runIds.size === 1 && workspaces.size === 1 && branches.size === 1
     && [...runIds][0] === run.run_id && [...branches][0] === run.work_branch
+    && [...workspaces][0] === run.workspace_id
   check('③', '同 Run/workspace lineage', okLineage, okLineage ? 'ok' : `run_id=${[...runIds]} ws=${[...workspaces]} br=${[...branches]}`)
 
-  // ④ Proof HEAD/branch 与当前一致（§7.3）
+  // ④ Proof HEAD/branch 与实况一致（§7.3）：不信任 run.json 缓存
+  const liveNow = live || liveState(runDir)
+  const refHead = liveNow ? liveNow.head : run.current_head
+  const refBranch = liveNow ? liveNow.branch : run.work_branch
   const badHead = []
   for (const [rt, r] of [['review_proof', review], ['test_proof', test]]) {
-    if (r && (r.payload?.verified_head !== run.current_head || r.payload?.verified_branch !== run.work_branch)) {
-      badHead.push(`${rt}(head=${r.payload?.verified_head})`)
+    if (r && (r.payload?.verified_head !== refHead || r.payload?.verified_branch !== refBranch)) {
+      badHead.push(`${rt}(head=${r.payload?.verified_head} ≠ 实况 ${refHead})`)
     }
   }
-  check('④', 'Proof 绑定当前 HEAD/branch', badHead.length === 0, badHead.join('; ') || 'ok')
+  if (liveNow && run.current_head !== liveNow.head) {
+    badHead.push(`run.json current_head(${run.current_head}) 落后于实况——先 reverify`)
+  }
+  check('④', 'Proof 绑定实况 HEAD/branch', badHead.length === 0, badHead.join('; ') || 'ok')
 
   // ⑤ baseline confirmed 且无残留 gaps
   const ok5 = baseline?.payload?.status === 'confirmed' && (baseline.payload.gaps || []).length === 0
@@ -87,6 +109,8 @@ export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false } = {}
   if (ok6 && design.payload.decision_required) {
     if (!design.payload.decision) {
       ok6 = false; detail6 = '命中条件门但无 Decision Record'
+    } else if (!design.payload.decision_request) {
+      ok6 = false; detail6 = '命中条件门但缺 decision_request（呈递候选集丢失）'
     } else if (design.payload.decision_request) {
       const names = design.payload.decision_request.options.map(o => o.name)
       if (!names.includes(design.payload.decision.chosen)) {

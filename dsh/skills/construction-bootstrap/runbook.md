@@ -62,22 +62,22 @@ node "$CWF_ASSETS/cwf-record.mjs" write .agent-runs/<run_id> requirements_baseli
 
 ## 6. Human Acceptance（人工验收）— 契约 §3.6
 
-1. 执行 **§8.3 九项证据链校验**（机器化）：
-
-```bash
-node "$CWF_ASSETS/cwf-evidence-verify.mjs" .agent-runs/<run_id>
-```
-
-   逐项输出判定；exit 非 0 即不得呈递或签收。人工知情接受（user_accepted）加 `--decision user_accepted`（②⑧ 放宽，feedback 必填说明差异）。
-2. `user_accepted` 例外：允许携带 fail/blocked 证据链知情接受，必须附 feedback 说明差异（不得伪造证据）。
-3. 执行 Integration Checkpoint：
+1. 执行 Integration Checkpoint：
 
 ```bash
 node "$CWF_ASSETS/cwf-checkpoint.mjs" .agent-runs/<run_id>
 ```
 
    target 已前进 → 先 sync，再执行 `node "$CWF_ASSETS/cwf-record.mjs" reverify <runDir> --reason "checkpoint sync"` 推进 Proof 修订（保留原 HEAD 记录，不耗额度），重跑受影响 Proof（review/test 新 attempt 文件），再 `--proofs-rerun`。
-4. 组装 `assembled`（五类引用 + 结构化 checkpoint），`write acceptance_package`（status=awaiting_decision），呈递人工。
+2. 组装 `assembled`（五类引用 + 结构化 checkpoint），`write acceptance_package`（status=awaiting_decision）。
+3. 执行 **§8.3 九项证据链校验**（机器化；引擎要求验收包已写入，故校验在组装之后）：
+
+```bash
+node "$CWF_ASSETS/cwf-evidence-verify.mjs" .agent-runs/<run_id>
+```
+
+   逐项输出判定；exit 非 0 即不得呈递或签收。人工知情接受（user_accepted）加 `--decision user_accepted`（②⑧ 放宽，feedback 必填说明差异；不得伪造证据）。
+4. 呈递人工。
 5. 人工裁决后回填 `status=decided` + `decision` + `decided_by/at` + `verified_branch/head`（+ reject 时 feedback/根因），重新 `write`。
 6. **reject 路由**：验收 reject ≠ 进 closeout——执行人工触发回退（不耗自动额度，§4.2）：
 
