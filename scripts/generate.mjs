@@ -35,6 +35,23 @@ function builtinRoleIdsCached() {
   return _builtinRoleIdsCache;
 }
 
+// ---------- 内置角色正文（#129 遗留项 2：临时/未保存图编译自包含） ----------
+// 把内置角色 .md 正文内联进编译脚本（ROLE_DEFS）：agent 无需依赖工作区 dsh/roles 或
+// 打包角色包即可拿到角色定义；stale 产物缺 ROLE_DEFS 时 roleRef 安全回退到读文件路径。
+// 仅收录内置角色（ids 即内置清单）；角色文件缺失/非法 id 时跳过，保留读路径回退。
+// rolesDir 默认 <repo>/dsh/roles（与 collectBuiltinRoles 同源，编译期内联 = 打包快照）。
+export function loadBuiltinRoleDefs(ids, rolesDir = DEFAULT_ROLES_DIR, io = fs) {
+  const out = {};
+  for (const id of ids) {
+    if (!/^[\w一-龥-]+$/.test(id)) continue;
+    const file = path.join(rolesDir, id + '.md');
+    const rel = path.relative(rolesDir, file);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    try { out[id] = io.readFileSync(file, 'utf8'); } catch (e) { /* 缺失跳过：运行时走读路径回退 */ }
+  }
+  return out;
+}
+
 // ---------- vwf 侧投影（契约 §4.1；候选二 Q7 修订：业务规则字段进入 DSL） ----------
 export function projectToVwf(bp) {
   const models = (bp.bindings && bp.bindings.models) || {};
@@ -103,6 +120,9 @@ export function compileBlueprint(bp, opts = {}) {
   const autoReschedule = bp.onMaxRounds === 'auto-reschedule';
   // 内置角色清单：opts 注入优先（测试用），否则读宿主注册表并缓存
   const builtinRoleIds = opts.builtinRoleIds || builtinRoleIdsCached();
+  // 内置角色正文（#129 遗留项 2）：临时/未保存图编译自包含——正文内联进 ROLE_DEFS，
+  // roleRef 对内置角色直接返回内联定义，不依赖工作区 dsh/roles 或打包角色包。
+  const builtinRoleDefs = opts.builtinRoleDefs || loadBuiltinRoleDefs(builtinRoleIds);
 
   const lines = [
     'const A = args || {}',
@@ -118,6 +138,8 @@ export function compileBlueprint(bp, opts = {}) {
     'const FOLDS = ' + JSON.stringify(folds),
     // 内置角色清单（单一来源 = 宿主注册表）：roleRef 据此决定内置/自定义读取优先级
     'const BUILTIN_ROLE_IDS = ' + JSON.stringify(builtinRoleIds),
+    // 内置角色正文（#129 遗留项 2）：编译期内联，临时编译自包含；缺失时 roleRef 走读路径回退
+    'const ROLE_DEFS = ' + JSON.stringify(builtinRoleDefs),
     'const BYID = {}',
     'for (const n of NODES) BYID[n.id] = n',
   ];
@@ -174,12 +196,16 @@ export function compileBlueprint(bp, opts = {}) {
     'function roleRef(name) {',
     opts.noRole
       ? '  return \'【角色定义】原型模式：本节点无角色文件要求，以 goal 为唯一依据。\\n\''
-      // 内置 vs 自定义走不同优先级（Codex PR#124 第四轮 P1，评论 3889756922）：
-      // - 内置角色只读且随模板版本分发，必须以打包快照为准，再回退工作区同名文件；
-      //   否则项目里一份旧版 dsh/roles/dev.md 会静默覆盖模板自带的版本化角色定义。
-      // - 自定义角色（如迁移后的 dispatcher）以工作区 dsh/roles 为准，再回退打包
-      //   快照——这样编辑种子到工作区后对 bundled run 立即生效，且不回写 .generated。
-      : '  const _b = BUILTIN_ROLE_IDS.indexOf(name) >= 0',
+      // 内置角色正文优先内联（#129 遗留项 2）：编译期内联 = 打包快照同源，临时编译
+      // 自包含；stale 产物缺 ROLE_DEFS 时（ROLE_DEFS && 守卫）安全回退到读文件路径。
+      // 自定义角色（如迁移后的 dispatcher）不在 ROLE_DEFS，继续走工作区优先读路径。
+      : [
+          '  const _def = ROLE_DEFS && ROLE_DEFS[name]',
+          '  if (_def !== undefined) return \'【角色定义】（内置角色，编译期内联，与打包快照同源）：\\n\' + _def',
+          '  const _b = BUILTIN_ROLE_IDS.indexOf(name) >= 0',
+        ].join('\n'),
+    // 读路径兜底（内置/自定义身份切分，Codex PR#124 第四轮 P1）：内置先打包快照再工作区，
+    // 自定义先工作区再打包快照（如迁移后的 dispatcher，编辑种子到工作区后对 bundled run 生效）。
     '  const _ws = \'dsh/roles/\' + name + \'.md\'',
     '  const _bundle = (A.roleDir || \'dsh/roles\') + \'/\' + name + \'.md\'',
     '  const _order = _b ? [_bundle, _ws] : [_ws, _bundle]',

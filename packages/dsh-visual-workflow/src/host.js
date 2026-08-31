@@ -1232,27 +1232,33 @@ return {
       }
       return roles
     }
-    // 单个角色详情：内置角色正文缺省时依次回退 工作区文件 → 打包仓库 dsh/roles
-    // （静态 bundle 运行时推导的 __VWF_REPO_ROOT__）→ 内置元数据合成占位正文。
+    // 单个角色详情：内置角色定义来源顺序与运行时 roleRef 对齐（#129 遗留项 1）——
+    // 打包快照（__VWF_REPO_ROOT__/dsh/roles，编译期内联同源）→ 工作区 dsh/roles 回退
+    // → 内置元数据合成占位正文。否则工作区一份旧版/本地改过的同名文件会盖过模板自带
+    // 的版本化定义，编辑器展示与执行口径不一致。自定义角色仍以工作区为准（打包只读兜底）。
     async function getRoleDetail(id) {
       const inv = await readRoleFiles()
       const files = inv.files
       if (BUILTIN_ROLE_IDS.indexOf(id) >= 0) {
         const meta = BUILTIN_ROLES.find(r => r.id === id)
-        const f = files.get(id)
-        let content = f && f.content
+        const roots = [(typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) ? __VWF_REPO_ROOT__ : null].filter(Boolean)
+        let content = null
+        for (const root of roots) {
+          try {
+            const target = await fs.resolve(root + '/dsh/roles/' + id + '.md')
+            const info = await fs.stat(target)
+            if (info && info.type === 'file') { content = String(await fs.readText(target)); break }
+          } catch (e) { /* 尝试下一个根 */ }
+        }
         if (content == null) {
-          const roots = [(typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) ? __VWF_REPO_ROOT__ : null].filter(Boolean)
-          for (const root of roots) {
-            try {
-              const target = await fs.resolve(root + '/dsh/roles/' + id + '.md')
-              const info = await fs.stat(target)
-              if (info && info.type === 'file') { content = String(await fs.readText(target)); break }
-            } catch (e) { /* 尝试下一个根 */ }
-          }
+          const f = files.get(id)
+          content = f && f.content
         }
         if (content == null) content = '# ' + meta.name + '（' + id + '）\n\n' + meta.summary + '\n\n> 当前工作区未包含该内置角色的完整定义（dsh/roles/' + id + '.md），角色仍可正常选择使用。'
-        return { id, name: meta.name, summary: (f && f.summary) || meta.summary, builtin: true, content }
+        // 摘要与展示正文同源（readRoleFiles 同口径取首个有意义行），占位正文回退注册表摘要
+        const firstLine = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('---') && !l.startsWith('id:') && !l.startsWith('name:') && !l.startsWith('summary') && !l.startsWith('createdAt') && !l.startsWith('updatedAt') && !l.startsWith('dynamicTemplate') && !l.startsWith('#'))[0]
+        const summary = (firstLine || meta.summary).slice(0, 80)
+        return { id, name: meta.name, summary, builtin: true, content }
       }
       const f = files.get(id)
       if (f) return { id, name: id, summary: f.summary || '', builtin: false, content: f.content != null ? f.content : '' }

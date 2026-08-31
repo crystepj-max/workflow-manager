@@ -54,6 +54,17 @@ test('F1 走通性-幸福路径：一路成功（人工门禁挂起后通过）�
   assert.deepEqual(r2.agentCalls.map((c) => c.label), ['finish'])
 })
 
+// ── #129 遗留项 2：临时编译自包含——内置角色正文编译期内联，prompt 直接携带角色定义 ──
+test('F-内置角色内联：work(dev) 节点 prompt 含 dsh/roles/dev.md 正文（不依赖工作区 dsh/roles）', async () => {
+  const devContent = readFileSync(path.join(here, '..', '..', 'dsh', 'roles', 'dev.md'), 'utf8')
+  const marker = devContent.split('\n').map(l => l.trim()).find(l => l && !l.startsWith('---') && !l.startsWith('#')) || devContent.slice(0, 40)
+  assert.ok(marker, '夹具卫生：dev.md 应可提取首个有意义行')
+  const { agentCalls } = await runEngine(mini, { dispatch: { complete: true }, work: { status: 'completed' }, gate: { verdict: 'ok' } })
+  const work = agentCalls.find((c) => c.label === 'work')
+  assert.ok(work, 'work 节点应出场')
+  assert.ok(work.prompt.includes(marker), 'work(dev) 的 prompt 应含内联角色正文（编译期内联，运行时不依赖 dsh/roles 存在）')
+})
+
 test('F2 走通性-失败出口：判定失败 + failure 边指向终点 → FAILED_AT_节点', async () => {
   const { result } = await runEngine(mini, { dispatch: { complete: false } })
   assert.equal(result.status, 'FAILED_AT_dispatch')
