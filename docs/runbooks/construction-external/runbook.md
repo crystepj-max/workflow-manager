@@ -66,7 +66,7 @@ node scripts/cwf-evidence-verify.mjs .agent-runs/<run_id>     # §8.3 九项机�
 node scripts/cwf-evidence-verify.mjs .agent-runs/<run_id> --decision user_accepted
 ```
 
-呈递用户裁决：accept / reject（feedback + 根因）/ user_accepted（知情接受差异，feedback 必填）。**AI 不代签**。裁决后回填 decided 字段重新写入（成熟刷新；assembled 不得改写）。
+呈递用户裁决：accept / reject（feedback + 根因）/ user_accepted（知情接受差异，feedback 必填）。**AI 不代签**。裁决后回填 decided 字段重新写入（成熟刷新；assembled 不得改写）。**裁决回填前必须重跑实况校验**（人工等待期间 target 可能已前进，契约 §7.3）：`node scripts/cwf-checkpoint.mjs .agent-runs/<run_id>` 与 `node scripts/cwf-evidence-verify.mjs .agent-runs/<run_id>` 任一失败即不得签收——先重跑受影响 Proof 并更新 checkpoint。
 
 **收口序列（契约 §3.7，accept 之后）**：PR 按仓库规则创建/合并 → 写 closeout_summary（交付清单 + 集成结果 + acceptance 引用 + `records_retained=true`）→ 归档：
 
