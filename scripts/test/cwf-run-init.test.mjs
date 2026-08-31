@@ -37,19 +37,19 @@ test('parseBudget：完整非负整数校验', () => {
   assert.throws(() => parseBudget(String(Number.MAX_SAFE_INTEGER + 1)), /非法回退额度/)
 })
 
-test('ensureGitExclude：幂等追加本地排除', async () => {
-  const { mkdtempSync } = await import('node:fs')
+test('ensureGitExclude：幂等追加本地排除（入参为 exclude 文件路径）', async () => {
+  const { mkdtempSync, readFileSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
-  const { readFileSync, existsSync } = await import('node:fs')
   const dir = mkdtempSync(join(tmpdir(), 'cwf-excl-'))
-  const first = ensureGitExclude(dir, ['.scratch/', '.agent-runs/'])
+  const excl = join(dir, 'info', 'exclude')
+  const first = ensureGitExclude(excl, ['.scratch/', '.agent-runs/'])
   assert.deepEqual(first, ['.scratch/', '.agent-runs/'])
-  const content = readFileSync(join(dir, 'info', 'exclude'), 'utf-8')
+  const content = readFileSync(excl, 'utf-8')
   assert.match(content, /\.scratch\//)
   assert.match(content, /\.agent-runs\//)
   // 幂等：重复调用不追加
-  const second = ensureGitExclude(dir, ['.scratch/'])
+  const second = ensureGitExclude(excl, ['.scratch/'])
   assert.deepEqual(second, [])
 })
 

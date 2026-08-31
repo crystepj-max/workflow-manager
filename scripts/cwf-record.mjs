@@ -135,6 +135,21 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
   console.log(`${out} valid（stage=${run.stage} attempt=${run.attempt}）`)
 }
 
+function assertRunBranch(runDir, run) {
+  // lineage 不变量（§7.2）：任何 run 状态变更前都要求实际分支与 run.work_branch 一致
+  let actual
+  try {
+    actual = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot(runDir), encoding: 'utf-8' }).trim()
+  } catch (e) {
+    console.error(`无法读取当前工作区分支（${e.message}）：变更中止`)
+    process.exit(1)
+  }
+  if (actual !== run.work_branch) {
+    console.error(`当前分支(${actual}) 与 run.work_branch(${run.work_branch}) 不一致，拒绝变更 run 状态（契约 §7.2 lineage）`)
+    process.exit(1)
+  }
+}
+
 function currentHead(runDir) {
   // runDir 所在 git 工作区的 HEAD（worktree 场景 = 该 worktree 分支 HEAD）；失败即抛错（fail closed）
   return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot(runDir), encoding: 'utf-8' }).trim()
@@ -170,6 +185,7 @@ function cmdRollback(runDir, rootCause, flags) {
     process.exit(2)
   }
   const run = loadRun(runDir)
+  assertRunBranch(runDir, run)
   const budget = run.rollback_budget ?? 3
   // 持久化所选回退边（§4.1 一次一条边；历史供升级/重放审计）
   const entry = {
@@ -224,6 +240,7 @@ function cmdBudget(runDir, target, flags) {
     process.exit(2)
   }
   const run = loadRun(runDir)
+  assertRunBranch(runDir, run)
   const from = run.rollback_budget ?? 3
   run.budget_adjustments = [...(run.budget_adjustments || []), {
     at: new Date().toISOString(),
@@ -248,6 +265,7 @@ function cmdReverify(runDir, flags) {
   // Integration Checkpoint sync 后的 Proof 重跑（§7.3）：推进 attempt 产生新修订文件，
   // 保留原 HEAD 绑定的旧 proof（§8.5）；不是回退，不耗额度
   const run = loadRun(runDir)
+  assertRunBranch(runDir, run)
   run.attempt += 1
   run.rollback_history = [...(run.rollback_history || []), {
     at: new Date().toISOString(),

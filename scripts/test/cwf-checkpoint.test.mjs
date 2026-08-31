@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { computeCheckpoint } from '../cwf-checkpoint.mjs'
+import { computeCheckpoint, verifyRerunEvidence } from '../cwf-checkpoint.mjs'
 
 const run = {
   run_id: 'r', issue_or_task_identity: '#1', workspace_id: 'w',
@@ -24,4 +24,23 @@ test('target 已前进 → 需要重跑 Proof', () => {
   assert.equal(ckpt.target_advanced, true)
   assert.equal(ckpt.ok, false)
   assert.match(ckpt.hint, /重跑/)
+})
+
+test('verifyRerunEvidence：sync 与证据绑定逐项判定', () => {
+  const goodProofs = {
+    review_proof: { run: { attempt: 2 }, payload: { verified_head: 'head2' } },
+    test_proof: { run: { attempt: 2 }, payload: { verified_head: 'head2' } },
+  }
+  // 全部满足 → 无错
+  assert.deepEqual(verifyRerunEvidence({ synced: true, currentHead: 'head2', attempt: 2, proofs: goodProofs }), [])
+  // 未 sync → 拒绝
+  assert.ok(verifyRerunEvidence({ synced: false, currentHead: 'head2', attempt: 2, proofs: goodProofs }).length > 0)
+  // 证据过期（旧 HEAD）→ 拒绝
+  const stale = { ...goodProofs, test_proof: { run: { attempt: 2 }, payload: { verified_head: 'head1' } } }
+  assert.ok(verifyRerunEvidence({ synced: true, currentHead: 'head2', attempt: 2, proofs: stale }).some(e => e.includes('证据过期')))
+  // attempt 错位 → 拒绝
+  const wrongAttempt = { ...goodProofs, review_proof: { run: { attempt: 1 }, payload: { verified_head: 'head2' } } }
+  assert.ok(verifyRerunEvidence({ synced: true, currentHead: 'head2', attempt: 2, proofs: wrongAttempt }).some(e => e.includes('先 reverify')))
+  // 缺记录 → 拒绝
+  assert.ok(verifyRerunEvidence({ synced: true, currentHead: 'head2', attempt: 2, proofs: { review_proof: null, test_proof: null } }).length > 0)
 })

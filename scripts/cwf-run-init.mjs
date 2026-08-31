@@ -27,11 +27,13 @@ export function repoSlugFromUrl(url) {
   return u
 }
 
-export function ensureGitExclude(gitDir, entries) {
-  // 写入 git 本地排除（info/exclude，不污染仓库 .gitignore）：幂等追加
-  const infoDir = join(gitDir, 'info')
+export function ensureGitExclude(excludeFile, entries) {
+  // 写入 git 本地排除（不污染仓库 .gitignore）：幂等追加。
+  // 注意：linked worktree 的 --git-dir 是 per-worktree 目录，Git 实际读取的是公共 info/exclude；
+  // 调用方须以 `git rev-parse --git-path info/exclude` 解析得到本文件路径。
+  const excl = excludeFile
+  const infoDir = dirname(excl)
   mkdirSync(infoDir, { recursive: true })
-  const excl = join(infoDir, 'exclude')
   const cur = existsSync(excl) ? readFileSync(excl, 'utf-8') : ''
   const lines = cur.split('\n').map(l => l.trim())
   const add = entries.filter(e => !lines.includes(e))
@@ -142,10 +144,9 @@ function main() {
 
   // run 产物不得入库（仓库安全规则）：目标仓库可能未 ignore .scratch/ 与 .agent-runs/，
   // 写 git 本地 info/exclude（不改动仓库跟踪的 .gitignore）
-  const mainGitDir = git(['rev-parse', '--git-dir'], repo)
-  ensureGitExclude(mainGitDir, ['.scratch/', '.agent-runs/'])
-  const wtGitDir = git(['rev-parse', '--git-dir'], worktreePath)
-  ensureGitExclude(wtGitDir, ['.agent-runs/', '.scratch/'])
+  // info/exclude 是仓库级公共文件；linked worktree 需经 --git-path 解析（--git-dir 是 per-worktree 目录）
+  ensureGitExclude(git(['rev-parse', '--git-path', 'info/exclude'], repo), ['.scratch/', '.agent-runs/'])
+  ensureGitExclude(git(['rev-parse', '--git-path', 'info/exclude'], worktreePath), ['.agent-runs/', '.scratch/'])
 
   const runDir = join(worktreePath, runDirRel)
   mkdirSync(runDir, { recursive: true })

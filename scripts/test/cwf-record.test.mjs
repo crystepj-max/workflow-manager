@@ -233,6 +233,17 @@ test('rollback：--by 非法值拒绝（防拼写错误静默落到自动路径�
   assert.equal(runState.rollback_used, 0) // 未污染
 })
 
+test('rollback：分支切换后拒绝变更 run 状态（lineage 守卫覆盖变更路径）', () => {
+  const { root, runDir } = makeRunDir()
+  execFileSync('git', ['checkout', '-q', '-b', 'other-branch'], { cwd: root })
+  const r = run(['rollback', runDir, 'dev'])
+  assert.equal(r.code, 1)
+  assert.match(r.out, /不一致.*拒绝变更 run 状态/)
+  const runState = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(runState.rollback_used, 0) // 未被污染
+  assert.equal(runState.attempt, 1)
+})
+
 test('budget：畸形调额拒绝（4junk / 负数 / 空串）', () => {
   const { runDir } = makeRunDir()
   for (const bad of ['4junk', '-1', 'nope']) {
