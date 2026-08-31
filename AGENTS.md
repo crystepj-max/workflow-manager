@@ -60,21 +60,21 @@ npm test
 
 ## Codex PR Review 收敛规则
 
-本节约束所有能够在 GitHub PR 上触发 Codex Review 的 Agent；它独立于本地工作流、Run 和回退额度。目标是让 PR 审查围绕当前 Issue 的完成条件收敛，禁止通过无限重复 `@codex review` 把一个 PR 扩张成无边界的持续改进任务。
+本节约束所有能够在 GitHub PR 上触发 Codex Review 的 Agent；它独立于本地工作流、Run 和回退额度。目标是让 PR 审查围绕当前 Issue 的完成条件收敛，并把 **Codex PR Review Controller 作为 Agent 的唯一 Review 入口**，禁止通过直接 `@codex review` 或无限追加轮次把一个 PR 扩张成无边界的持续改进任务。
 
-- 一个 PR 最多允许 **3 轮自动 Codex Review**。只有 Codex 成功完成并给出审查结果的请求才计入轮次；服务报错、超时或明确的工具故障重试不计入业务轮次。
-- 第 1 轮是完整审查：允许检查当前 PR 的需求符合性、正确性、回归风险、证据与必要边界条件。
+- Agent **不得直接发表评论 `@codex review`**。所有由 Agent 发起的 Codex PR Review 必须通过 PR 评论命令 `/codex-review next` 进入 Controller；Controller 负责轮次、HEAD 去重、提示词和额度状态。
+- 一个 PR 默认最多允许 **3 轮自动 Codex Review**。服务报错、超时或明确的工具故障只能使用 `/codex-review retry` 重试；retry 仅限同一 HEAD 的服务/工具故障，不得借 retry 绕过业务轮次。
+- 第 1 轮是完整审查：Controller 应围绕当前 PR 的需求符合性、正确性、回归风险、证据与必要边界条件发起审查。
 - 每条 Review 意见都必须先分类再处理：
   - **A · 当前阻塞**：当前 Issue 验收条件未满足、当前 PR 引入的回归、会导致当前交付明显不正确或不安全的问题。本 PR 必须修复。
   - **B · 后续事项**：问题成立，但属于历史问题、额外增强、需要扩大范围才能解决，或不影响当前 Issue 完成。登记独立 Issue / backlog，本 PR 不继续扩张。
   - **C · 不采纳**：偏好型建议、收益不足、与当前目标无关或判断不成立。说明理由后结束该意见。
-- 第 2、3 轮属于**收敛审查**，不得重新把整个 PR 当作全新任务无限发掘改进点。触发时必须在 `@codex review` 后附带本轮目的：优先验证上一轮 A 类问题是否正确解决，以及这些修复是否新引入当前范围的阻塞问题；新的 B/C 类建议不得阻止当前 PR 收口。
-- 第 2 轮推荐指令：`@codex review 第 2/3 轮收敛审查：重点验证上一轮阻塞问题是否正确解决，以及本轮修改是否引入新的当前范围阻塞问题。新的非阻塞优化建议请明确标记为 follow-up，不要扩大当前 PR 的验收范围。`
-- 第 3 轮推荐指令：`@codex review 第 3/3 轮最终收敛审查：只报告会导致当前 Issue 验收失败、当前修改引入的明显回归或必须在合并前解决的阻塞问题。其他改进建议请标记为 follow-up，不得作为继续自动循环的理由。`
-- Agent 修完当前轮 A 类问题后，只有在自动 Review 额度尚未耗尽时才能再次触发 Codex。**任何 Agent 都不得自动触发第 4 轮 Codex Review。**
+- 第 2、3 轮属于**收敛审查**。Agent 修复本轮 A 类问题并产生新的 PR HEAD 后，只能再次执行 `/codex-review next`；不得自行拼接或直接发送新的 `@codex review` 指令。Controller 分别负责第 2 轮“验证上一轮 A 类修复 + 本轮新阻塞”和第 3 轮“只看当前验收失败/明显回归/合并前阻塞”的收敛提示词。
+- 同一 HEAD 上重复执行 `/codex-review next` 应被拒绝。若上一轮只是 Codex 服务/工具故障，使用 `/codex-review retry`；若是业务 Review 已完成，则必须先处理 A 类问题并形成新 HEAD，才能进入下一轮。
+- **任何 Agent 都不得自行追加 Review 额度。** 当默认 3 轮耗尽后，Agent 必须停止自动 Review 与自动扩大修改，向人工呈递：剩余 A 类阻塞、已完成验证、继续 Review 的收益/风险，以及可选命令 `/codex-review extend 1 <明确原因>`；Agent 本身不得执行该 extend 命令。
+- `/codex-review extend 1 <明确原因>` 是人工决策命令。人工追加后只增加 **1 轮有限额度**，且追加动作本身不得自动触发 Review；Agent 只能围绕人工允许继续解决的具体阻塞项修改并形成新 HEAD，随后再使用 `/codex-review next`。
 - 第 3 轮后若已无 A 类阻塞项，且当前 Issue 验收条件、测试和仓库质量门均满足，应进入收口/合并，不得以“Codex 可能还能找到更多建议”为理由继续审查。
-- 第 3 轮后若仍存在 A 类阻塞项，停止自动 Review 与自动扩大修改，转人工决策。人工只能显式选择：接受当前结果并记录已知风险、追加有限 Review 额度、把剩余问题拆成后续 Issue 后收口，或停止当前 PR。
-- 人工若追加 Review 额度，必须在 PR 中留下明确记录（追加几轮、原因、允许解决的具体阻塞项）。追加额度不是重新开放无限审查范围；后续仍执行收敛审查规则。
+- 如果 PR 时间线出现**未由 Controller 触发的 Codex Review**（例如人工直接 `@codex review`、仓库原生自动 Review 或其他旁路），Agent 不得据此自动开启新一轮修复→Review 循环，也不得用它自行增加 Controller 额度；应先按 A/B/C 分类当前意见，并把旁路事件报告为治理异常。是否追加正式 Controller 轮次由现有额度和人工决策决定。
 - PR 的完成标准是：**当前 Issue 定义的问题已解决、验收条件满足、必要验证通过、没有已知的当前范围阻塞项。** “Codex 再也提不出新建议”不是完成标准。
 
 ## 配置与安全
