@@ -4,7 +4,7 @@
 // 证明失效只调用 #78，不平行实现 provenance。
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { computeCheckpoint } from './cwf-checkpoint.mjs'
@@ -155,8 +155,12 @@ export function allocateWorkspace(registry, spec) {
   }
 
   const created_at = iso(registry.now())
-  const workspace_id = spec.workspace_id || `ws-${logical_run_id}`
-  requireText(workspace_id, 'workspace_id')
+  const workspace_id = assertSafeId(spec.workspace_id || `ws-${logical_run_id}`, 'workspace_id')
+  for (const other of registry.workspaces.values()) {
+    if (other.workspace_id === workspace_id) {
+      throw new Error(`workspace_id 已被占用: ${workspace_id}`)
+    }
+  }
   const workRoot = mode === WORKSPACE_MODE.NONE ? spec.work_root : requireText(spec.work_root, 'work_root')
   const records_path = join(requireText(workRoot || spec.records_root, 'work_root/records_root'), 'records', logical_run_id)
   mkdirSync(records_path, { recursive: true })
@@ -196,6 +200,7 @@ export function allocateWorkspace(registry, spec) {
       ws.source_revision = 'none'
     } else {
       ws.workspace_path = join(workRoot, workspace_id)
+      assertInsideRoot(workRoot, ws.workspace_path, 'workspace_path')
       mkdirSync(ws.workspace_path, { recursive: true })
       if (mode === WORKSPACE_MODE.SANDBOX) {
         materializeSandbox(ws, spec)
@@ -242,8 +247,20 @@ export function markAbandoned(registry, logicalRunId) {
 
 export function recordSourceSync(registry, logicalRunId, { current_head, source_revision } = {}) {
   const ws = mutable(registry, logicalRunId)
-  if (current_head) ws.current_head = requireText(current_head, 'current_head')
-  if (source_revision) ws.source_revision = requireText(source_revision, 'source_revision')
+  if (ws.source_path && isGitDir(ws.source_path)) {
+    const actual = git(['rev-parse', 'HEAD'], ws.source_path)
+    if (current_head && current_head !== actual) {
+      throw new Error(`recordSourceSync 禁止自报 HEAD（${current_head} ≠ 实况 ${actual}）`)
+    }
+    if (source_revision && source_revision !== actual) {
+      throw new Error(`recordSourceSync 禁止自报 source_revision（${source_revision} ≠ 实况 ${actual}）`)
+    }
+    ws.current_head = actual
+    ws.source_revision = actual
+  } else {
+    if (current_head) ws.current_head = requireText(current_head, 'current_head')
+    if (source_revision) ws.source_revision = requireText(source_revision, 'source_revision')
+  }
   emit(registry, { type: 'source_sync', logical_run_id: logicalRunId, current_head: ws.current_head })
   persistIdentity(ws)
   return clone(ws)
@@ -322,11 +339,19 @@ export function buildAttemptProvenance(workspace, { node, attempt }) {
 
 export function assertProofBinding(workspace, proof) {
   if (!proof || typeof proof !== 'object') throw new Error('proof 必须是对象')
-  if (proof.workspace_id !== workspace.workspace_id) {
-    throw new Error(`Proof workspace_id(${proof.workspace_id}) ≠ 本 Run(${workspace.workspace_id})`)
+  const fields = [
+    ['workspace_id', proof.workspace_id, workspace.workspace_id],
+    ['logical_run_id', proof.logical_run_id, workspace.logical_run_id],
+    ['source_revision', proof.source_revision, workspace.source_revision],
+    ['base_commit', proof.base_commit, workspace.base_commit],
+    ['work_branch', proof.work_branch, workspace.work_branch],
+    ['config_snapshot_revision', proof.config_snapshot_revision, workspace.config_snapshot_revision],
+  ]
+  for (const [label, got, expected] of fields) {
+    if (got !== expected) throw new Error(`Proof ${label}(${got}) ≠ workspace(${expected})`)
   }
   if (!workspace.source_path || !isGitDir(workspace.source_path)) {
-    if (proof.verified_head && proof.verified_head !== workspace.current_head && proof.verified_head !== workspace.source_revision) {
+    if (proof.verified_head !== workspace.current_head && proof.verified_head !== workspace.source_revision) {
       throw new Error('Proof verified_head 与 workspace 不一致')
     }
     return true
@@ -334,6 +359,9 @@ export function assertProofBinding(workspace, proof) {
   const actualHead = git(['rev-parse', 'HEAD'], workspace.source_path)
   if (proof.verified_head !== actualHead) {
     throw new Error(`Proof verified_head(${proof.verified_head}) ≠ 实际 HEAD(${actualHead})`)
+  }
+  if (proof.source_revision !== actualHead && proof.source_revision !== workspace.source_revision) {
+    throw new Error(`Proof source_revision(${proof.source_revision}) ≠ 实际 HEAD(${actualHead})`)
   }
   if (workspace.work_branch) {
     const actualBranch = git(['rev-parse', '--abbrev-ref', 'HEAD'], workspace.source_path)
@@ -344,11 +372,22 @@ export function assertProofBinding(workspace, proof) {
   return true
 }
 
+export function observeTargetHead(repositoryPath, ref) {
+  return git(['rev-parse', requireText(ref, 'ref')], requireText(repositoryPath, 'repository_path'))
+}
+
 export function computeIntegrationCheckpoint({ base_ref, base_commit, target_head }) {
   return computeCheckpoint(
     { base_ref: requireText(base_ref, 'base_ref'), base_commit: requireText(base_commit, 'base_commit') },
     { targetHead: requireText(target_head, 'target_head') },
   )
+}
+
+export function computeIntegrationCheckpointFromRepo({
+  base_ref, base_commit, repository_path, target_ref,
+}) {
+  const observed = observeTargetHead(repository_path, target_ref || base_ref)
+  return computeIntegrationCheckpoint({ base_ref, base_commit, target_head: observed })
 }
 
 export function assertIntegrationAllowed({ checkpoint, formalStore, targetRecordId, proofs }) {
@@ -388,6 +427,9 @@ export function acquireLock(registry, spec) {
       if (held.logical_run_id !== logical_run_id) {
         throw new Error(`资源锁被占用: ${resource_key} by ${held.logical_run_id}`)
       }
+      if (held.owner !== owner) {
+        throw new Error(`锁 owner 不匹配，拒绝刷新: ${held.owner} ≠ ${owner}`)
+      }
       held.expires_at = iso(new Date(registry.now().getTime() + ttl))
       emit(registry, { type: 'lock_refreshed', lock_id: held.lock_id, resource_key })
       return clone(held)
@@ -410,12 +452,19 @@ export function acquireLock(registry, spec) {
   return clone(lock)
 }
 
-export function releaseLock(registry, lockId, extra = {}) {
-  const lock = registry.locks.get(requireText(lockId, 'lock_id'))
-  if (!lock) throw new Error(`锁不存在: ${lockId}`)
+export function releaseLock(registry, spec) {
+  if (!spec || typeof spec !== 'object') {
+    throw new Error('releaseLock 必须提供 { lock_id, owner, logical_run_id }')
+  }
+  const lock = registry.locks.get(requireText(spec.lock_id, 'lock_id'))
+  if (!lock) throw new Error(`锁不存在: ${spec.lock_id}`)
   if (lock.released_at) return clone(lock)
+  if (lock.logical_run_id !== requireText(spec.logical_run_id, 'logical_run_id')
+      || lock.owner !== requireText(spec.owner, 'owner')) {
+    throw new Error('锁 owner/run 不匹配，拒绝释放')
+  }
   lock.released_at = iso(registry.now())
-  lock.release_reason = extra.reason || 'released'
+  lock.release_reason = spec.reason || 'released'
   if (registry.locksByKey.get(lock.resource_key) === lock.lock_id) {
     registry.locksByKey.delete(lock.resource_key)
   }
@@ -544,6 +593,7 @@ function materializeGit(ws, spec, mode) {
   ws.source_path = source
   ws.current_head = git(['rev-parse', 'HEAD'], source)
   ws.source_revision = ws.current_head
+  if (mode === WORKSPACE_MODE.ISOLATED_READ) chmodTree(source, 0o555)
 }
 
 function materializeSandbox(ws) {
@@ -574,6 +624,24 @@ function allocateResources(registry, ws) {
     cache_dir,
     port,
     test_db: `vwf_${ws.logical_run_id.replace(/-/g, '_')}`,
+  }
+}
+
+function assertInsideRoot(root, target, label) {
+  const rootR = resolve(root)
+  const t = resolve(target)
+  if (t === rootR || !t.startsWith(rootR + sep)) {
+    throw new Error(`${label} 逃出 work_root`)
+  }
+}
+
+function chmodTree(dir, mode) {
+  if (!dir || !existsSync(dir)) return
+  chmodSync(dir, mode)
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name)
+    if (entry.isDirectory()) chmodTree(p, mode)
+    else chmodSync(p, mode)
   }
 }
 
@@ -613,6 +681,7 @@ function expireLocks(registry) {
 }
 
 function removeGitWorktree(ws) {
+  try { chmodTree(ws.source_path, 0o755) } catch { /* ignore */ }
   try {
     git(['worktree', 'remove', '--force', ws.source_path], ws.repository_path)
     return 'removed'

@@ -11,7 +11,8 @@ import {
   createRegistry, allocateWorkspace, getRunWorkspace, setLifecycle, markAbandoned,
   recordSourceSync, workerScratchPath, assembleWorkerContext, writeWorkerFile, readWorkerFile,
   writeSourceFile, readSourceFile, buildAttemptProvenance, assertProofBinding,
-  computeIntegrationCheckpoint, assertIntegrationAllowed,
+  computeIntegrationCheckpoint, computeIntegrationCheckpointFromRepo, observeTargetHead,
+  assertIntegrationAllowed,
   acquireLock, releaseLock, activeLockFor, cleanupWorkspace, recoverStale,
   loadWorkspaceSchema, validateDef,
 } from '../workspace-isolation.mjs'
@@ -181,6 +182,7 @@ test('A Git 只读冻结 detached source；禁止写 source', () => {
   assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD'], ws.source_path), 'HEAD')
   assert.equal(readSourceFile(ws, 'README.md'), 'base\n')
   assert.throws(() => writeSourceFile(ws, 'hack.txt', 'nope'), /ISOLATED_READ 禁止写入 source/)
+  assert.throws(() => writeFileSync(join(ws.source_path, 'bypass.txt'), 'nope'))
 })
 
 test('A 同一 Run 验证节点绑定真实 HEAD；另一 workspace 的 Proof 不能背书', () => {
@@ -199,8 +201,8 @@ test('A 同一 Run 验证节点绑定真实 HEAD；另一 workspace 的 Proof �
   assert.equal(validateDef('attemptProvenance', proofA).length, 0)
   assert.equal(assertProofBinding(a, proofA), true)
   assert.throws(() => assertProofBinding(b, proofA), /workspace_id/)
-  const forged = { ...proofA, workspace_id: b.workspace_id, verified_head: proofA.verified_head }
-  assert.throws(() => assertProofBinding(b, forged), /verified_head|verified_branch/)
+  const forged = { ...proofA, workspace_id: b.workspace_id, logical_run_id: b.logical_run_id }
+  assert.throws(() => assertProofBinding(b, forged), /verified_head|verified_branch|source_revision|work_branch/)
 })
 
 test('A Fan-out worker 独立 scratch；专家上下文看不到兄弟 scratch', () => {
@@ -250,9 +252,18 @@ test('A resource-scoped lock：不同 target 可并行；同一 target 受控串
   assert.throws(() => acquireLock(reg, {
     logical_run_id: 'run-c', resource_key: keyA, owner: 'closeout',
   }), /资源锁被占用/)
-  releaseLock(reg, la.lock_id)
+  releaseLock(reg, { lock_id: la.lock_id, owner: 'closeout', logical_run_id: 'run-a' })
   const lc = acquireLock(reg, { logical_run_id: 'run-c', resource_key: keyA, owner: 'closeout' })
   assert.equal(lc.logical_run_id, 'run-c')
+  const held = acquireLock(reg, { logical_run_id: 'run-c', resource_key: keyA, owner: 'closeout' })
+  assert.equal(held.lock_id, lc.lock_id)
+  assert.throws(() => acquireLock(reg, {
+    logical_run_id: 'run-c', resource_key: keyA, owner: 'thief',
+  }), /owner 不匹配/)
+  assert.throws(() => releaseLock(reg, {
+    lock_id: lc.lock_id, owner: 'thief', logical_run_id: 'run-c',
+  }), /owner\/run 不匹配/)
+  assert.throws(() => releaseLock(reg, lc.lock_id), /必须提供/)
   assert.equal(isolation.acquireGlobalCloseoutLock, undefined)
   assert.equal(activeLockFor(reg, 'global:closeout'), undefined)
 })
@@ -288,6 +299,20 @@ test('A Integration Checkpoint 发现 target HEAD 变化', () => {
   })
   assert.equal(moved.target_advanced, true)
   assert.equal(moved.ok, false)
+  const repo = initRepo()
+  const base = git(['rev-parse', 'HEAD'], repo)
+  const liveStill = computeIntegrationCheckpointFromRepo({
+    base_ref: 'HEAD', base_commit: base, repository_path: repo, target_ref: 'HEAD',
+  })
+  assert.equal(liveStill.target_advanced, false)
+  assert.equal(observeTargetHead(repo, 'HEAD'), base)
+  writeFileSync(join(repo, 'more.txt'), 'x')
+  git(['add', 'more.txt'], repo)
+  git(['commit', '-q', '-m', 'advance-target'], repo)
+  const liveMoved = computeIntegrationCheckpointFromRepo({
+    base_ref: 'HEAD', base_commit: base, repository_path: repo, target_ref: 'HEAD',
+  })
+  assert.equal(liveMoved.target_advanced, true)
 })
 
 test('A target 更新后旧 Proof 不能为新 Revision 背书（调用 #78）', () => {
@@ -400,7 +425,7 @@ test('A 诊断模板二次 allocate 不切换 source lineage；config snapshot �
   assert.equal(second.config_snapshot_revision, 'prov-2')
 })
 
-test('A portable run 映射与 sync 后 provenance 使用新 HEAD', () => {
+test('A portable run 映射；Git sync 只接受实况 HEAD', () => {
   const mapped = mapFromPortableRun({
     run_id: 'cwf-93-01', workspace_id: 'wt-dev-cwf-93-01',
     repository: 'org/demo', base_ref: 'main', base_commit: 'abc',
@@ -415,9 +440,15 @@ test('A portable run 映射与 sync 后 provenance 使用新 HEAD', () => {
     logical_run_id: 'run-sync', mode: WORKSPACE_MODE.ISOLATED_WRITE,
     repository_path: repo, repository: 'org/demo', work_root: root,
   })
-  const synced = recordSourceSync(reg, 'run-sync', { current_head: 'defdef', source_revision: 'defdef' })
-  assert.equal(synced.current_head, 'defdef')
-  assert.notEqual(synced.current_head, ws.current_head)
+  writeSourceFile(ws, 'next.txt', 'n')
+  git(['add', 'next.txt'], ws.source_path)
+  git(['commit', '-q', '-m', 'advance'], ws.source_path)
+  const actual = git(['rev-parse', 'HEAD'], ws.source_path)
+  assert.notEqual(actual, ws.current_head)
+  assert.throws(() => recordSourceSync(reg, 'run-sync', { current_head: 'deadbeef' }), /禁止自报 HEAD/)
+  const synced = recordSourceSync(reg, 'run-sync')
+  assert.equal(synced.current_head, actual)
+  assert.equal(synced.source_revision, actual)
 })
 
 test('A NONE 有 workspace 身份但无文件 source', () => {
@@ -430,4 +461,35 @@ test('A NONE 有 workspace 身份但无文件 source', () => {
   assert.equal(ws.workspace_path, null)
   assert.equal(getRunWorkspace(reg, 'run-none').logical_run_id, 'run-none')
   assert.throws(() => writeSourceFile(ws, 'x.txt', 'n'), /没有可写 source/)
+})
+
+test('R1 workspace_id 必须净化且唯一', () => {
+  const root = workRoot()
+  const reg = trackedRegistry()
+  assert.throws(() => allocateWorkspace(reg, {
+    logical_run_id: 'run-a', mode: WORKSPACE_MODE.SANDBOX, work_root: root,
+    workspace_id: '../records',
+  }), /非法 workspace_id/)
+  allocateWorkspace(reg, {
+    logical_run_id: 'run-a', mode: WORKSPACE_MODE.SANDBOX, work_root: root,
+    workspace_id: 'ws-shared', task_identity: 't-a',
+  })
+  assert.throws(() => allocateWorkspace(reg, {
+    logical_run_id: 'run-b', mode: WORKSPACE_MODE.SANDBOX, work_root: root,
+    workspace_id: 'ws-shared', task_identity: 't-b',
+  }), /workspace_id 已被占用/)
+})
+
+test('R3 Proof 绑定核对 lineage 字段', () => {
+  const repo = initRepo()
+  const root = workRoot()
+  const reg = trackedRegistry()
+  const a = allocateWorkspace(reg, {
+    logical_run_id: 'run-a', mode: WORKSPACE_MODE.ISOLATED_WRITE,
+    repository_path: repo, repository: 'org/demo', work_root: root, task_identity: 't-a',
+  })
+  const proof = buildAttemptProvenance(a, { node: 'review', attempt: 1 })
+  assert.equal(assertProofBinding(a, proof), true)
+  assert.throws(() => assertProofBinding(a, { ...proof, logical_run_id: 'run-other' }), /logical_run_id/)
+  assert.throws(() => assertProofBinding(a, { ...proof, config_snapshot_revision: 'forged' }), /config_snapshot_revision/)
 })

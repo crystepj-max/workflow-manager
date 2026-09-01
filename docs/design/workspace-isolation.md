@@ -29,7 +29,7 @@ Logical Run
 | `SANDBOX` | DirectorySandboxWorkspace | 无 Git / 非仓库文件任务 |
 | `NONE` | — | 明确不需要文件工作空间；**不是**四套正式模板默认 |
 
-Node Attempt **只能**通过 `getRunWorkspace(registry, logical_run_id)` 取得当前现场，不得猜路径、不得落回共享主仓 cwd。
+Node Attempt **只能**通过 `getRunWorkspace(registry, logical_run_id)` 取得当前现场，不得猜路径、不得落回共享主仓 cwd。`workspace_id` / `logical_run_id` 必须是已净化的小写连字符形态，且在 Registry 内唯一；`workspace_path` 不得逃出 `work_root`。
 
 ## 2. 默认 Workspace Policy
 
@@ -47,7 +47,7 @@ Node Attempt **只能**通过 `getRunWorkspace(registry, logical_run_id)` 取得
 写：`resolve repo → freeze base_ref + base_commit → create branch → git worktree add`。  
 默认分支名 `vwf/run/<logical_run_id>`，可被 `work_branch` 覆盖。
 
-只读：对冻结 commit `git worktree add --detach`。`writeSourceFile` 必须拒绝。
+只读：对冻结 commit `git worktree add --detach`。`writeSourceFile` 必须拒绝；materialize 后将 `source_path` 置为目录只读，cleanup 前再恢复可写。API 与文件系统两层都禁止写 source。
 
 Provider/Model 的 `config_snapshot_revision` 变化只更新字段，**不得**重建或切换 `source_path`。
 
@@ -55,7 +55,7 @@ Provider/Model 的 `config_snapshot_revision` 变化只更新字段，**不得**
 
 Attempt / Proof 记录：`workspace_id`、`source_revision` / `base_commit`、`work_branch`（若有）、**实际** `verified_head`、`config_snapshot_revision`。
 
-`assertProofBinding` 从 `source_path` 读真实 HEAD：workspace_id 与 HEAD（及有 branch 时的 branch）必须一致。禁止在另一工作区验证却为本 Run 背书。
+`assertProofBinding` 必须核对 `workspace_id`、`logical_run_id`、`source_revision`、`base_commit`、`work_branch`、`config_snapshot_revision`，并从 `source_path` 读真实 HEAD（及有 branch 时的 branch）。`recordSourceSync` 若 source 是 Git 目录，只能写入 `git rev-parse HEAD` 观测到的值，禁止自报伪造 SHA。禁止在另一工作区验证却为本 Run 背书。
 
 ## 5. Fan-out scratch
 
@@ -65,7 +65,7 @@ Attempt / Proof 记录：`workspace_id`、`source_revision` / `base_commit`、`w
 
 可分配资源默认按 Run 派生：`tmpdir` / `build_dir` / `cache_dir` / `port` / `test_db=vwf_<id>`。
 
-不可独立分配的共享资源用 **resource-scoped lock**，绑定 `logical_run_id`、`resource_key`、`owner`、`acquired_at`、`expires_at`、`released_at`。
+不可独立分配的共享资源用 **resource-scoped lock**，绑定 `logical_run_id`、`resource_key`、`owner`、`acquired_at`、`expires_at`、`released_at`。刷新与释放必须同时校验 `logical_run_id` 与 `owner`。
 
 集成锁键：`repo:<repository>:target:<ref>:integration`。不同仓库的 target 可并行；同一 target 上第二把锁被拒，直到释放或过期。
 
@@ -73,7 +73,10 @@ Attempt / Proof 记录：`workspace_id`、`source_revision` / `base_commit`、`w
 
 ## 7. Integration Checkpoint 与 #78
 
-`computeIntegrationCheckpoint({ base_ref, base_commit, target_head })` 从**调用方提供的实际 target HEAD**计算（与 `cwf-checkpoint.computeCheckpoint` 同一纯函数）。  
+生产路径必须由 Core **观测仓库实况**：`observeTargetHead(repository_path, ref)` fail closed 执行 `git rev-parse`；`computeIntegrationCheckpointFromRepo({ base_ref, base_commit, repository_path, target_ref })` 用观测值计算。不得在集成闸门上回落调用方自报 HEAD。
+
+纯函数 `computeIntegrationCheckpoint({ base_ref, base_commit, target_head })` 仅用于单测（与 `cwf-checkpoint.computeCheckpoint` 同一实现）。
+
 `target_advanced=true` 之后：
 
 1. `recordSourceSync` 更新 `current_head` / `source_revision`（新 Artifact Revision）；
