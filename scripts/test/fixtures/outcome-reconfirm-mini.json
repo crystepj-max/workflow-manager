@@ -1,0 +1,83 @@
+{
+  "id": "outcome-reconfirm-mini",
+  "displayName": "RECONFIRM 不计额度微型",
+  "entry": "kickoff",
+  "control": { "maxRounds": 1 },
+  "nodes": [
+    {
+      "id": "kickoff",
+      "profile": "dispatcher",
+      "goal": "启动",
+      "output": {
+        "outcomePath": "$.go",
+        "schema": {
+          "type": "object",
+          "properties": { "go": { "type": "string", "enum": ["START"] } },
+          "required": ["go"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "intake",
+      "profile": "dispatcher",
+      "goal": "确认目标",
+      "output": {
+        "outcomePath": "$.go",
+        "schema": {
+          "type": "object",
+          "properties": { "go": { "type": "string", "enum": ["NEXT"] } },
+          "required": ["go"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "execute",
+      "profile": "dev",
+      "goal": "执行改动",
+      "output": {
+        "outcomePath": "$.status",
+        "schema": {
+          "type": "object",
+          "properties": { "status": { "type": "string", "enum": ["DONE", "RECONFIRM_REQUIRED"] } },
+          "required": ["status"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "evaluate",
+      "profile": "review",
+      "goal": "评估结果",
+      "output": {
+        "outcomePath": "$.verdict",
+        "completionPath": "$.completion_type",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "verdict": { "type": "string", "enum": ["PASS"] },
+            "completion_type": { "type": "string" }
+          },
+          "required": ["verdict"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "kickoff", "to": "intake", "outcome": "START" },
+    { "from": "intake", "to": "execute", "outcome": "NEXT" },
+    { "from": "execute", "to": "evaluate", "outcome": "DONE" },
+    { "from": "execute", "to": "intake", "outcome": "RECONFIRM_REQUIRED", "countRound": false },
+    { "from": "evaluate", "to": "$end", "outcome": "PASS" }
+  ],
+  "bindings": {
+    "models": {
+      "kickoff": { "provider": "kimi-coding", "model": "k3" },
+      "intake": { "provider": "kimi-coding", "model": "k3" },
+      "execute": { "provider": "kimi-coding", "model": "k3" },
+      "evaluate": { "provider": "deepseek-official", "model": "deepseek-v4-pro" }
+    }
+  }
+}

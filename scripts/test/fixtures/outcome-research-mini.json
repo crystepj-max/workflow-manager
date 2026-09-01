@@ -1,0 +1,82 @@
+{
+  "id": "outcome-research-mini",
+  "displayName": "探索三轮映射微型",
+  "entry": "kickoff",
+  "control": { "maxRounds": 2 },
+  "nodes": [
+    {
+      "id": "kickoff",
+      "profile": "dispatcher",
+      "goal": "启动探索",
+      "output": {
+        "outcomePath": "$.go",
+        "schema": {
+          "type": "object",
+          "properties": { "go": { "type": "string", "enum": ["START"] } },
+          "required": ["go"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "orchestrate",
+      "profile": "dispatcher",
+      "goal": "探索统筹",
+      "output": {
+        "outcomePath": "$.go",
+        "schema": {
+          "type": "object",
+          "properties": { "go": { "type": "string", "enum": ["RESEARCH"] } },
+          "required": ["go"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "research",
+      "profile": "dev",
+      "goal": "专家研究",
+      "output": {
+        "outcomePath": "$.status",
+        "schema": {
+          "type": "object",
+          "properties": { "status": { "type": "string", "enum": ["DONE"] } },
+          "required": ["status"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "evaluate",
+      "profile": "review",
+      "goal": "结论评估",
+      "output": {
+        "outcomePath": "$.verdict",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "verdict": { "type": "string", "enum": ["PASS", "NEEDS_RESEARCH", "INSUFFICIENT"] }
+          },
+          "required": ["verdict"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "kickoff", "to": "orchestrate", "outcome": "START" },
+    { "from": "orchestrate", "to": "research", "outcome": "RESEARCH" },
+    { "from": "research", "to": "evaluate", "outcome": "DONE" },
+    { "from": "evaluate", "to": "$end", "outcome": "PASS" },
+    { "from": "evaluate", "to": "$end", "outcome": "INSUFFICIENT" },
+    { "from": "evaluate", "to": "orchestrate", "outcome": "NEEDS_RESEARCH", "countRound": true }
+  ],
+  "bindings": {
+    "models": {
+      "kickoff": { "provider": "kimi-coding", "model": "k3" },
+      "orchestrate": { "provider": "kimi-coding", "model": "k3" },
+      "research": { "provider": "kimi-coding", "model": "k3" },
+      "evaluate": { "provider": "deepseek-official", "model": "deepseek-v4-pro" }
+    }
+  }
+}
