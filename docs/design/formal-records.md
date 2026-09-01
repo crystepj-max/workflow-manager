@@ -62,7 +62,7 @@ Node Result 可以产生 **0..n** 条 Formal Record（验收要求「可产生�
 ## 5. Decision 与 Guidance
 
 - **Decision Record**：`kind=proof_decision`，`body.value.decision` 含 question / options / chosen / rationale / decided_by / decided_at。追加式；不得改写已存在 Revision。
-- **Guidance**：`kind=input_baseline` 的输入记录，依赖当时 Baseline。`changes_baseline=false` 时不产生新 Baseline Revision；`true` 时必须同时追加新的 Baseline Revision，且新 Baseline 的 `dependencies` 含旧 Baseline 与该 Guidance。
+- **Guidance**：`kind=input_baseline` 的输入记录，依赖当时 Baseline。`changes_baseline=false` 时不产生新 Baseline Revision；`true` 时必须同时追加新的 Baseline Revision，且新 Baseline 的 `dependencies` 含旧 Baseline 与该 Guidance。失败路径不得留下「声称改 Baseline 却没有新 Revision」的 Guidance。
 
 ## 6. Portable 映射
 

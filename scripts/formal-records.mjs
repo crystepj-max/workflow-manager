@@ -98,6 +98,17 @@ export function allRecords(store) {
 }
 
 export function appendRecord(store, input) {
+  const frozen = buildRecord(store, input)
+  return commitRecord(store, frozen)
+}
+
+function forkStore(store) {
+  const byId = new Map()
+  for (const [id, revs] of store.byId) byId.set(id, new Map(revs))
+  return { byId, order: store.order.slice(), control_log: store.control_log }
+}
+
+function buildRecord(store, input) {
   if (!input || typeof input !== 'object') throw new Error('appendRecord 需要记录对象')
   if (input.record_revision !== undefined) {
     throw new Error('禁止指定 record_revision：由 Store 追加分配')
@@ -135,10 +146,13 @@ export function appendRecord(store, input) {
   if (errors.length > 0) {
     throw new Error(`Formal Record 校验失败：${errors.join('；')}`)
   }
+  return deepFreeze(structuredClone(record))
+}
 
-  const frozen = deepFreeze(structuredClone(record))
+function commitRecord(store, frozen) {
+  const recordId = frozen.record_id
   if (!store.byId.has(recordId)) store.byId.set(recordId, new Map())
-  store.byId.get(recordId).set(nextRev, frozen)
+  store.byId.get(recordId).set(frozen.record_revision, frozen)
   store.order.push(toRef(frozen))
   return frozen
 }
@@ -193,7 +207,10 @@ export function appendGuidance(store, input) {
     throw new Error(`Guidance 所依赖的 Baseline 不存在: ${baseline.record_id}@${baseline.record_revision}`)
   }
   const changes = input.changes_baseline === true
-  const guidance = appendRecord(store, {
+  if (changes && (!input.new_baseline || !input.new_baseline.body)) {
+    throw new Error('changes_baseline 必须关联新的 Baseline Revision（提供 new_baseline.body）')
+  }
+  const guidanceBuilt = buildRecord(store, {
     record_id: requireText(input.record_id, 'record_id'),
     kind: KIND.INPUT_BASELINE,
     body: {
@@ -205,23 +222,25 @@ export function appendGuidance(store, input) {
     provenance: input.provenance,
   })
   if (!changes) {
+    const guidance = commitRecord(store, guidanceBuilt)
     return { guidance, baseline: getRecord(store, baseline.record_id, baseline.record_revision) }
   }
-  if (!input.new_baseline || !input.new_baseline.body) {
-    throw new Error('changes_baseline 必须关联新的 Baseline Revision（提供 new_baseline.body）')
-  }
   const nextId = input.new_baseline.record_id || baseline.record_id
-  const next = appendRecord(store, {
+  const tmp = forkStore(store)
+  commitRecord(tmp, guidanceBuilt)
+  const nextBuilt = buildRecord(tmp, {
     record_id: nextId,
     kind: KIND.INPUT_BASELINE,
-    body: normalizeBody(input.new_baseline.body),
-    dependencies: [baseline, toRef(guidance)],
+    body: input.new_baseline.body,
+    dependencies: [baseline, toRef(guidanceBuilt)],
     based_on: baseline,
     provenance: {
       ...input.provenance,
-      related_guidance: toRef(guidance),
+      related_guidance: toRef(guidanceBuilt),
     },
   })
+  const guidance = commitRecord(store, guidanceBuilt)
+  const next = commitRecord(store, nextBuilt)
   return { guidance, baseline: next }
 }
 

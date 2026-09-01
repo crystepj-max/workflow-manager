@@ -208,6 +208,7 @@ test('A8 Guidance 与 Baseline：普通 Guidance 不改版本；改范围必须�
   assert.equal(currentRevision(store, 'baseline'), 1)
   assert.deepEqual(keep.guidance.based_on, toRef(bl1))
 
+  const beforeFail = allRecords(store).length
   assert.throws(() => appendGuidance(store, {
     record_id: 'guide-bad',
     text: '扩大范围',
@@ -215,6 +216,19 @@ test('A8 Guidance 与 Baseline：普通 Guidance 不改版本；改范围必须�
     baseline: toRef(bl1),
     provenance: prov({ node: 'guidance' }),
   }), /必须关联新的 Baseline Revision/)
+  assert.equal(allRecords(store).length, beforeFail)
+  assert.equal(getRecord(store, 'guide-bad'), undefined)
+
+  assert.throws(() => appendGuidance(store, {
+    record_id: 'guide-bad-body',
+    text: '扩大范围',
+    changes_baseline: true,
+    baseline: toRef(bl1),
+    new_baseline: { body: { media_type: 'nope', value: { goal: 'x' } } },
+    provenance: prov({ node: 'guidance' }),
+  }), /非法 media_type/)
+  assert.equal(allRecords(store).length, beforeFail)
+  assert.equal(getRecord(store, 'guide-bad-body'), undefined)
 
   const changed = appendGuidance(store, {
     record_id: 'guide-scope',
