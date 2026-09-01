@@ -1,0 +1,51 @@
+{
+  "id": "human-decision-mini",
+  "displayName": "人工决策微型蓝图",
+  "description": "框架级 Human Decision 夹具：自动节点 success 边升 $human-decision，出边带业务 Result",
+  "entry": "work",
+  "control": {
+    "maxRounds": 3
+  },
+  "nodes": [
+    {
+      "id": "work",
+      "profile": "dev",
+      "label": "执行",
+      "goal": "完成工作；命中需人拍板的结论时由蓝图升 Human Decision",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string" },
+            "why": { "type": "string" },
+            "current_state": { "type": "string" }
+          },
+          "required": ["status"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "finish",
+      "profile": "closeout",
+      "label": "收口",
+      "goal": "按决策结果收口",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "done": { "type": "boolean" }
+          },
+          "required": ["done"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "work", "to": "$human-decision", "on": "success", "when": "$.status == \"confirm\"" },
+    { "from": "work", "to": "finish", "on": "success", "when": "$.status == \"auto\"" },
+    { "from": "$human-decision", "to": "finish", "on": "success", "result": "SHIP" },
+    { "from": "finish", "to": "$end", "on": "success" }
+  ]
+}

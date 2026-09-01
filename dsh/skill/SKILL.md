@@ -103,12 +103,12 @@ diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
    恢复后核对 `git -C <runDir>/worktree rev-parse --abbrev-ref HEAD` = dev2/<taskId> 再动手复现。
 1. 向用户呈现 `<runDir>/acceptance-summary.md` 的核心内容（逐条 ✅/⚠️/❌ + 确认方式）；
 2. 用 ask_user_question 发起裁决：通过 / 不通过（附意见）；
-3. **通过** → 以 `entry=closeout` 续跑（收口会推送分支、合并 PR、关闭 issue、收束本地工作区）；
-4. **不通过** → 以 `entry=dev` 续跑，args 增加：`feedback`=人工意见、`startRound`=上次 round+1、`history`=前次打回历史（保持 9 轮计数连续；dev 节点开工自行读取 runDir 内 `dispatch-result.json`）。
+3. **通过** → 以当前门禁节点为续跑入口、`approved=true`（引擎只走该节点 success 出边；下游是否收口由蓝图决定，手册不得指定下一跳）；
+4. **不通过** → 仍以同一门禁节点续跑并带上意见；引擎对非 true（含 false）会再挂起，**不走 failure 边**。不要手写跳到开发或收口节点。
 
 ## 硬规则提醒（约束主会话自己）
 
-- 未获人工「通过」裁决前，禁止以 entry=closeout 续跑。
+- 未获人工「通过」裁决前，不得把 `approved` 设为 true 续跑。
 - 续跑必须回传前次 `history` / `startRound`，否则 9 轮上限计数会断。
 - 目标仓库必须在当前会话工作区内；不要跨工作区读写别的项目。
 - 每个 issue 独立会话 + 独立 git worktree（脚本自动建 `.agent-runs/<taskId>/worktree` + 分支 `dev2/<taskId>`）；多任务并行 = 多会话 + 多 worktree 物理隔离。

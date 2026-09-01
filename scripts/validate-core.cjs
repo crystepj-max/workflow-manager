@@ -13,12 +13,103 @@
 'use strict'
 
 const COND_RE = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
-const RESERVED = ['$end', '$entry', '$new-round']
+const HUMAN_DECISION_ID = '$human-decision'
+const RESERVED = ['$end', '$entry', '$new-round', HUMAN_DECISION_ID]
+const FRAMEWORK_TO = ['$end', HUMAN_DECISION_ID]
+const FRAMEWORK_FROM = [HUMAN_DECISION_ID]
 const FILES_KINDS = ['json', 'markdown', 'text']
 const ON_MAX_ROUNDS = ['return', 'auto-reschedule']
 const MAX_ROUNDS_CAP = 9 // 系统约定上限：编辑器最大可设 9 轮（用户意见 Q7）
 const FANOUT_ITEMS_ARGS_RE = /^\$\.args(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
 const FANOUT_ITEMS_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
+const HD_RESULT_RE = /^[A-Z][A-Z0-9_]*$/
+const HD_REASONS = ['HUMAN_ACCEPTANCE', 'ESCALATED_DECISION', 'MAX_ROUNDS_REACHED']
+const HD_CONTROL_RESULTS = ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP']
+const HD_PACKAGE_REQUIRED = ['why', 'current_state', 'options', 'subsequent_effects']
+const HD_PACKAGE_OPTIONAL_UNKNOWN = ['cost', 'benefit', 'risk', 'recommendation']
+const HD_EVENT_FIELDS = [
+  'record_kind', 'trigger', 'lifecycle_at_request', 'decision_id', 'run_ref',
+  'node_id', 'attempt', 'reason', 'triggering_node_outcome', 'decision_package',
+  'user_choice', 'impact', 'subsequent_path', 'created_at',
+]
+const HD_RESUME_FIELDS = ['decision_id', 'user_choice']
+const HD_EVENT_RECORD_KIND = 'DECISION'
+const HD_EVENT_TRIGGER = 'SYSTEM_REQUEST'
+const HD_UNKNOWN = 'UNKNOWN'
+const JSON_PATH_RE = /^\$\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)$/
+
+function hasOwn(obj, key) {
+  return !!obj && Object.prototype.hasOwnProperty.call(obj, key)
+}
+
+function hasOutcomeField(e) {
+  if (!e || !hasOwn(e, 'outcome')) return false
+  return e.outcome !== undefined && e.outcome !== null && e.outcome !== ''
+}
+
+function isTechnicalEdge(e) {
+  return !!(e && e.on === 'technical')
+}
+
+function isStructuralEdge(e) {
+  return !!(e && (e.on === 'success' || hasOutcomeField(e)))
+}
+
+function hasOutcomePath(n) {
+  return !!(n && n.output && typeof n.output.outcomePath === 'string' && n.output.outcomePath.trim())
+}
+
+function parseJsonPath(expr) {
+  if (typeof expr !== 'string') return null
+  const m = JSON_PATH_RE.exec(expr.trim())
+  return m ? m[1].split('.') : null
+}
+
+function schemaLeafAt(schema, segments) {
+  let cursor = schema
+  for (const key of segments) {
+    if (Array.isArray(cursor)) cursor = cursor[0]
+    if (!cursor || typeof cursor !== 'object') return null
+    if (cursor.type === 'array' && cursor.items) cursor = cursor.items
+    const props = cursor.properties
+    if (!props || typeof props !== 'object' || !(key in props)) return null
+    cursor = props[key]
+  }
+  return cursor && typeof cursor === 'object' ? cursor : null
+}
+
+function enumerableValues(leaf) {
+  if (!leaf || typeof leaf !== 'object') return null
+  if (Array.isArray(leaf.oneOf)) {
+    const out = []
+    for (let i = 0; i < leaf.oneOf.length; i++) {
+      const inner = enumerableValues(leaf.oneOf[i])
+      if (!inner) return null
+      for (let j = 0; j < inner.length; j++) out.push(inner[j])
+    }
+    return out
+  }
+  if (leaf.const !== undefined) return [leaf.const]
+  if (Array.isArray(leaf.enum)) return leaf.enum.slice()
+  if (leaf.type === 'boolean') return [true, false]
+  return null
+}
+
+function isStringSchemaLeaf(leaf) {
+  if (!leaf || typeof leaf !== 'object') return false
+  if (Array.isArray(leaf.oneOf)) {
+    return leaf.oneOf.length > 0 && leaf.oneOf.every(isStringSchemaLeaf)
+  }
+  if (leaf.const !== undefined) return typeof leaf.const === 'string'
+  if (Array.isArray(leaf.enum)) {
+    return leaf.enum.length > 0 && leaf.enum.every((v) => typeof v === 'string')
+  }
+  return leaf.type === 'string'
+}
+
+function outcomeKey(value) {
+  return JSON.stringify(value)
+}
 
 // ---------- 错误坐标 → 编辑器 fieldKey ----------
 function fieldKeyOf(at) {
@@ -35,7 +126,52 @@ function fieldKeyOf(at) {
   // 工作流级业务规则字段（编辑器控件标红）
   if (at === '$.heteroCheck') return 'heteroCheck'
   if (at === '$.onMaxRounds') return 'onMaxRounds'
+  if (at === '$.approved') return 'approved'
+  if (at === '$.humanDecision') return 'humanDecision'
+  if (at.startsWith('$.humanDecision.')) return 'humanDecision:' + at.slice('$.humanDecision.'.length)
   return undefined
+}
+
+function edgeTouchesHumanDecision(e) {
+  return !!(e && (e.to === HUMAN_DECISION_ID || e.from === HUMAN_DECISION_ID))
+}
+
+function blueprintUsesHumanDecision(bp) {
+  if (!bp || typeof bp !== 'object') return false
+  if (bp.humanDecision !== undefined) return true
+  const edges = Array.isArray(bp.edges) ? bp.edges : []
+  return edges.some(edgeTouchesHumanDecision)
+}
+
+// 结构后继：success ∪ outcome；把 $human-decision 当透明跳点（入边停机、出边仍参与走通性）。
+function hopSuccessors(from, edges, ids, pred) {
+  const out = []
+  const hopped = {}
+  const visit = (src) => {
+    edges.forEach((e) => {
+      if (!e || e.from !== src || !pred(e)) return
+      if (e.to === '$end') return
+      if (e.to === HUMAN_DECISION_ID) {
+        if (!hopped[HUMAN_DECISION_ID]) {
+          hopped[HUMAN_DECISION_ID] = true
+          visit(HUMAN_DECISION_ID)
+        }
+        return
+      }
+      if (ids && !ids[e.to]) return
+      out.push(e.to)
+    })
+  }
+  visit(from)
+  return out
+}
+
+function successSuccessors(from, edges, ids) {
+  return hopSuccessors(from, edges, ids, (e) => e && e.on === 'success')
+}
+
+function structuralSuccessors(from, edges, ids) {
+  return hopSuccessors(from, edges, ids, isStructuralEdge)
 }
 
 // ---------- 结构层 ----------
@@ -57,20 +193,30 @@ function deriveEntryCandidates(nodes, edges) {
   nodes.forEach((n) => { if (n && n.id) ids[n.id] = true })
   const incoming = {}
   edges.forEach((e) => {
-    if (!e || !ids[e.from] || !ids[e.to]) return
-    if (e.on === 'success' && e.to !== '$end') incoming[e.to] = true
+    if (!isStructuralEdge(e)) return
+    if (!e.to || e.to === '$end' || e.to === HUMAN_DECISION_ID || !ids[e.to]) return
+    const fromOk = ids[e.from] || e.from === HUMAN_DECISION_ID
+    if (!fromOk) return
+    incoming[e.to] = true
   })
   return nodes.map((n) => n && n.id).filter((id) => id && !incoming[id])
 }
 
+function nodeIdMap(nodes) {
+  const ids = {}
+  nodes.forEach((n) => { if (n && n.id) ids[n.id] = true })
+  return ids
+}
+
 function reachable(entry, nodes, edges) {
+  const ids = nodeIdMap(nodes)
   const reach = {}
   const stack = [entry]
   while (stack.length) {
     const cur = stack.pop()
     if (reach[cur]) continue
     reach[cur] = true
-    edges.forEach((e) => { if (e && e.from === cur && e.on === 'success' && e.to !== '$end' && !reach[e.to]) stack.push(e.to) })
+    structuralSuccessors(cur, edges, ids).forEach((to) => { if (!reach[to]) stack.push(to) })
   }
   return reach
 }
@@ -83,27 +229,91 @@ function successPathExists(from, to, edges) {
     if (cur === to) return true
     if (seen[cur]) continue
     seen[cur] = true
-    edges.forEach((e) => {
-      if (e && e.from === cur && e.on === 'success' && e.to !== '$end' && !seen[e.to]) stack.push(e.to)
+    structuralSuccessors(cur, edges, null).forEach((next) => {
+      if (!seen[next]) stack.push(next)
     })
   }
   return false
 }
 
 function hasSuccessCycle(entry, nodes, edges) {
+  const ids = nodeIdMap(nodes)
   const color = {}
   let cyclic = false
   const dfs = (u) => {
     color[u] = 1
-    edges.forEach((e) => {
-      if (cyclic || e.from !== u || e.on !== 'success' || e.to === '$end') return
-      if (color[e.to] === 1) { cyclic = true; return }
-      if (color[e.to] === undefined) dfs(e.to)
+    successSuccessors(u, edges, ids).forEach((v) => {
+      if (cyclic) return
+      if (color[v] === 1) { cyclic = true; return }
+      if (color[v] === undefined) dfs(v)
     })
     color[u] = 2
   }
   if (entry) dfs(entry)
   return cyclic
+}
+
+function tarjanSccs(ids, succs) {
+  const index = {}
+  const low = {}
+  const stack = []
+  const onStack = {}
+  const sccs = []
+  let idx = 0
+  const strongconnect = (v) => {
+    index[v] = low[v] = idx++
+    stack.push(v)
+    onStack[v] = true
+    ;(succs[v] || []).forEach((w) => {
+      if (index[w] === undefined) {
+        strongconnect(w)
+        low[v] = Math.min(low[v], low[w])
+      } else if (onStack[w]) {
+        low[v] = Math.min(low[v], index[w])
+      }
+    })
+    if (low[v] === index[v]) {
+      const comp = []
+      let w
+      do {
+        w = stack.pop()
+        onStack[w] = false
+        comp.push(w)
+      } while (w !== v)
+      sccs.push(comp)
+    }
+  }
+  Object.keys(ids).forEach((v) => { if (index[v] === undefined) strongconnect(v) })
+  return sccs
+}
+
+function sccHasStructuralExit(comp, edges) {
+  const inComp = {}
+  comp.forEach((id) => { inComp[id] = true })
+  for (let i = 0; i < edges.length; i++) {
+    const e = edges[i]
+    if (!e || !inComp[e.from] || !isStructuralEdge(e)) continue
+    if (e.to === '$end' || e.to === HUMAN_DECISION_ID) return true
+    if (e.to && !inComp[e.to]) return true
+  }
+  return false
+}
+
+function hasStructuralSelfLoop(id, edges) {
+  return edges.some((e) => e && e.from === id && e.to === id && isStructuralEdge(e))
+}
+
+function hasUnexitedBusinessScc(nodes, edges) {
+  const ids = nodeIdMap(nodes)
+  const succs = {}
+  Object.keys(ids).forEach((id) => { succs[id] = structuralSuccessors(id, edges, ids) })
+  const sccs = tarjanSccs(ids, succs)
+  for (let i = 0; i < sccs.length; i++) {
+    const comp = sccs[i]
+    const nontrivial = comp.length > 1 || (comp.length === 1 && hasStructuralSelfLoop(comp[0], edges))
+    if (nontrivial && !sccHasStructuralExit(comp, edges)) return true
+  }
+  return false
 }
 
 // 结构层校验：nodes/edges 定义合法性 + 走通性（框架保证，与业务无关）。
@@ -151,12 +361,30 @@ function validateStructure(nodes, edges, opts) {
   edges.forEach((e, i) => {
     const at = '$.edges[' + i + ']'
     if (!e || typeof e !== 'object') { err(at, '边必须是对象'); return }
-    if (!e.from || !ids[e.from]) err(at + '.from', '边的来源节点 ' + e.from + ' 不存在')
-    if (!e.to || (e.to !== '$end' && !ids[e.to])) err(at + '.to', '边的目标节点 ' + e.to + ' 不存在')
-    if (e.on !== 'success' && e.on !== 'failure') { err(at + '.on', 'on ∈ { success, failure }'); return }
-    if (e.when !== undefined) {
-      if (e.on !== 'success') err(at + '.when', 'when 只允许用于 success 边')
-      else if (typeof e.when !== 'string' || !COND_RE.test(e.when)) err(at + '.when', 'when 需为 $.path == value 形式')
+    const fromOk = e.from && (ids[e.from] || FRAMEWORK_FROM.includes(e.from))
+    const toOk = e.to && (ids[e.to] || FRAMEWORK_TO.includes(e.to))
+    if (!fromOk) err(at + '.from', '边的来源节点 ' + e.from + ' 不存在')
+    if (!toOk) err(at + '.to', '边的目标节点 ' + e.to + ' 不存在')
+    const hasOut = hasOutcomeField(e)
+    const hasOn = e.on !== undefined && e.on !== null && e.on !== ''
+    if (hasOut && hasOn) {
+      err(at + '.on', 'outcome 与 on 互斥')
+    } else if (hasOut) {
+      if (e.when !== undefined) err(at + '.when', '业务边禁止 when')
+      if (e.countRound !== undefined && typeof e.countRound !== 'boolean') {
+        err(at + '.countRound', 'countRound 须为布尔')
+      }
+    } else if (e.on === 'technical') {
+      if (e.when !== undefined) err(at + '.when', 'technical 边禁止 when')
+      if (e.countRound !== undefined) err(at + '.countRound', 'countRound 仅业务边可声明')
+    } else if (e.on === 'success' || e.on === 'failure') {
+      if (e.when !== undefined) {
+        if (e.on !== 'success') err(at + '.when', 'when 只允许用于 success 边')
+        else if (typeof e.when !== 'string' || !COND_RE.test(e.when)) err(at + '.when', 'when 需为 $.path == value 形式')
+      }
+      if (e.countRound !== undefined) err(at + '.countRound', 'countRound 仅业务边可声明')
+    } else {
+      err(at + '.on', 'on ∈ { success, failure, technical }，或改用业务边 outcome')
     }
     outgoing[e.from] = (outgoing[e.from] || 0) + 1
   })
@@ -187,8 +415,11 @@ function validateStructure(nodes, edges, opts) {
   const effEntry = entryOk ? entry : (cands.length === 1 ? cands[0] : '')
   if (effEntry) {
     const reach = reachable(effEntry, nodes, edges)
-    nodes.forEach((n) => { if (n && !reach[n.id]) err('$.nodes[' + n.id + ']', '节点不可达（无法从入口沿 success 边到达）') })
+    nodes.forEach((n) => { if (n && !reach[n.id]) err('$.nodes[' + n.id + ']', '节点不可达（无法从入口沿结构边到达）') })
     if (hasSuccessCycle(effEntry, nodes, edges)) err('$.nodes', 'success 边存在环（打回请用 failure 边）')
+    if (hasUnexitedBusinessScc(nodes, edges)) {
+      err('$.nodes', '业务结果环缺少出口（须能离开该强连通分量，或到达 $end / $human-decision）')
+    }
   }
   return { errors }
 }
@@ -268,8 +499,22 @@ function validateBlueprint(bp, opts) {
     if (n.output && n.output.successCondition !== undefined) {
       err('$.nodes[' + n.id + '].output.successCondition', 'fanout 节点禁止 output.successCondition；失败判定统一使用 failOn')
     }
+    if (hasOutcomePath(n)) {
+      err('$.nodes[' + n.id + '].output.outcomePath', 'fanout 节点禁止 outcomePath（不参与 Business Outcome Routing）')
+    }
+    if (n.output && typeof n.output.completionPath === 'string' && n.output.completionPath.trim()) {
+      err('$.nodes[' + n.id + '].output.completionPath', 'fanout 节点禁止 completionPath')
+    }
     if (n.manualCheck) err('$.nodes[' + n.id + '].manualCheck', 'fanout 节点禁止 manualCheck')
     if (n.verifyBranch) err('$.nodes[' + n.id + '].verifyBranch', 'fanout 节点禁止 verifyBranch')
+    bp.edges.forEach((e, i) => {
+      if (e && e.from === n.id && e.to === HUMAN_DECISION_ID) {
+        err('$.nodes[' + n.id + '].kind', 'fanout 节点禁止升级到 Human Decision（坐标 edge:' + i + ':to）')
+      }
+      if (e && e.from === n.id && (hasOutcomeField(e) || isTechnicalEdge(e))) {
+        err('$.nodes[' + n.id + '].kind', 'fanout 节点禁止 outcome / technical 边（failOn 仍走 failure）')
+      }
+    })
     if (!bp.edges.some((e) => e && e.from === n.id && e.on === 'failure')) {
       err('$.nodes[' + n.id + '].kind', 'fanout 节点必须有 failure 出边')
     }
@@ -336,6 +581,172 @@ function validateBlueprint(bp, opts) {
     }
   }
 
+  // Business Outcome Routing / Completion Mapping（#77 / #88 / #91 / #92 / #89）
+  bp.nodes.forEach((n) => {
+    if (!n || !n.id) return
+    const kind = n.kind === undefined ? 'worker' : n.kind
+    if (kind === 'fanout') return
+    const outs = bp.edges.filter((e) => e && e.from === n.id)
+    const newMode = hasOutcomePath(n)
+
+    if (n.output && typeof n.output.completionPath === 'string' && n.output.completionPath.trim()) {
+      const cpath = n.output.completionPath.trim()
+      const csegs = parseJsonPath(cpath)
+      if (!csegs) {
+        err('$.nodes[' + n.id + '].output.completionPath', 'completionPath 需为 $.field 形式')
+      } else if (!n.output.schema || typeof n.output.schema !== 'object') {
+        err('$.nodes[' + n.id + '].output.schema', '声明 completionPath 时 output.schema 必填')
+      } else if (!pathInSchema(n.output.schema, csegs)) {
+        err('$.nodes[' + n.id + '].output.completionPath', '完成类型路径未在 output.schema 中声明')
+      } else if (!isStringSchemaLeaf(schemaLeafAt(n.output.schema, csegs))) {
+        err('$.nodes[' + n.id + '].output.completionPath', 'completionPath 叶子必须是 string')
+      }
+      const toEnd = outs.some((e) => isStructuralEdge(e) && e.to === '$end')
+      if (!toEnd) {
+        err('$.nodes[' + n.id + '].output.completionPath', 'completionPath 仅允许声明在有结构边指向 $end 的节点上')
+      }
+    }
+
+    if (newMode) {
+      if (n.output.successCondition !== undefined && n.output.successCondition !== null && n.output.successCondition !== '') {
+        err('$.nodes[' + n.id + '].output.successCondition', '新模式（有 outcomePath）禁止 successCondition')
+      }
+      const segs = parseJsonPath(n.output.outcomePath.trim())
+      if (!segs) {
+        err('$.nodes[' + n.id + '].output.outcomePath', 'outcomePath 需为 $.field 形式')
+        return
+      }
+      if (!n.output.schema || typeof n.output.schema !== 'object') {
+        err('$.nodes[' + n.id + '].output.schema', '声明 outcomePath 时 output.schema 必填')
+        return
+      }
+      if (!pathInSchema(n.output.schema, segs)) {
+        err('$.nodes[' + n.id + '].output.outcomePath', '业务结果路径未在 output.schema 中声明')
+        return
+      }
+      const leaf = schemaLeafAt(n.output.schema, segs)
+      const vals = enumerableValues(leaf)
+      if (!vals) {
+        err('$.nodes[' + n.id + '].output.outcomePath', 'outcomePath 必须可穷举（enum / const / oneOf 常量，或 boolean）')
+        return
+      }
+      const outcomeEdges = outs.filter(hasOutcomeField)
+      const technical = outs.filter(isTechnicalEdge)
+      const legacy = outs.filter((e) => e && (e.on === 'success' || e.on === 'failure'))
+      if (legacy.length) {
+        err('$.nodes[' + n.id + '].output.outcomePath', '新模式禁止 on: success / failure 出边')
+      }
+      if (outs.some((e) => e && e.when !== undefined)) {
+        err('$.nodes[' + n.id + '].output.outcomePath', '新模式禁止 when')
+      }
+      if (technical.length > 1) {
+        err('$.nodes[' + n.id + ']', 'on: technical 边最多一条')
+      }
+      const seen = {}
+      outcomeEdges.forEach((e) => {
+        const key = outcomeKey(e.outcome)
+        if (seen[key]) err('$.nodes[' + n.id + ']', '同一 outcome 取值只能有一条出边：' + key)
+        seen[key] = true
+      })
+      vals.forEach((v) => {
+        const key = outcomeKey(v)
+        if (!seen[key]) err('$.nodes[' + n.id + ']', '枚举值 ' + key + ' 缺少对应 outcome 出边')
+      })
+      outcomeEdges.forEach((e) => {
+        const key = outcomeKey(e.outcome)
+        if (!vals.some((v) => outcomeKey(v) === key)) {
+          err('$.nodes[' + n.id + ']', 'outcome 取值 ' + key + ' 不在 outcomePath 枚举内')
+        }
+      })
+    } else {
+      outs.forEach((e, i) => {
+        if (!e) return
+        const at = '$.edges[' + bp.edges.indexOf(e) + ']'
+        if (hasOutcomeField(e)) err(at + '.outcome', '旧模式节点禁止 outcome 边（须先声明 outcomePath）')
+        if (isTechnicalEdge(e)) err(at + '.on', '旧模式节点禁止 on: technical（技术失败仍走 failure）')
+      })
+    }
+  })
+
+  // Human Decision（#116）：拓扑已在结构层允许 $human-decision；此处钉契约键与互斥。
+  {
+    const usesHd = blueprintUsesHumanDecision(bp)
+    if (usesHd) {
+      if (bp.approved !== undefined) {
+        err('$.approved', '使用 Human Decision 的蓝图禁止 approved（残留门禁续跑字段；新路径用 decision_id / user_choice）')
+      }
+      bp.nodes.forEach((n) => {
+        if (n && n.approved !== undefined) {
+          err('$.nodes[' + n.id + '].approved', '使用 Human Decision 的蓝图禁止节点 approved')
+        }
+        if (n && n.manualCheck) {
+          err('$.nodes[' + n.id + '].manualCheck', 'Human Decision 与残留 manualCheck 不得同图（新蓝图只走 HD，残留门禁冷冻至废弃）')
+        }
+      })
+    }
+    if (bp.humanDecision !== undefined) {
+      const hd = bp.humanDecision
+      if (!hd || typeof hd !== 'object' || Array.isArray(hd)) {
+        err('$.humanDecision', 'humanDecision 必须是对象')
+      } else if (hd.maxRoundsReachedOptions !== undefined) {
+        const opts = hd.maxRoundsReachedOptions
+        const at = '$.humanDecision.maxRoundsReachedOptions'
+        if (!Array.isArray(opts) || opts.length === 0) {
+          err(at, '额度耗尽默认控制选项可覆盖但不可删到零（至少保留一项 USER_ACCEPTED | ADD_BUDGET | STOP）')
+        } else {
+          const seen = {}
+          opts.forEach((name, i) => {
+            if (!HD_CONTROL_RESULTS.includes(name)) {
+              err(at, 'maxRoundsReachedOptions[' + i + '] 须为 USER_ACCEPTED | ADD_BUDGET | STOP，当前：' + name)
+            } else if (seen[name]) {
+              err(at, 'maxRoundsReachedOptions 不得重复：' + name)
+            }
+            seen[name] = true
+          })
+        }
+      }
+    }
+    const seenHdResults = {}
+    const seenHdOutcomes = {}
+    const hdIn = bp.edges.filter((e) => e && e.to === HUMAN_DECISION_ID && isStructuralEdge(e))
+    const hdOut = bp.edges.filter((e) => e && e.from === HUMAN_DECISION_ID)
+    if (hdIn.length === 0 && hdOut.some(hasOutcomeField)) {
+      err('$.edges', '$human-decision 无入边却声明了出边')
+    }
+    if (hdIn.some(hasOutcomeField) && !hdOut.some(hasOutcomeField)) {
+      err('$.edges', '$human-decision 有业务入边时必须至少有一条 outcome 出边')
+    }
+    bp.edges.forEach((e, i) => {
+      if (!e) return
+      const at = '$.edges[' + i + ']'
+      if (e.to === HUMAN_DECISION_ID && e.on === 'failure') {
+        err(at + '.on', '升 Human Decision 的入边须为 success（failure 边仍表示打回）')
+      }
+      if (e.from !== HUMAN_DECISION_ID) return
+      if (hasOutcomeField(e)) {
+        const key = outcomeKey(e.outcome)
+        if (seenHdOutcomes[key]) err(at + '.outcome', 'Decision Result 重复：' + key)
+        else seenHdOutcomes[key] = true
+        return
+      }
+      if (e.on !== 'success') {
+        err(at + '.on', '$human-decision 出边须为 success，用 result 区分 Decision Result')
+        return
+      }
+      if (typeof e.result !== 'string' || !e.result.trim()) {
+        err(at + '.result', '$human-decision 出边必须带 result（业务 Decision Result id）')
+      } else if (HD_CONTROL_RESULTS.includes(e.result)) {
+        err(at + '.result', '控制类 Result（USER_ACCEPTED / ADD_BUDGET / STOP）由框架解释，不得作为蓝图出边 result')
+      } else if (!HD_RESULT_RE.test(e.result)) {
+        err(at + '.result', 'result 须为 SCREAMING_SNAKE（如 SHIP），当前：' + e.result)
+      } else if (seenHdResults[e.result]) {
+        err(at + '.result', 'Decision Result 重复：' + e.result)
+      } else {
+        seenHdResults[e.result] = true
+      }
+    })
+  }
+
   // 契约一致性（候选五 C5 规则 A）：goal 中反引号引用的文件名必须全局声明
   // （某节点 output.files ∪ 保留文件 STATE.md）——output.files 为权威，改一处漏一处即红
   {
@@ -358,4 +769,22 @@ function validateBlueprint(bp, opts) {
   return { ok: errors.length === 0, errors, warnings, counts: { nodes: bp.nodes.length, edges: bp.edges.length } }
 }
 
-module.exports = { validateStructure, validateBlueprint, deriveEntryCandidates, extractFileTokens, COND_RE, MAX_ROUNDS_CAP }
+module.exports = {
+  validateStructure,
+  validateBlueprint,
+  deriveEntryCandidates,
+  extractFileTokens,
+  blueprintUsesHumanDecision,
+  COND_RE,
+  MAX_ROUNDS_CAP,
+  HUMAN_DECISION_ID,
+  HD_REASONS,
+  HD_CONTROL_RESULTS,
+  HD_PACKAGE_REQUIRED,
+  HD_PACKAGE_OPTIONAL_UNKNOWN,
+  HD_EVENT_FIELDS,
+  HD_RESUME_FIELDS,
+  HD_EVENT_RECORD_KIND,
+  HD_EVENT_TRIGGER,
+  HD_UNKNOWN,
+}

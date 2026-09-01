@@ -1,0 +1,33 @@
+{
+  "presets": [
+    {
+      "id": "optimize-evaluator",
+      "outcomePath": "$.verdict",
+      "values": ["PASS", "OPTIMIZE", "CONFIRM"],
+      "labelsZh": {
+        "PASS": "通过",
+        "OPTIMIZE": "需优化，回执行",
+        "CONFIRM": "需确认，升人工决策"
+      }
+    },
+    {
+      "id": "explore-evaluator",
+      "outcomePath": "$.verdict",
+      "values": ["PASS", "NEEDS_RESEARCH", "INSUFFICIENT"],
+      "labelsZh": {
+        "PASS": "通过",
+        "NEEDS_RESEARCH": "需补充研究",
+        "INSUFFICIENT": "证据不足（可为合法完成）"
+      }
+    },
+    {
+      "id": "review",
+      "outcomePath": "$.verdict",
+      "values": ["APPROVE", "REQUEST_CHANGES"],
+      "labelsZh": {
+        "APPROVE": "审核通过",
+        "REQUEST_CHANGES": "请求修改"
+      }
+    }
+  ]
+}
