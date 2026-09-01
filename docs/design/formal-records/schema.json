@@ -26,7 +26,15 @@
       "required": ["media_type", "value"],
       "properties": {
         "media_type": {
-          "enum": ["application/json", "text/markdown", "text/plain"]
+          "enum": [
+            "application/json",
+            "text/markdown",
+            "text/plain",
+            "text/html",
+            "application/vnd.workflow.canvas+json",
+            "application/vnd.workflow.flowchart+json",
+            "application/vnd.workflow.diagram+json"
+          ]
         },
         "value": true
       }

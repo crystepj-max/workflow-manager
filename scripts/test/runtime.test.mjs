@@ -213,7 +213,7 @@ test('T1 模板回归-幸福路径：门禁挂起后通过 → DONE；分流零�
   assert.equal(result.status, 'AWAITING_HUMAN_accept', '门禁节点按设计挂起')
   assert.deepEqual(agentCalls.map((c) => c.label), ['调度', '开发', '测试', '审核', '人工验收'], '分流节点应被折叠，零出场')
   const dispatchPrompt = agentCalls[0].prompt
-  assert.ok(dispatchPrompt.includes('【本节点应产出文件】') && dispatchPrompt.includes('dispatch-result.json'), '文件契约注入')
+  assert.ok(dispatchPrompt.includes('【本节点应产出 Formal Artifact】') && dispatchPrompt.includes('dispatch-result.json'), '文件契约注入')
   assert.ok(dispatchPrompt.includes('【角色定义】') && dispatchPrompt.includes('dsh/roles/dispatcher.md'), '角色台词注入')
   // 人工通过 → 收口 → DONE
   const r2 = await runTpl({ 收口: { status: 'done', summary: 's' } }, {

@@ -173,7 +173,16 @@ test('S1 output.files：保留文件 STATE.md 拒绝', () => {
 test('S1 output.files：类型枚举拒绝', () => {
   const b = clone();
   b.nodes[1].output.files['x.yaml'] = 'yaml';
-  expectReject(b, 'json | markdown | text', 'filesKind');
+  expectReject(b, 'yaml', 'filesKind');
+});
+
+test('S1 output.files：html/canvas/flowchart 允许', () => {
+  const b = clone();
+  b.nodes[1].output.files['ui-preview.html'] = 'html';
+  b.nodes[1].output.files['map.canvas.json'] = 'canvas';
+  b.nodes[1].output.files['flow.flowchart.json'] = 'flowchart';
+  const r = validateBlueprint(b);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
 });
 
 test('S1 id 非 kebab-case 拒绝', () => {

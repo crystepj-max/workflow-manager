@@ -469,6 +469,41 @@ return {
       return validatorCorePromise
     }
 
+    // Formal Artifact 摄入内核（#69）：与 validate-core 相同 vm 求值路径
+    let formalArtifactsCorePromise = null
+    function loadFormalArtifactsCore() {
+      if (!formalArtifactsCorePromise) {
+        formalArtifactsCorePromise = (async () => {
+          const repo = repoRoot()
+          if (fs === undefined) return null
+          const roots = [
+            repo,
+            (typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) ? __VWF_REPO_ROOT__ : null,
+          ].filter(Boolean)
+          for (const root of roots) {
+            try {
+              const target = await fs.resolve(root + '/scripts/formal-artifacts.cjs')
+              const info = await fs.stat(target)
+              if (!info || info.type !== 'file') continue
+              const src = await fs.readText(target)
+              const module = { exports: {} }
+              new Function('module', 'exports', src)(module, module.exports)
+              return module.exports
+            } catch (e) { /* 尝试下一个根 */ }
+          }
+          return null
+        })()
+      }
+      return formalArtifactsCorePromise
+    }
+
+    function ensureRunFormalRecords(runId) {
+      const rec = runs.get(runId)
+      if (!rec) return null
+      if (!Array.isArray(rec.formalRecords)) rec.formalRecords = []
+      return rec
+    }
+
     // 保存前清洗（对应 Gold-Band sanitizedWorkflow）：entry 依拓扑归一（内核推导）、
     // failure 边剔除 when、maxRounds 取整——DSL 形态变换，留在宿主。
     function sanitizeDsl(dsl, core) {
@@ -711,7 +746,7 @@ return {
 
     const runs = new Map()
     ctx.on('workflow/start', (info) => {
-      runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [], startedAt: Date.now() })
+      runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [], formalRecords: [], startedAt: Date.now() })
       requestRunPersist(info.id)
     })
     ctx.on('workflow/phase', (info, title) => { const r = runs.get(info.id); if (r) { r.phase = String(title); r.logs.push('[phase] ' + title); if (r.logs.length > 50) r.logs.shift(); requestRunPersist(info.id) } })
@@ -765,6 +800,7 @@ return {
         phase: String(rec.phase || ''),
         logs: rec.logs || [],
         agents: (rec.agents || []).map((a) => ({ seq: a.seq, label: a.label || '', phase: a.phase || '', outcome: a.outcome || '' })),
+        formalRecords: Array.isArray(rec.formalRecords) ? rec.formalRecords : [],
         taskId: tag ? String(tag.taskId || '') : '',
         workflowId: tag ? String(tag.workflowId || '') : '',
         startedAt: rec.startedAt != null ? rec.startedAt : (tag && tag.startedAt != null ? tag.startedAt : null),
@@ -857,6 +893,7 @@ return {
         phase: typeof data.phase === 'string' ? data.phase : '',
         logs: Array.isArray(data.logs) ? data.logs.map((l) => String(l)).slice(-50) : [],
         agents: Array.isArray(data.agents) ? data.agents.filter((a) => a && typeof a === 'object').map((a) => ({ seq: a.seq, label: String(a.label || ''), phase: a.phase ? String(a.phase) : '', outcome: String(a.outcome || '') })) : [],
+        formalRecords: Array.isArray(data.formalRecords) ? data.formalRecords : [],
         startedAt: typeof data.startedAt === 'number' ? data.startedAt : null,
       })
       if (data.taskId || data.workflowId) {
@@ -1048,8 +1085,44 @@ return {
       if (!s) return { found: false, state: null }
       const tag = runTags.get(id) || null
       return { found: true, state: { id: id, meta: s.meta, status: s.status, phase: s.phase, logs: s.logs, agents: s.agents,
+        formalRecords: Array.isArray(s.formalRecords) ? s.formalRecords : [],
         taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: s.startedAt != null ? s.startedAt : (tag ? tag.startedAt : null),
         supersededBy: tag && tag.supersededBy ? tag.supersededBy : '' } }
+    })
+    registerRpc('vwf.artifacts.ingest', async (a) => {
+      const runId = a && a.runId
+      const nodeId = a && a.nodeId
+      const artifacts = a && a.artifacts
+      if (!runId || !nodeId || !Array.isArray(artifacts) || !artifacts.length) {
+        return { ok: false, errors: [{ at: '$', message: '缺少 runId / nodeId / artifacts' }] }
+      }
+      const rec = ensureRunFormalRecords(runId)
+      if (!rec) return { ok: false, errors: [{ at: '$.runId', message: '运行记录不存在：' + runId }] }
+      const core = await loadFormalArtifactsCore()
+      if (!core) return { ok: false, errors: [{ at: '$', message: 'Formal Artifact 内核不可用：缺少 scripts/formal-artifacts.cjs' }] }
+      const tag = runTags.get(runId) || null
+      try {
+        rec.formalRecords = core.ingestArtifacts(rec.formalRecords, {
+          runId: String(runId),
+          nodeId: String(nodeId),
+          artifacts: artifacts,
+          outcome: a && a.outcome !== undefined ? a.outcome : null,
+          provenance: {
+            logical_run_id: String(runId),
+            node: String(nodeId),
+            attempt: (a && a.attempt) || 1,
+            snapshot_revision: (a && a.snapshot_revision) || 'unspecified',
+            provider: (a && a.provider) || 'unknown',
+            model: (a && a.model) || 'unknown',
+            produced_by: (a && a.produced_by) || 'vwf:artifacts.ingest',
+            node_business_outcome: (a && a.outcome !== undefined) ? a.outcome : null,
+          },
+        })
+        requestRunPersist(runId)
+        return { ok: true, formalRecords: rec.formalRecords, produced: artifacts.length, taskId: tag ? tag.taskId : '' }
+      } catch (e) {
+        return { ok: false, errors: [{ at: '$', message: String((e && e.message) || e) }] }
+      }
     })
     // 多 run 并行（#19）：运行清单（最新在前），看板列表/门禁队列/并行警示的数据源
     registerRpc('vwf.runs.list', async () => {

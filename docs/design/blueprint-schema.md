@@ -40,7 +40,7 @@
 | `failOn` | fanout 可选 | `any` \| `all`（缺省）\| 非负整数 N；分别表示任一失败、全部失败、`failedCount > N` 时走 failure 边 |
 | `output.schema` | 可选 | JSON Schema，仅受支持子集：`type/oneOf/properties/required/additionalProperties/items/enum/const` + 注解 `description/title/default/examples`（R-03）；fanout 下是 per-item schema，不校验聚合包装对象 |
 | `output.successCondition` | 可选 | `$.path ==|!= value`（value ∈ true/false/null/字符串/数字）；路径必须已在 `output.schema` 中声明 |
-| `output.files` | 可选 | 对象：`{ "<相对路径>": "json"\|"markdown"\|"text" }`——本节点**应产出**的声明式文件契约（D7，Q1 增补）；路径相对 `runDir/`；见 §6.4 |
+| `output.files` | 可选 | 对象：`{ "<相对路径>": "json"\|"markdown"\|"text"\|"html"\|"canvas"\|"flowchart"\|"diagram" }`——本节点**应产出**的 Formal Artifact 声明式文件契约（D7，Q1 增补）；路径相对 `runDir/`；见 §6.4 |
 | `manualCheck` | 可选 | 布尔，默认 false；true = 人工门禁节点（vwf 编译为 `AWAITING_HUMAN_<id>` + resume 续跑；DSH 侧对应脚本返回 + 主会话裁决） |
 | `verifyBranch` | 可选 | 布尔，默认 false；DSH 增强（D4）：置 true 时 `output.schema.required` **必须**含 `verified_branch` 与 `verified_head`（可信度闸门，编译注入开工分支自检 + 结论硬校验）；vwf 侧 v1 忽略，**v1.1（候选一统一编译器）起按蓝图内容生效**——内置模板含本字段，vwf 入口同样硬校验 |
 
@@ -69,7 +69,7 @@
 3. `bindings.models` 的每个键都必须是已声明节点 id。
 4. `heteroCheck=true` 时存在 `dev` 与 `review` 节点。
 5. `verifyBranch=true` 节点：`output.schema.required` 含 `verified_branch`/`verified_head`。
-6. `output.files`（若给）：键为合法相对路径（非空、不以 `/` 开头或结尾、不含 `..`、不覆盖保留文件 `STATE.md`）；值为 `json|markdown|text` 枚举。
+6. `output.files`（若给）：键为合法相对路径（非空、不以 `/` 开头或结尾、不含 `..`、不覆盖保留文件 `STATE.md`）；值为 `json|markdown|text|html|canvas|flowchart|diagram` 枚举。
 7. **异源硬规则（v2 生效，T-06）**：凡含 `dev` 与 `review` 节点的蓝图（按节点 `id` 或 `profile` 识别——编辑器新建节点默认 id 为 node-N，以角色表达 dev/review 时同样纳入），save/update/validate 一律校验其 `bindings.models`——任一缺失 → 拒（「无法证明异源，请显式配置」）；完全同模型（provider+model 相同）→ 拒；同 provider 不同 model（弱异源）→ 通过 + warning；不同 provider → 通过。无 dev/review 节点的蓝图跳过。错误消息沿用 `errors[]` 结构（at=`bindings.models`，含实际 provider/model 与修复指引）。
 8. `control.maxRounds`（若给）：**1-9 的整数（系统约定上限 9，候选二 Q7）**——0/负数/小数/非数/超 9 一律拒绝（坐标键 `control:maxRounds`）。
 9. **fanout 专属规则**：`kind ∈ {worker, fanout}`；fanout 必须有合法 `items`、含 `{{item}}` 的 `goal` 和 failure 出边，禁止 `output.successCondition` / `manualCheck` / `verifyBranch`；`failOn` 仅接受 `any` / `all` / 非负整数。`$.results.<节点id>` 引用必须存在且沿 success 边先于当前节点。worker 出现 `items` / `failOn` 拒绝。所有错误携带对应 `node:<id>:<field>` 坐标。

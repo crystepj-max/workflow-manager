@@ -14,7 +14,8 @@
 
 const COND_RE = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
 const RESERVED = ['$end', '$entry', '$new-round']
-const FILES_KINDS = ['json', 'markdown', 'text']
+// 与 scripts/formal-artifacts.cjs FILE_KINDS 保持同步（#69）
+const FILES_KINDS = ['json', 'markdown', 'text', 'html', 'canvas', 'flowchart', 'diagram']
 const ON_MAX_ROUNDS = ['return', 'auto-reschedule']
 const MAX_ROUNDS_CAP = 9 // 系统约定上限：编辑器最大可设 9 轮（用户意见 Q7）
 const FANOUT_ITEMS_ARGS_RE = /^\$\.args(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
@@ -196,7 +197,7 @@ function validateStructure(nodes, edges, opts) {
 // ---------- 文件名 token 提取（候选五 C5：契约一致性自动断言） ----------
 // 仅提取「反引号引用的文件名」（`dev-report.md`）——裸提及（package.json 等工程文件）
 // 不纳入检查，避免误报；约定：交付物文件名在 goal/角色文件中用反引号显式引用。
-const FILE_TOKEN_RE = /`([A-Za-z0-9][A-Za-z0-9._-]*\.(?:json|md|markdown|txt))`/g
+const FILE_TOKEN_RE = /`([A-Za-z0-9][A-Za-z0-9._-]*\.(?:json|md|markdown|txt|html|canvas\.json|flowchart\.json|diagram\.json))`/g
 function extractFileTokens(text) {
   if (typeof text !== 'string') return []
   const out = new Set()
@@ -285,7 +286,7 @@ function validateBlueprint(bp, opts) {
       Object.keys(o.files).forEach((p) => {
         const valid = typeof p === 'string' && p.length > 0 && !p.startsWith('/') && !p.endsWith('/') && !p.includes('..') && p !== 'STATE.md'
         if (!valid) err('$.nodes[' + n.id + '].output.files.' + p, '文件路径须为合法相对路径（非空、不以 / 开头或结尾、不含 ..、不得为保留文件 STATE.md）')
-        if (!FILES_KINDS.includes(o.files[p])) err('$.nodes[' + n.id + '].output.files.' + p, '文件类型须为 json | markdown | text，当前：' + o.files[p])
+        if (!FILES_KINDS.includes(o.files[p])) err('$.nodes[' + n.id + '].output.files.' + p, '文件类型须为 ' + FILES_KINDS.join(' | ') + '，当前：' + o.files[p])
       })
     }
     if (n.verifyBranch) {
