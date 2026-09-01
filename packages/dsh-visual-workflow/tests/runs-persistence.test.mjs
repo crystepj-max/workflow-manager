@@ -549,3 +549,101 @@ test('#122 刷新后 decision_id 与 Package 仍在；业务 Result 续跑同一
   assert.equal(parked.state.control_event.user_choice, null)
 })
 
+test('#119 迟到 workflow/end 不得盖掉 WAITING_HUMAN；空 results 续跑仍回填原 Outcome', async () => {
+  const engA = makeEngine()
+  const a = engineEnv(engA)
+  const wfRunA = a.definedTools.find((t) => t.name === 'wf_run')
+  const pkg = { why: '等人', current_state: '待拍板', options: [{ id: 'USER_ACCEPTED' }], subsequent_effects: { USER_ACCEPTED: '完成且不改写' } }
+  const outcome = { status: 'confirm', why: '需要你决定是否发版', current_state: '改动已齐，待拍板' }
+  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'hd-accept' })
+  await until(() => engA.starts.length >= 1, 'A 启动')
+  a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(engA, a.events, 'run-1', 'WAITING_HUMAN', {
+    decision_id: 'hd-accept:work:0',
+    reason: 'ESCALATED_DECISION',
+    node: 'work',
+    decision_package: pkg,
+    results: { work: outcome },
+    control_event: { record_kind: 'DECISION', decision_id: 'hd-accept:work:0', triggering_node_outcome: outcome },
+  })
+  await p1
+  a.events.get('workflow/end')({ id: 'run-1' }, { stopReason: 'completed' })
+  await drain()
+  const afterLateEnd = await call(a.handlers, 'vwf.state', { runId: 'run-1' })
+  assert.equal(afterLateEnd.state.status, 'WAITING_HUMAN', '迟到 end 不得把权威等待态改成 completed')
+
+  const engB = makeEngine('rb-')
+  const b = loadHost({
+    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
+  })
+  await until(async () => (await call(b.handlers, 'vwf.state', { runId: 'run-1' })).found, 'B 回载')
+  const wfRunB = b.definedTools.find((t) => t.name === 'wf_run')
+  const p2 = wfRunB.execute({
+    templateId: 'dev-workflow-2-0', taskId: 'hd-accept',
+    decision_id: 'hd-accept:work:0', user_choice: 'USER_ACCEPTED',
+    results: {},
+  })
+  await until(() => engB.starts.length >= 1, 'USER_ACCEPTED 续跑')
+  const passed = engB.starts[0].args
+  assert.equal(passed.results && passed.results.work && passed.results.work.status, 'confirm', '空 results 须从停机记录回填')
+  assert.equal(passed.entry, 'work')
+  b.events.get('workflow/start')({ id: 'rb-1', meta: { name: 'x' } })
+  settleRun(engB, b.events, 'rb-1', 'DONE', { decision_id: 'hd-accept:work:0', user_choice: 'USER_ACCEPTED', results: passed.results })
+  await p2
+})
+
+function freezeArgs(value) {
+  if (value && typeof value === 'object') {
+    Object.freeze(value)
+    if (!Array.isArray(value)) {
+      for (const nested of Object.values(value)) freezeArgs(nested)
+    }
+  }
+  return value
+}
+
+test('#119 冻结 args 时仍回填 results（DSH tools deepFreeze）', async () => {
+  const engA = makeEngine()
+  const a = engineEnv(engA)
+  const wfRunA = a.definedTools.find((t) => t.name === 'wf_run')
+  const pkg = { why: '等人', current_state: '待拍板', options: [{ id: 'SHIP' }, { id: 'STOP' }], subsequent_effects: { SHIP: '去收口', STOP: '停' } }
+  const outcome = { status: 'confirm', why: '需要你决定是否发版', current_state: '改动已齐，待拍板' }
+  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'hd-frozen' })
+  await until(() => engA.starts.length >= 1, 'A 启动')
+  a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(engA, a.events, 'run-1', 'WAITING_HUMAN', {
+    decision_id: 'hd-frozen:work:0',
+    reason: 'ESCALATED_DECISION',
+    node: 'work',
+    decision_package: pkg,
+    results: { work: outcome },
+    control_event: { record_kind: 'DECISION', decision_id: 'hd-frozen:work:0', triggering_node_outcome: outcome },
+  })
+  await p1
+  await drain()
+
+  const engB = makeEngine('rb-')
+  const b = loadHost({
+    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
+  })
+  await until(async () => (await call(b.handlers, 'vwf.state', { runId: 'run-1' })).found, 'B 回载')
+  const wfRunB = b.definedTools.find((t) => t.name === 'wf_run')
+  const frozen = freezeArgs({
+    templateId: 'dev-workflow-2-0',
+    taskId: 'hd-frozen',
+    decision_id: 'hd-frozen:work:0',
+    user_choice: 'USER_ACCEPTED',
+  })
+  const p2 = wfRunB.execute(frozen)
+  await until(() => engB.starts.length >= 1, '冻结 args 续跑')
+  const passed = engB.starts[0].args
+  assert.equal(passed.results && passed.results.work && passed.results.work.status, 'confirm', '冻结 args 不得阻止回填')
+  assert.equal(passed.entry, 'work')
+  assert.equal(frozen.results, undefined, '不得改写冻结入参')
+  b.events.get('workflow/start')({ id: 'rb-1', meta: { name: 'x' } })
+  settleRun(engB, b.events, 'rb-1', 'DONE', { decision_id: 'hd-frozen:work:0', user_choice: 'USER_ACCEPTED', results: passed.results })
+  await p2
+})
+

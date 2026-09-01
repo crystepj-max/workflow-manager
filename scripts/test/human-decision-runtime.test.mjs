@@ -217,3 +217,16 @@ test('#121 无对应出边的业务选择被拒绝并保持等待', async () => 
   assert.equal(r2.result.control_event.user_choice, null)
   assert.equal(r2.result.rejected_choice, 'HOLD')
 })
+
+test('#121 无 results 快照时拒绝非法选项仍可序列化', async () => {
+  const halt = await runHd({ 执行: workOk })
+  const r2 = await runHd({ 收口: { done: true } }, {
+    entry: halt.result.node,
+    decision_id: halt.result.decision_id,
+    user_choice: 'LAUNCH',
+  })
+  assert.equal(r2.result.status, 'WAITING_HUMAN')
+  assert.equal(r2.result.rejected_choice, 'LAUNCH')
+  assert.equal(r2.result.result, null)
+  assert.equal(JSON.stringify(r2.result).includes('undefined'), false)
+})

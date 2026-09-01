@@ -678,12 +678,22 @@ return {
       if (typeof val.maxRounds === 'number') rec.maxRounds = val.maxRounds
       if (typeof val.decisionSeq === 'number') rec.decisionSeq = val.decisionSeq
     }
+    function isEmptyObject(val) {
+      return val == null || (typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length === 0)
+    }
+    // workflow/end 只有 stopReason=completed，可能在 wf_run 回写 WAITING_HUMAN 之后才到达，
+    // 把权威等待态盖掉；此时仍靠 decisionId + Package 识别可续跑的停机记录。
+    function isParkedHumanDecisionRecord(rec) {
+      if (!rec) return false
+      if (rec.status === 'WAITING_HUMAN') return true
+      return !!(rec.decisionId && rec.decisionPackage && String(rec.status) === 'completed')
+    }
     async function parkedHumanDecision(taskId) {
       const hit = latestTagByTaskId(taskId)
       if (!hit) return null
       let rec = runs.get(hit.runId)
       if (!rec) rec = await loadRunFromDisk(hit.runId)
-      if (!rec || rec.status !== 'WAITING_HUMAN') return null
+      if (!isParkedHumanDecisionRecord(rec)) return null
       return rec
     }
     // Map 保持插入序 = 启动序：取同 taskId 最后插入且未被续跑接管的记录
@@ -773,7 +783,9 @@ return {
     ctx.on('workflow/end', (info, result) => {
       const r = runs.get(info.id)
       if (r) {
-        r.status = String(result.stopReason)
+        // 脚本权威终态（WAITING_HUMAN / DONE / …）已由 wf_run 回写时，不得被
+        // 迟到的 workflow/end（stopReason=completed）盖掉，否则续跑找不到停机记录。
+        if (!TERMINAL_STATUS_RE.test(String(r.status || ''))) r.status = String(result.stopReason)
         for (const a of r.agents) { if (a.outcome === 'running') a.outcome = 'failed' }
         requestRunPersist(info.id)
       }
@@ -1736,7 +1748,10 @@ return {
           results: { type: 'object', additionalProperties: true, description: '续跑时带回的节点结果快照' },
         },
         output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
-        async execute(args) {
+        async execute(rawArgs) {
+          // 工具平台会对 execute 参数 deepFreeze（DSH tools snapshotJsonValue）。
+          // 续跑回填必须写到浅拷贝上，不能改冻结的 rawArgs。
+          const args = Object.assign({}, rawArgs || {})
           // 约束②（同 taskId 互斥）：最新记录进行中/AWAITING_HUMAN 且非 entry 续跑 → 拒绝。
           // 校验放最前（fail-fast），不浪费校验/编译开销。
           // 先等启动回载完成（评审 PRRT_kwDOT57Tec6b6Iu1）：否则互斥判定可能与
@@ -1782,7 +1797,10 @@ return {
             const parked = await parkedHumanDecision(String((args && args.taskId) || ''))
             if (parked) {
               if (args.blocked_edge == null && parked.blockedEdge) args.blocked_edge = parked.blockedEdge
-              if (args.results == null && parked.results) args.results = parked.results
+              if (isEmptyObject(args.results) && parked.results) args.results = parked.results
+              if (isEmptyObject(args.results) && parked.node && parked.controlEvent && parked.controlEvent.triggering_node_outcome) {
+                args.results = { [parked.node]: parked.controlEvent.triggering_node_outcome }
+              }
               if (args.history == null && parked.history) args.history = parked.history
               if (args.startRound == null && parked.round != null) args.startRound = parked.round
               if (args.budgetUsed == null && parked.budgetUsed != null) args.budgetUsed = parked.budgetUsed
