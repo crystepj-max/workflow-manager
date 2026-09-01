@@ -89,6 +89,33 @@ test('fanout 编译使用 pipeline、白名单 agent opts，并保持投影字�
   assert.equal(fan.failOn, 'all');
 });
 
+test('#116 投影：humanDecision 与 HD 出边 result 进入 DSL', () => {
+  const hd = JSON.parse(readFileSync(path.join(here, 'fixtures/human-decision-blueprint.json'), 'utf8'));
+  hd.humanDecision = { maxRoundsReachedOptions: ['STOP', 'ADD_BUDGET'] };
+  const dsl = projectToVwf(hd);
+  assert.deepEqual(dsl.humanDecision, { maxRoundsReachedOptions: ['STOP', 'ADD_BUDGET'] });
+  const out = dsl.edges.find((e) => e.from === '$human-decision');
+  assert.equal(out.result, 'SHIP');
+});
+
+test('#128 投影：outcome / countRound / completionPath 透传，业务边不伪造 on', () => {
+  const bp = JSON.parse(readFileSync(path.join(here, 'fixtures/outcome-evaluate-mini.json'), 'utf8'));
+  const dsl = projectToVwf(bp);
+  const ev = dsl.nodes.find((n) => n.id === 'evaluate');
+  assert.equal(ev.output.outcomePath, '$.verdict');
+  assert.equal(ev.output.completionPath, '$.completion_type');
+  const opt = dsl.edges.find((e) => e.outcome === 'OPTIMIZE');
+  assert.equal(opt.to, 'execute');
+  assert.equal(opt.countRound, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(opt, 'on'), false);
+  const tech = dsl.edges.find((e) => e.on === 'technical');
+  assert.equal(tech.from, 'evaluate');
+  assert.equal(Object.prototype.hasOwnProperty.call(tech, 'outcome'), false);
+  const hdOut = dsl.edges.find((e) => e.from === '$human-decision');
+  assert.equal(hdOut.outcome, 'USER_ACCEPTED');
+  assert.equal(Object.prototype.hasOwnProperty.call(hdOut, 'on'), false);
+});
+
 test('fanout 编译与 skill 包装幂等，runbook 覆盖 cap 终态', () => {
   assert.equal(compileBlueprint(fanoutBp).script, compileBlueprint(fanoutBp).script);
   const skill = skillWrap(fanoutBp);
@@ -116,6 +143,19 @@ test('S2 generateUserSkill：用户模板 → 自包含 skill 三件套（T-03 s
   assert.ok(script.includes('超限归因'), 'script 含超限归因（auto-reschedule）');
   const meta = JSON.parse(files.get('meta.json'));
   assert.equal(meta.name, 'vwf-dev-workflow-2-0');
+});
+
+test('#117 生成 skill 不再写死不通过去开发或不经门禁去收口', () => {
+  const skill = skillWrap(bp);
+  assert.equal(skill.includes('entry=dev'), false, '不得写死 entry=dev');
+  assert.equal(skill.includes('entry=closeout'), false, '不得写死 entry=closeout');
+  assert.equal(/不通过\s*→\s*entry=dev/.test(skill), false);
+});
+
+test('#117 手写主会话手册同样不再写死这两跳', () => {
+  const handbook = readFileSync(path.join(here, '../../dsh/skill/SKILL.md'), 'utf8');
+  assert.equal(handbook.includes('entry=closeout'), false, '手册不得写死通过 → entry=closeout');
+  assert.equal(handbook.includes('entry=dev'), false, '手册不得写死不通过 → entry=dev');
 });
 
 // ── 候选四 T-IMP-14 · 原子写盘（失败零残留） ──
