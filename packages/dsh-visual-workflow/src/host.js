@@ -1690,6 +1690,155 @@ return {
       }
     }
 
+    // ── Workspace Isolation 包装脚本路径（#93 Runtime Integration）──
+    // Core 实现单一来源 = scripts/workspace-isolation.mjs；宿主通过 runNode 调用
+    // 包装脚本 scripts/workspace-isolation-host.mjs，禁止平行实现 Git/lock。
+    let _workspaceHostPath = null
+    async function workspaceHostPath() {
+      if (_workspaceHostPath) return _workspaceHostPath
+      const p = await rootPaths()
+      // 优先组合包注入的仓库根（静态 bundle），其次动态会话 cwd
+      const roots = [p.generatorRoot, p.repo].filter(Boolean)
+      for (const root of roots) {
+        const candidate = root + '/scripts/workspace-isolation-host.mjs'
+        if (fs !== undefined) {
+          try {
+            const st = await fs.stat(await fs.resolve(candidate))
+            if (st && st.type === 'file') { _workspaceHostPath = candidate; break }
+          } catch (e) { /* 尝试下一个根 */ }
+        }
+      }
+      return _workspaceHostPath
+    }
+    // workspace 根目录：开发 DSH 用 ~/.dsh-workflow-dev/workspaces/，产品 DSH 用 ~/.dsh/workspaces/
+    async function workspaceRoot() {
+      const home = await dshHome()
+      if (!home) return null
+      return home + '/workspaces'
+    }
+    // 调用 workspace-isolation-host.mjs；返回解析后的 JSON 结果
+    async function wsHostCall(cmd, input, opts) {
+      const host = await workspaceHostPath()
+      if (!host) return { ok: false, error: 'workspace-isolation-host.mjs 未找到' }
+      const wsr = await workspaceRoot()
+      if (!wsr) return { ok: false, error: '无法解析 workspace 根目录' }
+      const payload = { ...input, work_root: input.work_root || wsr }
+      const r = await runNode([host, cmd, JSON.stringify(payload)], { cwd: opts && opts.cwd ? opts.cwd : (await rootPaths()).generatorRoot, graceMs: (opts && opts.graceMs) || 30000, maxBytes: (opts && opts.maxBytes) || 256 * 1024 })
+      if (!r.ok) return { ok: false, error: 'workspace host 调用失败：' + r.detail }
+      try {
+        const parsed = JSON.parse(r.stdout)
+        if (!parsed.ok) return { ok: false, error: parsed.error || 'workspace host 业务错误', detail: parsed.detail }
+        return parsed
+      } catch (e) {
+        return { ok: false, error: 'workspace host 输出不可解析：' + String((e && e.message) || e), raw: r.stdout }
+      }
+    }
+    // 模板 id → TEMPLATE_ID 映射（#93 Policy 解析器消费）
+    function mapTemplateId(id) {
+      if (!id || typeof id !== 'string') return null
+      const lower = id.toLowerCase()
+      if (lower.indexOf('construction') >= 0 || lower.indexOf('bootstrap') >= 0) return 'construction'
+      if (lower.indexOf('optimize') >= 0 || lower.indexOf('optim') >= 0) return 'optimize'
+      if (lower.indexOf('diagnose') >= 0 || lower.indexOf('debug') >= 0) return 'diagnose'
+      if (lower.indexOf('explore') >= 0 || lower.indexOf('research') >= 0) return 'explore'
+      // 默认：建设类工作流（含 dev-workflow）走 ISOLATED_WRITE
+      if (lower.indexOf('dev-workflow') >= 0 || lower.indexOf('dev_') >= 0) return 'construction'
+      return 'construction'
+    }
+
+    // ── Workspace Isolation RPC（#93）──────────────────────────────────────
+    // 这些 RPC 供编译后的 workflow 脚本在节点内调用，获取 workspace 现场、
+    // 写 source/scratch、构建 provenance、管理集成锁。
+    registerRpc('vwf.workspace.allocate', async (a) => {
+      const templateId = mapTemplateId(a && a.templateId)
+      const spec = {
+        logical_run_id: String((a && a.taskId) || ''),
+        template_id: templateId,
+        repository_path: (a && a.repository_path) || null,
+        repository: (a && a.repository) || null,
+        base_ref: (a && a.baseBranch) || 'main',
+        base_commit: (a && a.base_commit) || null,
+        work_branch: (a && a.work_branch) || null,
+        task_identity: String((a && a.taskId) || ''),
+        allow_parallel: !!(a && a.allow_parallel),
+      }
+      return wsHostCall('allocate', spec)
+    })
+    registerRpc('vwf.workspace.get', async (a) => {
+      return wsHostCall('get', { logical_run_id: String((a && a.taskId) || '') })
+    })
+    registerRpc('vwf.workspace.setLifecycle', async (a) => {
+      return wsHostCall('setLifecycle', {
+        logical_run_id: String((a && a.logical_run_id) || ''),
+        lifecycle: String((a && a.lifecycle) || ''),
+        extra: (a && a.extra) || {},
+      })
+    })
+    registerRpc('vwf.workspace.recordSourceSync', async (a) => {
+      return wsHostCall('recordSourceSync', {
+        logical_run_id: String((a && a.logical_run_id) || ''),
+        current_head: (a && a.current_head) || undefined,
+        source_revision: (a && a.source_revision) || undefined,
+      })
+    })
+    registerRpc('vwf.workspace.buildProvenance', async (a) => {
+      const ws = (a && a.workspace) || null
+      if (!ws) return { ok: false, error: '缺少 workspace' }
+      return wsHostCall('buildAttemptProvenance', {
+        workspace: ws, node: String((a && a.node) || ''), attempt: Number((a && a.attempt) || 1),
+      })
+    })
+    registerRpc('vwf.workspace.acquireLock', async (a) => {
+      return wsHostCall('acquireLock', {
+        logical_run_id: String((a && a.logical_run_id) || ''),
+        resource_key: String((a && a.resource_key) || ''),
+        owner: String((a && a.owner) || ''),
+        ttl_ms: (a && a.ttl_ms) || undefined,
+      })
+    })
+    registerRpc('vwf.workspace.releaseLock', async (a) => {
+      return wsHostCall('releaseLock', {
+        lock_id: String((a && a.lock_id) || ''),
+        owner: String((a && a.owner) || ''),
+        logical_run_id: String((a && a.logical_run_id) || ''),
+        reason: (a && a.reason) || undefined,
+      })
+    })
+    registerRpc('vwf.workspace.cleanup', async (a) => {
+      return wsHostCall('cleanup', {
+        logical_run_id: String((a && a.logical_run_id) || ''),
+        opts: (a && a.opts) || {},
+      })
+    })
+    registerRpc('vwf.workspace.writeSource', async (a) => {
+      const ws = (a && a.workspace) || null
+      if (!ws) return { ok: false, error: '缺少 workspace' }
+      return wsHostCall('writeSourceFile', { workspace: ws, rel: String((a && a.rel) || ''), content: String((a && a.content) || '') })
+    })
+    registerRpc('vwf.workspace.readSource', async (a) => {
+      const ws = (a && a.workspace) || null
+      if (!ws) return { ok: false, error: '缺少 workspace' }
+      return wsHostCall('readSourceFile', { workspace: ws, rel: String((a && a.rel) || '') })
+    })
+    registerRpc('vwf.workspace.writeWorker', async (a) => {
+      const ws = (a && a.workspace) || null
+      if (!ws) return { ok: false, error: '缺少 workspace' }
+      return wsHostCall('writeWorkerFile', { workspace: ws, worker_id: String((a && a.worker_id) || ''), rel: String((a && a.rel) || ''), content: String((a && a.content) || '') })
+    })
+    registerRpc('vwf.workspace.readWorker', async (a) => {
+      const ws = (a && a.workspace) || null
+      if (!ws) return { ok: false, error: '缺少 workspace' }
+      return wsHostCall('readWorkerFile', { workspace: ws, worker_id: String((a && a.worker_id) || ''), rel: String((a && a.rel) || '') })
+    })
+    registerRpc('vwf.workspace.checkpoint', async (a) => {
+      return wsHostCall('computeIntegrationCheckpointFromRepo', {
+        base_ref: String((a && a.base_ref) || ''),
+        base_commit: String((a && a.base_commit) || ''),
+        repository_path: String((a && a.repository_path) || ''),
+        target_ref: (a && a.target_ref) || undefined,
+      })
+    })
+
     // ── workflowEngine 解析 ──────────────────────────────────────────────────
     // 本部署中 workflowEngine 由 agent preset 平面挂载（workflow-worker-thread），
     // 动态插件 host ctx 看不到；经 agentPresets.serviceFor 对当前发起 agent 做
@@ -1798,13 +1947,53 @@ return {
           const engineNow = resolveEngine()
           if (engineNow === undefined) return '错误：当前宿主平面无法访问 workflowEngine（wf_run 需要 agent preset 挂载的工作流引擎）。可改用内置 workflow 工具执行 vwf.script 编译产物。'
           const parent = agents.requireInitiator()
+
+          // ── #93 Workspace Isolation 集成：启动前分配 Workspace ───────────────
+          // 用 taskId 作为 portable run_id 占位 logical_run_id；模板类型决定 Policy。
+          // 失败不阻断：workspace 分配失败时降级到旧行为（脚本自行管理路径）。
+          let workspaceInfo = null
+          const repoPath = repoRoot() || ''
+          try {
+            const templateId = mapTemplateId(args.templateId || (dsl && dsl.id) || '')
+            const alloc = await wsHostCall('allocate', {
+              logical_run_id: String(args.taskId || ''),
+              template_id: templateId,
+              repository_path: repoPath || null,
+              repository: repoPath ? null : null,
+              base_ref: args.baseBranch || 'main',
+              task_identity: String(args.taskId || ''),
+            })
+            if (alloc.ok && alloc.workspace) {
+              workspaceInfo = alloc.workspace
+              console.log('[vwf] workspace allocated: ' + workspaceInfo.workspace_id + ' at ' + workspaceInfo.workspace_path)
+            } else {
+              console.log('[vwf] workspace allocate 降级：' + (alloc.error || '未知'))
+            }
+          } catch (e) {
+            console.log('[vwf] workspace allocate 异常降级：' + String((e && e.message) || e))
+          }
+
+          // 注入 workspace 路径到 script args（#93）：脚本通过 host.call('vwf.workspace.get')
+          // 获取现场，而非猜路径。旧脚本无此字段时行为不变。
           const scriptArgs = {
             taskId: args.taskId, runDir: args.runDir, roleDir: args.roleDir || c.roleDir, baseBranch: args.baseBranch,
             issueRef: args.issueRef, issueTitle: args.issueTitle, issueBody: args.issueBody, issueComments: args.issueComments,
             requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
             decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
             budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
+            // #93: workspace 现场注入
+            workspace_id: workspaceInfo ? workspaceInfo.workspace_id : undefined,
+            workspace_path: workspaceInfo ? workspaceInfo.workspace_path : undefined,
+            source_path: workspaceInfo ? workspaceInfo.source_path : undefined,
+            records_path: workspaceInfo ? workspaceInfo.records_path : undefined,
+            work_branch: workspaceInfo ? workspaceInfo.work_branch : undefined,
+            source_revision: workspaceInfo ? workspaceInfo.source_revision : undefined,
           }
+          // 剔除 undefined 键（lossless-JSON 守卫）
+          for (const k of Object.keys(scriptArgs)) {
+            if (scriptArgs[k] === undefined) delete scriptArgs[k]
+          }
+
           const run = engineNow.start({ script: c.script, meta: c.meta, args: scriptArgs, parent: parent })
           // 启动边界自登记（workflow/start 事件无 taskId，见 runTags 注释）；
           // entry / decision_id 续跑把同 taskId 前序门禁记录标记接管，旧卡片退出门禁队列
@@ -1813,9 +2002,11 @@ return {
             workflowId: String(args.templateId || (v.sanitized && v.sanitized.id) || ''),
             startedAt: Date.now(),
             active: true,
+            // #93: 绑定 workspace 到 runTag，供后续节点通过 taskId 获取
+            workspace_id: workspaceInfo ? workspaceInfo.workspace_id : undefined,
           })
           // 启动边界同步落一份快照：workflow/start 事件可能晚于 tag 登记到达，
-          // 这里保证进行中的 run 在 start 后即有含 taskId 的可见快照（#40 AC2）
+          // 这里保证进行中的 run 后即有含 taskId 的可见快照（#40 AC2）
           requestRunPersist(String(run.id))
           if (isResume) supersedeParked(String(args.taskId), String(run.id))
           const result = await run.result
@@ -1830,6 +2021,18 @@ return {
               rec.status = canon
               applyHumanDecisionValue(rec, result && result.value)
               requestRunPersist(String(run.id))
+            }
+          }
+          // #93: 终态时更新 workspace lifecycle（非阻断）
+          if (workspaceInfo) {
+            const lifecycleMap = {
+              'DONE': 'COMPLETED',
+              'STOPPED': 'STOPPED',
+              'WAITING_HUMAN': 'WAITING_HUMAN',
+            }
+            const lc = lifecycleMap[canon]
+            if (lc) {
+              try { await wsHostCall('setLifecycle', { logical_run_id: String(args.taskId || ''), lifecycle: lc }) } catch (e) { /* 忽略 */ }
             }
           }
           return JSON.stringify({ runId: String(run.id), stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
