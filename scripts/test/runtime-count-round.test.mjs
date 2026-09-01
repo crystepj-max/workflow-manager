@@ -163,6 +163,42 @@ test('#73 ADD_BUDGET 显式 +1 额度并沿被拦边继续，写入 Control Reco
   assert.ok(resumed.result.history.some((h) => h.via === 'ADD_BUDGET' && h.countRound === true))
 })
 
+test('#73 ADD_BUDGET 后再耗尽须新 decision_id，不得覆盖前次 Decision Record', async () => {
+  const bp = JSON.parse(JSON.stringify(optimizeBp))
+  bp.control.maxRounds = 1
+  const first = await runEngine(bp, {
+    intake: { go: 'NEXT' },
+    '/^execute/': { status: 'DONE' },
+    '/^evaluate/': { verdict: 'OPTIMIZE', completion_type: 'loop' },
+  })
+  assert.equal(first.result.status, 'WAITING_HUMAN')
+  const id1 = first.result.decision_id
+  assert.ok(id1)
+  assert.equal(first.result.decisionSeq, 1)
+  assert.equal(first.result.control_event.attempt, 1)
+
+  const second = await runEngine(bp, {
+    '/^execute/': { status: 'DONE' },
+    '/^evaluate/': { verdict: 'OPTIMIZE', completion_type: 'loop' },
+  }, {
+    decision_id: id1,
+    user_choice: 'ADD_BUDGET',
+    blocked_edge: first.result.blocked_edge,
+    results: first.result.results,
+    history: first.result.history,
+    budgetUsed: first.result.budgetUsed,
+    maxRounds: first.result.maxRounds,
+    decisionSeq: first.result.decisionSeq,
+    entry: first.result.node,
+  })
+  assert.equal(second.result.status, 'WAITING_HUMAN')
+  assert.equal(second.result.reason, 'MAX_ROUNDS_REACHED')
+  assert.notEqual(second.result.decision_id, id1)
+  assert.equal(second.result.decisionSeq, 2)
+  assert.equal(second.result.control_event.decision_id, second.result.decision_id)
+  assert.equal(second.result.results.evaluate.verdict, 'OPTIMIZE')
+})
+
 test('#73 旧蓝图 failure 边仍走 FAILED_MAX_ROUNDS（兼容）', async () => {
   const bp = JSON.parse(JSON.stringify(hello))
   bp.control = { maxRounds: 1 }

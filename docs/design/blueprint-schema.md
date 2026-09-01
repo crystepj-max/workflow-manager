@@ -70,7 +70,7 @@
 | 控制类 Result | `USER_ACCEPTED` / `ADD_BUDGET` / `STOP` | 仅框架解释，不写在蓝图出边 `result` 上 |
 | Package 硬必填 | `why` / `current_state` / `options` / `subsequent_effects` | 缺一不得挂起。`options` = `[{ id }]`；`subsequent_effects` = `{ [id]: string }` |
 | Package 可显式未知 | `cost` / `benefit` / `risk` / `recommendation` | 值为 `"UNKNOWN"` 时仍可挂起 |
-| 控制面事件 | `record_kind` / `trigger` / `lifecycle_at_request` / `decision_id` / `run_ref` / `node_id` / `attempt` / `reason` / `triggering_node_outcome` / `decision_package` / `user_choice` / `impact` / `subsequent_path` / `created_at` | `record_kind=DECISION`，`trigger=SYSTEM_REQUEST`，`lifecycle_at_request=WAITING_HUMAN`；追加-only，`decision_id` 不可覆盖 |
+| 控制面事件 | `record_kind` / `trigger` / `lifecycle_at_request` / `decision_id` / `run_ref` / `node_id` / `attempt` / `reason` / `triggering_node_outcome` / `decision_package` / `user_choice` / `impact` / `subsequent_path` / `created_at` | `record_kind=DECISION`，`trigger=SYSTEM_REQUEST`，`lifecycle_at_request=WAITING_HUMAN`；追加-only，`decision_id` 不可覆盖。新模式 `decision_id = taskId:nodeId:round:decisionSeq`，每次新建挂起（含 ADD_BUDGET 后再耗尽）递增 `decisionSeq`，续跑同一决策则复用原 id |
 | 续跑 args | `decision_id` / `user_choice` | 新路径；**禁止**再传 `approved`。业务 `user_choice` 匹配 `$human-decision` 出边 `result` 后续跑到 `to`（不改写触发节点 Outcome）；无匹配出边则保持 `WAITING_HUMAN`。残留门禁续跑仍用 `approved` |
 | 过渡身份 | `taskId` | #79 交付 `logical_run_id` 前的恢复身份 |
 
@@ -135,7 +135,7 @@ fanout 节点的 `kind` / `items` / `failOn` 必须双向透传；新模式边�
 - **超限归因**：`onMaxRounds = 'auto-reschedule'` → 超限时注入归因 agent（产出 reschedule：归因/拆分/人工介入建议）。
 - **可信度闸门**：`verifyBranch=true` 节点 → 注入开工分支自检 + `verified_branch`/`verified_head` 硬校验（失败即 TECHNICAL_FAILURE；新模式可走 `on: technical`）。
 - **异源警告**：`heteroCheck=true` → 注入 dev↔review 模型比对 warning（v1 不拦截，v2 由 T-06 升级为 enforcement）。
-- **业务结果路由（#77）+ 自动回退额度（#73）**：有 `outcomePath` 的节点按路径等值匹配 `outcome` 出边；命中 `$human-decision` → `ROUTE_HALTED`（`reason=HUMAN_DECISION`），不发 `WAITING_HUMAN`。缺匹配 → `ENDED_NO_OUTCOME_EDGE`。`countRound=true` 的业务边消耗 `control.maxRounds`；耗尽则 `WAITING_HUMAN` + `MAX_ROUNDS_REACHED`，不改写 `results[node]`。`countRound=false` 与技术边不计额度。旧蓝图 failure 边仍 `round++`，超限仍 `FAILED_MAX_ROUNDS`。走进 `$end` 时 `DONE.completion = { type, node, path } | null`（仅终态节点声明了 `completionPath` 且读到非空字符串才有对象）。`ADD_BUDGET` 续跑必须把额度变更写入 `control_event`（`budget_delta` / `max_rounds_after` / `budget_used`）。
+- **业务结果路由（#77）+ 自动回退额度（#73）**：有 `outcomePath` 的节点按路径等值匹配 `outcome` 出边；命中 `$human-decision` → `ROUTE_HALTED`（`reason=HUMAN_DECISION`），不发 `WAITING_HUMAN`。缺匹配 → `ENDED_NO_OUTCOME_EDGE`。`countRound=true` 的业务边消耗 `control.maxRounds`；耗尽则 `WAITING_HUMAN` + `MAX_ROUNDS_REACHED`，不改写 `results[node]`。`countRound=false` 与技术边不计额度。旧蓝图 failure 边仍 `round++`，超限仍 `FAILED_MAX_ROUNDS`。走进 `$end` 时 `DONE.completion = { type, node, path } | null`（仅终态节点声明了 `completionPath` 且读到非空字符串才有对象）。`ADD_BUDGET` 续跑必须把额度变更写入 `control_event`（`budget_delta` / `max_rounds_after` / `budget_used`）；再次耗尽必须分配新的 `decision_id`（单调 `decisionSeq`），不得复用前次 Decision Record 身份。
 
 ### 4.3 角色与运行上下文
 
