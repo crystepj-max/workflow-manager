@@ -450,4 +450,5 @@ test('#69 多格式 Formal Artifact：html/canvas/flowchart 与 Revision 追加'
   assert.equal(second.produced_records[0].record_revision, 2)
   assert.equal(getRecord(store, second.produced_records[0].record_id, 1).body.value.includes('ok'), true)
   assert.equal(getRecord(store, second.produced_records[0].record_id, 2).body.value.includes('v2'), true)
+  assert.deepEqual(second.produced_records[0].dependencies, [{ record_id: second.produced_records[0].record_id, record_revision: 1 }])
 })

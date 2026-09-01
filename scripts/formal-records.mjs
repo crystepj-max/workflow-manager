@@ -191,11 +191,18 @@ export function ingestArtifactDeclarations(store, { runId, nodeId, artifacts, pr
       throw new Error('artifact.path 必填')
     }
     if (!FILE_KINDS.includes(art.kind)) throw new Error(`非法 artifact kind: ${art.kind}`)
-    return {
-      record_id: artifactRecordId(runId, nodeId, art.path),
+    const recordId = artifactRecordId(runId, nodeId, art.path)
+    const prev = currentRevision(store, recordId)
+    const dependencies = []
+    if (prev !== undefined) dependencies.push({ record_id: recordId, record_revision: prev })
+    const input = {
+      record_id: recordId,
       kind: KIND.RESULT,
       body: parseArtifactBody(art.kind, art.content),
+      dependencies,
     }
+    if (prev !== undefined) input.based_on = { record_id: recordId, record_revision: prev }
+    return input
   })
   return recordsFromNodeResult(store, { outcome, productions, provenance })
 }
