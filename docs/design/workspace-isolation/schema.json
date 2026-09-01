@@ -1,0 +1,158 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "docs/design/workspace-isolation/schema.json",
+  "title": "Workspace / Resource / Integration Isolation",
+  "description": "Logical Run 工作区、资源锁、Attempt provenance 与 cleanup 审计（#93 Core）。Registry 默认内存；持久化归 #79。",
+  "type": "object",
+  "definitions": {
+    "nonEmptyText": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "isoDateTime": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "nullableText": {
+      "anyOf": [
+        { "$ref": "#/definitions/nonEmptyText" },
+        { "type": "null" }
+      ]
+    },
+    "workspaceMode": {
+      "enum": ["ISOLATED_WRITE", "ISOLATED_READ", "SANDBOX", "NONE"]
+    },
+    "lifecycle": {
+      "enum": ["READY", "RUNNING", "WAITING_HUMAN", "PAUSED", "BLOCKED", "COMPLETED", "STOPPED", "FAILED"]
+    },
+    "providerId": {
+      "enum": ["GitWorktreeWorkspace", "DirectorySandboxWorkspace", "NoneWorkspace"]
+    },
+    "workspaceResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tmpdir": { "$ref": "#/definitions/nonEmptyText" },
+        "build_dir": { "$ref": "#/definitions/nonEmptyText" },
+        "cache_dir": { "$ref": "#/definitions/nonEmptyText" },
+        "port": { "type": "integer", "minimum": 1 },
+        "test_db": { "$ref": "#/definitions/nonEmptyText" }
+      }
+    },
+    "workspaceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id",
+        "logical_run_id",
+        "workspace_mode",
+        "workspace_path",
+        "source_path",
+        "records_path",
+        "provider_id",
+        "repository",
+        "base_ref",
+        "base_commit",
+        "work_branch",
+        "current_head",
+        "source_revision",
+        "config_snapshot_revision",
+        "lifecycle",
+        "created_at"
+      ],
+      "properties": {
+        "workspace_id": { "$ref": "#/definitions/nonEmptyText" },
+        "logical_run_id": { "$ref": "#/definitions/nonEmptyText" },
+        "workspace_mode": { "$ref": "#/definitions/workspaceMode" },
+        "workspace_path": { "$ref": "#/definitions/nullableText" },
+        "source_path": { "$ref": "#/definitions/nullableText" },
+        "records_path": { "$ref": "#/definitions/nonEmptyText" },
+        "provider_id": { "$ref": "#/definitions/providerId" },
+        "repository": { "$ref": "#/definitions/nullableText" },
+        "base_ref": { "$ref": "#/definitions/nullableText" },
+        "base_commit": { "$ref": "#/definitions/nullableText" },
+        "work_branch": { "$ref": "#/definitions/nullableText" },
+        "current_head": { "$ref": "#/definitions/nullableText" },
+        "source_revision": { "$ref": "#/definitions/nonEmptyText" },
+        "config_snapshot_revision": { "$ref": "#/definitions/nonEmptyText" },
+        "lifecycle": { "$ref": "#/definitions/lifecycle" },
+        "concurrency_key": { "$ref": "#/definitions/nonEmptyText" },
+        "resources": { "$ref": "#/definitions/workspaceResources" },
+        "created_at": { "$ref": "#/definitions/isoDateTime" }
+      }
+    },
+    "resourceLock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lock_id",
+        "logical_run_id",
+        "resource_key",
+        "owner",
+        "acquired_at",
+        "expires_at"
+      ],
+      "properties": {
+        "lock_id": { "$ref": "#/definitions/nonEmptyText" },
+        "logical_run_id": { "$ref": "#/definitions/nonEmptyText" },
+        "resource_key": { "$ref": "#/definitions/nonEmptyText" },
+        "owner": { "$ref": "#/definitions/nonEmptyText" },
+        "acquired_at": { "$ref": "#/definitions/isoDateTime" },
+        "expires_at": { "$ref": "#/definitions/isoDateTime" },
+        "released_at": { "$ref": "#/definitions/isoDateTime" },
+        "release_reason": { "$ref": "#/definitions/nonEmptyText" }
+      }
+    },
+    "attemptProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id",
+        "logical_run_id",
+        "source_revision",
+        "base_commit",
+        "work_branch",
+        "verified_branch",
+        "verified_head",
+        "config_snapshot_revision",
+        "node",
+        "attempt"
+      ],
+      "properties": {
+        "workspace_id": { "$ref": "#/definitions/nonEmptyText" },
+        "logical_run_id": { "$ref": "#/definitions/nonEmptyText" },
+        "source_revision": { "$ref": "#/definitions/nonEmptyText" },
+        "base_commit": { "$ref": "#/definitions/nullableText" },
+        "work_branch": { "$ref": "#/definitions/nullableText" },
+        "verified_branch": { "$ref": "#/definitions/nullableText" },
+        "verified_head": { "$ref": "#/definitions/nonEmptyText" },
+        "config_snapshot_revision": { "$ref": "#/definitions/nonEmptyText" },
+        "node": { "$ref": "#/definitions/nonEmptyText" },
+        "attempt": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "cleanupAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "logical_run_id",
+        "workspace_id",
+        "at",
+        "worktree",
+        "branch",
+        "artifacts",
+        "records"
+      ],
+      "properties": {
+        "logical_run_id": { "$ref": "#/definitions/nonEmptyText" },
+        "workspace_id": { "$ref": "#/definitions/nonEmptyText" },
+        "at": { "$ref": "#/definitions/isoDateTime" },
+        "worktree": { "enum": ["removed", "absent", "skipped"] },
+        "branch": { "enum": ["deleted", "kept", "absent", "skipped"] },
+        "artifacts": { "enum": ["removed", "absent", "skipped"] },
+        "records": { "const": "retained" },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}
