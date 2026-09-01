@@ -37,7 +37,7 @@ test('#127 PASS 走进 $end：DONE 带 completion，不改写节点结果', asyn
   assert.equal(result.results.evaluate.verdict, 'PASS')
 })
 
-test('#127 OPTIMIZE 回执行后 PASS：countRound 不增加 round 闸门', async () => {
+test('#73 OPTIMIZE 回执行后 PASS：countRound 消耗 1 点额度（未达上限）', async () => {
   let evals = 0
   const { result } = await runEngine(outcomeBp, {
     intake: { go: 'NEXT' },
@@ -50,6 +50,7 @@ test('#127 OPTIMIZE 回执行后 PASS：countRound 不增加 round 闸门', asyn
   })
   assert.equal(result.status, 'DONE')
   assert.equal(evals, 2)
+  assert.equal(result.budgetUsed, 1)
   assert.equal(result.completion.type, 'EVALUATION_PASSED')
 })
 

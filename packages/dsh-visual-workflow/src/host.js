@@ -674,6 +674,8 @@ return {
       if (Array.isArray(val.history)) rec.history = val.history
       if (typeof val.node === 'string' && val.node) rec.node = val.node
       if (typeof val.round === 'number') rec.round = val.round
+      if (typeof val.budgetUsed === 'number') rec.budgetUsed = val.budgetUsed
+      if (typeof val.maxRounds === 'number') rec.maxRounds = val.maxRounds
     }
     async function parkedHumanDecision(taskId) {
       const hit = latestTagByTaskId(taskId)
@@ -819,6 +821,8 @@ return {
         history: rec.history || null,
         node: rec.node ? String(rec.node) : '',
         round: typeof rec.round === 'number' ? rec.round : null,
+        budgetUsed: typeof rec.budgetUsed === 'number' ? rec.budgetUsed : null,
+        maxRounds: typeof rec.maxRounds === 'number' ? rec.maxRounds : null,
         updatedAt: Date.now(),
       }
     }
@@ -917,6 +921,8 @@ return {
         history: Array.isArray(data.history) ? data.history : null,
         node: typeof data.node === 'string' ? data.node : '',
         round: typeof data.round === 'number' ? data.round : null,
+        budgetUsed: typeof data.budgetUsed === 'number' ? data.budgetUsed : null,
+        maxRounds: typeof data.maxRounds === 'number' ? data.maxRounds : null,
       })
       if (data.taskId || data.workflowId) {
         const status = typeof data.status === 'string' && data.status ? data.status : 'unknown'
@@ -1111,7 +1117,9 @@ return {
         supersededBy: tag && tag.supersededBy ? tag.supersededBy : '',
         decision_id: s.decisionId || '', reason: s.reason || '',
         decision_package: s.decisionPackage || null, control_event: s.controlEvent || null,
-        blocked_edge: s.blockedEdge || null, results: s.results || null } }
+        blocked_edge: s.blockedEdge || null, results: s.results || null,
+        budgetUsed: typeof s.budgetUsed === 'number' ? s.budgetUsed : null,
+        maxRounds: typeof s.maxRounds === 'number' ? s.maxRounds : null } }
     })
     // 多 run 并行（#19）：运行清单（最新在前），看板列表/门禁队列/并行警示的数据源
     registerRpc('vwf.runs.list', async () => {
@@ -1773,6 +1781,8 @@ return {
               if (args.results == null && parked.results) args.results = parked.results
               if (args.history == null && parked.history) args.history = parked.history
               if (args.startRound == null && parked.round != null) args.startRound = parked.round
+              if (args.budgetUsed == null && parked.budgetUsed != null) args.budgetUsed = parked.budgetUsed
+              if (args.maxRounds == null && parked.maxRounds != null) args.maxRounds = parked.maxRounds
               if (!args.entry && parked.node) args.entry = parked.node
             }
           }
@@ -1788,6 +1798,7 @@ return {
             issueRef: args.issueRef, issueTitle: args.issueTitle, issueBody: args.issueBody, issueComments: args.issueComments,
             requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
             decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
+            budgetUsed: args.budgetUsed, maxRounds: args.maxRounds,
           }
           const run = engineNow.start({ script: c.script, meta: c.meta, args: scriptArgs, parent: parent })
           // 启动边界自登记（workflow/start 事件无 taskId，见 runTags 注释）；

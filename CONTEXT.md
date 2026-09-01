@@ -222,15 +222,15 @@
 
 ### 额度与停机
 
-- **countRound（本边是否计数）**：该业务回退边是否消耗自动回退额度。由 #73 承接会计。
-- **maxRounds（Target：自动回退额度）**：允许自动跨节点回上游再产出的次数；初次执行不计。Current 仍是 failure 边打回上限。
+- **countRound（本边是否计数）**：该业务回退边是否消耗自动回退额度。#73 已落地：`true` 消耗，`false`/缺省不消耗但仍记 `history`。
+- **maxRounds（自动回退额度）**：允许自动跨节点回上游再产出的次数；初次执行不计。旧蓝图仍把该字段当 failure 边打回上限。
 - **MAX_ROUNDS_REACHED（额度耗尽）**：Lifecycle（运行生命周期）上 `WAITING_HUMAN` 的 reason（原因码）。不是 `FAILED_MAX_ROUNDS`。
 - **FAILED_MAX_ROUNDS（超过打回上限）**：Current 引擎返回状态；旧蓝图过渡期仍用。
 - **WAITING_HUMAN（等待人工）**：Run Lifecycle 值。进入条件包括人工决策与额度耗尽。由 #79/#72 承接，#77 不宣称自己实现了该生命周期。
 - **ROUTE_HALTED（路由停机）**：#77 引擎段返回状态（#87）。表示蓝图要求不要自动走下一步。payload 含 `reason`、`node`、原样 `results`。不是运行生命周期。命中 `$human-decision` 时 `reason=HUMAN_DECISION`。#77 不因额度耗尽发此状态。
 - **reason（原因码）**：停机/等待的结构化原因，如 `HUMAN_DECISION`（人工决策）或 `MAX_ROUNDS_REACHED`（额度耗尽）。
 - **payload（返回体载荷）**：引擎返回状态附带的数据对象。
-- **过渡预算闸门**：#77 不做（#87 Q6）。`countRound` 只校验与往返无损；真闸门归 #73。
+- **过渡预算闸门**：#77 只做 `countRound` 校验与往返无损；#73 落地真闸门：`countRound=true` 消耗额度，耗尽 `WAITING_HUMAN` + `MAX_ROUNDS_REACHED`，`ADD_BUDGET` 必须显式入账。
 
 ### 常用业务结果 / 完成类型枚举（机器英文）
 

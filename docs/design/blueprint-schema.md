@@ -20,7 +20,7 @@
 | `displayName` | ✅ | 非空字符串 | 中文展示名，如「开发工作流 2.0」；生成 skill 的触发词之一（FR-6） |
 | `description` | 可选 | 字符串 | 一句话概述，进 vwf 模板 description |
 | `entry` | ✅ | 节点 id | 首次运行入口；**必须等于拓扑推导的唯一入口**（与 validateDsl 严格一致） |
-| `control.maxRounds` | 可选 | 正整数，默认 9 | 打回上限；**系统约定上限 9（候选二 Q7：编辑器与校验器强制 1-9，超限拒绝）** |
+| `control.maxRounds` | 可选 | 正整数，默认 9 | **新模式（#73）**：自动回退额度（仅 `countRound=true` 的业务边消耗；初次执行不计）。**旧模式**：failure 边打回上限。系统约定上限 9（候选二 Q7：1-9，超限拒绝） |
 | `onMaxRounds` | 可选 | `'return'`（默认）\| `'auto-reschedule'` | DSH 增强：超限自动回调度做失败归因（D4）；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
 | `heteroCheck` | 可选 | 布尔，默认 false | DSH 增强：注入 dev↔review 异源运行日志（T-06 定稿后：v2 起异源由 save/validate 全局强制，本字段退化为运行时日志开关）；置 true 时须存在 dev 与 review 节点；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
 | `bindings.models` | 可选 | 对象：`{ <nodeId>: {provider?, model?} }` | 模型绑定（D2 节点粒度）；键必须都是节点 id；缺省 = 宿主默认 |
@@ -55,7 +55,7 @@
 | `on` | 旧模式必填；新模式业务边不写 | `'success'` \| `'failure'` \| `'technical'`。旧模式：升 HD 的入边与 HD 出边均为 `success`。新模式：禁止 `success`/`failure`；技术失败走可选 `{ on: "technical" }`（没有则运行时 `TECHNICAL_FAILURE`）。`outcome` 与 `on` 互斥 |
 | `when` | 可选 | 仅旧模式普通节点 success 边；`$.path ==|!= value`；多 success 出边必须**全部**带 when；failure 边最多一条。新模式与 `technical` 边禁止 |
 | `outcome` | 新模式业务边必填 | 与该节点 `outcomePath` 指向的值等值匹配（含 boolean `true`/`false`）。同一取值只能有一条出边，且须覆盖全部可穷举值。`$human-decision` 出边在新模式下用 `outcome`（**允许** `outcome: "USER_ACCEPTED"`，因为不是 `result` 字段） |
-| `countRound` | 可选 | 仅业务边。布尔；落盘且往返无损，运行时不计数（会计归 #73） |
+| `countRound` | 可选 | 仅业务边。布尔；`true` 则走该边消耗 1 点自动回退额度；`false` 或缺省不消耗但仍记入 `history`。额度耗尽不走边，进入 `WAITING_HUMAN` + `MAX_ROUNDS_REACHED`，保留原 Node Business Outcome（#73） |
 | `result` | 旧 HD 出边必填 | 业务 Decision Result id（`SCREAMING_SNAKE`，如 `SHIP`）。**不得**占用框架控制类 `USER_ACCEPTED` / `ADD_BUDGET` / `STOP` |
 
 ### 2.4 Human Decision 控制面键名（#116 钉死；机器英文）
@@ -135,7 +135,7 @@ fanout 节点的 `kind` / `items` / `failOn` 必须双向透传；新模式边�
 - **超限归因**：`onMaxRounds = 'auto-reschedule'` → 超限时注入归因 agent（产出 reschedule：归因/拆分/人工介入建议）。
 - **可信度闸门**：`verifyBranch=true` 节点 → 注入开工分支自检 + `verified_branch`/`verified_head` 硬校验（失败即 TECHNICAL_FAILURE；新模式可走 `on: technical`）。
 - **异源警告**：`heteroCheck=true` → 注入 dev↔review 模型比对 warning（v1 不拦截，v2 由 T-06 升级为 enforcement）。
-- **业务结果路由（#77）**：有 `outcomePath` 的节点按路径等值匹配 `outcome` 出边；命中 `$human-decision` → `ROUTE_HALTED`（`reason=HUMAN_DECISION`），不发 `WAITING_HUMAN`。缺匹配 → `ENDED_NO_OUTCOME_EDGE`。`countRound` 不增加 `round`。走进 `$end` 时 `DONE.completion = { type, node, path } | null`（仅终态节点声明了 `completionPath` 且读到非空字符串才有对象）。
+- **业务结果路由（#77）+ 自动回退额度（#73）**：有 `outcomePath` 的节点按路径等值匹配 `outcome` 出边；命中 `$human-decision` → `ROUTE_HALTED`（`reason=HUMAN_DECISION`），不发 `WAITING_HUMAN`。缺匹配 → `ENDED_NO_OUTCOME_EDGE`。`countRound=true` 的业务边消耗 `control.maxRounds`；耗尽则 `WAITING_HUMAN` + `MAX_ROUNDS_REACHED`，不改写 `results[node]`。`countRound=false` 与技术边不计额度。旧蓝图 failure 边仍 `round++`，超限仍 `FAILED_MAX_ROUNDS`。走进 `$end` 时 `DONE.completion = { type, node, path } | null`（仅终态节点声明了 `completionPath` 且读到非空字符串才有对象）。`ADD_BUDGET` 续跑必须把额度变更写入 `control_event`（`budget_delta` / `max_rounds_after` / `budget_used`）。
 
 ### 4.3 角色与运行上下文
 
