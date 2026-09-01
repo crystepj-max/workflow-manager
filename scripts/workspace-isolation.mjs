@@ -4,7 +4,7 @@
 // 证明失效只调用 #78，不平行实现 provenance。
 
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { computeCheckpoint } from './cwf-checkpoint.mjs'
@@ -47,6 +47,7 @@ const TERMINAL = new Set([LIFECYCLE.COMPLETED, LIFECYCLE.STOPPED, LIFECYCLE.FAIL
 const MODES = new Set(Object.values(WORKSPACE_MODE))
 const LIFECYCLES = new Set(Object.values(LIFECYCLE))
 const SAFE_ID = /^[a-z0-9][a-z0-9-]*$/
+const RESERVED_WORKSPACE_IDS = new Set(['records'])
 const SCHEMA_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'design', 'workspace-isolation', 'schema.json')
 
 let cachedSchema
@@ -156,6 +157,9 @@ export function allocateWorkspace(registry, spec) {
 
   const created_at = iso(registry.now())
   const workspace_id = assertSafeId(spec.workspace_id || `ws-${logical_run_id}`, 'workspace_id')
+  if (RESERVED_WORKSPACE_IDS.has(workspace_id)) {
+    throw new Error(`workspace_id 为保留名: ${workspace_id}`)
+  }
   for (const other of registry.workspaces.values()) {
     if (other.workspace_id === workspace_id) {
       throw new Error(`workspace_id 已被占用: ${workspace_id}`)
@@ -319,6 +323,9 @@ export function buildAttemptProvenance(workspace, { node, attempt }) {
     verified_head = git(['rev-parse', 'HEAD'], workspace.source_path)
     const br = git(['rev-parse', '--abbrev-ref', 'HEAD'], workspace.source_path)
     verified_branch = br === 'HEAD' ? null : br
+    if (workspace.source_revision !== verified_head) {
+      throw new Error('Git workspace 的 source_revision 落后于实况 HEAD，需要先 recordSourceSync')
+    }
   }
   const prov = {
     workspace_id: workspace.workspace_id,
@@ -360,8 +367,11 @@ export function assertProofBinding(workspace, proof) {
   if (proof.verified_head !== actualHead) {
     throw new Error(`Proof verified_head(${proof.verified_head}) ≠ 实际 HEAD(${actualHead})`)
   }
-  if (proof.source_revision !== actualHead && proof.source_revision !== workspace.source_revision) {
+  if (proof.source_revision !== actualHead) {
     throw new Error(`Proof source_revision(${proof.source_revision}) ≠ 实际 HEAD(${actualHead})`)
+  }
+  if (workspace.source_revision !== actualHead) {
+    throw new Error(`workspace source_revision(${workspace.source_revision}) ≠ 实际 HEAD(${actualHead})`)
   }
   if (workspace.work_branch) {
     const actualBranch = git(['rev-parse', '--abbrev-ref', 'HEAD'], workspace.source_path)
@@ -489,7 +499,10 @@ export function cleanupWorkspace(registry, logicalRunId, opts = {}) {
   if (ws.hold_integration || ws.hold_review) {
     throw new Error('仍有未完成 Integration 或人工复验，不得立即删除')
   }
-  if (!TERMINAL.has(ws.lifecycle) && !opts.force_abandoned) {
+  const staleForce = opts.force_abandoned === true
+    && ws.abandoned === true
+    && ws.lifecycle === LIFECYCLE.RUNNING
+  if (!TERMINAL.has(ws.lifecycle) && !staleForce) {
     throw new Error('非终态 workspace 不可 cleanup')
   }
 
@@ -593,7 +606,7 @@ function materializeGit(ws, spec, mode) {
   ws.source_path = source
   ws.current_head = git(['rev-parse', 'HEAD'], source)
   ws.source_revision = ws.current_head
-  if (mode === WORKSPACE_MODE.ISOLATED_READ) chmodTree(source, 0o555)
+  if (mode === WORKSPACE_MODE.ISOLATED_READ) freezeReadOnlyTree(source)
 }
 
 function materializeSandbox(ws) {
@@ -635,14 +648,70 @@ function assertInsideRoot(root, target, label) {
   }
 }
 
-function chmodTree(dir, mode) {
+function walkNoFollow(dir, visit) {
   if (!dir || !existsSync(dir)) return
-  chmodSync(dir, mode)
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, entry.name)
-    if (entry.isDirectory()) chmodTree(p, mode)
-    else chmodSync(p, mode)
+  const st = lstatSync(dir)
+  visit(dir, st)
+  if (!st.isDirectory() || st.isSymbolicLink()) return
+  for (const name of readdirSync(dir)) {
+    walkNoFollow(join(dir, name), visit)
   }
+}
+
+function stripWriteBits(dir) {
+  walkNoFollow(dir, (p, st) => {
+    if (st.isSymbolicLink()) return
+    chmodSync(p, (st.mode & 0o777) & ~0o222)
+  })
+}
+
+function restoreOwnerWrite(dir) {
+  walkNoFollow(dir, (p, st) => {
+    if (st.isSymbolicLink()) return
+    chmodSync(p, (st.mode & 0o777) | 0o200)
+  })
+}
+
+function setImmutableFlag(dir, enable) {
+  const privileged = typeof process.getuid === 'function' && process.getuid() === 0
+  let applied = 0
+  let lastErr
+  walkNoFollow(dir, (p, st) => {
+    if (st.isSymbolicLink()) return
+    try {
+      if (process.platform === 'darwin') {
+        execFileSync('chflags', [enable ? 'uchg' : 'nouchg', p], { stdio: 'pipe' })
+        applied++
+      } else if (process.platform === 'linux') {
+        execFileSync('chattr', [enable ? '+i' : '-i', p], { stdio: 'pipe' })
+        applied++
+      }
+    } catch (e) {
+      lastErr = e
+    }
+  })
+  if (enable && privileged && applied === 0) {
+    throw new Error(`ISOLATED_READ 无法在特权进程中冻结 source${lastErr ? `（${lastErr.message}）` : ''}`)
+  }
+}
+
+function freezeReadOnlyTree(dir) {
+  stripWriteBits(dir)
+  setImmutableFlag(dir, true)
+  const probe = join(dir, '.vwf-readonly-probe')
+  try {
+    writeFileSync(probe, 'x')
+  } catch (e) {
+    if (e && (e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'EROFS')) return
+    throw e
+  }
+  try { rmSync(probe) } catch { /* ignore */ }
+  throw new Error('ISOLATED_READ 未能阻止对 source 的直接写入')
+}
+
+function thawReadOnlyTree(dir) {
+  try { setImmutableFlag(dir, false) } catch { /* ignore */ }
+  try { restoreOwnerWrite(dir) } catch { /* ignore */ }
 }
 
 function assertNotSharedSource(sourcePath, forbidden) {
@@ -681,7 +750,7 @@ function expireLocks(registry) {
 }
 
 function removeGitWorktree(ws) {
-  try { chmodTree(ws.source_path, 0o755) } catch { /* ignore */ }
+  try { thawReadOnlyTree(ws.source_path) } catch { /* ignore */ }
   try {
     git(['worktree', 'remove', '--force', ws.source_path], ws.repository_path)
     return 'removed'
@@ -784,17 +853,48 @@ function isGitDir(dir) {
   }
 }
 
+function isContained(root, candidate) {
+  const rootR = resolve(root)
+  const t = resolve(candidate)
+  return t === rootR || t.startsWith(rootR + sep)
+}
+
 function resolveInside(root, rel) {
   if (typeof rel !== 'string' || !rel.trim() || rel.includes('\0')) {
     throw new Error('非法相对路径')
   }
   if (isAbsolute(rel)) throw new Error('禁止绝对路径')
-  const target = resolve(root, rel)
-  const rootR = resolve(root)
-  if (target !== rootR && !target.startsWith(rootR + sep)) {
-    throw new Error('路径逃出允许根目录')
+  const rootReal = existsSync(root) ? realpathSync(root) : resolve(root)
+  const parts = rel.split(/[/\\]/)
+  let cur = rootReal
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]
+    if (!part || part === '.') continue
+    if (part === '..') throw new Error('路径逃出允许根目录')
+    const next = join(cur, part)
+    if (!existsSync(next)) {
+      const rest = parts.slice(i).filter(p => p && p !== '.')
+      if (rest.some(p => p === '..')) throw new Error('路径逃出允许根目录')
+      const candidate = rest.length ? join(cur, ...rest) : cur
+      if (!isContained(rootReal, candidate)) throw new Error('路径逃出允许根目录')
+      return candidate
+    }
+    const st = lstatSync(next)
+    if (st.isSymbolicLink()) {
+      let real
+      try {
+        real = realpathSync(next)
+      } catch {
+        throw new Error('路径逃出允许根目录')
+      }
+      if (!isContained(rootReal, real)) throw new Error('路径逃出允许根目录')
+      cur = real
+    } else {
+      if (!isContained(rootReal, next)) throw new Error('路径逃出允许根目录')
+      cur = next
+    }
   }
-  return target
+  return cur
 }
 
 function assertSafeId(value, label) {

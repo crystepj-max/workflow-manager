@@ -29,7 +29,7 @@ Logical Run
 | `SANDBOX` | DirectorySandboxWorkspace | 无 Git / 非仓库文件任务 |
 | `NONE` | — | 明确不需要文件工作空间；**不是**四套正式模板默认 |
 
-Node Attempt **只能**通过 `getRunWorkspace(registry, logical_run_id)` 取得当前现场，不得猜路径、不得落回共享主仓 cwd。`workspace_id` / `logical_run_id` 必须是已净化的小写连字符形态，且在 Registry 内唯一；`workspace_path` 不得逃出 `work_root`。
+Node Attempt **只能**通过 `getRunWorkspace(registry, logical_run_id)` 取得当前现场，不得猜路径、不得落回共享主仓 cwd。`workspace_id` / `logical_run_id` 必须是已净化的小写连字符形态，且在 Registry 内唯一；`workspace_id` 不得使用保留名 `records`（与 `work_root/records/` 记录根冲突）；`workspace_path` 不得逃出 `work_root`。
 
 ## 2. 默认 Workspace Policy
 
@@ -47,7 +47,7 @@ Node Attempt **只能**通过 `getRunWorkspace(registry, logical_run_id)` 取得
 写：`resolve repo → freeze base_ref + base_commit → create branch → git worktree add`。  
 默认分支名 `vwf/run/<logical_run_id>`，可被 `work_branch` 覆盖。
 
-只读：对冻结 commit `git worktree add --detach`。`writeSourceFile` 必须拒绝；materialize 后将 `source_path` 置为目录只读，cleanup 前再恢复可写。API 与文件系统两层都禁止写 source。
+只读：对冻结 commit `git worktree add --detach`。`writeSourceFile` 必须拒绝；materialize 后去掉 source 写位并保留原执行位，特权进程（UID 0）再加 immutable（`chattr`/`chflags`）。若探测写入仍成功则 fail closed。cleanup 前先解冻再恢复可写。解析 source/scratch 相对路径时必须按 realpath 校验，禁止目录符号链接逃出 workspace 根。
 
 Provider/Model 的 `config_snapshot_revision` 变化只更新字段，**不得**重建或切换 `source_path`。
 
@@ -55,7 +55,7 @@ Provider/Model 的 `config_snapshot_revision` 变化只更新字段，**不得**
 
 Attempt / Proof 记录：`workspace_id`、`source_revision` / `base_commit`、`work_branch`（若有）、**实际** `verified_head`、`config_snapshot_revision`。
 
-`assertProofBinding` 必须核对 `workspace_id`、`logical_run_id`、`source_revision`、`base_commit`、`work_branch`、`config_snapshot_revision`，并从 `source_path` 读真实 HEAD（及有 branch 时的 branch）。`recordSourceSync` 若 source 是 Git 目录，只能写入 `git rev-parse HEAD` 观测到的值，禁止自报伪造 SHA。禁止在另一工作区验证却为本 Run 背书。
+`assertProofBinding` 必须核对 `workspace_id`、`logical_run_id`、`source_revision`、`base_commit`、`work_branch`、`config_snapshot_revision`，并从 `source_path` 读真实 HEAD（及有 branch 时的 branch）。Git workspace 的 `source_revision` 必须等于观测到的 HEAD；HEAD 已前进但未 `recordSourceSync` 时不得签发或绑定 Proof。`recordSourceSync` 若 source 是 Git 目录，只能写入 `git rev-parse HEAD` 观测到的值，禁止自报伪造 SHA。禁止在另一工作区验证却为本 Run 背书。
 
 ## 5. Fan-out scratch
 
@@ -90,7 +90,7 @@ Attempt / Proof 记录：`workspace_id`、`source_revision` / `base_commit`、`w
 |---|---|
 | `WAITING_HUMAN` / `PAUSED` / `BLOCKED` | **拒绝**删除 workspace（可 Resume） |
 | `COMPLETED` / `STOPPED` / `FAILED` | 进入 eligibility；若 `hold_integration` / `hold_review` 仍拒绝 |
-| `RUNNING` 且 `abandoned` | `recoverStale` 标为 cleanup eligible 或可恢复 |
+| `RUNNING` 且 `abandoned` | `recoverStale` 标为 cleanup eligible；`cleanupWorkspace(..., { force_abandoned: true })` **仅**允许该组合，不得对未标记 abandoned 的 READY/RUNNING 强删 |
 
 cleanup 必须写审计（worktree / branch / artifacts 处理结果）。删除 worktree **不得**删除 `records_path` 与 timeline。过期锁在 acquire / recover 时释放。
 

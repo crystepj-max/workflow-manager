@@ -2,7 +2,7 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -183,6 +183,7 @@ test('A Git 只读冻结 detached source；禁止写 source', () => {
   assert.equal(readSourceFile(ws, 'README.md'), 'base\n')
   assert.throws(() => writeSourceFile(ws, 'hack.txt', 'nope'), /ISOLATED_READ 禁止写入 source/)
   assert.throws(() => writeFileSync(join(ws.source_path, 'bypass.txt'), 'nope'))
+  assert.equal(git(['status', '--porcelain'], ws.source_path), '')
 })
 
 test('A 同一 Run 验证节点绑定真实 HEAD；另一 workspace 的 Proof 不能背书', () => {
@@ -470,6 +471,10 @@ test('R1 workspace_id 必须净化且唯一', () => {
     logical_run_id: 'run-a', mode: WORKSPACE_MODE.SANDBOX, work_root: root,
     workspace_id: '../records',
   }), /非法 workspace_id/)
+  assert.throws(() => allocateWorkspace(reg, {
+    logical_run_id: 'run-rec', mode: WORKSPACE_MODE.SANDBOX, work_root: root,
+    workspace_id: 'records', task_identity: 't-rec',
+  }), /保留名/)
   allocateWorkspace(reg, {
     logical_run_id: 'run-a', mode: WORKSPACE_MODE.SANDBOX, work_root: root,
     workspace_id: 'ws-shared', task_identity: 't-a',
@@ -492,4 +497,79 @@ test('R3 Proof 绑定核对 lineage 字段', () => {
   assert.equal(assertProofBinding(a, proof), true)
   assert.throws(() => assertProofBinding(a, { ...proof, logical_run_id: 'run-other' }), /logical_run_id/)
   assert.throws(() => assertProofBinding(a, { ...proof, config_snapshot_revision: 'forged' }), /config_snapshot_revision/)
+})
+
+test('R4 符号链接不得逃出 source/scratch 根', () => {
+  const repo = initRepo()
+  const outside = mkdtempSync(join(fixtureRoot, 'outside-'))
+  cleanups.push(() => { try { rmSync(outside, { recursive: true, force: true }) } catch { /* ignore */ } })
+  writeFileSync(join(outside, 'leaked.txt'), 'secret')
+  symlinkSync(outside, join(repo, 'output'))
+  git(['add', 'output'], repo)
+  git(['commit', '-q', '-m', 'add-symlink'], repo)
+  const root = workRoot()
+  const reg = trackedRegistry()
+  const ws = allocateWorkspace(reg, {
+    logical_run_id: 'run-link', mode: WORKSPACE_MODE.ISOLATED_WRITE,
+    repository_path: repo, repository: 'org/demo', work_root: root, task_identity: 't-link',
+  })
+  assert.throws(() => readSourceFile(ws, join('output', 'leaked.txt')), /逃出/)
+  assert.throws(() => writeSourceFile(ws, join('output', 'pwned.txt'), 'x'), /逃出/)
+  writeWorkerFile(ws, 'expert-a', 'ok.md', 'in')
+  symlinkSync(outside, join(workerScratchPath(ws, 'expert-a'), 'out'))
+  assert.throws(() => readWorkerFile(ws, 'expert-a', join('out', 'leaked.txt')), /逃出/)
+})
+
+test('R5 Git HEAD 前进后未 sync 不得绑定 Proof', () => {
+  const repo = initRepo()
+  const root = workRoot()
+  const reg = trackedRegistry()
+  const ws = allocateWorkspace(reg, {
+    logical_run_id: 'run-stale', mode: WORKSPACE_MODE.ISOLATED_WRITE,
+    repository_path: repo, repository: 'org/demo', work_root: root, task_identity: 't-stale',
+  })
+  const oldRev = ws.source_revision
+  writeSourceFile(ws, 'next.txt', 'n')
+  git(['add', 'next.txt'], ws.source_path)
+  git(['commit', '-q', '-m', 'advance'], ws.source_path)
+  const live = git(['rev-parse', 'HEAD'], ws.source_path)
+  assert.notEqual(live, oldRev)
+  assert.throws(() => buildAttemptProvenance(ws, { node: 'review', attempt: 1 }), /recordSourceSync/)
+  assert.throws(() => assertProofBinding(ws, {
+    workspace_id: ws.workspace_id,
+    logical_run_id: ws.logical_run_id,
+    source_revision: oldRev,
+    base_commit: ws.base_commit,
+    work_branch: ws.work_branch,
+    verified_branch: ws.work_branch,
+    verified_head: live,
+    config_snapshot_revision: ws.config_snapshot_revision,
+    node: 'review',
+    attempt: 1,
+  }), /source_revision/)
+  recordSourceSync(reg, 'run-stale')
+  const synced = getRunWorkspace(reg, 'run-stale')
+  assert.equal(assertProofBinding(synced, buildAttemptProvenance(synced, { node: 'review', attempt: 1 })), true)
+})
+
+test('R6 force_abandoned 只能清理已标记 abandoned 的 RUNNING', () => {
+  const root = workRoot()
+  const reg = trackedRegistry()
+  const live = allocateWorkspace(reg, {
+    logical_run_id: 'run-live', mode: WORKSPACE_MODE.SANDBOX, work_root: root, task_identity: 'live',
+  })
+  setLifecycle(reg, 'run-live', LIFECYCLE.RUNNING)
+  assert.throws(() => cleanupWorkspace(reg, 'run-live', { force_abandoned: true }), /非终态/)
+  assert.equal(existsSync(live.workspace_path), true)
+  const ready = allocateWorkspace(reg, {
+    logical_run_id: 'run-ready', mode: WORKSPACE_MODE.SANDBOX, work_root: root, task_identity: 'ready',
+  })
+  markAbandoned(reg, 'run-ready')
+  assert.throws(() => cleanupWorkspace(reg, 'run-ready', { force_abandoned: true }), /非终态/)
+  assert.equal(existsSync(ready.workspace_path), true)
+  setLifecycle(reg, 'run-live', LIFECYCLE.RUNNING)
+  markAbandoned(reg, 'run-live')
+  const audit = cleanupWorkspace(reg, 'run-live', { force_abandoned: true })
+  assert.equal(audit.artifacts, 'removed')
+  assert.equal(existsSync(live.workspace_path), false)
 })
