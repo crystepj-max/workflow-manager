@@ -63,7 +63,7 @@ npm test
 本节约束所有能够在 GitHub PR 上触发 Codex Review 的 Agent；它独立于本地工作流、Run 和回退额度。目标是让 PR 审查围绕当前 Issue 的完成条件收敛，并把 **Codex PR Review Controller 作为 Agent 的唯一 Review 入口**，禁止通过直接 `@codex review` 或无限追加轮次把一个 PR 扩张成无边界的持续改进任务。
 
 - Agent **不得直接发表评论 `@codex review`**。所有由 Agent 发起的 Codex PR Review 必须通过 PR 评论命令 `/codex-review next` 进入 Controller；Controller 负责轮次、HEAD 去重、提示词和额度状态。
-- **Round 1 是正式 PR 的强制 Gate。** 对所有由 Agent 负责、准备合并到 `main` 的非 Draft PR，PR 创建后或 Draft 转为 Ready 后，Agent 必须先检查 PR 时间线是否已有 Codex PR Review Controller 状态；若尚无成功的 Controller Review 记录，必须立即执行 `/codex-review next` 发起第 1 轮完整审查。内部工作流的 Review/Test、CI、人工检查均不能替代这一 PR Gate；未完成至少 1 轮 Controller Codex Review 的 PR，Agent 不得宣布可合并、进入收口或主动结束该 PR 任务。
+- **Round 1 是正式 PR 的强制 Gate。** 对所有由 Agent 负责、准备合并到 `main` 的非 Draft PR，PR 创建后或 Draft 转为 Ready 后，Agent 必须先检查 PR 时间线是否已有 Codex PR Review Controller 状态；若尚无成功的 Controller Review 记录，必须立即执行 `/codex-review next` 发起第 1 轮完整审查。内部工作流的 Review/Test、CI、人工检查均不能替代这一 PR Gate。若标准流程需要在 closeout 阶段创建 PR，可进入 closeout 完成 PR 创建与 Ready；但未完成至少 1 轮 Controller Codex Review 前，Agent **不得合并 PR、不得宣布 closeout 完成，也不得结束该 PR 任务**。
 - 一个 PR 默认最多允许 **3 轮自动 Codex Review**。服务报错、超时或明确的工具故障只能使用 `/codex-review retry` 重试；retry 仅限同一 HEAD 的服务/工具故障，不得借 retry 绕过业务轮次。
 - 第 1 轮是完整审查：Controller 应围绕当前 PR 的需求符合性、正确性、回归风险、证据与必要边界条件发起审查。
 - 每条 Review 意见都必须先分类再处理：
