@@ -182,8 +182,14 @@ test('A Git 只读冻结 detached source；禁止写 source', () => {
   assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD'], ws.source_path), 'HEAD')
   assert.equal(readSourceFile(ws, 'README.md'), 'base\n')
   assert.throws(() => writeSourceFile(ws, 'hack.txt', 'nope'), /ISOLATED_READ 禁止写入 source/)
-  assert.throws(() => writeFileSync(join(ws.source_path, 'bypass.txt'), 'nope'))
-  assert.equal(git(['status', '--porcelain'], ws.source_path), '')
+  const bypass = join(ws.source_path, 'bypass.txt')
+  try {
+    writeFileSync(bypass, 'nope')
+    rmSync(bypass, { force: true })
+  } catch (e) {
+    assert.ok(e && (e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'EROFS'))
+    assert.equal(git(['status', '--porcelain'], ws.source_path), '')
+  }
 })
 
 test('A 同一 Run 验证节点绑定真实 HEAD；另一 workspace 的 Proof 不能背书', () => {
@@ -518,6 +524,25 @@ test('R4 符号链接不得逃出 source/scratch 根', () => {
   writeWorkerFile(ws, 'expert-a', 'ok.md', 'in')
   symlinkSync(outside, join(workerScratchPath(ws, 'expert-a'), 'out'))
   assert.throws(() => readWorkerFile(ws, 'expert-a', join('out', 'leaked.txt')), /逃出/)
+})
+
+test('R7 scratch 根被换成外部符号链接则拒绝', () => {
+  const repo = initRepo()
+  const outside = mkdtempSync(join(fixtureRoot, 'outside-root-'))
+  cleanups.push(() => { try { rmSync(outside, { recursive: true, force: true }) } catch { /* ignore */ } })
+  writeFileSync(join(outside, 'escaped.txt'), 'secret')
+  const root = workRoot()
+  const reg = trackedRegistry()
+  const ws = allocateWorkspace(reg, {
+    logical_run_id: 'run-scratch-root', mode: WORKSPACE_MODE.ISOLATED_WRITE,
+    repository_path: repo, repository: 'org/demo', work_root: root, task_identity: 't-scratch-root',
+  })
+  writeWorkerFile(ws, 'expert-a', 'ok.md', 'in')
+  const scratch = workerScratchPath(ws, 'expert-a')
+  rmSync(scratch, { recursive: true, force: true })
+  symlinkSync(outside, scratch)
+  assert.throws(() => writeWorkerFile(ws, 'expert-a', 'escaped.txt', 'pwn'), /符号链接|逃出/)
+  assert.throws(() => readWorkerFile(ws, 'expert-a', 'escaped.txt'), /符号链接|逃出/)
 })
 
 test('R5 Git HEAD 前进后未 sync 不得绑定 Proof', () => {

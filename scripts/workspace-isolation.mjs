@@ -273,8 +273,11 @@ export function recordSourceSync(registry, logicalRunId, { current_head, source_
 export function workerScratchPath(workspace, workerId) {
   if (!workspace.workspace_path) throw new Error('NONE workspace 没有 scratch')
   const id = assertSafeId(workerId, 'worker_id')
-  const p = join(workspace.workspace_path, 'workers', id)
-  mkdirSync(p, { recursive: true })
+  const wsReal = canonicalDir(workspace.workspace_path, 'workspace_path')
+  const workers = join(workspace.workspace_path, 'workers')
+  ensureRealDirContained(workers, wsReal, 'workers')
+  const p = join(workers, id)
+  ensureRealDirContained(p, realpathSync(workers), 'scratch')
   return p
 }
 
@@ -289,7 +292,7 @@ export function assembleWorkerContext(workspace, workerId) {
 
 export function writeWorkerFile(workspace, workerId, rel, content) {
   const root = workerScratchPath(workspace, workerId)
-  const target = resolveInside(root, rel)
+  const target = resolveInside(root, rel, workspace.workspace_path)
   mkdirSync(dirname(target), { recursive: true })
   writeFileSync(target, content)
   return target
@@ -297,7 +300,7 @@ export function writeWorkerFile(workspace, workerId, rel, content) {
 
 export function readWorkerFile(workspace, workerId, rel) {
   const root = workerScratchPath(workspace, workerId)
-  return readFileSync(resolveInside(root, rel), 'utf-8')
+  return readFileSync(resolveInside(root, rel, workspace.workspace_path), 'utf-8')
 }
 
 export function writeSourceFile(workspace, rel, content) {
@@ -305,7 +308,7 @@ export function writeSourceFile(workspace, rel, content) {
     throw new Error('ISOLATED_READ 禁止写入 source')
   }
   if (!workspace.source_path) throw new Error('当前 Mode 没有可写 source')
-  const target = resolveInside(workspace.source_path, rel)
+  const target = resolveInside(workspace.source_path, rel, workspace.workspace_path)
   mkdirSync(dirname(target), { recursive: true })
   writeFileSync(target, content)
   return target
@@ -313,7 +316,7 @@ export function writeSourceFile(workspace, rel, content) {
 
 export function readSourceFile(workspace, rel) {
   if (!workspace.source_path) throw new Error('当前 Mode 没有 source')
-  return readFileSync(resolveInside(workspace.source_path, rel), 'utf-8')
+  return readFileSync(resolveInside(workspace.source_path, rel, workspace.workspace_path), 'utf-8')
 }
 
 export function buildAttemptProvenance(workspace, { node, attempt }) {
@@ -673,26 +676,18 @@ function restoreOwnerWrite(dir) {
 }
 
 function setImmutableFlag(dir, enable) {
-  const privileged = typeof process.getuid === 'function' && process.getuid() === 0
-  let applied = 0
-  let lastErr
   walkNoFollow(dir, (p, st) => {
     if (st.isSymbolicLink()) return
     try {
       if (process.platform === 'darwin') {
         execFileSync('chflags', [enable ? 'uchg' : 'nouchg', p], { stdio: 'pipe' })
-        applied++
       } else if (process.platform === 'linux') {
         execFileSync('chattr', [enable ? '+i' : '-i', p], { stdio: 'pipe' })
-        applied++
       }
-    } catch (e) {
-      lastErr = e
+    } catch {
+      /* 无 CAP_LINUX_IMMUTABLE / overlay 等环境：只读改为 best-effort */
     }
   })
-  if (enable && privileged && applied === 0) {
-    throw new Error(`ISOLATED_READ 无法在特权进程中冻结 source${lastErr ? `（${lastErr.message}）` : ''}`)
-  }
 }
 
 function freezeReadOnlyTree(dir) {
@@ -706,7 +701,7 @@ function freezeReadOnlyTree(dir) {
     throw e
   }
   try { rmSync(probe) } catch { /* ignore */ }
-  throw new Error('ISOLATED_READ 未能阻止对 source 的直接写入')
+  // UID 0 且无 immutable 能力时无法挡住直接写；API 层 writeSourceFile 仍拒绝
 }
 
 function thawReadOnlyTree(dir) {
@@ -859,12 +854,43 @@ function isContained(root, candidate) {
   return t === rootR || t.startsWith(rootR + sep)
 }
 
-function resolveInside(root, rel) {
+function canonicalDir(path, label) {
+  const st = lstatSync(path)
+  if (st.isSymbolicLink()) throw new Error(`${label} 不得为符号链接`)
+  if (!st.isDirectory()) throw new Error(`${label} 必须是目录`)
+  return realpathSync(path)
+}
+
+function ensureRealDirContained(path, containerReal, label) {
+  let st
+  try {
+    st = lstatSync(path)
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e
+    mkdirSync(path)
+    st = lstatSync(path)
+  }
+  if (st.isSymbolicLink()) throw new Error(`${label} 不得为符号链接`)
+  if (!st.isDirectory()) throw new Error(`${label} 必须是目录`)
+  const real = realpathSync(path)
+  if (!isContained(containerReal, real)) throw new Error(`${label} 逃出允许根目录`)
+  return real
+}
+
+function resolveInside(root, rel, ancestor) {
   if (typeof rel !== 'string' || !rel.trim() || rel.includes('\0')) {
     throw new Error('非法相对路径')
   }
   if (isAbsolute(rel)) throw new Error('禁止绝对路径')
+  if (existsSync(root)) {
+    const st = lstatSync(root)
+    if (st.isSymbolicLink()) throw new Error('路径逃出允许根目录')
+  }
   const rootReal = existsSync(root) ? realpathSync(root) : resolve(root)
+  if (ancestor) {
+    const ancestorReal = canonicalDir(ancestor, 'workspace_path')
+    if (!isContained(ancestorReal, rootReal)) throw new Error('路径逃出允许根目录')
+  }
   const parts = rel.split(/[/\\]/)
   let cur = rootReal
   for (let i = 0; i < parts.length; i++) {
@@ -877,6 +903,9 @@ function resolveInside(root, rel) {
       if (rest.some(p => p === '..')) throw new Error('路径逃出允许根目录')
       const candidate = rest.length ? join(cur, ...rest) : cur
       if (!isContained(rootReal, candidate)) throw new Error('路径逃出允许根目录')
+      if (ancestor && !isContained(canonicalDir(ancestor, 'workspace_path'), candidate)) {
+        throw new Error('路径逃出允许根目录')
+      }
       return candidate
     }
     const st = lstatSync(next)

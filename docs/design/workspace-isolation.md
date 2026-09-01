@@ -47,7 +47,7 @@ Node Attempt **只能**通过 `getRunWorkspace(registry, logical_run_id)` 取得
 写：`resolve repo → freeze base_ref + base_commit → create branch → git worktree add`。  
 默认分支名 `vwf/run/<logical_run_id>`，可被 `work_branch` 覆盖。
 
-只读：对冻结 commit `git worktree add --detach`。`writeSourceFile` 必须拒绝；materialize 后去掉 source 写位并保留原执行位，特权进程（UID 0）再加 immutable（`chattr`/`chflags`）。若探测写入仍成功则 fail closed。cleanup 前先解冻再恢复可写。解析 source/scratch 相对路径时必须按 realpath 校验，禁止目录符号链接逃出 workspace 根。
+只读：对冻结 commit `git worktree add --detach`。`writeSourceFile` 必须拒绝。materialize 后去掉 source 写位并保留原执行位；能用时再加 immutable（`chattr`/`chflags`）。文件系统只读是 best-effort：UID 0 且无 `CAP_LINUX_IMMUTABLE`（常见 overlay 容器）时不得因此拒绝分配，仍以 API 层禁止写 source。cleanup 前先解冻再恢复可写。解析 source/scratch 相对路径时必须按 realpath 校验；scratch/source **根目录本身**若被换成指向外部的符号链接必须拒绝，不得把外部 realpath 当成可信根。
 
 Provider/Model 的 `config_snapshot_revision` 变化只更新字段，**不得**重建或切换 `source_path`。
 
