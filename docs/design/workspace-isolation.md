@@ -55,7 +55,7 @@ Provider/Model 的 `config_snapshot_revision` 变化只更新字段，**不得**
 
 Attempt / Proof 记录：`workspace_id`、`source_revision` / `base_commit`、`work_branch`（若有）、**实际** `verified_head`、`config_snapshot_revision`。
 
-`assertProofBinding` 必须核对 `workspace_id`、`logical_run_id`、`source_revision`、`base_commit`、`work_branch`、`config_snapshot_revision`，并从 `source_path` 读真实 HEAD（及有 branch 时的 branch）。Git workspace 的 `source_revision` 必须等于观测到的 HEAD；HEAD 已前进但未 `recordSourceSync` 时不得签发或绑定 Proof。`recordSourceSync` 若 source 是 Git 目录，只能写入 `git rev-parse HEAD` 观测到的值，禁止自报伪造 SHA。禁止在另一工作区验证却为本 Run 背书。
+`assertProofBinding` 必须核对 `workspace_id`、`logical_run_id`、`source_revision`、`base_commit`、`work_branch`、`config_snapshot_revision`，并从 `source_path` 读真实 HEAD（及有 branch 时的 branch）。GitWorktree 以 `provider_id` 为准：元数据不可读（`.git` 被删/覆盖）时 fail closed，不得回落调用方自报 SHA。`source_revision` 必须等于观测到的 HEAD；HEAD 已前进但未 `recordSourceSync` 时不得签发或绑定 Proof。`recordSourceSync` 只能写入 `git rev-parse HEAD`。禁止经 `writeSourceFile` 写入 `.git` 元数据。禁止在另一工作区验证却为本 Run 背书。
 
 ## 5. Fan-out scratch
 

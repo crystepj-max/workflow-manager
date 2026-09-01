@@ -577,6 +577,34 @@ test('R5 Git HEAD 前进后未 sync 不得绑定 Proof', () => {
   assert.equal(assertProofBinding(synced, buildAttemptProvenance(synced, { node: 'review', attempt: 1 })), true)
 })
 
+test('R8 Git 元数据损坏时不得接受自报 HEAD', () => {
+  const repo = initRepo()
+  const root = workRoot()
+  const reg = trackedRegistry()
+  const ws = allocateWorkspace(reg, {
+    logical_run_id: 'run-gitmeta', mode: WORKSPACE_MODE.ISOLATED_WRITE,
+    repository_path: repo, repository: 'org/demo', work_root: root, task_identity: 't-gitmeta',
+  })
+  assert.throws(() => writeSourceFile(ws, '.git', 'forged\n'), /Git 元数据/)
+  writeFileSync(join(ws.source_path, '.git'), 'forged\n')
+  assert.throws(() => recordSourceSync(reg, 'run-gitmeta', {
+    current_head: 'attacker-head', source_revision: 'attacker-head',
+  }), /实况 HEAD|元数据/)
+  assert.throws(() => buildAttemptProvenance(ws, { node: 'review', attempt: 1 }), /实况 HEAD|元数据/)
+  assert.throws(() => assertProofBinding(ws, {
+    workspace_id: ws.workspace_id,
+    logical_run_id: ws.logical_run_id,
+    source_revision: 'attacker-head',
+    base_commit: ws.base_commit,
+    work_branch: ws.work_branch,
+    verified_branch: ws.work_branch,
+    verified_head: 'attacker-head',
+    config_snapshot_revision: ws.config_snapshot_revision,
+    node: 'review',
+    attempt: 1,
+  }), /实况 HEAD|元数据/)
+})
+
 test('R6 force_abandoned 只能清理已标记 abandoned 的 RUNNING', () => {
   const root = workRoot()
   const reg = trackedRegistry()

@@ -251,8 +251,8 @@ export function markAbandoned(registry, logicalRunId) {
 
 export function recordSourceSync(registry, logicalRunId, { current_head, source_revision } = {}) {
   const ws = mutable(registry, logicalRunId)
-  if (ws.source_path && isGitDir(ws.source_path)) {
-    const actual = git(['rev-parse', 'HEAD'], ws.source_path)
+  if (isGitWorkspace(ws)) {
+    const actual = observeGitHead(ws)
     if (current_head && current_head !== actual) {
       throw new Error(`recordSourceSync 禁止自报 HEAD（${current_head} ≠ 实况 ${actual}）`)
     }
@@ -308,6 +308,7 @@ export function writeSourceFile(workspace, rel, content) {
     throw new Error('ISOLATED_READ 禁止写入 source')
   }
   if (!workspace.source_path) throw new Error('当前 Mode 没有可写 source')
+  if (isGitMetadataRel(rel)) throw new Error('禁止写入 Git 元数据')
   const target = resolveInside(workspace.source_path, rel, workspace.workspace_path)
   mkdirSync(dirname(target), { recursive: true })
   writeFileSync(target, content)
@@ -322,8 +323,8 @@ export function readSourceFile(workspace, rel) {
 export function buildAttemptProvenance(workspace, { node, attempt }) {
   let verified_head = workspace.current_head
   let verified_branch = workspace.work_branch
-  if (workspace.source_path && isGitDir(workspace.source_path)) {
-    verified_head = git(['rev-parse', 'HEAD'], workspace.source_path)
+  if (isGitWorkspace(workspace)) {
+    verified_head = observeGitHead(workspace)
     const br = git(['rev-parse', '--abbrev-ref', 'HEAD'], workspace.source_path)
     verified_branch = br === 'HEAD' ? null : br
     if (workspace.source_revision !== verified_head) {
@@ -349,6 +350,36 @@ export function buildAttemptProvenance(workspace, { node, attempt }) {
 
 export function assertProofBinding(workspace, proof) {
   if (!proof || typeof proof !== 'object') throw new Error('proof 必须是对象')
+  if (isGitWorkspace(workspace)) {
+    const actualHead = observeGitHead(workspace)
+    const fields = [
+      ['workspace_id', proof.workspace_id, workspace.workspace_id],
+      ['logical_run_id', proof.logical_run_id, workspace.logical_run_id],
+      ['source_revision', proof.source_revision, workspace.source_revision],
+      ['base_commit', proof.base_commit, workspace.base_commit],
+      ['work_branch', proof.work_branch, workspace.work_branch],
+      ['config_snapshot_revision', proof.config_snapshot_revision, workspace.config_snapshot_revision],
+    ]
+    for (const [label, got, expected] of fields) {
+      if (got !== expected) throw new Error(`Proof ${label}(${got}) ≠ workspace(${expected})`)
+    }
+    if (proof.verified_head !== actualHead) {
+      throw new Error(`Proof verified_head(${proof.verified_head}) ≠ 实际 HEAD(${actualHead})`)
+    }
+    if (proof.source_revision !== actualHead) {
+      throw new Error(`Proof source_revision(${proof.source_revision}) ≠ 实际 HEAD(${actualHead})`)
+    }
+    if (workspace.source_revision !== actualHead) {
+      throw new Error(`workspace source_revision(${workspace.source_revision}) ≠ 实际 HEAD(${actualHead})`)
+    }
+    if (workspace.work_branch) {
+      const actualBranch = git(['rev-parse', '--abbrev-ref', 'HEAD'], workspace.source_path)
+      if (proof.verified_branch !== actualBranch) {
+        throw new Error(`Proof verified_branch(${proof.verified_branch}) ≠ 实际分支(${actualBranch})`)
+      }
+    }
+    return true
+  }
   const fields = [
     ['workspace_id', proof.workspace_id, workspace.workspace_id],
     ['logical_run_id', proof.logical_run_id, workspace.logical_run_id],
@@ -360,27 +391,8 @@ export function assertProofBinding(workspace, proof) {
   for (const [label, got, expected] of fields) {
     if (got !== expected) throw new Error(`Proof ${label}(${got}) ≠ workspace(${expected})`)
   }
-  if (!workspace.source_path || !isGitDir(workspace.source_path)) {
-    if (proof.verified_head !== workspace.current_head && proof.verified_head !== workspace.source_revision) {
-      throw new Error('Proof verified_head 与 workspace 不一致')
-    }
-    return true
-  }
-  const actualHead = git(['rev-parse', 'HEAD'], workspace.source_path)
-  if (proof.verified_head !== actualHead) {
-    throw new Error(`Proof verified_head(${proof.verified_head}) ≠ 实际 HEAD(${actualHead})`)
-  }
-  if (proof.source_revision !== actualHead) {
-    throw new Error(`Proof source_revision(${proof.source_revision}) ≠ 实际 HEAD(${actualHead})`)
-  }
-  if (workspace.source_revision !== actualHead) {
-    throw new Error(`workspace source_revision(${workspace.source_revision}) ≠ 实际 HEAD(${actualHead})`)
-  }
-  if (workspace.work_branch) {
-    const actualBranch = git(['rev-parse', '--abbrev-ref', 'HEAD'], workspace.source_path)
-    if (proof.verified_branch !== actualBranch) {
-      throw new Error(`Proof verified_branch(${proof.verified_branch}) ≠ 实际分支(${actualBranch})`)
-    }
+  if (proof.verified_head !== workspace.current_head && proof.verified_head !== workspace.source_revision) {
+    throw new Error('Proof verified_head 与 workspace 不一致')
   }
   return true
 }
@@ -839,13 +851,22 @@ function gitRepoSlug(repoPath) {
   }
 }
 
-function isGitDir(dir) {
+function isGitWorkspace(workspace) {
+  return workspace && workspace.provider_id === PROVIDER.GIT_WORKTREE
+}
+
+function observeGitHead(workspace) {
+  if (!workspace.source_path) throw new Error('Git workspace 缺少 source_path，无法观测 HEAD')
   try {
-    git(['rev-parse', '--is-inside-work-tree'], dir)
-    return true
+    return git(['rev-parse', 'HEAD'], workspace.source_path)
   } catch {
-    return false
+    throw new Error('Git workspace 无法读取实况 HEAD（元数据不可用）')
   }
+}
+
+function isGitMetadataRel(rel) {
+  const n = String(rel).replace(/\\/g, '/').replace(/^\.\//, '')
+  return n === '.git' || n.startsWith('.git/')
 }
 
 function isContained(root, candidate) {
