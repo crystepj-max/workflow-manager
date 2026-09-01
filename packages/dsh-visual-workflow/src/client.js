@@ -2366,12 +2366,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     function statusBadge(status) {
       const s = String(status || '')
-      const color = s === 'DONE' ? STATUS_COLOR.pass : s === 'running' ? STATUS_COLOR.running : s.indexOf('AWAITING_HUMAN_') === 0 ? STATUS_COLOR.human : STATUS_COLOR.fail
-      return h('span', { className: 'vwf-badge', style: { color: color } }, s.indexOf('AWAITING_HUMAN_') === 0 ? '人工门禁' : (s || '—'))
+      const color = s === 'DONE' ? STATUS_COLOR.pass : s === 'running' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0) ? STATUS_COLOR.human : STATUS_COLOR.fail
+      return h('span', { className: 'vwf-badge', style: { color: color } }, s === 'WAITING_HUMAN' ? '等待人工' : s.indexOf('AWAITING_HUMAN_') === 0 ? '人工门禁' : (s || '—'))
     }
     function isActiveRunStatus(status) {
       const s = String(status || '')
-      return s === 'running' || s.indexOf('AWAITING_HUMAN_') === 0
+      return s === 'running' || s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0
     }
 
     // 运行看板（#19 多 run 并行）：运行清单 + 切换、门禁卡片队列（一次裁决一张）、
@@ -2428,7 +2428,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         return merged.sort((a, b) => ((b.startedAt || b.ts || 0) - (a.startedAt || a.ts || 0)) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
       }, [runs, older])
       const activeCount = allRuns.filter((r) => !r.supersededBy && isActiveRunStatus(r.status)).length
-      const gates = allRuns.filter((r) => !r.supersededBy && String(r.status).indexOf('AWAITING_HUMAN_') === 0)
+      const gates = allRuns.filter((r) => !r.supersededBy && (String(r.status) === 'WAITING_HUMAN' || String(r.status).indexOf('AWAITING_HUMAN_') === 0))
       // 分页：数据刷新（新 run 落盘 / 历史拉取）时回到第 0 页
       React.useEffect(() => { setPage(0) }, [allRuns.length])
       const totalPages = Math.max(1, Math.ceil(allRuns.length / pageSize))
@@ -2450,11 +2450,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap' } },
                 h('span', { className: 'vwf-badge accent' }, i === 0 ? '裁决中' : '排队 #' + (i + 1)),
                 h('strong', null, g.taskId || g.id),
-                h('span', { className: 'vwf-muted-sm' }, (g.name || g.workflowId || '') + ' · 门禁节点 ' + String(g.status).replace('AWAITING_HUMAN_', '')),
+                h('span', { className: 'vwf-muted-sm' }, (g.name || g.workflowId || '') + ' · ' + (String(g.status) === 'WAITING_HUMAN' ? ('Human Decision ' + (g.reason || '')) : ('门禁节点 ' + String(g.status).replace('AWAITING_HUMAN_', '')))),
                 statusBadge(g.status)
               ),
               h('div', { className: 'vwf-code', style: { marginTop: 4 } },
-                '续跑：wf_run { taskId: "' + (g.taskId || '<taskId>') + '"' + (g.workflowId ? ', templateId: "' + g.workflowId + '"' : '') + ', entry: "' + String(g.status).replace('AWAITING_HUMAN_', '') + '", approved: true|false }')
+                String(g.status) === 'WAITING_HUMAN'
+                  ? ('续跑：wf_run { taskId: "' + (g.taskId || '<taskId>') + '"' + (g.workflowId ? ', templateId: "' + g.workflowId + '"' : '') + ', decision_id: "' + (g.decision_id || '<decision_id>') + '", user_choice: "USER_ACCEPTED|ADD_BUDGET|STOP" }')
+                  : ('续跑：wf_run { taskId: "' + (g.taskId || '<taskId>') + '"' + (g.workflowId ? ', templateId: "' + g.workflowId + '"' : '') + ', entry: "' + String(g.status).replace('AWAITING_HUMAN_', '') + '", approved: true|false }'))
             )))
         ) : null,
         h('div', { className: 'vwf-card', style: { marginBottom: 8 } },

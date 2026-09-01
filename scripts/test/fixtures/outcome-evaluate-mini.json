@@ -1,0 +1,70 @@
+{
+  "id": "outcome-evaluate-mini",
+  "displayName": "业务结果评估微型",
+  "entry": "intake",
+  "control": { "maxRounds": 3 },
+  "nodes": [
+    {
+      "id": "intake",
+      "profile": "dispatcher",
+      "goal": "接入任务",
+      "output": {
+        "outcomePath": "$.go",
+        "schema": {
+          "type": "object",
+          "properties": { "go": { "type": "string", "enum": ["NEXT"] } },
+          "required": ["go"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "execute",
+      "profile": "dev",
+      "goal": "执行改动",
+      "output": {
+        "outcomePath": "$.status",
+        "schema": {
+          "type": "object",
+          "properties": { "status": { "type": "string", "enum": ["DONE"] } },
+          "required": ["status"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "evaluate",
+      "profile": "review",
+      "goal": "评估结果",
+      "output": {
+        "outcomePath": "$.verdict",
+        "completionPath": "$.completion_type",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "verdict": { "type": "string", "enum": ["PASS", "OPTIMIZE", "CONFIRM"] },
+            "completion_type": { "type": "string" }
+          },
+          "required": ["verdict"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "intake", "to": "execute", "outcome": "NEXT" },
+    { "from": "execute", "to": "evaluate", "outcome": "DONE" },
+    { "from": "evaluate", "to": "$end", "outcome": "PASS" },
+    { "from": "evaluate", "to": "execute", "outcome": "OPTIMIZE", "countRound": true },
+    { "from": "evaluate", "to": "$human-decision", "outcome": "CONFIRM" },
+    { "from": "evaluate", "to": "evaluate", "on": "technical" },
+    { "from": "$human-decision", "to": "$end", "outcome": "USER_ACCEPTED" }
+  ],
+  "bindings": {
+    "models": {
+      "intake": { "provider": "kimi-coding", "model": "k3" },
+      "execute": { "provider": "kimi-coding", "model": "k3" },
+      "evaluate": { "provider": "deepseek-official", "model": "deepseek-v4-pro" }
+    }
+  }
+}

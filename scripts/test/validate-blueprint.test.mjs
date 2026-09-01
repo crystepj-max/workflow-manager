@@ -4,7 +4,16 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import validatorCore from '../validate-core.cjs';
-const { validateBlueprint } = validatorCore;
+const {
+  validateBlueprint,
+  HUMAN_DECISION_ID,
+  HD_REASONS,
+  HD_CONTROL_RESULTS,
+  HD_PACKAGE_REQUIRED,
+  HD_PACKAGE_OPTIONAL_UNKNOWN,
+  HD_EVENT_FIELDS,
+  HD_RESUME_FIELDS,
+} = validatorCore;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const good = JSON.parse(readFileSync(path.join(here, '../../templates/dev-workflow-2-0.json'), 'utf8'));
@@ -342,4 +351,94 @@ test('S1 异源 T8：profile 定位 + 真异源通过无警告', () => {
   const r = validateBlueprint(b);
   assert.equal(r.ok, true, JSON.stringify(r.errors));
   assert.equal(r.warnings.length, 0);
+});
+
+// —— Human Decision 契约（#116 / #72）：键名钉死 + 非法配置拒绝；不测挂起运行时 ——
+const hdGood = JSON.parse(readFileSync(path.join(here, 'fixtures/human-decision-blueprint.json'), 'utf8'));
+const hdClone = () => JSON.parse(JSON.stringify(hdGood));
+
+test('#116 契约键名：Human Decision 控制面英文键钉死', () => {
+  assert.equal(HUMAN_DECISION_ID, '$human-decision');
+  assert.deepEqual(HD_REASONS, ['HUMAN_ACCEPTANCE', 'ESCALATED_DECISION', 'MAX_ROUNDS_REACHED']);
+  assert.deepEqual(HD_CONTROL_RESULTS, ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP']);
+  assert.deepEqual(HD_PACKAGE_REQUIRED, ['why', 'current_state', 'options', 'subsequent_effects']);
+  assert.deepEqual(HD_PACKAGE_OPTIONAL_UNKNOWN, ['cost', 'benefit', 'risk', 'recommendation']);
+  assert.deepEqual(HD_EVENT_FIELDS, [
+    'record_kind', 'trigger', 'lifecycle_at_request', 'decision_id', 'run_ref',
+    'node_id', 'attempt', 'reason', 'triggering_node_outcome', 'decision_package',
+    'user_choice', 'impact', 'subsequent_path', 'created_at',
+  ]);
+  assert.deepEqual(HD_RESUME_FIELDS, ['decision_id', 'user_choice']);
+});
+
+test('#116 合法 Human Decision 蓝图通过校验；$human-decision 不得当节点 id', () => {
+  const ok = validateBlueprint(hdGood);
+  assert.equal(ok.ok, true, JSON.stringify(ok.errors));
+  const stolen = hdClone();
+  stolen.nodes.push({ id: '$human-decision', profile: 'accept', goal: '伪节点' });
+  stolen.edges.push({ from: '$human-decision', to: '$end', on: 'success' });
+  const r = validateBlueprint(stolen);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => String(e.message).includes('保留') && String(e.message).includes('$human-decision')), JSON.stringify(r.errors));
+});
+
+test('#116 残留 manualCheck 蓝图仍通过校验', () => {
+  const leftover = JSON.parse(readFileSync(path.join(here, 'fixtures/hello-blueprint.json'), 'utf8'));
+  const r = validateBlueprint(leftover);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.equal(validateBlueprint(good).ok, true, JSON.stringify(validateBlueprint(good).errors));
+});
+
+test('#116 fanout 节点声明升级到 $human-decision 被拒', () => {
+  const b = JSON.parse(JSON.stringify(fanoutGood));
+  b.edges = [
+    { from: 'fan', to: '$human-decision', on: 'success' },
+    { from: '$human-decision', to: 'finish', on: 'success', result: 'SHIP' },
+    { from: 'fan', to: '$end', on: 'failure' },
+    { from: 'finish', to: '$end', on: 'success' },
+  ];
+  const r = validateBlueprint(b);
+  assert.equal(r.ok, false, 'fanout 升 Human Decision 应拒绝');
+  assert.ok(r.errors.some((e) => (e.fieldKey || '').includes('fan') || String(e.message).includes('fanout')), JSON.stringify(r.errors));
+});
+
+test('#116 使用 Human Decision 的新蓝图携带 approved 被拒', () => {
+  const top = hdClone();
+  top.approved = true;
+  const r1 = validateBlueprint(top);
+  assert.equal(r1.ok, false);
+  assert.ok(r1.errors.some((e) => e.fieldKey === 'approved' || String(e.message).includes('approved')), JSON.stringify(r1.errors));
+
+  const node = hdClone();
+  node.nodes[0].approved = false;
+  const r2 = validateBlueprint(node);
+  assert.equal(r2.ok, false);
+  assert.ok(r2.errors.some((e) => String(e.fieldKey || '').includes('approved') || String(e.message).includes('approved')), JSON.stringify(r2.errors));
+});
+
+test('#116 额度耗尽默认控制选项可覆盖但不可删到零', () => {
+  const subset = hdClone();
+  subset.humanDecision = { maxRoundsReachedOptions: ['STOP'] };
+  assert.equal(validateBlueprint(subset).ok, true, JSON.stringify(validateBlueprint(subset).errors));
+
+  const empty = hdClone();
+  empty.humanDecision = { maxRoundsReachedOptions: [] };
+  const r = validateBlueprint(empty);
+  assert.equal(r.ok, false);
+  assert.equal(r.errors.some((e) => e.fieldKey === 'humanDecision:maxRoundsReachedOptions'), true, JSON.stringify(r.errors));
+});
+
+test('#116 HD 与 manualCheck 同图拒绝；出边 result 不得占用控制类 Result 名', () => {
+  const mixed = hdClone();
+  mixed.nodes[0].manualCheck = true;
+  const r1 = validateBlueprint(mixed);
+  assert.equal(r1.ok, false);
+  assert.ok(r1.errors.some((e) => String(e.message).includes('manualCheck')), JSON.stringify(r1.errors));
+
+  const ctrl = hdClone();
+  const hdOut = ctrl.edges.find((e) => e.from === '$human-decision');
+  hdOut.result = 'STOP';
+  const r2 = validateBlueprint(ctrl);
+  assert.equal(r2.ok, false);
+  assert.ok(r2.errors.some((e) => String(e.fieldKey || '').endsWith(':result')), JSON.stringify(r2.errors));
 });
