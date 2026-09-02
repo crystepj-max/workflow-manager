@@ -26,8 +26,8 @@ workflow 编排脚本（.generated/dev-workflow-2-0/script.mjs——单一编译
    │
    ▼
 主会话呈 acceptance-summary.md → ask_user_question 人工裁决（AI 不代签）
-   ├─ 通过 → workflow(entry=closeout) → 收口 agent（一致性收口 + 推送/合并 PR + 关闭 issue）→ DONE
-   └─ 不通过 → workflow(entry=dev, feedback=人工意见, startRound+1) → 继续开发循环
+   ├─ 通过 → 以门禁节点为 entry + approved=true 续跑（只走 success；下游是否收口由蓝图决定）
+   └─ 不通过 → 仍以同一门禁节点续跑并带意见；引擎对非 true（含 false）再挂起，不走 failure
 ```
 
 - **人机职责边界**：人工只做两个决策——确认需求（issue 三要素）与验收裁决；
@@ -101,7 +101,7 @@ gh issue view <N> --json title,body,comments
 
 | 返回 status | 含义 | 主会话动作 |
 |---|---|---|
-| `AWAITING_HUMAN_<节点id>`（如 `AWAITING_HUMAN_accept`） | 门禁节点产出后挂起 | 呈报告 + 人工确认卡：通过 → `entry=<节点id>` + `approved=true` 续跑；不通过 → `entry=dev` + `feedback` + `startRound+1` 续跑（返回体含 `resume` 载荷） |
+| `AWAITING_HUMAN_<节点id>`（如 `AWAITING_HUMAN_accept`） | 门禁节点产出后挂起 | 呈报告 + 人工确认卡：通过 → 以该门禁节点为 entry 且 `approved=true` 续跑（只走 success）；非 true（含 false）→ 仍以同一门禁节点续跑，引擎再挂起，不走 failure（返回体含 `resume` 载荷）。不要手写跳到开发或收口节点。 |
 | `FAILED_AT_<节点id>`（如 `FAILED_AT_dispatch`） | 节点未通过且走 failure 边至终点（含三要素缺失、dev 受阻） | 呈节点结果（dispatch 场景含 `missing`/`reason` 三要素判定；dev 受阻 = `status: "blocked"`），人工补齐后重跑对应 `entry` |
 | `FAILED_MAX_ROUNDS` | 超限（auto-reschedule 时含归因 `reschedule`） | 呈 reschedule（归因/拆分建议/人工介入建议）→ 人工决策拆分 |
 | `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` | 图缺陷（走通性违约的运行时兜底） | 检查蓝图（创作期由校验器「successCondition 必须有 failure 边」规则拦截） |
@@ -334,7 +334,7 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
 | `issueRef` | 可选 | issue 引用（如 `#7`）；无 issue 时用 `requirement` |
 | `issueTitle` / `issueBody` / `issueComments` | 可选 | issue 标题 / 正文 / 评论 |
 | `requirement` | 可选 | 原始需求文本（无 issue 时） |
-| `entry` | 可选 | 起点/续跑点，缺省 `dispatch`；续跑时指向被暂停的门禁节点（如 `accept`）或打回起点 `dev` |
+| `entry` | 可选 | 起点/续跑点，缺省 `dispatch`；残留门禁续跑时指向被暂停的门禁节点本身（如 `accept`），不要手写跳到开发或收口节点 |
 | `approved` | 续跑 | 人工裁决结果：`true` 表「通过」，放行门禁节点走 success 出边 |
 | `feedback` | 续跑 | 打回/续跑意见（验收不通过或审核打回时回传） |
 | `startRound` | 续跑 | 续跑起始轮次，回传上次返回值以保持 9 轮计数连续 |
@@ -350,9 +350,9 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
 `history` / `feedback`），主会话据此呈 `acceptance-summary.md` + 发人工确认卡（AI 不代签）：
 
 - **通过**：以 `entry=<节点id>` + `approved=true` 续跑（并回传 `startRound` / `history` /
-  `feedback`），门禁节点走 success 出边进入收口，最终 `DONE`；
-- **不通过**：以 `entry=dev` + `feedback=人工意见` + `startRound=上次+1` + `history` 续跑，
-  回到开发循环继续（9 轮上限计数连续）。
+  `feedback`）；引擎只走该节点 success 出边，下游是否收口由蓝图决定，手册不得指定下一跳；
+- **不通过**：仍以同一门禁节点续跑并带上意见；引擎对非 true（含 false）会再挂起，**不走
+  failure 边**。不要手写跳到开发或收口节点。
 
 ```jsonc
 // 首次运行：选内置模板，entry=dispatch 起（issue 字段为透传输入，与 workflow 工具同源）
@@ -364,7 +364,7 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
 { "templateId": "dev-workflow-2-0", "taskId": "req-1",
   "requirement": "把登录流程改为无密码邮箱验证码" }
 
-// 收到 AWAITING_HUMAN_accept 后，人工裁决「通过」→ 放行进入收口
+// 收到 AWAITING_HUMAN_accept 后，人工裁决「通过」→ 以门禁节点续跑（approved=true，只走 success）
 { "templateId": "dev-workflow-2-0", "taskId": "issue-7",
   "entry": "accept", "approved": true,
   "startRound": 1, "history": [], "feedback": "" }

@@ -158,6 +158,12 @@ test('#117 手写主会话手册同样不再写死这两跳', () => {
   assert.equal(handbook.includes('entry=dev'), false, '手册不得写死不通过 → entry=dev');
 });
 
+test('#117 主会话 README 不再写死不通过去开发或不经门禁去收口', () => {
+  const readme = readFileSync(path.join(here, '../../dsh/README.md'), 'utf8');
+  assert.equal(readme.includes('entry=closeout'), false, 'README 不得写死通过 → entry=closeout');
+  assert.equal(readme.includes('entry=dev'), false, 'README 不得写死不通过 → entry=dev');
+});
+
 // ── 候选四 T-IMP-14 · 原子写盘（失败零残留） ──
 const makeTmp = () => mkdtempSync(path.join(tmpdir(), 'vwf-skill-'))
 const rmTmp = (dir) => { try { execFileSync('/bin/rm', ['-rf', dir]) } catch (e) {} }
