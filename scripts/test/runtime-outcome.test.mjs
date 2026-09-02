@@ -54,16 +54,19 @@ test('#73 OPTIMIZE 回执行后 PASS：countRound 消耗 1 点额度（未达上
   assert.equal(result.completion.type, 'EVALUATION_PASSED')
 })
 
-test('#127 CONFIRM → ROUTE_HALTED，保留 results，不发 WAITING_HUMAN', async () => {
+test('#127 CONFIRM → 翻译为 WAITING_HUMAN，保留 results，不把 ROUTE_HALTED 对外返回', async () => {
   const { result } = await runEngine(outcomeBp, {
     intake: { go: 'NEXT' },
     execute: { status: 'DONE' },
     evaluate: { verdict: 'CONFIRM', completion_type: 'pending' },
   })
-  assert.equal(result.status, 'ROUTE_HALTED')
-  assert.equal(result.reason, 'HUMAN_DECISION')
+  assert.equal(result.status, 'WAITING_HUMAN')
+  assert.equal(result.reason, 'ESCALATED_DECISION')
   assert.equal(result.node, 'evaluate')
   assert.equal(result.results.evaluate.verdict, 'CONFIRM')
+  assert.ok(result.decision_package)
+  assert.ok(result.decision_package.options.some((o) => o.id === 'USER_ACCEPTED'))
+  assert.equal(result.control_event.user_choice, null)
   assert.equal(result.completion, undefined)
 })
 
