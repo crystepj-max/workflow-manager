@@ -718,7 +718,8 @@ return {
       // runs 也可能无 rec（workflow/start 未投递）；此时状态由 tag.active 裁决，
       // 若 active 已解除（终态），绝不能假想仍在运行而误判占用。
       const status = rec ? rec.status : (hit.tag && hit.tag.lastStatus) || ''
-      const active = !staleRunning && ((hit.tag && hit.tag.active === true) || isActiveStatus(status))
+      const parkedHd = rec ? isParkedHumanDecisionRecord(rec) : false
+      const active = !staleRunning && ((hit.tag && hit.tag.active === true) || isActiveStatus(status) || parkedHd)
       return active ? { runId: hit.runId, status: status || 'running' } : null
     }
     function supersedeParked(taskId, newRunId) {
@@ -726,7 +727,7 @@ return {
         if (rid === newRunId || !tag || tag.taskId !== taskId || tag.supersededBy) continue
         const rec = runs.get(rid)
         const parked = rec
-          ? isHumanWaitStatus(rec.status)
+          ? (isHumanWaitStatus(rec.status) || isParkedHumanDecisionRecord(rec))
           : isHumanWaitStatus(tag.lastStatus)
         if (parked) {
           tag.supersededBy = newRunId
@@ -905,7 +906,7 @@ return {
         const tag = runTags.get(v.id)
         const status = rec ? rec.status : (tag && tag.lastStatus) || ''
         const unsuperseded = !(tag && tag.supersededBy)
-        if (unsuperseded && isActiveStatus(status)) continue
+        if (unsuperseded && (isActiveStatus(status) || isParkedHumanDecisionRecord(rec))) continue
         const r = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{force:true})", p.runsDir + '/' + v.file])
         if (r.ok) runsDiskIndex.delete(v.file)
         else console.log('[vwf] 运行记录淘汰删除失败：' + v.file + '：' + r.detail)
@@ -1763,10 +1764,10 @@ return {
           const blocker = taskMutexBlocker(String((args && args.taskId) || ''))
           if (blocker) {
             const st = String(blocker.status || '')
+            let rec = runs.get(blocker.runId)
+            if (!rec) rec = await loadRunFromDisk(blocker.runId)
             let allow = false
-            if (st === 'WAITING_HUMAN') {
-              let rec = runs.get(blocker.runId)
-              if (!rec) rec = await loadRunFromDisk(blocker.runId)
+            if (st === 'WAITING_HUMAN' || isParkedHumanDecisionRecord(rec)) {
               const parkedId = rec && rec.decisionId ? String(rec.decisionId) : ''
               allow = isHdResume && (!parkedId || parkedId === String(args.decision_id))
             } else if (st.indexOf('AWAITING_HUMAN_') === 0) {

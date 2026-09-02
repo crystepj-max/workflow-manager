@@ -593,6 +593,52 @@ test('#119 迟到 workflow/end 不得盖掉 WAITING_HUMAN；空 results 续跑�
   await p2
 })
 
+test('#119 迟到 completed 落盘的 HD 仍占互斥，禁止无 decision_id 新开', async () => {
+  const engA = makeEngine()
+  const a = engineEnv(engA)
+  const wfRunA = a.definedTools.find((t) => t.name === 'wf_run')
+  const pkg = { why: '等人', current_state: '待拍板', options: [{ id: 'STOP' }], subsequent_effects: { STOP: '停' } }
+  const outcome = { status: 'confirm', why: '需要你决定是否发版', current_state: '改动已齐，待拍板' }
+  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'hd-stale-completed' })
+  await until(() => engA.starts.length >= 1, 'A 启动')
+  a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(engA, a.events, 'run-1', 'WAITING_HUMAN', {
+    decision_id: 'hd-stale-completed:work:0',
+    reason: 'ESCALATED_DECISION',
+    node: 'work',
+    decision_package: pkg,
+    results: { work: outcome },
+    control_event: { record_kind: 'DECISION', decision_id: 'hd-stale-completed:work:0', triggering_node_outcome: outcome },
+  })
+  await p1
+  await drain()
+  const onDisk = readRun(a.fs, 'run-1')
+  onDisk.status = 'completed'
+  a.fs._files.set(RUNS_DIR + '/run-1.json', JSON.stringify(onDisk, null, 2) + '\n')
+
+  const engB = makeEngine('rb-')
+  const b = loadHost({
+    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
+  })
+  await until(async () => (await call(b.handlers, 'vwf.state', { runId: 'run-1' })).found, 'B 回载 completed HD')
+  const wfRunB = b.definedTools.find((t) => t.name === 'wf_run')
+  const blocked = await wfRunB.execute({ templateId: 'dev-workflow-2-0', taskId: 'hd-stale-completed' })
+  assert.equal(typeof blocked, 'string')
+  assert.match(String(blocked), /串行互斥/)
+  assert.equal(engB.starts.length, 0, '无 decision_id 不得新开')
+
+  const p2 = wfRunB.execute({
+    templateId: 'dev-workflow-2-0', taskId: 'hd-stale-completed',
+    decision_id: 'hd-stale-completed:work:0', user_choice: 'STOP',
+  })
+  await until(() => engB.starts.length >= 1, '带 decision_id 续跑')
+  assert.equal(engB.starts[0].args.results.work.status, 'confirm')
+  b.events.get('workflow/start')({ id: 'rb-1', meta: { name: 'x' } })
+  settleRun(engB, b.events, 'rb-1', 'STOPPED', { decision_id: 'hd-stale-completed:work:0', user_choice: 'STOP', results: engB.starts[0].args.results })
+  await p2
+})
+
 function freezeArgs(value) {
   if (value && typeof value === 'object') {
     Object.freeze(value)
