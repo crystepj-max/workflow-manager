@@ -152,6 +152,11 @@ test('#117 生成 skill 不再写死不通过去开发或不经门禁去收口',
   assert.equal(/不通过\s*→\s*entry=dev/.test(skill), false);
 });
 
+test('#119 coerceStructured 仅对 object/array schema 解析 JSON 字符串', () => {
+  const { script } = compileBlueprint(bp);
+  assert.equal(script.includes("if (root !== 'object' && root !== 'array') return v"), true);
+});
+
 test('#117 手写主会话手册同样不再写死这两跳', () => {
   const handbook = readFileSync(path.join(here, '../../dsh/skill/SKILL.md'), 'utf8');
   assert.equal(handbook.includes('entry=closeout'), false, '手册不得写死通过 → entry=closeout');
