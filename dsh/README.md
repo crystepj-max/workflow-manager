@@ -84,12 +84,13 @@ gh issue view <N> --json title,body,comments
 {
   "taskId": "issue-12",                 // 必填，任务标识
   "runDir": ".agent-runs/issue-12",     // 必填，run 产物目录（相对目标仓库根）
-  "entry": "dispatch",                  // 首次 = 蓝图入口；续跑 = 门禁节点 id（accept）或打回起点（dev）
+  "entry": "dispatch",                  // 首次 = 蓝图入口；残留门禁续跑 = 被暂停的门禁节点 id（如 accept）
   "issueRef": "#12", "issueTitle": "...", "issueBody": "...", "issueComments": "...",
   // 或 "requirement": "...(直接需求文本)",
   "roleDir": "dsh/roles",               // 可选，角色提示词目录（相对工作区根）
   // —— 续跑专用（AWAITING_HUMAN_<节点id> 后回传返回值）——
-  "approved": true, "startRound": 3, "feedback": "人工验收不通过意见 / 打回原因",
+  // 仅人工「通过」时 approved=true；不通过不要设 true，仍以同一门禁节点续跑
+  "approved": true, "startRound": 3, "feedback": "",
   "history": [ { "round": 1, "stage": "review", "verdict": "REQUEST_CHANGES", "reason": "..." } ]
 }
 ```

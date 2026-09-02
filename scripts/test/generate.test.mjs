@@ -162,6 +162,8 @@ test('#117 主会话 README 不再写死不通过去开发或不经门禁去收�
   const readme = readFileSync(path.join(here, '../../dsh/README.md'), 'utf8');
   assert.equal(readme.includes('entry=closeout'), false, 'README 不得写死通过 → entry=closeout');
   assert.equal(readme.includes('entry=dev'), false, 'README 不得写死不通过 → entry=dev');
+  assert.equal(/打回起点\s*[（(]dev[）)]/.test(readme), false, '不得用自然语言写打回起点（dev）');
+  assert.equal(/approved:\s*true[\s\S]{0,80}不通过/.test(readme), false, '不得把 approved:true 与不通过意见写进同一续跑示例');
 });
 
 // ── 候选四 T-IMP-14 · 原子写盘（失败零残留） ──
