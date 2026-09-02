@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -16,6 +17,169 @@ import { spawn, spawnSync } from 'node:child_process'
 import test from 'node:test'
 
 const scriptPath = fileURLToPath(new URL('../dev-plugin.mjs', import.meta.url))
+
+test('开发启动可显式使用 DSH 测试替身，不依赖 PATH', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-command-'))
+  try {
+    const bin = join(root, 'bin')
+    const markerPath = join(root, 'spawned')
+    const devHome = join(root, 'dev-home')
+    const productHome = join(root, 'product-home')
+    const dshPath = join(root, 'fake-dsh')
+    mkdirSync(bin)
+    writeFileSync(dshPath, `#!/bin/sh
+: > '${markerPath}'
+exit 0
+`)
+    chmodSync(dshPath, 0o755)
+
+    const result = spawnSync(process.execPath, [scriptPath, 'start'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: bin,
+        VWF_DEV_DSH_BIN: dshPath,
+        VWF_DEV_DSH_HOME: devHome,
+        VWF_PRODUCT_DSH_HOME: productHome,
+        DSH_HOME: undefined,
+      },
+    })
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(existsSync(markerPath), true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('PID 文件缺失时发现并接管同一开发 Home 的现有 DSH', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-discovery-'))
+  try {
+    const bin = join(root, 'bin')
+    const markerPath = join(root, 'spawned')
+    const devHome = join(root, 'dev-home')
+    const productHome = join(root, 'product-home')
+    const dshPath = join(root, 'fake-dsh')
+    const lsofPath = join(root, 'fake-lsof')
+    mkdirSync(bin)
+    writeFileSync(dshPath, `#!/bin/sh
+: > '${markerPath}'
+exit 0
+`)
+    writeFileSync(lsofPath, `#!/bin/sh
+case "$*" in
+  *-iTCP*) printf 'p${process.pid}\\ncnode\\nf19\\nn127.0.0.1:53202\\n' ;;
+  *) printf 'p${process.pid}\\ncnode\\nf20\\nn${devHome}/settings.yaml\\nf21\\nn${devHome}/profiles/web/cordis.yml\\nf22\\nn${devHome}/profiles/web/package.json\\n' ;;
+esac
+`)
+    chmodSync(dshPath, 0o755)
+    chmodSync(lsofPath, 0o755)
+
+    const result = spawnSync(process.execPath, [scriptPath, 'start'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: bin,
+        VWF_DEV_DSH_BIN: dshPath,
+        VWF_DEV_LSOF_BIN: lsofPath,
+        VWF_DEV_DSH_HOME: devHome,
+        VWF_PRODUCT_DSH_HOME: productHome,
+        DSH_HOME: undefined,
+      },
+    })
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /已发现.*无需重复启动/)
+    assert.equal(existsSync(markerPath), false)
+    assert.equal(
+      Number(readFileSync(join(devHome, '.vwf-dev-dsh.pid'), 'utf8').trim()),
+      process.pid,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('发现多个同一开发 Home 的 DSH 时停止启动', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-multiple-'))
+  try {
+    const markerPath = join(root, 'spawned')
+    const devHome = join(root, 'dev-home')
+    const productHome = join(root, 'product-home')
+    const dshPath = join(root, 'fake-dsh')
+    const lsofPath = join(root, 'fake-lsof')
+    writeFileSync(dshPath, `#!/bin/sh
+: > '${markerPath}'
+exit 0
+`)
+    writeFileSync(lsofPath, `#!/bin/sh
+case "$*" in
+  *-iTCP*) printf 'p${process.pid}\\ncnode\\nf19\\nn127.0.0.1:53202\\np${process.ppid}\\ncnode\\nf19\\nn127.0.0.1:57160\\n' ;;
+  *) printf 'n${devHome}/profiles/web/cordis.yml\\nn${devHome}/profiles/web/package.json\\n' ;;
+esac
+`)
+    chmodSync(dshPath, 0o755)
+    chmodSync(lsofPath, 0o755)
+
+    const result = spawnSync(process.execPath, [scriptPath, 'start'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        VWF_DEV_DSH_BIN: dshPath,
+        VWF_DEV_LSOF_BIN: lsofPath,
+        VWF_DEV_DSH_HOME: devHome,
+        VWF_PRODUCT_DSH_HOME: productHome,
+        DSH_HOME: undefined,
+      },
+    })
+
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /检测到多个使用开发 Home 的 DSH/)
+    assert.equal(existsSync(markerPath), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('PID 文件指向非开发 DSH 进程时不复用', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-stale-pid-'))
+  try {
+    const markerPath = join(root, 'spawned')
+    const devHome = join(root, 'dev-home')
+    const productHome = join(root, 'product-home')
+    const dshPath = join(root, 'fake-dsh')
+    const lsofPath = join(root, 'fake-lsof')
+    mkdirSync(devHome)
+    writeFileSync(join(devHome, '.vwf-dev-dsh.pid'), `${process.pid}\n`)
+    writeFileSync(dshPath, `#!/bin/sh
+: > '${markerPath}'
+exit 0
+`)
+    writeFileSync(lsofPath, `#!/bin/sh
+exit 0
+`)
+    chmodSync(dshPath, 0o755)
+    chmodSync(lsofPath, 0o755)
+
+    const result = spawnSync(process.execPath, [scriptPath, 'start'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        VWF_DEV_DSH_BIN: dshPath,
+        VWF_DEV_LSOF_BIN: lsofPath,
+        VWF_DEV_DSH_HOME: devHome,
+        VWF_PRODUCT_DSH_HOME: productHome,
+        DSH_HOME: undefined,
+      },
+    })
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /已使用隔离 Home 启动开发 DSH/)
+    assert.equal(existsSync(markerPath), true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test('开发 Home 为产品 Home 的符号链接时拒绝启动', () => {
   const root = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-symlink-'))
@@ -38,7 +202,7 @@ exit 0
       encoding: 'utf8',
       env: {
         ...process.env,
-        PATH: `${bin}:${process.env.PATH ?? ''}`,
+        VWF_DEV_DSH_BIN: dshPath,
         VWF_DEV_DSH_HOME: devHome,
         VWF_PRODUCT_DSH_HOME: productHome,
       },
@@ -71,7 +235,7 @@ exit 0
       encoding: 'utf8',
       env: {
         ...process.env,
-        PATH: `${bin}:${process.env.PATH ?? ''}`,
+        VWF_DEV_DSH_BIN: dshPath,
         VWF_DEV_DSH_HOME: devHome,
         VWF_PRODUCT_DSH_HOME: productHome,
         DSH_HOME: undefined,
@@ -99,9 +263,13 @@ test('PID 文件记录分离的 DSH 子进程，启动器结束后仍能识别�
     const devHome = join(root, 'dev-home')
     const productHome = join(root, 'product-home')
     const dshPath = join(bin, 'dsh')
+    const lsofPath = join(root, 'fake-lsof')
+    mkdirSync(devHome)
+    const canonicalDevHome = realpathSync(devHome)
     const env = {
       ...process.env,
-      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      VWF_DEV_DSH_BIN: dshPath,
+      VWF_DEV_LSOF_BIN: lsofPath,
       VWF_DEV_DSH_HOME: devHome,
       VWF_PRODUCT_DSH_HOME: productHome,
       DSH_HOME: undefined,
@@ -109,9 +277,19 @@ test('PID 文件记录分离的 DSH 子进程，启动器结束后仍能识别�
     mkdirSync(bin)
     writeFileSync(dshPath, `#!/bin/sh
 echo $$ > '${fakePidPath}'
-sleep 30
+/bin/sleep 30
+`)
+    writeFileSync(lsofPath, `#!/bin/sh
+if [ -f '${fakePidPath}' ]; then
+  pid=$(/bin/cat '${fakePidPath}')
+  case "$*" in
+    *-iTCP*) printf 'p%s\\ncnode\\nf19\\nn127.0.0.1:54321\\n' "$pid" ;;
+    *) printf 'p%s\\ncnode\\nf20\\nn${canonicalDevHome}/profiles/web/cordis.yml\\nf21\\nn${canonicalDevHome}/profiles/web/package.json\\n' "$pid" ;;
+  esac
+fi
 `)
     chmodSync(dshPath, 0o755)
+    chmodSync(lsofPath, 0o755)
 
     const launcher = spawn(process.execPath, [scriptPath, 'start'], {
       cwd: root,
