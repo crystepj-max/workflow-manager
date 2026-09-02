@@ -2,16 +2,33 @@
 
 ## 项目结构与模块组织
 
-- `templates/` 存放工作流蓝图，是项目唯一的事实来源。
-- `scripts/` 存放生成、校验、运行排练和测试相关内容。
+- `templates/` 存放当前 main 已实现的具体 Workflow Blueprint，是“当前已实现 Workflow 定义”的唯一事实来源；它不代表尚未完成的版本目标规格。
+- `scripts/` 存放生成、校验、运行排练、测试，以及建设工作流证据记录与校验相关内容。
 - `packages/dsh-visual-workflow/` 存放可视化工作流插件：`src/` 为运行内容，`tests/` 为测试，`docs/` 为迁移说明。
-- `dsh/` 存放角色说明、技能和安装脚本。
-- `docs/design/` 与 `docs/research/` 存放设计契约和研究资料；`wayfinder/` 存放决策与任务记录。
+- `dsh/` 存放角色说明、Skill、安装脚本，以及建设工作流 Bootstrap / Dogfood 相关资产。
+- `docs/design/` 与 `docs/research/` 存放设计契约、长期设计原则、当前版本目标规格和研究资料；`specs/` 存放正式规格 / OpenSpec；`wayfinder/` 存放决策与任务记录。
 - `.generated/` 是自动生成的结果目录，已被 Git 忽略。禁止直接修改；应先修改蓝图，再重新生成。
+
+### 权威资料与 Current / Target 边界
+
+- `docs/design/workflow-design-principles.md` 是跨版本长期工作流设计原则的方法论权威。
+- `docs/design/workflow-manager-v0.1-final-product-spec.md` 是当前 v0.1 的 Target（目标规格）权威；目标规格不等于 main 已经实现。
+- Current（当前实现）以实际 `main` 为准；`CONTEXT.md` 描述当前实现术语与兼容语义，`templates/` 只定义当前已实现的具体 Workflow。
+- `roadmap.md` 负责版本顺序、实施依赖和阶段主线，不替代产品规格，也不证明某项能力已经进入 main。
+- GitHub Issue / PR 负责具体施工范围、迁移、验收和状态记录，不得反向覆盖长期原则、版本目标规格或已进入 main 的事实。
+- 实施、Review 和验收必须明确自己是在维护 Current 兼容基线，还是实现 Target 目标规格；两者存在差异属于正常迁移状态，不得静默混用，也不得用当前旧定义否定目标规格，或把尚未完成的目标规格当成已上线能力。
 
 ## 构建、测试与开发命令
 
-以下命令均在仓库根目录执行：
+以下命令均在仓库根目录执行。
+
+干净环境首次验证前使用 Node.js 24，并先在仓库根目录完成依赖安装；已有完整依赖环境时无需重复安装：
+
+```bash
+npm install
+```
+
+然后运行所需命令：
 
 ```bash
 npm run generate   # 根据 templates/*.json 重新生成结果
@@ -80,4 +97,4 @@ npm test
 
 ## 配置与安全
 
-不要提交凭据、本地 DSH 状态、`.agent-runs/`、`.scratch/`、`node_modules/` 或自动生成的结果。出现不一致时，以 `templates/` 和已记录的项目契约为准。
+不要提交凭据、本地 DSH 状态、`.agent-runs/`、`.scratch/`、`node_modules/` 或自动生成的结果。出现不一致时，应按“权威资料与 Current / Target 边界”判断对应事实来源；不得笼统以 `templates/` 覆盖长期原则、目标规格或实际 main 状态。
