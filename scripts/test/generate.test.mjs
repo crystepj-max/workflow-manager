@@ -163,6 +163,21 @@ test('#117 手写主会话手册同样不再写死这两跳', () => {
   assert.equal(handbook.includes('entry=dev'), false, '手册不得写死不通过 → entry=dev');
 });
 
+test('#117 主会话 README 不再写死不通过去开发或不经门禁去收口', () => {
+  const readme = readFileSync(path.join(here, '../../dsh/README.md'), 'utf8');
+  // 允许 JSONC `"approved":` 与裸 `approved:`；80 字符窗口覆盖同一续跑示例行
+  const staleApprovedWithReject = /approved"?\s*:\s*true[\s\S]{0,80}不通过/;
+  assert.equal(
+    staleApprovedWithReject.test('"approved": true, "startRound": 3, "feedback": "人工验收不通过意见"'),
+    true,
+    '断言须能抓到带引号的 JSONC 键名',
+  );
+  assert.equal(readme.includes('entry=closeout'), false, 'README 不得写死通过 → entry=closeout');
+  assert.equal(readme.includes('entry=dev'), false, 'README 不得写死不通过 → entry=dev');
+  assert.equal(/打回起点\s*[（(]dev[）)]/.test(readme), false, '不得用自然语言写打回起点（dev）');
+  assert.equal(staleApprovedWithReject.test(readme), false, '不得把 approved:true 与不通过意见写进同一续跑示例');
+});
+
 // ── 候选四 T-IMP-14 · 原子写盘（失败零残留） ──
 const makeTmp = () => mkdtempSync(path.join(tmpdir(), 'vwf-skill-'))
 const rmTmp = (dir) => { try { execFileSync('/bin/rm', ['-rf', dir]) } catch (e) {} }
