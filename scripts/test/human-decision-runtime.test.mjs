@@ -18,6 +18,7 @@ const {
 const here = path.dirname(fileURLToPath(import.meta.url))
 const hd = JSON.parse(readFileSync(path.join(here, 'fixtures/human-decision-blueprint.json'), 'utf8'))
 const mini = JSON.parse(readFileSync(path.join(here, 'fixtures/hello-blueprint.json'), 'utf8'))
+const outcomeHd = JSON.parse(readFileSync(path.join(here, 'fixtures/outcome-evaluate-mini.json'), 'utf8'))
 
 const runHd = (table, args = {}, bp = hd) => {
   const { script } = compileBlueprint(bp)
@@ -98,6 +99,25 @@ test('#118 测试注入 ROUTE_HALTED 同样翻译为 WAITING_HUMAN', async () =>
   assert.equal(result.status, 'WAITING_HUMAN')
   assert.equal(result.reason, 'ESCALATED_DECISION')
   assert.equal(result.node, 'work')
+})
+
+test('#118 新模式 outcomePath 命中 $human-decision 翻译为 WAITING_HUMAN（不靠 injectHalt）', async () => {
+  const { result } = await runHd({
+    intake: { go: 'NEXT' },
+    execute: { status: 'DONE' },
+    evaluate: { verdict: 'CONFIRM', completion_type: 'pending' },
+  }, { taskId: 'hd-outcome' }, outcomeHd)
+  assert.equal(result.status, 'WAITING_HUMAN')
+  assert.equal(result.reason, 'ESCALATED_DECISION')
+  assert.equal(result.node, 'evaluate')
+  assert.equal(result.results.evaluate.verdict, 'CONFIRM')
+  for (const key of HD_PACKAGE_REQUIRED) {
+    assert.ok(result.decision_package && result.decision_package[key], 'Package 缺 ' + key)
+  }
+  assert.ok(result.decision_package.options.some((o) => o.id === 'USER_ACCEPTED'))
+  assert.equal(result.control_event.record_kind, 'DECISION')
+  assert.equal(result.control_event.user_choice, null)
+  assert.equal(result.control_event.triggering_node_outcome.verdict, 'CONFIRM')
 })
 
 test('#119 选择写入追加控制面事件且不改原 decision_id', async () => {
