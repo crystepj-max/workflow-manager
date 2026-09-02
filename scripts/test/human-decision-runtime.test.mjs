@@ -181,8 +181,11 @@ test('#119 STOP 后本 Run 不再执行；不派生新 Run', async () => {
     results: halt.result.results,
   })
   assert.equal(r2.result.status, 'STOPPED')
+  assert.equal(r2.result.taskId, halt.result.taskId)
   assert.equal(r2.result.decision_id, halt.result.decision_id)
   assert.deepEqual(r2.result.results.work.status, 'confirm')
+  assert.equal(r2.result.spawned_run, undefined)
+  assert.equal(r2.result.new_run_id, undefined)
   assert.ok(!r2.agentCalls.some((c) => c.label === '收口'), 'STOP 不得续跑下游')
 })
 
@@ -195,6 +198,8 @@ test('#119 USER_ACCEPTED 完成且不把原 Outcome 改成 PASS', async () => {
     results: halt.result.results,
   })
   assert.equal(r2.result.status, 'DONE')
+  assert.equal(r2.result.completion, null)
+  assert.deepEqual(r2.result.results.work, halt.result.results.work)
   assert.equal(r2.result.results.work.status, 'confirm')
   assert.notEqual(r2.result.results.work.status, 'PASS')
   assert.ok(!r2.agentCalls.some((c) => c.label === '收口'))
@@ -225,6 +230,38 @@ test('#119 ADD_BUDGET 保留原 Outcome 并从被拦边续跑', async () => {
   assert.equal(r2.result.control_event.user_choice, 'ADD_BUDGET')
   assert.equal(r2.result.control_event.subsequent_path, 'finish')
   assert.equal(r2.result.control_event.decision_id, halt.result.decision_id)
+})
+
+test('#119 运行时禁止把默认控制选项删光', async () => {
+  const emptyCfg = JSON.parse(JSON.stringify(hd))
+  emptyCfg.humanDecision = { maxRoundsReachedOptions: [] }
+  const compiled = await runHd({ 执行: workOk }, {
+    injectHalt: {
+      node: 'work',
+      reason: 'MAX_ROUNDS_REACHED',
+      blocked_edge: { from: 'work', to: 'finish', on: 'success' },
+    },
+  }, emptyCfg)
+  assert.notEqual(compiled.result.status, 'WAITING_HUMAN')
+  assert.equal(compiled.result.status, 'ERROR')
+  assert.match(String(compiled.result.detail || ''), /删光/)
+
+  const emptyPkg = await runHd({ 执行: workOk }, {
+    injectHalt: {
+      node: 'work',
+      reason: 'MAX_ROUNDS_REACHED',
+      blocked_edge: { from: 'work', to: 'finish', on: 'success' },
+      decision_package: {
+        why: '额度耗尽',
+        current_state: '待决策',
+        options: [],
+        subsequent_effects: {},
+      },
+    },
+  })
+  assert.notEqual(emptyPkg.result.status, 'WAITING_HUMAN')
+  assert.equal(emptyPkg.result.status, 'ERROR')
+  assert.match(String(emptyPkg.result.detail || ''), /删光/)
 })
 
 test('#121 业务 Result 沿蓝图 $human-decision 出边续跑且不改写原 Outcome', async () => {

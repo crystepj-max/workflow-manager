@@ -24,7 +24,7 @@
 | `onMaxRounds` | 可选 | `'return'`（默认）\| `'auto-reschedule'` | DSH 增强：超限自动回调度做失败归因（D4）；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
 | `heteroCheck` | 可选 | 布尔，默认 false | DSH 增强：注入 dev↔review 异源运行日志（T-06 定稿后：v2 起异源由 save/validate 全局强制，本字段退化为运行时日志开关）；置 true 时须存在 dev 与 review 节点；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
 | `bindings.models` | 可选 | 对象：`{ <nodeId>: {provider?, model?} }` | 模型绑定（D2 节点粒度）；键必须都是节点 id；缺省 = 宿主默认 |
-| `humanDecision.maxRoundsReachedOptions` | 可选 | 非空数组，元素 ∈ `USER_ACCEPTED` \| `ADD_BUDGET` \| `STOP` | 额度耗尽时展示的控制类 Result；**缺省 = 三项全开**；可覆盖为非空子集，**删到零则拒**（#116） |
+| `humanDecision.maxRoundsReachedOptions` | 可选 | 非空数组，元素 ∈ `USER_ACCEPTED` \| `ADD_BUDGET` \| `STOP` | 额度耗尽时展示的控制类 Result；**缺省 = 三项全开**；可覆盖为非空子集，**删到零则拒**（#116 校验；#119 运行时同样 fail-closed，不得挂起空目录） |
 | `nodes` | ✅ | 数组，≥1 | 见 2.2 |
 | `edges` | ✅ | 数组 | 见 2.3 |
 
