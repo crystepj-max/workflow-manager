@@ -395,6 +395,43 @@ test('#40 评审修复：回载窗口外的门禁保持互斥并可接管回写�
   await until(() => { try { return readRun(b.fs, 'gate-00').supersededBy === 'rb-1' } catch (e) { return false } }, '接管标记回写磁盘')
 })
 
+test('#119 回载窗口外 completed HD 幽灵记录仍占互斥', async () => {
+  const pkg = { why: '等人', current_state: '待拍板', options: [{ id: 'STOP' }], subsequent_effects: { STOP: '停' } }
+  const seed = {
+    [RUNS_DIR + '/hd-ghost.json']: seedRun('hd-ghost', {
+      status: 'completed', phase: 'work',
+      taskId: 'task-hd-ghost', workflowId: 'dev-workflow-2-0',
+      startedAt: 1000, updatedAt: 1000,
+      decision_id: 'task-hd-ghost:work:0',
+      decision_package: pkg,
+      results: { work: { status: 'confirm' } },
+      node: 'work',
+    }),
+  }
+  for (let i = 0; i < 25; i++) {
+    const id = 'fill-' + String(i).padStart(2, '0')
+    seed[RUNS_DIR + '/' + id + '.json'] = seedRun(id, {
+      status: 'DONE', phase: 'closeout',
+      taskId: 'task-fill-' + i, workflowId: 'dev-workflow-2-0',
+      startedAt: 8000 + i, updatedAt: 8000 + i,
+    })
+  }
+  const engB = makeEngine('rb-')
+  const b = env({ seed, extra: { workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
+  const wfRun = b.definedTools.find((t) => t.name === 'wf_run')
+  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'task-hd-ghost' })
+  assert.ok(String(blocked).includes('串行互斥'), '窗口外 completed HD 须占用：' + blocked)
+  const p2 = wfRun.execute({
+    templateId: 'dev-workflow-2-0', taskId: 'task-hd-ghost',
+    decision_id: 'task-hd-ghost:work:0', user_choice: 'STOP',
+  })
+  await until(() => engB.starts.length >= 1, '幽灵 completed HD 可 decision_id 续跑')
+  assert.equal(engB.starts[0].args.results.work.status, 'confirm')
+  b.events.get('workflow/start')({ id: 'rb-1', meta: { name: 'x' } })
+  settleRun(engB, b.events, 'rb-1', 'STOPPED')
+  await p2
+})
+
 test('#120 重启后 WAITING_HUMAN 仍占用，Package 可读取，decision_id 续跑接管', async () => {
   const engA = makeEngine()
   const a = engineEnv(engA)

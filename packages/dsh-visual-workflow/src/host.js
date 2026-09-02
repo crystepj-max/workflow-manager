@@ -683,10 +683,16 @@ return {
     }
     // workflow/end 只有 stopReason=completed，可能在 wf_run 回写 WAITING_HUMAN 之后才到达，
     // 把权威等待态盖掉；此时仍靠 decisionId + Package 识别可续跑的停机记录。
+    function isRecoverableCompletedHd(data) {
+      if (!data || String(data.status) !== 'completed') return false
+      const id = data.decisionId || data.decision_id
+      const pkg = data.decisionPackage || data.decision_package
+      return !!(id && pkg && typeof pkg === 'object')
+    }
     function isParkedHumanDecisionRecord(rec) {
       if (!rec) return false
       if (rec.status === 'WAITING_HUMAN') return true
-      return !!(rec.decisionId && rec.decisionPackage && String(rec.status) === 'completed')
+      return isRecoverableCompletedHd(rec)
     }
     async function parkedHumanDecision(taskId) {
       const hit = latestTagByTaskId(taskId)
@@ -718,7 +724,7 @@ return {
       // runs 也可能无 rec（workflow/start 未投递）；此时状态由 tag.active 裁决，
       // 若 active 已解除（终态），绝不能假想仍在运行而误判占用。
       const status = rec ? rec.status : (hit.tag && hit.tag.lastStatus) || ''
-      const parkedHd = rec ? isParkedHumanDecisionRecord(rec) : false
+      const parkedHd = rec ? isParkedHumanDecisionRecord(rec) : !!(hit.tag && hit.tag.parkedHd)
       const active = !staleRunning && ((hit.tag && hit.tag.active === true) || isActiveStatus(status) || parkedHd)
       return active ? { runId: hit.runId, status: status || 'running' } : null
     }
@@ -728,7 +734,7 @@ return {
         const rec = runs.get(rid)
         const parked = rec
           ? (isHumanWaitStatus(rec.status) || isParkedHumanDecisionRecord(rec))
-          : isHumanWaitStatus(tag.lastStatus)
+          : (isHumanWaitStatus(tag.lastStatus) || !!(tag && tag.parkedHd))
         if (parked) {
           tag.supersededBy = newRunId
           requestRunPersist(rid)
@@ -906,7 +912,7 @@ return {
         const tag = runTags.get(v.id)
         const status = rec ? rec.status : (tag && tag.lastStatus) || ''
         const unsuperseded = !(tag && tag.supersededBy)
-        if (unsuperseded && (isActiveStatus(status) || isParkedHumanDecisionRecord(rec))) continue
+        if (unsuperseded && (isActiveStatus(status) || isParkedHumanDecisionRecord(rec) || (tag && tag.parkedHd))) continue
         const r = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{force:true})", p.runsDir + '/' + v.file])
         if (r.ok) runsDiskIndex.delete(v.file)
         else console.log('[vwf] 运行记录淘汰删除失败：' + v.file + '：' + r.detail)
@@ -1018,7 +1024,7 @@ return {
         if (hydrated.has(it.id) || runs.has(it.id)) continue
         const d = it.data
         const st = typeof d.status === 'string' ? d.status : ''
-        if (!isHumanWaitStatus(st)) continue
+        if (!isHumanWaitStatus(st) && !isRecoverableCompletedHd(d)) continue
         if (typeof d.supersededBy === 'string' && d.supersededBy) continue
         if (!d.taskId && !d.workflowId) continue
         runTags.set(d.id, {
@@ -1028,6 +1034,7 @@ return {
           active: false,
           ghost: true,
           lastStatus: st,
+          parkedHd: isRecoverableCompletedHd(d),
         })
       }
       evictRunsSoon()
