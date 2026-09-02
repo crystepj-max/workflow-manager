@@ -24,7 +24,7 @@
 ```text
 record_id + record_revision
 kind
-body.media_type ∈ { application/json, text/markdown, text/plain }
+body.media_type ∈ { application/json, text/markdown, text/plain, text/html, application/vnd.workflow.canvas+json, application/vnd.workflow.flowchart+json, application/vnd.workflow.diagram+json }
 body.value            ← 不透明载体；覆盖判定不得读取
 dependencies[]        ← { record_id, record_revision }；覆盖判定的唯一依据
 based_on?             ← 主前驱，若出现则必须是 dependencies 中的一项

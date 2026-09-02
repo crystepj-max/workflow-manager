@@ -5,7 +5,7 @@
 //   dist/.src-stamp.json — 源码哈希戳，供 check-dist-fresh 校验「源码变更后必须重建」
 // 单一事实源仍是 src/*.js；本脚本只做形态包装，不做逻辑转换。
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -15,6 +15,7 @@ mkdirSync(dist, { recursive: true })
 
 const hostPath = join(root, 'src', 'host.js')
 const clientPath = join(root, 'src', 'client.js')
+const formalArtifactsSrc = join(root, '..', '..', 'scripts', 'formal-artifacts.cjs')
 const hostBody = readFileSync(hostPath, 'utf8')
 const clientBody = readFileSync(clientPath, 'utf8')
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
@@ -36,6 +37,7 @@ writeFileSync(
   `// bundle 位于 <repo>/packages/dsh-visual-workflow/dist/host-entry.mjs，向上 4 层即仓库根。\n` +
   `// 动态模式（cordis_define）无此常量，宿主代码 typeof 检查自动回落到 repoRoot()。\n` +
   `const __VWF_REPO_ROOT__ = (() => { try { return dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url))))) } catch (e) { return null } })();\n` +
+  `const __VWF_PLUGIN_ROOT__ = (() => { try { return dirname(dirname(fileURLToPath(import.meta.url))) } catch (e) { return null } })();\n` +
   `${hostBody}\n})();\n` +
   `export const name = plugin.name;\n` +
   // 静态组合包行级激活必须等 webServer 与 tools 就绪：无 inject 的行会在
@@ -63,6 +65,7 @@ writeFileSync(
 )
 
 writeFileSync(join(dist, '.src-stamp.json'), JSON.stringify(stamp, null, 2) + '\n')
+copyFileSync(formalArtifactsSrc, join(dist, 'formal-artifacts.cjs'))
 console.log('built:', join(dist, 'host-entry.mjs'))
 console.log('built:', join(dist, 'client.js'))
 console.log('stamp:', stamp.host.slice(0, 12), stamp.client.slice(0, 12))

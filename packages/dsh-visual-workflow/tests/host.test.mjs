@@ -1747,3 +1747,36 @@ test('#128 ROUTE_HALTED / ENDED_NO_OUTCOME_EDGE 回写为权威终态且释放�
   assert.equal(s2.state.status, 'ENDED_NO_OUTCOME_EDGE')
 })
 
+test('#69 Codex P1：正式安装仅从插件 dist/formal-artifacts.cjs 加载内核', async () => {
+  const formalArtifactsSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'formal-artifacts.cjs'), 'utf8')
+  const PLUGIN = '/plugin/pkg'
+  const fs = seedFs({
+    [PLUGIN + '/dist/formal-artifacts.cjs']: formalArtifactsSrc,
+  })
+  const { handlers, events } = loadHost({ fs, pluginRoot: PLUGIN })
+  events.get('workflow/start')({ id: 'run-art', meta: { name: 'artifact-test' } })
+  const res = await call(handlers, 'vwf.artifacts.ingest', {
+    runId: 'run-art',
+    nodeId: 'writer',
+    artifacts: [{ path: 'out/data.json', kind: 'json', content: '{"n":1}' }],
+  })
+  assert.equal(res.ok, true, res.errors && res.errors[0] && res.errors[0].message)
+  assert.equal(res.produced, 1)
+  assert.equal(res.formalRecords.length, 1)
+  assert.equal(res.formalRecords[0].body.value.n, 1)
+})
+
+test('#69 Codex P2：vwf.artifacts.ingest 拒绝 JSON 类缺 content', async () => {
+  const formalArtifactsSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'formal-artifacts.cjs'), 'utf8')
+  const fs = seedFs({ [REPO + '/scripts/formal-artifacts.cjs']: formalArtifactsSrc })
+  const { handlers, events } = loadHost({ fs })
+  events.get('workflow/start')({ id: 'run-bad', meta: {} })
+  const res = await call(handlers, 'vwf.artifacts.ingest', {
+    runId: 'run-bad',
+    nodeId: 'writer',
+    artifacts: [{ path: 'bad.json', kind: 'json' }],
+  })
+  assert.equal(res.ok, false)
+  assert.match(res.errors[0].message, /必填/)
+})
+
