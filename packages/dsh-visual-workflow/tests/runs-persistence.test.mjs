@@ -179,6 +179,61 @@ test('#40 AC1：重启后按原 runId 仍可查看终态/阶段/子代理表/日
   assert.ok(list.runs.some(r => r.id === 'run-1' && r.taskId === 'issue-77'), '回载记录进入运行清单')
 })
 
+test('#118 刷新后同一 taskId 仍能读到 WAITING_HUMAN 决策卡', async () => {
+  const engA = makeEngine()
+  const a = engineEnv(engA)
+  const wfRunA = a.definedTools.find(t => t.name === 'wf_run')
+  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-118' })
+  await until(() => engA.starts.length >= 1, 'A 启动')
+  a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'Human Decision' } })
+  const pkg = {
+    why: '需要人决定是否交付',
+    current_state: '实现已完成，待拍板',
+    options: [{ id: 'SHIP' }],
+    subsequent_effects: { SHIP: '选择 SHIP 后沿蓝图出边继续' },
+    cost: 'UNKNOWN',
+    benefit: 'UNKNOWN',
+    risk: 'UNKNOWN',
+    recommendation: 'UNKNOWN',
+  }
+  settleRun(engA, a.events, 'run-1', 'WAITING_HUMAN', {
+    decision_id: 'issue-118:work:0:1',
+    reason: 'ESCALATED_DECISION',
+    node: 'work',
+    decision_package: pkg,
+    control_event: {
+      record_kind: 'DECISION',
+      trigger: 'SYSTEM_REQUEST',
+      lifecycle_at_request: 'WAITING_HUMAN',
+      decision_id: 'issue-118:work:0:1',
+      user_choice: null,
+    },
+    results: { work: { status: 'confirm' } },
+  })
+  await p1
+  await drain()
+  const disk = readRun(a.fs, 'run-1')
+  assert.equal(disk.status, 'WAITING_HUMAN')
+  assert.equal(disk.taskId, 'issue-118')
+  assert.equal(disk.decision_id, 'issue-118:work:0:1')
+  assert.equal(disk.decision_package.why, pkg.why)
+  assert.equal(disk.control_event.user_choice, null)
+
+  const engB = makeEngine('rb-')
+  const b = loadHost({
+    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
+  })
+  let s = null
+  await until(async () => { s = await call(b.handlers, 'vwf.state', { runId: 'run-1' }); return s.found }, 'B 回载 run-1')
+  assert.equal(s.state.status, 'WAITING_HUMAN')
+  assert.equal(s.state.taskId, 'issue-118')
+  assert.equal(s.state.decision_id, 'issue-118:work:0:1')
+  assert.equal(s.state.reason, 'ESCALATED_DECISION')
+  assert.equal(s.state.decision_package.why, pkg.why)
+  assert.equal(s.state.control_event.user_choice, null)
+})
+
 test('#40：重启后 AWAITING_HUMAN 门禁继续保持同 taskId 互斥；entry 续跑接管并回写磁盘', async () => {
   const engA = makeEngine()
   const a = engineEnv(engA)

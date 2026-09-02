@@ -18,6 +18,7 @@ const {
 const here = path.dirname(fileURLToPath(import.meta.url))
 const hd = JSON.parse(readFileSync(path.join(here, 'fixtures/human-decision-blueprint.json'), 'utf8'))
 const mini = JSON.parse(readFileSync(path.join(here, 'fixtures/hello-blueprint.json'), 'utf8'))
+const outcomeHd = JSON.parse(readFileSync(path.join(here, 'fixtures/outcome-evaluate-mini.json'), 'utf8'))
 
 const runHd = (table, args = {}, bp = hd) => {
   const { script } = compileBlueprint(bp)
@@ -76,6 +77,36 @@ test('#118 Package 缺硬必填不得挂起；显式 UNKNOWN 仍可挂起', asyn
   assert.equal(result.decision_package.recommendation, 'UNKNOWN')
 })
 
+test('#118 Package 畸形 options / subsequent_effects 不得挂起', async () => {
+  const emptyOpt = await runHd({ 执行: workOk }, {
+    injectHalt: {
+      node: 'work',
+      decision_package: {
+        why: '需要人决定',
+        current_state: '待拍板',
+        options: [{}],
+        subsequent_effects: { SHIP: '沿出边继续' },
+      },
+    },
+  })
+  assert.notEqual(emptyOpt.result.status, 'WAITING_HUMAN')
+  assert.ok(String(emptyOpt.result.detail || emptyOpt.result.status).includes('Package') || emptyOpt.result.status === 'ERROR')
+
+  const nullFx = await runHd({ 执行: workOk }, {
+    injectHalt: {
+      node: 'work',
+      decision_package: {
+        why: '需要人决定',
+        current_state: '待拍板',
+        options: [{ id: 'SHIP' }],
+        subsequent_effects: { SHIP: null },
+      },
+    },
+  })
+  assert.notEqual(nullFx.result.status, 'WAITING_HUMAN')
+  assert.ok(String(nullFx.result.detail || nullFx.result.status).includes('Package') || nullFx.result.status === 'ERROR')
+})
+
 test('#118 无蓝图声明时运行时拒绝自行升级；残留 manualCheck 仍发 AWAITING_HUMAN_<id>', async () => {
   const undeclared = await runHd({ 执行: workOk, 收口: { done: true } }, {
     injectHalt: { node: 'finish', reason: 'ESCALATED_DECISION' },
@@ -98,6 +129,25 @@ test('#118 测试注入 ROUTE_HALTED 同样翻译为 WAITING_HUMAN', async () =>
   assert.equal(result.status, 'WAITING_HUMAN')
   assert.equal(result.reason, 'ESCALATED_DECISION')
   assert.equal(result.node, 'work')
+})
+
+test('#118 新模式 outcomePath 命中 $human-decision 翻译为 WAITING_HUMAN（不靠 injectHalt）', async () => {
+  const { result } = await runHd({
+    intake: { go: 'NEXT' },
+    execute: { status: 'DONE' },
+    evaluate: { verdict: 'CONFIRM', completion_type: 'pending' },
+  }, { taskId: 'hd-outcome' }, outcomeHd)
+  assert.equal(result.status, 'WAITING_HUMAN')
+  assert.equal(result.reason, 'ESCALATED_DECISION')
+  assert.equal(result.node, 'evaluate')
+  assert.equal(result.results.evaluate.verdict, 'CONFIRM')
+  for (const key of HD_PACKAGE_REQUIRED) {
+    assert.ok(result.decision_package && result.decision_package[key], 'Package 缺 ' + key)
+  }
+  assert.ok(result.decision_package.options.some((o) => o.id === 'USER_ACCEPTED'))
+  assert.equal(result.control_event.record_kind, 'DECISION')
+  assert.equal(result.control_event.user_choice, null)
+  assert.equal(result.control_event.triggering_node_outcome.verdict, 'CONFIRM')
 })
 
 test('#119 选择写入追加控制面事件且不改原 decision_id', async () => {
