@@ -3,7 +3,7 @@
 // 验证：同仓双 Run 并行隔离、integration lock 串行、workspace 现场绑定
 // 运行：node scripts/test/runtime-integration-e2e.mjs
 
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -76,14 +76,14 @@ function testDualRunIsolation() {
   if (branchB !== 'vwf/run/run-b') { console.error('Run B branch 错误:', branchB); return false }
   console.log('  ✓ branch 独立:', branchA, '|', branchB)
 
-  // 验证：A 写 source，B 不可见
+  // 验证：A 写 source，B 不可见（A4：RPC 只接收 Run 身份，由注册表解析权威 workspace）
   const writeA = runNode([hostScript, 'writeSourceFile', JSON.stringify({
-    workspace: wsA, rel: 'secret-a.txt', content: 'from-a',
+    logical_run_id: 'run-a', rel: 'secret-a.txt', content: 'from-a', work_root: workRoot,
   })])
   if (!writeA.ok) { console.error('Run A write 失败:', writeA.stderr); return false }
   const visibleInB = existsSync(join(wsB.source_path, 'secret-a.txt'))
   if (visibleInB) { console.error('Run A 的未提交文件对 B 可见！'); return false }
-  console.log('  ✓ A 的未提交文件对 B 不可见')
+  console.log('  ✓ A 的未提交文件对 B 不可见（RPC 经注册表解析）')
 
   // 验证：A 写 cache，B 不可见
   writeFileSync(join(wsA.resources.cache_dir, 'cache-a'), 'ca')
@@ -167,6 +167,63 @@ function testIntegrationLock() {
   return true
 }
 
+// ── 测试 2b（A1）：注册表跨进程串行——并发 acquireLock 只有一个成功 ──────
+// 两个独立进程同时抢同一把 integration lock，必须恰有一个成功、
+// 一个被拒（跨进程文件锁保证 load-modify-save 不后写覆盖先写）。
+function testConcurrentLock() {
+  console.log('\n━━ 测试 2b：注册表跨进程锁（并发 acquireLock 串行）━━')
+  const workRoot = mkdtempSync(join(fixtureRoot, 'conc-'))
+  const hostScript = join(dirname(fileURLToPath(import.meta.url)), '..', 'workspace-isolation-host.mjs')
+
+  // 并行 spawn 两个独立进程，不同 run/owner 抢同一 resource_key
+  function spawnAcquire(runId, owner) {
+    return new Promise((resolve) => {
+      const child = spawn(process.execPath, [hostScript, 'acquireLock', JSON.stringify({
+        logical_run_id: runId, resource_key: 'repo:org/demo:target:main:integration',
+        owner: owner, ttl_ms: 30000, work_root: workRoot,
+      })], { stdio: ['ignore', 'pipe', 'pipe'] })
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (d) => { stdout += d })
+      child.stderr.on('data', (d) => { stderr += d })
+      child.on('close', (code) => {
+        try { resolve({ ok: true, parsed: JSON.parse(stdout) }) }
+        catch (e) { resolve({ ok: false, error: String(stderr || stdout || e) }) }
+      })
+    })
+  }
+
+  return (async () => {
+    const [r1, r2] = await Promise.all([spawnAcquire('run-a', 'run-a'), spawnAcquire('run-b', 'run-b')])
+    const won = [r1, r2].filter(r => r.ok && r.parsed.ok && r.parsed.lock)
+    const lost = [r1, r2].filter(r => !r.ok || !r.parsed || !r.parsed.ok)
+    if (won.length !== 1 || lost.length !== 1) {
+      console.error('并发 acquireLock 应恰有一个成功一个被拒，实际:', JSON.stringify([r1, r2].map(r => r.ok && r.parsed ? r.parsed : r)))
+      return false
+    }
+    console.log('  ✓ 并发抢锁：' + won[0].parsed.lock.lock_id + ' 成功，另一个被拒（正确）')
+
+    // 释放后再次并发，仍应只有一个成功（锁状态跨进程一致）
+    await new Promise((resolve) => {
+      execFileSync(process.execPath, [hostScript, 'releaseLock', JSON.stringify({
+        lock_id: won[0].parsed.lock.lock_id, owner: won[0].parsed.lock.owner,
+        logical_run_id: won[0].parsed.lock.logical_run_id, reason: 'test', work_root: workRoot,
+      })], { encoding: 'utf-8', maxBuffer: 1024 * 1024 })
+      resolve()
+    })
+    const [r3, r4] = await Promise.all([spawnAcquire('run-c', 'run-c'), spawnAcquire('run-d', 'run-d')])
+    const won2 = [r3, r4].filter(r => r.ok && r.parsed.ok && r.parsed.lock)
+    if (won2.length !== 1) {
+      console.error('释放后并发抢锁应恰有一个成功，实际:', won2.length)
+      return false
+    }
+    console.log('  ✓ 释放后并发抢锁仍只有一个成功（注册表无后写覆盖）')
+
+    console.log('  ✅ 测试 2b 通过')
+    return true
+  })()
+}
+
 // ── 测试 3：Provider/Model Snapshot 变化不重建 workspace ─────────────────
 function testSnapshotUpdate() {
   console.log('\n━━ 测试 3：Provider/Model Snapshot 变化不重建 workspace ━━')
@@ -223,9 +280,9 @@ function testProofBinding() {
   if (!alloc.ok) { console.error('allocate 失败:', alloc.stderr); return false }
   const ws = JSON.parse(alloc.stdout).workspace
 
-  // 构建 provenance
+  // 构建 provenance（A4：Run 身份）
   const prov = runNode([hostScript, 'buildAttemptProvenance', JSON.stringify({
-    workspace: ws, node: 'review', attempt: 1,
+    logical_run_id: 'run-proof', node: 'review', attempt: 1, work_root: workRoot,
   })])
   if (!prov.ok) { console.error('buildAttemptProvenance 失败:', prov.stderr); return false }
   const provenance = JSON.parse(prov.stdout).provenance
@@ -263,7 +320,7 @@ function testProofBinding() {
     node: 'review', attempt: 1,
   }
   const bind = runNode([hostScript, 'assertProofBinding', JSON.stringify({
-    workspace: ws, proof: fakeProof,
+    logical_run_id: 'run-proof', proof: fakeProof, work_root: workRoot,
   })])
   if (!bind.ok) { console.error('assertProofBinding 调用失败:', bind.stderr); return false }
   const valid = JSON.parse(bind.stdout).valid
@@ -290,9 +347,15 @@ console.log('══════════════════════�
 let pass = 0
 let fail = 0
 
-for (const fn of [testDualRunIsolation, testIntegrationLock, testSnapshotUpdate, testProofBinding]) {
+for (const fn of [testDualRunIsolation, testIntegrationLock, testConcurrentLock, testSnapshotUpdate, testProofBinding]) {
   try {
-    if (fn()) pass++
+    const r = fn()
+    // async 测试（并发场景）返回 Promise：await 后按真实结果计分
+    if (r && typeof r.then === 'function') {
+      const ok = await r
+      if (ok) pass++
+      else fail++
+    } else if (r) pass++
     else fail++
   } catch (e) {
     console.error('  ❌ 异常:', e.message)

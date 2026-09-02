@@ -141,6 +141,20 @@ node scripts/test/runtime-integration-e2e.mjs
 - [ ] #14/#19 重做
 - [ ] construction-bootstrap shim 退役（#105）
 
+## Codex Round 1 修复（PR #150）
+
+PR #150 经 `/codex-review next` 发起 Codex Round 1，收到 5 条 P1/A 类阻塞意见，已全部修复：
+
+| # | 意见 | 修复 |
+|---|---|---|
+| A1 | 注册表 load-modify-save 跨进程竞争：并发 allocate/acquireLock 后写覆盖先写，integration lock 串行被破坏 | `workspace-isolation-host.mjs` 对全部注册表事务加跨进程文件锁（`openSync 'wx'` 排他 + stale 接管），落盘改临时文件 + `renameSync` 原子换入；新增 E2E 测试 2b 用并行 spawn 验证并发抢锁恰有一个成功 |
+| A2 | workspace 分配失败静默降级，隔离保证被关闭 | `wf_run` 分配失败 fail closed 拒绝启动；仅当包装脚本不存在（宿主未部署集成）回退旧行为 |
+| A3 | 节点提示仍宣称只允许在 RUNDIR 写文件，开发节点忽略 Runtime 分配的 source | `generate.mjs` `runtimeCtx` 明确「业务源码读写目录 = SOURCE（worktree 现场）」，records/run 产物分目录说明 |
+| A4 | RPC 信任调用方传入的 workspace 对象，可伪造路径越权写 | `vwf.workspace.*` 写操作只接收 Run 身份（logical_run_id/workspace_id），包装脚本内 `resolveWorkspaceFromRegistry` 从注册表解析权威 workspace |
+| A5 | lifecycle 映射只覆盖 3 态，cancelled/error 等终态把 workspace 永久留在 READY | 新增 `canonicalLifecycleFor`：人工等待→WAITING_HUMAN（保留态）、DONE→COMPLETED、STOPPED→STOPPED、其余失败/取消→FAILED |
+
+修复后回归：`npm test` 262 pass / 0 fail、`npm run validate` 全绿、E2E 5/5 通过。
+
 ---
 
 ## 架构图
@@ -163,8 +177,8 @@ DSH Host (vm 沙箱)
        └─ engine.start({ script, meta, args, parent })
                 └─ workflow 脚本节点
                      ├─ host.call('vwf.workspace.get', { taskId })
-                     ├─ host.call('vwf.workspace.writeSource', { workspace, rel, content })
-                     ├─ host.call('vwf.workspace.buildProvenance', { workspace, node, attempt })
+                     ├─ host.call('vwf.workspace.writeSource', { logical_run_id, rel, content })
+                     ├─ host.call('vwf.workspace.buildProvenance', { logical_run_id, node, attempt })
                      └─ host.call('vwf.workspace.acquireLock', { ... })
 ```
 
@@ -172,5 +186,5 @@ DSH Host (vm 沙箱)
 
 ## 提交记录
 
-1. `merge: 引入 PR#144 workspace isolation Core (#93)` — 合并 Core 到当前分支
-2. `feat(workflow): #93 DSH Runtime Integration — workspace 分配、RPC、编译脚本注入` — 本 Run 主要改动
+1. `feat(workflow): #93 DSH Runtime Integration — workspace 分配、RPC、编译脚本注入`（PR #150 首个提交，1ba8715）
+2. `fix(workflow): #93 Codex Round 1 A 类修复 — 跨进程锁、fail closed、RPC Run 身份、lifecycle 全覆盖`（新 HEAD）

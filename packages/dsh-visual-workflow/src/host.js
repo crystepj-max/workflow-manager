@@ -752,6 +752,20 @@ return {
       const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
       return TERMINAL_STATUS_RE.test(cand) ? cand : ''
     }
+    // #93 A5（Codex Round 1）：脚本终态 → Core LIFECYCLE 映射，覆盖全部终态。
+    // 人工等待（WAITING_HUMAN / AWAITING_HUMAN_*）→ 保留态；成功（DONE）→
+    // COMPLETED；显式 STOPPED → STOPPED；其余失败/取消（FAILED_*、
+    // TECHNICAL_FAILURE、ENDED_*、ROUTE_HALTED、ERROR、cancelled、error）→ FAILED。
+    // 返回 Core 的 LIFECYCLE 枚举值字符串，无法归类时返回 null（保持原状态）。
+    function canonicalLifecycleFor(canon, stopReason) {
+      if (canon === 'DONE') return 'COMPLETED'
+      if (canon === 'STOPPED') return 'STOPPED'
+      if (canon === 'WAITING_HUMAN' || canon.indexOf('AWAITING_HUMAN_') === 0) return 'WAITING_HUMAN'
+      if (canon) return 'FAILED'
+      // canon 为空：引擎层 cancelled / error
+      if (stopReason === 'cancelled' || stopReason === 'error') return 'FAILED'
+      return null
+    }
 
     const runs = new Map()
     ctx.on('workflow/start', (info) => {
@@ -1716,12 +1730,14 @@ return {
       if (!home) return null
       return home + '/workspaces'
     }
-    // 调用 workspace-isolation-host.mjs；返回解析后的 JSON 结果
+    // 调用 workspace-isolation-host.mjs；返回解析后的 JSON 结果。
+    // 包装脚本不存在时返回 { ok:false, error, notFound:true }——调用方据此区分
+    // 「宿主未部署 #93 集成（回退旧行为）」与「脚本存在但隔离建立失败（fail closed）」。
     async function wsHostCall(cmd, input, opts) {
       const host = await workspaceHostPath()
-      if (!host) return { ok: false, error: 'workspace-isolation-host.mjs 未找到' }
+      if (!host) return { ok: false, notFound: true, error: 'workspace-isolation-host.mjs 未找到（宿主未部署 #93 集成）' }
       const wsr = await workspaceRoot()
-      if (!wsr) return { ok: false, error: '无法解析 workspace 根目录' }
+      if (!wsr) return { ok: false, notFound: true, error: '无法解析 workspace 根目录' }
       const payload = { ...input, work_root: input.work_root || wsr }
       const r = await runNode([host, cmd, JSON.stringify(payload)], { cwd: opts && opts.cwd ? opts.cwd : (await rootPaths()).generatorRoot, graceMs: (opts && opts.graceMs) || 30000, maxBytes: (opts && opts.maxBytes) || 256 * 1024 })
       if (!r.ok) return { ok: false, error: 'workspace host 调用失败：' + r.detail }
@@ -1782,10 +1798,12 @@ return {
       })
     })
     registerRpc('vwf.workspace.buildProvenance', async (a) => {
-      const ws = (a && a.workspace) || null
-      if (!ws) return { ok: false, error: '缺少 workspace' }
+      // A4（Codex Round 1）：只接收 Run 身份，权威 workspace 由包装脚本从注册表解析，
+      // 不信任调用方传入的 workspace 对象（防伪造路径越权写其他 Run）。
+      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
+      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
       return wsHostCall('buildAttemptProvenance', {
-        workspace: ws, node: String((a && a.node) || ''), attempt: Number((a && a.attempt) || 1),
+        logical_run_id: runId, node: String((a && a.node) || ''), attempt: Number((a && a.attempt) || 1),
       })
     })
     registerRpc('vwf.workspace.acquireLock', async (a) => {
@@ -1811,24 +1829,25 @@ return {
       })
     })
     registerRpc('vwf.workspace.writeSource', async (a) => {
-      const ws = (a && a.workspace) || null
-      if (!ws) return { ok: false, error: '缺少 workspace' }
-      return wsHostCall('writeSourceFile', { workspace: ws, rel: String((a && a.rel) || ''), content: String((a && a.content) || '') })
+      // A4：只接收 Run 身份；包装脚本内 resolveWorkspaceFromRegistry 取权威 workspace
+      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
+      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
+      return wsHostCall('writeSourceFile', { logical_run_id: runId, rel: String((a && a.rel) || ''), content: String((a && a.content) || '') })
     })
     registerRpc('vwf.workspace.readSource', async (a) => {
-      const ws = (a && a.workspace) || null
-      if (!ws) return { ok: false, error: '缺少 workspace' }
-      return wsHostCall('readSourceFile', { workspace: ws, rel: String((a && a.rel) || '') })
+      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
+      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
+      return wsHostCall('readSourceFile', { logical_run_id: runId, rel: String((a && a.rel) || '') })
     })
     registerRpc('vwf.workspace.writeWorker', async (a) => {
-      const ws = (a && a.workspace) || null
-      if (!ws) return { ok: false, error: '缺少 workspace' }
-      return wsHostCall('writeWorkerFile', { workspace: ws, worker_id: String((a && a.worker_id) || ''), rel: String((a && a.rel) || ''), content: String((a && a.content) || '') })
+      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
+      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
+      return wsHostCall('writeWorkerFile', { logical_run_id: runId, worker_id: String((a && a.worker_id) || ''), rel: String((a && a.rel) || ''), content: String((a && a.content) || '') })
     })
     registerRpc('vwf.workspace.readWorker', async (a) => {
-      const ws = (a && a.workspace) || null
-      if (!ws) return { ok: false, error: '缺少 workspace' }
-      return wsHostCall('readWorkerFile', { workspace: ws, worker_id: String((a && a.worker_id) || ''), rel: String((a && a.rel) || '') })
+      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
+      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
+      return wsHostCall('readWorkerFile', { logical_run_id: runId, worker_id: String((a && a.worker_id) || ''), rel: String((a && a.rel) || '') })
     })
     registerRpc('vwf.workspace.checkpoint', async (a) => {
       return wsHostCall('computeIntegrationCheckpointFromRepo', {
@@ -1950,9 +1969,14 @@ return {
 
           // ── #93 Workspace Isolation 集成：启动前分配 Workspace ───────────────
           // 用 taskId 作为 portable run_id 占位 logical_run_id；模板类型决定 Policy。
-          // 失败不阻断：workspace 分配失败时降级到旧行为（脚本自行管理路径）。
+          // A2（Codex Round 1）：脚本存在但分配失败必须 fail closed——隔离是本 PR
+          // 交付的核心保证，瞬时故障静默降级会让两个 Run 重新写入共享现场。
+          // 例外：包装脚本不存在（宿主未部署 #93 集成，如旧安装/测试环境）→ 回退
+          // 旧行为（不注入 workspace，脚本自行管理路径），不把「未部署」当故障。
           let workspaceInfo = null
+          let workspaceDegraded = false
           const repoPath = repoRoot() || ''
+          let allocError = null
           try {
             const templateId = mapTemplateId(args.templateId || (dsl && dsl.id) || '')
             const alloc = await wsHostCall('allocate', {
@@ -1966,11 +1990,18 @@ return {
             if (alloc.ok && alloc.workspace) {
               workspaceInfo = alloc.workspace
               console.log('[vwf] workspace allocated: ' + workspaceInfo.workspace_id + ' at ' + workspaceInfo.workspace_path)
+            } else if (alloc.notFound) {
+              workspaceDegraded = true
+              console.log('[vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为：' + (alloc.error || ''))
             } else {
-              console.log('[vwf] workspace allocate 降级：' + (alloc.error || '未知'))
+              allocError = alloc.error || 'workspace 分配失败（未知原因）'
             }
           } catch (e) {
-            console.log('[vwf] workspace allocate 异常降级：' + String((e && e.message) || e))
+            allocError = String((e && e.message) || e)
+          }
+          if (allocError) {
+            console.log('[vwf] workspace allocate 失败（fail closed，拒绝启动）：' + allocError)
+            return '错误：Run Workspace 分配失败，隔离保证无法建立，工作流拒绝启动：' + allocError + '（请检查仓库根可访问性、~/.dsh*/workspaces 目录权限与 workspace-isolation-host.mjs 是否存在）'
           }
 
           // 注入 workspace 路径到 script args（#93）：脚本通过 host.call('vwf.workspace.get')
@@ -2023,16 +2054,14 @@ return {
               requestRunPersist(String(run.id))
             }
           }
-          // #93: 终态时更新 workspace lifecycle（非阻断）
+          // #93: 终态时更新 workspace lifecycle（非阻断）。
+          // A5（Codex Round 1）：覆盖 canonicalStop 全部终态 + cancelled/error 兜底。
+          // 人工等待类映射为保留态（cleanup 拒绝、可 Resume）；失败/取消类映射为
+          // FAILED（cleanup 可回收），避免 workspace 永久留在 READY 泄漏资源。
           if (workspaceInfo) {
-            const lifecycleMap = {
-              'DONE': 'COMPLETED',
-              'STOPPED': 'STOPPED',
-              'WAITING_HUMAN': 'WAITING_HUMAN',
-            }
-            const lc = lifecycleMap[canon]
-            if (lc) {
-              try { await wsHostCall('setLifecycle', { logical_run_id: String(args.taskId || ''), lifecycle: lc }) } catch (e) { /* 忽略 */ }
+            const canonLc = canonicalLifecycleFor(canon, result && result.stopReason)
+            if (canonLc) {
+              try { await wsHostCall('setLifecycle', { logical_run_id: String(args.taskId || ''), lifecycle: canonLc }) } catch (e) { /* 忽略 */ }
             }
           }
           return JSON.stringify({ runId: String(run.id), stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
