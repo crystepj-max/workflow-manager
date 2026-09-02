@@ -77,6 +77,36 @@ test('#118 Package 缺硬必填不得挂起；显式 UNKNOWN 仍可挂起', asyn
   assert.equal(result.decision_package.recommendation, 'UNKNOWN')
 })
 
+test('#118 Package 畸形 options / subsequent_effects 不得挂起', async () => {
+  const emptyOpt = await runHd({ 执行: workOk }, {
+    injectHalt: {
+      node: 'work',
+      decision_package: {
+        why: '需要人决定',
+        current_state: '待拍板',
+        options: [{}],
+        subsequent_effects: { SHIP: '沿出边继续' },
+      },
+    },
+  })
+  assert.notEqual(emptyOpt.result.status, 'WAITING_HUMAN')
+  assert.ok(String(emptyOpt.result.detail || emptyOpt.result.status).includes('Package') || emptyOpt.result.status === 'ERROR')
+
+  const nullFx = await runHd({ 执行: workOk }, {
+    injectHalt: {
+      node: 'work',
+      decision_package: {
+        why: '需要人决定',
+        current_state: '待拍板',
+        options: [{ id: 'SHIP' }],
+        subsequent_effects: { SHIP: null },
+      },
+    },
+  })
+  assert.notEqual(nullFx.result.status, 'WAITING_HUMAN')
+  assert.ok(String(nullFx.result.detail || nullFx.result.status).includes('Package') || nullFx.result.status === 'ERROR')
+})
+
 test('#118 无蓝图声明时运行时拒绝自行升级；残留 manualCheck 仍发 AWAITING_HUMAN_<id>', async () => {
   const undeclared = await runHd({ 执行: workOk, 收口: { done: true } }, {
     injectHalt: { node: 'finish', reason: 'ESCALATED_DECISION' },
