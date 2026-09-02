@@ -479,27 +479,35 @@ return {
       return validatorCorePromise
     }
 
-    // Formal Artifact 摄入内核（#69）：与 validate-core 相同 vm 求值路径
+    function formalArtifactCorePaths() {
+      const paths = []
+      const repo = repoRoot()
+      if (repo) paths.push(repo + '/scripts/formal-artifacts.cjs')
+      if (typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) {
+        paths.push(__VWF_REPO_ROOT__ + '/scripts/formal-artifacts.cjs')
+      }
+      if (typeof __VWF_PLUGIN_ROOT__ === 'string' && __VWF_PLUGIN_ROOT__) {
+        paths.push(__VWF_PLUGIN_ROOT__ + '/dist/formal-artifacts.cjs')
+      }
+      return paths
+    }
+
+    // Formal Artifact 摄入内核（#69）：仓库 scripts/ 或插件 dist/（正式安装）
     let formalArtifactsCorePromise = null
     function loadFormalArtifactsCore() {
       if (!formalArtifactsCorePromise) {
         formalArtifactsCorePromise = (async () => {
-          const repo = repoRoot()
           if (fs === undefined) return null
-          const roots = [
-            repo,
-            (typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) ? __VWF_REPO_ROOT__ : null,
-          ].filter(Boolean)
-          for (const root of roots) {
+          for (const targetRel of formalArtifactCorePaths()) {
             try {
-              const target = await fs.resolve(root + '/scripts/formal-artifacts.cjs')
+              const target = await fs.resolve(targetRel)
               const info = await fs.stat(target)
               if (!info || info.type !== 'file') continue
               const src = await fs.readText(target)
               const module = { exports: {} }
               new Function('module', 'exports', src)(module, module.exports)
               return module.exports
-            } catch (e) { /* 尝试下一个根 */ }
+            } catch (e) { /* 尝试下一个路径 */ }
           }
           return null
         })()
@@ -1173,7 +1181,7 @@ return {
       const rec = ensureRunFormalRecords(runId)
       if (!rec) return { ok: false, errors: [{ at: '$.runId', message: '运行记录不存在：' + runId }] }
       const core = await loadFormalArtifactsCore()
-      if (!core) return { ok: false, errors: [{ at: '$', message: 'Formal Artifact 内核不可用：缺少 scripts/formal-artifacts.cjs' }] }
+      if (!core) return { ok: false, errors: [{ at: '$', message: 'Formal Artifact 内核不可用：缺少 scripts/formal-artifacts.cjs 或 dist/formal-artifacts.cjs' }] }
       const tag = runTags.get(runId) || null
       try {
         rec.formalRecords = core.ingestArtifacts(rec.formalRecords, {

@@ -15,6 +15,11 @@ const here = dirname(fileURLToPath(import.meta.url))
 const distEntry = join(here, '..', 'dist', 'host-entry.mjs')
 const distClient = join(here, '..', 'dist', 'client.js')
 
+test('T3：静态 bundle dist 含 formal-artifacts.cjs（#69 正式安装路径）', () => {
+  const formalDist = join(here, '..', 'dist', 'formal-artifacts.cjs')
+  assert.ok(existsSync(formalDist), 'dist/formal-artifacts.cjs 必须存在（build 时从 scripts/ 复制）')
+})
+
 test('T3：静态客户端 bundle 注册 dsh-visual-workflow 到网页模块加载器', () => {
   assert.ok(existsSync(distClient), 'dist/client.js 必须存在（源码变更后须重新 build）')
   const registrations = []

@@ -25,10 +25,27 @@ function blueprintKindToMediaType(kind) {
 function parseArtifactBody(kind, rawContent) {
   const media = blueprintKindToMediaType(kind)
   if (JSON_KINDS.has(kind)) {
-    const value = typeof rawContent === 'string' ? JSON.parse(rawContent) : rawContent
+    if (rawContent === undefined || rawContent === null) {
+      throw new Error('artifact content 必填（JSON 类 kind）')
+    }
+    let value
+    if (typeof rawContent === 'string') {
+      if (!rawContent.trim()) throw new Error('artifact content 不能为空')
+      try {
+        value = JSON.parse(rawContent)
+      } catch (e) {
+        throw new Error('artifact content 必须是合法 JSON')
+      }
+    } else {
+      value = rawContent
+    }
+    if (value === undefined) throw new Error('artifact content 解析结果为 undefined')
     return { media_type: media, value }
   }
-  const value = typeof rawContent === 'string' ? rawContent : String(rawContent ?? '')
+  if (rawContent === undefined || rawContent === null) {
+    throw new Error('artifact content 必填')
+  }
+  const value = typeof rawContent === 'string' ? rawContent : String(rawContent)
   return { media_type: media, value }
 }
 
