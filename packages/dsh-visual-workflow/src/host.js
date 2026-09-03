@@ -50,7 +50,6 @@ return {
   apply(ctx) {
     const engine = ctx.get('workflowEngine')
     const agents = ctx.get('agents')
-    const llm = ctx.get('llm')
     let fs = ctx.get('fs')
     const sp = ctx.get('sandboxPolicy')
     let subprocess = ctx.get('subprocess')
@@ -1269,10 +1268,13 @@ return {
       return { runs: out }
     })
     registerRpc('vwf.models', async () => {
-      if (llm === undefined) return { providers: [] }
+      // llm 每次现取而非 apply 时捕获：llm 服务就绪可能晚于插件 apply，
+      // 启动时一次性捕获会永久拿到 undefined 导致面板「未配置可用模型」
+      const llm = ctx.get('llm')
+      if (llm === undefined) { console.log('[vwf] vwf.models：llm 服务不可用（未就绪或未注入），返回空 provider 列表'); return { providers: [] } }
       const out = []
       let providers = []
-      try { providers = await Promise.resolve(llm.listProviders()) } catch (e) { return { providers: [] } }
+      try { providers = await Promise.resolve(llm.listProviders()) } catch (e) { console.log('[vwf] vwf.models：listProviders 失败：' + String((e && e.message) || e)); return { providers: [] } }
       for (const p of providers || []) {
         const id = String(p && (p.id || p.provider || p.name) || '')
         if (!id) continue
@@ -1280,7 +1282,7 @@ return {
         try {
           const ms = await llm.listModels(id)
           models = (ms || []).map(m => String(m && (m.id || m.model || m.name) || '')).filter(Boolean)
-        } catch (e) {}
+        } catch (e) { console.log('[vwf] vwf.models：listModels(' + id + ') 失败：' + String((e && e.message) || e)) }
         out.push({ id: id, models: models })
       }
       return { providers: out }
