@@ -1747,6 +1747,39 @@ test('#128 ROUTE_HALTED / ENDED_NO_OUTCOME_EDGE 回写为权威终态且释放�
   assert.equal(s2.state.status, 'ENDED_NO_OUTCOME_EDGE')
 })
 
+// A3-2（Codex Round 2）：workspace RPC 必须携带宿主登记的不可伪造 capability——
+// 未登记 Run、capability 缺失/不匹配一律拒绝，防止猜测 taskId 跨 Run 越权。
+// 测试环境无 workspace-isolation-host.mjs（未部署集成），workspaceCaps 初始为空
+// （wf_run 走 notFound 降级不登记），因此任何 workspace RPC 都必须被拒。
+test('#93 A3-2：未登记 capability 的 workspace RPC 一律拒绝（越权防护）', async () => {
+  const eng = makeEngine()
+  const { handlers } = engineEnv(eng)
+
+  const writeSource = handlers.get('vwf.workspace.writeSource')
+  assert.ok(writeSource, 'vwf.workspace.writeSource RPC 已注册')
+  // 未登记 Run：任何 capability 都不匹配
+  const r1 = await writeSource({ logical_run_id: 'cap-run', rel: 'x.txt', content: 'x', capability: 'cap-fake' })
+  assert.equal(r1.ok, false)
+  assert.ok(String(r1.error).includes('capability'), '未登记 Run 应拒绝：' + JSON.stringify(r1))
+  const r2 = await writeSource({ logical_run_id: 'cap-run', rel: 'x.txt', content: 'x' })
+  assert.equal(r2.ok, false)
+  assert.ok(String(r2.error).includes('capability'), '缺 capability 应拒绝')
+  // 完全未登记的 taskId 同样拒绝
+  const r3 = await writeSource({ logical_run_id: 'other-run', rel: 'x.txt', content: 'x', capability: 'cap-anything' })
+  assert.equal(r3.ok, false)
+  assert.ok(String(r3.error).includes('capability'), '未登记 taskId 应拒绝')
+  // 读、锁、provenance 等其他 RPC 同样拒绝
+  const readSource = handlers.get('vwf.workspace.readSource')
+  const r4 = await readSource({ logical_run_id: 'cap-run', rel: 'x.txt', capability: 'cap-fake' })
+  assert.equal(r4.ok, false)
+  const acquireLock = handlers.get('vwf.workspace.acquireLock')
+  const r5 = await acquireLock({ logical_run_id: 'cap-run', resource_key: 'k', owner: 'o', capability: 'cap-fake' })
+  assert.equal(r5.ok, false)
+  const buildProv = handlers.get('vwf.workspace.buildProvenance')
+  const r6 = await buildProv({ logical_run_id: 'cap-run', node: 'dev', attempt: 1, capability: 'cap-fake' })
+  assert.equal(r6.ok, false)
+})
+
 test('#69 Codex P1：正式安装仅从插件 dist/formal-artifacts.cjs 加载内核', async () => {
   const formalArtifactsSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'formal-artifacts.cjs'), 'utf8')
   const PLUGIN = '/plugin/pkg'
@@ -1778,5 +1811,30 @@ test('#69 Codex P2：vwf.artifacts.ingest 拒绝 JSON 类缺 content', async () 
   })
   assert.equal(res.ok, false)
   assert.match(res.errors[0].message, /必填/)
+})
+
+test('#93 A3-2：vwf_workspace dtool 已注册，未登记 capability 仍拒绝', async () => {
+  const eng = makeEngine()
+  const { definedTools } = engineEnv(eng)
+  const wsTool = definedTools.find((t) => t.name === 'vwf_workspace')
+  assert.ok(wsTool, 'vwf_workspace 已注册为节点可调用 dtool')
+  const raw = await wsTool.execute({ op: 'writeSource', logical_run_id: 'cap-run', rel: 'x.txt', content: 'x', capability: 'cap-fake' })
+  const parsed = JSON.parse(raw)
+  assert.equal(parsed.ok, false)
+  assert.ok(String(parsed.error).includes('capability'), parsed.error)
+})
+
+test('#93 正式路径：vwf.script 未部署包装脚本时 allocate 不阻断编译', async () => {
+  const { handlers } = env()
+  const s = await call(handlers, 'vwf.script', { dsl: baseDsl(), allocate: true, taskId: 'issue-script' })
+  assert.equal(s.ok, true, JSON.stringify(s.errors))
+  assert.equal(s.workspaceArgs, null)
+})
+
+test('#93 DSH_HOME：home 探测优先读取 process.env.DSH_HOME', async () => {
+  const { handlers, sub } = env()
+  await call(handlers, 'vwf.workflows.list')
+  const probe = sub._calls.find((c) => c.join(' ').includes('process.env.DSH_HOME') && c.join(' ').includes('.homedir'))
+  assert.ok(probe, 'dshHome 探测必须读取 DSH_HOME，不能无条件 os.homedir()+/.dsh：' + JSON.stringify(sub._calls.slice(0, 3)))
 })
 

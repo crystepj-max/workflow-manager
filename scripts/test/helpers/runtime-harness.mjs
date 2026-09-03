@@ -66,7 +66,7 @@ export function makeAgentScript(table) {
     if (!hit) throw new Error('排练厅：剧本未覆盖演员 ' + JSON.stringify(label) + '（prompt 前 80 字：' + String(prompt).slice(0, 80) + '）')
     const value = typeof hit.v === 'function' ? await hit.v(label, opts, index) : hit.v
     const rejected = Boolean(opts.schema) && !validateResult(opts.schema, value)
-    calls.push({ label, index, prompt: String(prompt), opts: { label, schema: opts.schema }, result: value, rejected })
+    calls.push({ label, index, prompt: String(prompt), opts: { label, schema: opts.schema, cwd: opts.cwd }, result: value, rejected })
     return rejected ? null : value
   }
   agent.calls = calls

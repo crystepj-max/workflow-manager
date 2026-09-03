@@ -242,6 +242,19 @@ test('T1 模板回归-幸福路径：门禁挂起后通过 → DONE；分流零�
   assert.deepEqual(r2.agentCalls.map((c) => c.label), ['收口'])
 })
 
+test('#93 运行时：SOURCE 注入业务目录并绑定 agent cwd', async () => {
+  const { agentCalls } = await runTpl({
+    调度: { complete: true, missing: [], need_integration_test: false, reason: 'ok' },
+    开发: { status: 'completed', summary: 's', self_verify: 'v' },
+    审核: { verdict: 'APPROVE', summary: 's', ...VERIFIED },
+    人工验收: { verdict: 'PASS', summary_for_human: 's', details: 'd', ...VERIFIED },
+  }, { source_path: '/tmp/ws-source', workspace_path: '/tmp/ws', records_path: '/tmp/ws/records' })
+  const dispatch = agentCalls[0]
+  assert.ok(dispatch.prompt.includes('/tmp/ws-source'), 'prompt 含 SOURCE 业务源码目录')
+  assert.ok(dispatch.prompt.includes('【本节点应产出 Formal Artifact】'), 'Formal Artifact 提示仍在')
+  assert.equal(dispatch.opts.cwd, '/tmp/ws-source', 'agent opts.cwd 绑定 SOURCE')
+})
+
 test('T2 模板回归-三要素缺失：dispatch 判定失败 → FAILED_AT_dispatch', async () => {
   const { result } = await runTpl({ 调度: { complete: false, missing: ['objective'], need_integration_test: false, reason: '缺目标' } })
   assert.equal(result.status, 'FAILED_AT_dispatch')

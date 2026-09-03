@@ -328,6 +328,16 @@ test('S4 内置角色清单：单一来源为宿主注册表，解析失败 loud
   assert.throws(() => loadBuiltinRoleIds(''), /解析失败/, '找不到数组应报错')
 })
 
+test('S7 #93：编译脚本注入 workspace 默认 args 与 SOURCE cwd', () => {
+  const { script } = compileBlueprint(bp)
+  assert.ok(script.includes('const __VWF_WS_DEFAULTS__ = {}'), '宿主可替换的 workspace 默认 args 桩')
+  assert.ok(script.includes("const A = Object.assign({}, __VWF_WS_DEFAULTS__, args || {})"), 'args 覆盖注入的默认 workspace 字段')
+  assert.ok(script.includes('if (SOURCE) opts.cwd = SOURCE'), 'callNode 把业务源码目录绑到 agent cwd')
+  assert.ok(script.includes('if (SOURCE) itemOpts.cwd = SOURCE'), 'fanout 子代理同样绑定 cwd')
+  assert.ok(script.includes('【本节点应产出 Formal Artifact】'), '与 #69 Formal Artifact 提示并存')
+  assert.ok(script.includes('业务源码读写目录'), 'SOURCE 存在时提示隔离现场')
+})
+
 test('S4 捆绑角色：profile 含路径穿越被拒绝（Codex 第四轮 P1）', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'roles-'))
   fs.writeFileSync(path.join(dir, 'dev.md'), '内置角色正文\n')
