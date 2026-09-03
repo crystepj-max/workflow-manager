@@ -118,7 +118,8 @@ test('#73 技术重试不计额度', async () => {
   assert.equal(result.status, 'DONE')
   assert.equal(result.budgetUsed, 0)
   const tech = result.history.filter((h) => h.on === 'technical')
-  assert.equal(tech.length, 2)
+  // 引擎先在节点内自动重试一次（吞掉第一次 null），重试仍失败才沿 technical 边打回
+  assert.equal(tech.length, 1)
   assert.ok(tech.every((h) => h.countRound === false))
 })
 
