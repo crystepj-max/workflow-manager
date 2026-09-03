@@ -185,6 +185,32 @@ test('F6c AGENT_FAILED 打回反馈归因：失败节点为 work，不得错标�
   assert.ok(!dispatchR1.prompt.includes('dispatch agent 技术失败'), '不得把失败错标到回退目标')
 })
 
+test('F6d 人工门禁不挂空结果：门禁首次无效 → 节点内重试有效 → 以有效结果挂起', async () => {
+  // gate(manualCheck) 第一次交多余字段作业（additionalProperties:false 拒绝），重试合格后挂起
+  const { result, agentCalls } = await runEngine(mini, {
+    dispatch: { complete: true },
+    work: { status: 'completed' },
+    gate: (label, opts, index) => (index === 2 ? { verdict: 'ok', stray: true } : { verdict: 'ok' }),
+  })
+  assert.equal(result.status, 'AWAITING_HUMAN_gate')
+  assert.equal(agentCalls.filter((c) => c.label === 'gate').length, 2, '门禁应出场两次（首败 + 节点内重试）')
+  assert.ok(result.result && result.result.verdict === 'ok', '挂起必须携带 schema 有效结果，不得 result:null')
+  assert.ok(!result.history.some((h) => h.verdict === 'AGENT_FAILED'), '重试有效不应留下 AGENT_FAILED')
+})
+
+test('F6e 人工门禁重试仍无效 → 技术失败，不挂空结果可放行态', async () => {
+  const { result, agentCalls } = await runEngine(mini, {
+    dispatch: { complete: true },
+    work: { status: 'completed' },
+    gate: { verdict: 'ok', stray: true },
+  })
+  assert.equal(result.status, 'TECHNICAL_FAILURE')
+  assert.equal(result.history[0].verdict, 'AGENT_FAILED')
+  assert.ok(String(result.history[0].reason).includes('不得以空结果挂起人工门禁'), '失败原因应注明不得空挂')
+  assert.equal(agentCalls.filter((c) => c.label === 'gate').length, 2, '门禁首败 + 节点内重试仍败')
+  assert.notEqual(result.status, 'AWAITING_HUMAN_gate', '不得挂起空结果')
+})
+
 test('F7 入口与未知节点：args.entry 覆盖；未知入口 → ERROR', async () => {
   const a = await runEngine(mini, { finish: { done: true } }, { entry: 'finish' })
   assert.equal(a.result.status, 'DONE')
