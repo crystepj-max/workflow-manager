@@ -248,6 +248,7 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (SOURCE) s += \'\\n- **业务源码读写目录（本节点唯一允许写业务文件的位置）：\' + SOURCE + \'（#93 Git worktree 现场，分支 \' + (WORK_BRANCH || WORK) + \'）**——所有源码/业务文件改动必须发生在该目录内，禁止写主仓库或共享 cwd\'',
     '  if (WS) s += \'\\n- workspace 路径：\' + WS + \'（#93 隔离工作区，其下 source=业务源码、records=Formal Records、tmp/build/cache=按 Run 隔离资源）\'',
     '  if (RECORDS) s += \'\\n- records 路径：\' + RECORDS + \'（Formal Records 证据记录目录，业务证据写入此目录）\'',
+    '  if (A.workspace_capability) s += \'\\n- workspace RPC 能力令牌（调用 vwf.workspace.* RPC 时必须原样携带）：\' + A.workspace_capability + \'（仅限本 Run 使用，禁止用于其他 Run 的 taskId）\'',
     '  s += \'\\n- 当前节点：\' + (n.label || nodeId) + \'\\n- 完成本节点后更新 \' + RUNDIR + \'/STATE.md（stage / round / status / updated，时间用 date -u +%FT%TZ）\\n\'',
     '  if (n.output && n.output.files) s += \'【本节点应产出文件】\' + JSON.stringify(n.output.files) + \'\\n\'',
     '  s += (extra ? \'\\n\' + extra + \'\\n\' : \'\') + \'\\n## 最终回复要求\\n完成全部工作（含写报告、更新 STATE.md）后，最终回复只给出结构化结果本身，不要复述报告全文。\\n\'',

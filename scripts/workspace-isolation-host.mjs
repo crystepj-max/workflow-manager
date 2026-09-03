@@ -37,32 +37,45 @@ function lockPath(workRoot) {
   return registryPath(workRoot) + '.lock'
 }
 
-// ── 跨进程文件锁（A1）────────────────────────────────────────────────────
-// 用 openSync(..., 'wx') 的排他创建做互斥；锁文件带 pid + 时间戳，
-// 超时/崩溃残留（stale）由后来者接管。获取锁后必须 finally 释放。
+// ── 跨进程文件锁（A1 / A2-2）────────────────────────────────────────────
+// 用 openSync(..., 'wx') 的排他创建做互斥；锁文件带 pid + token + 时间戳。
+// stale 判定：仅当持有者进程已退出（PID 不存活）才接管——长事务（如大型仓库
+// git worktree add）即使超过固定秒数也不得抢占仍存活的锁；释放只允许持有 token
+// 的所有者，避免原持有者无条件删除继任者的锁（Codex Round 2 A2-2）。
 function sleepMs(ms) {
   const sab = new SharedArrayBuffer(4)
   Atomics.wait(new Int32Array(sab), 0, 0, ms)
 }
 
-function acquireFileLock(lockPath, timeoutMs = 15000, staleMs = 8000) {
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return e.code === 'EPERM'
+  }
+}
+
+// 返回本进程持有的锁 token（释放时必须带回）。
+function acquireFileLock(lockPath, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs
+  const token = Math.random().toString(36).slice(2) + '-' + Date.now().toString(36) + '-' + process.pid.toString(36)
   for (;;) {
     try {
       const fd = openSync(lockPath, 'wx')
       try {
-        writeFileSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() }) + '\n')
+        writeFileSync(fd, JSON.stringify({ pid: process.pid, token, at: Date.now() }) + '\n')
       } catch (e) { /* 锁内容写失败不阻塞持锁 */ }
       closeSync(fd)
-      return
+      return token
     } catch (e) {
       if (e.code !== 'EEXIST') throw e
-      // 检查 stale：锁文件内容不可读或时间戳过旧 → 接管
+      // 仅当持有者进程已退出才接管；否则继续等待（长事务不误伤）
       let stale = false
       try {
         const info = JSON.parse(readFileSync(lockPath, 'utf8'))
-        if (!info || typeof info.at !== 'number') stale = true
-        else if (Date.now() - info.at > staleMs) stale = true
+        if (!info || typeof info.pid !== 'number') stale = true
+        else if (!processAlive(info.pid)) stale = true
       } catch {
         stale = true
       }
@@ -76,7 +89,12 @@ function acquireFileLock(lockPath, timeoutMs = 15000, staleMs = 8000) {
   }
 }
 
-function releaseFileLock(lockPath) {
+function releaseFileLock(lockPath, token) {
+  // 只允许持有者释放：锁文件 token 不匹配说明已被接管，不得删除继任者的锁
+  try {
+    const info = JSON.parse(readFileSync(lockPath, 'utf8'))
+    if (info.token !== token) return
+  } catch { /* 锁文件缺失/损坏：尽力清理 */ }
   try { unlinkSync(lockPath) } catch { /* 已释放 */ }
 }
 
@@ -132,28 +150,32 @@ function saveRegistry(workRoot, registry) {
 // 修改型命令统一走事务：跨进程锁 → 最新状态 → 修改 → 原子落盘 → 释放。
 // 读命令（get / activeLockFor / provenance 等）同样持锁读，避免读到
 // 并发写的中途状态。
+// A1-2（Codex Round 2）：事务开始前先递归创建 workRoot——全新 DSH Home
+// 尚无 ~/.dsh*/workspaces 时，锁文件与注册表目录的父目录必须存在。
 function withRegistryTx(workRoot, fn) {
   const lp = lockPath(workRoot)
-  acquireFileLock(lp)
+  mkdirSync(workRoot, { recursive: true })
+  const token = acquireFileLock(lp)
   try {
     const registry = loadRegistry(workRoot)
     const result = fn(registry)
     saveRegistry(workRoot, registry)
     return result
   } finally {
-    releaseFileLock(lp)
+    releaseFileLock(lp, token)
   }
 }
 
 // 只读命令：持锁读取，不落盘。
 function withRegistryRead(workRoot, fn) {
   const lp = lockPath(workRoot)
-  acquireFileLock(lp)
+  mkdirSync(workRoot, { recursive: true })
+  const token = acquireFileLock(lp)
   try {
     const registry = loadRegistry(workRoot)
     return fn(registry)
   } finally {
-    releaseFileLock(lp)
+    releaseFileLock(lp, token)
   }
 }
 

@@ -1762,6 +1762,25 @@ return {
       return 'construction'
     }
 
+    // ── Workspace RPC 能力令牌（A3-2，Codex Round 2）───────────────────────
+    // logical_run_id → capability 映射：allocate 成功时由宿主生成不可伪造令牌，
+    // 注入 script args；RPC 调用必须携带匹配的 capability，否则拒绝。防止调用方
+    // 猜出另一个 Run 的可猜测 taskId 越权读写对方 workspace（注册表解析只验证
+    // ID 存在，不证明属于当前调用者）。
+    const workspaceCaps = new Map()
+    function genCapability() {
+      // vm 沙箱无 crypto；用高熵拼接（时间 + 随机 + 计数器）防猜测
+      const rand = () => Math.random().toString(36).slice(2)
+      return 'cap-' + rand() + rand() + rand() + Date.now().toString(36) + '-' + (workspaceCaps.size + 1)
+    }
+    // RPC handler 内调用：校验 payload 携带的 capability 与宿主登记的 Run 一致
+    function requireWorkspaceCapability(runId, cap) {
+      const expected = workspaceCaps.get(String(runId || ''))
+      if (!expected) return '该 Run 未登记 workspace capability（可能未经 wf_run 分配或已释放）'
+      if (typeof cap !== 'string' || cap !== expected) return 'workspace capability 不匹配，拒绝越权访问'
+      return null
+    }
+
     // ── Workspace Isolation RPC（#93）──────────────────────────────────────
     // 这些 RPC 供编译后的 workflow 脚本在节点内调用，获取 workspace 现场、
     // 写 source/scratch、构建 provenance、管理集成锁。
@@ -1781,18 +1800,30 @@ return {
       return wsHostCall('allocate', spec)
     })
     registerRpc('vwf.workspace.get', async (a) => {
-      return wsHostCall('get', { logical_run_id: String((a && a.taskId) || '') })
+      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || (a && a.taskId) || '')
+      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
+      const capErr = requireWorkspaceCapability(runId, a && a.capability)
+      if (capErr) return { ok: false, error: capErr }
+      return wsHostCall('get', { logical_run_id: runId })
     })
     registerRpc('vwf.workspace.setLifecycle', async (a) => {
+      const runId = String((a && a.logical_run_id) || '')
+      if (!runId) return { ok: false, error: '缺少 logical_run_id' }
+      const capErr = requireWorkspaceCapability(runId, a && a.capability)
+      if (capErr) return { ok: false, error: capErr }
       return wsHostCall('setLifecycle', {
-        logical_run_id: String((a && a.logical_run_id) || ''),
+        logical_run_id: runId,
         lifecycle: String((a && a.lifecycle) || ''),
         extra: (a && a.extra) || {},
       })
     })
     registerRpc('vwf.workspace.recordSourceSync', async (a) => {
+      const runId = String((a && a.logical_run_id) || '')
+      if (!runId) return { ok: false, error: '缺少 logical_run_id' }
+      const capErr = requireWorkspaceCapability(runId, a && a.capability)
+      if (capErr) return { ok: false, error: capErr }
       return wsHostCall('recordSourceSync', {
-        logical_run_id: String((a && a.logical_run_id) || ''),
+        logical_run_id: runId,
         current_head: (a && a.current_head) || undefined,
         source_revision: (a && a.source_revision) || undefined,
       })
@@ -1800,31 +1831,46 @@ return {
     registerRpc('vwf.workspace.buildProvenance', async (a) => {
       // A4（Codex Round 1）：只接收 Run 身份，权威 workspace 由包装脚本从注册表解析，
       // 不信任调用方传入的 workspace 对象（防伪造路径越权写其他 Run）。
+      // A3-2（Codex Round 2）：校验不可伪造 capability，防猜测 taskId 跨 Run 越权。
       const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
       if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
+      const capErr = requireWorkspaceCapability(runId, a && a.capability)
+      if (capErr) return { ok: false, error: capErr }
       return wsHostCall('buildAttemptProvenance', {
         logical_run_id: runId, node: String((a && a.node) || ''), attempt: Number((a && a.attempt) || 1),
       })
     })
     registerRpc('vwf.workspace.acquireLock', async (a) => {
+      const runId = String((a && a.logical_run_id) || '')
+      if (!runId) return { ok: false, error: '缺少 logical_run_id' }
+      const capErr = requireWorkspaceCapability(runId, a && a.capability)
+      if (capErr) return { ok: false, error: capErr }
       return wsHostCall('acquireLock', {
-        logical_run_id: String((a && a.logical_run_id) || ''),
+        logical_run_id: runId,
         resource_key: String((a && a.resource_key) || ''),
         owner: String((a && a.owner) || ''),
         ttl_ms: (a && a.ttl_ms) || undefined,
       })
     })
     registerRpc('vwf.workspace.releaseLock', async (a) => {
+      const runId = String((a && a.logical_run_id) || '')
+      if (!runId) return { ok: false, error: '缺少 logical_run_id' }
+      const capErr = requireWorkspaceCapability(runId, a && a.capability)
+      if (capErr) return { ok: false, error: capErr }
       return wsHostCall('releaseLock', {
         lock_id: String((a && a.lock_id) || ''),
         owner: String((a && a.owner) || ''),
-        logical_run_id: String((a && a.logical_run_id) || ''),
+        logical_run_id: runId,
         reason: (a && a.reason) || undefined,
       })
     })
     registerRpc('vwf.workspace.cleanup', async (a) => {
+      const runId = String((a && a.logical_run_id) || '')
+      if (!runId) return { ok: false, error: '缺少 logical_run_id' }
+      const capErr = requireWorkspaceCapability(runId, a && a.capability)
+      if (capErr) return { ok: false, error: capErr }
       return wsHostCall('cleanup', {
-        logical_run_id: String((a && a.logical_run_id) || ''),
+        logical_run_id: runId,
         opts: (a && a.opts) || {},
       })
     })
@@ -1832,21 +1878,29 @@ return {
       // A4：只接收 Run 身份；包装脚本内 resolveWorkspaceFromRegistry 取权威 workspace
       const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
       if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
+      const capErr = requireWorkspaceCapability(runId, a && a.capability)
+      if (capErr) return { ok: false, error: capErr }
       return wsHostCall('writeSourceFile', { logical_run_id: runId, rel: String((a && a.rel) || ''), content: String((a && a.content) || '') })
     })
     registerRpc('vwf.workspace.readSource', async (a) => {
       const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
       if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
+      const capErr = requireWorkspaceCapability(runId, a && a.capability)
+      if (capErr) return { ok: false, error: capErr }
       return wsHostCall('readSourceFile', { logical_run_id: runId, rel: String((a && a.rel) || '') })
     })
     registerRpc('vwf.workspace.writeWorker', async (a) => {
       const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
       if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
+      const capErr = requireWorkspaceCapability(runId, a && a.capability)
+      if (capErr) return { ok: false, error: capErr }
       return wsHostCall('writeWorkerFile', { logical_run_id: runId, worker_id: String((a && a.worker_id) || ''), rel: String((a && a.rel) || ''), content: String((a && a.content) || '') })
     })
     registerRpc('vwf.workspace.readWorker', async (a) => {
       const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
       if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
+      const capErr = requireWorkspaceCapability(runId, a && a.capability)
+      if (capErr) return { ok: false, error: capErr }
       return wsHostCall('readWorkerFile', { logical_run_id: runId, worker_id: String((a && a.worker_id) || ''), rel: String((a && a.rel) || '') })
     })
     registerRpc('vwf.workspace.checkpoint', async (a) => {
@@ -1974,6 +2028,7 @@ return {
           // 例外：包装脚本不存在（宿主未部署 #93 集成，如旧安装/测试环境）→ 回退
           // 旧行为（不注入 workspace，脚本自行管理路径），不把「未部署」当故障。
           let workspaceInfo = null
+          let workspaceCap = null
           let workspaceDegraded = false
           const repoPath = repoRoot() || ''
           let allocError = null
@@ -1989,6 +2044,11 @@ return {
             })
             if (alloc.ok && alloc.workspace) {
               workspaceInfo = alloc.workspace
+              // A3-2（Codex Round 2）：分配成功后登记不可伪造 capability，注入
+              // script args；RPC 调用必须携带匹配令牌，防猜测 taskId 跨 Run 越权。
+              const cap = genCapability()
+              workspaceCaps.set(String(args.taskId || ''), cap)
+              workspaceCap = cap
               console.log('[vwf] workspace allocated: ' + workspaceInfo.workspace_id + ' at ' + workspaceInfo.workspace_path)
             } else if (alloc.notFound) {
               workspaceDegraded = true
@@ -2019,6 +2079,8 @@ return {
             records_path: workspaceInfo ? workspaceInfo.records_path : undefined,
             work_branch: workspaceInfo ? workspaceInfo.work_branch : undefined,
             source_revision: workspaceInfo ? workspaceInfo.source_revision : undefined,
+            // A3-2: RPC 越权防护——脚本节点调用 workspace RPC 必须携带此令牌
+            workspace_capability: workspaceCap || undefined,
           }
           // 剔除 undefined 键（lossless-JSON 守卫）
           for (const k of Object.keys(scriptArgs)) {
@@ -2118,3 +2180,4 @@ return {
     }
   },
 }
+//probe

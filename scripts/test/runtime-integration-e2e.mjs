@@ -8,7 +8,12 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const fixtureRoot = mkdtempSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.scratch', 'rt-integ-' + Date.now()))
+// fixture 根：默认 .scratch/rt-integ-<ts>；可经 RT_FIXTURE_ROOT 覆盖到
+// 系统临时目录（host 环境删除计数沙箱会拦截 .scratch 内 git lockfile unlink，
+// CI/沙箱受限环境用 env RT_FIXTURE_ROOT=$(mktemp -d) 运行）。
+import { tmpdir } from 'node:os'
+const _baseRoot = process.env.RT_FIXTURE_ROOT || join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.scratch')
+const fixtureRoot = mkdtempSync(join(_baseRoot, 'rt-integ-' + Date.now()))
 
 function cleanup() {
   try { rmSync(fixtureRoot, { recursive: true, force: true }) } catch { /* ignore */ }
