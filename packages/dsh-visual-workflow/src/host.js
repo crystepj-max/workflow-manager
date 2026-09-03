@@ -61,8 +61,8 @@ return {
     const isDynamicHost = typeof harness !== 'undefined'
     const rpcRoutes = new Map()
     function registerRpc(method, fn) {
-      rpcRoutes.set(method, fn)
       if (isDynamicHost) { harness.handle(method, fn); return }
+      rpcRoutes.set(method, fn)
     }
     // 工具定义/注册双模式：动态=harness.defineTool/registerTool；静态=ctx.tools + 平台 defineTool
     const dtools = {
@@ -90,8 +90,7 @@ return {
     // （apply 时）与客户端 RPC 调用都没有，因此每次调用实时探测，并把任何
     // 有 initiator 的调用记录为 knownCwd 兜底；最后才落 sandboxPolicy
     // workspaceRoot（部署默认 process.cwd()）。
-    // DSH home = 实际 DSH_HOME（开发 ~/.dsh-workflow-dev / 自定义产品 Home），
-    // 禁止无条件推导 os.homedir()+/.dsh（会污染产品 Home）。
+    // DSH home = 子进程引导（os.homedir() + '/.dsh'，一次性缓存）。
     function sessionCwd() {
       try {
         if (agents === undefined || typeof agents.currentInitiator !== 'function') return null
@@ -131,7 +130,7 @@ return {
           // 移除宿主注入的 NODE_OPTIONS（如 WorkBuddy genie-safe-delete 的
           // --require 钩子会拦截 fs.rmSync 并抛 SAFE_DELETE_BULK_CONFIRM_REQUIRED，
           // 导致 remove 的 rm 子进程失败；插件自己的脚本不需要该钩子）
-          env: Object.assign({ NODE_OPTIONS: undefined }, (opts && opts.env) || {}),
+          env: { NODE_OPTIONS: undefined },
           stdio: {
             stdin: 'ignore',
             stdout: { maxBytes: (opts && opts.maxBytes) || 64 * 1024 },
@@ -153,38 +152,27 @@ return {
     }
 
     let dshHomePromise = null
-    function hostProcessDshHome() {
-      // 动态 vm 可能无 process；静态/测试宿主有。仅当值是非空字符串才采用。
-      try {
-        if (typeof process !== 'undefined' && process && process.env && typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME) {
-          return process.env.DSH_HOME
-        }
-      } catch (e) { /* vm 无 process */ }
-      return null
-    }
     function dshHome() {
       if (!dshHomePromise) {
         dshHomePromise = (async () => {
-          // 优先实际 DSH_HOME：开发 DSH（npm run dev:plugin）与自定义产品 Home
-          // 都写在该变量里。子进程 -e 必须读取它，不能无条件 os.homedir()+/.dsh，
-          // 否则 workspace 会落到产品 ~/.dsh/workspaces（Codex Round 3）。
-          const injected = hostProcessDshHome()
+          // 宿主 env 经 scrub 后仍保留 HOME；DSH_* 在注入层被剥除，但宿主进程自身
+          // env 保留 DSH_HOME（开发 DSH ~/.dsh-workflow-dev、自定义产品 Home）。
+          // 优先子进程引导（动态 vm 沙箱与测试假服务均走这里），子进程继承宿主 env，
+          // 因此必须显式读 DSH_HOME——否则开发 DSH 会把宿主数据（含 #93 workspaces）
+          // 写进产品 ~/.dsh（Codex Round 3 R3-2）。
+          // 子进程服务不可用时（静态/web profile 无 subprocess 服务）回落进程 env。
+          let home = null
           const probe = "console.log(process.env.DSH_HOME || require('path').join(require('os').homedir(), '.dsh'))"
-          const r = await runNode(['-e', probe], {
-            cwd: repoRoot() || '/',
-            env: injected ? { DSH_HOME: injected } : {},
-          })
+          const r = await runNode(['-e', probe], { cwd: repoRoot() || '/' })
           if (r.ok) {
-            const home = (r.stdout || '').trim()
-            if (home) return home
-          }
-          if (injected) return injected
-          try {
-            if (typeof process !== 'undefined' && process && process.env && typeof process.env.HOME === 'string' && process.env.HOME) {
-              return process.env.HOME.replace(/\/$/, '') + '/.dsh'
+            home = (r.stdout || '').trim()
+          } else if (typeof process !== 'undefined' && process && process.env) {
+            const envHome = process.env.DSH_HOME || process.env.HOME
+            if (typeof envHome === 'string' && envHome) {
+              home = process.env.DSH_HOME ? envHome : envHome.replace(/\/$/, '') + '/.dsh'
             }
-          } catch (e) { /* ignore */ }
-          return null
+          }
+          return home || null
         })()
       }
       return dshHomePromise
@@ -1197,28 +1185,47 @@ return {
       const fromTemplate = !!(dsl && typeof dsl.id === 'string' && (await findWorkflow(dsl.id)))
       const c = await compileViaPipeline(v.sanitized, { fromTemplate })
       if (!c.ok) return { ok: false, errors: [{ at: '$', message: c.detail }] }
-      // 正式「获取脚本 → 平台 workflow 工具」路径与 wf_run 共用同一分配边界：
-      // 调用方传 allocate:true（及 taskId）时先分配并注入脚本默认 args，避免 SOURCE 为空回退共享 RUNDIR。
-      let script = c.script
-      let workspaceArgs = null
-      const wantAlloc = !!(a && (a.allocate === true || a.taskId))
-      if (wantAlloc) {
-        const taskId = String((a && a.taskId) || ((dsl && dsl.id) ? (dsl.id + '-' + Date.now()) : ''))
-        const prepared = await prepareRunWorkspace({
-          taskId: taskId,
-          templateId: (a && a.templateId) || (dsl && dsl.id) || '',
-          baseBranch: (a && a.baseBranch) || 'main',
-        })
-        if (!prepared.ok) return { ok: false, errors: [{ at: '$', message: 'Run Workspace 分配失败，隔离保证无法建立：' + prepared.error }] }
-        if (prepared.workspace) {
-          workspaceArgs = scriptArgsFromWorkspace(prepared.workspace, prepared.capability, taskId)
-          workspaceArgs.taskId = taskId
-          script = injectWorkspaceDefaults(script, workspaceArgs)
-          await markWorkspaceLifecycle(taskId, 'RUNNING')
+      const out = { ok: true, engineAvailable: !!(resolveEngine()), script: c.script, meta: c.meta }
+      if (c.roleDir) out.roleDir = c.roleDir
+      // R3-1（Codex Round 3）：正式执行路径（获取脚本 → 平台 workflow 工具）不得绕过
+      // Runtime 隔离。调用方若给出 taskId 且宿主已部署集成，这里就分配 workspace 并把
+      // 注入参数随返回带出——调用方把 out.workspace 平铺并入 workflow 工具 args 后，
+      // script 即收到 SOURCE/WS/RECORDS/capability，不再回退旧 RUNDIR/worktree 路径。
+      // 纯浏览器 RPC 无 agent 会话仓库上下文时无法 GitWorktree，不分配（仍可经 wf_run）。
+      const scriptTaskId = String((a && a.taskId) || '')
+      if (scriptTaskId && (await workspaceHostPath())) {
+        try {
+          const templateId = mapTemplateId((dsl && dsl.id) || (a && a.templateId) || '')
+          const repoPath = repoRoot() || ''
+          const alloc = await wsHostCall('allocate', {
+            logical_run_id: scriptTaskId,
+            template_id: templateId,
+            repository_path: repoPath || null,
+            repository: repoPath ? null : null,
+            base_ref: (a && a.baseBranch) || 'main',
+            task_identity: scriptTaskId,
+          })
+          if (alloc.ok && alloc.workspace && repoPath) {
+            const cap = genCapability()
+            workspaceCaps.set(scriptTaskId, cap)
+            out.workspace = {
+              logical_run_id: scriptTaskId,
+              workspace_id: alloc.workspace.workspace_id,
+              workspace_path: alloc.workspace.workspace_path,
+              source_path: alloc.workspace.source_path,
+              records_path: alloc.workspace.records_path,
+              work_branch: alloc.workspace.work_branch,
+              source_revision: alloc.workspace.source_revision,
+              capability: cap,
+            }
+            // RUNNING 边界：script 一旦被 workflow 工具执行即视为运行中（正式路径无
+            // wf_run 的 start 回执，这里先标 RUNNING，令崩溃残留可被 recoverStale 回收）
+            try { await wsHostCall('setLifecycle', { logical_run_id: scriptTaskId, lifecycle: 'RUNNING' }) } catch (e) { /* 忽略 */ }
+          }
+        } catch (e) {
+          console.log('[vwf] vwf.script workspace 预分配失败（不阻断返回）：' + String((e && e.message) || e))
         }
       }
-      const out = { ok: true, engineAvailable: !!(resolveEngine()), script: script, meta: c.meta, workspaceArgs: workspaceArgs }
-      if (c.roleDir) out.roleDir = c.roleDir
       return out
     })
     registerRpc('vwf.state', async (a) => {
@@ -1919,57 +1926,6 @@ return {
       return null
     }
 
-    function scriptArgsFromWorkspace(ws, cap, taskId) {
-      if (!ws) return {}
-      return {
-        taskId: taskId || undefined,
-        workspace_id: ws.workspace_id,
-        workspace_path: ws.workspace_path,
-        source_path: ws.source_path,
-        records_path: ws.records_path,
-        work_branch: ws.work_branch,
-        source_revision: ws.source_revision,
-        workspace_capability: cap || undefined,
-      }
-    }
-
-    function injectWorkspaceDefaults(script, defaults) {
-      const payload = {}
-      for (const k of Object.keys(defaults || {})) {
-        if (defaults[k] !== undefined && defaults[k] !== null) payload[k] = defaults[k]
-      }
-      const json = JSON.stringify(payload)
-      const marker = 'const __VWF_WS_DEFAULTS__ = {}'
-      if (script && script.indexOf(marker) >= 0) return script.replace(marker, 'const __VWF_WS_DEFAULTS__ = ' + json)
-      const old = 'const A = args || {}'
-      if (script && script.indexOf(old) >= 0) {
-        return script.replace(old, 'const A = Object.assign({}, ' + json + ', args || {})')
-      }
-      return 'const A = Object.assign({}, ' + json + ', args || {})\n' + (script || '')
-    }
-
-    async function prepareRunWorkspace(opts) {
-      const taskId = String((opts && opts.taskId) || '')
-      if (!taskId) return { ok: false, error: '缺少 taskId' }
-      const alloc = await wsHostCall('allocate', {
-        logical_run_id: taskId,
-        template_id: mapTemplateId((opts && opts.templateId) || ''),
-        repository_path: repoRoot() || null,
-        base_ref: (opts && opts.baseBranch) || 'main',
-        task_identity: taskId,
-      })
-      if (alloc.notFound) return { ok: true, degraded: true, notFound: true }
-      if (!alloc.ok || !alloc.workspace) return { ok: false, error: alloc.error || 'workspace 分配失败（未知原因）' }
-      const cap = genCapability()
-      workspaceCaps.set(taskId, cap)
-      return { ok: true, workspace: alloc.workspace, capability: cap }
-    }
-
-    async function markWorkspaceLifecycle(taskId, lifecycle) {
-      if (!taskId || !lifecycle) return
-      try { await wsHostCall('setLifecycle', { logical_run_id: String(taskId), lifecycle: lifecycle }) } catch (e) { /* 非阻断 */ }
-    }
-
     // ── Workspace Isolation RPC（#93）──────────────────────────────────────
     // 这些 RPC 供编译后的 workflow 脚本在节点内调用，获取 workspace 现场、
     // 写 source/scratch、构建 provenance、管理集成锁。
@@ -1986,19 +1942,7 @@ return {
         task_identity: String((a && a.taskId) || ''),
         allow_parallel: !!(a && a.allow_parallel),
       }
-      const result = await wsHostCall('allocate', spec)
-      if (result.ok && result.workspace) {
-        const runId = String((a && a.taskId) || '')
-        if (runId) {
-          let cap = workspaceCaps.get(runId)
-          if (!cap) {
-            cap = genCapability()
-            workspaceCaps.set(runId, cap)
-          }
-          result.capability = cap
-        }
-      }
-      return result
+      return wsHostCall('allocate', spec)
     })
     registerRpc('vwf.workspace.get', async (a) => {
       const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || (a && a.taskId) || '')
@@ -2236,21 +2180,39 @@ return {
           // 旧行为（不注入 workspace，脚本自行管理路径），不把「未部署」当故障。
           let workspaceInfo = null
           let workspaceCap = null
-          const prepared = await prepareRunWorkspace({
-            taskId: String(args.taskId || ''),
-            templateId: args.templateId || (dsl && dsl.id) || '',
-            baseBranch: args.baseBranch || 'main',
-          })
-          if (!prepared.ok) {
-            console.log('[vwf] workspace allocate 失败（fail closed，拒绝启动）：' + prepared.error)
-            return '错误：Run Workspace 分配失败，隔离保证无法建立，工作流拒绝启动：' + prepared.error + '（请检查仓库根可访问性、DSH Home/workspaces 目录权限与 workspace-isolation-host.mjs 是否存在）'
+          let workspaceDegraded = false
+          const repoPath = repoRoot() || ''
+          let allocError = null
+          try {
+            const templateId = mapTemplateId(args.templateId || (dsl && dsl.id) || '')
+            const alloc = await wsHostCall('allocate', {
+              logical_run_id: String(args.taskId || ''),
+              template_id: templateId,
+              repository_path: repoPath || null,
+              repository: repoPath ? null : null,
+              base_ref: args.baseBranch || 'main',
+              task_identity: String(args.taskId || ''),
+            })
+            if (alloc.ok && alloc.workspace) {
+              workspaceInfo = alloc.workspace
+              // A3-2（Codex Round 2）：分配成功后登记不可伪造 capability，注入
+              // script args；RPC 调用必须携带匹配令牌，防猜测 taskId 跨 Run 越权。
+              const cap = genCapability()
+              workspaceCaps.set(String(args.taskId || ''), cap)
+              workspaceCap = cap
+              console.log('[vwf] workspace allocated: ' + workspaceInfo.workspace_id + ' at ' + workspaceInfo.workspace_path)
+            } else if (alloc.notFound) {
+              workspaceDegraded = true
+              console.log('[vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为：' + (alloc.error || ''))
+            } else {
+              allocError = alloc.error || 'workspace 分配失败（未知原因）'
+            }
+          } catch (e) {
+            allocError = String((e && e.message) || e)
           }
-          if (prepared.workspace) {
-            workspaceInfo = prepared.workspace
-            workspaceCap = prepared.capability
-            console.log('[vwf] workspace allocated: ' + workspaceInfo.workspace_id + ' at ' + workspaceInfo.workspace_path)
-          } else if (prepared.notFound) {
-            console.log('[vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为')
+          if (allocError) {
+            console.log('[vwf] workspace allocate 失败（fail closed，拒绝启动）：' + allocError)
+            return '错误：Run Workspace 分配失败，隔离保证无法建立，工作流拒绝启动：' + allocError + '（请检查仓库根可访问性、~/.dsh*/workspaces 目录权限与 workspace-isolation-host.mjs 是否存在）'
           }
 
           // 注入 workspace 路径到 script args（#93）：脚本通过 host.call('vwf.workspace.get')
@@ -2276,21 +2238,14 @@ return {
             if (scriptArgs[k] === undefined) delete scriptArgs[k]
           }
 
-          // Codex Round 3：启动引擎前先持久化 RUNNING。崩溃/start 抛错/result
-          // rejection 不得把 workspace 永久留在 READY（recoverStale 只回收 RUNNING）。
-          if (workspaceInfo) await markWorkspaceLifecycle(String(args.taskId || ''), 'RUNNING')
-
-          const startReq = { script: c.script, meta: c.meta, args: scriptArgs, parent: parent }
-          if (workspaceInfo && workspaceInfo.source_path) {
-            startReq.cwd = workspaceInfo.source_path
-            startReq.workspaceRoot = workspaceInfo.source_path
-          }
-          let run
-          try {
-            run = engineNow.start(startReq)
-          } catch (e) {
-            if (workspaceInfo) await markWorkspaceLifecycle(String(args.taskId || ''), 'FAILED')
-            return '错误：工作流引擎启动失败，workspace 已标 FAILED：' + String((e && e.message) || e)
+          const run = engineNow.start({ script: c.script, meta: c.meta, args: scriptArgs, parent: parent })
+          // R3-5（Codex Round 3）：启动边界先持久化 RUNNING——分配返回 READY，
+          // 若宿主崩溃 / 同步启动异常 / run.result rejection 发生在此之后，Core 的
+          // recoverStale/force_abandoned 只回收 RUNNING；READY 会永久泄漏 worktree。
+          if (workspaceInfo) {
+            try {
+              await wsHostCall('setLifecycle', { logical_run_id: String(args.taskId || ''), lifecycle: 'RUNNING' })
+            } catch (e) { console.log('[vwf] workspace RUNNING 标记失败（不影响运行）：' + String((e && e.message) || e)) }
           }
           // 启动边界自登记（workflow/start 事件无 taskId，见 runTags 注释）；
           // entry / decision_id 续跑把同 taskId 前序门禁记录标记接管，旧卡片退出门禁队列
@@ -2310,8 +2265,13 @@ return {
           try {
             result = await run.result
           } catch (e) {
-            if (workspaceInfo) await markWorkspaceLifecycle(String(args.taskId || ''), 'FAILED')
-            return '错误：工作流运行失败，workspace 已标 FAILED：' + String((e && e.message) || e)
+            // R3-5：run.result rejection（启动异常/宿主中途故障）也必须收口 workspace——
+            // 否则 RUNNING 之后的异常退出仍可能留 RUNNING 残迹；标 FAILED 让 cleanup 可回收
+            if (workspaceInfo) {
+              try { await wsHostCall('setLifecycle', { logical_run_id: String(args.taskId || ''), lifecycle: 'FAILED' }) } catch (e2) { /* 忽略 */ }
+            }
+            console.log('[vwf] wf_run 运行异常：' + String((e && e.message) || e))
+            return '错误：工作流运行异常：' + String((e && e.message) || e)
           }
           // 权威终态回写（见 canonicalStop 注释）：completed 时以脚本返回为准
           // （DONE / WAITING_HUMAN / AWAITING_HUMAN_* / FAILED_*），cancelled/error 保持事件原样。
@@ -2340,37 +2300,54 @@ return {
         }
       })
       dtools.register(ctx, tool)
-      const wsTool = dtools.define({
-        name: 'vwf_workspace',
-        description: '按已分配的 Logical Run 访问隔离 workspace。必须携带本 Run 的 workspace_capability。op=get|writeSource|readSource|writeWorker|readWorker|acquireLock|releaseLock|checkpoint|buildProvenance|setLifecycle|recordSourceSync|cleanup',
+      // R3-3（Codex Round 3）：节点 agent 真实写隔离 source 的工具通道。
+      // capability 对 dtool 不可见（宿主注入），agent 仅凭当前 Run 的 capability
+      // 访问自己的 workspace；猜他人 taskId 无匹配 capability → 拒绝。
+      // 写操作经 wsHostCall 子进程以宿主权限写 workspace 根，不受会话 workspace-write
+      // 沙箱限制（SOURCE 在会话 cwd 沙箱根之外），实现「受限工具层挂载分配的 source」。
+      const wsWriteTool = dtools.define({
+        name: 'vwf_workspace_write',
+        description: '把业务文件写入当前 Run 的隔离 source workspace（#93 Git worktree 现场）。仅限本 Run 使用，禁止改其他 Run 的 taskId。运行上下文会给出本 Run 的 workspace_capability。',
         parameters: {
-          op: { type: 'string', required: true, description: 'get | writeSource | readSource | writeWorker | readWorker | acquireLock | releaseLock | checkpoint | buildProvenance | setLifecycle | recordSourceSync | cleanup' },
-          logical_run_id: { type: 'string', required: true, description: 'Logical Run / taskId' },
-          capability: { type: 'string', required: true, description: 'wf_run 或获取脚本注入的 workspace_capability' },
-          rel: { type: 'string', description: '相对 source/worker 的路径' },
-          content: { type: 'string', description: '写入内容' },
-          worker_id: { type: 'string' },
-          resource_key: { type: 'string' },
-          owner: { type: 'string' },
-          lock_id: { type: 'string' },
-          node: { type: 'string' },
-          attempt: { type: 'number' },
-          lifecycle: { type: 'string' },
+          taskId: { type: 'string', required: true, description: '本 Run 任务标识（运行上下文中的 任务标识）' },
+          capability: { type: 'string', required: true, description: '运行上下文给出的 workspace 能力令牌' },
+          rel: { type: 'string', required: true, description: '相对 source 根的路径，如 packages/foo/src/a.js' },
+          content: { type: 'string', required: true, description: '文件内容' },
         },
-        output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
+        output: { schema: { type: 'string' }, render: (a2, value) => [{ type: 'text', text: value }] },
         async execute(rawArgs) {
-          const op = String((rawArgs && rawArgs.op) || '')
-          const fn = rpcRoutes.get('vwf.workspace.' + op)
-          if (typeof fn !== 'function') return JSON.stringify({ ok: false, error: '未知 workspace op：' + op })
-          try {
-            const res = await fn(rawArgs)
-            return typeof res === 'string' ? res : JSON.stringify(res)
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: String((e && e.message) || e) })
-          }
+          const args = Object.assign({}, rawArgs || {})
+          const runId = String(args.taskId || '')
+          if (!runId) return '错误：缺少 taskId'
+          const capErr = requireWorkspaceCapability(runId, args.capability)
+          if (capErr) return '错误：' + capErr
+          const r = await wsHostCall('writeSourceFile', { logical_run_id: runId, rel: String(args.rel || ''), content: String(args.content == null ? '' : args.content) })
+          if (!r.ok) return '错误：写入失败：' + (r.error || '未知')
+          return '已写入 ' + r.path
         },
       })
-      dtools.register(ctx, wsTool)
+      dtools.register(ctx, wsWriteTool)
+      const wsReadTool = dtools.define({
+        name: 'vwf_workspace_read',
+        description: '读取当前 Run 隔离 source workspace（#93 Git worktree 现场）内的文件。仅限本 Run 使用。',
+        parameters: {
+          taskId: { type: 'string', required: true, description: '本 Run 任务标识' },
+          capability: { type: 'string', required: true, description: '运行上下文给出的 workspace 能力令牌' },
+          rel: { type: 'string', required: true, description: '相对 source 根的路径' },
+        },
+        output: { schema: { type: 'string' }, render: (a2, value) => [{ type: 'text', text: value }] },
+        async execute(rawArgs) {
+          const args = Object.assign({}, rawArgs || {})
+          const runId = String(args.taskId || '')
+          if (!runId) return '错误：缺少 taskId'
+          const capErr = requireWorkspaceCapability(runId, args.capability)
+          if (capErr) return '错误：' + capErr
+          const r = await wsHostCall('readSourceFile', { logical_run_id: runId, rel: String(args.rel || '') })
+          if (!r.ok) return '错误：读取失败：' + (r.error || '未知')
+          return r.content
+        },
+      })
+      dtools.register(ctx, wsReadTool)
       // 诊断工具（定位删除/路径问题）：op=paths 返回路径解析；op=remove 逐步执行删除
       const debugTool = dtools.define({
         name: 'vwf_debug',

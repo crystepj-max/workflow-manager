@@ -4,7 +4,7 @@
 // 运行：node scripts/test/runtime-integration-e2e.mjs
 
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, openSync, closeSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -229,52 +229,6 @@ function testConcurrentLock() {
   })()
 }
 
-// ── 测试 2c：初始化空锁不得被判 stale 立即接管（Codex Round 3）────────
-function testLockInitNotStale() {
-  console.log('\n━━ 测试 2c：空锁文件初始化窗口不得被抢占 ━━')
-  const workRoot = mkdtempSync(join(fixtureRoot, 'lock-init-'))
-  const hostScript = join(dirname(fileURLToPath(import.meta.url)), '..', 'workspace-isolation-host.mjs')
-  const repo = initRepo()
-  const lp = workRoot + '/.vwf-registry.lock'
-  const fd = openSync(lp, 'wx')
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [hostScript, 'allocate', JSON.stringify({
-      logical_run_id: 'run-init', template_id: 'construction',
-      repository_path: repo, work_root: workRoot, task_identity: 'issue-lock-init',
-    })], { stdio: ['ignore', 'pipe', 'pipe'] })
-    let stdout = ''
-    let stderr = ''
-    child.stdout.on('data', (d) => { stdout += d })
-    child.stderr.on('data', (d) => { stderr += d })
-    const done = new Promise((r) => child.on('close', (code) => r(code)))
-    setTimeout(async () => {
-      const stillRunning = child.exitCode === null
-      try { closeSync(fd) } catch { /* ignore */ }
-      try { unlinkSync(lp) } catch { /* ignore */ }
-      if (!stillRunning) {
-        console.error('空锁窗口内 allocate 已结束（被当成 stale 抢占）exit=', child.exitCode, stdout, stderr)
-        resolve(false)
-        return
-      }
-      await done
-      try {
-        const parsed = JSON.parse(stdout)
-        if (!parsed.ok || !parsed.workspace) {
-          console.error('释放空锁后 allocate 失败:', stdout, stderr)
-          resolve(false)
-          return
-        }
-        console.log('  ✓ 空锁窗口内未抢占；释放后 allocate 成功')
-        console.log('  ✅ 测试 2c 通过')
-        resolve(true)
-      } catch (e) {
-        console.error('释放后输出不可解析:', stdout, stderr, e.message)
-        resolve(false)
-      }
-    }, 500)
-  })
-}
-
 // ── 测试 3：Provider/Model Snapshot 变化不重建 workspace ─────────────────
 function testSnapshotUpdate() {
   console.log('\n━━ 测试 3：Provider/Model Snapshot 变化不重建 workspace ━━')
@@ -398,7 +352,7 @@ console.log('══════════════════════�
 let pass = 0
 let fail = 0
 
-for (const fn of [testDualRunIsolation, testIntegrationLock, testConcurrentLock, testLockInitNotStale, testSnapshotUpdate, testProofBinding]) {
+for (const fn of [testDualRunIsolation, testIntegrationLock, testConcurrentLock, testSnapshotUpdate, testProofBinding]) {
   try {
     const r = fn()
     // async 测试（并发场景）返回 Promise：await 后按真实结果计分

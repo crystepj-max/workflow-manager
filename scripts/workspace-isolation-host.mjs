@@ -37,11 +37,11 @@ function lockPath(workRoot) {
   return registryPath(workRoot) + '.lock'
 }
 
-// ── 跨进程文件锁（A1 / A2-2 / Round 3）──────────────────────────────────
-// 原子 hardlink 发布：先把完整 JSON 写入临时文件，再 linkSync 到锁路径
-// （目标已存在则 EEXIST）。锁文件从出现那一刻起就含完整 {pid, token, at}，
-// 消除 openSync('wx') 与写内容之间的空文件窗口——竞争者不会再因读到空/半写
-// 内容而误判 stale（Codex Round 3）。
+// ── 跨进程文件锁（A1 / A2-2 / R3-4）──────────────────────────────────────
+// 用原子 hardlink 发布锁记录：先把完整 JSON 写进临时文件，再 linkSync 到锁路径
+// （目标已存在则 EEXIST）。锁文件从出现那一刻起就含完整 {pid, token, at}，消除
+// openSync('wx') 与写内容之间的空文件窗口——竞争者不会再因读到空/半写内容而误判
+// stale 删除仍存活的锁（Codex Round 3 R3-4）。
 // stale 判定：仅当持有者进程已退出（PID 不存活）才接管——长事务（如大型仓库
 // git worktree add）即使超过固定秒数也不得抢占仍存活的锁；释放只允许持有 token
 // 的所有者，避免原持有者无条件删除继任者的锁（Codex Round 2 A2-2）。
@@ -65,6 +65,7 @@ function acquireFileLock(lockPath, timeoutMs = 30000) {
   const token = Math.random().toString(36).slice(2) + '-' + Date.now().toString(36) + '-' + process.pid.toString(36)
   const payload = JSON.stringify({ pid: process.pid, token, at: Date.now() }) + '\n'
   for (;;) {
+    // 原子发布：临时文件（唯一名）→ hardlink 到锁路径；目标存在 → EEXIST = 被占用
     const tmp = lockPath + '.init-' + process.pid + '-' + Math.random().toString(36).slice(2)
     let created = false
     try {
@@ -77,13 +78,16 @@ function acquireFileLock(lockPath, timeoutMs = 30000) {
       } catch (e) {
         try { unlinkSync(tmp) } catch { /* ignore */ }
         if (e.code !== 'EEXIST') throw e
+        // 锁被占用：落入下方 stale 检查（内容必完整，无初始化窗口）
       }
     } catch (e) {
       if (created) { try { unlinkSync(tmp) } catch { /* ignore */ } }
       if (e.code !== 'EEXIST') throw e
+      // tmp 唯一名撞车（几乎不可能）：重试下一轮
       continue
     }
-    // 仅当持有者进程已退出才接管；内容不可解析按非 stale 等待，绝不当即接管。
+    // 仅当持有者进程已退出才接管；否则继续等待（长事务不误伤）。
+    // 内容不可解析理论上不发生（原子发布保证）；若发生按非 stale 等待，绝不当即接管
     let stale = false
     try {
       const info = JSON.parse(readFileSync(lockPath, 'utf8'))
@@ -102,12 +106,11 @@ function acquireFileLock(lockPath, timeoutMs = 30000) {
 }
 
 function releaseFileLock(lockPath, token) {
-  // 只允许持有者释放：锁文件 token 不匹配说明已被接管，不得删除继任者的锁。
-  // 解析失败（初始化空文件）不得 unlink，否则会删掉仍由活进程持有的锁。
+  // 只允许持有者释放：锁文件 token 不匹配说明已被接管，不得删除继任者的锁
   try {
     const info = JSON.parse(readFileSync(lockPath, 'utf8'))
     if (info.token !== token) return
-  } catch { return }
+  } catch { /* 锁文件缺失/损坏：尽力清理 */ }
   try { unlinkSync(lockPath) } catch { /* 已释放 */ }
 }
 

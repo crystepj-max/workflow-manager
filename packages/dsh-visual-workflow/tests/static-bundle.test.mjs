@@ -185,9 +185,9 @@ test('Issue #37：消费者先进入 Cordis，webServer/tools 后出现时才一
   await fiber
   assert.deepEqual(mod.inject, ['webServer', 'tools'], '静态 bundle 必须声明两个宿主依赖')
   assert.deepEqual([...activeRoutes.keys()], ['/dsh-visual-workflow'])
-  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_run'])
+  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace_read', 'vwf_workspace_write', 'wf_run'])
   assert.equal(routeCalls.length, 1, 'RPC 路由首次只注册一次')
-  assert.equal(toolCalls.length, 3, '三个工具首次各注册一次')
+  assert.equal(toolCalls.length, 4, '四个工具首次各注册一次')
 
   await disposeTools()
   assert.equal(activeRoutes.size, 0, 'tools 卸载时静态 Host 的 RPC 路由应随插件卸载')
@@ -196,9 +196,9 @@ test('Issue #37：消费者先进入 Cordis，webServer/tools 后出现时才一
   const disposeToolsAgain = ctx.provide('tools', tools)
   await fiber
   assert.equal(activeRoutes.size, 1, 'tools 重现后只能保留一条活动 RPC 路由')
-  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_run'], 'tools 重现后只能保留三个活动工具')
+  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace_read', 'vwf_workspace_write', 'wf_run'], 'tools 重现后四个活动工具保留')
   assert.equal(routeCalls.length, 2, '重载后是先卸载再重新注册，不发生重复占用')
-  assert.equal(toolCalls.length, 6, '重载后是先卸载再重新注册，不发生重复占用')
+  assert.equal(toolCalls.length, 8, '重载后四工具各重新注册一次，不发生重复占用')
 
   await disposeToolsAgain()
   await disposeWebServer()

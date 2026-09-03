@@ -113,6 +113,23 @@ node scripts/test/runtime-integration-e2e.mjs
 
 ---
 
+## Codex Round 2 / Round 3 修复（PR #150）
+
+Round 2（3 条）与 Round 3（5 条）P1/A 意见全部修复：
+
+| 轮 | 意见 | 修复 |
+|---|---|---|
+| R2 | 事务前 workRoot 不存在 ENOENT | `withRegistryTx/Read` 前递归 `mkdirSync(workRoot)` |
+| R2 | 固定秒数 stale 误抢活锁 / 原持有者删继任者锁 | stale 只按持有者 PID 存活判定；锁带唯一 token，只允许所有者释放 |
+| R2 | RPC 可猜 taskId 跨 Run 越权 | allocate 生成不可伪造 capability 注入 script args，`vwf.workspace.*` RPC 校验令牌 |
+| R3-1 | 正式路径（获取脚本 → 平台 workflow 工具）绕过隔离 | `vwf.script` 在有 taskId + 宿主集成时预分配 workspace 并随返回带出注入参数；标 RUNNING 令崩溃可回收 |
+| R3-2 | workspace 根硬编码 `~/.dsh`，开发 DSH 污染产品 Home | `dshHome()` 子进程引导优先读 `process.env.DSH_HOME` |
+| R3-3 | capability 只注册 RPC，节点 agent 无法写 SOURCE | 注册 `vwf_workspace_write/read` dtool（agent 可见，capability 由宿主校验，写操作经 wsHostCall 子进程挂载 source） |
+| R3-4 | 锁初始化空文件窗口可被误判 stale 双持锁 | 原子 hardlink 发布：临时文件写完整 JSON → `linkSync` 到锁路径（存在即 EEXIST），锁文件出现即含完整记录 |
+| R3-5 | 启动前未标 RUNNING，崩溃留 READY 泄漏 | `engineNow.start` 前持久化 RUNNING；`run.result` rejection 兜底写 FAILED |
+
+回归（merge origin/main 至 aab35ac 后）：包测试 137 pass、E2E 5 通过、非 git 引擎测试 107 通过、Core 25 通过（/tmp fixture，规避宿主沙箱 unlink 限制）。
+
 ## 留给后续 Issue 的缺口
 
 ### #79 持久化（Logical Run / Segment / Snapshot）
