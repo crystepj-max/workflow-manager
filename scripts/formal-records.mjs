@@ -2,10 +2,14 @@
 // 追加式 Store：无 update；覆盖判定只读 dependencies。
 // 用法：import { createStore, appendRecord, coverageStatus, mapPortableHandoff } from './formal-records.mjs'
 
+import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateRecord } from './cwf-validate.mjs'
+
+const require = createRequire(import.meta.url)
+const formalArtifacts = require('./formal-artifacts.cjs')
 
 export const KIND = {
   INPUT_BASELINE: 'input_baseline',
@@ -17,7 +21,17 @@ export const MEDIA = {
   JSON: 'application/json',
   MARKDOWN: 'text/markdown',
   TEXT: 'text/plain',
+  HTML: 'text/html',
+  CANVAS: 'application/vnd.workflow.canvas+json',
+  FLOWCHART: 'application/vnd.workflow.flowchart+json',
+  DIAGRAM: 'application/vnd.workflow.diagram+json',
 }
+
+export const FILE_KINDS = formalArtifacts.FILE_KINDS
+export const blueprintKindToMediaType = formalArtifacts.blueprintKindToMediaType
+export const parseArtifactBody = formalArtifacts.parseArtifactBody
+export const artifactRecordId = formalArtifacts.artifactRecordId
+export const artifactFormatHint = formalArtifacts.artifactFormatHint
 
 export const COVERING = 'covering'
 export const NOT_COVERING_CURRENT = 'not_covering_current'
@@ -167,6 +181,30 @@ export function recordsFromNodeResult(store, { outcome, productions, provenance 
     },
   }))
   return { outcome, produced_records }
+}
+
+export function ingestArtifactDeclarations(store, { runId, nodeId, artifacts, provenance, outcome }) {
+  if (!runId || !nodeId) throw new Error('ingestArtifactDeclarations 需要 runId 与 nodeId')
+  if (!Array.isArray(artifacts)) throw new Error('artifacts 必须是数组')
+  const productions = artifacts.map((art) => {
+    if (!art || typeof art.path !== 'string' || !art.path.trim()) {
+      throw new Error('artifact.path 必填')
+    }
+    if (!FILE_KINDS.includes(art.kind)) throw new Error(`非法 artifact kind: ${art.kind}`)
+    const recordId = artifactRecordId(runId, nodeId, art.path)
+    const prev = currentRevision(store, recordId)
+    const dependencies = []
+    if (prev !== undefined) dependencies.push({ record_id: recordId, record_revision: prev })
+    const input = {
+      record_id: recordId,
+      kind: KIND.RESULT,
+      body: parseArtifactBody(art.kind, art.content),
+      dependencies,
+    }
+    if (prev !== undefined) input.based_on = { record_id: recordId, record_revision: prev }
+    return input
+  })
+  return recordsFromNodeResult(store, { outcome, productions, provenance })
 }
 
 export function appendDecisionRecord(store, input) {

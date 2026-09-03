@@ -10,6 +10,7 @@ import {
   recordsFromNodeResult, appendDecisionRecord, appendGuidance, applyRuntimeControl,
   coverageStatus, coversRevision, dependsOnStaleInputs, staleProofsFor,
   mapPortableHandoff, portableRecordId, validateFormalRecord, loadFormalRecordSchema,
+  ingestArtifactDeclarations, blueprintKindToMediaType,
 } from '../formal-records.mjs'
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -420,4 +421,34 @@ test('仓库内 Portable 示例外壳可映射（不要求本测试解析 payloa
   assert.equal(rec.kind, KIND.INPUT_BASELINE)
   assert.equal(rec.provenance.portable.record_type, 'requirements_baseline')
   assert.equal(rec.body.value.status, 'confirmed')
+})
+
+test('#69 多格式 Formal Artifact：html/canvas/flowchart 与 Revision 追加', () => {
+  const store = createStore()
+  assert.equal(blueprintKindToMediaType('html'), MEDIA.HTML)
+  assert.equal(blueprintKindToMediaType('canvas'), MEDIA.CANVAS)
+  const first = ingestArtifactDeclarations(store, {
+    runId: 'run-a',
+    nodeId: 'eval',
+    outcome: { ok: true },
+    provenance: prov({ node: 'eval' }),
+    artifacts: [
+      { path: 'ui-preview.html', kind: 'html', content: '<!DOCTYPE html><html><body>ok</body></html>' },
+      { path: 'map.canvas.json', kind: 'canvas', content: '{"nodes":[],"edges":[]}' },
+    ],
+  })
+  assert.equal(first.produced_records.length, 2)
+  assert.equal(first.produced_records[0].body.media_type, MEDIA.HTML)
+  assert.equal(first.produced_records[1].body.media_type, MEDIA.CANVAS)
+  const second = ingestArtifactDeclarations(store, {
+    runId: 'run-a',
+    nodeId: 'eval',
+    outcome: { ok: true, rev: 2 },
+    provenance: prov({ node: 'eval', attempt: 2 }),
+    artifacts: [{ path: 'ui-preview.html', kind: 'html', content: '<!DOCTYPE html><html><body>v2</body></html>' }],
+  })
+  assert.equal(second.produced_records[0].record_revision, 2)
+  assert.equal(getRecord(store, second.produced_records[0].record_id, 1).body.value.includes('ok'), true)
+  assert.equal(getRecord(store, second.produced_records[0].record_id, 2).body.value.includes('v2'), true)
+  assert.deepEqual(second.produced_records[0].dependencies, [{ record_id: second.produced_records[0].record_id, record_revision: 1 }])
 })

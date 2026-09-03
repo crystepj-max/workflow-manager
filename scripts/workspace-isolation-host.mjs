@@ -18,8 +18,8 @@ import {
   resolveWorkspacePolicy,
 } from './workspace-isolation.mjs'
 import {
-  mkdirSync, writeFileSync, readFileSync, existsSync, openSync, closeSync,
-  unlinkSync, renameSync,
+  mkdirSync, writeFileSync, readFileSync, existsSync,
+  unlinkSync, renameSync, linkSync,
 } from 'node:fs'
 
 const CMD = process.argv[2]
@@ -37,8 +37,11 @@ function lockPath(workRoot) {
   return registryPath(workRoot) + '.lock'
 }
 
-// ── 跨进程文件锁（A1 / A2-2）────────────────────────────────────────────
-// 用 openSync(..., 'wx') 的排他创建做互斥；锁文件带 pid + token + 时间戳。
+// ── 跨进程文件锁（A1 / A2-2 / Round 3）──────────────────────────────────
+// 原子 hardlink 发布：先把完整 JSON 写入临时文件，再 linkSync 到锁路径
+// （目标已存在则 EEXIST）。锁文件从出现那一刻起就含完整 {pid, token, at}，
+// 消除 openSync('wx') 与写内容之间的空文件窗口——竞争者不会再因读到空/半写
+// 内容而误判 stale（Codex Round 3）。
 // stale 判定：仅当持有者进程已退出（PID 不存活）才接管——长事务（如大型仓库
 // git worktree add）即使超过固定秒数也不得抢占仍存活的锁；释放只允许持有 token
 // 的所有者，避免原持有者无条件删除继任者的锁（Codex Round 2 A2-2）。
@@ -60,41 +63,51 @@ function processAlive(pid) {
 function acquireFileLock(lockPath, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs
   const token = Math.random().toString(36).slice(2) + '-' + Date.now().toString(36) + '-' + process.pid.toString(36)
+  const payload = JSON.stringify({ pid: process.pid, token, at: Date.now() }) + '\n'
   for (;;) {
+    const tmp = lockPath + '.init-' + process.pid + '-' + Math.random().toString(36).slice(2)
+    let created = false
     try {
-      const fd = openSync(lockPath, 'wx')
+      writeFileSync(tmp, payload)
+      created = true
       try {
-        writeFileSync(fd, JSON.stringify({ pid: process.pid, token, at: Date.now() }) + '\n')
-      } catch (e) { /* 锁内容写失败不阻塞持锁 */ }
-      closeSync(fd)
-      return token
+        linkSync(tmp, lockPath)
+        try { unlinkSync(tmp) } catch { /* 临时文件清理失败不阻塞持锁 */ }
+        return token
+      } catch (e) {
+        try { unlinkSync(tmp) } catch { /* ignore */ }
+        if (e.code !== 'EEXIST') throw e
+      }
     } catch (e) {
+      if (created) { try { unlinkSync(tmp) } catch { /* ignore */ } }
       if (e.code !== 'EEXIST') throw e
-      // 仅当持有者进程已退出才接管；否则继续等待（长事务不误伤）
-      let stale = false
-      try {
-        const info = JSON.parse(readFileSync(lockPath, 'utf8'))
-        if (!info || typeof info.pid !== 'number') stale = true
-        else if (!processAlive(info.pid)) stale = true
-      } catch {
-        stale = true
-      }
-      if (stale) {
-        try { unlinkSync(lockPath) } catch { /* 已被其他进程接管 */ }
-        continue
-      }
-      if (Date.now() > deadline) throw new Error('workspace 注册表跨进程锁等待超时: ' + lockPath)
-      sleepMs(20)
+      continue
     }
+    // 仅当持有者进程已退出才接管；内容不可解析按非 stale 等待，绝不当即接管。
+    let stale = false
+    try {
+      const info = JSON.parse(readFileSync(lockPath, 'utf8'))
+      if (!info || typeof info.pid !== 'number') stale = true
+      else if (!processAlive(info.pid)) stale = true
+    } catch {
+      stale = false
+    }
+    if (stale) {
+      try { unlinkSync(lockPath) } catch { /* 已被其他进程接管 */ }
+      continue
+    }
+    if (Date.now() > deadline) throw new Error('workspace 注册表跨进程锁等待超时: ' + lockPath)
+    sleepMs(20)
   }
 }
 
 function releaseFileLock(lockPath, token) {
-  // 只允许持有者释放：锁文件 token 不匹配说明已被接管，不得删除继任者的锁
+  // 只允许持有者释放：锁文件 token 不匹配说明已被接管，不得删除继任者的锁。
+  // 解析失败（初始化空文件）不得 unlink，否则会删掉仍由活进程持有的锁。
   try {
     const info = JSON.parse(readFileSync(lockPath, 'utf8'))
     if (info.token !== token) return
-  } catch { /* 锁文件缺失/损坏：尽力清理 */ }
+  } catch { return }
   try { unlinkSync(lockPath) } catch { /* 已释放 */ }
 }
 

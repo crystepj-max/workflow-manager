@@ -24,8 +24,9 @@ export function loadHost(overrides = {}) {
     defineTool: (tool) => { definedTools.push(tool); return tool },
     registerTool: () => {},
   }
-  const fn = new Function('ctx', 'harness', `${src}`)
-  const plugin = fn(ctx, harness)
+  const pluginRoot = overrides.pluginRoot ?? null
+  const fn = new Function('ctx', 'harness', '__VWF_PLUGIN_ROOT__', `${src}`)
+  const plugin = fn(ctx, harness, pluginRoot)
   plugin.apply(ctx)
   return { handlers, definedTools, events, ctx }
 }

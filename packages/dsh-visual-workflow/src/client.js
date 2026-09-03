@@ -148,6 +148,15 @@ return {
       outputSchema: 'JSON 输出约束',
       outputSchemaPlaceholder: '标准 JSON Schema，例如 {"type":"object","properties":{"result":{"type":"boolean"}},"required":["result"]}',
       outputSchemaHelp: '填写给 AI 的最终 JSON 输出结构（标准 JSON Schema）。保存时会校验成功表达式路径是否存在于其中。',
+      artifactFiles: 'Formal Artifact 声明',
+      artifactFilesHelp: '声明本节点应产出的正式交付物（相对 runDir 路径 + 格式 kind）；写入后产生不可覆盖的 Record Revision。',
+      artifactPath: '相对路径',
+      artifactKind: '格式',
+      addArtifact: '添加 Artifact',
+      removeArtifact: '移除',
+      formalArtifacts: 'Formal Artifacts',
+      artifactRevision: 'Revision',
+      noFormalArtifacts: '该 run 暂无 Formal Artifact 记录',
       outputSchemaBeautify: '美化 JSON',
       outputSchemaInvalid: 'JSON 格式无效，修正后才会写入工作流。',
       successCondition: '成功表达式',
@@ -170,8 +179,8 @@ return {
       templates: '模板库',
       dashboard: '运行看板',
       runMode: '运行方式',
-      runModePrimary: '正式路径：在编辑器中点「获取脚本」，再把脚本交给平台 workflow 工具执行。',
-      runModeEnhanced: '增强路径：宿主 agents 可用时才注册 wf_run；若 workflowEngine 在执行阶段解析失败，请改用正式路径。',
+      runModePrimary: '正式路径：在编辑器中点「获取脚本」（会先分配隔离 workspace 并写入脚本默认 args），再把完整脚本交给平台 workflow 工具执行。',
+      runModeEnhanced: '增强路径：宿主 agents 可用时用 wf_run；与正式路径共用同一 workspace 分配边界。workflowEngine 解析失败时仍走正式路径。',
       newTemplate: '新建模板',
       editTemplate: '编辑',
       deleteTemplate: '删除',
@@ -295,6 +304,15 @@ return {
       outputSchema: 'JSON output constraint',
       outputSchemaPlaceholder: 'Standard JSON Schema, e.g. {"type":"object","properties":{"result":{"type":"boolean"}},"required":["result"]}',
       outputSchemaHelp: 'Define the final JSON shape for the AI (standard JSON Schema). Save validates that the success expression path exists in it.',
+      artifactFiles: 'Formal Artifact declarations',
+      artifactFilesHelp: 'Declare formal deliverables for this node (runDir-relative path + kind); each write creates an append-only Record Revision.',
+      artifactPath: 'Relative path',
+      artifactKind: 'Kind',
+      addArtifact: 'Add artifact',
+      removeArtifact: 'Remove',
+      formalArtifacts: 'Formal Artifacts',
+      artifactRevision: 'Revision',
+      noFormalArtifacts: 'No Formal Artifact records for this run',
       outputSchemaBeautify: 'Beautify JSON',
       outputSchemaInvalid: 'Invalid JSON; fix it before it is written to the workflow.',
       successCondition: 'Success expression',
@@ -317,8 +335,8 @@ return {
       templates: 'Templates',
       dashboard: 'Runs',
       runMode: 'How to run',
-      runModePrimary: 'Standard path: select Get Script in the editor, then run the script with the platform workflow tool.',
-      runModeEnhanced: 'Enhanced path: wf_run is registered only when host agents are available. If workflowEngine cannot be resolved at execution time, use the standard path.',
+      runModePrimary: 'Standard path: click Get Script (this allocates an isolated workspace and bakes default args into the script), then run the full script with the platform workflow tool.',
+      runModeEnhanced: 'Enhanced path: use wf_run when host agents are available. It shares the same workspace allocation boundary as Get Script. If workflowEngine cannot be resolved, use the standard path.',
       newTemplate: 'New Template',
       editTemplate: 'Edit',
       deleteTemplate: 'Delete',
@@ -1201,6 +1219,85 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       )
     }
 
+    const ARTIFACT_KINDS = ['json', 'markdown', 'text', 'html', 'canvas', 'flowchart', 'diagram']
+
+    function artifactPathFromRecordId(recordId) {
+      const parts = String(recordId || '').split(':')
+      return parts.length >= 4 ? parts.slice(3).join(':') : recordId
+    }
+
+    function latestArtifactRecords(records) {
+      const byId = new Map()
+      for (const r of records || []) {
+        if (!r || !r.record_id) continue
+        const cur = byId.get(r.record_id)
+        if (!cur || (r.record_revision || 0) > (cur.record_revision || 0)) byId.set(r.record_id, r)
+      }
+      return Array.from(byId.values()).sort((a, b) => String(a.record_id).localeCompare(String(b.record_id)))
+    }
+
+    function renderArtifactBody(record) {
+      const mt = record && record.body && record.body.media_type
+      const val = record && record.body && record.body.value
+      if (mt === 'text/html') {
+        return h('iframe', { sandbox: '', title: record.record_id, srcDoc: String(val || ''), style: { width: '100%', height: 220, border: '1px solid var(--dsw-alias-border-l2, #333)', borderRadius: 6, background: '#fff' } })
+      }
+      if (mt === 'text/markdown' || mt === 'text/plain') {
+        return h('pre', { className: 'vwf-code', style: { maxHeight: 220, overflow: 'auto' } }, String(val ?? ''))
+      }
+      return h('pre', { className: 'vwf-code', style: { maxHeight: 220, overflow: 'auto' } }, JSON.stringify(val, null, 2))
+    }
+
+    function ArtifactFilesEditor(props) {
+      const files = (props.node.output && props.node.output.files) || {}
+      const entries = Object.entries(files)
+      const errorsFor = props.errorsFor || (() => [])
+      const setFiles = (next) => {
+        const output = { ...(props.node.output || {}) }
+        if (next && Object.keys(next).length) output.files = next
+        else delete output.files
+        if (!output.schema && !output.successCondition && !output.files) {
+          props.onUpdate(props.node.id, { output: null })
+          return
+        }
+        props.onUpdate(props.node.id, { output })
+      }
+      const updateEntry = (oldPath, path, kind) => {
+        const next = { ...files }
+        if (oldPath !== path && oldPath in next) delete next[oldPath]
+        if (path && path.trim()) next[path.trim()] = kind || 'markdown'
+        setFiles(next)
+      }
+      const addEntry = () => {
+        let i = entries.length + 1
+        let path = 'artifact-' + i + '.md'
+        while (files[path]) { i += 1; path = 'artifact-' + i + '.md' }
+        setFiles({ ...files, [path]: 'markdown' })
+      }
+      const removeEntry = (path) => {
+        const next = { ...files }
+        delete next[path]
+        setFiles(next)
+      }
+      return h('div', { className: 'vwf-subsection' },
+        h(Field, { label: t('artifactFiles'), help: t('artifactFilesHelp'), errors: errorsFor('output.files') },
+          entries.length ? entries.map(([path, kind]) => h('div', { key: path, className: 'vwf-row', style: { gap: 6, marginBottom: 6, flexWrap: 'wrap' } },
+            h('input', {
+              className: 'vwf-input vwf-mono', style: { flex: 2, minWidth: 140 }, value: path, placeholder: 'contract.md',
+              onChange: (ev) => updateEntry(path, ev.target.value, kind),
+            }),
+            h(VwfSelect, {
+              value: kind || 'markdown',
+              options: ARTIFACT_KINDS.map((k) => ({ value: k, label: k })),
+              onChange: (v) => updateEntry(path, path, v),
+            }),
+            h('button', { className: 'vwf-btn sm danger', type: 'button', onClick: () => removeEntry(path) }, t('removeArtifact'))
+          )) : h('div', { className: 'vwf-muted-sm' }, '—'),
+          h('button', { className: 'vwf-btn sm', type: 'button', style: { marginTop: 6 }, onClick: addEntry }, t('addArtifact'))
+        )
+      )
+    }
+
     // ── 节点配置表单（对应 WorkerNodeInspector）──────────────────────────────
     function NodeInspector(props) {
       const node = props.node
@@ -1430,9 +1527,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 setSchemaDraft('')
                 setSchemaError(null)
                 setSchemaDirty(false)
-                if (mode === 'ai') props.onUpdate(node.id, { output: { schema: (node.output && node.output.schema) || null, successCondition: (node.output && node.output.successCondition) || '' }, manualCheck: null })
-                else if (mode === 'manual') props.onUpdate(node.id, { output: null, manualCheck: true })
-                else props.onUpdate(node.id, { output: null, manualCheck: null })
+                if (mode === 'ai') props.onUpdate(node.id, { output: { schema: (node.output && node.output.schema) || null, successCondition: (node.output && node.output.successCondition) || '', files: (node.output && node.output.files) || undefined }, manualCheck: null })
+                else if (mode === 'manual') props.onUpdate(node.id, { output: (node.output && node.output.files) ? { files: node.output.files } : null, manualCheck: true })
+                else props.onUpdate(node.id, { output: (node.output && node.output.files) ? { files: node.output.files } : null, manualCheck: null })
               },
             })
           ),
@@ -1463,7 +1560,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 onChange: (ev) => props.onUpdate(node.id, { output: { ...(node.output || {}), successCondition: ev.target.value } }),
               })
             )
-          ) : null
+          ) : null,
+          !isFanout ? h(ArtifactFilesEditor, { node, onUpdate: props.onUpdate, errorsFor }) : null
         )
       )
     }
@@ -2425,6 +2523,23 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                   h('thead', null, h('tr', null, h('th', null, '#'), h('th', null, '节点'), h('th', null, '阶段'), h('th', null, '结果'))),
                   h('tbody', null, dashboardAgentRows(snap.state.agents))
                 ),
+                (() => {
+                  const arts = latestArtifactRecords(snap.state.formalRecords)
+                  return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
+                    h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('formalArtifacts'))),
+                    h('div', { style: { padding: '8px 14px 12px' } },
+                      arts.length ? arts.map((rec) => h('div', { key: rec.record_id + '@' + rec.record_revision, style: { marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--dsw-alias-border-l2, #333)' } },
+                        h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
+                          h('strong', null, artifactPathFromRecordId(rec.record_id)),
+                          h('span', { className: 'vwf-badge accent' }, t('artifactRevision') + ' R' + rec.record_revision),
+                          h('span', { className: 'vwf-muted-sm' }, rec.body && rec.body.media_type ? rec.body.media_type : ''),
+                          rec.provenance && rec.provenance.node ? h('span', { className: 'vwf-muted-sm' }, '节点 ' + rec.provenance.node) : null
+                        ),
+                        renderArtifactBody(rec)
+                      )) : h('div', { className: 'vwf-muted-sm' }, t('noFormalArtifacts'))
+                    )
+                  )
+                })(),
                 h('div', { className: 'vwf-code', style: { marginTop: 8 } }, (snap.state.logs || []).slice(-20).join('\n'))
               )
       )
@@ -2514,7 +2629,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
       const onScript = () => {
         if (!wf) return
-        host.call('vwf.script', { dsl: wf }).then(r => setMsg(r.ok ? ('✓ 编译通过 · 引擎可用：' + r.engineAvailable + '\n\n' + r.script) : JSON.stringify(r.errors))).catch(() => {})
+        const taskId = String((wf && wf.id) || 'task') + '-' + Date.now().toString(36)
+        host.call('vwf.script', { dsl: wf, allocate: true, taskId: taskId, templateId: wf.id }).then(r => {
+          if (!r || !r.ok) {
+            setMsg(JSON.stringify((r && r.errors) || r || { ok: false }))
+            return
+          }
+          const argsNote = r.workspaceArgs
+            ? ('\n\n---\n本脚本已注入隔离 workspace 默认 args（taskId=' + r.workspaceArgs.taskId + '）。交给平台 workflow 工具时请原样运行此完整脚本；勿删 __VWF_WS_DEFAULTS__。\n')
+            : ('\n\n---\n未部署 workspace-isolation-host.mjs：脚本未注入隔离现场，将回退旧 RUNDIR 行为。\n')
+          setMsg('✓ 编译通过 · 引擎可用：' + r.engineAvailable + argsNote + '\n' + r.script)
+        }).catch(() => {})
       }
 
       const editingBuiltin = !!(list || []).find(x => x.id === editId && x.builtin)

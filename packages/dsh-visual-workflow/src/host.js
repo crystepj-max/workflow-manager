@@ -50,7 +50,6 @@ return {
   apply(ctx) {
     const engine = ctx.get('workflowEngine')
     const agents = ctx.get('agents')
-    const llm = ctx.get('llm')
     let fs = ctx.get('fs')
     const sp = ctx.get('sandboxPolicy')
     let subprocess = ctx.get('subprocess')
@@ -62,8 +61,8 @@ return {
     const isDynamicHost = typeof harness !== 'undefined'
     const rpcRoutes = new Map()
     function registerRpc(method, fn) {
-      if (isDynamicHost) { harness.handle(method, fn); return }
       rpcRoutes.set(method, fn)
+      if (isDynamicHost) { harness.handle(method, fn); return }
     }
     // 工具定义/注册双模式：动态=harness.defineTool/registerTool；静态=ctx.tools + 平台 defineTool
     const dtools = {
@@ -91,7 +90,8 @@ return {
     // （apply 时）与客户端 RPC 调用都没有，因此每次调用实时探测，并把任何
     // 有 initiator 的调用记录为 knownCwd 兜底；最后才落 sandboxPolicy
     // workspaceRoot（部署默认 process.cwd()）。
-    // DSH home = 子进程引导（os.homedir() + '/.dsh'，一次性缓存）。
+    // DSH home = 实际 DSH_HOME（开发 ~/.dsh-workflow-dev / 自定义产品 Home），
+    // 禁止无条件推导 os.homedir()+/.dsh（会污染产品 Home）。
     function sessionCwd() {
       try {
         if (agents === undefined || typeof agents.currentInitiator !== 'function') return null
@@ -131,7 +131,7 @@ return {
           // 移除宿主注入的 NODE_OPTIONS（如 WorkBuddy genie-safe-delete 的
           // --require 钩子会拦截 fs.rmSync 并抛 SAFE_DELETE_BULK_CONFIRM_REQUIRED，
           // 导致 remove 的 rm 子进程失败；插件自己的脚本不需要该钩子）
-          env: { NODE_OPTIONS: undefined },
+          env: Object.assign({ NODE_OPTIONS: undefined }, (opts && opts.env) || {}),
           stdio: {
             stdin: 'ignore',
             stdout: { maxBytes: (opts && opts.maxBytes) || 64 * 1024 },
@@ -153,24 +153,38 @@ return {
     }
 
     let dshHomePromise = null
+    function hostProcessDshHome() {
+      // 动态 vm 可能无 process；静态/测试宿主有。仅当值是非空字符串才采用。
+      try {
+        if (typeof process !== 'undefined' && process && process.env && typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME) {
+          return process.env.DSH_HOME
+        }
+      } catch (e) { /* vm 无 process */ }
+      return null
+    }
     function dshHome() {
       if (!dshHomePromise) {
         dshHomePromise = (async () => {
-          // 宿主 env 经 scrub 后仍保留 HOME；DSH_* 被剥除，os.homedir() 不受影响。
-          // 优先子进程引导（动态 vm 沙箱与测试假服务均走这里）；子进程服务不可用时
-          // （静态/web profile 无 subprocess 服务）回落进程 env：DSH_HOME 显式覆盖，
-          // 否则 HOME + '/.dsh'。
-          let home = null
-          const r = await runNode(['-e', "console.log(require('path').join(require('os').homedir(), '.dsh'))"], { cwd: repoRoot() || '/' })
+          // 优先实际 DSH_HOME：开发 DSH（npm run dev:plugin）与自定义产品 Home
+          // 都写在该变量里。子进程 -e 必须读取它，不能无条件 os.homedir()+/.dsh，
+          // 否则 workspace 会落到产品 ~/.dsh/workspaces（Codex Round 3）。
+          const injected = hostProcessDshHome()
+          const probe = "console.log(process.env.DSH_HOME || require('path').join(require('os').homedir(), '.dsh'))"
+          const r = await runNode(['-e', probe], {
+            cwd: repoRoot() || '/',
+            env: injected ? { DSH_HOME: injected } : {},
+          })
           if (r.ok) {
-            home = (r.stdout || '').trim()
-          } else if (typeof process !== 'undefined' && process && process.env) {
-            const envHome = process.env.DSH_HOME || process.env.HOME
-            if (typeof envHome === 'string' && envHome) {
-              home = process.env.DSH_HOME ? envHome : envHome.replace(/\/$/, '') + '/.dsh'
-            }
+            const home = (r.stdout || '').trim()
+            if (home) return home
           }
-          return home || null
+          if (injected) return injected
+          try {
+            if (typeof process !== 'undefined' && process && process.env && typeof process.env.HOME === 'string' && process.env.HOME) {
+              return process.env.HOME.replace(/\/$/, '') + '/.dsh'
+            }
+          } catch (e) { /* ignore */ }
+          return null
         })()
       }
       return dshHomePromise
@@ -479,6 +493,49 @@ return {
       return validatorCorePromise
     }
 
+    function formalArtifactCorePaths() {
+      const paths = []
+      const repo = repoRoot()
+      if (repo) paths.push(repo + '/scripts/formal-artifacts.cjs')
+      if (typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) {
+        paths.push(__VWF_REPO_ROOT__ + '/scripts/formal-artifacts.cjs')
+      }
+      if (typeof __VWF_PLUGIN_ROOT__ === 'string' && __VWF_PLUGIN_ROOT__) {
+        paths.push(__VWF_PLUGIN_ROOT__ + '/dist/formal-artifacts.cjs')
+      }
+      return paths
+    }
+
+    // Formal Artifact 摄入内核（#69）：仓库 scripts/ 或插件 dist/（正式安装）
+    let formalArtifactsCorePromise = null
+    function loadFormalArtifactsCore() {
+      if (!formalArtifactsCorePromise) {
+        formalArtifactsCorePromise = (async () => {
+          if (fs === undefined) return null
+          for (const targetRel of formalArtifactCorePaths()) {
+            try {
+              const target = await fs.resolve(targetRel)
+              const info = await fs.stat(target)
+              if (!info || info.type !== 'file') continue
+              const src = await fs.readText(target)
+              const module = { exports: {} }
+              new Function('module', 'exports', src)(module, module.exports)
+              return module.exports
+            } catch (e) { /* 尝试下一个路径 */ }
+          }
+          return null
+        })()
+      }
+      return formalArtifactsCorePromise
+    }
+
+    function ensureRunFormalRecords(runId) {
+      const rec = runs.get(runId)
+      if (!rec) return null
+      if (!Array.isArray(rec.formalRecords)) rec.formalRecords = []
+      return rec
+    }
+
     // 保存前清洗（对应 Gold-Band sanitizedWorkflow）：entry 依拓扑归一（内核推导）、
     // failure 边剔除 when、maxRounds 取整——DSL 形态变换，留在宿主。
     function sanitizeDsl(dsl, core) {
@@ -678,12 +735,28 @@ return {
       if (typeof val.maxRounds === 'number') rec.maxRounds = val.maxRounds
       if (typeof val.decisionSeq === 'number') rec.decisionSeq = val.decisionSeq
     }
+    function isEmptyObject(val) {
+      return val == null || (typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length === 0)
+    }
+    // workflow/end 只有 stopReason=completed，可能在 wf_run 回写 WAITING_HUMAN 之后才到达，
+    // 把权威等待态盖掉；此时仍靠 decisionId + Package 识别可续跑的停机记录。
+    function isRecoverableCompletedHd(data) {
+      if (!data || String(data.status) !== 'completed') return false
+      const id = data.decisionId || data.decision_id
+      const pkg = data.decisionPackage || data.decision_package
+      return !!(id && pkg && typeof pkg === 'object')
+    }
+    function isParkedHumanDecisionRecord(rec) {
+      if (!rec) return false
+      if (rec.status === 'WAITING_HUMAN') return true
+      return isRecoverableCompletedHd(rec)
+    }
     async function parkedHumanDecision(taskId) {
       const hit = latestTagByTaskId(taskId)
       if (!hit) return null
       let rec = runs.get(hit.runId)
       if (!rec) rec = await loadRunFromDisk(hit.runId)
-      if (!rec || rec.status !== 'WAITING_HUMAN') return null
+      if (!isParkedHumanDecisionRecord(rec)) return null
       return rec
     }
     // Map 保持插入序 = 启动序：取同 taskId 最后插入且未被续跑接管的记录
@@ -708,7 +781,8 @@ return {
       // runs 也可能无 rec（workflow/start 未投递）；此时状态由 tag.active 裁决，
       // 若 active 已解除（终态），绝不能假想仍在运行而误判占用。
       const status = rec ? rec.status : (hit.tag && hit.tag.lastStatus) || ''
-      const active = !staleRunning && ((hit.tag && hit.tag.active === true) || isActiveStatus(status))
+      const parkedHd = rec ? isParkedHumanDecisionRecord(rec) : !!(hit.tag && hit.tag.parkedHd)
+      const active = !staleRunning && ((hit.tag && hit.tag.active === true) || isActiveStatus(status) || parkedHd)
       return active ? { runId: hit.runId, status: status || 'running' } : null
     }
     function supersedeParked(taskId, newRunId) {
@@ -716,8 +790,8 @@ return {
         if (rid === newRunId || !tag || tag.taskId !== taskId || tag.supersededBy) continue
         const rec = runs.get(rid)
         const parked = rec
-          ? isHumanWaitStatus(rec.status)
-          : isHumanWaitStatus(tag.lastStatus)
+          ? (isHumanWaitStatus(rec.status) || isParkedHumanDecisionRecord(rec))
+          : (isHumanWaitStatus(tag.lastStatus) || !!(tag && tag.parkedHd))
         if (parked) {
           tag.supersededBy = newRunId
           requestRunPersist(rid)
@@ -769,7 +843,7 @@ return {
 
     const runs = new Map()
     ctx.on('workflow/start', (info) => {
-      runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [], startedAt: Date.now() })
+      runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [], formalRecords: [], startedAt: Date.now() })
       requestRunPersist(info.id)
     })
     ctx.on('workflow/phase', (info, title) => { const r = runs.get(info.id); if (r) { r.phase = String(title); r.logs.push('[phase] ' + title); if (r.logs.length > 50) r.logs.shift(); requestRunPersist(info.id) } })
@@ -787,7 +861,9 @@ return {
     ctx.on('workflow/end', (info, result) => {
       const r = runs.get(info.id)
       if (r) {
-        r.status = String(result.stopReason)
+        // 脚本权威终态（WAITING_HUMAN / DONE / …）已由 wf_run 回写时，不得被
+        // 迟到的 workflow/end（stopReason=completed）盖掉，否则续跑找不到停机记录。
+        if (!TERMINAL_STATUS_RE.test(String(r.status || ''))) r.status = String(result.stopReason)
         for (const a of r.agents) { if (a.outcome === 'running') a.outcome = 'failed' }
         requestRunPersist(info.id)
       }
@@ -823,6 +899,7 @@ return {
         phase: String(rec.phase || ''),
         logs: rec.logs || [],
         agents: (rec.agents || []).map((a) => ({ seq: a.seq, label: a.label || '', phase: a.phase || '', outcome: a.outcome || '' })),
+        formalRecords: Array.isArray(rec.formalRecords) ? rec.formalRecords : [],
         taskId: tag ? String(tag.taskId || '') : '',
         workflowId: tag ? String(tag.workflowId || '') : '',
         startedAt: rec.startedAt != null ? rec.startedAt : (tag && tag.startedAt != null ? tag.startedAt : null),
@@ -907,7 +984,7 @@ return {
         const tag = runTags.get(v.id)
         const status = rec ? rec.status : (tag && tag.lastStatus) || ''
         const unsuperseded = !(tag && tag.supersededBy)
-        if (unsuperseded && isActiveStatus(status)) continue
+        if (unsuperseded && (isActiveStatus(status) || isParkedHumanDecisionRecord(rec) || (tag && tag.parkedHd))) continue
         const r = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{force:true})", p.runsDir + '/' + v.file])
         if (r.ok) runsDiskIndex.delete(v.file)
         else console.log('[vwf] 运行记录淘汰删除失败：' + v.file + '：' + r.detail)
@@ -927,6 +1004,7 @@ return {
         phase: typeof data.phase === 'string' ? data.phase : '',
         logs: Array.isArray(data.logs) ? data.logs.map((l) => String(l)).slice(-50) : [],
         agents: Array.isArray(data.agents) ? data.agents.filter((a) => a && typeof a === 'object').map((a) => ({ seq: a.seq, label: String(a.label || ''), phase: a.phase ? String(a.phase) : '', outcome: String(a.outcome || '') })) : [],
+        formalRecords: Array.isArray(data.formalRecords) ? data.formalRecords : [],
         startedAt: typeof data.startedAt === 'number' ? data.startedAt : null,
         decisionId: typeof data.decision_id === 'string' && data.decision_id ? data.decision_id : null,
         reason: typeof data.reason === 'string' && data.reason ? data.reason : '',
@@ -1019,7 +1097,7 @@ return {
         if (hydrated.has(it.id) || runs.has(it.id)) continue
         const d = it.data
         const st = typeof d.status === 'string' ? d.status : ''
-        if (!isHumanWaitStatus(st)) continue
+        if (!isHumanWaitStatus(st) && !isRecoverableCompletedHd(d)) continue
         if (typeof d.supersededBy === 'string' && d.supersededBy) continue
         if (!d.taskId && !d.workflowId) continue
         runTags.set(d.id, {
@@ -1029,6 +1107,7 @@ return {
           active: false,
           ghost: true,
           lastStatus: st,
+          parkedHd: isRecoverableCompletedHd(d),
         })
       }
       evictRunsSoon()
@@ -1118,7 +1197,27 @@ return {
       const fromTemplate = !!(dsl && typeof dsl.id === 'string' && (await findWorkflow(dsl.id)))
       const c = await compileViaPipeline(v.sanitized, { fromTemplate })
       if (!c.ok) return { ok: false, errors: [{ at: '$', message: c.detail }] }
-      const out = { ok: true, engineAvailable: !!(resolveEngine()), script: c.script, meta: c.meta }
+      // 正式「获取脚本 → 平台 workflow 工具」路径与 wf_run 共用同一分配边界：
+      // 调用方传 allocate:true（及 taskId）时先分配并注入脚本默认 args，避免 SOURCE 为空回退共享 RUNDIR。
+      let script = c.script
+      let workspaceArgs = null
+      const wantAlloc = !!(a && (a.allocate === true || a.taskId))
+      if (wantAlloc) {
+        const taskId = String((a && a.taskId) || ((dsl && dsl.id) ? (dsl.id + '-' + Date.now()) : ''))
+        const prepared = await prepareRunWorkspace({
+          taskId: taskId,
+          templateId: (a && a.templateId) || (dsl && dsl.id) || '',
+          baseBranch: (a && a.baseBranch) || 'main',
+        })
+        if (!prepared.ok) return { ok: false, errors: [{ at: '$', message: 'Run Workspace 分配失败，隔离保证无法建立：' + prepared.error }] }
+        if (prepared.workspace) {
+          workspaceArgs = scriptArgsFromWorkspace(prepared.workspace, prepared.capability, taskId)
+          workspaceArgs.taskId = taskId
+          script = injectWorkspaceDefaults(script, workspaceArgs)
+          await markWorkspaceLifecycle(taskId, 'RUNNING')
+        }
+      }
+      const out = { ok: true, engineAvailable: !!(resolveEngine()), script: script, meta: c.meta, workspaceArgs: workspaceArgs }
       if (c.roleDir) out.roleDir = c.roleDir
       return out
     })
@@ -1130,6 +1229,7 @@ return {
       if (!s) return { found: false, state: null }
       const tag = runTags.get(id) || null
       return { found: true, state: { id: id, meta: s.meta, status: s.status, phase: s.phase, logs: s.logs, agents: s.agents,
+        formalRecords: Array.isArray(s.formalRecords) ? s.formalRecords : [],
         taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: s.startedAt != null ? s.startedAt : (tag ? tag.startedAt : null),
         supersededBy: tag && tag.supersededBy ? tag.supersededBy : '',
         decision_id: s.decisionId || '', reason: s.reason || '',
@@ -1138,6 +1238,41 @@ return {
         budgetUsed: typeof s.budgetUsed === 'number' ? s.budgetUsed : null,
         maxRounds: typeof s.maxRounds === 'number' ? s.maxRounds : null,
         decisionSeq: typeof s.decisionSeq === 'number' ? s.decisionSeq : null } }
+    })
+    registerRpc('vwf.artifacts.ingest', async (a) => {
+      const runId = a && a.runId
+      const nodeId = a && a.nodeId
+      const artifacts = a && a.artifacts
+      if (!runId || !nodeId || !Array.isArray(artifacts) || !artifacts.length) {
+        return { ok: false, errors: [{ at: '$', message: '缺少 runId / nodeId / artifacts' }] }
+      }
+      const rec = ensureRunFormalRecords(runId)
+      if (!rec) return { ok: false, errors: [{ at: '$.runId', message: '运行记录不存在：' + runId }] }
+      const core = await loadFormalArtifactsCore()
+      if (!core) return { ok: false, errors: [{ at: '$', message: 'Formal Artifact 内核不可用：缺少 scripts/formal-artifacts.cjs 或 dist/formal-artifacts.cjs' }] }
+      const tag = runTags.get(runId) || null
+      try {
+        rec.formalRecords = core.ingestArtifacts(rec.formalRecords, {
+          runId: String(runId),
+          nodeId: String(nodeId),
+          artifacts: artifacts,
+          outcome: a && a.outcome !== undefined ? a.outcome : null,
+          provenance: {
+            logical_run_id: String(runId),
+            node: String(nodeId),
+            attempt: (a && a.attempt) || 1,
+            snapshot_revision: (a && a.snapshot_revision) || 'unspecified',
+            provider: (a && a.provider) || 'unknown',
+            model: (a && a.model) || 'unknown',
+            produced_by: (a && a.produced_by) || 'vwf:artifacts.ingest',
+            node_business_outcome: (a && a.outcome !== undefined) ? a.outcome : null,
+          },
+        })
+        requestRunPersist(runId)
+        return { ok: true, formalRecords: rec.formalRecords, produced: artifacts.length, taskId: tag ? tag.taskId : '' }
+      } catch (e) {
+        return { ok: false, errors: [{ at: '$', message: String((e && e.message) || e) }] }
+      }
     })
     // 多 run 并行（#19）：运行清单（最新在前），看板列表/门禁队列/并行警示的数据源
     registerRpc('vwf.runs.list', async () => {
@@ -1182,10 +1317,13 @@ return {
       return { runs: out }
     })
     registerRpc('vwf.models', async () => {
-      if (llm === undefined) return { providers: [] }
+      // llm 每次现取而非 apply 时捕获：llm 服务就绪可能晚于插件 apply，
+      // 启动时一次性捕获会永久拿到 undefined 导致面板「未配置可用模型」
+      const llm = ctx.get('llm')
+      if (llm === undefined) { console.log('[vwf] vwf.models：llm 服务不可用（未就绪或未注入），返回空 provider 列表'); return { providers: [] } }
       const out = []
       let providers = []
-      try { providers = await Promise.resolve(llm.listProviders()) } catch (e) { return { providers: [] } }
+      try { providers = await Promise.resolve(llm.listProviders()) } catch (e) { console.log('[vwf] vwf.models：listProviders 失败：' + String((e && e.message) || e)); return { providers: [] } }
       for (const p of providers || []) {
         const id = String(p && (p.id || p.provider || p.name) || '')
         if (!id) continue
@@ -1193,7 +1331,7 @@ return {
         try {
           const ms = await llm.listModels(id)
           models = (ms || []).map(m => String(m && (m.id || m.model || m.name) || '')).filter(Boolean)
-        } catch (e) {}
+        } catch (e) { console.log('[vwf] vwf.models：listModels(' + id + ') 失败：' + String((e && e.message) || e)) }
         out.push({ id: id, models: models })
       }
       return { providers: out }
@@ -1781,6 +1919,57 @@ return {
       return null
     }
 
+    function scriptArgsFromWorkspace(ws, cap, taskId) {
+      if (!ws) return {}
+      return {
+        taskId: taskId || undefined,
+        workspace_id: ws.workspace_id,
+        workspace_path: ws.workspace_path,
+        source_path: ws.source_path,
+        records_path: ws.records_path,
+        work_branch: ws.work_branch,
+        source_revision: ws.source_revision,
+        workspace_capability: cap || undefined,
+      }
+    }
+
+    function injectWorkspaceDefaults(script, defaults) {
+      const payload = {}
+      for (const k of Object.keys(defaults || {})) {
+        if (defaults[k] !== undefined && defaults[k] !== null) payload[k] = defaults[k]
+      }
+      const json = JSON.stringify(payload)
+      const marker = 'const __VWF_WS_DEFAULTS__ = {}'
+      if (script && script.indexOf(marker) >= 0) return script.replace(marker, 'const __VWF_WS_DEFAULTS__ = ' + json)
+      const old = 'const A = args || {}'
+      if (script && script.indexOf(old) >= 0) {
+        return script.replace(old, 'const A = Object.assign({}, ' + json + ', args || {})')
+      }
+      return 'const A = Object.assign({}, ' + json + ', args || {})\n' + (script || '')
+    }
+
+    async function prepareRunWorkspace(opts) {
+      const taskId = String((opts && opts.taskId) || '')
+      if (!taskId) return { ok: false, error: '缺少 taskId' }
+      const alloc = await wsHostCall('allocate', {
+        logical_run_id: taskId,
+        template_id: mapTemplateId((opts && opts.templateId) || ''),
+        repository_path: repoRoot() || null,
+        base_ref: (opts && opts.baseBranch) || 'main',
+        task_identity: taskId,
+      })
+      if (alloc.notFound) return { ok: true, degraded: true, notFound: true }
+      if (!alloc.ok || !alloc.workspace) return { ok: false, error: alloc.error || 'workspace 分配失败（未知原因）' }
+      const cap = genCapability()
+      workspaceCaps.set(taskId, cap)
+      return { ok: true, workspace: alloc.workspace, capability: cap }
+    }
+
+    async function markWorkspaceLifecycle(taskId, lifecycle) {
+      if (!taskId || !lifecycle) return
+      try { await wsHostCall('setLifecycle', { logical_run_id: String(taskId), lifecycle: lifecycle }) } catch (e) { /* 非阻断 */ }
+    }
+
     // ── Workspace Isolation RPC（#93）──────────────────────────────────────
     // 这些 RPC 供编译后的 workflow 脚本在节点内调用，获取 workspace 现场、
     // 写 source/scratch、构建 provenance、管理集成锁。
@@ -1797,7 +1986,19 @@ return {
         task_identity: String((a && a.taskId) || ''),
         allow_parallel: !!(a && a.allow_parallel),
       }
-      return wsHostCall('allocate', spec)
+      const result = await wsHostCall('allocate', spec)
+      if (result.ok && result.workspace) {
+        const runId = String((a && a.taskId) || '')
+        if (runId) {
+          let cap = workspaceCaps.get(runId)
+          if (!cap) {
+            cap = genCapability()
+            workspaceCaps.set(runId, cap)
+          }
+          result.capability = cap
+        }
+      }
+      return result
     })
     registerRpc('vwf.workspace.get', async (a) => {
       const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || (a && a.taskId) || '')
@@ -1958,7 +2159,10 @@ return {
           results: { type: 'object', additionalProperties: true, description: '续跑时带回的节点结果快照' },
         },
         output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
-        async execute(args) {
+        async execute(rawArgs) {
+          // 工具平台会对 execute 参数 deepFreeze（DSH tools snapshotJsonValue）。
+          // 续跑回填必须写到浅拷贝上，不能改冻结的 rawArgs。
+          const args = Object.assign({}, rawArgs || {})
           // 约束②（同 taskId 互斥）：最新记录进行中/AWAITING_HUMAN 且非 entry 续跑 → 拒绝。
           // 校验放最前（fail-fast），不浪费校验/编译开销。
           // 先等启动回载完成（评审 PRRT_kwDOT57Tec6b6Iu1）：否则互斥判定可能与
@@ -1970,10 +2174,10 @@ return {
           const blocker = taskMutexBlocker(String((args && args.taskId) || ''))
           if (blocker) {
             const st = String(blocker.status || '')
+            let rec = runs.get(blocker.runId)
+            if (!rec) rec = await loadRunFromDisk(blocker.runId)
             let allow = false
-            if (st === 'WAITING_HUMAN') {
-              let rec = runs.get(blocker.runId)
-              if (!rec) rec = await loadRunFromDisk(blocker.runId)
+            if (st === 'WAITING_HUMAN' || isParkedHumanDecisionRecord(rec)) {
               const parkedId = rec && rec.decisionId ? String(rec.decisionId) : ''
               allow = isHdResume && (!parkedId || parkedId === String(args.decision_id))
             } else if (st.indexOf('AWAITING_HUMAN_') === 0) {
@@ -2004,7 +2208,10 @@ return {
             const parked = await parkedHumanDecision(String((args && args.taskId) || ''))
             if (parked) {
               if (args.blocked_edge == null && parked.blockedEdge) args.blocked_edge = parked.blockedEdge
-              if (args.results == null && parked.results) args.results = parked.results
+              if (isEmptyObject(args.results) && parked.results) args.results = parked.results
+              if (isEmptyObject(args.results) && parked.node && parked.controlEvent && parked.controlEvent.triggering_node_outcome) {
+                args.results = { [parked.node]: parked.controlEvent.triggering_node_outcome }
+              }
               if (args.history == null && parked.history) args.history = parked.history
               if (args.startRound == null && parked.round != null) args.startRound = parked.round
               if (args.budgetUsed == null && parked.budgetUsed != null) args.budgetUsed = parked.budgetUsed
@@ -2029,39 +2236,21 @@ return {
           // 旧行为（不注入 workspace，脚本自行管理路径），不把「未部署」当故障。
           let workspaceInfo = null
           let workspaceCap = null
-          let workspaceDegraded = false
-          const repoPath = repoRoot() || ''
-          let allocError = null
-          try {
-            const templateId = mapTemplateId(args.templateId || (dsl && dsl.id) || '')
-            const alloc = await wsHostCall('allocate', {
-              logical_run_id: String(args.taskId || ''),
-              template_id: templateId,
-              repository_path: repoPath || null,
-              repository: repoPath ? null : null,
-              base_ref: args.baseBranch || 'main',
-              task_identity: String(args.taskId || ''),
-            })
-            if (alloc.ok && alloc.workspace) {
-              workspaceInfo = alloc.workspace
-              // A3-2（Codex Round 2）：分配成功后登记不可伪造 capability，注入
-              // script args；RPC 调用必须携带匹配令牌，防猜测 taskId 跨 Run 越权。
-              const cap = genCapability()
-              workspaceCaps.set(String(args.taskId || ''), cap)
-              workspaceCap = cap
-              console.log('[vwf] workspace allocated: ' + workspaceInfo.workspace_id + ' at ' + workspaceInfo.workspace_path)
-            } else if (alloc.notFound) {
-              workspaceDegraded = true
-              console.log('[vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为：' + (alloc.error || ''))
-            } else {
-              allocError = alloc.error || 'workspace 分配失败（未知原因）'
-            }
-          } catch (e) {
-            allocError = String((e && e.message) || e)
+          const prepared = await prepareRunWorkspace({
+            taskId: String(args.taskId || ''),
+            templateId: args.templateId || (dsl && dsl.id) || '',
+            baseBranch: args.baseBranch || 'main',
+          })
+          if (!prepared.ok) {
+            console.log('[vwf] workspace allocate 失败（fail closed，拒绝启动）：' + prepared.error)
+            return '错误：Run Workspace 分配失败，隔离保证无法建立，工作流拒绝启动：' + prepared.error + '（请检查仓库根可访问性、DSH Home/workspaces 目录权限与 workspace-isolation-host.mjs 是否存在）'
           }
-          if (allocError) {
-            console.log('[vwf] workspace allocate 失败（fail closed，拒绝启动）：' + allocError)
-            return '错误：Run Workspace 分配失败，隔离保证无法建立，工作流拒绝启动：' + allocError + '（请检查仓库根可访问性、~/.dsh*/workspaces 目录权限与 workspace-isolation-host.mjs 是否存在）'
+          if (prepared.workspace) {
+            workspaceInfo = prepared.workspace
+            workspaceCap = prepared.capability
+            console.log('[vwf] workspace allocated: ' + workspaceInfo.workspace_id + ' at ' + workspaceInfo.workspace_path)
+          } else if (prepared.notFound) {
+            console.log('[vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为')
           }
 
           // 注入 workspace 路径到 script args（#93）：脚本通过 host.call('vwf.workspace.get')
@@ -2087,7 +2276,22 @@ return {
             if (scriptArgs[k] === undefined) delete scriptArgs[k]
           }
 
-          const run = engineNow.start({ script: c.script, meta: c.meta, args: scriptArgs, parent: parent })
+          // Codex Round 3：启动引擎前先持久化 RUNNING。崩溃/start 抛错/result
+          // rejection 不得把 workspace 永久留在 READY（recoverStale 只回收 RUNNING）。
+          if (workspaceInfo) await markWorkspaceLifecycle(String(args.taskId || ''), 'RUNNING')
+
+          const startReq = { script: c.script, meta: c.meta, args: scriptArgs, parent: parent }
+          if (workspaceInfo && workspaceInfo.source_path) {
+            startReq.cwd = workspaceInfo.source_path
+            startReq.workspaceRoot = workspaceInfo.source_path
+          }
+          let run
+          try {
+            run = engineNow.start(startReq)
+          } catch (e) {
+            if (workspaceInfo) await markWorkspaceLifecycle(String(args.taskId || ''), 'FAILED')
+            return '错误：工作流引擎启动失败，workspace 已标 FAILED：' + String((e && e.message) || e)
+          }
           // 启动边界自登记（workflow/start 事件无 taskId，见 runTags 注释）；
           // entry / decision_id 续跑把同 taskId 前序门禁记录标记接管，旧卡片退出门禁队列
           runTags.set(String(run.id), {
@@ -2102,7 +2306,13 @@ return {
           // 这里保证进行中的 run 后即有含 taskId 的可见快照（#40 AC2）
           requestRunPersist(String(run.id))
           if (isResume) supersedeParked(String(args.taskId), String(run.id))
-          const result = await run.result
+          let result
+          try {
+            result = await run.result
+          } catch (e) {
+            if (workspaceInfo) await markWorkspaceLifecycle(String(args.taskId || ''), 'FAILED')
+            return '错误：工作流运行失败，workspace 已标 FAILED：' + String((e && e.message) || e)
+          }
           // 权威终态回写（见 canonicalStop 注释）：completed 时以脚本返回为准
           // （DONE / WAITING_HUMAN / AWAITING_HUMAN_* / FAILED_*），cancelled/error 保持事件原样。
           // 注意：wf_run 回执保持引擎原样 stopReason/value 不做翻译（runtime-host
@@ -2130,6 +2340,37 @@ return {
         }
       })
       dtools.register(ctx, tool)
+      const wsTool = dtools.define({
+        name: 'vwf_workspace',
+        description: '按已分配的 Logical Run 访问隔离 workspace。必须携带本 Run 的 workspace_capability。op=get|writeSource|readSource|writeWorker|readWorker|acquireLock|releaseLock|checkpoint|buildProvenance|setLifecycle|recordSourceSync|cleanup',
+        parameters: {
+          op: { type: 'string', required: true, description: 'get | writeSource | readSource | writeWorker | readWorker | acquireLock | releaseLock | checkpoint | buildProvenance | setLifecycle | recordSourceSync | cleanup' },
+          logical_run_id: { type: 'string', required: true, description: 'Logical Run / taskId' },
+          capability: { type: 'string', required: true, description: 'wf_run 或获取脚本注入的 workspace_capability' },
+          rel: { type: 'string', description: '相对 source/worker 的路径' },
+          content: { type: 'string', description: '写入内容' },
+          worker_id: { type: 'string' },
+          resource_key: { type: 'string' },
+          owner: { type: 'string' },
+          lock_id: { type: 'string' },
+          node: { type: 'string' },
+          attempt: { type: 'number' },
+          lifecycle: { type: 'string' },
+        },
+        output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
+        async execute(rawArgs) {
+          const op = String((rawArgs && rawArgs.op) || '')
+          const fn = rpcRoutes.get('vwf.workspace.' + op)
+          if (typeof fn !== 'function') return JSON.stringify({ ok: false, error: '未知 workspace op：' + op })
+          try {
+            const res = await fn(rawArgs)
+            return typeof res === 'string' ? res : JSON.stringify(res)
+          } catch (e) {
+            return JSON.stringify({ ok: false, error: String((e && e.message) || e) })
+          }
+        },
+      })
+      dtools.register(ctx, wsTool)
       // 诊断工具（定位删除/路径问题）：op=paths 返回路径解析；op=remove 逐步执行删除
       const debugTool = dtools.define({
         name: 'vwf_debug',

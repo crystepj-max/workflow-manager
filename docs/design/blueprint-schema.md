@@ -24,7 +24,7 @@
 | `onMaxRounds` | 可选 | `'return'`（默认）\| `'auto-reschedule'` | DSH 增强：超限自动回调度做失败归因（D4）；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
 | `heteroCheck` | 可选 | 布尔，默认 false | DSH 增强：注入 dev↔review 异源运行日志（T-06 定稿后：v2 起异源由 save/validate 全局强制，本字段退化为运行时日志开关）；置 true 时须存在 dev 与 review 节点；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
 | `bindings.models` | 可选 | 对象：`{ <nodeId>: {provider?, model?} }` | 模型绑定（D2 节点粒度）；键必须都是节点 id；缺省 = 宿主默认 |
-| `humanDecision.maxRoundsReachedOptions` | 可选 | 非空数组，元素 ∈ `USER_ACCEPTED` \| `ADD_BUDGET` \| `STOP` | 额度耗尽时展示的控制类 Result；**缺省 = 三项全开**；可覆盖为非空子集，**删到零则拒**（#116） |
+| `humanDecision.maxRoundsReachedOptions` | 可选 | 非空数组，元素 ∈ `USER_ACCEPTED` \| `ADD_BUDGET` \| `STOP` | 额度耗尽时展示的控制类 Result；**缺省 = 三项全开**；可覆盖为非空子集，**删到零则拒**（#116 校验；#119 运行时同样 fail-closed，不得挂起空目录） |
 | `nodes` | ✅ | 数组，≥1 | 见 2.2 |
 | `edges` | ✅ | 数组 | 见 2.3 |
 
@@ -43,7 +43,7 @@
 | `output.successCondition` | 可选 | 旧模式：`$.path ==|!= value`（value ∈ true/false/null/字符串/数字）；路径必须已在 `output.schema` 中声明。新模式（有 `outcomePath`）禁止 |
 | `output.outcomePath` | 可选 | 新模式开关（#88）。`$.field` 指向 schema 内可穷举叶子（`enum` / `const` / `oneOf` 常量，或 `boolean`→`{true,false}`）。有则走业务边 `outcome` + 可选 `{ on: "technical" }`；无则走旧 `successCondition`/`on`/`when`。同一节点禁止新旧混用；同一工作流允许新旧节点并存。fanout 禁止 |
 | `output.completionPath` | 可选 | 完成类型字段路径（#92），语法同 `outcomePath`，允许二者相等。须有 schema、路径在内、叶子为 `string`；该节点必须有结构边到 `$end`。fanout 禁止。仅 `DONE` 时读 `results[node]` 写入 `completion` |
-| `output.files` | 可选 | 对象：`{ "<相对路径>": "json"\|"markdown"\|"text" }`——本节点**应产出**的声明式文件契约（D7，Q1 增补）；路径相对 `runDir/`；见 §6.4 |
+| `output.files` | 可选 | 对象：`{ "<相对路径>": "json"\|"markdown"\|"text"\|"html"\|"canvas"\|"flowchart"\|"diagram" }`——本节点**应产出**的 Formal Artifact 声明式文件契约（D7，Q1 增补）；路径相对 `runDir/`；见 §6.4 |
 | `manualCheck` | 可选 | 布尔，默认 false；true = 人工门禁节点（vwf 编译为 `AWAITING_HUMAN_<id>` + resume 续跑；DSH 侧对应脚本返回 + 主会话裁决） |
 | `verifyBranch` | 可选 | 布尔，默认 false；DSH 增强（D4）：置 true 时 `output.schema.required` **必须**含 `verified_branch` 与 `verified_head`（可信度闸门，编译注入开工分支自检 + 结论硬校验）；vwf 侧 v1 忽略，**v1.1（候选一统一编译器）起按蓝图内容生效**——内置模板含本字段，vwf 入口同样硬校验 |
 
@@ -60,7 +60,7 @@
 
 ### 2.4 Human Decision 控制面键名（#116 钉死；机器英文）
 
-> 新蓝图走本协议；残留 `manualCheck` 仍用 `AWAITING_HUMAN_<id>` + `approved`。本表只锁字段名，挂起运行时由 #118 起实现。
+> 新蓝图走本协议；残留 `manualCheck` 仍用 `AWAITING_HUMAN_<id>` + `approved`。本表只锁字段名。挂起运行时：#77 引擎段命中 `$human-decision` 入边发出 `ROUTE_HALTED`（`reason=HUMAN_DECISION`）；#118 将其翻译为 `WAITING_HUMAN` 并装配 Decision Package 与追加-only 控制面事件。编译脚本对外返回 `WAITING_HUMAN`，不把 `ROUTE_HALTED` 作为人工决策终态。
 
 | 面 | 英文键 | 取值 / 说明 |
 |---|---|---|
@@ -74,7 +74,7 @@
 | 续跑 args | `decision_id` / `user_choice` | 新路径；**禁止**再传 `approved`。业务 `user_choice` 匹配 `$human-decision` 出边 `result` 后续跑到 `to`（不改写触发节点 Outcome）；无匹配出边则保持 `WAITING_HUMAN`。残留门禁续跑仍用 `approved` |
 | 过渡身份 | `taskId` | #79 交付 `logical_run_id` 前的恢复身份 |
 
-规则摘要：使用 HD 的蓝图禁止顶层/节点 `approved`，禁止与 `manualCheck` 同图；fanout 节点禁止边到 `$human-decision`。新模式命中 `$human-decision` 入边时引擎返回 `ROUTE_HALTED`（`reason=HUMAN_DECISION`），不发 `WAITING_HUMAN`、不装配 Decision Package（#72）。旧模式 HD 入边仍为 `on: success`，运行时仍走 `WAITING_HUMAN`。
+规则摘要：使用 HD 的蓝图禁止顶层/节点 `approved`，禁止与 `manualCheck` 同图；fanout 节点禁止边到 `$human-decision`。新模式命中 `$human-decision` 入边时引擎段发出 `ROUTE_HALTED`（`reason=HUMAN_DECISION`）；#118 翻译为 `WAITING_HUMAN` 并装配 Decision Package。旧模式 HD 入边仍为 `on: success`，运行时直接 `WAITING_HUMAN`。
 
 ## 3. 校验规则（两层，D5）
 
@@ -93,7 +93,7 @@
 3. `bindings.models` 的每个键都必须是已声明节点 id。
 4. `heteroCheck=true` 时存在 `dev` 与 `review` 节点。
 5. `verifyBranch=true` 节点：`output.schema.required` 含 `verified_branch`/`verified_head`。
-6. `output.files`（若给）：键为合法相对路径（非空、不以 `/` 开头或结尾、不含 `..`、不覆盖保留文件 `STATE.md`）；值为 `json|markdown|text` 枚举。
+6. `output.files`（若给）：键为合法相对路径（非空、不以 `/` 开头或结尾、不含 `..`、不覆盖保留文件 `STATE.md`）；值为 `json|markdown|text|html|canvas|flowchart|diagram` 枚举。
 7. **异源硬规则（v2 生效，T-06）**：凡含 `dev` 与 `review` 节点的蓝图（按节点 `id` 或 `profile` 识别——编辑器新建节点默认 id 为 node-N，以角色表达 dev/review 时同样纳入），save/update/validate 一律校验其 `bindings.models`——任一缺失 → 拒（「无法证明异源，请显式配置」）；完全同模型（provider+model 相同）→ 拒；同 provider 不同 model（弱异源）→ 通过 + warning；不同 provider → 通过。无 dev/review 节点的蓝图跳过。错误消息沿用 `errors[]` 结构（at=`bindings.models`，含实际 provider/model 与修复指引）。
 8. `control.maxRounds`（若给）：**1-9 的整数（系统约定上限 9，候选二 Q7）**——0/负数/小数/非数/超 9 一律拒绝（坐标键 `control:maxRounds`）。
 9. **fanout 专属规则**：`kind ∈ {worker, fanout}`；fanout 必须有合法 `items`、含 `{{item}}` 的 `goal` 和 failure 出边，禁止 `output.successCondition` / `manualCheck` / `verifyBranch` / 升级到 `$human-decision`；`failOn` 仅接受 `any` / `all` / 非负整数。`$.results.<节点id>` 引用必须存在且沿 success 边先于当前节点。worker 出现 `items` / `failOn` 拒绝。所有错误携带对应 `node:<id>:<field>` 坐标。
@@ -135,7 +135,7 @@ fanout 节点的 `kind` / `items` / `failOn` 必须双向透传；新模式边�
 - **超限归因**：`onMaxRounds = 'auto-reschedule'` → 超限时注入归因 agent（产出 reschedule：归因/拆分/人工介入建议）。
 - **可信度闸门**：`verifyBranch=true` 节点 → 注入开工分支自检 + `verified_branch`/`verified_head` 硬校验（失败即 TECHNICAL_FAILURE；新模式可走 `on: technical`）。
 - **异源警告**：`heteroCheck=true` → 注入 dev↔review 模型比对 warning（v1 不拦截，v2 由 T-06 升级为 enforcement）。
-- **业务结果路由（#77）+ 自动回退额度（#73）**：有 `outcomePath` 的节点按路径等值匹配 `outcome` 出边；命中 `$human-decision` → `ROUTE_HALTED`（`reason=HUMAN_DECISION`），不发 `WAITING_HUMAN`。缺匹配 → `ENDED_NO_OUTCOME_EDGE`。`countRound=true` 的业务边消耗 `control.maxRounds`；耗尽则 `WAITING_HUMAN` + `MAX_ROUNDS_REACHED`，不改写 `results[node]`。`countRound=false` 与技术边不计额度。旧蓝图 failure 边仍 `round++`，超限仍 `FAILED_MAX_ROUNDS`。走进 `$end` 时 `DONE.completion = { type, node, path } | null`（仅终态节点声明了 `completionPath` 且读到非空字符串才有对象）。`ADD_BUDGET` 续跑必须把额度变更写入 `control_event`（`budget_delta` / `max_rounds_after` / `budget_used`）；再次耗尽必须分配新的 `decision_id`（单调 `decisionSeq`），不得复用前次 Decision Record 身份。
+- **业务结果路由（#77）+ 自动回退额度（#73）+ Human Decision 翻译（#118）**：有 `outcomePath` 的节点按路径等值匹配 `outcome` 出边；命中 `$human-decision` → 引擎段 `ROUTE_HALTED`（`reason=HUMAN_DECISION`），由 #118 翻译为 `WAITING_HUMAN` 并装配 Decision Package。缺匹配 → `ENDED_NO_OUTCOME_EDGE`。`countRound=true` 的业务边消耗 `control.maxRounds`；耗尽则 `WAITING_HUMAN` + `MAX_ROUNDS_REACHED`，不改写 `results[node]`。`countRound=false` 与技术边不计额度。旧蓝图 failure 边仍 `round++`，超限仍 `FAILED_MAX_ROUNDS`。走进 `$end` 时 `DONE.completion = { type, node, path } | null`（仅终态节点声明了 `completionPath` 且读到非空字符串才有对象）。`ADD_BUDGET` 续跑必须把额度变更写入 `control_event`（`budget_delta` / `max_rounds_after` / `budget_used`）；再次耗尽必须分配新的 `decision_id`（单调 `decisionSeq`），不得复用前次 Decision Record 身份。
 
 ### 4.3 角色与运行上下文
 
@@ -204,7 +204,7 @@ fanout 节点的 `kind` / `items` / `failOn` 必须双向透传；新模式边�
 | D7 产出文件（Q1 增补） | 节点 `output.files` 声明式契约（相对 runDir，kind 枚举）；STATE.md 保留文件不可声明；v1 注入+留痕、不强制缺失即失败 |
 | Q4 权限管控（增补） | per-node 权限列为 v2 候选 fog（引擎扩展，蓝图不预置字段）；思考强度明确不需要（引擎白名单不支持，模型档位替代） |
 | #77 / #88 双模式 | 无 `outcomePath` 保持旧 `success`/`failure`；有则走 `outcome` + 可选 `technical`。缺边 `ENDED_NO_OUTCOME_EDGE` |
-| #77 / #87 最小停机 | 新模式命中 `$human-decision` → `ROUTE_HALTED`（`reason=HUMAN_DECISION`），不发 `WAITING_HUMAN` |
+| #77 / #87 最小停机 | 新模式命中 `$human-decision` → 引擎段 `ROUTE_HALTED`（`reason=HUMAN_DECISION`）；#118 翻译为 `WAITING_HUMAN` |
 | #90 结构边 / SCC | 结构边 = success ∪ outcome；新模式允许有出口的业务 SCC；走通性不看 `countRound` |
 | #91 完整性 / Preset | 枚举与边一一对应；Preset JSON 可选（`docs/design/outcome-presets.json`），校验不强制 |
 | #92 Completion | `completionPath` + `DONE.completion`；不写 `runs/` |

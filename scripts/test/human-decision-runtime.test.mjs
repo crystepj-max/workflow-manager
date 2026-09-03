@@ -18,6 +18,7 @@ const {
 const here = path.dirname(fileURLToPath(import.meta.url))
 const hd = JSON.parse(readFileSync(path.join(here, 'fixtures/human-decision-blueprint.json'), 'utf8'))
 const mini = JSON.parse(readFileSync(path.join(here, 'fixtures/hello-blueprint.json'), 'utf8'))
+const outcomeHd = JSON.parse(readFileSync(path.join(here, 'fixtures/outcome-evaluate-mini.json'), 'utf8'))
 
 const runHd = (table, args = {}, bp = hd) => {
   const { script } = compileBlueprint(bp)
@@ -76,6 +77,36 @@ test('#118 Package 缺硬必填不得挂起；显式 UNKNOWN 仍可挂起', asyn
   assert.equal(result.decision_package.recommendation, 'UNKNOWN')
 })
 
+test('#118 Package 畸形 options / subsequent_effects 不得挂起', async () => {
+  const emptyOpt = await runHd({ 执行: workOk }, {
+    injectHalt: {
+      node: 'work',
+      decision_package: {
+        why: '需要人决定',
+        current_state: '待拍板',
+        options: [{}],
+        subsequent_effects: { SHIP: '沿出边继续' },
+      },
+    },
+  })
+  assert.notEqual(emptyOpt.result.status, 'WAITING_HUMAN')
+  assert.ok(String(emptyOpt.result.detail || emptyOpt.result.status).includes('Package') || emptyOpt.result.status === 'ERROR')
+
+  const nullFx = await runHd({ 执行: workOk }, {
+    injectHalt: {
+      node: 'work',
+      decision_package: {
+        why: '需要人决定',
+        current_state: '待拍板',
+        options: [{ id: 'SHIP' }],
+        subsequent_effects: { SHIP: null },
+      },
+    },
+  })
+  assert.notEqual(nullFx.result.status, 'WAITING_HUMAN')
+  assert.ok(String(nullFx.result.detail || nullFx.result.status).includes('Package') || nullFx.result.status === 'ERROR')
+})
+
 test('#118 无蓝图声明时运行时拒绝自行升级；残留 manualCheck 仍发 AWAITING_HUMAN_<id>', async () => {
   const undeclared = await runHd({ 执行: workOk, 收口: { done: true } }, {
     injectHalt: { node: 'finish', reason: 'ESCALATED_DECISION' },
@@ -98,6 +129,25 @@ test('#118 测试注入 ROUTE_HALTED 同样翻译为 WAITING_HUMAN', async () =>
   assert.equal(result.status, 'WAITING_HUMAN')
   assert.equal(result.reason, 'ESCALATED_DECISION')
   assert.equal(result.node, 'work')
+})
+
+test('#118 新模式 outcomePath 命中 $human-decision 翻译为 WAITING_HUMAN（不靠 injectHalt）', async () => {
+  const { result } = await runHd({
+    intake: { go: 'NEXT' },
+    execute: { status: 'DONE' },
+    evaluate: { verdict: 'CONFIRM', completion_type: 'pending' },
+  }, { taskId: 'hd-outcome' }, outcomeHd)
+  assert.equal(result.status, 'WAITING_HUMAN')
+  assert.equal(result.reason, 'ESCALATED_DECISION')
+  assert.equal(result.node, 'evaluate')
+  assert.equal(result.results.evaluate.verdict, 'CONFIRM')
+  for (const key of HD_PACKAGE_REQUIRED) {
+    assert.ok(result.decision_package && result.decision_package[key], 'Package 缺 ' + key)
+  }
+  assert.ok(result.decision_package.options.some((o) => o.id === 'USER_ACCEPTED'))
+  assert.equal(result.control_event.record_kind, 'DECISION')
+  assert.equal(result.control_event.user_choice, null)
+  assert.equal(result.control_event.triggering_node_outcome.verdict, 'CONFIRM')
 })
 
 test('#119 选择写入追加控制面事件且不改原 decision_id', async () => {
@@ -131,8 +181,11 @@ test('#119 STOP 后本 Run 不再执行；不派生新 Run', async () => {
     results: halt.result.results,
   })
   assert.equal(r2.result.status, 'STOPPED')
+  assert.equal(r2.result.taskId, halt.result.taskId)
   assert.equal(r2.result.decision_id, halt.result.decision_id)
   assert.deepEqual(r2.result.results.work.status, 'confirm')
+  assert.equal(r2.result.spawned_run, undefined)
+  assert.equal(r2.result.new_run_id, undefined)
   assert.ok(!r2.agentCalls.some((c) => c.label === '收口'), 'STOP 不得续跑下游')
 })
 
@@ -145,6 +198,8 @@ test('#119 USER_ACCEPTED 完成且不把原 Outcome 改成 PASS', async () => {
     results: halt.result.results,
   })
   assert.equal(r2.result.status, 'DONE')
+  assert.equal(r2.result.completion, null)
+  assert.deepEqual(r2.result.results.work, halt.result.results.work)
   assert.equal(r2.result.results.work.status, 'confirm')
   assert.notEqual(r2.result.results.work.status, 'PASS')
   assert.ok(!r2.agentCalls.some((c) => c.label === '收口'))
@@ -175,6 +230,38 @@ test('#119 ADD_BUDGET 保留原 Outcome 并从被拦边续跑', async () => {
   assert.equal(r2.result.control_event.user_choice, 'ADD_BUDGET')
   assert.equal(r2.result.control_event.subsequent_path, 'finish')
   assert.equal(r2.result.control_event.decision_id, halt.result.decision_id)
+})
+
+test('#119 运行时禁止把默认控制选项删光', async () => {
+  const emptyCfg = JSON.parse(JSON.stringify(hd))
+  emptyCfg.humanDecision = { maxRoundsReachedOptions: [] }
+  const compiled = await runHd({ 执行: workOk }, {
+    injectHalt: {
+      node: 'work',
+      reason: 'MAX_ROUNDS_REACHED',
+      blocked_edge: { from: 'work', to: 'finish', on: 'success' },
+    },
+  }, emptyCfg)
+  assert.notEqual(compiled.result.status, 'WAITING_HUMAN')
+  assert.equal(compiled.result.status, 'ERROR')
+  assert.match(String(compiled.result.detail || ''), /删光/)
+
+  const emptyPkg = await runHd({ 执行: workOk }, {
+    injectHalt: {
+      node: 'work',
+      reason: 'MAX_ROUNDS_REACHED',
+      blocked_edge: { from: 'work', to: 'finish', on: 'success' },
+      decision_package: {
+        why: '额度耗尽',
+        current_state: '待决策',
+        options: [],
+        subsequent_effects: {},
+      },
+    },
+  })
+  assert.notEqual(emptyPkg.result.status, 'WAITING_HUMAN')
+  assert.equal(emptyPkg.result.status, 'ERROR')
+  assert.match(String(emptyPkg.result.detail || ''), /删光/)
 })
 
 test('#121 业务 Result 沿蓝图 $human-decision 出边续跑且不改写原 Outcome', async () => {
@@ -216,4 +303,17 @@ test('#121 无对应出边的业务选择被拒绝并保持等待', async () => 
   assert.ok(!r2.agentCalls.some((c) => c.label === '收口'), '拒绝选择不得续跑下游')
   assert.equal(r2.result.control_event.user_choice, null)
   assert.equal(r2.result.rejected_choice, 'HOLD')
+})
+
+test('#121 无 results 快照时拒绝非法选项仍可序列化', async () => {
+  const halt = await runHd({ 执行: workOk })
+  const r2 = await runHd({ 收口: { done: true } }, {
+    entry: halt.result.node,
+    decision_id: halt.result.decision_id,
+    user_choice: 'LAUNCH',
+  })
+  assert.equal(r2.result.status, 'WAITING_HUMAN')
+  assert.equal(r2.result.rejected_choice, 'LAUNCH')
+  assert.equal(r2.result.result, null)
+  assert.equal(JSON.stringify(r2.result).includes('undefined'), false)
 })

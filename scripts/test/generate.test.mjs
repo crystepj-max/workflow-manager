@@ -152,10 +152,30 @@ test('#117 生成 skill 不再写死不通过去开发或不经门禁去收口',
   assert.equal(/不通过\s*→\s*entry=dev/.test(skill), false);
 });
 
+test('#119 coerceStructured 仅对 object/array schema 解析 JSON 字符串', () => {
+  const { script } = compileBlueprint(bp);
+  assert.equal(script.includes("if (root !== 'object' && root !== 'array') return v"), true);
+});
+
 test('#117 手写主会话手册同样不再写死这两跳', () => {
   const handbook = readFileSync(path.join(here, '../../dsh/skill/SKILL.md'), 'utf8');
   assert.equal(handbook.includes('entry=closeout'), false, '手册不得写死通过 → entry=closeout');
   assert.equal(handbook.includes('entry=dev'), false, '手册不得写死不通过 → entry=dev');
+});
+
+test('#117 主会话 README 不再写死不通过去开发或不经门禁去收口', () => {
+  const readme = readFileSync(path.join(here, '../../dsh/README.md'), 'utf8');
+  // 允许 JSONC `"approved":` 与裸 `approved:`；80 字符窗口覆盖同一续跑示例行
+  const staleApprovedWithReject = /approved"?\s*:\s*true[\s\S]{0,80}不通过/;
+  assert.equal(
+    staleApprovedWithReject.test('"approved": true, "startRound": 3, "feedback": "人工验收不通过意见"'),
+    true,
+    '断言须能抓到带引号的 JSONC 键名',
+  );
+  assert.equal(readme.includes('entry=closeout'), false, 'README 不得写死通过 → entry=closeout');
+  assert.equal(readme.includes('entry=dev'), false, 'README 不得写死不通过 → entry=dev');
+  assert.equal(/打回起点\s*[（(]dev[）)]/.test(readme), false, '不得用自然语言写打回起点（dev）');
+  assert.equal(staleApprovedWithReject.test(readme), false, '不得把 approved:true 与不通过意见写进同一续跑示例');
 });
 
 // ── 候选四 T-IMP-14 · 原子写盘（失败零残留） ──
@@ -306,6 +326,16 @@ test('S4 内置角色清单：单一来源为宿主注册表，解析失败 loud
   assert.ok(!ids.includes('dispatcher'), 'dispatcher 已迁出内置')
   assert.throws(() => loadBuiltinRoleIds('const BUILTIN_ROLES = []'), /解析失败/, '空清单应报错')
   assert.throws(() => loadBuiltinRoleIds(''), /解析失败/, '找不到数组应报错')
+})
+
+test('S7 #93：编译脚本注入 workspace 默认 args 与 SOURCE cwd', () => {
+  const { script } = compileBlueprint(bp)
+  assert.ok(script.includes('const __VWF_WS_DEFAULTS__ = {}'), '宿主可替换的 workspace 默认 args 桩')
+  assert.ok(script.includes("const A = Object.assign({}, __VWF_WS_DEFAULTS__, args || {})"), 'args 覆盖注入的默认 workspace 字段')
+  assert.ok(script.includes('if (SOURCE) opts.cwd = SOURCE'), 'callNode 把业务源码目录绑到 agent cwd')
+  assert.ok(script.includes('if (SOURCE) itemOpts.cwd = SOURCE'), 'fanout 子代理同样绑定 cwd')
+  assert.ok(script.includes('【本节点应产出 Formal Artifact】'), '与 #69 Formal Artifact 提示并存')
+  assert.ok(script.includes('业务源码读写目录'), 'SOURCE 存在时提示隔离现场')
 })
 
 test('S4 捆绑角色：profile 含路径穿越被拒绝（Codex 第四轮 P1）', () => {
