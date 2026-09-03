@@ -44,6 +44,7 @@
 ## 硬规则
 
 - 人工验收门禁不得由 Agent 代签——等待人工确认是强制环节。
+- 验收报告（acceptance-summary.md / accept-report.md）写文件；**最终回复只输出运行上下文「本节点最终回复 JSON schema」标注的 JSON 对象**（通常为 verdict 字段），不把报告全文、markdown 围栏或解释文字放进最终回复。
 - 人工验证先切分支：人工复现验证或只读核验前，必须先切到工作分支 dev2/<taskId>（worktree），
   确认 `git -C <worktree> rev-parse --abbrev-ref HEAD` = dev2/<taskId> 且 HEAD 与 worktree 一致后再动手；
   禁止在主工作区（停在 base 分支）上复现验证，避免「验证跑在错误分支」得出相反结论。
