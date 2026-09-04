@@ -317,3 +317,40 @@ test('#121 无 results 快照时拒绝非法选项仍可序列化', async () => 
   assert.equal(r2.result.result, null)
   assert.equal(JSON.stringify(r2.result).includes('undefined'), false)
 })
+
+test('#149 新模式 outcome 出边业务选择可续跑', async () => {
+  const bp = JSON.parse(JSON.stringify(hd))
+  const hdOut = bp.edges.find((e) => e.from === '$human-decision')
+  delete hdOut.result
+  hdOut.outcome = 'SHIP'
+  const halt = await runHd({ 执行: workOk }, {}, bp)
+  assert.equal(halt.result.status, 'WAITING_HUMAN')
+  assert.ok(halt.result.decision_package.options.some((o) => o.id === 'SHIP'))
+  const r2 = await runHd({ 收口: { done: true } }, {
+    entry: halt.result.node,
+    decision_id: halt.result.decision_id,
+    user_choice: 'SHIP',
+    results: halt.result.results,
+  }, bp)
+  assert.equal(r2.result.status, 'DONE')
+  assert.equal(r2.result.user_choice, 'SHIP')
+  assert.equal(r2.result.results.finish.done, true)
+  assert.deepEqual(r2.agentCalls.map((c) => c.label), ['收口'])
+})
+
+test('#149 outcome 出边无匹配选择仍保持等待', async () => {
+  const bp = JSON.parse(JSON.stringify(hd))
+  const hdOut = bp.edges.find((e) => e.from === '$human-decision')
+  delete hdOut.result
+  hdOut.outcome = 'SHIP'
+  const halt = await runHd({ 执行: workOk }, {}, bp)
+  const r2 = await runHd({ 收口: { done: true } }, {
+    entry: halt.result.node,
+    decision_id: halt.result.decision_id,
+    user_choice: 'HOLD',
+    results: halt.result.results,
+  }, bp)
+  assert.equal(r2.result.status, 'WAITING_HUMAN')
+  assert.equal(r2.result.rejected_choice, 'HOLD')
+  assert.ok(!r2.agentCalls.some((c) => c.label === '收口'))
+})
