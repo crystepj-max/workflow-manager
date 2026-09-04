@@ -1,0 +1,9 @@
+# dsh-llm-account-auth bundle for DeepSeek Harness (dsh).
+# 通过官方 CLI 安装即挂载：
+#   dsh plugin --profile web add link:E:/workspace/workflow-manager/packages/dsh-llm-account-auth
+# 入口走包的 exports["."]（src/index.js，导出 Cordis 插件 { name, apply }），
+# apply 内把 openai / anthropic 两条账户鉴权路由注册进 ctx.llm。
+# 插件行按包名经 profile 的 node_modules 解析。
+- insert:
+    - id: llm-account-auth
+      name: 'dsh-llm-account-auth'
