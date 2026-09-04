@@ -42,8 +42,10 @@ writeFileSync(
   `export const name = plugin.name;\n` +
   // 静态组合包行级激活必须等 webServer 与 tools 就绪：无 inject 的行会在
   // 这些服务激活前 apply，导致 RPC 路由或工具注册永久错过。
+  // #122: subprocess 必须加入 inject——否则 apply 时 ctx.get('subprocess') 返回 undefined，
+  // 导致删除模板/子进程调用等操作失败（子进程服务不可用）。
   // 动态会话插件仍走 harness.handle，不受影响（src 闭包体本身不声明 inject）。
-  `export const inject = ['webServer', 'tools'];\n` +
+  `export const inject = ['webServer', 'tools', 'subprocess'];\n` +
   `export function apply(ctx) { return plugin.apply(ctx); }\n`
 )
 

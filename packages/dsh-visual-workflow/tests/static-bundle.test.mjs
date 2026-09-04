@@ -90,9 +90,10 @@ test('T3：静态 bundle dist/host-entry.mjs 在无 harness 时 apply() 走 webS
   assert.equal(registered[0].path, '/dsh-visual-workflow')
 })
 
-test('T3：静态 bundle dist 导出 inject:[\'webServer\', \'tools\']——行级激活等待必需服务就绪', async (t) => {
-  // 回归：host 行无完整 inject 时会在 webServer/tools 激活前 apply，
-  // 导致 RPC 路由或工具注册永久错过。
+test('T3：静态 bundle dist 导出 inject:[\'webServer\', \'tools\', \'subprocess\']——行级激活等待必需服务就绪', async (t) => {
+  // 回归：host 行无完整 inject 时会在 webServer/tools/subprocess 激活前 apply，
+  // 导致 RPC 路由或工具注册永久错过；#122：缺少 subprocess 会让删除/保存模板报
+  // 「子进程服务不可用（node 解析失败）」。
   assert.ok(existsSync(distEntry), 'dist/host-entry.mjs 必须存在')
   try {
     await import('@deepseek-ai/dsh-tools')
@@ -101,7 +102,7 @@ test('T3：静态 bundle dist 导出 inject:[\'webServer\', \'tools\']——行�
     return
   }
   const mod = await import(pathToFileURL(distEntry).href + '?t=' + Date.now())
-  assert.deepEqual(mod.inject, ['webServer', 'tools'], '静态 host 出口必须声明 webServer/tools 依赖')
+  assert.deepEqual(mod.inject, ['webServer', 'tools', 'subprocess'], '静态 host 出口必须声明 webServer/tools/subprocess 依赖')
 })
 
 test('T3：webServer 晚于 apply 激活时经 ctx.inject 延迟注册路由（无 inject 旧安装位兜底）', () => {
@@ -183,7 +184,7 @@ test('Issue #37：消费者先进入 Cordis，webServer/tools 后出现时才一
 
   const disposeTools = ctx.provide('tools', tools)
   await fiber
-  assert.deepEqual(mod.inject, ['webServer', 'tools'], '静态 bundle 必须声明两个宿主依赖')
+  assert.deepEqual(mod.inject, ['webServer', 'tools', 'subprocess'], '静态 bundle 必须声明三个宿主依赖')
   assert.deepEqual([...activeRoutes.keys()], ['/dsh-visual-workflow'])
   assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_run'])
   assert.equal(routeCalls.length, 1, 'RPC 路由首次只注册一次')
