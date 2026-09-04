@@ -1,0 +1,25 @@
+{
+  "name": "dsh-llm-account-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH 账户鉴权 LLM 适配器：openai / anthropic 两条路由，凭据取自 CLI 本地登录态（设置 profile 不写 API Key）",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test tests/adapter.test.mjs"
+  },
+  "dependencies": {
+    "undici": "^6.28.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": "^0.1.1-rc.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
