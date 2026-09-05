@@ -1,0 +1,101 @@
+{
+  "id": "construction-rollback-mini",
+  "displayName": "完整功能开发",
+  "description": "需求→设计→开发，回退 outcome 指向入口。",
+  "entry": "requirements",
+  "control": { "maxRounds": 3 },
+  "heteroCheck": true,
+  "bindings": {
+    "models": {
+      "requirements": { "provider": "kimi-coding", "model": "k3" },
+      "design": { "provider": "deepseek-official", "model": "deepseek-v4-pro" },
+      "dev": { "provider": "deepseek-official", "model": "deepseek-v4-pro" },
+      "review": { "provider": "kimi-coding", "model": "k3" }
+    }
+  },
+  "nodes": [
+    {
+      "id": "requirements",
+      "label": "需求分析",
+      "profile": "requirements",
+      "goal": "形成需求基线",
+      "manualCheck": true,
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": { "complete": { "type": "boolean" } },
+          "required": ["complete"],
+          "additionalProperties": false
+        },
+        "successCondition": "$.complete == true"
+      }
+    },
+    {
+      "id": "design",
+      "label": "方案设计",
+      "profile": "designer",
+      "goal": "形成方案",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": { "type": "string", "enum": ["READY", "RETURN_REQUIREMENTS", "BLOCKED"] }
+          },
+          "required": ["route"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "dev",
+      "label": "开发",
+      "profile": "dev",
+      "goal": "完成实现",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": { "type": "string", "enum": ["READY", "RETURN_DESIGN", "BLOCKED"] }
+          },
+          "required": ["route"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "review",
+      "label": "独立审核",
+      "profile": "review",
+      "goal": "独立审核",
+      "verifyBranch": true,
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": { "type": "string", "enum": ["APPROVE", "RETURN_DEV", "BLOCKED"] },
+            "verified_branch": { "type": "string" },
+            "verified_head": { "type": "string" }
+          },
+          "required": ["route", "verified_branch", "verified_head"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "requirements", "to": "design", "on": "success" },
+    { "from": "requirements", "to": "$end", "on": "failure" },
+    { "from": "design", "to": "dev", "outcome": "READY" },
+    { "from": "design", "to": "requirements", "outcome": "RETURN_REQUIREMENTS", "countRound": false },
+    { "from": "design", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "dev", "to": "review", "outcome": "READY" },
+    { "from": "dev", "to": "design", "outcome": "RETURN_DESIGN", "countRound": false },
+    { "from": "dev", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "review", "to": "$end", "outcome": "APPROVE" },
+    { "from": "review", "to": "dev", "outcome": "RETURN_DEV", "countRound": true },
+    { "from": "review", "to": "$end", "outcome": "BLOCKED" }
+  ]
+}

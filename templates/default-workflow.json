@@ -1,7 +1,7 @@
 {
   "id": "default-workflow",
   "displayName": "默认工作流",
-  "description": "内置默认工作流（用户级）：issue 三要素门禁 → 开发 →（分流）测试/直审 → 审核 → 人工验收 → 收口，打回上限 9 轮；角色自包含分发，任意项目可用",
+  "description": "默认工作流（用户级）：issue 三要素门禁 → 开发 →（分流）测试/直审 → 审核 → 人工验收 → 收口，打回上限 9 轮；角色自包含分发，任意项目可用",
   "entry": "dispatch",
   "control": {
     "maxRounds": 9

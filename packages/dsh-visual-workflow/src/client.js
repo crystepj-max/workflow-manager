@@ -111,7 +111,6 @@ return {
       customRoleBadge: '自定义角色',
       saveRole: '保存角色',
       cancelRole: '取消',
-      roleDupName: '已存在同名角色，请使用其他名称。',
       roleNameRequired: '角色名称不能为空',
       roleContentRequired: '角色配置不能为空',
       roleNameInvalid: '角色名称不能为空，且最长 64 字符、不含非法字符（/\\:*?"<>|）',
@@ -267,7 +266,6 @@ return {
       customRoleBadge: 'Custom',
       saveRole: 'Save Role',
       cancelRole: 'Cancel',
-      roleDupName: 'A role with the same name already exists; please use another name.',
       roleNameRequired: 'Role name is required',
       roleContentRequired: 'Role configuration is required',
       roleNameInvalid: 'Role name is required, at most 64 chars, no illegal chars (/\\:*?"<>|)',
@@ -536,8 +534,42 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     function clone(x) { return JSON.parse(JSON.stringify(x)) }
 
+    // 编辑器 JSON tab 同时接受蓝图落盘格式（displayName / bindings.models）与 DSL。
+    // 粘贴 templates/*.json 时把模型绑到节点、展示名写入 name，画布才能显示 provider/model。
+    function ingestEditorJson(raw) {
+      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.nodes)) return raw
+      const models = (raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object')
+        ? raw.bindings.models : {}
+      const isBlueprint = typeof raw.displayName === 'string' || Object.keys(models).length > 0
+      if (!isBlueprint) return raw
+      const nodes = raw.nodes.map((n) => {
+        if (!n || typeof n !== 'object') return n
+        if (n.model || !models[n.id]) return n
+        return { ...n, model: models[n.id] }
+      })
+      const name = (typeof raw.name === 'string' && raw.name.trim() && raw.name !== raw.id)
+        ? raw.name
+        : (typeof raw.displayName === 'string' ? raw.displayName : (raw.name || ''))
+      const next = { ...raw, nodes, name }
+      delete next.displayName
+      delete next.bindings
+      return next
+    }
+
     // ── 拓扑与布局（对应 workflowGraph.ts 的 successTopologyOrder /
     //    deriveEntryCandidateIds / computeBackwardLanes / layoutSuccessPath）──
+    function hasOutcomeField(e) {
+      return !!(e && e.outcome !== undefined && e.outcome !== null && e.outcome !== '')
+    }
+    function isStructuralEdge(e) {
+      return !!(e && (e.on === 'success' || hasOutcomeField(e)))
+    }
+    // 与校验内核同构：countRound 声明 / 自环 = 回退边，不参与入口入边与主链分层。
+    function isRollbackEdge(e) {
+      if (!isStructuralEdge(e)) return false
+      if (e.from === e.to) return true
+      return e.countRound !== undefined
+    }
     function successTopologyOrder(dsl) {
       const ids = (dsl.nodes || []).map(n => n && n.id).filter(Boolean)
       const idSet = new Set(ids)
@@ -545,7 +577,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const indegree = new Map()
       ids.forEach(id => { adjacency.set(id, []); indegree.set(id, 0) })
       ;(dsl.edges || []).forEach(e => {
-        if (e.on !== 'success') return
+        if (!isStructuralEdge(e) || isRollbackEdge(e)) return
+        if (e.from === e.to) return
         if (!idSet.has(e.from) || !idSet.has(e.to)) return
         adjacency.get(e.from).push(e.to)
         indegree.set(e.to, (indegree.get(e.to) || 0) + 1)
@@ -556,7 +589,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       pushRoot(dsl.entry)
       ids.forEach(id => { if ((indegree.get(id) || 0) === 0) pushRoot(id) })
       const ordered = []
-      while (queue.length) {
+      const leftover = () => ids.filter(id => !queued.has(id))
+      while (queue.length || leftover().length) {
+        if (!queue.length) pushRoot(leftover()[0])
         const id = queue.shift()
         ordered.push(id)
         ;(adjacency.get(id) || []).forEach(next => {
@@ -564,7 +599,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           if ((indegree.get(next) || 0) === 0) pushRoot(next)
         })
       }
-      ids.forEach(id => { if (!queued.has(id)) ordered.push(id) })
       const order = new Map()
       ordered.forEach((id, i) => order.set(id, i))
       return order
@@ -578,14 +612,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     function deriveEntryCandidates(dsl) {
       const ids = new Set((dsl.nodes || []).map(n => n && n.id).filter(Boolean))
-      const order = successTopologyOrder({ ...dsl, entry: '' })
       const incoming = new Set()
       ;(dsl.edges || []).forEach(e => {
-        if (!ids.has(e.from) || !ids.has(e.to)) return
-        if (e.on !== 'success' && isBackwardEdge(e.from, e.to, order)) return
+        if (!isStructuralEdge(e) || isRollbackEdge(e)) return
+        if (!e.to || e.to === END_NODE || e.to === '$human-decision' || !ids.has(e.to)) return
+        if (!(ids.has(e.from) || e.from === '$human-decision')) return
         incoming.add(e.to)
       })
-      return (dsl.nodes || []).map(n => n.id).filter(id => Boolean(id) && !incoming.has(id))
+      return (dsl.nodes || []).map(n => n && n.id).filter(id => Boolean(id) && !incoming.has(id))
     }
 
     function normalizeEntry(dsl) {
@@ -719,7 +753,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const allIds = nodeIds.concat(terminalIds)
       const sizeOf = (id) => id === END_NODE ? { w: TERM_W, h: TERM_H } : { w: NODE_W, h: NODE_H }
 
-      // rank：success + 前向非 success 边参与最长路（对应 layoutSuccessPath 的过滤）
+      // rank：前向结构边（success ∪ 非回退 outcome）定最长路；回退/失败边不把目标拉到更右
       const rank = {}
       allIds.forEach(id => { rank[id] = 0 })
       let changed = true
@@ -731,7 +765,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           if (e.from === e.to) continue
           if (!idSet.has(e.from)) continue
           if (!(idSet.has(e.to) || e.to === END_NODE)) continue
-          if (e.on !== 'success' && isBackwardEdge(e.from, e.to, order)) continue
+          if (isRollbackEdge(e) || (!isStructuralEdge(e) && isBackwardEdge(e.from, e.to, order))) continue
           if (rank[e.from] + 1 > (rank[e.to] || 0)) { rank[e.to] = rank[e.from] + 1; changed = true }
         }
       }
@@ -863,7 +897,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const panRef = React.useRef(null)
       const lay = React.useMemo(
         () => layoutGraph(dsl, props.visibleTerminals || []),
-        [JSON.stringify({ entry: dsl.entry || '', n: (dsl.nodes || []).map(n => n.id), e: (dsl.edges || []).map(e => [e.from, e.to, e.on]), v: props.visibleTerminals || [] })]
+        [JSON.stringify({ entry: dsl.entry || '', n: (dsl.nodes || []).map(n => n.id), e: (dsl.edges || []).map(e => [e.from, e.to, e.on, e.outcome, e.countRound]), v: props.visibleTerminals || [] })]
       )
       const pos = lay.pos
       const W = lay.W
@@ -1667,13 +1701,19 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
         }).catch((e) => setError(String(e)))
       }
-      const validForm = () => {
+      // 名称权威校验（Host：完整规则——非法字符/首尾点/Windows 保留名 + 唯一性含内置/
+      // 自定义/打包回退）。客户端不再维护规则副本；本地只保留空值即时提示（非权威快速通道）。
+      const validateNameWithHost = async (name) => {
+        const v = await host.call('vwf.roles.validate', { name: name, excludeId: (current && current.builtin === false) ? current.id : undefined }).catch((e) => ({ ok: false, errors: [{ message: String(e) }] }))
+        if (v && v.ok === true) return null
+        return (v && v.errors && v.errors[0] && v.errors[0].message) || t('roleNameInvalid')
+      }
+      const validForm = async () => {
         const name = draftName.trim()
-        if (!name || name.length > 64 || /[\\/:*?"<>|\x00-\x1F\x7F]/.test(name)) { setError(t('roleNameInvalid')); return null }
+        if (!name) { setError(t('roleNameRequired')); return null }
         if (!draftContent.trim()) { setError(t('roleContentRequired')); return null }
-        const key = (s) => String(s || '').normalize('NFC').toLowerCase()
-        const dup = (roles || []).some(r => key(r.id) === key(name) && (!current || r.id !== current.id))
-        if (dup) { setError(t('roleDupName')); return null }
+        const bad = await validateNameWithHost(name)
+        if (bad) { setError(bad); return null }
         return name
       }
       const submitForm = (name, content) => {
@@ -1692,8 +1732,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
         }).catch((e) => setError(t('roleSaveFailed') + String(e))).then(() => setSaving(false))
       }
-      const save = () => {
-        const name = validForm()
+      const save = async () => {
+        const name = await validForm()
         if (!name) return
         const editingCustom = !!(current && current.builtin === false)
         if (!editingCustom) { submitForm(name, draftContent); return }
@@ -1723,8 +1763,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
       const askDelete = (role) => {
         host.call('vwf.roles.usage', { id: role.id, draftDsl: props.draftDsl }).then((u) => {
-          setConfirm({ kind: (u && u.ok && u.count > 0) ? 'blocked' : 'delete', role: role, usage: (u && u.ok) ? u : null })
-        }).catch((e) => setError(String(e)))
+          if (!u || u.ok !== true) {
+            // fail-closed：引用统计失败时绝不进入删除确认（修复 fail-open：ok:false 曾被
+            // 折叠为「零引用」直接放行删除）
+            setError(t('roleUsageFailed') + ((u && u.errors && u.errors[0] && u.errors[0].message) || ''))
+            return
+          }
+          setConfirm({ kind: u.count > 0 ? 'blocked' : 'delete', role: role, usage: u })
+        }).catch((e) => setError(t('roleUsageFailed') + String(e)))
       }
       const doDelete = () => {
         if (!confirm || !confirm.role) return
@@ -1798,6 +1844,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             h('input', {
               className: 'vwf-input', value: draftName, placeholder: t('roleNamePlaceholder'),
               onChange: (ev) => setDraftName(ev.target.value),
+              onBlur: () => {
+                const name = draftName.trim()
+                if (!name) return
+                // 失焦即时提示（Host 权威裁决）：.foo/foo./CON/COM1 等过去仅在保存时报错的
+                // 名称现在输入即提示；输入过程不打断，错误在失焦/保存时呈现
+                validateNameWithHost(name).then((bad) => { if (bad) setError(bad) })
+              },
             })
           ),
           h('div', { className: 'vwf-field' },
@@ -2087,7 +2140,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             setJsonError(t('outputSchemaInvalid'))
             return
           }
-          toSave = normalizeEntry(parsed)
+          toSave = normalizeEntry(ingestEditorJson(parsed))
           setWf(toSave)
         }
         const v = await host.call('vwf.validate', { dsl: toSave }).catch(() => null)
@@ -2144,7 +2197,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         try {
           const parsed = JSON.parse(value)
           if (parsed && Array.isArray(parsed.nodes)) {
-            const next = normalizeEntry(parsed)
+            const next = normalizeEntry(ingestEditorJson(parsed))
             setWf(next)
           }
         } catch (e) { /* 保留草稿，保存时报错 */ }

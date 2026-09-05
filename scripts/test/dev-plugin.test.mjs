@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 import test from 'node:test'
@@ -329,6 +329,31 @@ fi
         process.kill(fakePid, 'SIGTERM')
       }
     }
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('status 把校验内核与仓库指针同步到开发 Home', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-kernel-'))
+  try {
+    const devHome = join(root, 'dev-home')
+    const productHome = join(root, 'product-home')
+    const result = spawnSync(process.execPath, [scriptPath, 'status'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        VWF_DEV_DSH_HOME: devHome,
+        VWF_PRODUCT_DSH_HOME: productHome,
+        DSH_HOME: undefined,
+      },
+    })
+    assert.equal(result.status, 0, result.stderr)
+    const kernel = join(devHome, 'visual-workflow', 'validate-core.cjs')
+    const pointer = join(devHome, 'visual-workflow', 'repo-root')
+    assert.equal(existsSync(kernel), true, '应复制 scripts/validate-core.cjs')
+    assert.match(readFileSync(kernel, 'utf8'), /validateBlueprint/)
+    assert.equal(readFileSync(pointer, 'utf8').trim(), dirname(dirname(scriptPath)))
+  } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })

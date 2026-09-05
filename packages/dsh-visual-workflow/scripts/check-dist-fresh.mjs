@@ -9,9 +9,13 @@ import { fileURLToPath } from 'node:url'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const hostPath = join(root, 'src', 'host.js')
 const clientPath = join(root, 'src', 'client.js')
+const roleLibraryPath = join(root, '..', '..', 'scripts', 'role-library.cjs')
+const roleManifestPath = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
 const stampPath = join(root, 'dist', '.src-stamp.json')
 const distHost = join(root, 'dist', 'host-entry.mjs')
 const distClient = join(root, 'dist', 'client.js')
+const distRoleLibrary = join(root, 'dist', 'role-library.cjs')
+const distRoleManifest = join(root, 'dist', 'builtin-roles.json')
 
 const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex')
 const fail = (msg) => {
@@ -22,6 +26,9 @@ const fail = (msg) => {
 
 if (!existsSync(distHost) || !existsSync(distClient) || !existsSync(stampPath)) {
   fail('缺少 dist/host-entry.mjs、dist/client.js 或 dist/.src-stamp.json')
+}
+if (!existsSync(distRoleLibrary) || !existsSync(distRoleManifest)) {
+  fail('缺少 dist/role-library.cjs 或 dist/builtin-roles.json（角色库内核随包分发）')
 }
 
 let stamp
@@ -35,6 +42,12 @@ const host = sha256(hostPath)
 const client = sha256(clientPath)
 if (stamp.host !== host || stamp.client !== client) {
   fail('源码哈希与 stamp 不符（host ' + host.slice(0, 12) + ' / client ' + client.slice(0, 12) + '）')
+}
+// 角色库内核与清单也纳入新鲜度闸门：改内核/manifest 未重建 dist 时正式安装会加载过期逻辑
+const roleLibrary = sha256(roleLibraryPath)
+const roleManifest = sha256(roleManifestPath)
+if (stamp.roleLibrary !== roleLibrary || stamp.roleManifest !== roleManifest) {
+  fail('角色库内核/清单哈希与 stamp 不符（roleLibrary ' + roleLibrary.slice(0, 12) + ' / roleManifest ' + roleManifest.slice(0, 12) + '）')
 }
 
 const body = readFileSync(distHost, 'utf8')

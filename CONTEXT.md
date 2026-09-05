@@ -11,6 +11,9 @@
 - **蓝图（blueprint）**：`templates/*.json`，工作流唯一事实源——人只改它，生成物禁手改。
 - **生成物（artifact）**：`.generated/<id>/` 四件套（`script.mjs` / `vwf-dsl.json` / `SKILL.md` / `meta.json`），gitignore + 重生成比对保护。其中 `SKILL.md` 含 **runbook（操作手册）**：按脚本返回状态告诉主会话下一步怎么做。
 - **节点 / 边 / 入口 / $end**：蓝图图结构。边分 success（成功/打回后继续）与 failure（打回/终止）两类。
+- **角色库（Role Library）**：供工作流节点选择与管理角色的目录，由正式内置角色与自定义角色组成；角色身份与节点结果契约彼此独立。
+- **内置角色（Built-in Role）**：产品定义的正式角色，机器 ID 与展示顺序稳定，始终可选、只读，可作为创建自定义角色的起点。
+- **自定义角色（Custom Role）**：用户可创建和维护的角色；历史 `dispatcher` 属于自定义角色，迁移后仍保持既有引用可解析。
 
 ## 引擎层（框架，与业务无关）
 
@@ -74,7 +77,7 @@
 ## 插件界面层（编辑器与运行看板）
 
 - **工作流面板**：DSH 设置页注入的 `settings.section`（`client.js` 末尾 `slots.inject`），内含两个页签。
-- **模板库（templates 页签）**：工作流清单（一行一个模板，内置标 builtin 且只读），操作 = 新建 / 编辑 / 删除。
+- **模板库（templates 页签）**：工作流清单（一行一个模板）。正式内置标 builtin 且只读；当前两套历史模板 `default-workflow` / `dev-workflow-2-0` 已迁为自定义（无内置标签，可编辑/删除）。操作 = 新建 / 编辑 / 删除。
 - **运行看板（dashboard 页签）**：每 3 秒轮询 `vwf.runs.list` + `vwf.state`，呈现**运行列表**（可点选切换）、
   当前 run 的状态/阶段、只读画布（节点按状态染色，按 workflowId 匹配模板 DSL）、**子代理表格**与
   最近 20 条日志。**与模板库无关**（两者常被混指）。

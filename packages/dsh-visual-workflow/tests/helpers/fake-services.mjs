@@ -63,7 +63,11 @@ export function makeSubprocess({ failPattern = null, fs = null, compileScript = 
       let exitCode = 0
       let stdout = ''
       let stderr = ''
-      if (argvStr.includes('.homedir')) {
+      if (argvStr.includes('validate-core.cjs') && fs) {
+        const key = [...fs._files.keys()].find((k) => k.endsWith('/validate-core.cjs'))
+        if (key) stdout = fs._files.get(key)
+        else exitCode = 2
+      } else if (argvStr.includes('.homedir')) {
         stdout = DSH_HOME
       } else if (argvStr.includes('generate.mjs') && argvStr.includes(' compile ')) {
         stdout = JSON.stringify({ ok: true, script: compileScript, meta: { name: 'mock', description: 'mock', phases: [] } })

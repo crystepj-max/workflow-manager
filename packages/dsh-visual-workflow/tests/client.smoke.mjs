@@ -92,6 +92,22 @@ function makeRuntime() {
         if (idx >= 0) roleState.roles.splice(idx, 1)
         return { ok: true, id: args.id }
       }
+      // 权威名称校验（与 scripts/role-library.cjs 规则一致的最小镜像）：
+      // 非空/长度/非法字符/首尾点/Windows 保留名 + 唯一性（excludeId 排除自身）
+      case 'vwf.roles.validate': {
+        const name = String((args && args.name) || '').trim()
+        const badName = !name ? '角色名称不能为空'
+          : name.length > 64 ? '角色名称过长（最多 64 字符）'
+          : /[\\/:*?"<>|\x00-\x1F\x7F]/.test(name) ? '角色名称包含非法字符'
+          : /^\./.test(name) || /\.$/.test(name) ? '角色名称不能以点开头或结尾'
+          : /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(name) ? '角色名称是系统保留名（如 CON/NUL/AUX），请换一个名称'
+          : null
+        if (badName) return { ok: false, errors: [{ at: 'name', message: badName }] }
+        const key = (s) => String(s || '').normalize('NFC').toLowerCase()
+        const dup = roleState.roles.some(r => key(r.id) === key(name) && r.id !== args.excludeId)
+        if (dup) return { ok: false, errors: [{ at: 'name', message: '已存在同名角色，请使用其他名称。' }] }
+        return { ok: true }
+      }
       case 'vwf.roles.usage': {
         if (state.failUsage === 'resolved') return { ok: false, errors: [{ at: '$', message: '引用统计服务不可用' }] }
         if (state.failUsage) return Promise.reject(new Error('引用统计服务不可用'))
@@ -1131,6 +1147,148 @@ test('角色库：自定义角色「基于此创建」克隆 + usage 失败时�
     freshRoot.unmount()
     fresh.remove()
   })
+})
+
+test('角色库 UX 收紧：首尾点/Windows 保留名保存时被 Host 权威校验拦截（此前客户端漏检）', async () => {
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+  })
+  await act(async () => { byText(fresh, '编辑').click(); await flush() })
+  const roleZone = fresh.querySelector('.vwf-role-zone')
+  await act(async () => {
+    Array.from(roleZone.querySelectorAll('button')).find(b => b.textContent.includes('管理角色')).click()
+    await flush()
+  })
+  const mgr = fresh.querySelector('.vwf-role-mgr')
+  await act(async () => { byText(mgr, '新增角色').click(); await flush() })
+  const nameInput = mgr.querySelector('input.vwf-input')
+  const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+  const before = roleState.roles.length
+  for (const badName of ['.foo', 'foo.', 'CON', 'com1']) {
+    await act(async () => {
+      setter.call(nameInput, badName)
+      nameInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+      const ta = mgr.querySelector('textarea')
+      const taSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+      taSetter.call(ta, '正文\n')
+      ta.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+      await flush()
+      byText(mgr, '保存角色').click()
+      await flush()
+      await flush()
+    })
+    assert.ok(mgr.querySelector('input.vwf-input'), `非法名称 ${badName} 保存被拦截（表单保持打开）`)
+    assert.ok(byText(mgr, '保留名') || byText(mgr, '以点开头或结尾'), `非法名称 ${badName} 展示 Host 裁决文案`)
+  }
+  assert.equal(roleState.roles.length, before, '四个非法名称均未落库')
+  // 失焦即时提示：合法名称失焦后再次输入非法名，失焦即提示（无需点保存）
+  // 注：React onBlur 委托监听 focusout（冒泡），而非不冒泡的 blur 事件
+  await act(async () => {
+    setter.call(nameInput, '.bad')
+    nameInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    nameInput.dispatchEvent(new dom.window.Event('focusout', { bubbles: true }))
+    await flush()
+    await flush()
+  })
+  assert.ok(byText(mgr, '以点开头或结尾'), '失焦即展示 Host 校验错误')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+})
+
+test('角色库删除 fail-closed：usage 返回 ok:false 时不弹出删除确认、角色不删除', async () => {
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+  })
+  await act(async () => { byText(fresh, '编辑').click(); await flush() })
+  const roleZone = fresh.querySelector('.vwf-role-zone')
+  await act(async () => {
+    Array.from(roleZone.querySelectorAll('button')).find(b => b.textContent.includes('管理角色')).click()
+    await flush()
+  })
+  const mgr = fresh.querySelector('.vwf-role-mgr')
+  // 用零引用的 dispatcher 行：usage 服务故障（ok:false 解析）时点删除
+  state.failUsage = 'resolved'
+  const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, 'dispatcher'))
+  await act(async () => {
+    Array.from(row.querySelectorAll('button')).find(b => b.textContent === '删除').click()
+    await flush()
+    await flush()
+  })
+  assert.ok(!byText(mgr, '确认删除') && !mgr.querySelector('.vwf-dialog-mask'), 'usage ok:false 时不得进入删除确认')
+  assert.ok(byText(mgr, '引用统计失败'), '展示引用统计失败原因')
+  assert.ok(roleState.roles.some(r => r.id === 'dispatcher'), '角色未被删除')
+  state.failUsage = false
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+})
+
+test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链从左到右', async () => {
+  const blueprint = {
+    id: 'construction-full-feature',
+    displayName: '完整功能开发',
+    entry: 'requirements',
+    bindings: {
+      models: {
+        requirements: { provider: 'kimi-coding', model: 'k3' },
+        design: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+        dev: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+      },
+    },
+    nodes: [
+      { id: 'requirements', label: '需求分析', profile: 'requirements', goal: 'g' },
+      { id: 'design', label: '方案设计', profile: 'designer', goal: 'g' },
+      { id: 'dev', label: '开发', profile: 'dev', goal: 'g' },
+    ],
+    edges: [
+      { from: 'requirements', to: 'design', on: 'success' },
+      { from: 'design', to: 'dev', outcome: 'READY' },
+      { from: 'design', to: 'requirements', outcome: 'RETURN_REQUIREMENTS', countRound: false },
+      { from: 'dev', to: 'design', outcome: 'RETURN_DESIGN', countRound: false },
+      { from: 'dev', to: '$end', outcome: 'BLOCKED' },
+    ],
+  }
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(blueprint, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  const nameInput = Array.from(container.querySelectorAll('input.vwf-input')).find((el) => el.getAttribute('placeholder') === '模板名称' || el.value === '完整功能开发')
+  assert.ok(nameInput, '模板名称从 displayName 摄入')
+  assert.equal(nameInput.value, '完整功能开发')
+  const xOf = (id) => {
+    const g = container.querySelector('g[data-node-id="' + id + '"]')
+    const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return Number(match[1])
+  }
+  assert.ok(xOf('requirements') < xOf('design'), '需求在设计左侧')
+  assert.ok(xOf('design') < xOf('dev'), '设计在开发左侧')
+  const badges = Array.from(container.querySelectorAll('.vwf-entry-badge-text')).map((el) => {
+    const g = el.closest('g[data-node-id]')
+    return g && g.getAttribute('data-node-id')
+  }).filter(Boolean)
+  assert.deepEqual(badges, ['requirements'], '只有需求分析带入口徽标，开发不得并列入口')
+  await act(async () => {
+    container.querySelector('g[data-node-id="requirements"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    await flush()
+  })
+  const selects = Array.from(container.querySelectorAll('.vwf-inspector select.vwf-select'))
+  const values = selects.map((s) => s.value)
+  assert.ok(values.includes('kimi-coding'), '节点 provider 从 bindings.models 投影：' + JSON.stringify(values))
+  assert.ok(values.includes('k3'), '节点 model 从 bindings.models 投影：' + JSON.stringify(values))
 })
 
 test('清理：卸载冒烟测试根节点', async () => {

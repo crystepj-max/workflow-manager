@@ -112,7 +112,8 @@ dsh --profile web --dump-config | grep visual-workflow   # 可见 patch 层
 | `vwf.script` | 统一编译器管道（T-IMP-12）：DSL → `scripts/generate.mjs compileBlueprint` 译文（CLI 兜底），返回脚本全文、meta 与 engineAvailable。`vwf.compile` 已随统一编译器删除 |
 | `vwf.state` | 运行状态（runId → status/phase/agents/logs） |
 | `vwf.models` | 对接 DSH 宿主 `llm` 服务的 provider/model 列表（编辑器的 Agent/模型下拉数据源） |
-| `vwf.roles` | 读取工作区 `dsh/roles/*.md`（`fs` 服务，多形态兜底；不可用回退内置六角色） |
+| `vwf.roles / roles.get / roles.usage / roles.validate` | 角色库（issue-58/81）：内置 12 角色（清单事实源 `dsh/roles/builtin-roles.json`）+ 自定义（工作区 `dsh/roles/*.md`）+ 打包回退；决策内核 `scripts/role-library.cjs`（名称规则/来源优先级/摘要/引用统计/CRUD 裁决），`vwf.roles.validate` 为客户端权威名称校验；core 不可用时降级为内置只读清单 |
+| `vwf.roles.create / update / remove` | 自定义角色生命周期：内核裁决（内置只读、重命名零引用、引用阻止删除）→ Host 适配器执行（写盘/重命名回滚/删除） |
 
 ## 测试
 

@@ -9,15 +9,49 @@ import { pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadStaticHost, loadHost } from './helpers/load-host.mjs'
-import { makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
+import { REPO, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const distEntry = join(here, '..', 'dist', 'host-entry.mjs')
 const distClient = join(here, '..', 'dist', 'client.js')
 
+function invokeStaticRpc(route, method, payload = {}) {
+  return new Promise((resolve, reject) => {
+    const listeners = {}
+    const req = { method: 'POST', on(name, fn) { listeners[name] = fn } }
+    const res = {
+      writeHead() {},
+      end(text) {
+        try { resolve(JSON.parse(text).result) } catch (e) { reject(e) }
+      },
+    }
+    route.handler(req, res)
+    if (listeners.data) listeners.data(JSON.stringify({ type: 'client-request', rpcId: 'test-rpc', method, payload }))
+    if (listeners.end) listeners.end()
+  })
+}
+
 test('T3：静态 bundle dist 含 formal-artifacts.cjs（#69 正式安装路径）', () => {
   const formalDist = join(here, '..', 'dist', 'formal-artifacts.cjs')
   assert.ok(existsSync(formalDist), 'dist/formal-artifacts.cjs 必须存在（build 时从 scripts/ 复制）')
+})
+
+test('静态 bundle dist 含 validate-core.cjs（浏览器保存无仓库 cwd 时的内核副本）', () => {
+  const kernelDist = join(here, '..', 'dist', 'validate-core.cjs')
+  assert.ok(existsSync(kernelDist), 'dist/validate-core.cjs 必须存在（build 时从 scripts/ 复制）')
+})
+
+test('静态 bundle dist 含 role-library.cjs + builtin-roles.json 且内核可加载（角色库正式安装路径）', () => {
+  const coreDist = join(here, '..', 'dist', 'role-library.cjs')
+  const manifestDist = join(here, '..', 'dist', 'builtin-roles.json')
+  assert.ok(existsSync(coreDist), 'dist/role-library.cjs 必须存在（build 时从 scripts/ 复制）')
+  assert.ok(existsSync(manifestDist), 'dist/builtin-roles.json 必须存在（build 时从 dsh/roles/ 复制）')
+  // 从 dist 路径真实加载内核（与 host.js 静态候选根 __VWF_PLUGIN_ROOT__/dist 同形态）
+  const module = { exports: {} }
+  new Function('module', 'exports', readFileSync(coreDist, 'utf8'))(module, module.exports)
+  assert.equal(typeof module.exports.createRoleLibrary, 'function', 'dist 内核必须导出 createRoleLibrary')
+  const lib = module.exports.createRoleLibrary(JSON.parse(readFileSync(manifestDist, 'utf8')))
+  assert.equal(lib.describe().builtinIds.length, 12, 'dist 清单必须含 12 个内置角色')
 })
 
 test('T3：静态客户端 bundle 注册 dsh-visual-workflow 到网页模块加载器', () => {
@@ -58,6 +92,26 @@ test('T3：动态 Host 仍走 harness.handle（回归：双模式互不抢占）
   })()
   assert.ok(handlers.has('vwf.workflows.list'), '动态模式 RPC 仍经 harness.handle 注册')
   assert.equal(registered, undefined, '动态加载器不暴露 webServer 注册面')
+})
+
+test('角色库 core 加载：正式静态模式优先可信 pluginRoot/dist，不读取 repo 旧清单', async () => {
+  const repoRoot = join(here, '..', '..', '..')
+  const coreSrc = readFileSync(join(repoRoot, 'scripts', 'role-library.cjs'), 'utf8')
+  const base = JSON.parse(readFileSync(join(repoRoot, 'dsh', 'roles', 'builtin-roles.json'), 'utf8'))
+  const trusted = JSON.parse(JSON.stringify(base))
+  trusted.builtins.find((r) => r.id === 'dev').name = 'DIST 可信开发名'
+  const untrusted = JSON.parse(JSON.stringify(base))
+  untrusted.builtins.find((r) => r.id === 'dev').name = 'REPO 旧开发名'
+  const pluginRoot = '/pkg'
+  const fs = makeFs({
+    [pluginRoot + '/dist/role-library.cjs']: coreSrc,
+    [pluginRoot + '/dist/builtin-roles.json']: JSON.stringify(trusted),
+    [REPO + '/scripts/role-library.cjs']: coreSrc,
+    [REPO + '/dsh/roles/builtin-roles.json']: JSON.stringify(untrusted),
+  })
+  const loaded = loadStaticHost({ fs, subprocess: makeSubprocess({ fs }), sandboxPolicy, pluginRoot })
+  const result = await invokeStaticRpc(loaded.registered[0].route, 'vwf.roles')
+  assert.equal(result.roles.find((r) => r.id === 'dev').name, 'DIST 可信开发名', '静态模式必须优先可信 dist')
 })
 
 test('T3：静态 bundle dist/host-entry.mjs 在无 harness 时 apply() 走 webServer', async (t) => {

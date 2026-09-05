@@ -62,6 +62,14 @@ function isStructuralEdge(e) {
   return !!(e && (e.on === 'success' || hasOutcomeField(e)))
 }
 
+// 回退边不计入入口入边（契约：failure/technical 本就不是结构边；新模式回退走
+// outcome + countRound，自环也视为回退）。未标 countRound 的前向 outcome 仍是结构入边。
+function isRollbackEdge(e) {
+  if (!isStructuralEdge(e)) return false
+  if (e.from === e.to) return true
+  return e.countRound !== undefined
+}
+
 function hasOutcomePath(n) {
   return !!(n && n.output && typeof n.output.outcomePath === 'string' && n.output.outcomePath.trim())
 }
@@ -216,7 +224,7 @@ function deriveEntryCandidates(nodes, edges) {
   nodes.forEach((n) => { if (n && n.id) ids[n.id] = true })
   const incoming = {}
   edges.forEach((e) => {
-    if (!isStructuralEdge(e)) return
+    if (!isStructuralEdge(e) || isRollbackEdge(e)) return
     if (!e.to || e.to === '$end' || e.to === HUMAN_DECISION_ID || !ids[e.to]) return
     const fromOk = ids[e.from] || e.from === HUMAN_DECISION_ID
     if (!fromOk) return
