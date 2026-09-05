@@ -19,16 +19,18 @@
 //
 // T-IMP-06（双根加载 + 用户模板落盘闭环，FR-2/FR-3，AC-2/AC-3）：
 //  - 废除硬编码 TEMPLATES（L29-74）→ 目录加载：内置 = <repo>/.generated/<id>/vwf-dsl.json
-//    （生成物，CI 先 npm run generate）+ ~/.dsh/.generated（syncBuiltins 同步，会话无关，
-//    默认工作流这类用户级内置模板在任意项目会话可见）；用户 = ~/.dsh/visual-workflow/templates/<id>.json
-//    （蓝图 JSON，宿主数据根 ~/.dsh 下新建）。
+//    （生成物，CI 先 npm run generate）+ ~/.dsh/.generated（syncBuiltins 同步，会话无关）；
+//    用户 = ~/.dsh/visual-workflow/templates/<id>.json（蓝图 JSON）。
+//  - 历史两套 `default-workflow` / `dev-workflow-2-0` 已迁为 Custom Workflow：仍从
+//    .generated 出现在模板库，但 builtin=false，可保存覆盖、可删除（删除后写
+//    ~/.dsh/visual-workflow/removed/<id> 删除标记，避免生成物再次出现）。
 //  - list 合并双根（builtin 标志 + id 字母序），用户条目 dsl = 蓝图→vwf DSL 投影
-//    （内联 projectToVwf，与 scripts/generate.mjs 行为一致）。
-//  - save：结构+异源校验 → 撞名拒绝（内置只读 / 当前编辑 id ≠ 目标 → 改名提示）→
+//    （内联 projectToVwf，与 scripts/generate.mjs 行为一致）；用户覆盖优先于同 id 生成物。
+//  - save：结构+异源校验 → 撞名拒绝（正式内置只读 / 当前编辑 id ≠ 目标 → 改名提示）→
 //    逆投影蓝图落盘 → spawn 生成器 user 子命令同步自包含 skill 到 ~/.dsh/skills/<id>/
 //    （save 即闭环；生成失败回滚落盘，保持原子）。save 新增参数 currentId。
-//  - remove：仅用户模板可删（删蓝图 + 同步删 skill 目录）；内置拒绝。
-//  - findWorkflow：内置优先、用户目录兜底。
+//  - remove：用户模板与已迁出的历史模板可删（删蓝图 + 同步删 skill 目录）；正式内置拒绝。
+//  - findWorkflow：用户覆盖优先，其次未删除的历史生成物，再次正式内置。
 // T-IMP-07（异源接入，FR-8，AC-8）：save 与 vwf.validate 叠加内联异源硬规则
 //  （有 dev+review 节点 → 缺绑定拒 / 完全同模型拒 / 弱异源警告），与引擎
 //  校验内核 validate-core.cjs 规则 7 行为一致（候选二统一）。
@@ -202,10 +204,11 @@ return {
         builtinDir: repo ? repo + '/.generated' : null,
         // 静态组合包的仓库根（仅 bundle 内注入）；避免首次 RPC 早于同步任务时看不到模板。
         packageBuiltinDir: packageRepo ? packageRepo + '/.generated' : null,
-        // 宿主根内置模板（会话无关）：安装/重装时经 syncBuiltins 同步的标准配置，
-        // 任何会话都能看到（默认工作流这类用户级内置模板）
+        // 宿主根内置模板（会话无关）：安装/重装时经 syncBuiltins 同步的标准配置
         homeBuiltinDir: home ? home + '/.generated' : null,
         userDir: home ? home + '/visual-workflow/templates' : null,
+        // 历史模板迁为自定义后的删除标记：存在则 list/find 不再从 .generated 重新列出该 id
+        removedDir: home ? home + '/visual-workflow/removed' : null,
         // runs 运行记录持久化目录（#40）：<runId>.json 一条一文件
         runsDir: home ? home + '/visual-workflow/runs' : null,
         skillRoot: home ? home + '/skills' : null,
@@ -302,10 +305,16 @@ return {
     // 与 apply 时序解耦的异步同步：不阻塞 apply，失败仅在终端日志留痕
     syncBuiltins().catch((e) => console.log('[vwf] 内置模板同步失败：' + String((e && e.message) || e)))
 
+    // 历史两套正式模板已按目标规格迁为 Custom Workflow，不再占用内置身份。
+    // 生成物仍可出现在模板库（任意项目可见的 default-workflow / 仓库内的
+    // dev-workflow-2-0），但 list 标 builtin=false，允许保存覆盖与删除。
+    const LEGACY_CUSTOM_WORKFLOW_IDS = { 'default-workflow': true, 'dev-workflow-2-0': true }
+    function isLegacyCustomId(id) { return !!LEGACY_CUSTOM_WORKFLOW_IDS[id] }
+
     // 内置根：.generated/<id>/vwf-dsl.json（生成物四件套之一，CI 先 npm run generate）
     // 双根：仓库 .generated（开发期最新）优先，宿主根 ~/.dsh/.generated（syncBuiltins 同步，
-    // 会话无关）补缺失——默认工作流这类用户级内置模板在任意项目会话都可见
-    async function loadBuiltins(strict) {
+    // 会话无关）补缺失。扫描结果再按 id 拆成「正式内置」与「已迁出的历史自定义」。
+    async function loadGeneratedCatalog(strict) {
       const out = new Map()
       if (fs === undefined) {
         if (strict) throw new Error('宿主文件能力不可用：无法扫描内置模板')
@@ -338,6 +347,50 @@ return {
         }
       }
       return out
+    }
+    async function splitGenerated(strict) {
+      const all = await loadGeneratedCatalog(strict)
+      const builtins = new Map()
+      const shipped = new Map()
+      for (const [id, dsl] of all) {
+        if (isLegacyCustomId(id)) shipped.set(id, dsl)
+        else builtins.set(id, dsl)
+      }
+      return { builtins, shipped }
+    }
+    async function loadBuiltins(strict) {
+      return (await splitGenerated(strict)).builtins
+    }
+    async function loadRemovedIds() {
+      const out = new Set()
+      if (fs === undefined) return out
+      const p = await rootPaths()
+      if (!p.removedDir) return out
+      let entries = null
+      try {
+        entries = await fs.listDir(await fs.resolve(p.removedDir))
+      } catch (e) { return out }
+      for (const ent of entries || []) {
+        if (!ent || typeof ent.name !== 'string' || !ent.name) continue
+        out.add(ent.name)
+      }
+      return out
+    }
+    async function markRemoved(id) {
+      if (fs === undefined || !isLegacyCustomId(id)) return
+      const p = await rootPaths()
+      if (!p.removedDir) return
+      try {
+        await fs.writeText(await fs.resolve(p.removedDir + '/' + id), '', undefined, undefined, writePolicy())
+      } catch (e) { /* 删除标记写入失败不阻断删除：用户目录与 skill 已清 */ }
+    }
+    async function clearRemoved(id) {
+      if (!isLegacyCustomId(id)) return
+      const p = await rootPaths()
+      if (!p.removedDir || !p.generatorRoot) return
+      try {
+        await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{force:true})", p.removedDir + '/' + id], { cwd: p.generatorRoot })
+      } catch (e) { /* 重建模板时清除删除标记失败不阻断 save */ }
     }
 
     // 用户根：~/.dsh/visual-workflow/templates/<id>.json（蓝图 JSON）
@@ -643,9 +696,10 @@ return {
     async function compileViaPipeline(dsl, opts) {
       const p = await rootPaths()
       if (opts && opts.fromTemplate) {
-        // 磁盘产物优先：仓库 .generated → 宿主根 .generated（用户级内置，syncBuiltins 同步）→ 用户 skill 闭环产物
+        // 磁盘产物优先：用户 skill 闭环产物（保存覆盖后必须盖过同 id 的 .generated）
+        // → 仓库 .generated → 宿主根 .generated（syncBuiltins 同步）
         // bundleRoles 模板在产物目录旁带 roles/ 自包含角色包，命中则随译文返回 roleDir
-        const spots = [p.builtinDir, p.packageBuiltinDir, p.homeBuiltinDir, p.skillRoot]
+        const spots = [p.skillRoot, p.builtinDir, p.packageBuiltinDir, p.homeBuiltinDir]
         for (const spot of spots) {
           if (!spot) continue
           const script = await readTextIfExists(spot + '/' + dsl.id + '/script.mjs')
@@ -689,23 +743,38 @@ return {
       }
     }
 
-    // 双根查找：内置优先（沿用），用户目录兜底（蓝图 → vwf DSL 投影）
+    // 查找：用户覆盖优先 → 未删除的历史生成物 → 正式内置
     async function findWorkflow(id) {
       if (!id || typeof id !== 'string') return null
-      const builtins = await loadBuiltins()
-      if (builtins.has(id)) return builtins.get(id)
       const users = await loadUserTemplates()
       const bp = users.get(id)
-      return bp ? projectToVwf(bp) : null
+      if (bp) return projectToVwf(bp)
+      const removed = await loadRemovedIds()
+      if (removed.has(id)) return null
+      const { builtins, shipped } = await splitGenerated()
+      if (shipped.has(id)) return shipped.get(id)
+      if (builtins.has(id)) return builtins.get(id)
+      return null
     }
-    // 合并双根：builtin 标志 + id 字母序；用户条目 dsl = 蓝图 → vwf DSL 投影
+    // 合并：正式内置 builtin=true；历史生成物与用户模板 builtin=false。
+    // 同 id：用户覆盖优先；已删除标记的历史 id 不再从 .generated 列出。
     async function listWorkflows() {
-      const [builtins, users] = await Promise.all([loadBuiltins(), loadUserTemplates()])
+      const [{ builtins, shipped }, users, removed] = await Promise.all([splitGenerated(), loadUserTemplates(), loadRemovedIds()])
       const out = []
-      for (const dsl of builtins.values()) out.push({ id: dsl.id, name: dsl.name, description: dsl.description || '', builtin: true, dsl: dsl })
+      const seen = new Set()
+      for (const dsl of builtins.values()) {
+        out.push({ id: dsl.id, name: dsl.name, description: dsl.description || '', builtin: true, dsl: dsl })
+        seen.add(dsl.id)
+      }
       for (const bp of users.values()) {
+        if (seen.has(bp.id)) continue
         const dsl = projectToVwf(bp)
         out.push({ id: bp.id, name: bp.displayName, description: bp.description || '', builtin: false, dsl: dsl })
+        seen.add(bp.id)
+      }
+      for (const dsl of shipped.values()) {
+        if (seen.has(dsl.id) || removed.has(dsl.id)) continue
+        out.push({ id: dsl.id, name: dsl.name, description: dsl.description || '', builtin: false, dsl: dsl })
       }
       out.sort((a, b) => (a.builtin === b.builtin ? (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) : a.builtin ? -1 : 1))
       return out
@@ -1175,6 +1244,7 @@ return {
         } catch (e) {}
         return { ok: false, errors: [{ at: '$', message: '蓝图校验/技能生成失败（save 已回滚）：' + gen.detail }] }
       }
+      await clearRemoved(id)
       return { ok: true, id: id, dsl: v.sanitized, warnings: v.warnings || [] }
     })
     registerRpc('vwf.workflows.remove', async (a) => {
@@ -1195,12 +1265,18 @@ return {
         const info = await fs.stat(target)
         existed = !!info
       } catch (e) { existed = false }
-      if (!existed) return { ok: false, errors: [{ at: '$.id', message: '用户模板不存在：' + id }] }
+      const shipped = isLegacyCustomId(id)
+      if (!existed && !shipped) return { ok: false, errors: [{ at: '$.id', message: '用户模板不存在：' + id }] }
+      const removed = await loadRemovedIds()
+      if (!existed && shipped && removed.has(id)) return { ok: false, errors: [{ at: '$.id', message: '用户模板不存在：' + id }] }
       // 删蓝图 + 同步删 ~/.dsh/skills/<id>/（fs 服务无删除能力，经子进程 rm）
-      const rm = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.generatorRoot })
-      if (!rm.ok) return { ok: false, errors: [{ at: '$', message: '模板删除失败：' + rm.detail }] }
+      if (existed) {
+        const rm = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.generatorRoot })
+        if (!rm.ok) return { ok: false, errors: [{ at: '$', message: '模板删除失败：' + rm.detail }] }
+      }
       const skillDir = p.skillRoot + '/' + id
       await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", skillDir], { cwd: p.generatorRoot })
+      await markRemoved(id)
       return { ok: true, id: id }
     })
     registerRpc('vwf.validate', async (a) => {

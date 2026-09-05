@@ -74,7 +74,7 @@
 ## 插件界面层（编辑器与运行看板）
 
 - **工作流面板**：DSH 设置页注入的 `settings.section`（`client.js` 末尾 `slots.inject`），内含两个页签。
-- **模板库（templates 页签）**：工作流清单（一行一个模板，内置标 builtin 且只读），操作 = 新建 / 编辑 / 删除。
+- **模板库（templates 页签）**：工作流清单（一行一个模板）。正式内置标 builtin 且只读；当前两套历史模板 `default-workflow` / `dev-workflow-2-0` 已迁为自定义（无内置标签，可编辑/删除）。操作 = 新建 / 编辑 / 删除。
 - **运行看板（dashboard 页签）**：每 3 秒轮询 `vwf.runs.list` + `vwf.state`，呈现**运行列表**（可点选切换）、
   当前 run 的状态/阶段、只读画布（节点按状态染色，按 workflowId 匹配模板 DSL）、**子代理表格**与
   最近 20 条日志。**与模板库无关**（两者常被混指）。
