@@ -18,6 +18,10 @@
         "provider": "deepseek-official",
         "model": "deepseek-v4-pro"
       },
+      "dev-2": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-pro"
+      },
       "route": {
         "provider": "deepseek-official",
         "model": "deepseek-v4-flash"
@@ -143,6 +147,42 @@
         "successCondition": "$.status == \"completed\"",
         "files": {
           "dev-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "dev-2",
+      "label": "开发 2 号",
+      "profile": "dev",
+      "goal": "（两级序号验证用）与「开发」同级并行节点；在工作分支施工（tdd），本地验证全绿后提交（不推送、不建 PR）；写 `dev-2-report.md` 并更新 STATE.md。环境受阻时 status 报 blocked。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "completed",
+                "blocked"
+              ]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "self_verify": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "summary",
+            "self_verify"
+          ],
+          "additionalProperties": false
+        },
+        "successCondition": "$.status == \"completed\"",
+        "files": {
+          "dev-2-report.md": "markdown"
         }
       }
     },
@@ -346,7 +386,14 @@
     {
       "from": "dispatch",
       "to": "dev",
-      "on": "success"
+      "on": "success",
+      "when": "$.complete == true"
+    },
+    {
+      "from": "dispatch",
+      "to": "dev-2",
+      "on": "success",
+      "when": "$.complete == true"
     },
     {
       "from": "dispatch",
@@ -360,6 +407,16 @@
     },
     {
       "from": "dev",
+      "to": "$end",
+      "on": "failure"
+    },
+    {
+      "from": "dev-2",
+      "to": "route",
+      "on": "success"
+    },
+    {
+      "from": "dev-2",
       "to": "$end",
       "on": "failure"
     },

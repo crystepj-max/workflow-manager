@@ -490,6 +490,8 @@ return {
 .vwf-node-card { fill:var(--dsw-alias-bg-layer-2, #242424); stroke:var(--dsw-alias-border-l2, #333); stroke-width:1; }
 .vwf-node-kind { fill:var(--dsw-alias-label-tertiary, #8a8a8a); font-size:10px; letter-spacing:.14em; text-transform:uppercase; }
 .vwf-node-label { fill:var(--dsw-alias-label-primary, #e8e8e8); font-size:13px; font-weight:500; }
+.vwf-node-seq { fill:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #4d9fff)); font-size:11px; font-weight:700; font-variant-numeric:tabular-nums; }
+.vwf-node-seq-badge { fill:var(--dsw-alias-bg-layer-1, #1e1e1e); stroke:var(--dsw-alias-brand-primary, #4d9fff); stroke-width:1; }
 .vwf-handle { fill:var(--dsw-alias-label-tertiary, #8a8a8a); stroke:var(--dsw-alias-bg-layer-2, #242424); stroke-width:2; }
 /* 节点左右连接把手（拖出/落入连线的源与目标指示）：默认隐藏，节点悬停时显示，
    避免没有对应边的节点右侧出现无意义灰点（验收反馈）。 */
@@ -524,6 +526,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     const MARGIN_Y = 64
     const CANVAS_PAD = 24
     const END_NODE = '$end'
+    const HUMAN_DECISION_ID = '$human-decision'
     const STATUS_COLOR = { running: 'var(--dsw-alias-brand-primary, #60a5fa)', pass: 'var(--dsw-alias-state-success-primary, #22c55e)', fail: 'var(--dsw-alias-state-error-primary, #ef4444)', human: 'var(--dsw-alias-state-warn-primary, #f59e0b)' }
     const EDGE_OK = '#2563eb'
     const EDGE_FAIL = 'var(--dsw-alias-state-error-primary, #f87171)'
@@ -558,6 +561,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     // ── 拓扑与布局（对应 workflowGraph.ts 的 successTopologyOrder /
     //    deriveEntryCandidateIds / computeBackwardLanes / layoutSuccessPath）──
+    // 两级序号：主序号 = 前向最长路列（横轴 0…n）；同列多节点 = m.1…m.k（纵轴）。
+    // `$human-decision` 为透明跳板：A→HD→B 在排版上等价于前向边 A→B（回退旁路除外）。
     function hasOutcomeField(e) {
       return !!(e && e.outcome !== undefined && e.outcome !== null && e.outcome !== '')
     }
@@ -570,18 +575,69 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       if (e.from === e.to) return true
       return e.countRound !== undefined
     }
+    // 基图邻接（不含 HD）：用于判断 HD 出边是否回指上游（如验收退回→开发）。
+    function buildBaseForwardAdj(dsl, idSet) {
+      const adj = new Map()
+      idSet.forEach(id => adj.set(id, []))
+      ;(dsl.edges || []).forEach(e => {
+        if (!isStructuralEdge(e) || isRollbackEdge(e)) return
+        if (e.from === e.to) return
+        if (e.from === HUMAN_DECISION_ID || e.to === HUMAN_DECISION_ID) return
+        if (!idSet.has(e.from) || !idSet.has(e.to)) return
+        adj.get(e.from).push(e.to)
+      })
+      return adj
+    }
+    function canReachInAdj(adj, from, to) {
+      if (from === to) return true
+      const seen = new Set()
+      const stack = [from]
+      while (stack.length) {
+        const id = stack.pop()
+        if (seen.has(id)) continue
+        seen.add(id)
+        for (const next of (adj.get(id) || [])) {
+          if (next === to) return true
+          if (!seen.has(next)) stack.push(next)
+        }
+      }
+      return false
+    }
+    // 排版用前向边对：真实节点↔真实节点/$end，含 HD 透传；跳过回退与「HD 出边回指上游」。
+    function forEachLayoutForwardPair(dsl, idSet, visit) {
+      const edges = dsl.edges || []
+      const baseAdj = buildBaseForwardAdj(dsl, idSet)
+      const hdOuts = edges.filter(e =>
+        e && e.from === HUMAN_DECISION_ID && isStructuralEdge(e) && !isRollbackEdge(e) && e.to !== HUMAN_DECISION_ID
+      )
+      edges.forEach(e => {
+        if (!isStructuralEdge(e) || isRollbackEdge(e)) return
+        if (e.from === e.to) return
+        if (e.from === HUMAN_DECISION_ID) return
+        if (!idSet.has(e.from)) return
+        if (e.to === HUMAN_DECISION_ID) {
+          hdOuts.forEach(out => {
+            if (out.to === END_NODE) { visit(e.from, out.to, out); return }
+            if (!idSet.has(out.to)) return
+            // 目标能到达起点 ⇒ 回退旁路（退回开发等），不参与主序号前进
+            if (canReachInAdj(baseAdj, out.to, e.from)) return
+            visit(e.from, out.to, out)
+          })
+          return
+        }
+        if (idSet.has(e.to) || e.to === END_NODE) visit(e.from, e.to, e)
+      })
+    }
     function successTopologyOrder(dsl) {
       const ids = (dsl.nodes || []).map(n => n && n.id).filter(Boolean)
       const idSet = new Set(ids)
       const adjacency = new Map()
       const indegree = new Map()
       ids.forEach(id => { adjacency.set(id, []); indegree.set(id, 0) })
-      ;(dsl.edges || []).forEach(e => {
-        if (!isStructuralEdge(e) || isRollbackEdge(e)) return
-        if (e.from === e.to) return
-        if (!idSet.has(e.from) || !idSet.has(e.to)) return
-        adjacency.get(e.from).push(e.to)
-        indegree.set(e.to, (indegree.get(e.to) || 0) + 1)
+      forEachLayoutForwardPair(dsl, idSet, (from, to) => {
+        if (!idSet.has(to)) return
+        adjacency.get(from).push(to)
+        indegree.set(to, (indegree.get(to) || 0) + 1)
       })
       const queued = new Set()
       const queue = []
@@ -615,8 +671,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const incoming = new Set()
       ;(dsl.edges || []).forEach(e => {
         if (!isStructuralEdge(e) || isRollbackEdge(e)) return
-        if (!e.to || e.to === END_NODE || e.to === '$human-decision' || !ids.has(e.to)) return
-        if (!(ids.has(e.from) || e.from === '$human-decision')) return
+        if (!e.to || e.to === END_NODE || e.to === HUMAN_DECISION_ID || !ids.has(e.to)) return
+        if (!(ids.has(e.from) || e.from === HUMAN_DECISION_ID)) return
         incoming.add(e.to)
       })
       return (dsl.nodes || []).map(n => n && n.id).filter(id => Boolean(id) && !incoming.has(id))
@@ -742,7 +798,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       return routes
     }
 
-    // 分层布局：success/前向边最长路定 rank，rank 内按拓扑序纵向堆叠并整体居中
+    // 分层布局：前向结构边（含 HD 透传）最长路定主序号；同列按拓扑序定子序号并纵向堆叠
     function layoutGraph(dsl, extraTerminals) {
       const nodeIds = (dsl.nodes || []).map(n => n.id).filter(Boolean)
       const idSet = new Set(nodeIds)
@@ -753,22 +809,26 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const allIds = nodeIds.concat(terminalIds)
       const sizeOf = (id) => id === END_NODE ? { w: TERM_W, h: TERM_H } : { w: NODE_W, h: NODE_H }
 
-      // rank：前向结构边（success ∪ 非回退 outcome）定最长路；回退/失败边不把目标拉到更右
+      // 主序号（rank）：前向边最长路；回退边 / HD 回指上游不把目标拉到更右
       const rank = {}
       allIds.forEach(id => { rank[id] = 0 })
       let changed = true
       let guard = 0
       while (changed && guard++ < 100) {
         changed = false
-        for (const e of (dsl.edges || [])) {
-          // 自环边（防御脏数据）：不参与最长路 rank，避免自身 rank 无限自增
-          if (e.from === e.to) continue
-          if (!idSet.has(e.from)) continue
-          if (!(idSet.has(e.to) || e.to === END_NODE)) continue
-          if (isRollbackEdge(e) || (!isStructuralEdge(e) && isBackwardEdge(e.from, e.to, order))) continue
-          if (rank[e.from] + 1 > (rank[e.to] || 0)) { rank[e.to] = rank[e.from] + 1; changed = true }
-        }
+        forEachLayoutForwardPair(dsl, idSet, (from, to) => {
+          if (!(idSet.has(to) || to === END_NODE)) return
+          if (rank[from] + 1 > (rank[to] || 0)) { rank[to] = rank[from] + 1; changed = true }
+        })
       }
+      // $end 也可能只被非透传 failure 边指向；补一次直接边（非 rollback 结构边）
+      ;(dsl.edges || []).forEach(e => {
+        if (!e || e.to !== END_NODE || !idSet.has(e.from)) return
+        if (isRollbackEdge(e)) return
+        if (!isStructuralEdge(e) && isBackwardEdge(e.from, e.to, order)) return
+        if (rank[e.from] + 1 > (rank[END_NODE] || 0)) rank[END_NODE] = rank[e.from] + 1
+      })
+
       const layers = new Map()
       allIds.forEach(id => {
         const r = rank[id] || 0
@@ -777,6 +837,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       })
       const ranks = Array.from(layers.keys()).sort((a, b) => a - b)
       ranks.forEach(r => layers.get(r).sort((a, b) => (order.get(a) || 0) - (order.get(b) || 0)))
+
+      // 两级序号标签：单列单节点 → "m"；同列多个 → "m.1"…"m.k"（$end 不标业务序号）
+      const seqLabels = {}
+      ranks.forEach(r => {
+        const ids = layers.get(r).filter(id => id !== END_NODE)
+        if (ids.length === 1) {
+          seqLabels[ids[0]] = String(r)
+        } else {
+          ids.forEach((id, i) => { seqLabels[id] = r + '.' + (i + 1) })
+        }
+      })
 
       // 每层高度与整体居中
       const layerHeights = new Map()
@@ -826,7 +897,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         maxRouteY += routeShift
       }
       const contentBottom = Math.max(maxY, maxRouteY > -Infinity ? maxRouteY : maxY)
-      return { pos, W: maxX + MARGIN_X, H: contentBottom + MARGIN_Y, lanes, routes, order }
+      return { pos, W: maxX + MARGIN_X, H: contentBottom + MARGIN_Y, lanes, routes, order, seqLabels, rank }
     }
 
     function uniqueNodeId(dsl, base) {
@@ -902,6 +973,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const pos = lay.pos
       const W = lay.W
       const H = lay.H
+      const seqLabels = lay.seqLabels || {}
 
       const fitView = React.useCallback(() => {
         const wrap = wrapRef.current
@@ -1169,6 +1241,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           return
         }
         const stroke = isConnectTarget ? ACCENT : selected ? ACCENT : invalid ? 'var(--dsw-alias-state-error-primary, #e5484d)' : status ? STATUS_COLOR[status] : 'var(--dsw-alias-border-l2, #333)'
+        const seq = seqLabels[id]
+        const seqW = seq ? Math.max(22, 8 + String(seq).length * 7) : 0
         nodeEls.push(h('g', {
           key: 'n' + id, 'data-node-id': id, transform: 'translate(' + p.x + ',' + p.y + ')',
           style: { cursor: props.readOnly ? 'default' : 'pointer' },
@@ -1183,6 +1257,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           candidates.indexOf(id) >= 0 ? h('g', { key: 'eb' },
             h('rect', { className: 'vwf-entry-badge', x: -6, y: -9, width: 34, height: 16, rx: 8 }),
             h('text', { className: 'vwf-entry-badge-text', x: 11, y: 3, textAnchor: 'middle' }, t('entryBadge'))
+          ) : null,
+          seq ? h('g', { key: 'seq', 'data-node-seq': seq },
+            h('rect', { className: 'vwf-node-seq-badge', x: 8, y: 8, width: seqW, height: 18, rx: 6 }),
+            h('text', { className: 'vwf-node-seq', x: 8 + seqW / 2, y: 21, textAnchor: 'middle' }, seq)
           ) : null,
           h('text', { className: 'vwf-node-label', x: p.w / 2, y: p.h / 2 - 4, textAnchor: 'middle' }, (node && (node.label || node.id)) || id),
           h('text', { className: 'vwf-node-kind', x: p.w / 2, y: p.h / 2 + 15, textAnchor: 'middle' }, (node && node.kind) || 'worker'),
