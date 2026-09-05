@@ -1838,3 +1838,20 @@ test('#93 DSH_HOME：home 探测优先读取 process.env.DSH_HOME', async () => 
   assert.ok(probe, 'dshHome 探测必须读取 DSH_HOME，不能无条件 os.homedir()+/.dsh：' + JSON.stringify(sub._calls.slice(0, 3)))
 })
 
+test('粘贴蓝图 JSON：displayName / bindings.models 摄入 DSL，回退 outcome 不吞入口', async () => {
+  const { handlers, fs } = env()
+  const bp = JSON.parse(readFileSync(join(here, '..', '..', '..', 'scripts', 'test', 'fixtures', 'construction-rollback-mini.json'), 'utf8'))
+  const v = await call(handlers, 'vwf.validate', { dsl: bp })
+  assert.equal(v.ok, true, JSON.stringify(v.errors))
+  assert.equal(v.sanitized.name, '完整功能开发', 'displayName 投影为模板名称')
+  assert.equal(v.sanitized.entry, 'requirements', '唯一入口仍是 requirements')
+  assert.equal(v.sanitized.nodes.find((n) => n.id === 'requirements').model.provider, 'kimi-coding')
+  assert.equal(v.sanitized.nodes.find((n) => n.id === 'dev').model.model, 'deepseek-v4-pro')
+  const saved = await call(handlers, 'vwf.workflows.save', { dsl: bp })
+  assert.equal(saved.ok, true, JSON.stringify(saved.errors))
+  const disk = JSON.parse(fs._files.get(USER_DIR + '/construction-rollback-mini.json'))
+  assert.equal(disk.displayName, '完整功能开发')
+  assert.equal(disk.nodes.find((n) => n.id === 'review').verifyBranch, true, 'verifyBranch 保存往返')
+  assert.equal(disk.bindings.models.requirements.provider, 'kimi-coding')
+})
+

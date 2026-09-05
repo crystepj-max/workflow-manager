@@ -396,6 +396,7 @@ return {
           if (n.failOn !== undefined) o.failOn = n.failOn
           if (n.output) o.output = n.output
           if (n.manualCheck) o.manualCheck = true
+          if (n.verifyBranch) o.verifyBranch = true
           if (models[n.id]) o.model = models[n.id]
           return o
         }),
@@ -412,12 +413,13 @@ return {
       // 业务规则字段（候选二 Q7，与 generate.mjs projectToVwf 一致）
       if (bp.onMaxRounds !== undefined) out.onMaxRounds = bp.onMaxRounds
       if (bp.heteroCheck) out.heteroCheck = true
+      if (bp.bundleRoles) out.bundleRoles = true
       if (bp.humanDecision !== undefined) out.humanDecision = bp.humanDecision
       return out
     }
     // 逆投影（save 落盘格式：蓝图 JSON；候选二 Q7：业务规则字段 onMaxRounds/
-    // heteroCheck 已在 DSL 中（前端可配置），原样带回蓝图；verifyBranch 节点级
-    // 字段无编辑器 UI、不在 DSL，自然不产生）
+    // heteroCheck 已在 DSL 中（前端可配置），原样带回蓝图；verifyBranch 无编辑器
+    // UI，但 JSON 粘贴/保存必须往返，否则建设蓝图的可信度闸门会在另存后丢失）
     function projectToBlueprint(dsl) {
       const models = {}
       const nodes = (dsl.nodes || []).map((n) => {
@@ -427,6 +429,7 @@ return {
         if (n.failOn !== undefined) o.failOn = n.failOn
         if (n.output) o.output = n.output
         if (n.manualCheck) o.manualCheck = true
+        if (n.verifyBranch) o.verifyBranch = true
         if (n.model && typeof n.model === 'object' && n.model.provider && n.model.model) {
           models[n.id] = { provider: n.model.provider, model: n.model.model }
         }
@@ -452,9 +455,24 @@ return {
       if (dsl.control && dsl.control.maxRounds != null) bp.control = { maxRounds: dsl.control.maxRounds }
       if (dsl.onMaxRounds !== undefined) bp.onMaxRounds = dsl.onMaxRounds
       if (dsl.heteroCheck) bp.heteroCheck = true
+      if (dsl.bundleRoles) bp.bundleRoles = true
       if (dsl.humanDecision !== undefined) bp.humanDecision = dsl.humanDecision
       if (Object.keys(models).length) bp.bindings = { models: models }
       return bp
+    }
+
+    // JSON tab / 保存可能直接贴蓝图落盘格式（displayName、bindings.models）。
+    // 先投影成 DSL，再走 sanitize / 逆投影，避免模型绑定与展示名被丢掉。
+    function ingestToDsl(raw) {
+      if (!raw || typeof raw !== 'object') return raw
+      const hasBindings = !!(raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object'
+        && Object.keys(raw.bindings.models).length)
+      if (typeof raw.displayName !== 'string' && !hasBindings) return raw
+      if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return raw
+      return projectToVwf({
+        ...raw,
+        displayName: typeof raw.displayName === 'string' ? raw.displayName : (raw.name || raw.id || ''),
+      })
     }
 
 
@@ -566,6 +584,7 @@ return {
         // lossless-JSON 守卫：所有键都必须有值，sanitized 早退时显式给 null
         return { ok: false, errors: [{ at: '$', message: '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）' }], fieldErrors: {}, sanitized: null, warnings: [] }
       }
+      dsl = ingestToDsl(dsl)
       if (!dsl || typeof dsl !== 'object') {
         return { ok: false, errors: [{ at: '$', message: 'dsl 必须是对象' }], fieldErrors: {}, sanitized: null, warnings: [] }
       }

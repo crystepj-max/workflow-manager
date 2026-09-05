@@ -536,8 +536,42 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     function clone(x) { return JSON.parse(JSON.stringify(x)) }
 
+    // 编辑器 JSON tab 同时接受蓝图落盘格式（displayName / bindings.models）与 DSL。
+    // 粘贴 templates/*.json 时把模型绑到节点、展示名写入 name，画布才能显示 provider/model。
+    function ingestEditorJson(raw) {
+      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.nodes)) return raw
+      const models = (raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object')
+        ? raw.bindings.models : {}
+      const isBlueprint = typeof raw.displayName === 'string' || Object.keys(models).length > 0
+      if (!isBlueprint) return raw
+      const nodes = raw.nodes.map((n) => {
+        if (!n || typeof n !== 'object') return n
+        if (n.model || !models[n.id]) return n
+        return { ...n, model: models[n.id] }
+      })
+      const name = (typeof raw.name === 'string' && raw.name.trim() && raw.name !== raw.id)
+        ? raw.name
+        : (typeof raw.displayName === 'string' ? raw.displayName : (raw.name || ''))
+      const next = { ...raw, nodes, name }
+      delete next.displayName
+      delete next.bindings
+      return next
+    }
+
     // ── 拓扑与布局（对应 workflowGraph.ts 的 successTopologyOrder /
     //    deriveEntryCandidateIds / computeBackwardLanes / layoutSuccessPath）──
+    function hasOutcomeField(e) {
+      return !!(e && e.outcome !== undefined && e.outcome !== null && e.outcome !== '')
+    }
+    function isStructuralEdge(e) {
+      return !!(e && (e.on === 'success' || hasOutcomeField(e)))
+    }
+    // 与校验内核同构：countRound 声明 / 自环 = 回退边，不参与入口入边与主链分层。
+    function isRollbackEdge(e) {
+      if (!isStructuralEdge(e)) return false
+      if (e.from === e.to) return true
+      return e.countRound !== undefined
+    }
     function successTopologyOrder(dsl) {
       const ids = (dsl.nodes || []).map(n => n && n.id).filter(Boolean)
       const idSet = new Set(ids)
@@ -545,7 +579,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const indegree = new Map()
       ids.forEach(id => { adjacency.set(id, []); indegree.set(id, 0) })
       ;(dsl.edges || []).forEach(e => {
-        if (e.on !== 'success') return
+        if (!isStructuralEdge(e) || isRollbackEdge(e)) return
+        if (e.from === e.to) return
         if (!idSet.has(e.from) || !idSet.has(e.to)) return
         adjacency.get(e.from).push(e.to)
         indegree.set(e.to, (indegree.get(e.to) || 0) + 1)
@@ -556,7 +591,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       pushRoot(dsl.entry)
       ids.forEach(id => { if ((indegree.get(id) || 0) === 0) pushRoot(id) })
       const ordered = []
-      while (queue.length) {
+      const leftover = () => ids.filter(id => !queued.has(id))
+      while (queue.length || leftover().length) {
+        if (!queue.length) pushRoot(leftover()[0])
         const id = queue.shift()
         ordered.push(id)
         ;(adjacency.get(id) || []).forEach(next => {
@@ -564,7 +601,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           if ((indegree.get(next) || 0) === 0) pushRoot(next)
         })
       }
-      ids.forEach(id => { if (!queued.has(id)) ordered.push(id) })
       const order = new Map()
       ordered.forEach((id, i) => order.set(id, i))
       return order
@@ -578,14 +614,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     function deriveEntryCandidates(dsl) {
       const ids = new Set((dsl.nodes || []).map(n => n && n.id).filter(Boolean))
-      const order = successTopologyOrder({ ...dsl, entry: '' })
       const incoming = new Set()
       ;(dsl.edges || []).forEach(e => {
-        if (!ids.has(e.from) || !ids.has(e.to)) return
-        if (e.on !== 'success' && isBackwardEdge(e.from, e.to, order)) return
+        if (!isStructuralEdge(e) || isRollbackEdge(e)) return
+        if (!e.to || e.to === END_NODE || e.to === '$human-decision' || !ids.has(e.to)) return
+        if (!(ids.has(e.from) || e.from === '$human-decision')) return
         incoming.add(e.to)
       })
-      return (dsl.nodes || []).map(n => n.id).filter(id => Boolean(id) && !incoming.has(id))
+      return (dsl.nodes || []).map(n => n && n.id).filter(id => Boolean(id) && !incoming.has(id))
     }
 
     function normalizeEntry(dsl) {
@@ -719,7 +755,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const allIds = nodeIds.concat(terminalIds)
       const sizeOf = (id) => id === END_NODE ? { w: TERM_W, h: TERM_H } : { w: NODE_W, h: NODE_H }
 
-      // rank：success + 前向非 success 边参与最长路（对应 layoutSuccessPath 的过滤）
+      // rank：前向结构边（success ∪ 非回退 outcome）定最长路；回退/失败边不把目标拉到更右
       const rank = {}
       allIds.forEach(id => { rank[id] = 0 })
       let changed = true
@@ -731,7 +767,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           if (e.from === e.to) continue
           if (!idSet.has(e.from)) continue
           if (!(idSet.has(e.to) || e.to === END_NODE)) continue
-          if (e.on !== 'success' && isBackwardEdge(e.from, e.to, order)) continue
+          if (isRollbackEdge(e) || (!isStructuralEdge(e) && isBackwardEdge(e.from, e.to, order))) continue
           if (rank[e.from] + 1 > (rank[e.to] || 0)) { rank[e.to] = rank[e.from] + 1; changed = true }
         }
       }
@@ -863,7 +899,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const panRef = React.useRef(null)
       const lay = React.useMemo(
         () => layoutGraph(dsl, props.visibleTerminals || []),
-        [JSON.stringify({ entry: dsl.entry || '', n: (dsl.nodes || []).map(n => n.id), e: (dsl.edges || []).map(e => [e.from, e.to, e.on]), v: props.visibleTerminals || [] })]
+        [JSON.stringify({ entry: dsl.entry || '', n: (dsl.nodes || []).map(n => n.id), e: (dsl.edges || []).map(e => [e.from, e.to, e.on, e.outcome, e.countRound]), v: props.visibleTerminals || [] })]
       )
       const pos = lay.pos
       const W = lay.W
@@ -2087,7 +2123,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             setJsonError(t('outputSchemaInvalid'))
             return
           }
-          toSave = normalizeEntry(parsed)
+          toSave = normalizeEntry(ingestEditorJson(parsed))
           setWf(toSave)
         }
         const v = await host.call('vwf.validate', { dsl: toSave }).catch(() => null)
@@ -2144,7 +2180,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         try {
           const parsed = JSON.parse(value)
           if (parsed && Array.isArray(parsed.nodes)) {
-            const next = normalizeEntry(parsed)
+            const next = normalizeEntry(ingestEditorJson(parsed))
             setWf(next)
           }
         } catch (e) { /* 保留草稿，保存时报错 */ }

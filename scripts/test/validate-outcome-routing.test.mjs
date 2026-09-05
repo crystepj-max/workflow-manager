@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import validatorCore from '../validate-core.cjs'
 
-const { validateBlueprint } = validatorCore
+const { validateBlueprint, deriveEntryCandidates } = validatorCore
 const here = path.dirname(fileURLToPath(import.meta.url))
 const good = JSON.parse(readFileSync(path.join(here, '../../templates/dev-workflow-2-0.json'), 'utf8'))
 const defaultWf = JSON.parse(readFileSync(path.join(here, '../../templates/default-workflow.json'), 'utf8'))
@@ -312,4 +312,11 @@ test('#126 同一 outcome 取值两条出边拒绝', () => {
   const b = clone(outcomeGood)
   b.edges.push({ from: 'evaluate', to: 'execute', outcome: 'PASS' })
   expectReject(b, 'PASS', 'dup-outcome')
+})
+
+test('回退 outcome 不计入入口入边：建设主链唯一入口仍是 requirements', () => {
+  const bp = JSON.parse(readFileSync(path.join(here, 'fixtures/construction-rollback-mini.json'), 'utf8'))
+  const cands = deriveEntryCandidates(bp.nodes, bp.edges)
+  assert.deepEqual(cands, ['requirements'], 'RETURN_* 不得把入口节点算成有入边：' + JSON.stringify(cands))
+  expectOk(bp, 'construction-rollback-mini')
 })

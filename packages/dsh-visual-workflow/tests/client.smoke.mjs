@@ -1133,6 +1133,69 @@ test('角色库：自定义角色「基于此创建」克隆 + usage 失败时�
   })
 })
 
+test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链从左到右', async () => {
+  const blueprint = {
+    id: 'construction-full-feature',
+    displayName: '完整功能开发',
+    entry: 'requirements',
+    bindings: {
+      models: {
+        requirements: { provider: 'kimi-coding', model: 'k3' },
+        design: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+        dev: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+      },
+    },
+    nodes: [
+      { id: 'requirements', label: '需求分析', profile: 'requirements', goal: 'g' },
+      { id: 'design', label: '方案设计', profile: 'designer', goal: 'g' },
+      { id: 'dev', label: '开发', profile: 'dev', goal: 'g' },
+    ],
+    edges: [
+      { from: 'requirements', to: 'design', on: 'success' },
+      { from: 'design', to: 'dev', outcome: 'READY' },
+      { from: 'design', to: 'requirements', outcome: 'RETURN_REQUIREMENTS', countRound: false },
+      { from: 'dev', to: 'design', outcome: 'RETURN_DESIGN', countRound: false },
+      { from: 'dev', to: '$end', outcome: 'BLOCKED' },
+    ],
+  }
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(blueprint, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  const nameInput = Array.from(container.querySelectorAll('input.vwf-input')).find((el) => el.getAttribute('placeholder') === '模板名称' || el.value === '完整功能开发')
+  assert.ok(nameInput, '模板名称从 displayName 摄入')
+  assert.equal(nameInput.value, '完整功能开发')
+  const xOf = (id) => {
+    const g = container.querySelector('g[data-node-id="' + id + '"]')
+    const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return Number(match[1])
+  }
+  assert.ok(xOf('requirements') < xOf('design'), '需求在设计左侧')
+  assert.ok(xOf('design') < xOf('dev'), '设计在开发左侧')
+  const badges = Array.from(container.querySelectorAll('.vwf-entry-badge-text')).map((el) => {
+    const g = el.closest('g[data-node-id]')
+    return g && g.getAttribute('data-node-id')
+  }).filter(Boolean)
+  assert.deepEqual(badges, ['requirements'], '只有需求分析带入口徽标，开发不得并列入口')
+  await act(async () => {
+    container.querySelector('g[data-node-id="requirements"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    await flush()
+  })
+  const selects = Array.from(container.querySelectorAll('.vwf-inspector select.vwf-select'))
+  const values = selects.map((s) => s.value)
+  assert.ok(values.includes('kimi-coding'), '节点 provider 从 bindings.models 投影：' + JSON.stringify(values))
+  assert.ok(values.includes('k3'), '节点 model 从 bindings.models 投影：' + JSON.stringify(values))
+})
+
 test('清理：卸载冒烟测试根节点', async () => {
   await act(async () => {
     root.unmount()
