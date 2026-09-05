@@ -377,3 +377,33 @@ test('#159 归一化冲突蓝图无法通过校验进入运行时（无静默态
   assert.equal(v2.ok, false, 'result/outcome 同名蓝图不得通过校验')
   assert.ok(v2.errors.some((e) => String(e.message).includes('归一化') && String(e.message).includes('choice id "SHIP"')), JSON.stringify(v2.errors))
 })
+
+// Issue #159（A1/A2 复核）：原型键与混合字段出边同样不得携带静默不可达路径进入运行时。
+// A1：单条 outcome "toString" 在运行期画卡装配的普通对象 subsequent_effects 中判重伪命中、
+// 选项被静默丢弃（出边不可达），校验期须以"运行时保留键"契约错误拒绝且不伪报归一化冲突；
+// A2：outcome 与空白 result " " 同边混合字段会让校验端与运行期对同一边取不同 choice id
+// 身份（旧校验按 A/B 判不冲突、运行期两条边都坍缩为空白 result），校验期须以互斥错误拒绝。
+test('#159 A1/A2 原型键与混合字段出边无法通过校验进入运行时（无静默态）', () => {
+  // A1：单条合法字符串 outcome "toString" —— 不得伪报归一化冲突，但须因运行时保留键被拒
+  const proto = JSON.parse(JSON.stringify(hd))
+  const protoOut = proto.edges.filter((e) => e.from === '$human-decision')[0]
+  delete protoOut.result
+  protoOut.outcome = 'toString'
+  const v1 = validateBlueprint(proto)
+  assert.equal(v1.ok, false, '原型键 outcome 不得通过校验（运行期会静默丢弃该出边）')
+  assert.equal(
+    v1.errors.filter((e) => String(e.message).includes('归一化冲突')).length,
+    0,
+    '不得伪报归一化冲突：' + JSON.stringify(v1.errors),
+  )
+  assert.ok(v1.errors.some((e) => String(e.message).includes('保留键')), JSON.stringify(v1.errors))
+
+  // A2：两条 outcome 边各带空白 result " "（truthy，运行期优先于 outcome）
+  const mixed = JSON.parse(JSON.stringify(hd))
+  mixed.edges = mixed.edges.filter((e) => !(e && e.from === '$human-decision'))
+  mixed.edges.push({ from: '$human-decision', to: 'finish', outcome: 'A', result: ' ' })
+  mixed.edges.push({ from: '$human-decision', to: 'finish', outcome: 'B', result: ' ' })
+  const v2 = validateBlueprint(mixed)
+  assert.equal(v2.ok, false, '混合字段蓝图不得通过校验（运行期两条边将坍缩为同一空白 result）')
+  assert.ok(v2.errors.some((e) => String(e.message).includes('互斥')), JSON.stringify(v2.errors))
+})

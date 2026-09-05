@@ -504,3 +504,71 @@ test('#159 归一化后不同的 typed/纯字符串 outcome 蓝图仍通过（�
   const c = hdWithOutEdges([{ on: 'success', result: 'SHIP' }, { on: 'success', result: 'HOLD' }]);
   assert.equal(validateBlueprint(c).ok, true, JSON.stringify(validateBlueprint(c).errors));
 });
+
+// —— Issue #159（A1）：判重表必须安全处理合法原型键。普通对象 seenHdChoiceIds 会把单条
+//    outcome "toString"/"constructor"/"__proto__" 经 Object.prototype 继承链伪报为"已登记"，
+//    误报归一化冲突并生成 "$.edges[function toString() { [native code] }]" 这类非真实边坐标。
+//    修复：判重表改 Map（无原型链）；这些 id 运行期也无法表示（画卡装配的 subsequent_effects
+//    为普通对象，判重会伪命中并把该出边静默丢弃），故校验期显式拒绝并报真实边坐标——
+//    由契约规则拒绝，不靠原型链伪造冲突。
+test('#159 A1 原型键 outcome：不伪报归一化冲突，显式保留键拒绝且坐标为真实边', () => {
+  ['toString', 'constructor', '__proto__'].forEach((key) => {
+    const r = validateBlueprint(hdWithOutEdges([{ outcome: key }]));
+    assert.equal(r.ok, false, key + '：运行期普通对象无法承载，须显式拒绝（不得静默放行）');
+    assert.equal(
+      r.errors.filter((e) => String(e.message).includes('归一化冲突')).length,
+      0,
+      key + '：不得伪报归一化冲突：' + JSON.stringify(r.errors),
+    );
+    assert.ok(
+      !JSON.stringify(r.errors).includes('function '),
+      key + '：错误不得含函数序列化的伪坐标：' + JSON.stringify(r.errors),
+    );
+    const hit = r.errors.find((e) => String(e.message).includes('保留键'));
+    assert.ok(hit, key + '：应有运行时保留键契约错误：' + JSON.stringify(r.errors));
+    assert.equal(hit.at, '$.edges[3].outcome', key + '：at 必须指向真实边坐标，实际 ' + hit.at);
+    assert.equal(hit.fieldKey, 'edge:3:outcome', key + '：fieldKey 必须映射真实边，实际 ' + hit.fieldKey);
+  });
+  // 两个不同的原型键（toString + constructor）：Map 判重表不得把它们伪报为同一 choice id
+  const pair = hdWithOutEdges([{ outcome: 'toString' }, { outcome: 'constructor' }]);
+  const rp = validateBlueprint(pair);
+  assert.equal(rp.ok, false, '原型键出边整体仍须拒绝（运行期无法承载）');
+  assert.equal(
+    rp.errors.filter((e) => String(e.message).includes('归一化冲突')).length,
+    0,
+    'toString 与 constructor 不得被伪报为归一化冲突：' + JSON.stringify(rp.errors),
+  );
+  assert.equal(
+    rp.errors.filter((e) => String(e.message).includes('保留键')).length,
+    2,
+    '两个原型键应各自报保留键错误：' + JSON.stringify(rp.errors),
+  );
+});
+
+// —— Issue #159（A2）：校验端 hdChoiceId 必须与运行期语义同构。运行期取 id 是
+//    `e.result || String(e.outcome)`——result 段"任意 truthy 值优先"（空白串 " " 同样优先），
+//    校验 helper 不得假设 result 必须是非空白字符串；且 outcome 与 result 不得同边混用
+//    （结构层只禁 outcome+on、不禁 outcome+result）。否则混合字段边可通过校验、运行期却取
+//    另一套身份：outcome "A"/"B" 各带空白 result " " 时，校验按 A/B 判不冲突，运行期两条边
+//    归一化 id 均为空白 result → 画卡只暴露一个选项（静默不可达）。
+test('#159 A2 outcome 与 result 同边（混合字段）拒绝，杜绝校验通过后运行期另取身份', () => {
+  // 审核示例：两条 outcome 边各带空白 result " "（truthy，运行期优先于 outcome）
+  const pair = hdWithOutEdges([{ outcome: 'A', result: ' ' }, { outcome: 'B', result: ' ' }]);
+  const r = validateBlueprint(pair);
+  assert.equal(r.ok, false, '混合字段边不得通过校验：' + JSON.stringify(r.errors));
+  const mixes = r.errors.filter((e) => String(e.message).includes('互斥'));
+  assert.ok(mixes.length >= 2, '两条混合边都应报 outcome 与 result 互斥：' + JSON.stringify(r.errors));
+  // 单条混合字段边同样拒绝（空白与非空白 result 都要拒）
+  for (const single of [{ outcome: 'SHIP', result: 'HOLD' }, { outcome: 'SHIP', result: ' ' }]) {
+    const r2 = validateBlueprint(hdWithOutEdges([single]));
+    assert.equal(r2.ok, false, '单条混合字段边也须拒绝：' + JSON.stringify(r2.errors));
+    assert.ok(r2.errors.some((e) => String(e.message).includes('互斥')), JSON.stringify(r2.errors));
+  }
+  // 显式 result: undefined（等价于未声明；JSON 往返会丢弃）不算混用 → 纯 outcome 边保持通过
+  const ud = hdWithOutEdges([{ outcome: 'SHIP', result: undefined }, { outcome: 'HOLD' }]);
+  const r3 = validateBlueprint(ud);
+  assert.equal(r3.ok, true, 'result:undefined 不应触发互斥：' + JSON.stringify(r3.errors));
+  // 纯字符串兼容不回归：合法 outcome 边与 result 边归一化 id 互异时仍通过
+  const clean = hdWithOutEdges([{ outcome: 'SHIP' }, { outcome: 'HOLD' }, { on: 'success', result: 'CARGO' }]);
+  assert.equal(validateBlueprint(clean).ok, true, JSON.stringify(validateBlueprint(clean).errors));
+});

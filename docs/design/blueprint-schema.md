@@ -63,6 +63,13 @@
 > 同名字符串）、`outcome: 0` 与 `outcome: "0"`、`outcome: "SHIP"` 与 `result: "SHIP"`（跨形态同名）都会
 > 坍缩为同一选项 id，其中一条合法出边在运行期静默不可达。`validateBlueprint` 在校验期显式拒绝该归一化
 > 冲突并报出两条冲突边坐标与归一化 id；应改用显式 `result` 命名（如 `result: REJECT_BOOL`）区分选项。
+>
+> **字段归属与保留键（#159 A1/A2 复核）**：`result` 只属于 `on: "success"` 的旧 HD 出边；业务 `outcome`
+> 出边**禁止**再携带 `result`（二者同边互斥——结构层只禁 `outcome` 与 `on`，而运行期 `e.result ||` 对
+> 任意 truthy result 优先，混用会让校验端与运行期对同一条边取不同 choice id 身份）。此外归一化 choice id
+> 命中运行时保留键（`toString` / `constructor` / `__proto__` 等 `Object.prototype` 成员）时校验期同样
+> 显式拒绝并报真实边坐标：画卡装配的 `subsequent_effects` 以普通对象承载，这些 id 会被判为已占用而把
+> 该出边静默丢弃，请改用显式 `result` 命名。
 
 ### 2.4 Human Decision 控制面键名（#116 钉死；机器英文）
 

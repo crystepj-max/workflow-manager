@@ -117,6 +117,10 @@
   `$human-decision` 出边 choice id——同一 HD 的出边归一化后不得相同（typed `false` 与字符串 `"false"`、
   `outcome: "SHIP"` 与 `result: "SHIP"` 都会坍缩为一，其中一条出边静默不可达）。`validateBlueprint`
   在校验期拒绝该归一化冲突并报告两条冲突边坐标与归一化 id；运行时保持纯字符串语义不做类型区分。
+  字段归属补充：业务 `outcome` 出边禁止同边携带 `result`（result 仅属 `on:"success"` 出边，混用会使
+  校验端与运行期对同一边取不同 id 身份）；归一化 choice id 命中 `toString`/`constructor`/`__proto__`
+  等 `Object.prototype` 保留键时校验期显式拒绝（运行期普通对象 `subsequent_effects` 无法承载，否则
+  该出边被静默丢弃）——两类均报真实边坐标（#159 A1/A2 复核）。
 - **执行路径（D5 正式化）**：编辑器「获取脚本」→ 粘贴主会话 → 平台 `workflow` 工具执行；
   `wf_run` 仅在引擎可达时条件注册。**推论：脚本返回值只回到主会话，插件进程拿不到**——
   看板只能看到事件流（阶段 / 子代理 / 日志）。
