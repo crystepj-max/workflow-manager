@@ -354,3 +354,26 @@ test('#149 outcome 出边无匹配选择仍保持等待', async () => {
   assert.equal(r2.result.rejected_choice, 'HOLD')
   assert.ok(!r2.agentCalls.some((c) => c.label === '收口'))
 })
+
+// Issue #159（方案 B）：HD 出边归一化冲突（typed outcome vs 同名字符串、result vs outcome
+// 同名）不存在"校验通过但运行期静默不可达"的路径——冲突蓝图必须在校验期被拒，不得进入
+// 运行时。此处断言校验拒绝（运行时行为不测：该蓝图根本不具备合法运行前提）。
+test('#159 归一化冲突蓝图无法通过校验进入运行时（无静默态）', () => {
+  const colliding = JSON.parse(JSON.stringify(hd))
+  const hdOuts = colliding.edges.filter((e) => e.from === '$human-decision')
+  // 同一 HD 声明 outcome:false 与 outcome:"false" 两条出边（运行期均坍缩为 choice id "false"）
+  hdOuts[0].result = undefined
+  hdOuts[0].outcome = false
+  colliding.edges.push({ from: '$human-decision', to: 'finish', outcome: 'false' })
+  const v = validateBlueprint(colliding)
+  assert.equal(v.ok, false, '归一化冲突蓝图不得通过校验（否则第二条出边运行期静默不可达）')
+  const hit = v.errors.filter((e) => String(e.message).includes('归一化') && String(e.message).includes('choice id "false"'))
+  assert.ok(hit.length >= 1, '应报归一化冲突并带 choice id "false"，实际 ' + JSON.stringify(v.errors))
+
+  // 跨形态：result "SHIP" 与 outcome "SHIP" 同名同样必须在校验期拒绝
+  const cross = JSON.parse(JSON.stringify(hd))
+  cross.edges.push({ from: '$human-decision', to: 'finish', outcome: 'SHIP' })
+  const v2 = validateBlueprint(cross)
+  assert.equal(v2.ok, false, 'result/outcome 同名蓝图不得通过校验')
+  assert.ok(v2.errors.some((e) => String(e.message).includes('归一化') && String(e.message).includes('choice id "SHIP"')), JSON.stringify(v2.errors))
+})

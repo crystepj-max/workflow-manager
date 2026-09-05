@@ -112,6 +112,18 @@ function outcomeKey(value) {
   return JSON.stringify(value)
 }
 
+// Issue #159（方案 B）：HD 出边 choice id 与运行时取 id 逻辑同构——
+// 运行时（scripts/generate.mjs assembleDecisionPackage / 续跑查找）用
+// `e.result || String(e.outcome)` 归一化出边 id；typed outcome（false/0 等）与同名字符串
+// （"false"/"0"），以及 result 与 outcome 同名，都会坍缩为同一 choice id，导致其中一条
+// 合法出边在运行期画卡/续跑永远不可达。校验端用同一归一化 id 建冲突表，杜绝"校验通过
+// 但运行期静默不可达"的中间态。字符串/布尔/数字统一走 String()，与运行时逐字一致。
+function hdChoiceId(e) {
+  if (typeof e.result === 'string' && e.result.trim()) return e.result
+  if (e.outcome !== undefined && e.outcome !== null && e.outcome !== '') return String(e.outcome)
+  return null
+}
+
 // ---------- 错误坐标 → 编辑器 fieldKey ----------
 function fieldKeyOf(at) {
   if (!at || typeof at !== 'string') return undefined
@@ -709,6 +721,11 @@ function validateBlueprint(bp, opts) {
     }
     const seenHdResults = {}
     const seenHdOutcomes = {}
+    // Issue #159：按运行时归一化 choice id 建统一冲突表——typed outcome 与同名字符串
+    // （outcome: false vs outcome: "false"）、以及 result 与 outcome 同名（result: "SHIP"
+    // vs outcome: "SHIP"）在运行期（generate.mjs e.result || String(e.outcome)）都坍缩为
+    // 同一 choice id，其中一条出边静默不可达；此处显式拒绝并报告两条冲突边坐标与归一化 id。
+    const seenHdChoiceIds = {}
     const hdIn = bp.edges.filter((e) => e && e.to === HUMAN_DECISION_ID && isStructuralEdge(e))
     const hdOut = bp.edges.filter((e) => e && e.from === HUMAN_DECISION_ID)
     if (hdIn.length === 0 && hdOut.some(hasOutcomeField)) {
@@ -726,8 +743,20 @@ function validateBlueprint(bp, opts) {
       if (e.from !== HUMAN_DECISION_ID) return
       if (hasOutcomeField(e)) {
         const key = outcomeKey(e.outcome)
-        if (seenHdOutcomes[key]) err(at + '.outcome', 'Decision Result 重复：' + key)
-        else seenHdOutcomes[key] = true
+        if (seenHdOutcomes[key]) {
+          err(at + '.outcome', 'Decision Result 重复：' + key)
+        } else {
+          seenHdOutcomes[key] = true
+          const id = hdChoiceId(e)
+          if (id !== null) {
+            const first = seenHdChoiceIds[id]
+            if (first !== undefined) {
+              err(at + '.outcome', 'HD 选项归一化冲突：与 $.edges[' + first + '] 归一化后为同一 choice id "' + id + '"（运行期画卡/续跑按 e.result || String(e.outcome) 归一化取 id，两条边坍缩为一、后者不可达）；请改用显式 result 命名区分')
+            } else {
+              seenHdChoiceIds[id] = i
+            }
+          }
+        }
         return
       }
       if (e.on !== 'success') {
@@ -744,6 +773,15 @@ function validateBlueprint(bp, opts) {
         err(at + '.result', 'Decision Result 重复：' + e.result)
       } else {
         seenHdResults[e.result] = true
+        const id = hdChoiceId(e)
+        if (id !== null) {
+          const first = seenHdChoiceIds[id]
+          if (first !== undefined) {
+            err(at + '.result', 'HD 选项归一化冲突：与 $.edges[' + first + '] 归一化后为同一 choice id "' + id + '"（运行期画卡/续跑按 e.result || String(e.outcome) 归一化取 id，两条边坍缩为一、后者不可达）；请改用显式 result 命名区分')
+          } else {
+            seenHdChoiceIds[id] = i
+          }
+        }
       }
     })
   }

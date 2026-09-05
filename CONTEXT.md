@@ -113,6 +113,10 @@
   `FAILED_MAX_ROUNDS`（超过打回上限）/ `TECHNICAL_FAILURE`（技术执行失败）/ `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` /
   `ERROR`；生成的 `SKILL.md` **runbook（操作手册）** 必须逐个覆盖。这是底层引擎一次执行的返回值，不是 Target 的 Run Lifecycle（运行生命周期）。
 - **rejected_choice**：业务 Decision Result 无匹配 `$human-decision` 出边时，引擎返回体上的被拒选项；`status` 仍为 `WAITING_HUMAN`，`decision_id` 不变，请求事件 `user_choice` 保持 null。
+- **HD 出边归一化 id（#159）**：运行期画卡装配与续跑查找均按 `e.result || String(e.outcome)` 归一化
+  `$human-decision` 出边 choice id——同一 HD 的出边归一化后不得相同（typed `false` 与字符串 `"false"`、
+  `outcome: "SHIP"` 与 `result: "SHIP"` 都会坍缩为一，其中一条出边静默不可达）。`validateBlueprint`
+  在校验期拒绝该归一化冲突并报告两条冲突边坐标与归一化 id；运行时保持纯字符串语义不做类型区分。
 - **执行路径（D5 正式化）**：编辑器「获取脚本」→ 粘贴主会话 → 平台 `workflow` 工具执行；
   `wf_run` 仅在引擎可达时条件注册。**推论：脚本返回值只回到主会话，插件进程拿不到**——
   看板只能看到事件流（阶段 / 子代理 / 日志）。

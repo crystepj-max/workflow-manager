@@ -442,3 +442,65 @@ test('#116 HD 与 manualCheck 同图拒绝；出边 result 不得占用控制类
   assert.equal(r2.ok, false);
   assert.ok(r2.errors.some((e) => String(e.fieldKey || '').endsWith(':result')), JSON.stringify(r2.errors));
 });
+
+// —— Issue #159（方案 B）：HD 出边按运行时归一化 id（e.result || String(e.outcome)）
+//    判重的冲突在校验期显式拒绝。typed outcome 与同名字符串、result 与 outcome 同名
+//    都会在运行期画卡/续跑坍缩为同一 choice id——绝不允许"校验通过但运行期静默不可达"。
+//    夹具说明：out 边逐个 push，fixture 删 HD 出边后余边数固定为 3（index 0..2），
+//    故第 k 条 HD 出边坐标为 $.edges[3+k]。
+const hdWithOutEdges = (outEdges) => {
+  const b = hdClone();
+  b.edges = b.edges.filter((e) => !(e && e.from === '$human-decision'));
+  outEdges.forEach((out) => b.edges.push(Object.assign({ from: '$human-decision', to: 'finish' }, out)));
+  return b;
+};
+const expectNormalizedReject = (bp, id, label) => {
+  const r = validateBlueprint(bp);
+  assert.equal(r.ok, false, label + '：应拒绝（存在校验通过但运行期不可达的静默态）');
+  const hit = r.errors.filter((e) => String(e.message).includes('归一化') && String(e.message).includes('choice id "' + id + '"'));
+  assert.ok(hit.length >= 1, label + '：缺归一化冲突错误，实际 ' + JSON.stringify(r.errors));
+  // 错误必须同时指明两条冲突边的坐标（fieldKey 指向后一条出边，消息引用首条坐标）
+  const coords = r.errors
+    .filter((e) => String(e.message).includes('归一化'))
+    .flatMap((e) => Array.from(String(e.message).matchAll(/\$\.edges\[(\d+)\]/g)).map((m) => Number(m[1])))
+    .concat(r.errors.filter((e) => String(e.message).includes('归一化')).map((e) => { const m = /\$\.edges\[(\d+)\]/.exec(e.at || ''); return m ? Number(m[1]) : -1; }));
+  assert.ok(coords.includes(3) && coords.includes(4), label + '：缺两条边坐标，coords=' + JSON.stringify(coords) + ' errors=' + JSON.stringify(r.errors));
+};
+
+test('#159 typed outcome false 与字符串 "false" 归一化冲突拒绝', () => {
+  expectNormalizedReject(hdWithOutEdges([{ outcome: false }, { outcome: 'false' }]), 'false', 'false-vs-string');
+});
+
+test('#159 typed outcome 0 与字符串 "0" 归一化冲突拒绝', () => {
+  expectNormalizedReject(hdWithOutEdges([{ outcome: 0 }, { outcome: '0' }]), '0', '0-vs-string');
+});
+
+test('#159 typed outcome true 与字符串 "true" 归一化冲突拒绝', () => {
+  expectNormalizedReject(hdWithOutEdges([{ outcome: true }, { outcome: 'true' }]), 'true', 'true-vs-string');
+});
+
+test('#159 outcome "SHIP" 与 result "SHIP" 跨形态同名冲突拒绝', () => {
+  // result 边先入（坐标 3），outcome 边后入（坐标 4）——归一化后同 id 亦拒绝
+  expectNormalizedReject(
+    hdWithOutEdges([{ on: 'success', result: 'SHIP' }, { outcome: 'SHIP' }]),
+    'SHIP',
+    'result-vs-outcome',
+  );
+  // 反向顺序：outcome 边先入、result 边后入，同样拒绝
+  const rev = hdWithOutEdges([{ outcome: 'HOLD' }, { on: 'success', result: 'HOLD' }]);
+  const r = validateBlueprint(rev);
+  assert.equal(r.ok, false, 'result 后入方向也应拒绝');
+  assert.ok(r.errors.some((e) => String(e.message).includes('归一化') && String(e.message).includes('choice id "HOLD"')), JSON.stringify(r.errors));
+});
+
+test('#159 归一化后不同的 typed/纯字符串 outcome 蓝图仍通过（不误伤）', () => {
+  // typed false vs 字符串 "no"：归一化 id 'false' 与 'no' 不同
+  const a = hdWithOutEdges([{ outcome: false }, { outcome: 'no' }]);
+  assert.equal(validateBlueprint(a).ok, true, JSON.stringify(validateBlueprint(a).errors));
+  // 纯字符串 outcome（如 SHIP / HOLD）各自归一化 id 不同 → 通过
+  const b = hdWithOutEdges([{ outcome: 'SHIP' }, { outcome: 'HOLD' }]);
+  assert.equal(validateBlueprint(b).ok, true, JSON.stringify(validateBlueprint(b).errors));
+  // 多个 result 边互不冲突 → 通过（旧行为）
+  const c = hdWithOutEdges([{ on: 'success', result: 'SHIP' }, { on: 'success', result: 'HOLD' }]);
+  assert.equal(validateBlueprint(c).ok, true, JSON.stringify(validateBlueprint(c).errors));
+});
