@@ -1,0 +1,225 @@
+{
+  "id": "construction-full-feature",
+  "displayName": "完整功能开发",
+  "description": "M2 单任务交付：定义外置（从已定义开工）；自动返工上限 3；人工验收严格三态（通过 / 退回 / 有条件通过）。主链不含需求分析与方案设计门。",
+  "entry": "preflight",
+  "control": {
+    "maxRounds": 3
+  },
+  "heteroCheck": true,
+  "nodes": [
+    {
+      "id": "preflight",
+      "profile": "evaluator",
+      "label": "实施前检查",
+      "goal": "对已定义任务做实施前硬门禁检查（不得跳过）。逐项核对：Issue 当前状态=已定义；无人值守许可=允许；本地任务规格可读且版本=Issue 需求基线版本；Run 绑定基线版本与 Issue 一致（若已绑定）；前置依赖=无；未决产品事项=0。全部通过则 route=PASS，并将已定义规格导入为已确认需求基线证据、写入定义外置说明性施工包（不是新的产品方案决策门），Issue 状态→交付中。任一项失败则 route=BLOCKED，写明原因，禁止进入开发。将检查结果写入 preflight-report.md；最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["PASS", "BLOCKED"]
+            },
+            "summary": { "type": "string" },
+            "blockers": { "type": "string" },
+            "baseline_version": { "type": "string" }
+          },
+          "required": ["route", "summary", "blockers", "baseline_version"],
+          "additionalProperties": false
+        },
+        "files": {
+          "preflight-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "dev",
+      "profile": "dev",
+      "label": "开发",
+      "goal": "只按当前已确认需求基线与本地任务规格施工，严格控制范围，在本 Run 隔离工作区完成实现并按角色规则自检。发现必须改变产品结果（目标/范围/验收标准）才能继续时输出 NEED_REDEFINE（不消耗自动返工额度，需回到定义阶段）；外部条件无法安全继续时输出 BLOCKED；否则输出 READY。将完整开发交接写入 dev-report.md；最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["READY", "NEED_REDEFINE", "BLOCKED"]
+            },
+            "summary": { "type": "string" },
+            "self_check": { "type": "string" }
+          },
+          "required": ["route", "summary", "self_check"],
+          "additionalProperties": false
+        },
+        "files": {
+          "dev-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "review",
+      "profile": "review",
+      "label": "收敛审查",
+      "verifyBranch": true,
+      "goal": "独立会话对当前候选成果做收敛审查：阻断项=0 才可通过（route=APPROVE）；实现问题导致不通过则 RETURN_DEV；无法安全继续则 BLOCKED。优化建议不阻断。不得修改正式成果。将审查报告写入 review-report.md；最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["APPROVE", "RETURN_DEV", "BLOCKED"]
+            },
+            "verdict": {
+              "type": "string",
+              "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT_ONLY"]
+            },
+            "summary": { "type": "string" },
+            "blockers": { "type": "string" },
+            "verified_branch": { "type": "string" },
+            "verified_head": { "type": "string" }
+          },
+          "required": ["route", "verdict", "summary", "blockers", "verified_branch", "verified_head"],
+          "additionalProperties": false
+        },
+        "files": {
+          "review-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "test",
+      "profile": "test",
+      "label": "测试",
+      "verifyBranch": true,
+      "goal": "只对刚刚通过收敛审查的同一候选成果做独立运行验证与必要回归：覆盖主路径、验收条件、边界异常、受影响已有能力、本轮修复项。通过则 route=PASS；失败回开发则 RETURN_DEV；无法安全继续则 BLOCKED。不得修改正式成果。将测试证据写入 test-report.md；最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["PASS", "RETURN_DEV", "BLOCKED"]
+            },
+            "result": {
+              "type": "string",
+              "enum": ["PASSED", "FAILED", "BLOCKED"]
+            },
+            "reason": { "type": "string" },
+            "evidence": { "type": "string" },
+            "verified_branch": { "type": "string" },
+            "verified_head": { "type": "string" }
+          },
+          "required": ["route", "result", "reason", "evidence", "verified_branch", "verified_head"],
+          "additionalProperties": false
+        },
+        "files": {
+          "test-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "uat",
+      "profile": "accept",
+      "label": "UAT 准备",
+      "goal": "自动阶段完成后生成 UAT 验收卡与通俗验收摘要，供人工正式验收。Agent 只负责验收准备，不得代替人工签字。按模板覆盖每个主要功能切片至少一个 UAT 点；写明已知风险与未覆盖项。准备就绪后输出 READY_FOR_HUMAN，升人工决策等待验收。将 uat-card.md 与 acceptance-summary.md 写盘；最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["READY_FOR_HUMAN"]
+            },
+            "summary_for_human": { "type": "string" },
+            "why": { "type": "string" },
+            "current_state": { "type": "string" },
+            "details": { "type": "string" }
+          },
+          "required": ["route", "summary_for_human", "why", "current_state", "details"],
+          "additionalProperties": false
+        },
+        "files": {
+          "uat-card.md": "markdown",
+          "acceptance-summary.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "closeout",
+      "profile": "closeout",
+      "label": "收口",
+      "goal": "仅对已经人工验收通过或有条件通过的同一成果执行最终交付、合并、任务关闭、记录整理与安全清理。有条件通过时必须把优化意见保留在收口遗留事项中，供下次定义摄入，且不得改写当前基线。不得修改正式成果、不得重新开发。完成后写 cleanup-report.md；最终回复只输出本节点 schema 对应 JSON，status=DELIVERED。",
+      "output": {
+        "outcomePath": "$.status",
+        "completionPath": "$.completion_type",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["DELIVERED"]
+            },
+            "completion_type": {
+              "type": "string",
+              "const": "DELIVERED"
+            },
+            "summary": { "type": "string" },
+            "followups": { "type": "string" }
+          },
+          "required": ["status", "completion_type", "summary", "followups"],
+          "additionalProperties": false
+        },
+        "files": {
+          "cleanup-report.md": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "preflight", "to": "dev", "outcome": "PASS" },
+    { "from": "preflight", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "preflight", "to": "preflight", "on": "technical" },
+
+    { "from": "dev", "to": "review", "outcome": "READY" },
+    { "from": "dev", "to": "$end", "outcome": "NEED_REDEFINE", "countRound": false },
+    { "from": "dev", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "dev", "to": "dev", "on": "technical" },
+
+    { "from": "review", "to": "test", "outcome": "APPROVE" },
+    { "from": "review", "to": "dev", "outcome": "RETURN_DEV", "countRound": true },
+    { "from": "review", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "review", "to": "review", "on": "technical" },
+
+    { "from": "test", "to": "uat", "outcome": "PASS" },
+    { "from": "test", "to": "dev", "outcome": "RETURN_DEV", "countRound": true },
+    { "from": "test", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "test", "to": "test", "on": "technical" },
+
+    { "from": "uat", "to": "$human-decision", "outcome": "READY_FOR_HUMAN" },
+    { "from": "uat", "to": "uat", "on": "technical" },
+
+    { "from": "$human-decision", "to": "closeout", "outcome": "ACCEPT", "subsequent_effect": "验收通过：进入收口，任务标记完成" },
+    { "from": "$human-decision", "to": "dev", "outcome": "REJECT", "subsequent_effect": "验收退回：保持当前基线，返回开发再走审查与测试" },
+    { "from": "$human-decision", "to": "closeout", "outcome": "CONDITIONAL_PASS", "subsequent_effect": "有条件通过：本任务收口，优化意见作为下一轮定义输入，不改当前基线" },
+
+    { "from": "closeout", "to": "$end", "outcome": "DELIVERED" },
+    { "from": "closeout", "to": "closeout", "on": "technical" }
+  ],
+  "bindings": {
+    "models": {
+      "preflight": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+      "dev": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+      "review": { "provider": "openai-codex", "model": "gpt-5.6-luna" },
+      "test": { "provider": "openai-codex", "model": "gpt-5.6-luna" },
+      "uat": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+      "closeout": { "provider": "deepseek-official", "model": "deepseek-v4-flash" }
+    }
+  }
+}

@@ -156,18 +156,15 @@ test('⑧ 验收映射缺失基线条目被拒；重复被拒', () => {
   assert.equal(checkOk(dup, '⑧'), false)
 })
 
-test('⑧ user_accepted 例外可达：awaiting 态（无 feedback，schema 合法）+ fail 证据链放行', () => {
+test('② fail 证据链不得呈递（含有条件通过路径）', () => {
   const dir = makeRunDir(rs => {
     rs['test_proof.a1.json'].payload.verdict = 'fail'
     rs['test_proof.a1.json'].payload.findings = [{ finding: 'f', root_cause: 'dev' }]
     rs['test_proof.a1.json'].payload.acceptance_mapping[1].result = 'fail'
-    // 验收包保持 awaiting_decision（无 feedback——schema 禁止该态带 feedback；签收写入时才必填）
   })
   const strict = verifyEvidenceChain(dir)
-  assert.equal(strict.ok, false) // accept 路径被拒
-  const relaxed = verifyEvidenceChain(dir, { relaxedUserAccepted: true })
-  assert.equal(relaxed.ok, true, JSON.stringify(relaxed.checks, null, 1)) // 例外通道放行
-  assert.ok(relaxed.checks.find(c => c.id === '②').detail.includes('签收写入时'))
+  assert.equal(strict.ok, false) // M2：不再提供 user_accepted 放宽通道
+  assert.equal(checkOk(strict, '②'), false)
 })
 
 test('④ checkpoint 条件不变量：target 已前进但未重跑被拒', () => {

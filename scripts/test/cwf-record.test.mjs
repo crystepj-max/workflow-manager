@@ -508,13 +508,13 @@ test('closeout：引用验收包交叉校验（未决/reject/错配/跨 Run 全�
   writeFileSync(ap, JSON.stringify({
     record_type: 'acceptance_package', record_version: 'v0.1.8', created_at: '2026-08-31T00:00:00Z',
     produced_by: 'x', run: { run_id: 'cwf-test-01', issue_or_task_identity: '#999', workspace_id: 'wt-test', repository: 'crystepj-max/workflow-manager', base_ref: 'main', base_commit: 'abc', work_branch: realBranch, current_head: realHead, stage: 'human_acceptance', attempt: 1 },
-    payload: { status: 'decided', assembled: {}, decision: 'user_accepted', decided_by: 'x', decided_at: '2026-08-31T00:00:00Z', feedback: 'f', verified_branch: realBranch, verified_head: realHead },
+    payload: { status: 'decided', assembled: {}, decision: 'conditional_pass', decided_by: 'x', decided_at: '2026-08-31T00:00:00Z', feedback: 'f', verified_branch: realBranch, verified_head: realHead },
   }))
   const rMismatch = writeCloseout('accept')
   assert.equal(rMismatch.code, 1)
   assert.match(rMismatch.out, /acceptance_outcome/)
   // 一致 → 放行
-  const rOk = run(['write', runDir, 'closeout_summary', (() => { const f = join(runDir, 'co-ok.json'); writeFileSync(f, JSON.stringify({ deliverables: ['x'], integration: { pr: '#1', checkpoint: 'c' }, acceptance_package_ref: 'acceptance_package.a1.json', acceptance_outcome: 'user_accepted', records_retained: true })); return f })(), '--produced-by', 'test-suite', '--stage', 'closeout'])
+  const rOk = run(['write', runDir, 'closeout_summary', (() => { const f = join(runDir, 'co-ok.json'); writeFileSync(f, JSON.stringify({ deliverables: ['x'], integration: { pr: '#1', checkpoint: 'c' }, acceptance_package_ref: 'acceptance_package.a1.json', acceptance_outcome: 'conditional_pass', records_retained: true, leftovers: ['下次定义：优化意见'] })); return f })(), '--produced-by', 'test-suite', '--stage', 'closeout'])
   assert.equal(rOk.code, 0, rOk.out)
 })
 
