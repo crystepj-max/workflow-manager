@@ -10,7 +10,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const realGenerated = join(here, '..', '..', '..', '.generated', 'dev-workflow-2-0', 'vwf-dsl.json')
 
 // ── 共享假服务（helpers/fake-services.mjs）与共享加载器（helpers/load-host.mjs）──
-import { loadHost } from './helpers/load-host.mjs'
+import { loadHost, ROLE_CORE_SEED } from './helpers/load-host.mjs'
 import { REPO, SESSION_REPO, HOME, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 
 const call = async (handlers, method, args) => handlers.get(method)(args)
@@ -858,7 +858,7 @@ test('角色库 create：落盘 dsh/roles/<name>.md；与内置/自定义重名�
   assert.equal(noContent.errors[0].at, 'content')
 })
 
-test('角色库 usage：已迁出内置的历史模板不再计入内置引用（仅用户模板）', async () => {
+test('角色库 usage：跨历史模板 + 用户模板统计节点引用', async () => {
   const fs = makeFs({
     [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: JSON.stringify({
       id: 'dev-workflow-2-0', name: '内置流', entry: 'a',
@@ -880,10 +880,11 @@ test('角色库 usage：已迁出内置的历史模板不再计入内置引用�
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
   const u = await call(handlers, 'vwf.roles.usage', { id: '需求分析师' })
   assert.equal(u.ok, true)
-  assert.equal(u.count, 1, '历史模板迁出内置后仅统计用户模板（引用回归由角色库深模块阶段纳入）')
-  assert.equal(u.refs.length, 1, '按工作流分组')
-  assert.equal(u.refs[0].workflowId, 'wf-a')
-  assert.equal(u.refs[0].builtin, false)
+  assert.equal(u.count, 3, '历史模板 2 + 用户模板 1')
+  assert.equal(u.refs.length, 2, '按工作流分组')
+  const shippedRef = u.refs.find(x => x.workflowId === 'dev-workflow-2-0')
+  assert.equal(shippedRef.builtin, false, '历史模板引用不再标内置')
+  assert.equal(shippedRef.nodes.length, 2)
 })
 
 test('角色库 update：内容修改全局生效；被引用角色重命名阻止；零引用重命名放行；内置拒绝', async () => {
@@ -1238,6 +1239,163 @@ test('静态组合包：项目路径不可用时仍从包内加载校验内核',
   } finally {
     if (previous === undefined) delete globalThis.__VWF_REPO_ROOT__
     else globalThis.__VWF_REPO_ROOT__ = previous
+  }
+})
+
+test('动态插件：浏览器保存（无会话 cwd）从宿主 visual-workflow 副本加载校验内核', async () => {
+  // 客户端 RPC 没有 currentInitiator；sandboxPolicy.workspaceRoot 是 DSH 部署 cwd，
+  // 不是工作流仓库。动态模式也没有 bundle 注入的 __VWF_REPO_ROOT__。
+  const previousRoot = globalThis.__VWF_REPO_ROOT__
+  const previousAlias = globalThis.__VWF_REPO__
+  delete globalThis.__VWF_REPO_ROOT__
+  delete globalThis.__VWF_REPO__
+  try {
+    const fs = makeFs({
+      [DSH_HOME + '/visual-workflow/validate-core.cjs']: validatorCoreSrc,
+    })
+    const { handlers } = loadHost({
+      fs,
+      subprocess: makeSubprocess({ fs }),
+      sandboxPolicy: { workspaceRoot: SESSION_REPO, resolve: () => ({ mode: 'danger-full-access', workspaceRoot: SESSION_REPO }) },
+    })
+    const v = await call(handlers, 'vwf.validate', { dsl: baseDsl() })
+    assert.equal(v.ok, true, JSON.stringify(v.errors))
+    assert.notEqual(
+      v.errors && v.errors[0] && v.errors[0].message,
+      '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）',
+    )
+  } finally {
+    if (previousRoot === undefined) delete globalThis.__VWF_REPO_ROOT__
+    else globalThis.__VWF_REPO_ROOT__ = previousRoot
+    if (previousAlias === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previousAlias
+  }
+})
+
+test('动态插件：fs 读不到仓库时经子进程从 Home 副本加载校验内核', async () => {
+  const previousRoot = globalThis.__VWF_REPO_ROOT__
+  const previousAlias = globalThis.__VWF_REPO__
+  delete globalThis.__VWF_REPO_ROOT__
+  delete globalThis.__VWF_REPO__
+  try {
+    const hostFs = makeFs({})
+    const kernelFs = makeFs({
+      [DSH_HOME + '/visual-workflow/validate-core.cjs']: validatorCoreSrc,
+    })
+    const { handlers } = loadHost({
+      fs: hostFs,
+      subprocess: makeSubprocess({ fs: kernelFs }),
+      sandboxPolicy: { workspaceRoot: '', resolve: () => ({ mode: 'danger-full-access', workspaceRoot: '' }) },
+    })
+    const v = await call(handlers, 'vwf.validate', { dsl: baseDsl() })
+    assert.equal(v.ok, true, JSON.stringify(v.errors))
+  } finally {
+    if (previousRoot === undefined) delete globalThis.__VWF_REPO_ROOT__
+    else globalThis.__VWF_REPO_ROOT__ = previousRoot
+    if (previousAlias === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previousAlias
+  }
+})
+
+test('动态插件：workspaceRoot 在仓库子目录时向上查找校验内核', async () => {
+  const previousRoot = globalThis.__VWF_REPO_ROOT__
+  const previousAlias = globalThis.__VWF_REPO__
+  delete globalThis.__VWF_REPO_ROOT__
+  delete globalThis.__VWF_REPO__
+  try {
+    const nested = REPO + '/packages/dsh-visual-workflow'
+    const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
+    const { handlers } = loadHost({
+      fs,
+      subprocess: makeSubprocess({ fs }),
+      sandboxPolicy: { workspaceRoot: nested, resolve: () => ({ mode: 'danger-full-access', workspaceRoot: nested }) },
+    })
+    const v = await call(handlers, 'vwf.validate', { dsl: baseDsl() })
+    assert.equal(v.ok, true, JSON.stringify(v.errors))
+  } finally {
+    if (previousRoot === undefined) delete globalThis.__VWF_REPO_ROOT__
+    else globalThis.__VWF_REPO_ROOT__ = previousRoot
+    if (previousAlias === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previousAlias
+  }
+})
+
+test('动态插件：历史 loader 的 __VWF_REPO__ 别名可加载校验内核', async () => {
+  const previousRoot = globalThis.__VWF_REPO_ROOT__
+  const previousAlias = globalThis.__VWF_REPO__
+  delete globalThis.__VWF_REPO_ROOT__
+  globalThis.__VWF_REPO__ = REPO
+  try {
+    const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
+    const { handlers } = loadHost({
+      fs,
+      subprocess: makeSubprocess({ fs }),
+      sandboxPolicy: { workspaceRoot: '', resolve: () => ({ mode: 'danger-full-access', workspaceRoot: '' }) },
+    })
+    const v = await call(handlers, 'vwf.validate', { dsl: baseDsl() })
+    assert.equal(v.ok, true, JSON.stringify(v.errors))
+  } finally {
+    if (previousRoot === undefined) delete globalThis.__VWF_REPO_ROOT__
+    else globalThis.__VWF_REPO_ROOT__ = previousRoot
+    if (previousAlias === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previousAlias
+  }
+})
+
+test('动态插件：从插件 dist/validate-core.cjs 加载校验内核', async () => {
+  const previousRoot = globalThis.__VWF_REPO_ROOT__
+  const previousAlias = globalThis.__VWF_REPO__
+  delete globalThis.__VWF_REPO_ROOT__
+  delete globalThis.__VWF_REPO__
+  try {
+    const PLUGIN = '/plugin/pkg'
+    const fs = makeFs({
+      [PLUGIN + '/dist/validate-core.cjs']: validatorCoreSrc,
+    })
+    const { handlers } = loadHost({
+      fs,
+      subprocess: makeSubprocess({ fs }),
+      pluginRoot: PLUGIN,
+      sandboxPolicy: { workspaceRoot: '', resolve: () => ({ mode: 'danger-full-access', workspaceRoot: '' }) },
+    })
+    const v = await call(handlers, 'vwf.validate', { dsl: baseDsl() })
+    assert.equal(v.ok, true, JSON.stringify(v.errors))
+  } finally {
+    if (previousRoot === undefined) delete globalThis.__VWF_REPO_ROOT__
+    else globalThis.__VWF_REPO_ROOT__ = previousRoot
+    if (previousAlias === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previousAlias
+  }
+})
+
+test('动态插件：repo-root 指针让浏览器保存使用仓库生成器', async () => {
+  const previousRoot = globalThis.__VWF_REPO_ROOT__
+  const previousAlias = globalThis.__VWF_REPO__
+  delete globalThis.__VWF_REPO_ROOT__
+  delete globalThis.__VWF_REPO__
+  try {
+    const fs = makeFs({
+      [DSH_HOME + '/visual-workflow/repo-root']: REPO + '\n',
+      [DSH_HOME + '/visual-workflow/validate-core.cjs']: validatorCoreSrc,
+      [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+    })
+    const sub = makeSubprocess({ fs })
+    const { handlers } = loadHost({
+      fs,
+      subprocess: sub,
+      sandboxPolicy: { workspaceRoot: SESSION_REPO, resolve: () => ({ mode: 'danger-full-access', workspaceRoot: SESSION_REPO }) },
+    })
+    const saved = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ id: 'browser-save' }) })
+    assert.equal(saved.ok, true, JSON.stringify(saved.errors))
+    assert.ok(
+      sub._calls.some((argv) => argv[1] === REPO + '/scripts/generate.mjs'),
+      JSON.stringify(sub._calls),
+    )
+  } finally {
+    if (previousRoot === undefined) delete globalThis.__VWF_REPO_ROOT__
+    else globalThis.__VWF_REPO_ROOT__ = previousRoot
+    if (previousAlias === undefined) delete globalThis.__VWF_REPO__
+    else globalThis.__VWF_REPO__ = previousAlias
   }
 })
 
@@ -1872,13 +2030,6 @@ test('#93 正式路径：vwf.script 未部署包装脚本时 allocate 不阻断�
   assert.equal(s.workspaceArgs, null)
 })
 
-test('#93 DSH_HOME：home 探测优先读取 process.env.DSH_HOME', async () => {
-  const { handlers, sub } = env()
-  await call(handlers, 'vwf.workflows.list')
-  const probe = sub._calls.find((c) => c.join(' ').includes('process.env.DSH_HOME') && c.join(' ').includes('.homedir'))
-  assert.ok(probe, 'dshHome 探测必须读取 DSH_HOME，不能无条件 os.homedir()+/.dsh：' + JSON.stringify(sub._calls.slice(0, 3)))
-})
-
 test('粘贴蓝图 JSON：displayName / bindings.models 摄入 DSL，回退 outcome 不吞入口', async () => {
   const { handlers, fs } = env()
   const bp = JSON.parse(readFileSync(join(here, '..', '..', '..', 'scripts', 'test', 'fixtures', 'construction-rollback-mini.json'), 'utf8'))
@@ -1894,5 +2045,31 @@ test('粘贴蓝图 JSON：displayName / bindings.models 摄入 DSL，回退 outc
   assert.equal(disk.displayName, '完整功能开发')
   assert.equal(disk.nodes.find((n) => n.id === 'review').verifyBranch, true, 'verifyBranch 保存往返')
   assert.equal(disk.bindings.models.requirements.provider, 'kimi-coding')
+})
+
+test('角色库 core 加载：动态模式优先 repo 最新成对资产，不被 home 旧清单覆盖', async () => {
+  const seed = { ...ROLE_CORE_SEED }
+  const homeManifestPath = DSH_HOME + '/visual-workflow/builtin-roles.json'
+  const stale = JSON.parse(seed[homeManifestPath])
+  stale.builtins.find((r) => r.id === 'dev').name = 'HOME 旧开发名'
+  seed[homeManifestPath] = JSON.stringify(stale)
+  // repo 候选保持当前 manifest（dev.name = 开发）
+  const fs = makeFs(seed)
+  const sub = makeSubprocess({ fs })
+  const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
+  const r = await call(handlers, 'vwf.roles')
+  assert.equal(r.roles.find((x) => x.id === 'dev').name, '开发', '动态模式必须优先 repo 当前清单')
+})
+
+test('#93 DSH_HOME：明确 process.env.DSH_HOME 直接优先，不能被成功 probe fallback 覆盖', async () => {
+  const injected = '/tmp/vwf-explicit-dev-home'
+  const processValue = { env: { DSH_HOME: injected, HOME: '/tmp' }, cwd: () => REPO }
+  const { definedTools, sub } = env({ extra: { processValue, agents: { currentInitiator: () => null, requireInitiator: () => ({}) } } })
+  const debug = definedTools.find((t) => t.name === 'vwf_debug')
+  assert.ok(debug, 'agents 存在时应注册 vwf_debug')
+  const paths = JSON.parse(await debug.execute({ op: 'paths' }))
+  assert.equal(paths.dshHome, injected, '明确注入的 DSH_HOME 必须直接胜出')
+  const probe = sub._calls.find((c) => c.join(' ').includes('process.env.DSH_HOME') && c.join(' ').includes('.homedir'))
+  assert.equal(probe, undefined, '明确 DSH_HOME 存在时不应再执行可能回落产品 ~/.dsh 的 probe')
 })
 

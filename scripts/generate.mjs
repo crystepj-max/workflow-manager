@@ -8,26 +8,34 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // 统一校验内核（候选二 T-IMP-13，CJS 单文件——引擎 import / 宿主 vm eval 双形态）
 import validatorCore from './validate-core.cjs';
+// 角色库内核（候选二深化）：内置角色清单唯一事实源 = dsh/roles/builtin-roles.json；
+// 正文安全读取与「被引用角色文件打包」共享内核实现（含自定义角色——dispatcher 等）。
+import roleLibrary from './role-library.cjs';
+
+const { buildSnapshot, readRoleFileSafe, collectReferencedRoleFiles } = roleLibrary;
 
 const { validateBlueprint, COND_RE, HUMAN_DECISION_ID, HD_CONTROL_RESULTS, HD_PACKAGE_REQUIRED, HD_UNKNOWN, HD_EVENT_RECORD_KIND, HD_EVENT_TRIGGER } = validatorCore;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TPL_DIR = path.join(__dirname, '..', 'templates');
 const DEFAULT_OUT_DIR = path.join(__dirname, '..', '.generated');
+const DEFAULT_MANIFEST_PATH = path.join(__dirname, '..', 'dsh', 'roles', 'builtin-roles.json');
 
-// ---------- 内置角色清单（单一来源 = 宿主注册表 host.js BUILTIN_ROLES）----------
+// ---------- 内置角色清单（单一事实源 = dsh/roles/builtin-roles.json）----------
 // 生成脚本需区分「内置角色」与「自定义角色」：内置角色只读、以打包快照为准（Codex
-// PR#124 第四轮 P1，评论 3889756922），自定义角色以工作区 dsh/roles 为准。此处不在
-// 本文件复制名单，改注册表即生效；解析失败 loud-fail，避免静默退化成全部走工作区。
-export function loadBuiltinRoleIds(hostSrc) {
-  const src = hostSrc === undefined
-    ? fs.readFileSync(path.join(__dirname, '..', 'packages', 'dsh-visual-workflow', 'src', 'host.js'), 'utf8')
-    : hostSrc;
-  const block = /const BUILTIN_ROLES = \[([\s\S]*?)\n\s*\]/.exec(src);
-  if (!block) throw new Error('内置角色清单解析失败：未在 host.js 找到 BUILTIN_ROLES 数组');
-  const ids = Array.from(block[1].matchAll(/\{\s*id:\s*'([^']+)'/g)).map((m) => m[1]);
-  if (!ids.length) throw new Error('内置角色清单解析失败：BUILTIN_ROLES 中未解析到任何 id');
-  return ids;
+// PR#124 第四轮 P1，评论 3889756922），自定义角色以工作区 dsh/roles 为准。清单读
+// manifest 并强校验（schema/顺序不变量/dispatcher 不得为内置），解析失败 loud-fail，
+// 禁止静默退化成全部走工作区。不再反向解析 host.js 源码（旧 regex 缝已拆）。
+export function loadBuiltinRoleIds(manifestPath = DEFAULT_MANIFEST_PATH) {
+  try {
+    // 统一走 RoleLibrary 的同步构建投影：保持 compileBlueprint 同步，避免第二套
+    // manifest 解析/校验实现。buildSnapshot 同时验证 12 个角色正文可读取性投影。
+    return buildSnapshot({ manifestPath, rolesDir: DEFAULT_ROLES_DIR, io: fs }).builtinIds;
+  } catch (e) {
+    const message = String((e && e.message) || e)
+    if (message.includes('内置角色清单解析失败')) throw e
+    throw new Error('内置角色清单解析失败：' + message)
+  }
 }
 let _builtinRoleIdsCache = null;
 function builtinRoleIdsCached() {
@@ -40,15 +48,9 @@ function builtinRoleIdsCached() {
 // 打包角色包即可拿到角色定义；stale 产物缺 ROLE_DEFS 时 roleRef 安全回退到读文件路径。
 // 仅收录内置角色（ids 即内置清单）；角色文件缺失/非法 id 时跳过，保留读路径回退。
 // rolesDir 默认 <repo>/dsh/roles（与 collectBuiltinRoles 同源，编译期内联 = 打包快照）。
-// 角色文件安全读取（与 collectBuiltinRoles 共享）：标识只允许中英文/数字/下划线/短横线，
-// 且解析后路径必须仍在角色源目录内（路径穿越防护）；文件缺失/非法返回 null。
-function readRoleFileSafe(rolesDir, id, io) {
-  if (!/^[\w一-龥-]+$/.test(id)) return null
-  const file = path.join(rolesDir, id + '.md')
-  const rel = path.relative(rolesDir, file)
-  if (rel.startsWith('..') || path.isAbsolute(rel)) return null
-  try { return io.readFileSync(file, 'utf8') } catch (e) { return null }
-}
+// 角色文件安全读取（readRoleFileSafe 共享自 role-library.cjs，Codex PR#124 第四轮 P1，
+// 评论 3889756923）：标识只允许中英文/数字/下划线/短横线，且解析后路径必须仍在角色源
+// 目录内（路径穿越防护）；文件缺失/非法返回 null。
 export function loadBuiltinRoleDefs(ids, rolesDir = DEFAULT_ROLES_DIR, io = fs) {
   const out = {};
   for (const id of ids) {
@@ -135,7 +137,7 @@ export function compileBlueprint(bp, opts = {}) {
   const folds = foldableNodes(bp);
   const hetero = bp.heteroCheck && models.dev && models.review;
   const autoReschedule = bp.onMaxRounds === 'auto-reschedule';
-  // 内置角色清单：opts 注入优先（测试用），否则读宿主注册表并缓存
+  // 内置角色清单：opts 注入优先（测试用），否则读 manifest 并缓存
   const builtinRoleIds = opts.builtinRoleIds || builtinRoleIdsCached();
   // 内置角色正文（#129 遗留项 2）：临时/未保存图编译自包含——正文内联进 ROLE_DEFS。
   // 只内联蓝图实际引用到的内置角色（Codex PR#130 P1，评论 3900290054）：全部 12 个
@@ -165,7 +167,7 @@ export function compileBlueprint(bp, opts = {}) {
     'const EDGES = ' + JSON.stringify(bp.edges),
     'const MODELS = ' + JSON.stringify(models),
     'const FOLDS = ' + JSON.stringify(folds),
-    // 内置角色清单（单一来源 = 宿主注册表）：roleRef 据此决定内置/自定义读取优先级
+    // 内置角色清单（单一事实源 = dsh/roles/builtin-roles.json）：roleRef 据此决定内置/自定义读取优先级
     'const BUILTIN_ROLE_IDS = ' + JSON.stringify(builtinRoleIds),
     // 内置角色正文（#129 遗留项 2）：编译期内联，临时编译自包含；缺失时 roleRef 走读路径回退
     'const ROLE_DEFS = ' + JSON.stringify(builtinRoleDefs),
@@ -824,22 +826,12 @@ export function generateUserSkill(bp) {
 // 一起写到 roles/ 子目录，compileViaPipeline 命中即带出 roleDir，运行时自包含。
 // 角色源缺失或某角色文件不存在时静默跳过——可能是自定义角色（运行时按工作区 dsh/roles 解析）。
 const DEFAULT_ROLES_DIR = path.join(__dirname, '..', 'dsh', 'roles')
+// 注意命名误导（保留导出名以兼容既有调用与测试）：本函数打包的是「蓝图引用且角色
+// 文件存在」的全部角色，**包含自定义角色**（如已迁出内置的 dispatcher）——绝不能误
+// 改为仅过滤内置，否则用户 skill 的历史自定义角色自包含行为会回归。语义实现已收敛进
+// role-library.cjs 的 collectReferencedRoleFiles（单一实现）。
 export function collectBuiltinRoles(bp, rolesDir = DEFAULT_ROLES_DIR, io = fs) {
-  const out = new Map()
-  if (!bp || !Array.isArray(bp.nodes)) return out
-  const profiles = new Set()
-  for (const n of bp.nodes) {
-    if (n && typeof n.profile === 'string' && n.profile) profiles.add(n.profile)
-  }
-  for (const profile of profiles) {
-    // 安全读取（readRoleFileSafe 共享，Codex PR#124 第四轮 P1，评论 3889756923）：
-    // profile 此前只校验非空，'../../AGENTS' 之类会被拼出 roles/ 目录之外的路径，
-    // 随 skill 写到暂存目录外。角色标识只允许中英文/数字/下划线/短横线且路径必须在
-    // 角色源目录内；文件缺失/非法返回 null → 跳过（自定义角色运行时按工作区 dsh/roles 解析）。
-    const content = readRoleFileSafe(rolesDir, profile, io)
-    if (content != null) out.set('roles/' + profile + '.md', content)
-  }
-  return out
+  return collectReferencedRoleFiles(bp, rolesDir, io)
 }
 
 // ---------- 用户 skill 原子写盘（候选四 T-IMP-14） ----------

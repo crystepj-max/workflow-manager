@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -156,10 +157,18 @@ function discoverDevDsh() {
 function sourceVersion() {
   const host = readFileSync(join(pluginRoot, 'src', 'host.js'))
   const client = readFileSync(join(pluginRoot, 'src', 'client.js'))
+  // 角色库深化后运行时行为还由内核与清单决定：改它们不改 host/client 时
+  // 联合版本必须变化，否则动态注入后 cordis_inspect_self 核对会漏掉内核漂移
+  const roleLibrary = readFileSync(join(repoRoot, 'scripts', 'role-library.cjs'))
+  const roleManifest = readFileSync(join(repoRoot, 'dsh', 'roles', 'builtin-roles.json'))
   const hash = createHash('sha256')
     .update(host)
     .update('\0')
     .update(client)
+    .update('\0')
+    .update(roleLibrary)
+    .update('\0')
+    .update(roleManifest)
     .digest('hex')
     .slice(0, 12)
   return `vwf-dev-${hash}`
@@ -194,7 +203,7 @@ console.log(
     running ? `运行中（PID ${pid}，${active.urls.join(', ')}）` : '未运行'
   }`,
 )
-console.log(`- 当前联合版本：${version}（host + client）`)
+console.log(`- 当前联合版本：${version}（host + client + role-library + role-manifest）`)
 
 if (formalBundleInstalled) {
   fail(
@@ -202,6 +211,36 @@ if (formalBundleInstalled) {
       `请先通过公开命令清理开发 Profile；脚本不会自动修改 ${profilePackage}。`,
   )
 }
+
+function syncDevKernelAssets() {
+  try {
+    const kernelSrc = join(repoRoot, 'scripts', 'validate-core.cjs')
+    const roleLibrarySrc = join(repoRoot, 'scripts', 'role-library.cjs')
+    const roleManifestSrc = join(repoRoot, 'dsh', 'roles', 'builtin-roles.json')
+    const assetDir = join(devHome, 'visual-workflow')
+    mkdirSync(assetDir, { recursive: true })
+    writeFileSync(join(assetDir, 'repo-root'), `${repoRoot}\n`)
+    if (!existsSync(kernelSrc)) {
+      fail(`缺少校验内核：${kernelSrc}`)
+    }
+    copyFileSync(kernelSrc, join(assetDir, 'validate-core.cjs'))
+    // 角色库内核 + 内置清单（RoleLibrary 深化）：候选根成对加载需要 home 副本
+    if (!existsSync(roleLibrarySrc)) {
+      fail(`缺少角色库内核：${roleLibrarySrc}`)
+    }
+    if (!existsSync(roleManifestSrc)) {
+      fail(`缺少内置角色清单：${roleManifestSrc}`)
+    }
+    copyFileSync(roleLibrarySrc, join(assetDir, 'role-library.cjs'))
+    copyFileSync(roleManifestSrc, join(assetDir, 'builtin-roles.json'))
+  } catch (e) {
+    // sync 是可选便利（浏览器侧候选根兜底）；写 dev home 被沙箱/权限拒绝时
+    // 不应让状态检查整体崩溃——插件运行时仍可从仓库根候选路径加载内核。
+    console.warn(`⚠️ 内核资产同步到开发 Home 失败（不影响仓库根加载）：${String((e && e.message) || e)}`)
+  }
+}
+
+syncDevKernelAssets()
 
 function printSyncGuide() {
   console.log(`

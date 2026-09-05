@@ -319,13 +319,22 @@ test('S6 内联仅限蓝图引用内置角色：最小图产物 < 宿主 64KB st
   assert.ok(Buffer.byteLength(resp12, 'utf8') < 1024 * 1024, '12 角色全用图的 JSON 响应 < 编译路径 1MB 捕获上限（host.js runNode maxBytes）')
 })
 
-test('S4 内置角色清单：单一来源为宿主注册表，解析失败 loud-fail', () => {
+test('S4 内置角色清单：单一事实源为 manifest（dsh/roles/builtin-roles.json），解析失败 loud-fail', () => {
   const ids = loadBuiltinRoleIds()
   assert.ok(ids.length >= 12, `内置角色不少于 12 个（实际 ${ids.length}）`)
   assert.ok(ids.includes('requirements') && ids.includes('synthesizer'), '含新增角色')
   assert.ok(!ids.includes('dispatcher'), 'dispatcher 已迁出内置')
-  assert.throws(() => loadBuiltinRoleIds('const BUILTIN_ROLES = []'), /解析失败/, '空清单应报错')
-  assert.throws(() => loadBuiltinRoleIds(''), /解析失败/, '找不到数组应报错')
+  // 来源证明：不再反向解析 host.js 源码——传入任何字符串都被当作 manifest 路径处理
+  assert.throws(() => loadBuiltinRoleIds('const BUILTIN_ROLES = []'), /解析失败/, '非路径输入按 manifest 读取失败报错')
+  assert.throws(() => loadBuiltinRoleIds(''), /解析失败/, '空路径报错')
+  // 损坏 manifest loud-fail（写入临时文件验证 fail-closed，不退化为空清单）
+  const tmp = path.join(tmpdir(), 'vwf-bad-manifest-' + process.pid + '.json')
+  fs.writeFileSync(tmp, '{"schemaVersion":1,"builtins":[]}', 'utf8')
+  try {
+    assert.throws(() => loadBuiltinRoleIds(tmp), /解析失败/, '空清单 manifest 应报错')
+  } finally {
+    fs.unlinkSync(tmp)
+  }
 })
 
 test('S7 #93：编译脚本注入 workspace 默认 args 与 SOURCE cwd', () => {

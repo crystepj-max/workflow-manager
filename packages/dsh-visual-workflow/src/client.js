@@ -111,7 +111,6 @@ return {
       customRoleBadge: '自定义角色',
       saveRole: '保存角色',
       cancelRole: '取消',
-      roleDupName: '已存在同名角色，请使用其他名称。',
       roleNameRequired: '角色名称不能为空',
       roleContentRequired: '角色配置不能为空',
       roleNameInvalid: '角色名称不能为空，且最长 64 字符、不含非法字符（/\\:*?"<>|）',
@@ -267,7 +266,6 @@ return {
       customRoleBadge: 'Custom',
       saveRole: 'Save Role',
       cancelRole: 'Cancel',
-      roleDupName: 'A role with the same name already exists; please use another name.',
       roleNameRequired: 'Role name is required',
       roleContentRequired: 'Role configuration is required',
       roleNameInvalid: 'Role name is required, at most 64 chars, no illegal chars (/\\:*?"<>|)',
@@ -1703,13 +1701,19 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
         }).catch((e) => setError(String(e)))
       }
-      const validForm = () => {
+      // 名称权威校验（Host：完整规则——非法字符/首尾点/Windows 保留名 + 唯一性含内置/
+      // 自定义/打包回退）。客户端不再维护规则副本；本地只保留空值即时提示（非权威快速通道）。
+      const validateNameWithHost = async (name) => {
+        const v = await host.call('vwf.roles.validate', { name: name, excludeId: (current && current.builtin === false) ? current.id : undefined }).catch((e) => ({ ok: false, errors: [{ message: String(e) }] }))
+        if (v && v.ok === true) return null
+        return (v && v.errors && v.errors[0] && v.errors[0].message) || t('roleNameInvalid')
+      }
+      const validForm = async () => {
         const name = draftName.trim()
-        if (!name || name.length > 64 || /[\\/:*?"<>|\x00-\x1F\x7F]/.test(name)) { setError(t('roleNameInvalid')); return null }
+        if (!name) { setError(t('roleNameRequired')); return null }
         if (!draftContent.trim()) { setError(t('roleContentRequired')); return null }
-        const key = (s) => String(s || '').normalize('NFC').toLowerCase()
-        const dup = (roles || []).some(r => key(r.id) === key(name) && (!current || r.id !== current.id))
-        if (dup) { setError(t('roleDupName')); return null }
+        const bad = await validateNameWithHost(name)
+        if (bad) { setError(bad); return null }
         return name
       }
       const submitForm = (name, content) => {
@@ -1728,8 +1732,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
         }).catch((e) => setError(t('roleSaveFailed') + String(e))).then(() => setSaving(false))
       }
-      const save = () => {
-        const name = validForm()
+      const save = async () => {
+        const name = await validForm()
         if (!name) return
         const editingCustom = !!(current && current.builtin === false)
         if (!editingCustom) { submitForm(name, draftContent); return }
@@ -1759,8 +1763,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
       const askDelete = (role) => {
         host.call('vwf.roles.usage', { id: role.id, draftDsl: props.draftDsl }).then((u) => {
-          setConfirm({ kind: (u && u.ok && u.count > 0) ? 'blocked' : 'delete', role: role, usage: (u && u.ok) ? u : null })
-        }).catch((e) => setError(String(e)))
+          if (!u || u.ok !== true) {
+            // fail-closed：引用统计失败时绝不进入删除确认（修复 fail-open：ok:false 曾被
+            // 折叠为「零引用」直接放行删除）
+            setError(t('roleUsageFailed') + ((u && u.errors && u.errors[0] && u.errors[0].message) || ''))
+            return
+          }
+          setConfirm({ kind: u.count > 0 ? 'blocked' : 'delete', role: role, usage: u })
+        }).catch((e) => setError(t('roleUsageFailed') + String(e)))
       }
       const doDelete = () => {
         if (!confirm || !confirm.role) return
@@ -1834,6 +1844,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             h('input', {
               className: 'vwf-input', value: draftName, placeholder: t('roleNamePlaceholder'),
               onChange: (ev) => setDraftName(ev.target.value),
+              onBlur: () => {
+                const name = draftName.trim()
+                if (!name) return
+                // 失焦即时提示（Host 权威裁决）：.foo/foo./CON/COM1 等过去仅在保存时报错的
+                // 名称现在输入即提示；输入过程不打断，错误在失焦/保存时呈现
+                validateNameWithHost(name).then((bad) => { if (bad) setError(bad) })
+              },
             })
           ),
           h('div', { className: 'vwf-field' },

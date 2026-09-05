@@ -16,12 +16,18 @@ mkdirSync(dist, { recursive: true })
 const hostPath = join(root, 'src', 'host.js')
 const clientPath = join(root, 'src', 'client.js')
 const formalArtifactsSrc = join(root, '..', '..', 'scripts', 'formal-artifacts.cjs')
+const roleLibrarySrc = join(root, '..', '..', 'scripts', 'role-library.cjs')
+const roleManifestSrc = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
 const hostBody = readFileSync(hostPath, 'utf8')
 const clientBody = readFileSync(clientPath, 'utf8')
+const roleLibraryBody = readFileSync(roleLibrarySrc, 'utf8')
+const roleManifestBody = readFileSync(roleManifestSrc, 'utf8')
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
 const stamp = {
   host: sha256(hostBody),
   client: sha256(clientBody),
+  roleLibrary: sha256(roleLibraryBody),
+  roleManifest: sha256(roleManifestBody),
   builtAt: new Date().toISOString(),
 }
 
@@ -68,6 +74,10 @@ writeFileSync(
 
 writeFileSync(join(dist, '.src-stamp.json'), JSON.stringify(stamp, null, 2) + '\n')
 copyFileSync(formalArtifactsSrc, join(dist, 'formal-artifacts.cjs'))
+copyFileSync(join(root, '..', '..', 'scripts', 'validate-core.cjs'), join(dist, 'validate-core.cjs'))
+// 角色库内核 + 内置角色清单：静态安装的可信加载源（host.js 候选根 pluginRoot/dist）
+copyFileSync(roleLibrarySrc, join(dist, 'role-library.cjs'))
+copyFileSync(roleManifestSrc, join(dist, 'builtin-roles.json'))
 console.log('built:', join(dist, 'host-entry.mjs'))
 console.log('built:', join(dist, 'client.js'))
 console.log('stamp:', stamp.host.slice(0, 12), stamp.client.slice(0, 12))
