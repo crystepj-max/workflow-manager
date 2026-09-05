@@ -58,6 +58,19 @@
 | `countRound` | 可选 | 仅业务边。布尔；`true` 则走该边消耗 1 点自动回退额度；`false` 或缺省不消耗但仍记入 `history`。额度耗尽不走边，进入 `WAITING_HUMAN` + `MAX_ROUNDS_REACHED`，保留原 Node Business Outcome（#73） |
 | `result` | 旧 HD 出边必填 | 业务 Decision Result id（`SCREAMING_SNAKE`，如 `SHIP`）。**不得**占用框架控制类 `USER_ACCEPTED` / `ADD_BUDGET` / `STOP` |
 
+> **同一 `$human-decision` 的出边按运行时归一化 id 不得冲突（#159）**：画卡选项装配与续跑查找均取
+> `e.result || String(e.outcome)` 作为 choice id，因此 `outcome: false` 与 `outcome: "false"`（typed 与
+> 同名字符串）、`outcome: 0` 与 `outcome: "0"`、`outcome: "SHIP"` 与 `result: "SHIP"`（跨形态同名）都会
+> 坍缩为同一选项 id，其中一条合法出边在运行期静默不可达。`validateBlueprint` 在校验期显式拒绝该归一化
+> 冲突并报出两条冲突边坐标与归一化 id；应改用显式 `result` 命名（如 `result: REJECT_BOOL`）区分选项。
+>
+> **字段归属与保留键（#159 A1/A2 复核）**：`result` 只属于 `on: "success"` 的旧 HD 出边；业务 `outcome`
+> 出边**禁止**再携带 `result`（二者同边互斥——结构层只禁 `outcome` 与 `on`，而运行期 `e.result ||` 对
+> 任意 truthy result 优先，混用会让校验端与运行期对同一条边取不同 choice id 身份）。此外归一化 choice id
+> 命中运行时保留键（`toString` / `constructor` / `__proto__` 等 `Object.prototype` 成员）时校验期同样
+> 显式拒绝并报真实边坐标：画卡装配的 `subsequent_effects` 以普通对象承载，这些 id 会被判为已占用而把
+> 该出边静默丢弃，请改用显式 `result` 命名。
+
 ### 2.4 Human Decision 控制面键名（#116 钉死；机器英文）
 
 > 新蓝图走本协议；残留 `manualCheck` 仍用 `AWAITING_HUMAN_<id>` + `approved`。本表只锁字段名。挂起运行时：#77 引擎段命中 `$human-decision` 入边发出 `ROUTE_HALTED`（`reason=HUMAN_DECISION`）；#118 将其翻译为 `WAITING_HUMAN` 并装配 Decision Package 与追加-only 控制面事件。编译脚本对外返回 `WAITING_HUMAN`，不把 `ROUTE_HALTED` 作为人工决策终态。

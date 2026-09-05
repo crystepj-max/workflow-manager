@@ -26,6 +26,12 @@ const FANOUT_ITEMS_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A
 const HD_RESULT_RE = /^[A-Z][A-Z0-9_]*$/
 const HD_REASONS = ['HUMAN_ACCEPTANCE', 'ESCALATED_DECISION', 'MAX_ROUNDS_REACHED']
 const HD_CONTROL_RESULTS = ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP']
+// Issue #159（A1）：运行期画卡装配把 `subsequent_effects` 建成普通对象 `{}`——choice id 若命中
+// Object.prototype 继承键（toString / constructor / __proto__ 等），其判重 `pkg.subsequent_effects[id]`
+// 会伪命中并把该出边静默丢弃（选项永不进画卡、续跑不可达）。这类 id 运行期无法表示，校验期
+// 显式拒绝（报真实边坐标），不得依赖无原型判重表放行后再让运行期静默不可达。
+const HD_RUNTIME_RESERVED_IDS = new Set(Object.getOwnPropertyNames(Object.prototype))
+HD_RUNTIME_RESERVED_IDS.add('__proto__')
 const HD_PACKAGE_REQUIRED = ['why', 'current_state', 'options', 'subsequent_effects']
 const HD_PACKAGE_OPTIONAL_UNKNOWN = ['cost', 'benefit', 'risk', 'recommendation']
 const HD_EVENT_FIELDS = [
@@ -110,6 +116,22 @@ function isStringSchemaLeaf(leaf) {
 
 function outcomeKey(value) {
   return JSON.stringify(value)
+}
+
+// Issue #159（方案 B）：HD 出边 choice id 与运行时取 id 逻辑逐字同构——
+// 运行时（scripts/generate.mjs assembleDecisionPackage / 续跑查找）用
+// `e.result || String(e.outcome)` 归一化出边 id，其中 result 段是"任意 truthy 值优先"
+// （空白串 " "、数字等同样优先，绝无"非空白字符串"假设）；typed outcome（false/0 等）
+// 与同名字符串（"false"/"0"），以及 result 与 outcome 同名，都会坍缩为同一 choice id，
+// 导致其中一条合法出边在运行期画卡/续跑永远不可达。校验端用同一归一化 id 建冲突表，
+// 杜绝"校验通过但运行期静默不可达"的中间态。HD 出边的 result+outcome 混用已在出边校验处
+// 显式互斥拒绝（#159 A2），故进入本函数时二者不同边共存、取值永不分叉。
+function hdChoiceId(e) {
+  if (!e) return null
+  if (e.result) return e.result
+  const outcome = e.outcome
+  if (outcome !== undefined && outcome !== null && outcome !== '') return String(outcome)
+  return null
 }
 
 // ---------- 错误坐标 → 编辑器 fieldKey ----------
@@ -709,6 +731,14 @@ function validateBlueprint(bp, opts) {
     }
     const seenHdResults = {}
     const seenHdOutcomes = {}
+    // Issue #159：按运行时归一化 choice id 建统一冲突表——typed outcome 与同名字符串
+    // （outcome: false vs outcome: "false"）、以及 result 与 outcome 同名（result: "SHIP"
+    // vs outcome: "SHIP"）在运行期（generate.mjs e.result || String(e.outcome)）都坍缩为
+    // 同一 choice id，其中一条出边静默不可达；此处显式拒绝并报告两条冲突边坐标与归一化 id。
+    // 判重表用 Map 而非普通对象（#159 A1）：普通对象会把 toString/constructor/__proto__ 等
+    // 经 Object.prototype 继承链伪报为已登记，既误伤合法单边又让冲突错误生成
+    // "$.edges[function toString()...]" 这类非真实边坐标。
+    const seenHdChoiceIds = new Map()
     const hdIn = bp.edges.filter((e) => e && e.to === HUMAN_DECISION_ID && isStructuralEdge(e))
     const hdOut = bp.edges.filter((e) => e && e.from === HUMAN_DECISION_ID)
     if (hdIn.length === 0 && hdOut.some(hasOutcomeField)) {
@@ -724,10 +754,39 @@ function validateBlueprint(bp, opts) {
         err(at + '.on', '升 Human Decision 的入边须为 success（failure 边仍表示打回）')
       }
       if (e.from !== HUMAN_DECISION_ID) return
+      // Issue #159（A2）：outcome 与 result 同边混合字段显式互斥——result 只属于 on:"success"
+      // 出边（SCREAMING_SNAKE 显式命名）；结构层仅禁 outcome 与 on 互斥、不禁 outcome 与 result，
+      // 而运行期画卡/续跑一律 `e.result || String(e.outcome)`（任意 truthy result 优先，含空白串
+      // " "）。outcome 边若夹带 truthy result，校验端与运行期会对同一条边取不同 choice id 身份，
+      // 冲突蓝图可穿过校验（如 outcome:"A" 与 outcome:"B" 各带 result:" " 时校验视为 A/B 不冲突、
+      // 运行期两条边都坍缩为空白 result）。此处显式拒绝，杜绝该分叉。
+      if (hasOutcomeField(e) && e.result !== undefined) {
+        err(at + '.result', 'outcome 与 result 互斥：result 仅用于 on:"success" 出边；业务 outcome 边携带 result 时运行期 e.result || String(e.outcome) 会改取其身份（#159）')
+        return
+      }
       if (hasOutcomeField(e)) {
         const key = outcomeKey(e.outcome)
-        if (seenHdOutcomes[key]) err(at + '.outcome', 'Decision Result 重复：' + key)
-        else seenHdOutcomes[key] = true
+        if (seenHdOutcomes[key]) {
+          err(at + '.outcome', 'Decision Result 重复：' + key)
+        } else {
+          seenHdOutcomes[key] = true
+          const id = hdChoiceId(e)
+          if (id !== null) {
+            if (HD_RUNTIME_RESERVED_IDS.has(id)) {
+              // #159（A1）：判重表本身已无原型污染（Map），但该 id 运行期无法表示——
+              // 普通对象 subsequent_effects 会把继承键当已占用、静默丢弃该出边；此处
+              // 显式拒绝并给出真实边坐标与修复指引，不允许校验放行后运行期再次不可达。
+              err(at + '.outcome', 'choice id "' + id + '" 为运行时保留键（画卡装配的 subsequent_effects 以普通对象承载，toString/constructor/__proto__ 等原型键会被判为已占用而静默丢弃该出边）；请改用显式 result 命名（如 result: SHIP）区分（#159）')
+            } else {
+              const first = seenHdChoiceIds.get(id)
+              if (first !== undefined) {
+                err(at + '.outcome', 'HD 选项归一化冲突：与 $.edges[' + first + '] 归一化后为同一 choice id "' + id + '"（运行期画卡/续跑按 e.result || String(e.outcome) 归一化取 id，两条边坍缩为一、后者不可达）；请改用显式 result 命名区分')
+              } else {
+                seenHdChoiceIds.set(id, i)
+              }
+            }
+          }
+        }
         return
       }
       if (e.on !== 'success') {
@@ -744,6 +803,15 @@ function validateBlueprint(bp, opts) {
         err(at + '.result', 'Decision Result 重复：' + e.result)
       } else {
         seenHdResults[e.result] = true
+        const id = hdChoiceId(e)
+        if (id !== null) {
+          const first = seenHdChoiceIds.get(id)
+          if (first !== undefined) {
+            err(at + '.result', 'HD 选项归一化冲突：与 $.edges[' + first + '] 归一化后为同一 choice id "' + id + '"（运行期画卡/续跑按 e.result || String(e.outcome) 归一化取 id，两条边坍缩为一、后者不可达）；请改用显式 result 命名区分')
+          } else {
+            seenHdChoiceIds.set(id, i)
+          }
+        }
       }
     })
   }

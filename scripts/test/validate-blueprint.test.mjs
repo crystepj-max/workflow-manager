@@ -442,3 +442,133 @@ test('#116 HD 与 manualCheck 同图拒绝；出边 result 不得占用控制类
   assert.equal(r2.ok, false);
   assert.ok(r2.errors.some((e) => String(e.fieldKey || '').endsWith(':result')), JSON.stringify(r2.errors));
 });
+
+// —— Issue #159（方案 B）：HD 出边按运行时归一化 id（e.result || String(e.outcome)）
+//    判重的冲突在校验期显式拒绝。typed outcome 与同名字符串、result 与 outcome 同名
+//    都会在运行期画卡/续跑坍缩为同一 choice id——绝不允许"校验通过但运行期静默不可达"。
+//    夹具说明：out 边逐个 push，fixture 删 HD 出边后余边数固定为 3（index 0..2），
+//    故第 k 条 HD 出边坐标为 $.edges[3+k]。
+const hdWithOutEdges = (outEdges) => {
+  const b = hdClone();
+  b.edges = b.edges.filter((e) => !(e && e.from === '$human-decision'));
+  outEdges.forEach((out) => b.edges.push(Object.assign({ from: '$human-decision', to: 'finish' }, out)));
+  return b;
+};
+const expectNormalizedReject = (bp, id, label) => {
+  const r = validateBlueprint(bp);
+  assert.equal(r.ok, false, label + '：应拒绝（存在校验通过但运行期不可达的静默态）');
+  const hit = r.errors.filter((e) => String(e.message).includes('归一化') && String(e.message).includes('choice id "' + id + '"'));
+  assert.ok(hit.length >= 1, label + '：缺归一化冲突错误，实际 ' + JSON.stringify(r.errors));
+  // 错误必须同时指明两条冲突边的坐标（fieldKey 指向后一条出边，消息引用首条坐标）
+  const coords = r.errors
+    .filter((e) => String(e.message).includes('归一化'))
+    .flatMap((e) => Array.from(String(e.message).matchAll(/\$\.edges\[(\d+)\]/g)).map((m) => Number(m[1])))
+    .concat(r.errors.filter((e) => String(e.message).includes('归一化')).map((e) => { const m = /\$\.edges\[(\d+)\]/.exec(e.at || ''); return m ? Number(m[1]) : -1; }));
+  assert.ok(coords.includes(3) && coords.includes(4), label + '：缺两条边坐标，coords=' + JSON.stringify(coords) + ' errors=' + JSON.stringify(r.errors));
+};
+
+test('#159 typed outcome false 与字符串 "false" 归一化冲突拒绝', () => {
+  expectNormalizedReject(hdWithOutEdges([{ outcome: false }, { outcome: 'false' }]), 'false', 'false-vs-string');
+});
+
+test('#159 typed outcome 0 与字符串 "0" 归一化冲突拒绝', () => {
+  expectNormalizedReject(hdWithOutEdges([{ outcome: 0 }, { outcome: '0' }]), '0', '0-vs-string');
+});
+
+test('#159 typed outcome true 与字符串 "true" 归一化冲突拒绝', () => {
+  expectNormalizedReject(hdWithOutEdges([{ outcome: true }, { outcome: 'true' }]), 'true', 'true-vs-string');
+});
+
+test('#159 outcome "SHIP" 与 result "SHIP" 跨形态同名冲突拒绝', () => {
+  // result 边先入（坐标 3），outcome 边后入（坐标 4）——归一化后同 id 亦拒绝
+  expectNormalizedReject(
+    hdWithOutEdges([{ on: 'success', result: 'SHIP' }, { outcome: 'SHIP' }]),
+    'SHIP',
+    'result-vs-outcome',
+  );
+  // 反向顺序：outcome 边先入、result 边后入，同样拒绝
+  const rev = hdWithOutEdges([{ outcome: 'HOLD' }, { on: 'success', result: 'HOLD' }]);
+  const r = validateBlueprint(rev);
+  assert.equal(r.ok, false, 'result 后入方向也应拒绝');
+  assert.ok(r.errors.some((e) => String(e.message).includes('归一化') && String(e.message).includes('choice id "HOLD"')), JSON.stringify(r.errors));
+});
+
+test('#159 归一化后不同的 typed/纯字符串 outcome 蓝图仍通过（不误伤）', () => {
+  // typed false vs 字符串 "no"：归一化 id 'false' 与 'no' 不同
+  const a = hdWithOutEdges([{ outcome: false }, { outcome: 'no' }]);
+  assert.equal(validateBlueprint(a).ok, true, JSON.stringify(validateBlueprint(a).errors));
+  // 纯字符串 outcome（如 SHIP / HOLD）各自归一化 id 不同 → 通过
+  const b = hdWithOutEdges([{ outcome: 'SHIP' }, { outcome: 'HOLD' }]);
+  assert.equal(validateBlueprint(b).ok, true, JSON.stringify(validateBlueprint(b).errors));
+  // 多个 result 边互不冲突 → 通过（旧行为）
+  const c = hdWithOutEdges([{ on: 'success', result: 'SHIP' }, { on: 'success', result: 'HOLD' }]);
+  assert.equal(validateBlueprint(c).ok, true, JSON.stringify(validateBlueprint(c).errors));
+});
+
+// —— Issue #159（A1）：判重表必须安全处理合法原型键。普通对象 seenHdChoiceIds 会把单条
+//    outcome "toString"/"constructor"/"__proto__" 经 Object.prototype 继承链伪报为"已登记"，
+//    误报归一化冲突并生成 "$.edges[function toString() { [native code] }]" 这类非真实边坐标。
+//    修复：判重表改 Map（无原型链）；这些 id 运行期也无法表示（画卡装配的 subsequent_effects
+//    为普通对象，判重会伪命中并把该出边静默丢弃），故校验期显式拒绝并报真实边坐标——
+//    由契约规则拒绝，不靠原型链伪造冲突。
+test('#159 A1 原型键 outcome：不伪报归一化冲突，显式保留键拒绝且坐标为真实边', () => {
+  ['toString', 'constructor', '__proto__'].forEach((key) => {
+    const r = validateBlueprint(hdWithOutEdges([{ outcome: key }]));
+    assert.equal(r.ok, false, key + '：运行期普通对象无法承载，须显式拒绝（不得静默放行）');
+    assert.equal(
+      r.errors.filter((e) => String(e.message).includes('归一化冲突')).length,
+      0,
+      key + '：不得伪报归一化冲突：' + JSON.stringify(r.errors),
+    );
+    assert.ok(
+      !JSON.stringify(r.errors).includes('function '),
+      key + '：错误不得含函数序列化的伪坐标：' + JSON.stringify(r.errors),
+    );
+    const hit = r.errors.find((e) => String(e.message).includes('保留键'));
+    assert.ok(hit, key + '：应有运行时保留键契约错误：' + JSON.stringify(r.errors));
+    assert.equal(hit.at, '$.edges[3].outcome', key + '：at 必须指向真实边坐标，实际 ' + hit.at);
+    assert.equal(hit.fieldKey, 'edge:3:outcome', key + '：fieldKey 必须映射真实边，实际 ' + hit.fieldKey);
+  });
+  // 两个不同的原型键（toString + constructor）：Map 判重表不得把它们伪报为同一 choice id
+  const pair = hdWithOutEdges([{ outcome: 'toString' }, { outcome: 'constructor' }]);
+  const rp = validateBlueprint(pair);
+  assert.equal(rp.ok, false, '原型键出边整体仍须拒绝（运行期无法承载）');
+  assert.equal(
+    rp.errors.filter((e) => String(e.message).includes('归一化冲突')).length,
+    0,
+    'toString 与 constructor 不得被伪报为归一化冲突：' + JSON.stringify(rp.errors),
+  );
+  assert.equal(
+    rp.errors.filter((e) => String(e.message).includes('保留键')).length,
+    2,
+    '两个原型键应各自报保留键错误：' + JSON.stringify(rp.errors),
+  );
+});
+
+// —— Issue #159（A2）：校验端 hdChoiceId 必须与运行期语义同构。运行期取 id 是
+//    `e.result || String(e.outcome)`——result 段"任意 truthy 值优先"（空白串 " " 同样优先），
+//    校验 helper 不得假设 result 必须是非空白字符串；且 outcome 与 result 不得同边混用
+//    （结构层只禁 outcome+on、不禁 outcome+result）。否则混合字段边可通过校验、运行期却取
+//    另一套身份：outcome "A"/"B" 各带空白 result " " 时，校验按 A/B 判不冲突，运行期两条边
+//    归一化 id 均为空白 result → 画卡只暴露一个选项（静默不可达）。
+test('#159 A2 outcome 与 result 同边（混合字段）拒绝，杜绝校验通过后运行期另取身份', () => {
+  // 审核示例：两条 outcome 边各带空白 result " "（truthy，运行期优先于 outcome）
+  const pair = hdWithOutEdges([{ outcome: 'A', result: ' ' }, { outcome: 'B', result: ' ' }]);
+  const r = validateBlueprint(pair);
+  assert.equal(r.ok, false, '混合字段边不得通过校验：' + JSON.stringify(r.errors));
+  const mixes = r.errors.filter((e) => String(e.message).includes('互斥'));
+  assert.ok(mixes.length >= 2, '两条混合边都应报 outcome 与 result 互斥：' + JSON.stringify(r.errors));
+  // 单条混合字段边同样拒绝（空白与非空白 result 都要拒）
+  for (const single of [{ outcome: 'SHIP', result: 'HOLD' }, { outcome: 'SHIP', result: ' ' }]) {
+    const r2 = validateBlueprint(hdWithOutEdges([single]));
+    assert.equal(r2.ok, false, '单条混合字段边也须拒绝：' + JSON.stringify(r2.errors));
+    assert.ok(r2.errors.some((e) => String(e.message).includes('互斥')), JSON.stringify(r2.errors));
+  }
+  // 显式 result: undefined（等价于未声明；JSON 往返会丢弃）不算混用 → 纯 outcome 边保持通过
+  const ud = hdWithOutEdges([{ outcome: 'SHIP', result: undefined }, { outcome: 'HOLD' }]);
+  const r3 = validateBlueprint(ud);
+  assert.equal(r3.ok, true, 'result:undefined 不应触发互斥：' + JSON.stringify(r3.errors));
+  // 纯字符串兼容不回归：合法 outcome 边与 result 边归一化 id 互异时仍通过
+  const clean = hdWithOutEdges([{ outcome: 'SHIP' }, { outcome: 'HOLD' }, { on: 'success', result: 'CARGO' }]);
+  assert.equal(validateBlueprint(clean).ok, true, JSON.stringify(validateBlueprint(clean).errors));
+});
