@@ -66,3 +66,9 @@ node --test scripts/test/ai-task-deliver-m2.test.mjs scripts/test/cwf-validate.t
 **具备启动 M3 的交付契约前提**：单任务主链、实施前检查、三态验收、返工上限 3、WAITING_HUMAN 语义已在仓库落地。
 
 建议 M3：Execution Plan（候选筛选、快照、并发、补位、批次汇总）；勿在单任务未 dogfood 前放大批量。
+
+## 落点说明（拆刀后）
+
+- 定义能力（M1）正本在 **my-agent-skills**；本 PR **不含** `requirements-analysis` Skill 升级。
+- 本仓库仅保留：公共契约、单任务交付主链、建设入口改造、可视化「完整功能开发」蓝图、实施前检查与验收三态接线。
+- `scripts/test/fixtures/ai-task-define-m1/` 仅为「已定义」示例夹具，供实施前检查机械验收，不是定义 Skill。

@@ -22,3 +22,5 @@
 node scripts/ai-task-define-m1-check.mjs
 node scripts/ai-task-deliver-m2-check.mjs
 ```
+
+> **落点**：定义 Skill（「做需求分析」→「已定义」）正本在 [my-agent-skills](https://github.com/crystepj-max/my-agent-skills) 的 `requirements-analysis`。本目录只保留交付侧共用的公共契约与 M2 主链说明；本仓库不再维护第二套定义 Skill。

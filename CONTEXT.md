@@ -314,3 +314,6 @@
 - 禁止 `outcomePath`、`completionPath`、`outcome` 边、`on: technical`。
 - `failOn` 仍走旧 failure（技术聚合失败）。探索业务结果写在 Evaluator。
 
+
+
+> AI 任务定义 Skill 正本：my-agent-skills / requirements-analysis；本仓库交付契约见 docs/design/ai-task-define-delivery/。
