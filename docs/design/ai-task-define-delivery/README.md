@@ -12,8 +12,9 @@
 | [uat-card-template.md](./uat-card-template.md) | UAT 验收卡模板 | M2 |
 | [construction-bridge-m2.md](./construction-bridge-m2.md) | M2 已接线说明 | M2 |
 | [execution-plan-m3.md](./execution-plan-m3.md) | Execution Plan（批量调度） | M3 |
+| [skill-set.md](./skill-set.md) | **三件套落点与双仓同步** | M1–M3 |
 
-- 定义入口 Skill（正本）：[my-agent-skills](https://github.com/crystepj-max/my-agent-skills) → `requirements-analysis`
+- 定义入口 Skill：`dsh/skills/requirements-analysis/`（同步副本：[my-agent-skills](https://github.com/crystepj-max/my-agent-skills) → `requirements-analysis`
 - 交付入口 Skill：`dsh/skills/construction-bootstrap/`（从已定义开工）
 - 批量调度 Skill：`dsh/skills/execution-plan/`
 

@@ -4,6 +4,8 @@ description: "AI 任务批量调度（Execution Plan）：从候选「已定义�
 ---
 
 # Execution Plan｜批量调度（M3）
+> 本 Skill 属「AI 任务交付」集合（见 `docs/design/ai-task-define-delivery/skill-set.md`）；通用副本同步至 my-agent-skills。
+
 
 本 skill **只负责「哪些任务现在开始」**，不负责把需求谈清楚，也不负责单任务施工。
 

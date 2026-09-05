@@ -3,30 +3,51 @@
   "evals": [
     {
       "id": 1,
-      "name": "s-size-raw-input-to-issue",
+      "name": "s-size-raw-input-to-defined",
       "prompt": "帮我把这个需求分析一下：我们 App 的个人中心里加一个『清除缓存』按钮，点击后清掉本地图片缓存，并显示『已清除 12.3 MB』的提示。",
-      "expected_output": "识别为原始输入→创建 issue 路径；size 判定为 sized-s；产出含任务目标/涉及范围/验收标准三要素；关键状态落盘（.scratch/ 下分析文档）；GitHub 不可用时自动降级本地落盘并提示",
+      "expected_output": "识别为原始输入→创建 issue 路径；走渐进分析；Definition Check 全过且未决=0；人工确认后落档 Issue 基本信息九字段 + 本地 task-spec-V1；回报『任务已定义』；GitHub 不可用时本地落档并按 Skill §7.2 说明",
       "files": []
     },
     {
       "id": 2,
-      "name": "m-size-issue-to-tickets",
+      "name": "m-size-issue-to-uat-slices",
       "prompt": "分析一下这个 issue 并把计划拆成任务清单：https://github.com/example-org/demo-app/issues/42 —— issue 内容为：支持微信扫码登录，需要新增后端鉴权接口、前端登录页二维码展示、回调处理与 token 续期，方案已有大致设计但涉及 3 个模块，预计需要 3-4 个任务依次完成。",
-      "expected_output": "识别为 GitHub issue→更新 issue 路径；size 判定为 sized-m；按内联拆解规则产出带依赖顺序的任务清单（垂直切片+阻塞边，落盘 .scratch/<slug>/issues/）；三要素齐全",
+      "expected_output": "识别为 GitHub issue→更新 issue 路径；按可独立 UAT 的完整功能切片拆分（非纯内部层次）；每切片可写 UAT；前置依赖明确写『无』或具体任务；三要素齐全；未达人工确认前不得标已定义",
       "files": []
     },
     {
       "id": 3,
       "name": "l-size-foggy-to-decision-map-openspec",
       "prompt": "帮我把这个需求分析一下：把我们的订单系统重构成微服务架构，拆成订单、支付、库存、物流四个服务。具体怎么拆、服务边界、数据一致性方案都还没定，团队也没做过微服务。",
-      "expected_output": "size 判定为 sized-l；按内联 wayfinder 规则拆决策地图（决策工单 + 阻塞边 + frontier）+ 产出 OpenSpec（references/openspec-template.md）；三要素齐全；明确禁止直接开工（不产出实现代码）；关键状态落盘",
+      "expected_output": "size 判定为 sized-l；按内联 wayfinder 规则拆决策地图 + OpenSpec；三要素齐全；明确禁止直接开工；不得在决策未清时标已定义",
       "files": []
     },
     {
       "id": 4,
       "name": "self-contained-no-subskill-invocation",
       "prompt": "分析一下这个 issue：https://github.com/example-org/demo-app/issues/9 —— issue 内容为：iOS 上登录页白屏，控制台报 Uncaught TypeError: Cannot read properties of undefined (reading 'map')，机型 iPhone 15 / iOS 17。",
-      "expected_output": "全程不调用 skill 工具加载 triage/grill-with-docs/wayfinder/to-tickets（这四个为 disable-model-invocation 的 user-invoked 命令 skill）；即使它们不可模型调用也能完整产出：分诊结论（bug + ready-for-agent/needs-info）+ 三要素 + size 判定；发布内容带 AI 免责声明",
+      "expected_output": "全程不调用 skill 工具加载 triage/grill-with-docs/wayfinder/to-tickets；即使它们不可模型调用也能完整产出：分诊结论 + 三要素 + size；发布内容带 AI 免责声明",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "product-decisions-then-defined",
+      "prompt": "做需求分析：给用户做消息通知偏好。渠道要不要含邮件还没定，默认开还是关也没定。",
+      "expected_output": "主动发现产品决策并用决策卡（成本/收益/风险+推荐）推进；用户拍板前未决>0不得已定义；拍板后写回规格决策表、Definition Check、人工确认基线后才报『任务已定义』",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "open-items-block-defined",
+      "prompt": "这个需求差不多了，直接标已定义吧：我们想做会员积分，具体怎么算分以后开发时再定。",
+      "expected_output": "拒绝标已定义；指出未决产品事项；保持定义中/待确认前；给出决策卡或缺口清单",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "baseline-v1-to-v2",
+      "prompt": "已定义任务 V1 要改验收标准：清除缓存成功文案必须同时显示文件个数。请升版。",
+      "expected_output": "判定为实质变更；走 V1→V2：更新本地规格、Definition Check、人工确认、Issue 版本评论与字段同步；不静默改 V1",
       "files": []
     }
   ]

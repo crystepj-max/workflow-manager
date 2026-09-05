@@ -164,11 +164,13 @@
 - **storageDomain（历史方案）**：DSH 宿主持久化域；P2-D3 原定用它存模板与运行记录，
   T2（#17）改双轨方案（宿主目录文件 + save 即生成 skill）后不再依赖。
 
-## AI 任务定义与批量交付（V0.1 / M1+M2）
+## AI 任务定义与批量交付（V0.1 / M1+M2+M3）
 
-> 权威：`docs/design/ai-task-define-delivery/public-task-contract.md` +  
-> `single-task-delivery-m2.md`。定义入口 = 现有 `requirements-analysis`；  
-> 交付入口 = 现有 `construction-bootstrap`（从已定义开工，不新建第二入口）。
+> 权威：`docs/design/ai-task-define-delivery/skill-set.md`（集合与双仓）+  
+> `public-task-contract.md` + `single-task-delivery-m2.md` + `execution-plan-m3.md`。  
+> 工程真源在本仓；`my-agent-skills` 为通用 skill 集副本。  
+> 定义入口 = `requirements-analysis`；单任务交付 = 内置蓝图 + `construction-bootstrap`；  
+> 批量调度 = `execution-plan`（M4 定时触发尚未开始）。
 
 - **已定义（DEFINED）**：Definition Check 通过、未决产品事项为 0、人工确认基线、Issue 基本信息与本地任务规格版本一致后的状态；交付应从这里开工。
 - **Definition Check（定义完成检查）**：进入「待确认」前的门禁清单（目标范围/规则边界/决策完整性/任务组织/验收/无人值守）。
@@ -316,4 +318,5 @@
 
 
 
-> AI 任务定义 Skill 正本：my-agent-skills / requirements-analysis；本仓库交付契约见 docs/design/ai-task-define-delivery/。
+> AI 任务交付 Skill 集合（M1+M2启动+M3）：工程真源在本仓 `dsh/skills/` 与内置蓝图；  
+> 通用副本同步至 my-agent-skills。集合说明见 `docs/design/ai-task-define-delivery/skill-set.md`。
