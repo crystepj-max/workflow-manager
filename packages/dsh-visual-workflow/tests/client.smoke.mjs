@@ -792,6 +792,110 @@ test('防重叠：入口变化会触发画布布局重算', async () => {
   assert.ok(yOf('b') < yOf('a'), 'entry 改为 b 后 B 排在 A 上方')
 })
 
+test('两级序号：HD 透传后收口主序号在 UAT 右侧，不再与入口同列', async () => {
+  const hdDsl = {
+    id: 'hd-seq-layout',
+    name: 'HD 序号布局',
+    entry: 'preflight',
+    control: { maxRounds: 3 },
+    nodes: [
+      { id: 'preflight', profile: 'evaluator', label: '实施前检查' },
+      { id: 'dev', profile: 'dev', label: '开发' },
+      { id: 'uat', profile: 'accept', label: 'UAT 准备' },
+      { id: 'closeout', profile: 'closeout', label: '收口' },
+    ],
+    edges: [
+      { from: 'preflight', to: 'dev', outcome: 'PASS' },
+      { from: 'dev', to: 'uat', outcome: 'READY' },
+      { from: 'uat', to: '$human-decision', outcome: 'READY_FOR_HUMAN' },
+      { from: '$human-decision', to: 'closeout', outcome: 'ACCEPT' },
+      { from: '$human-decision', to: 'dev', outcome: 'REJECT' },
+      { from: 'closeout', to: '$end', outcome: 'DELIVERED' },
+    ],
+  }
+  // 为 outcome 边补最小 schema，避免编辑器侧校验干扰画布（本测只关心布局）
+  hdDsl.nodes.forEach((n) => {
+    if (n.id === 'preflight') n.output = { outcomePath: '$.route', schema: { type: 'object', properties: { route: { type: 'string', enum: ['PASS'] } }, required: ['route'], additionalProperties: false } }
+    if (n.id === 'dev') n.output = { outcomePath: '$.route', schema: { type: 'object', properties: { route: { type: 'string', enum: ['READY'] } }, required: ['route'], additionalProperties: false } }
+    if (n.id === 'uat') n.output = { outcomePath: '$.route', schema: { type: 'object', properties: { route: { type: 'string', enum: ['READY_FOR_HUMAN'] } }, required: ['route'], additionalProperties: false } }
+    if (n.id === 'closeout') n.output = { outcomePath: '$.status', schema: { type: 'object', properties: { status: { type: 'string', enum: ['DELIVERED'] } }, required: ['status'], additionalProperties: false } }
+  })
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(hdDsl, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  const xyOf = (id) => {
+    const g = container.querySelector('g[data-node-id="' + id + '"]')
+    assert.ok(g, '缺少节点 ' + id)
+    const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return { x: Number(match[1]), y: Number(match[2]) }
+  }
+  const seqOf = (id) => {
+    const g = container.querySelector('g[data-node-id="' + id + '"]')
+    const badge = g && g.querySelector('[data-node-seq]')
+    return badge ? badge.getAttribute('data-node-seq') : null
+  }
+  const pre = xyOf('preflight')
+  const close = xyOf('closeout')
+  assert.ok(close.x > pre.x + 50, '收口应在实施前检查右侧（HD 透传后主序号前进），got pre.x=' + pre.x + ' close.x=' + close.x)
+  assert.equal(seqOf('preflight'), '0')
+  assert.equal(seqOf('dev'), '1')
+  assert.equal(seqOf('uat'), '2')
+  assert.equal(seqOf('closeout'), '3')
+})
+
+test('两级序号：同列多节点显示 m.1 / m.2 且上小下大', async () => {
+  const parallelDsl = {
+    id: 'parallel-seq',
+    name: '同列序号',
+    entry: 'a',
+    control: { maxRounds: 9 },
+    nodes: [
+      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'b1', profile: 'dev', label: 'B1' },
+      { id: 'b2', profile: 'review', label: 'B2' },
+    ],
+    edges: [
+      { from: 'a', to: 'b1', on: 'success' },
+      { from: 'a', to: 'b2', on: 'success' },
+      { from: 'b1', to: '$end', on: 'success' },
+      { from: 'b2', to: '$end', on: 'success' },
+    ],
+  }
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(parallelDsl, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  const yOf = (id) => {
+    const g = container.querySelector('g[data-node-id="' + id + '"]')
+    const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return Number(match[2])
+  }
+  const seqOf = (id) => container.querySelector('g[data-node-id="' + id + '"] [data-node-seq]').getAttribute('data-node-seq')
+  assert.equal(seqOf('a'), '0')
+  assert.equal(seqOf('b1'), '1.1')
+  assert.equal(seqOf('b2'), '1.2')
+  assert.ok(yOf('b1') < yOf('b2'), '同列 1.1 应在 1.2 上方')
+})
+
 test('自环边：布局不进入死循环，终点仍在节点左边框垂直居中', async () => {
   const selfLoopDsl = {
     id: 'self-loop',
