@@ -64,8 +64,18 @@ description: "AI 任务批量调度（Execution Plan）：从候选「已定义�
 批量开工 / Execution Plan（并发=2）
 ```
 
-定时触发（M4）只是再次调用本 Skill，不得另写调度内核。
+定时触发（M4）只是再次调用本 Skill / 同一执行计划脚本，不得另写调度内核。
+
+到点预约（产品说明：`docs/design/ai-task-define-delivery/scheduled-trigger-m4.md`）：
+
+```bash
+node scripts/ai-task-scheduled-trigger.mjs path/to/schedule.json
+# 机械对照 / 强制到点：
+node scripts/ai-task-scheduled-trigger.mjs path/to/schedule.json --now
+```
+
+预约单含 `runAt` + 与立即跑相同的 `batch`；到点后由触发脚本唤起 `scripts/ai-task-execution-plan.mjs`，并写出夜间批次报告。不新建第二套定时 Skill。
 
 ## 输出
 
-必须落盘或回报「批次汇总」（字段见 `execution-plan-m3.md` §6），并列出等待验收任务的定位信息。
+必须落盘或回报「批次汇总」（字段见 `execution-plan-m3.md` §6），并列出等待验收任务的定位信息。到点触发时额外落盘「夜间批次报告」（字段对齐汇总，见 M4 短文）。

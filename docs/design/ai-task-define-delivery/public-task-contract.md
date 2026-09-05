@@ -2,11 +2,12 @@
 
 > **版本**：v0.1.0-m1（2026-09-05）  
 > **上游**：《AI 任务定义与批量交付工作流 V0.1》+《实施任务书 V0.1》  
-> **产品拍板（相对上游规格的覆盖）**：自动返工上限 **3**（非上游文中的 2）；人工验收严格三态；定义 / 单任务 / 批量构成同一 skill 集合（见 `skill-set.md`），工程真源在本仓库，通用副本同步 my-agent-skills。  
+> **产品拍板（相对上游规格的覆盖）**：自动返工上限 **3**（非上游文中的 2）；人工验收严格三态；定义 / 单任务 / 批量构成同一 skill 集合（见 `skill-set.md`），工程真源在本仓库，通用副本同步 my-agent-skills；定时开跑（M4）只到点唤起同一执行计划，不另建调度。  
 > **本文件职责**：定义 / 单任务交付 / Execution Plan 三块能力共用的任务字段、状态与版本规则。不单独建设第四套系统。  
 > **M1 范围**：契约 + Definition Skill（`dsh/skills/requirements-analysis/`）。  
 > **M2 范围**：内置模板 `templates/construction-full-feature.json` + 启动 Skill；单任务交付主链——见 `single-task-delivery-m2.md`。  
-> **M3 范围**：Execution Plan Skill——见 `execution-plan-m3.md`。
+> **M3 范围**：Execution Plan Skill——见 `execution-plan-m3.md`。  
+> **M4 范围**：到点唤起同一执行计划 + 夜间报告 + 试跑——见 `scheduled-trigger-m4.md`（不含完整验收工作台 / 每晚循环）。
 
 ---
 

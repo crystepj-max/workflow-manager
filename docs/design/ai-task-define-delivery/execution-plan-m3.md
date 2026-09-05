@@ -14,7 +14,7 @@
 | 所属项目 | 仓库 / 工作区标识 |
 | 候选任务范围 | Issue 基本信息文件列表（或等价清单） |
 | 最大并发 | 正整数；同时处于 `RUNNING` 的上限 |
-| 启动方式 | `immediate`（立即）/ `scheduled`（定时触发同一 Skill，M4） |
+| 启动方式 | `immediate`（立即）/ `scheduled`（定时触发同一 Skill，见 `scheduled-trigger-m4.md`） |
 
 V0.1 排序固定：
 

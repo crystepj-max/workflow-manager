@@ -2,7 +2,7 @@
 
 | 文档 | 用途 | 里程碑 |
 |---|---|---|
-| [public-task-contract.md](./public-task-contract.md) | 三块能力共用的字段/状态/版本/验收三态/返工上限 | M1–M3 |
+| [public-task-contract.md](./public-task-contract.md) | 三块能力共用的字段/状态/版本/验收三态/返工上限 | M1–M4 |
 | [task-spec-template.md](./task-spec-template.md) | 本地详细任务规格模板 | M1 |
 | [issue-basics-template.md](./issue-basics-template.md) | Issue 基本信息模板 | M1 |
 | [definition-check.md](./definition-check.md) | Definition Check 清单 | M1 |
@@ -12,17 +12,20 @@
 | [uat-card-template.md](./uat-card-template.md) | UAT 验收卡模板 | M2 |
 | [construction-bridge-m2.md](./construction-bridge-m2.md) | M2 已接线说明 | M2 |
 | [execution-plan-m3.md](./execution-plan-m3.md) | Execution Plan（批量调度） | M3 |
-| [skill-set.md](./skill-set.md) | **三件套落点与双仓同步** | M1–M3 |
+| [scheduled-trigger-m4.md](./scheduled-trigger-m4.md) | **定时触发（到点唤起同一执行计划）** | M4 |
+| [m4-e2e-trial.md](./m4-e2e-trial.md) | M4 端到端试跑清单 | M4 |
+| [skill-set.md](./skill-set.md) | 集合落点与双仓同步（含 M4 触发） | M1–M4 |
 
-- 定义入口 Skill：`dsh/skills/requirements-analysis/`（同步副本：[my-agent-skills](https://github.com/crystepj-max/my-agent-skills) → `requirements-analysis`
+- 定义入口 Skill：`dsh/skills/requirements-analysis/`（同步副本：[my-agent-skills](https://github.com/crystepj-max/my-agent-skills)）
 - 交付入口 Skill：`dsh/skills/construction-bootstrap/`（从已定义开工）
-- 批量调度 Skill：`dsh/skills/execution-plan/`
+- 批量调度 Skill：`dsh/skills/execution-plan/`（定时 = 到点再调本入口，见 M4）
 
 机械验收：
 
 ```bash
 node scripts/ai-task-deliver-m2-check.mjs
 node scripts/ai-task-execution-plan-m3-check.mjs
+node scripts/ai-task-scheduled-m4-check.mjs
 ```
 
-> **落点**：定义 Skill（「做需求分析」→「已定义」）正本在 my-agent-skills。本目录保留交付与批量调度共用契约；本仓库不维护第二套定义 Skill。
+> **落点**：工程真源在本仓；通用副本同步至 my-agent-skills。M4 不新建第二套定时 Skill。
