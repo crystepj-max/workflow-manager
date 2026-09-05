@@ -164,18 +164,21 @@
 - **storageDomain（历史方案）**：DSH 宿主持久化域；P2-D3 原定用它存模板与运行记录，
   T2（#17）改双轨方案（宿主目录文件 + save 即生成 skill）后不再依赖。
 
-## AI 任务定义与批量交付（V0.1 / M1 已落契约）
+## AI 任务定义与批量交付（V0.1 / M1+M2）
 
-> 权威：`docs/design/ai-task-define-delivery/public-task-contract.md`。定义入口 = 现有
-> `requirements-analysis`（不新建第二入口）。交付改造属 M2。
+> 权威：`docs/design/ai-task-define-delivery/public-task-contract.md` +  
+> `single-task-delivery-m2.md`。定义入口 = 现有 `requirements-analysis`；  
+> 交付入口 = 现有 `construction-bootstrap`（从已定义开工，不新建第二入口）。
 
 - **已定义（DEFINED）**：Definition Check 通过、未决产品事项为 0、人工确认基线、Issue 基本信息与本地任务规格版本一致后的状态；交付应从这里开工。
 - **Definition Check（定义完成检查）**：进入「待确认」前的门禁清单（目标范围/规则边界/决策完整性/任务组织/验收/无人值守）。
 - **本地任务规格（task spec）**：详细需求事实源（`.scratch/<slug>/task-spec-V<n>.md`）；与 Issue 控制字段分工见公共契约。
 - **无人值守许可**：`允许` / `不允许`；进入已定义后必填。
 - **前置依赖**：无强制前置时必须写「无」；V0.1 批量不自动调度有前置依赖的任务。
-- **验收严格三态**：`ACCEPT`（通过）/ `REJECT`（退回）/ `CONDITIONAL_PASS`（有条件通过：基线已做对，优化进下一轮定义；**不是**历史 `user_accepted` 知情接受未达标）。
-- **自动返工上限**：产品拍板 **3**（与建设默认额度一致；覆盖上游规格文中的 2）。
+- **实施前检查（preflight）**：交付开工硬门禁（已定义 / 允许无人值守 / 版本一致 / 前置依赖=无 等）。
+- **UAT 验收卡**：等待人工验收前的可操作验收清单。
+- **验收严格三态**：`ACCEPT`/`accept`（通过）/ `REJECT`/`reject`（退回）/ `CONDITIONAL_PASS`/`conditional_pass`（有条件通过：基线已做对，优化进下一轮定义；**不是**历史 `user_accepted` 知情接受未达标）。
+- **自动返工上限**：产品拍板 **3**（`auto_rework_limit = 3`；与建设默认额度一致；覆盖上游规格文中的 2）。
 
 ## v0.1 目标词汇（尚未进入 main）
 

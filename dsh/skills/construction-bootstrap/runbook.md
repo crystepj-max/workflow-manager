@@ -1,8 +1,14 @@
-# 建设工作流 Bootstrap · Controller Runbook
+# 建设工作流 · 单任务交付 Runbook（M2）
 
-本 runbook 是 Portable Contract 的 DSH 驱动细则。契约锚点引用均为契约文档小节；安装后的权威契约副本在 `<SKILL_DIR>/assets/construction-workflow-portable-contract.md`（源仓库内 = `docs/design/construction-workflow-portable-contract.md`）。
+> **产品主链权威**：`docs/design/ai-task-define-delivery/single-task-delivery-m2.md`  
+> **公共契约**：`docs/design/ai-task-define-delivery/public-task-contract.md`  
+> 证据底物与交接包字段仍可对照 Portable Contract / `handoff.schema.json`；**产品行为以 M2 文档为准**。
 
-> **脚本路径约定**：下文命令使用 `$CWF_ASSETS/cwf-*.mjs` 形式——`CWF_ASSETS` 在 skill 安装态 = `<SKILL_DIR>/assets`（自包含，外仓库可用），在本源仓库内开发时 = 仓库 `scripts`。执行前先设置：`CWF_ASSETS=<SKILL_DIR>/assets`（或仓库内 `CWF_ASSETS=scripts`）。run-init 会把 `handoff.schema.json` 提供到目标 worktree 的 `.agent-runs/schema/`，记录/校验脚本优先读取该副本。
+> **脚本路径**：`$CWF_ASSETS/cwf-*.mjs`——安装态 = `<SKILL_DIR>/assets`，源仓库开发 = `scripts`。实施前检查：`node scripts/ai-task-preflight-check.mjs`（安装态亦在 assets）。
+
+常量：`auto_rework_limit = 3`（与 `rollback_budget` 默认 3 对齐，产品拍板）。
+
+---
 
 ## 0. Run 引导
 
@@ -10,100 +16,120 @@
 node "$CWF_ASSETS/cwf-run-init.mjs" <issue编号> <run_id>
 ```
 
-- 产出：独立分支 `dev-<run_id>` + worktree `.scratch/worktrees/dev-<run_id>` + run 目录 `.agent-runs/<run_id>/run.json`（含 portable run identity 与回退额度计数）。run_id 须为已净化小写连字符形态（如 `cwf-<issue>-01`）。
-- **之后全部工作在该 worktree 内进行**；run.json 是本 Run 的事实锚点（契约 §7.1）。
-- 会话内的 stage/attempt 推进都经 `cwf-record.mjs write` 回写 run.json，不留口头状态。
+- 产出独立分支 / worktree / `.agent-runs/<run_id>/run.json`。
+- 在 run.json 记录绑定的**需求基线版本**（与 Issue 当前版本一致）；之后不得静默换版。
+- **之后全部工作在该 worktree 内进行**。
 
-## 1. Requirements（需求基线）— 契约 §3.1
+---
 
-1. 拉取 issue 全文/评论，加工为三要素基线 payload（goal/scope/acceptance/gaps）。
-2. 写入草案记录：
+## 1. 实施前检查（产品节点；硬门禁）
+
+1. 从 Issue 读取：当前状态、无人值守许可、需求基线版本、前置依赖、任务规格位置、优先级、定义时间。
+2. 读取本地任务规格全文。
+3. 执行机械检查：
 
 ```bash
-node "$CWF_ASSETS/cwf-record.mjs" write .agent-runs/<run_id> requirements_baseline payload.json \
-  --produced-by <本会话标识> --stage requirements
+node "$CWF_ASSETS/ai-task-preflight-check.mjs" <issue-basics快照.md> <task-spec路径> \
+  --run-baseline <Run绑定版本>
 ```
 
-   payload 必须：`outcome=baseline_ready`（或 `awaiting_human_input` + 非空 gaps 挂起）、`status=draft`。
-3. **固定人工门**：向用户呈递基线（三要素摘要）请求确认。挂起等待，AI 不代签。
-4. 用户确认后：payload 改 `status=confirmed`、补 `baseline_revision` 与 `human_confirmation{confirmed_by, confirmed_at}`，重新 `write`（覆盖记录）。
-5. 有缺口且无人可问：`outcome=awaiting_human_input` 挂起（契约 §3.1），不编造。
+4. **失败**：Issue → 执行受阻；Run → `BLOCKED`；写明原因；**停止**（不进入开发）。
+5. **通过**：
+   - Issue → 交付中；Run → `RUNNING`；
+   - 将已定义规格导入为已确认 `requirements_baseline`（`status=confirmed`，注明「定义外置导入，不再呈递基线确认门」）；
+   - 写入说明性 `design_package`：`outcome=package_ready`，摘要写明「定义阶段已外置；本包仅作证据链底物，非新的产品方案决策」——**不得**再开 design 人工决策门；
+   - 进入开发。
 
-## 2. Design（方案设计）— 契约 §3.2
+---
 
-1. 产出方案 payload：`outcome`、方案摘要、受影响模块、风险、未决问题。
-2. **条件门自检**（§5.2 四条判据）。Role 报告命中情况：
-   - 未命中 → `outcome=package_ready`，自动推进；
-   - 命中 → `outcome=decision_required` + 非空 `decision_required_reasons` + **`decision_request` 待决包**（question / options≥1 / recommendation，§5.3），挂起呈递人工。
-3. 人工裁决后：payload 补 `decision`（Decision Record：chosen 必须属于 decision_request.options）+ `outcome` 翻转为 `package_ready`，重新 `write`。
-4. 发现基线缺陷/歧义/范围变化 → `outcome=requirements_issue`，Controller 按 §4.1 回退 Requirements。
+## 2. 开发
 
-## 3. Dev（开发实现）— 契约 §3.3
+1. 只按需求基线 + 本地任务规格施工；在 Run worktree 内实施。
+2. 完成时写 `dev_handoff`（`handoff_ready` / `blocked` / `requirements_issue` 等）。
+3. 若继续施工必须改变用户体验 / 范围 / 业务规则 / 验收 / 产品风险 → **不得自行决定**；`BLOCKED：需要重新定义`（不消耗自动返工额度）。
+4. `blocked`（可恢复外部条件）→ `hold`，条件恢复后重入开发。
 
-1. 在 Run worktree 内实施（不得跨 worktree 混写）。
-2. 完成时写 dev handoff：`outcome` 必填（`handoff_ready` / `blocked` / `design_issue` / `requirements_issue`）。
-3. **blocked 协议（§6.3/§6.4）**：仅用于可恢复外部/技术条件；必须附 `blocked_reason`；Controller 路由 `hold`——记录现场、保持 run.json，条件恢复后重入本 Stage 重试（技术重试不耗额度）。
-4. `handoff_ready` 要求自验清单非空且无 fail/blocked 项（schema 强制）。
-5. 提交代码后 `write dev_handoff`（信封自动绑定真实 `current_head`）。
+---
 
-## 4. Review（独立审核）— 契约 §3.4
+## 3. 收敛审查
 
-1. **独立证明者（§2 不变量 2）**：开启**新的独立会话/子会话**执行审核（推荐不同模型路线）；`produced_by` 必须异于 dev handoff 的产生者（§8.3 第⑨项）；`independent_session=true`。
-2. 产出 review proof：`verdict` + findings（逐条 `root_cause` ∈ dev/design/requirements）+ 真实 `verified_branch`/`verified_head`。
-3. 路由（controller 判定）：
-   - `approve` → 推进 Test；
-   - `request_changes` → **单边回退**：按根因优先级选一条边（requirements > design > dev，§4.1），执行 `node "$CWF_ASSETS/cwf-record.mjs" rollback <runDir> <root_cause>`（额度记账，耗尽自动拒绝并提示升级 §4.3），带 feedback 打回目标 Stage。
+1. **独立会话**执行；`produced_by` 异于 dev；`independent_session=true`。
+2. 检查：需求完整性、范围正确性、已确认决策未被改变、质量与回归风险、是否具备测试/UAT 条件。
+3. 阻断项 = 0 → 推进测试；否则 `request_changes` → 单边回退开发（耗自动返工额度）：
 
-## 5. Test（独立测试）— 契约 §3.5
+```bash
+node "$CWF_ASSETS/cwf-record.mjs" rollback <runDir> dev
+```
 
-1. 独立会话（同 §4 独立性要求）；输入 = review approve 的 HEAD。
-2. 产出 test proof：`verdict` + `acceptance_mapping`（与基线验收标准逐条完整无重复对应）。
-3. 路由：`pass` → 推进验收；`fail` → findings 带根因 → 单边回退（同 §4）；`blocked` → `blocked_reason` 必填，`hold` 挂起。
+4. 额度耗尽（已用满 3）→ `BLOCKED` / 升级人工；保留原专业结果。
 
-## 6. Human Acceptance（人工验收）— 契约 §3.6
+> M2 交付中：需求类根因默认升级为「需要重新定义」受阻，而不是在交付链内重开需求分析会话。
 
-1. 执行 Integration Checkpoint：
+---
+
+## 4. 测试
+
+1. 独立会话；输入 = 审查通过的 HEAD。
+2. 覆盖：主路径、验收条件、边界异常、受影响已有功能、本轮修复项。
+3. `pass` → UAT 准备；`fail` → 回退开发（耗额度）→ 再审查 → 再测试；`blocked` → hold。
+
+---
+
+## 5. UAT 准备 → 等待验收
+
+1. 按 `docs/design/ai-task-define-delivery/uat-card-template.md` 生成验收卡（落盘到 run 目录，如 `uat-card.md`）。
+2. Integration Checkpoint：
 
 ```bash
 node "$CWF_ASSETS/cwf-checkpoint.mjs" .agent-runs/<run_id>
 ```
 
-   target 已前进 → 先 sync，再执行 `node "$CWF_ASSETS/cwf-record.mjs" reverify <runDir> --reason "checkpoint sync"` 推进 Proof 修订（保留原 HEAD 记录，不耗额度），重跑受影响 Proof（review/test 新 attempt 文件），再 `--proofs-rerun`。
-2. 组装 `assembled`（五类引用 + 结构化 checkpoint），`write acceptance_package`（status=awaiting_decision）。
-3. 执行 **§8.3 九项证据链校验**（机器化；引擎要求验收包已写入，故校验在组装之后）：
+3. 组装并写入 `acceptance_package`（`status=awaiting_decision`）。
+4. 证据链校验：
 
 ```bash
 node "$CWF_ASSETS/cwf-evidence-verify.mjs" .agent-runs/<run_id>
 ```
 
-   逐项输出判定；exit 非 0 即不得呈递或签收。人工知情接受（user_accepted）加 `--decision user_accepted`（②⑧ 放宽，feedback 必填说明差异；不得伪造证据）。
-4. 呈递人工。
-5. 人工裁决后回填 `status=decided` + `decision` + `decided_by/at` + `verified_branch/head`（+ reject 时 feedback/根因），重新 `write`。
-6. **reject 路由**：验收 reject ≠ 进 closeout——执行人工触发回退（不耗自动额度，§4.2）：
+5. Issue → **等待验收**；Run → **`WAITING_HUMAN`**；呈递 UAT 卡与验收包。**AI 不代签**。
+6. 无人工操作 → 保持等待（跨日从**原 Run**恢复，禁止另起丢失上下文的新 Run）。
+
+---
+
+## 6. 人工验收（严格三态）
+
+裁决前重跑 checkpoint + evidence-verify。回填 `status=decided` + `decision` + `decided_by/at` + `verified_branch/head`。
+
+| 人工结果 | `decision` | 动作 |
+|---|---|---|
+| 验收通过 | `accept` | 进入收口 |
+| 验收退回 | `reject` | 人工回退（不耗自动额度）→ 开发 → 审查 → 测试 → 新 UAT → 再 `WAITING_HUMAN`；**基线不变** |
+| 有条件通过 | `conditional_pass` | **必须** `feedback` 写优化意见 → 进入收口；优化意见进遗留/下一轮定义输入；**不改基线** |
+
+退回示例：
 
 ```bash
-node "$CWF_ASSETS/cwf-record.mjs" rollback .agent-runs/<run_id> <rejection_root_cause> \
-  --by human --decided-by <验收人> --reason "acceptance reject: <feedback 摘要>"
+node "$CWF_ASSETS/cwf-record.mjs" rollback .agent-runs/<run_id> dev \
+  --by human --decided-by <验收人> --reason "acceptance reject: <摘要>"
 ```
 
-   随后按根因回到目标 Stage 重入（实现问题回 Dev，设计问题回 Design，需求/范围回 Requirements——§4.1 根因路由表）。
+---
 
-## 7. Closeout（收口）— 契约 §3.7
+## 7. 收口
 
-1. 只整理/冻结/交付；交付清单 + 集成结果（PR/merge 至少其一）+ `acceptance_package_ref`（引用已决验收包）+ `acceptance_outcome`（保留 user_accepted 异常）+ `records_retained=true`。
-2. PR 按仓库规则创建/合并；合并后 issue 关闭与复选框勾选属收口记账。
-3. `write closeout_summary` 归档声明（交付清单 + 集成结果 + acceptance 引用 + records_retained=true）。
-4. **证据归档**（§8.5）：closeout_summary 与最终 index.json/run.json 写入后，把完整 run 证据归档到主检出（worktree 是一次性的）：
+1. 仅 `accept` / `conditional_pass` 可收口；`reject` 禁止。
+2. `closeout_summary`：`acceptance_outcome` 与验收包 `decision` 一致；`conditional_pass` 时 `leftovers` 收录优化意见。
+3. PR/合并按仓库规则；Issue → 已完成。
+4. 归档：
 
 ```bash
 node "$CWF_ASSETS/cwf-record.mjs" archive .agent-runs/<run_id>
 ```
 
-   归档后的主检出 `.agent-runs/<run_id>/` 含全部七类记录，可按 run_id 检索；此后 worktree 才可安全移除。
+---
 
 ## 通用规则
 
-- **路由动作**（§6.4）：proceed / rollback（单边、耗额度）/ await-human（挂起）/ hold（BLOCKED 恢复后重入）/ escalate（升级）。
-- **额度**（§4.2）：默认 3；review/test 打回消耗；dev 内部迭代、挂起、技术重试、人工触发均不耗；Decision 后额度变化必须显式记录。
-- **升级**（§4.4）：额度耗尽（MAX_ROUNDS_REACHED，保留原结果）与完整性违约走人工升级。
-- **禁止事项**（§5.4/§6.1/§6.5）：AI 代签、篡改结果制造 PASS、Profile 复制契约语义、Role 输出路由指令、悬空结果。
+- 路由：proceed / rollback（耗额度，上限 3）/ await-human / hold / escalate。
+- 技术重试、挂起、人工退回触发的返工：**不消耗**自动返工额度（人工退回后新一轮交付重新拥有 3 轮）。
+- 禁止：AI 代签、篡改证据制造通过、交付中重开定义/方案产品决策门、用 `user_accepted` 冒充有条件通过。

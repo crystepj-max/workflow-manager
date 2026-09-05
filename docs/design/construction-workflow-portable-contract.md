@@ -1,9 +1,20 @@
 # 建设 · 完整功能开发 Portable Contract
 
-> **版本**：**v0.1.8（2026-08-30 冻结，同日按 PR #115 Codex Review 多轮修复升 patch；§1–§6 由 #112、§7–§8 由 #113、§9 由 #114 依次落地；Run 级人工验收随 PR #115 进行）**
-> **来源**：#102（epic，A1–A5 节为本契约的决断依据）、#103（本契约的任务 issue）
+> **版本**：**v0.1.8 + M2 overlay（2026-09-05）** —— 正文七阶段证据底物仍以 v0.1.8 冻结为准；**产品可见单任务交付主链以** `docs/design/ai-task-define-delivery/single-task-delivery-m2.md` **为准（定义外置）**。
+> **来源**：#102（epic，A1–A5 节为本契约的决断依据）、#103（本契约的任务 issue）；M2 对接《AI 任务定义与批量交付 V0.1》
 > **消费者**：DSH Execution Profile（#105）、External Coding Agent Profile（#104，Codex/Cursor）
-> **纪律**：两个 Profile 只通过引用本契约工作，不得复制或分叉业务语义；本契约是 executor 中立的，只定义产品语义，不定义实现字段（实现字段由各 Profile 的 Adapter 映射）。
+> **纪律**：两个 Profile 只通过引用本契约 + M2 overlay 工作，不得复制或分叉业务语义；本契约是 executor 中立的，只定义产品语义，不定义实现字段（实现字段由各 Profile 的 Adapter 映射）。
+
+## 0.1 M2 交付模式（定义外置）
+
+当任务已由「需求分析」落成 **已定义** 并进入本 Profile 时：
+
+1. **产品可见主链**为：实施前检查 → 开发 → 收敛审查 → 测试 → UAT 验收卡 → WAITING_HUMAN → 收口；
+2. **不得**在交付中重开需求分析决策闭环或方案设计人工门；
+3. 人工验收决议仅允许 `accept` / `reject` / `conditional_pass`（废弃用 `user_accepted` 表达有条件通过）；
+4. 自动返工上限 **3**（产品拍板，`auto_rework_limit = 3`）。
+
+冲突时：`single-task-delivery-m2.md` + `public-task-contract.md` > 下文旧七阶段产品叙事（下文仍描述证据记录类型与 Proof 纪律）。
 
 ## 0. 定位
 
@@ -104,20 +115,20 @@ requirements -> design -> dev -> review -> test -> human acceptance -> closeout
 
 - **目的**：人工对交付成果做正式业务签收。这是主链上唯一的固定人工业务节点；**AI 不代签**。
 - **输入**：acceptance package——requirements baseline + design package + dev handoff + review proof + test proof（+ Integration Checkpoint 结果，规则见 §7）。
-- **输出**（人工，非 Role）：acceptance decision——accept / reject（reject 必须附 feedback 及其根因指向）。
+- **输出**（人工，非 Role）：acceptance decision——`accept` / `reject` / `conditional_pass`（M2 严格三态；`reject` 必须附 feedback 及其根因指向；`conditional_pass` 必须附优化意见 feedback）。
 - **Proof**：acceptance proof——验收人、结论、时间、verified HEAD。
 - **回退根因**：reject 按 feedback 根因路由（默认 **Dev**；暴露设计/需求问题按根因回对应 Stage）。**人工打回不消耗自动回退额度**，但计入 Run 历史。
-- **特殊语义**：人工知情接受未完全满足 baseline 的结果时，使用 `USER_ACCEPTED`（#72），不得改写 baseline 制造 PASS。
-- **完成判定**：accept（或 USER_ACCEPTED）记录落盘，产生 acceptance proof。
+- **特殊语义（M2）**：有条件通过使用 `conditional_pass`——基线已做对，优化意见留给下次定义，不改当前基线。**禁止**用历史 `USER_ACCEPTED` / `user_accepted`（知情接受未达标）冒充有条件通过。
+- **完成判定**：`accept` 或 `conditional_pass` 记录落盘，产生 acceptance proof。
 
 ### 3.7 Closeout — 收口
 
 - **目的**：只整理、冻结、交付；不重新开发、测试或审查。
 - **输入**：通过的 acceptance proof + 本 Run 全部记录。
-- **专业输出**：closeout summary——交付清单、冻结记录、**验收决议（`accept` / `user_accepted`，必须保留）**、遗留事项。
+- **专业输出**：closeout summary——交付清单、冻结记录、**验收决议（`accept` / `conditional_pass`，必须保留）**、遗留事项（有条件通过的优化意见）。
 - **Proof**：closeout summary + 最终集成结果（PR 编号 / merge commit 至少其一）。
 - **回退根因**：**无回退出口**。若发现交付物与 Proof 不符，属完整性违约，升级人工处理，不作为回退。
-- **完成判定**：交付完成，Run 归档（记录保留要求见 §7/§8）。`user_accepted` 是合法交付决议：Completion 权威事实以 closeout 保留的验收决议为准，不得把「知情接受的异常交付」洗成普通交付（对齐 #72 与 v0.1 规格 Completion Type）。
+- **完成判定**：交付完成，Run 归档（记录保留要求见 §7/§8）。`conditional_pass` 是合法交付决议：不得改当前基线，也不得洗成普通 `accept` 而丢掉优化遗留（M2 / 公共契约 §6）。
 
 ## 4. 回退与升级语义
 
@@ -219,7 +230,7 @@ requirements -> design -> dev -> review -> test -> human acceptance -> closeout
 | human acceptance | （人工）accept / reject / user-accepted |
 | closeout | delivered |
 
-两类易混结果在此明确：`blocked` 基元仅用于**可恢复的外部/技术条件**（环境不可用、Provider 额度、鉴权失效等），不是业务失败；业务性受阻必须以 `decision-required` 或根因报告表达。节点的业务 `blocked` 结果不等于 Run Lifecycle 的 `BLOCKED` 状态（对齐 workflow-design-principles §3.2/§3.3）。closeout 的 `delivered` 必须携带验收决议（`accept` / `user_accepted`），它是 Completion 的权威事实来源（§3.7）。
+两类易混结果在此明确：`blocked` 基元仅用于**可恢复的外部/技术条件**（环境不可用、Provider 额度、鉴权失效等），不是业务失败；业务性受阻必须以 `decision-required` 或根因报告表达。节点的业务 `blocked` 结果不等于 Run Lifecycle 的 `BLOCKED` 状态（对齐 workflow-design-principles §3.2/§3.3）。closeout 的 `delivered` 必须携带验收决议（`accept` / `conditional_pass`），它是 Completion 的权威事实来源（§3.7；M2）。
 
 ### 6.4 路由动作基元
 
@@ -317,8 +328,8 @@ Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, 
 - **design_package**：summary + **整体 `outcome`**（`package_ready` / `decision_required` / `requirements_issue`，§6.3 基元）+ `decision_required` 标记；门状态机两态：**命中条件门且未决 ⇒ `outcome=decision_required`**（schema 双向约束）且必须附非空 `decision_required_reasons`（§5.2）与 **`decision_request` 待决包**（question / options≥1 / recommendation，§5.3），Controller 挂起呈递该包；**人工决策记录后 ⇒ 翻转为 `package_ready`**，`decision` 与 `decision_request` 并存（裁决上下文 + 已决记录），Decision Record 仅允许出现在命中条件门的 package 上，且**已决 package 必须保留裁决时呈递的 `decision_request`，`chosen` 必须属于 `decision_request.options` 呈递候选集**（schema 强制并存，Controller 校验候选集一致性，§5.3）；`requirements_issue` 为根因上报，由 Controller 按 §4.1 路由；
 - **dev_handoff**：改动摘要 + **整体 `outcome`**（`handoff_ready` / `blocked` / `design_issue` / `requirements_issue`，§6.3 基元）+ 自验清单；`outcome=blocked` 必须附 `blocked_reason`（供 `hold(<reason>)` 路由与恢复判定）；`outcome=handoff_ready` 要求自验清单非空且无 fail/blocked 项（§3.3 完成判定）；`design_issue`/`requirements_issue` 为根因上报，由 Controller 按 §4.1 路由；
 - **review_proof / test_proof**：结论 + 逐项 findings（带根因分类 dev/design/requirements，§4.1）+ `verified_branch`/`verified_head` + `independent_session=true`（不变量 2，review 与 test 同样要求）；条件约束：`request_changes`/`fail` 必须至少含一条 finding；`pass` 必须带非空且逐项全 pass 的验收映射；`blocked` 必须带 `blocked_reason`（供 `hold(<reason>)` 路由与恢复判定，§6.4）；
-- **acceptance_package**：`assembled`（**五类前置记录引用**：baseline / design package / dev handoff / review proof / test proof + checkpoint 结果）+ 人工决策状态机（`awaiting_decision` → `decided`，两态字段互斥；`decided` 必含 `verified_branch`/`verified_head`；`reject` 必含 `feedback` 与 `rejection_root_cause`；AI 不得代签）。`assembled.integration_checkpoint` 为结构化记录：`target_ref` / `target_head_at_check` / `target_advanced` / `proofs_state`（`target_advanced=true` ⇒ `proofs_state=rerun_completed`，§7.3 可机检）。Controller 在**呈递或签收前**必须校验证据链：① 各引用记录 `record_type` 与产生 Stage 正确；② 普通 `accept` 要求 review `verdict=approve` 且 test `verdict=pass`；**`user_accepted` 例外**——允许携带 fail/blocked 证据链知情接受，但必须附 `feedback` 说明接受的差异（§3.6 特殊语义，不得伪造测试证据）；③ 全部引用同 Run / 同 workspace lineage（标识字段非空才可比较）；④ 各 Proof `verified_head` 与当前 HEAD 一致（否则按 §7.3 重跑）；⑤ 引用 baseline `status=confirmed` 且无残留 gaps；⑥ 引用 design `outcome=package_ready`（命中过条件门的必须已带 Decision Record 与呈递时的 `decision_request`，且 `chosen` 属于呈递候选集）；⑦ 引用 dev `outcome=handoff_ready`；⑧ test `acceptance_mapping` 与引用 baseline 的验收标准逐条**完整且无重复**对应（防漏测项；`user_accepted` 场景下该项为「完整映射 + 已知差异说明」）；⑨ 引用 review/test 的 `produced_by` 必须与引用 dev handoff 的 `produced_by` 不同（§2 不变量 2 的机器可校验形式，配合各自 `independent_session=true`）——任一不满足即不得呈递或签收；
-- **closeout_summary**：交付清单 + 集成结果（PR / merge commit 至少其一）+ **`acceptance_package_ref`（必须指向已 `decided` 的验收包）** + `acceptance_outcome`（保留 `user_accepted` 异常到收口）+ `records_retained=true`。Controller 归档前双重校验：① 引用包 `status=decided`；② 引用包 `decision` ∈ {`accept`, `user_accepted`} 且与 `acceptance_outcome` 一致——引用包 `decision=reject` 时**不得归档**，按 §3.6 打回根因路由。
+- **acceptance_package**：`assembled`（**五类前置记录引用**：baseline / design package / dev handoff / review proof / test proof + checkpoint 结果）+ 人工决策状态机（`awaiting_decision` → `decided`，两态字段互斥；`decided` 必含 `verified_branch`/`verified_head`；`reject` 必含 `feedback` 与 `rejection_root_cause`；AI 不得代签）。`assembled.integration_checkpoint` 为结构化记录：`target_ref` / `target_head_at_check` / `target_advanced` / `proofs_state`（`target_advanced=true` ⇒ `proofs_state=rerun_completed`，§7.3 可机检）。Controller 在**呈递或签收前**必须校验证据链：① 各引用记录 `record_type` 与产生 Stage 正确；② `accept` 与 `conditional_pass` 均要求 review `verdict=approve` 且 test `verdict=pass`；`conditional_pass` 另须 `feedback` 记录优化意见（M2；**禁止**用历史 `user_accepted`/未达标知情接受冒充有条件通过）；③ 全部引用同 Run / 同 workspace lineage（标识字段非空才可比较）；④ 各 Proof `verified_head` 与当前 HEAD 一致（否则按 §7.3 重跑）；⑤ 引用 baseline `status=confirmed` 且无残留 gaps；⑥ 引用 design `outcome=package_ready`（命中过条件门的必须已带 Decision Record 与呈递时的 `decision_request`，且 `chosen` 属于呈递候选集）；⑦ 引用 dev `outcome=handoff_ready`；⑧ test `acceptance_mapping` 与引用 baseline 的验收标准逐条**完整且无重复**对应（防漏测项；`user_accepted` 场景下该项为「完整映射 + 已知差异说明」）；⑨ 引用 review/test 的 `produced_by` 必须与引用 dev handoff 的 `produced_by` 不同（§2 不变量 2 的机器可校验形式，配合各自 `independent_session=true`）——任一不满足即不得呈递或签收；
+- **closeout_summary**：交付清单 + 集成结果（PR / merge commit 至少其一）+ **`acceptance_package_ref`（必须指向已 `decided` 的验收包）** + `acceptance_outcome`（`accept` / `conditional_pass`）+ `records_retained=true`。Controller 归档前双重校验：① 引用包 `status=decided`；② 引用包 `decision` ∈ {`accept`, `conditional_pass`} 且与 `acceptance_outcome` 一致——引用包 `decision=reject` 时**不得归档**，按 §3.6 打回根因路由。
 
 ### 8.4 Schema、示例与机械校验
 

@@ -635,8 +635,8 @@
           }
         },
         "decision": {
-          "description": "人工决策，AI 不得代签（契约 §3.6）",
-          "enum": ["accept", "reject", "user_accepted"]
+          "description": "人工验收严格三态（M2 / 公共契约 §6）：accept=通过、reject=退回、conditional_pass=有条件通过（基线已做对，优化进下一轮定义）。禁止再用 user_accepted 表达有条件通过。",
+          "enum": ["accept", "reject", "conditional_pass"]
         },
         "decided_by": { "$ref": "#/definitions/nonEmptyText" },
         "decided_at": { "$ref": "#/definitions/isoDateTime" },
@@ -686,10 +686,10 @@
         {
           "if": {
             "required": ["decision"],
-            "properties": { "decision": { "const": "user_accepted" } }
+            "properties": { "decision": { "const": "conditional_pass" } }
           },
           "then": {
-            "description": "user_accepted 必须以 feedback 说明知情接受的差异（契约 §3.6 特殊语义）",
+            "description": "有条件通过必须以 feedback 记录优化意见，供下一轮定义摄入（公共契约 §6；不修改当前基线）",
             "required": ["feedback"]
           }
         }
@@ -721,8 +721,8 @@
         },
         "leftovers": { "type": "array", "items": { "$ref": "#/definitions/nonEmptyText" } },
         "acceptance_outcome": {
-          "description": "保留验收决议：user_accepted 异常必须延续到收口，作为 Completion 权威事实，不得洗成普通交付（契约 §3.7/§6.3）",
-          "enum": ["accept", "user_accepted"]
+          "description": "收口保留的验收决议：accept 或 conditional_pass（有条件通过的优化意见须在 leftovers/feedback 可追溯；不得洗成普通 accept）",
+          "enum": ["accept", "conditional_pass"]
         },
         "records_retained": {
           "description": "归档保留声明（契约 §8.5）",
