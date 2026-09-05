@@ -7,6 +7,8 @@ description: "在 DSH 会话中驱动「建设 · 完整功能开发」Bootstrap
 
 本 skill 是**建设工作流 Portable Contract**（`docs/design/construction-workflow-portable-contract.md`，版本以文档头为准）的 DSH Bootstrap 执行 Profile。
 
+> **M1 预留（定义外置）**：产品目标是「需求分析」先产出「已定义」，建设交付再从已定义开工。过渡说明见 `docs/design/ai-task-define-delivery/construction-bridge-m1.md`。**本 Profile 主链尚未跳过 requirements 阶段**（属 M2）；自动返工额度保持 **3**（产品拍板）。
+
 > **语义纪律（契约 §9.2）**：业务语义的唯一来源是契约文档；本 skill 只做驱动纪律与工具映射，**不复制契约正文语义**。下文引用契约小节锚点（如 §3.4）时，以契约文档为权威。
 
 ## 自包含内容
