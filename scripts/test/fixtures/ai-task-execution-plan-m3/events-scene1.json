@@ -1,0 +1,17 @@
+[
+  {
+    "op": "release",
+    "taskId": "A",
+    "to": "WAITING_HUMAN"
+  },
+  {
+    "op": "release",
+    "taskId": "B",
+    "to": "WAITING_HUMAN"
+  },
+  {
+    "op": "release",
+    "taskId": "C",
+    "to": "COMPLETED"
+  }
+]

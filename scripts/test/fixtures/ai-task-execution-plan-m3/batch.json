@@ -1,0 +1,21 @@
+{
+  "name": "m3-scene-1",
+  "maxConcurrency": 2,
+  "candidates": [
+    {
+      "id": "A",
+      "issueBasics": "A/issue-basics.md",
+      "taskSpec": "A/task-spec-V1.md"
+    },
+    {
+      "id": "B",
+      "issueBasics": "B/issue-basics.md",
+      "taskSpec": "B/task-spec-V1.md"
+    },
+    {
+      "id": "C",
+      "issueBasics": "C/issue-basics.md",
+      "taskSpec": "C/task-spec-V1.md"
+    }
+  ]
+}
