@@ -48,15 +48,52 @@ const deps = field(issue, '前置依赖')
 const specLoc = field(issue, '任务规格位置')
 const priority = field(issue, '优先级')
 const definedAt = field(issue, '定义时间')
+const envGroup = field(issue, '施工环境组')
+const envRole = field(issue, '施工环境角色')
+
+let envStore = null
+const esIdx = args.indexOf('--env-store')
+if (esIdx >= 0) envStore = args[esIdx + 1]
 
 if (status !== '已定义') fail(`当前状态必须为「已定义」，实际：${status ?? '（缺失）'}`)
 if (unattended !== '允许') fail(`无人值守许可必须为「允许」，实际：${unattended ?? '（缺失）'}`)
 if (!baseline || !/^V\d+$/i.test(baseline)) fail(`需求基线版本缺失或非法：${baseline ?? '（缺失）'}`)
 if (!deps || deps === '') fail('前置依赖缺失')
-else if (deps !== '无') fail(`V0.1 要求前置依赖为「无」才可自动交付，实际：${deps}`)
+if (!envGroup) fail('施工环境组缺失')
+if (!envRole) fail('施工环境角色缺失')
+else if (!/^(独立|成员|root|member|independent)$/i.test(envRole)) {
+  fail(`施工环境角色须为「独立」或「成员」，实际：${envRole}`)
+}
 if (!priority || !/^P[012]$/.test(priority)) fail(`优先级必须为 P0/P1/P2，实际：${priority ?? '（缺失）'}`)
 if (!definedAt) fail('定义时间缺失')
 if (!specLoc) fail('任务规格位置缺失')
+
+// 可选：联调环境组串行门禁（不创建 Git）
+if (envStore && failures.length === 0) {
+  const { planDeliveryWorkspace, loadEnv, parseDeps, normalizeRole } = await import('./ai-task-workspace-env.mjs')
+  const taskId =
+    field(issue, '任务标识') ||
+    path.basename(path.dirname(specPath)) ||
+    'task'
+  let roleNorm
+  try {
+    roleNorm = normalizeRole(envRole)
+  } catch (e) {
+    fail(String(e.message || e))
+    roleNorm = null
+  }
+  if (roleNorm) {
+    const existing = loadEnv(path.resolve(envStore), envGroup)
+    const plan = planDeliveryWorkspace({
+      taskId,
+      envId: envGroup,
+      role: envRole,
+      deps: parseDeps(deps),
+      existingEnv: existing,
+    })
+    if (plan.action === 'block') fail(plan.reason)
+  }
+}
 
 const specVersion =
   field(spec, '需求基线版本') ||
@@ -111,11 +148,13 @@ const result = {
   status: '已定义',
   baseline,
   unattended_permission: '允许',
-  dependencies: '无',
+  dependencies: deps,
+  workspace_env: envGroup,
+  workspace_role: envRole,
   priority,
   spec_path: specPath,
   auto_rework_limit: 3,
-  next: '开发',
+  next: '解析施工环境 → 开发',
 }
 console.log(JSON.stringify(result, null, 2))
 process.exit(0)

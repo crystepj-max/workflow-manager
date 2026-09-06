@@ -24,21 +24,32 @@ node "$CWF_ASSETS/cwf-run-init.mjs" <issue编号> <run_id>
 
 ## 1. 实施前检查（产品节点；硬门禁）
 
-1. 从 Issue 读取：当前状态、无人值守许可、需求基线版本、前置依赖、任务规格位置、优先级、定义时间。
+1. 从 Issue 读取：当前状态、无人值守许可、需求基线版本、前置依赖、施工环境组、施工环境角色、任务规格位置、优先级、定义时间。
 2. 读取本地任务规格全文。
 3. 执行机械检查：
 
 ```bash
 node "$CWF_ASSETS/ai-task-preflight-check.mjs" <issue-basics快照.md> <task-spec路径> \
-  --run-baseline <Run绑定版本>
+  --run-baseline <Run绑定版本> \
+  [--env-store <环境组登记目录>]
 ```
 
 4. **失败**：Issue → 执行受阻；Run → `BLOCKED`；写明原因；**停止**（不进入开发）。
-5. **通过**：
+5. **通过后解析施工环境**（批量调度不得代劳）：
+
+```bash
+node "$CWF_ASSETS/ai-task-workspace-env.mjs" resolve \
+  --store <环境组登记目录> --task <任务标识> --env <施工环境组> \
+  --role <独立|成员> --deps <无|依赖列表> [--repo <仓>] [--work-root <根>]
+```
+
+   - 角色「独立」→ 新建分支 + 独立工作区并登记环境组；
+   - 角色「成员」→ 沿用同组现场（前置未完成则受阻，串行等待）。
+6. 环境就绪后：
    - Issue → 交付中；Run → `RUNNING`；
    - 将已定义规格导入为已确认 `requirements_baseline`（`status=confirmed`，注明「定义外置导入，不再呈递基线确认门」）；
    - 写入说明性 `design_package`：`outcome=package_ready`，摘要写明「定义阶段已外置；本包仅作证据链底物，非新的产品方案决策」——**不得**再开 design 人工决策门；
-   - 进入开发。
+   - 进入开发（之后全部工作在该工作区内进行）。
 
 ---
 
@@ -119,6 +130,14 @@ node "$CWF_ASSETS/cwf-record.mjs" rollback .agent-runs/<run_id> dev \
 
 1. 仅 `accept` / `conditional_pass` 可收口；`reject` 禁止。
 2. `closeout_summary`：`acceptance_outcome` 与验收包 `decision` 一致；`conditional_pass` 时 `leftovers` 收录优化意见。
+3. 本任务标记环境组完成，并仅在**同组全部完成**时清理工作区：
+
+```bash
+node "$CWF_ASSETS/ai-task-workspace-env.mjs" mark-completed \
+  --store <环境组登记目录> --env <施工环境组> --task <任务标识>
+node "$CWF_ASSETS/ai-task-workspace-env.mjs" maybe-cleanup \
+  --store <环境组登记目录> --env <施工环境组>
+```
 3. PR/合并按仓库规则；Issue → 已完成。
 4. 归档：
 

@@ -33,8 +33,8 @@ description: "在 DSH 会话中驱动「建设 · 完整功能开发」单任务
 
 | 脚本 | 用途 |
 |---|---|
-| `scripts/ai-task-preflight-check.mjs` | 实施前检查（已定义 / 无人值守 / 版本一致 / 无前置依赖） |
-| `scripts/cwf-run-init.mjs` | Run 引导：分支 + worktree + run 目录 |
+| `scripts/ai-task-preflight-check.mjs` | 实施前检查（已定义 / 无人值守 / 版本一致 / 施工环境组与角色） |
+| `scripts/ai-task-workspace-env.mjs` | 单任务启动：新建或沿用分支/工作区；全员验收通过后再清理 || `scripts/cwf-run-init.mjs` | Run 引导：分支 + worktree + run 目录 |
 | `scripts/cwf-record.mjs` | 证据记录 + 返工额度记账 |
 | `scripts/cwf-checkpoint.mjs` | Integration Checkpoint |
 | `scripts/cwf-validate.mjs` | 交接包 schema 校验 |
