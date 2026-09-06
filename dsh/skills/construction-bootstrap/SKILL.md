@@ -4,6 +4,8 @@ description: "在 DSH 会话中驱动「建设 · 完整功能开发」单任务
 ---
 
 # 建设 · 完整功能开发 · 单任务交付（M2）
+> 本 Skill 属「AI 任务交付」集合（见 `docs/design/ai-task-define-delivery/skill-set.md`）；通用副本同步至 my-agent-skills。
+
 
 本 skill 是**建设工作流**的 DSH Bootstrap 执行 Profile，产品主链以 **AI 任务定义与批量交付 V0.1 / M2** 为准：
 

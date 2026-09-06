@@ -67,8 +67,8 @@ node --test scripts/test/ai-task-deliver-m2.test.mjs scripts/test/cwf-validate.t
 
 建议 M3：Execution Plan（候选筛选、快照、并发、补位、批次汇总）；勿在单任务未 dogfood 前放大批量。
 
-## 落点说明（拆刀后）
+## 落点说明（skill 集合）
 
-- 定义能力（M1）正本在 **my-agent-skills**；本 PR **不含** `requirements-analysis` Skill 升级。
-- 本仓库仅保留：公共契约、单任务交付主链、建设入口改造、可视化「完整功能开发」蓝图、实施前检查与验收三态接线。
-- `scripts/test/fixtures/ai-task-define-m1/` 仅为「已定义」示例夹具，供实施前检查机械验收，不是定义 Skill。
+- **M1 / M2 / M3** 构成同一套 skill 集合，工程真源在 **workflow-manager**（见 `docs/design/ai-task-define-delivery/skill-set.md`）。
+- **M2** 的可视化真源是内置模板「完整功能开发」；配套启动说明与 M1、M3 一并保存在本仓库，并同步到 **my-agent-skills**。
+- 示例夹具仅供「已定义」检查与机械验收，不是第二套定义入口。
