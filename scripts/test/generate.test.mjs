@@ -44,10 +44,14 @@ test('S2 生成器：vwf-dsl 注入模型绑定（bindings 编译期固化）', 
   assert.equal(accept.manualCheck, true);
 });
 
-test('S2 生成器：业务规则字段进 vwf DSL，节点级 verifyBranch 保持往返契约', () => {
+test('S2 生成器：业务规则字段进 vwf DSL（候选二 Q7 修订），节点级 verifyBranch 随 DSL 往返', () => {
   const { files } = generateAll(tplDir);
   const dsl = JSON.parse(files.get('dev-workflow-2-0/vwf-dsl.json'));
-  assert.equal(dsl.nodes.find((n) => n.id === 'review').verifyBranch, true, 'verifyBranch 节点级字段必须进入 DSL');
+  const bp = JSON.parse(readFileSync(path.join(tplDir, 'dev-workflow-2-0.json'), 'utf8'));
+  const gated = bp.nodes.filter((n) => n.verifyBranch).map((n) => n.id);
+  assert.ok(gated.length >= 1, '夹具须含 verifyBranch 节点');
+  assert.deepEqual(dsl.nodes.filter((n) => n.verifyBranch).map((n) => n.id), gated,
+    'verifyBranch 必须进 DSL：否则内置模板在编辑器另存后可信度闸门静默丢失');
   assert.equal(dsl.onMaxRounds, 'auto-reschedule', 'onMaxRounds 业务规则进 DSL（前端可配置）');
   assert.equal(dsl.heteroCheck, true, 'heteroCheck 业务规则进 DSL（前端可配置）');
   assert.equal(dsl.control.maxRounds, 9);
@@ -340,6 +344,19 @@ test('S4 内置角色清单：单一事实源为 manifest（dsh/roles/builtin-ro
   } finally {
     fs.unlinkSync(tmp)
   }
+})
+
+test('compile --inline：从参数读取蓝图并输出 JSON 译文', () => {
+  const mini = {
+    id: 'inline-mini', displayName: '内联编译', entry: 'n1',
+    nodes: [{ id: 'n1', profile: 'dev', label: '开发', goal: 'g' }],
+    edges: [{ from: 'n1', to: '$end', on: 'success' }],
+  }
+  const out = execFileSync(process.execPath, [path.join(here, '../generate.mjs'), 'compile', '--inline', JSON.stringify(mini)], { encoding: 'utf8' })
+  const parsed = JSON.parse(out)
+  assert.equal(parsed.ok, true)
+  assert.ok(typeof parsed.script === 'string' && parsed.script.includes('n1'), '内联编译产出脚本')
+  assert.equal(parsed.meta.name, 'vwf-inline-mini')
 })
 
 test('S7 #93：编译脚本注入 workspace 默认 args 与 SOURCE cwd', () => {

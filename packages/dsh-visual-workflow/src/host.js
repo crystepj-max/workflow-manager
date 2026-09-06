@@ -1,127 +1,88 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// visual-workflow · HOST 半（pkg-20，编辑模块 Gold-Band 对齐版）
+// visual-workflow · HOST 半
 //
-// 基于 pkg-19 host 改造：
-//  - 校验收敛进统一内核 scripts/validate-core.cjs（候选二 T-IMP-13）：结构层
-//    （入口拓扑推导 / $end 必须 / 悬空节点 / 保留 id / 成功表达式路径落在
-//    output.schema 内 / 边来源目标与类型 / when 仅 success / failure 唯一 /
-//    多 success 出边必须全部带 when / success 环检测 / 走通性 / maxRounds 1-9）
-//    + 蓝图业务规则层（异源硬规则 / requireModels 产品收紧）；经 fs 读源码、
-//    vm 内求值缓存（热路径内存执行）。原 validateDsl / heteroCheck / 拓扑推导
-//    已删除。校验结果带 fieldErrors（node:<id>:<field> / edge:<i>:<field> /
-//    control:<field>）供编辑面板逐字段标红。
-//  - sanitizeDsl：保存前清洗（entry 依内核拓扑归一、failure 边剔除 when、空白修整），
-//    对应 Gold-Band 的 sanitizedWorkflow。
-//  - 新增 vwf.roles RPC：列出工作区 dsh/roles/*.md 角色（fs 服务，多形态兜底），
-//    供节点表单的角色选择器使用（对应 Gold-Band 的 ProfilePicker 数据源）。
-//  - 保留 pkg-19 全部 RPC（workflows.list/save/remove、validate、compile、
-//    script、state、models）与 wf_run 工具、运行状态跟踪。
+// 职责只有三件事：RPC 面（模板库 / 校验 / 编译 / 角色库 / 运行状态 / 工作区）、
+// 工具（wf_run / vwf_workspace / vwf_debug）、运行记录。业务内核全部在仓库
+// scripts/ 中，构建时复制进插件 dist/，运行时只从这一处加载——不在运行时猜路径。
 //
-// T-IMP-06（双根加载 + 用户模板落盘闭环，FR-2/FR-3，AC-2/AC-3）：
-//  - 废除硬编码 TEMPLATES（L29-74）→ 目录加载：内置 = <repo>/.generated/<id>/vwf-dsl.json
-//    （生成物，CI 先 npm run generate）+ ~/.dsh/.generated（syncBuiltins 同步，会话无关）；
-//    用户 = ~/.dsh/visual-workflow/templates/<id>.json（蓝图 JSON）。
-//  - 历史两套 `default-workflow` / `dev-workflow-2-0` 已迁为 Custom Workflow：仍从
-//    .generated 出现在模板库，但 builtin=false，可保存覆盖、可删除（删除后写
-//    ~/.dsh/visual-workflow/removed/<id> 删除标记，避免生成物再次出现）。
-//  - list 合并双根（builtin 标志 + id 字母序），用户条目 dsl = 蓝图→vwf DSL 投影
-//    （经 scripts/projection-core.cjs 投影，与生成器共享同一份字段契约）；用户覆盖优先于同 id 生成物。
-//  - save：结构+异源校验 → 撞名拒绝（正式内置只读 / 当前编辑 id ≠ 目标 → 改名提示）→
-//    逆投影蓝图落盘 → spawn 生成器 user 子命令同步自包含 skill 到 ~/.dsh/skills/<id>/
-//    （save 即闭环；生成失败回滚落盘，保持原子）。save 新增参数 currentId。
-//  - remove：用户模板与已迁出的历史模板可删（删蓝图 + 同步删 skill 目录）；正式内置拒绝。
-//  - findWorkflow：用户覆盖优先，其次未删除的历史生成物，再次正式内置。
-// T-IMP-07（异源接入，FR-8，AC-8）：save 与 vwf.validate 叠加内联异源硬规则
-//  （有 dev+review 节点 → 缺绑定拒 / 完全同模型拒 / 弱异源警告），与引擎
-//  校验内核 validate-core.cjs 规则 7 行为一致（候选二统一）。
-// T-IMP-12（候选一：统一编译器）：compileDsl 已删除——单一编译器 =
-//  scripts/generate.mjs compileBlueprint；宿主经管道取译文：内置模板读
-//  .generated/<id>/script.mjs、用户模板读 ~/.dsh/skills/<id>/script.mjs（磁盘优先，
-//  含蓝图全部增强），临时图/编辑器实时查看走 CLI `generate.mjs compile` 兜底。
-//  vwf.compile RPC 随之删除（仅测试在用）；vwf.script 返回统一译文。
-//
-// 运行形态：动态插件（cordis_define code.host）——plain JS、无 import，
-// 服务经 ctx.get 获取并判空。vm 沙箱无 process/env：仓库根优先取发起 agent
-// 会话 cwd（apply 时捕获），兜底 sandboxPolicy.workspaceRoot；DSH home
-// （~/.dsh）经子进程引导一次（os.homedir）；用户目录写入显式传
-// danger-full-access 策略（宿主数据根不受会话 workspace-write 沙箱约束）；
-// fs 服务无删除能力，remove 经子进程 rm。
+// 运行约束（真机验证过的硬约束）：
+//  - 动态插件跑在 vm 沙箱：plain JS、无 import/require/process/真定时器；
+//    服务经 ctx.get 获取并判空；__VWF_PLUGIN_ROOT__ / __VWF_REPO_ROOT__ 由
+//    构建产物注入（静态 bundle 经 import.meta.url，动态版本经文件头常量）。
+//  - fs 服务没有删除能力：删除经子进程 `node -e fs.rmSync`；写入 ~/.dsh 等宿主数据根
+//    必须显式传 danger-full-access 策略。
+//  - 宿主可能注入 NODE_OPTIONS（如 WorkBuddy safe-delete 钩子拦截 rmSync）：子进程一律清掉。
+//  - 两个根是两回事：代码根（插件/内核/生成器所在，构建期已知）与项目根（发起
+//    agent 的会话工作区，仅模型发起的调用中可见，需实时探测）。
 // ─────────────────────────────────────────────────────────────────────────────
 return {
   name: 'visual-workflow-host',
   apply(ctx) {
     const engine = ctx.get('workflowEngine')
     const agents = ctx.get('agents')
-    let fs = ctx.get('fs')
     const sp = ctx.get('sandboxPolicy')
+    let fs = ctx.get('fs')
     let subprocess = ctx.get('subprocess')
+    // 服务可能晚于 apply 注入（静态组合包仅等待 webServer/tools/subprocess）：每次入口重取一次
+    const refreshServices = () => {
+      if (fs === undefined) fs = ctx.get('fs')
+      if (subprocess === undefined) subprocess = ctx.get('subprocess')
+    }
+    const log = (m) => console.log('[vwf] ' + m)
+    const errMsg = (e) => String((e && e.message) || e)
+    const fail = (message, at) => ({ ok: false, errors: [{ at: at || '$', message: message }] })
+    const isMissingErr = (e) => /ENOENT|no such file|not exist|不存在/i.test(errMsg(e))
+    const byId = (a, b) => (a < b ? -1 : a > b ? 1 : 0)
 
-    // ── 双模式 RPC 注册（动态会话=harness.handle / 静态 bundle=webServer 路由）──
-    // 动态插件运行时提供 harness 内建；静态组合包没有，改经 webServer 前缀路由
-    // （POST /dsh-visual-workflow/<method>，信封 {rpcId,method,payload}→{rpcId,result}）
-    // 必须用 typeof 探测未声明标识符：静态 IIFE / Minke 无 harness 全局，直接读会 ReferenceError。
+    // ── 双模式注册：动态会话 = harness.handle；静态组合包 = webServer 前缀路由 ──
+    // 必须用 typeof 探测未声明标识符：静态 IIFE 无 harness 全局，直接读会 ReferenceError。
     const isDynamicHost = typeof harness !== 'undefined'
     const rpcRoutes = new Map()
     function registerRpc(method, fn) {
-      rpcRoutes.set(method, fn)
-      if (isDynamicHost) { harness.handle(method, fn); return }
+      const wrapped = async (a) => { refreshServices(); return fn(a || {}) }
+      rpcRoutes.set(method, wrapped)
+      if (isDynamicHost) harness.handle(method, wrapped)
     }
-    // 工具定义/注册双模式：动态=harness.defineTool/registerTool；静态=ctx.tools + 平台 defineTool
     const dtools = {
       define(t) {
         if (isDynamicHost && typeof harness.defineTool === 'function') return harness.defineTool(t)
         if (typeof defineTool === 'function') return defineTool(t)
         return t
       },
-      register(ctx2, t) {
-        if (isDynamicHost && typeof harness.registerTool === 'function') { harness.registerTool(ctx2, t); return }
-        const tools = ctx2.get('tools')
-        if (tools && typeof tools.register === 'function') {
-          if (ctx2 && typeof ctx2.effect === 'function') {
-            ctx2.effect(() => tools.register(t), 'vwf: tool ' + (t && t.name))
-          } else {
-            tools.register(t)
-          }
-        } else console.log('[vwf] tools 服务缺失，工具未注册：' + (t && t.name))
+      register(t) {
+        if (isDynamicHost && typeof harness.registerTool === 'function') { harness.registerTool(ctx, t); return }
+        const tools = ctx.get('tools')
+        if (!tools || typeof tools.register !== 'function') { log('tools 服务缺失，工具未注册：' + t.name); return }
+        if (typeof ctx.effect === 'function') ctx.effect(() => tools.register(t), 'vwf: tool ' + t.name)
+        else tools.register(t)
       },
     }
 
-    // ── 双根模板存储（T-IMP-06）────────────────────────────────────────────
-    // 路径来源：repo 根优先 = 发起 agent 会话 cwd（会话工作区即仓库根）。
-    // currentInitiator 仅在模型发起的调用中存在——浏览器审批触发的激活
-    // （apply 时）与客户端 RPC 调用都没有，因此每次调用实时探测，并把任何
-    // 有 initiator 的调用记录为 knownCwd 兜底；最后才落 sandboxPolicy
-    // workspaceRoot（部署默认 process.cwd()）。
-    // DSH home = 实际 DSH_HOME（开发 ~/.dsh-workflow-dev / 自定义产品 Home），
-    // 禁止无条件推导 os.homedir()+/.dsh（会污染产品 Home）。
-    function sessionCwd() {
-      try {
-        if (agents === undefined || typeof agents.currentInitiator !== 'function') return null
-        const a = agents.currentInitiator()
-        const cwd = a && a.session && a.session.header && a.session.header.cwd
-        return typeof cwd === 'string' && cwd ? cwd : null
-      } catch (e) { return null }
-    }
-    let knownCwd = sessionCwd()
-    function repoRoot() {
-      const live = sessionCwd()
-      if (live) { knownCwd = live; return live }
-      if (knownCwd) return knownCwd
-      if (sp && typeof sp.workspaceRoot === 'string' && sp.workspaceRoot) return sp.workspaceRoot
-      return null
-    }
-    // 静态 bundle 注入 __VWF_REPO_ROOT__；历史动态 loader 注入 __VWF_REPO__。
-    function injectedRepoRoot() {
-      if (typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) return __VWF_REPO_ROOT__
-      if (typeof __VWF_REPO__ === 'string' && __VWF_REPO__) return __VWF_REPO__
-      return null
-    }
+    // ── 根路径 ────────────────────────────────────────────────────────────────
     function parentDir(dir) {
-      if (!dir || dir === '/') return null
-      const trimmed = String(dir).replace(/\/+$/, '')
+      const trimmed = String(dir || '').replace(/\/+$/, '')
       const slash = trimmed.lastIndexOf('/')
-      if (slash <= 0) return null
-      return trimmed.slice(0, slash)
+      return slash > 0 ? trimmed.slice(0, slash) : null
+    }
+    const PLUGIN_ROOT = (typeof __VWF_PLUGIN_ROOT__ === 'string' && __VWF_PLUGIN_ROOT__) ? __VWF_PLUGIN_ROOT__ : null
+    const CODE_ROOT = (typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__)
+      ? __VWF_REPO_ROOT__
+      : (PLUGIN_ROOT ? parentDir(parentDir(PLUGIN_ROOT)) : null)
+    const DIST = PLUGIN_ROOT ? PLUGIN_ROOT + '/dist' : null
+    const GENERATOR = CODE_ROOT ? CODE_ROOT + '/scripts/generate.mjs' : null
+    const WS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/workspace-isolation-host.mjs' : null
+
+    // 项目根：会话 cwd 只在模型发起的调用中存在（浏览器 RPC / 审批激活都没有），
+    // 因此每次实时探测，记住最近一次有效值，最后兜底 sandboxPolicy.workspaceRoot。
+    let knownCwd = null
+    function projectRoot() {
+      try {
+        const a = agents && typeof agents.currentInitiator === 'function' ? agents.currentInitiator() : null
+        const cwd = a && a.session && a.session.header && a.session.header.cwd
+        if (typeof cwd === 'string' && cwd) knownCwd = cwd
+      } catch (e) { /* 无会话 */ }
+      if (knownCwd) return knownCwd
+      return (sp && typeof sp.workspaceRoot === 'string' && sp.workspaceRoot) ? sp.workspaceRoot : null
     }
 
     let nodePathPromise = null
@@ -134,232 +95,140 @@ return {
       }
       return nodePathPromise
     }
-
-    // spawn node <args>，收集输出；返回 { ok, stdout, detail }
+    // spawn node <args>；返回 { ok, stdout, detail }
     async function runNode(args, opts) {
+      const o = opts || {}
       const node = await resolveNode()
       if (!node) return { ok: false, detail: '子进程服务不可用（node 解析失败）' }
       try {
         const handle = subprocess.spawn({
           argv: [node].concat(args || []),
-          cwd: (opts && opts.cwd) || repoRoot() || '/',
-          // 移除宿主注入的 NODE_OPTIONS（如 WorkBuddy genie-safe-delete 的
-          // --require 钩子会拦截 fs.rmSync 并抛 SAFE_DELETE_BULK_CONFIRM_REQUIRED，
-          // 导致 remove 的 rm 子进程失败；插件自己的脚本不需要该钩子）
-          env: Object.assign({ NODE_OPTIONS: undefined }, (opts && opts.env) || {}),
-          stdio: {
-            stdin: 'ignore',
-            stdout: { maxBytes: (opts && opts.maxBytes) || 64 * 1024 },
-            stderr: { maxBytes: (opts && opts.maxBytes) || 64 * 1024 },
-          },
-          graceMs: (opts && opts.graceMs) || 30000,
+          cwd: o.cwd || CODE_ROOT || projectRoot() || '/',
+          env: Object.assign({ NODE_OPTIONS: undefined }, o.env || {}),
+          stdio: { stdin: 'ignore', stdout: { maxBytes: o.maxBytes || 64 * 1024 }, stderr: { maxBytes: o.maxBytes || 64 * 1024 } },
+          graceMs: o.graceMs || 30000,
         })
         const outcome = await handle.done
-        const readerText = (r) => { if (!r) return ''; const rd = r.readFrom(0); return rd ? rd.text : '' }
-        const stdout = readerText(handle.collected.stdout)
-        const stderr = readerText(handle.collected.stderr)
-        if (outcome.exitCode !== 0) {
-          return { ok: false, detail: ((stderr || stdout) || ('exit ' + outcome.exitCode)).trim().slice(0, 500) }
-        }
+        const text = (r) => { if (!r) return ''; const rd = r.readFrom(0); return rd ? rd.text : '' }
+        const stdout = text(handle.collected.stdout)
+        const stderr = text(handle.collected.stderr)
+        if (outcome.exitCode !== 0) return { ok: false, detail: ((stderr || stdout) || ('exit ' + outcome.exitCode)).trim().slice(0, 500) }
         return { ok: true, stdout: stdout, stderr: stderr }
-      } catch (e) {
-        return { ok: false, detail: String((e && e.message) || e) }
-      }
+      } catch (e) { return { ok: false, detail: errMsg(e) } }
     }
+    const rm = (path) => runNode(['-e', "require('fs').rmSync(process.argv[1],{recursive:true,force:true})", path])
 
+    // DSH Home：显式 DSH_HOME 是宿主事实，直接采用；vm 沙箱无 process 时经子进程探测一次。
     let dshHomePromise = null
-    function hostProcessDshHome() {
-      // 动态 vm 可能无 process；静态/测试宿主有。仅当值是非空字符串才采用。
-      try {
-        if (typeof process !== 'undefined' && process && process.env && typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME) {
-          return process.env.DSH_HOME
-        }
-      } catch (e) { /* vm 无 process */ }
-      return null
-    }
     function dshHome() {
       if (!dshHomePromise) {
         dshHomePromise = (async () => {
-          // 优先实际 DSH_HOME：开发 DSH（npm run dev:plugin）与自定义产品 Home
-          // 都写在该变量里。子进程 -e 必须读取它，不能无条件 os.homedir()+/.dsh，
-          // 否则 workspace 会落到产品 ~/.dsh/workspaces（Codex Round 3）。
-          const injected = hostProcessDshHome()
-          // 明确注入的 DSH_HOME 是宿主事实，必须直接采用。此前先信任 probe 输出，
-          // 当 subprocess 未继承 env 覆盖时 probe 成功返回 ~/.dsh，反而覆盖开发
-          // ~/.dsh-workflow-dev，导致动态插件污染产品 Home。
-          if (injected) return injected
-          const probe = "console.log(process.env.DSH_HOME || require('path').join(require('os').homedir(), '.dsh'))"
-          const r = await runNode(['-e', probe], {
-            cwd: repoRoot() || '/',
-            env: {},
-          })
-          if (r.ok) {
-            const home = (r.stdout || '').trim()
-            if (home) return home
-          }
-          try {
-            if (typeof process !== 'undefined' && process && process.env && typeof process.env.HOME === 'string' && process.env.HOME) {
-              return process.env.HOME.replace(/\/$/, '') + '/.dsh'
-            }
-          } catch (e) { /* ignore */ }
-          return null
+          const env = (typeof process !== 'undefined' && process && process.env) || {}
+          if (typeof env.DSH_HOME === 'string' && env.DSH_HOME) return env.DSH_HOME
+          const r = await runNode(['-e', "console.log(process.env.DSH_HOME || require('path').join(require('os').homedir(), '.dsh'))"], { env: {} })
+          if (r.ok && r.stdout.trim()) return r.stdout.trim()
+          return typeof env.HOME === 'string' && env.HOME ? env.HOME.replace(/\/$/, '') + '/.dsh' : null
         })()
       }
       return dshHomePromise
     }
-
-    async function homeRepoPointer() {
-      const home = await dshHome()
-      if (!home || fs === undefined) return null
-      try {
-        const target = await fs.resolve(home + '/visual-workflow/repo-root')
-        const info = await fs.stat(target)
-        if (!info || info.type !== 'file') return null
-        const text = String(await fs.readText(target) || '').trim()
-        return text || null
-      } catch (e) { return null }
-    }
-
-    async function rootPaths() {
-      const repo = repoRoot()
-      const home = await dshHome()
-      const packageRepo = injectedRepoRoot() || (await homeRepoPointer())
-      const generatorRoot = packageRepo || repo
-      return {
-        repo: repo,
-        // 静态组合包的生成/校验脚本根；web profile 的 workspaceRoot 可能属于 DSH 宿主仓库。
-        generatorRoot: generatorRoot,
-        builtinDir: repo ? repo + '/.generated' : null,
-        // 静态组合包的仓库根（仅 bundle 内注入）；避免首次 RPC 早于同步任务时看不到模板。
-        packageBuiltinDir: packageRepo ? packageRepo + '/.generated' : null,
-        // 宿主根内置模板（会话无关）：安装/重装时经 syncBuiltins 同步的标准配置
-        homeBuiltinDir: home ? home + '/.generated' : null,
-        userDir: home ? home + '/visual-workflow/templates' : null,
-        // 历史模板迁为自定义后的删除标记：存在则 list/find 不再从 .generated 重新列出该 id
-        removedDir: home ? home + '/visual-workflow/removed' : null,
-        // runs 运行记录持久化目录（#40）：<runId>.json 一条一文件
-        runsDir: home ? home + '/visual-workflow/runs' : null,
-        skillRoot: home ? home + '/skills' : null,
-        generator: generatorRoot ? generatorRoot + '/scripts/generate.mjs' : null,
+    // 宿主数据根下的固定目录（只算一次）
+    let homeDirsPromise = null
+    function homeDirs() {
+      if (!homeDirsPromise) {
+        homeDirsPromise = dshHome().then((home) => (home ? {
+          home: home,
+          userDir: home + '/visual-workflow/templates',
+          removedDir: home + '/visual-workflow/removed',
+          runsDir: home + '/visual-workflow/runs',
+          skillRoot: home + '/skills',
+          workspaces: home + '/workspaces',
+        } : null))
       }
+      return homeDirsPromise
     }
-
-    // 用户目录（~/.dsh 宿主数据根）写入不受会话 workspace-write 沙箱约束；
-    // sandboxPolicy 服务缺失时（web profile 无 agent 会话），手工构造 danger-full-access
-    // 策略——fs 服务的策略层只认 policy.mode === 'danger-full-access' 即放行。
+    // 生成物根：项目 .generated（项目专属模板）→ 代码根 .generated（插件随附模板）
+    function generatedRoots() {
+      const out = []
+      const project = projectRoot()
+      if (project) out.push(project + '/.generated')
+      if (CODE_ROOT && out.indexOf(CODE_ROOT + '/.generated') < 0) out.push(CODE_ROOT + '/.generated')
+      return out
+    }
+    // ~/.dsh 写入不受会话 workspace-write 沙箱约束；fs 服务只认 mode === 'danger-full-access'
     function writePolicy() {
       if (sp && typeof sp.resolve === 'function') {
         try { return sp.resolve({ mode: 'danger-full-access' }) } catch (e) { /* fall through */ }
       }
       return { mode: 'danger-full-access', workspaceRoot: '/' }
     }
-
-    // 安装/重装时同步内置模板到宿主根（会话无关）：把仓库 .generated 的标准配置
-    // 复制到 ~/.dsh/.generated（仅补缺失，已存在不动），使任何会话都能看到内置模板。
-    // fs 服务可能尚未注入，重试几次再放弃（每次重取 ctx）——与 apply 的加载时序解耦。
-    async function syncBuiltins() {
-      for (let attempt = 0; attempt < 10; attempt++) {
-        fs = ctx.get('fs')
-        subprocess = ctx.get('subprocess')
-        if (fs !== undefined) break
-        // 动态会话 vm 沙箱不提供真定时器（setTimeout 为教学拦截陷阱函数）：
-        // 无定时器或调用被拦截则放弃重试（会话内 fs 通常立即可用）
-        try {
-          await new Promise((r) => setTimeout(r, 100 * (attempt + 1)))
-        } catch (e) { break }
-      }
-      if (fs === undefined) { console.log('[vwf] fs 服务不可用，跳过内置模板同步'); return }
-      const p = await rootPaths()
-      if (!p.homeBuiltinDir) return
-      const policy = writePolicy()
-      // 源根：会话 cwd（动态模式）优先，运行时 bundle 根（import.meta.url 推导）
-      // 与进程 cwd 兜底（web profile 无 agent 会话）
-      const sources = []
-      if (p.repo) sources.push(p.builtinDir)
-      if (p.packageBuiltinDir && sources.indexOf(p.packageBuiltinDir) < 0) sources.push(p.packageBuiltinDir)
-      if (typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) {
-        const pkgRoot = __VWF_REPO_ROOT__ + '/.generated'
-        if (sources.indexOf(pkgRoot) < 0) sources.push(pkgRoot)
-      }
+    const writeText = async (path, text) => fs.writeText(await fs.resolve(path), text, undefined, undefined, writePolicy())
+    async function readTextIfExists(path) {
+      if (fs === undefined) return null
       try {
-        const cwdRoot = process.cwd() + '/.generated'
-        if (sources.indexOf(cwdRoot) < 0) sources.push(cwdRoot)
-      } catch (e) { /* 忽略 */ }
-      for (const srcRoot of sources) {
-        let entries = null
-        try {
-          const dir = await fs.resolve(srcRoot)
-          entries = await fs.listDir(dir)
-        } catch (e) { continue }
-        // 递归复制（含 roles/ 等子目录——bundleRoles 模板的角色包为目录树）
-        const copyTree = async (srcRel, dstRel) => {
-          let children = null
-          try {
-            children = await fs.listDir(await fs.resolve(srcRoot + srcRel))
-          } catch (e) { return }
-          for (const child of children || []) {
-            if (!child || typeof child.name !== 'string' || !child.name) continue
-            const sub = srcRel + '/' + child.name
-            if (child.type === 'directory') {
-              await copyTree(sub, dstRel + '/' + child.name)
-              continue
-            }
-            if (child.type !== 'file') continue
-            const dst = await fs.resolve(p.homeBuiltinDir + dstRel + '/' + child.name)
-            let exists = false
-            try { const st = await fs.stat(dst); exists = !!(st && st.type === 'file') } catch (e) { }
-            if (exists) continue
-            try {
-              // fs 服务无 mkdir 面：writeText 后端保证创建父目录（writeFileAtomic 递归 mkdir）
-              await fs.writeText(dst, await fs.readText(await fs.resolve(srcRoot + sub)), undefined, undefined, policy)
-            } catch (e) { /* 单文件同步失败不影响其余 */ }
-          }
-        }
-        for (const ent of entries || []) {
-          if (!ent || typeof ent.name !== 'string' || !ent.name) continue
-          if (ent.type !== 'directory') continue
-          // 只有蓝图明确声明 bundleRoles 的用户级内置模板才进入宿主根；
-          // 项目专属模板（如 dev-workflow-2-0）继续只在项目内可见。
-          let bundleRoles = false
-          try {
-            const marker = await fs.readText(await fs.resolve(srcRoot + '/' + ent.name + '/vwf-dsl.json'))
-            bundleRoles = JSON.parse(marker).bundleRoles === true
-          } catch (e) { /* 缺少标记或损坏产物不进入用户级同步 */ }
-          if (!bundleRoles) continue
-          await copyTree('/' + ent.name, '/' + ent.name)
-        }
-      }
+        const target = await fs.resolve(path)
+        const info = await fs.stat(target)
+        return info && info.type === 'file' ? await fs.readText(target) : null
+      } catch (e) { return null }
     }
-    // 与 apply 时序解耦的异步同步：不阻塞 apply，失败仅在终端日志留痕
-    syncBuiltins().catch((e) => console.log('[vwf] 内置模板同步失败：' + String((e && e.message) || e)))
-    syncValidatorCore().catch((e) => console.log('[vwf] 校验内核同步失败：' + String((e && e.message) || e)))
-    syncProjectionCore().catch((e) => console.log('[vwf] 投影内核同步失败：' + String((e && e.message) || e)))
-    syncRoleAssets().catch((e) => console.log('[vwf] 角色库内核同步失败：' + String((e && e.message) || e)))
+    async function listDirOrNull(path) {
+      if (fs === undefined) return null
+      try { return await fs.listDir(await fs.resolve(path)) } catch (e) { return null }
+    }
+    async function fileExists(path) {
+      if (fs === undefined) return false
+      try { const info = await fs.stat(await fs.resolve(path)); return !!(info && info.type === 'file') } catch (e) { return false }
+    }
 
-    // 历史两套已按 #82 迁为 Custom Workflow：蓝图真源在 templates/custom-seeds/，
-    // 生成物仍可出现在模板库，但 list 标 builtin=false，允许保存覆盖与删除。
-    const LEGACY_CUSTOM_WORKFLOW_IDS = { 'default-workflow': true, 'dev-workflow-2-0': true }
-    function isLegacyCustomId(id) { return !!LEGACY_CUSTOM_WORKFLOW_IDS[id] }
+    // ── 内核与资产加载：唯一来源 = 插件 dist/ ────────────────────────────────
+    // 静态 bundle 可直接注入已加载模块（__VWF_KERNELS__，真 import，零 eval）；动态闭包
+    // 无 import，经 fs 读源码求值。缺失即明确报错，不降级、不去别处找。
+    const assetCache = new Map()
+    function loadDist(file) {
+      if (!assetCache.has(file)) {
+        const pending = (async () => {
+          const injected = (typeof __VWF_KERNELS__ === 'object' && __VWF_KERNELS__) ? __VWF_KERNELS__[file] : undefined
+          if (injected !== undefined) return injected
+          if (!DIST) throw new Error('插件根未注入：请使用 npm run build 产出的 dist 版本')
+          if (fs === undefined) throw new Error('宿主文件能力不可用')
+          const src = await fs.readText(await fs.resolve(DIST + '/' + file))
+          if (/\.cjs$/.test(file)) {
+            const module = { exports: {} }
+            new Function('module', 'exports', src)(module, module.exports)
+            return module.exports
+          }
+          return /\.json$/.test(file) ? JSON.parse(src) : src
+        })().catch((e) => { assetCache.delete(file); throw new Error('插件资产不可用 dist/' + file + '：' + errMsg(e)) })
+        assetCache.set(file, pending)
+      }
+      return assetCache.get(file)
+    }
+    const kernel = () => loadDist('validate-core.cjs')
+    let roleLibraryPromise = null
+    function roleLibrary() {
+      if (!roleLibraryPromise) {
+        roleLibraryPromise = Promise.all([loadDist('role-library.cjs'), loadDist('builtin-roles.json')])
+          .then(([mod, manifest]) => mod.createRoleLibrary(manifest))
+          .catch((e) => { roleLibraryPromise = null; throw e })
+      }
+      return roleLibraryPromise
+    }
 
-    // 内置根：.generated/<id>/vwf-dsl.json（生成物四件套之一，CI 先 npm run generate）
-    // 双根：仓库 .generated（开发期最新）优先，宿主根 ~/.dsh/.generated（syncBuiltins 同步，
-    // 会话无关）补缺失。扫描结果再按 id 拆成「正式内置」与「已迁出的历史自定义」。
-    async function loadGeneratedCatalog(strict) {
+    // ── 模板存储：生成物（只读；历史两套已迁为自定义）+ 用户目录 ─────────────────
+    const LEGACY_CUSTOM_IDS = { 'default-workflow': true, 'dev-workflow-2-0': true }
+    const isLegacyCustomId = (id) => !!LEGACY_CUSTOM_IDS[id]
+
+    // strict=true：清单/单文件读取失败即抛出（角色引用统计等破坏性前置不得把失败当空清单）
+    async function loadGenerated(strict) {
       const out = new Map()
       if (fs === undefined) {
         if (strict) throw new Error('宿主文件能力不可用：无法扫描内置模板')
         return out
       }
-      const p = await rootPaths()
-      const roots = [p.builtinDir, p.packageBuiltinDir, p.homeBuiltinDir].filter(Boolean)
-      for (const root of roots) {
+      for (const root of generatedRoots()) {
         let entries = null
-        try {
-          const dir = await fs.resolve(root)
-          entries = await fs.listDir(dir)
-        } catch (e) {
-          // 可选根目录确认不存在（ENOENT）→ 跳过继续下一个根；其余错误 strict 抛出
-          if (strict && !isMissingErr(e)) throw new Error('内置模板清单读取失败：' + String((e && e.message) || e))
+        try { entries = await fs.listDir(await fs.resolve(root)) } catch (e) {
+          if (strict && !isMissingErr(e)) throw new Error('内置模板清单读取失败：' + errMsg(e))
           continue
         }
         for (const ent of entries || []) {
@@ -371,79 +240,39 @@ return {
             const dsl = JSON.parse(await fs.readText(target))
             if (dsl && typeof dsl.id === 'string' && dsl.id && !out.has(dsl.id)) out.set(dsl.id, dsl)
           } catch (e) {
-            if (strict) throw new Error('内置模板读取失败：' + String((e && e.message) || e))
-            /* 单个生成物损坏不影响其余 */
+            if (strict) throw new Error('内置模板读取失败：' + errMsg(e))
           }
         }
       }
       return out
     }
     async function splitGenerated(strict) {
-      const all = await loadGeneratedCatalog(strict)
       const builtins = new Map()
       const shipped = new Map()
-      for (const [id, dsl] of all) {
-        if (isLegacyCustomId(id)) shipped.set(id, dsl)
-        else builtins.set(id, dsl)
-      }
+      for (const [id, dsl] of await loadGenerated(strict)) (isLegacyCustomId(id) ? shipped : builtins).set(id, dsl)
       return { builtins, shipped }
-    }
-    async function loadBuiltins(strict) {
-      return (await splitGenerated(strict)).builtins
     }
     async function loadRemovedIds() {
       const out = new Set()
-      if (fs === undefined) return out
-      const p = await rootPaths()
-      if (!p.removedDir) return out
-      let entries = null
-      try {
-        entries = await fs.listDir(await fs.resolve(p.removedDir))
-      } catch (e) { return out }
-      for (const ent of entries || []) {
-        if (!ent || typeof ent.name !== 'string' || !ent.name) continue
-        out.add(ent.name)
-      }
+      const d = fs === undefined ? null : await homeDirs()
+      const entries = d ? await listDirOrNull(d.removedDir) : null
+      for (const ent of entries || []) if (ent && typeof ent.name === 'string' && ent.name) out.add(ent.name)
       return out
     }
-    async function markRemoved(id) {
-      if (fs === undefined || !isLegacyCustomId(id)) return
-      const p = await rootPaths()
-      if (!p.removedDir) return
-      try {
-        await fs.writeText(await fs.resolve(p.removedDir + '/' + id), '', undefined, undefined, writePolicy())
-      } catch (e) { /* 删除标记写入失败不阻断删除：用户目录与 skill 已清 */ }
-    }
-    async function clearRemoved(id) {
-      if (!isLegacyCustomId(id)) return
-      const p = await rootPaths()
-      if (!p.removedDir || !p.generatorRoot) return
-      try {
-        await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{force:true})", p.removedDir + '/' + id], { cwd: p.generatorRoot })
-      } catch (e) { /* 重建模板时清除删除标记失败不阻断 save */ }
-    }
-
-    // 用户根：~/.dsh/visual-workflow/templates/<id>.json（蓝图 JSON）
-    // strict=true：清单/单文件读取失败即抛出（角色引用扫描等破坏性前置必须区分
-    // 「完整清单」与「失败清单」，不得把失败当空清单放行）。
     async function loadUserTemplates(strict) {
       const out = new Map()
       if (fs === undefined) {
         if (strict) throw new Error('宿主文件能力不可用：无法扫描用户模板')
         return out
       }
-      const p = await rootPaths()
-      if (!p.userDir) {
+      const d = await homeDirs()
+      if (!d) {
         if (strict) throw new Error('无法解析用户模板目录')
         return out
       }
       let entries = null
-      try {
-        const dir = await fs.resolve(p.userDir)
-        entries = await fs.listDir(dir)
-      } catch (e) {
-        // 用户模板目录确认不存在（ENOENT）= 空清单；其余错误 strict 抛出
-        if (strict && !isMissingErr(e)) throw new Error('用户模板清单读取失败：' + String((e && e.message) || e))
+      try { entries = await fs.listDir(await fs.resolve(d.userDir)) } catch (e) {
+        if (strict && !isMissingErr(e)) throw new Error('用户模板清单读取失败：' + errMsg(e))
         return out
       }
       for (const ent of entries || []) {
@@ -452,355 +281,51 @@ return {
           const bp = JSON.parse(await fs.readText(ent.target))
           if (bp && typeof bp.id === 'string' && bp.id) out.set(bp.id, bp)
         } catch (e) {
-          if (strict) throw new Error('用户模板读取失败：' + String((e && e.message) || e))
-          /* 损坏的模板文件跳过 */
+          if (strict) throw new Error('用户模板读取失败：' + errMsg(e))
         }
       }
       return out
     }
-
-    // ── 蓝图 ↔ vwf DSL 投影内核加载 ─────────────────────────────────────────
-    // 动态闭包不能 import/require：从受信候选路径读取 CJS 源码，在本次插件激活内
-    // 求值并缓存。投影内核缺失时只返回明确错误，禁止回退到已经删除的内联实现。
-    let projectionCorePromise = null
-    let projectionCoreValue = null
-    function addProjectionRoot(paths, seen, root) {
-      let dir = root
-      for (let i = 0; i < 8 && dir; i++) {
-        const file = dir + '/scripts/projection-core.cjs'
-        if (!seen.has(file)) {
-          seen.add(file)
-          paths.push(file)
-        }
-        dir = parentDir(dir)
-      }
+    // 查找：用户覆盖 → 未删除的历史生成物 → 正式内置
+    async function findWorkflow(id) {
+      if (!id || typeof id !== 'string') return null
+      const bp = (await loadUserTemplates()).get(id)
+      if (bp) return (await kernel()).projectToVwf(bp)
+      if ((await loadRemovedIds()).has(id)) return null
+      const { builtins, shipped } = await splitGenerated()
+      return shipped.get(id) || builtins.get(id) || null
     }
-    async function projectionCoreCandidatePaths() {
-      const paths = []
+    // 合并三源为清单条目；同 id 用户覆盖优先，已删除标记的历史 id 不再列出
+    async function workflowEntries(strict) {
+      const [{ builtins, shipped }, users, removed, core] = await Promise.all([splitGenerated(strict), loadUserTemplates(strict), loadRemovedIds(), kernel()])
+      const out = []
       const seen = new Set()
-      function addFile(file) {
-        if (!file || seen.has(file)) return
-        seen.add(file)
-        paths.push(file)
-      }
-      const pluginRoot = (typeof __VWF_PLUGIN_ROOT__ === 'string' && __VWF_PLUGIN_ROOT__) ? __VWF_PLUGIN_ROOT__ : null
-      // 正式静态模式优先可信 dist，不能用任意会话工作区的旧源码替代正式资产。
-      if (!isDynamicHost && pluginRoot) addFile(pluginRoot + '/dist/projection-core.cjs')
-      // 动态开发模式优先当前仓库，保证源码修改在当前激活中生效。
-      if (isDynamicHost) {
-        addProjectionRoot(paths, seen, injectedRepoRoot())
-        addProjectionRoot(paths, seen, repoRoot())
-      } else if (!pluginRoot) {
-        // 源码静态测试形态（无正式 pluginRoot）仍可从当前仓库加载。
-        addProjectionRoot(paths, seen, repoRoot())
-      }
-      const home = await dshHome()
-      if (home) addFile(home + '/visual-workflow/projection-core.cjs')
-      // Home 副本或插件 dist 是动态浏览器调用的兜底来源。
-      if (isDynamicHost) {
-        addProjectionRoot(paths, seen, await homeRepoPointer())
-        if (pluginRoot) addFile(pluginRoot + '/dist/projection-core.cjs')
-      }
-      return paths
+      const push = (dsl, name, builtin) => { seen.add(dsl.id); out.push({ id: dsl.id, name: name, description: dsl.description || '', builtin: builtin, dsl: dsl }) }
+      for (const dsl of builtins.values()) push(dsl, dsl.name, true)
+      for (const bp of users.values()) if (!seen.has(bp.id)) push(core.projectToVwf(bp), bp.displayName, false)
+      for (const dsl of shipped.values()) if (!seen.has(dsl.id) && !removed.has(dsl.id)) push(dsl, dsl.name, false)
+      return out
     }
-    function evalProjectionCore(src) {
-      const module = { exports: {} }
-      try { new Function('module', 'exports', src)(module, module.exports) } catch (e) { return null }
-      const ex = module.exports
-      if (!ex || typeof ex.projectToVwf !== 'function' || typeof ex.projectToBlueprint !== 'function') return null
-      return ex
-    }
-    async function syncProjectionCore() {
-      for (let attempt = 0; attempt < 10; attempt++) {
-        fs = ctx.get('fs')
-        subprocess = ctx.get('subprocess')
-        if (fs !== undefined) break
-        try {
-          await new Promise((r) => setTimeout(r, 100 * (attempt + 1)))
-        } catch (e) { break }
-      }
-      if (fs === undefined) return
-      const home = await dshHome()
-      if (!home) return
-      const policy = writePolicy()
-      const dest = home + '/visual-workflow/projection-core.cjs'
-      const pointer = home + '/visual-workflow/repo-root'
-      const files = await projectionCoreCandidatePaths()
-      for (const file of files) {
-        if (file === dest) continue
-        try {
-          const target = await fs.resolve(file)
-          const info = await fs.stat(target)
-          if (!info || info.type !== 'file') continue
-          const src = await fs.readText(target)
-          if (!evalProjectionCore(src)) continue
-          await fs.writeText(await fs.resolve(dest), src, undefined, undefined, policy)
-          if (file.indexOf('/scripts/projection-core.cjs') !== -1) {
-            const root = file.slice(0, file.length - '/scripts/projection-core.cjs'.length)
-            if (root) {
-              try { await fs.writeText(await fs.resolve(pointer), root + '\n', undefined, undefined, policy) } catch (e) { /* 指针可选 */ }
-            }
-          }
-          return
-        } catch (e) { /* 尝试下一个候选 */ }
-      }
-    }
-    async function readProjectionCoreViaNode() {
-      if (subprocess === undefined) return null
-      const probe = [
-        "const fs=require('fs');const path=require('path');const os=require('os');",
-        "function tryFile(p){try{if(!p)return false;if(!fs.existsSync(p)||!fs.statSync(p).isFile())return false;const s=fs.readFileSync(p,'utf8');if(s.indexOf('function projectToVwf')<0||s.indexOf('function projectToBlueprint')<0)return false;process.stdout.write(s);return true}catch(e){return false}}",
-        "function walk(d){for(let i=0;i<8&&d&&d!=='/';i++){if(tryFile(path.join(d,'scripts','projection-core.cjs')))return true;const n=path.dirname(d);if(n===d)break;d=n}return false}",
-        "const homes=[];if(process.env.DSH_HOME)homes.push(process.env.DSH_HOME);",
-        "try{homes.push(path.join(os.homedir(),'.dsh-workflow-dev'))}catch(e){}",
-        "for(const h of homes){if(tryFile(path.join(h,'visual-workflow','projection-core.cjs')))process.exit(0)}",
-        "const cands=[];try{cands.push(process.cwd())}catch(e){};if(process.env.PWD)cands.push(process.env.PWD);",
-        "for(const c of cands){if(walk(c))process.exit(0)}process.exit(2)",
-      ].join('')
-      const home = await dshHome()
-      const r = await runNode(['-e', probe], { cwd: home || '/' })
-      if (r.ok && r.stdout) return r.stdout
-      return null
-    }
-    function projectionUnavailable() {
-      return new Error('投影内核不可用：缺少或无法加载 scripts/projection-core.cjs（请确认插件资产完整）')
-    }
-    function projectToVwf(bp) {
-      if (!projectionCoreValue) throw projectionUnavailable()
-      return projectionCoreValue.projectToVwf(bp)
-    }
-    function projectToBlueprint(dsl) {
-      if (!projectionCoreValue) throw projectionUnavailable()
-      return projectionCoreValue.projectToBlueprint(dsl)
-    }
-    function loadProjectionCore() {
-      if (projectionCorePromise) return projectionCorePromise
-      const pending = (async () => {
-        if (fs === undefined) fs = ctx.get('fs')
-        if (subprocess === undefined) subprocess = ctx.get('subprocess')
-        if (fs !== undefined) {
-          const files = await projectionCoreCandidatePaths()
-          for (const file of files) {
-            try {
-              const target = await fs.resolve(file)
-              const info = await fs.stat(target)
-              if (!info || info.type !== 'file') continue
-              const core = evalProjectionCore(await fs.readText(target))
-              if (core) return core
-            } catch (e) { /* 尝试下一个路径 */ }
-          }
-        }
-        if (!isDynamicHost) return null
-        const spawned = await readProjectionCoreViaNode()
-        return spawned ? evalProjectionCore(spawned) : null
-      })()
-      projectionCorePromise = pending.then((core) => {
-        if (!core) projectionCorePromise = null
-        else projectionCoreValue = core
-        return core
-      }, (error) => {
-        projectionCorePromise = null
-        throw error
-      })
-      return projectionCorePromise
+    async function listWorkflows() {
+      return (await workflowEntries()).sort((a, b) => (a.builtin === b.builtin ? byId(a.id, b.id) : a.builtin ? -1 : 1))
     }
 
-    // JSON tab / 保存可能直接贴蓝图落盘格式（displayName、bindings.models）。
-    // 先投影成 DSL，再走 sanitize / 逆投影，避免模型绑定与展示名被丢掉。
-    function ingestToDsl(raw) {
+    // ── 校验管道：sanitize（DSL 形态归一）→ 逆投影蓝图 → 内核 validateBlueprint ──
+    // JSON tab / wf_run 可能直接传蓝图落盘格式（displayName / bindings.models）：先投影为 DSL
+    function ingestToDsl(raw, core) {
       if (!raw || typeof raw !== 'object') return raw
-      const hasBindings = !!(raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object'
-        && Object.keys(raw.bindings.models).length)
+      const hasBindings = !!(raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object' && Object.keys(raw.bindings.models).length)
       if (typeof raw.displayName !== 'string' && !hasBindings) return raw
       if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return raw
-      return projectToVwf({
-        ...raw,
-        displayName: typeof raw.displayName === 'string' ? raw.displayName : (raw.name || raw.id || ''),
-      })
+      return core.projectToVwf({ ...raw, displayName: typeof raw.displayName === 'string' ? raw.displayName : (raw.name || raw.id || '') })
     }
-
-
-    // ── 统一校验管道（候选二 T-IMP-13）───────────────────────────────────────
-    // 校验内核 = scripts/validate-core.cjs（唯一规则集：结构层 + 蓝图业务规则层）。
-    // host 无法 import（vm 沙箱），经 fs 服务读源码、vm 内求值并缓存——热路径内存执行。
-    // 管线：sanitize（DSL 形态归一）→ 逆投影蓝图 → core.validateBlueprint({requireModels:true})
-    //   → 错误坐标映射 fieldErrors（node:<id>:<field> / edge:<i>:<field> / control:<field>）。
-    // 原 validateDsl / heteroCheck / 拓扑推导 / COND_RE 已删除（唯一实现收敛进内核）。
-    let validatorCorePromise = null
-    function addValidatorRoot(paths, seen, root) {
-      let dir = root
-      for (let i = 0; i < 8 && dir; i++) {
-        const file = dir + '/scripts/validate-core.cjs'
-        if (!seen.has(file)) {
-          seen.add(file)
-          paths.push(file)
-        }
-        dir = parentDir(dir)
-      }
-    }
-    async function validatorCoreCandidatePaths() {
-      const paths = []
-      const seen = new Set()
-      function addFile(file) {
-        if (!file || seen.has(file)) return
-        seen.add(file)
-        paths.push(file)
-      }
-      // 浏览器保存没有会话 cwd。Home 副本与仓库指针是动态模式的稳定来源，
-      // 必须排在 sandboxPolicy.workspaceRoot（DSH 部署目录）前面。
-      const home = await dshHome()
-      if (home) addFile(home + '/visual-workflow/validate-core.cjs')
-      addValidatorRoot(paths, seen, await homeRepoPointer())
-      addValidatorRoot(paths, seen, injectedRepoRoot())
-      if (typeof __VWF_PLUGIN_ROOT__ === 'string' && __VWF_PLUGIN_ROOT__) {
-        const pluginRoot = __VWF_PLUGIN_ROOT__
-        addFile(pluginRoot + '/dist/validate-core.cjs')
-        addValidatorRoot(paths, seen, parentDir(parentDir(pluginRoot)))
-      }
-      addValidatorRoot(paths, seen, repoRoot())
-      return paths
-    }
-    async function evalValidatorCore(src) {
-      const module = { exports: {} }
-      new Function('module', 'exports', src)(module, module.exports)
-      if (!module.exports || typeof module.exports.validateBlueprint !== 'function') return null
-      return module.exports
-    }
-    async function syncValidatorCore() {
-      for (let attempt = 0; attempt < 10; attempt++) {
-        fs = ctx.get('fs')
-        subprocess = ctx.get('subprocess')
-        if (fs !== undefined) break
-        try {
-          await new Promise((r) => setTimeout(r, 100 * (attempt + 1)))
-        } catch (e) { break }
-      }
-      if (fs === undefined) return
-      const home = await dshHome()
-      if (!home) return
-      const policy = writePolicy()
-      const dest = home + '/visual-workflow/validate-core.cjs'
-      const pointer = home + '/visual-workflow/repo-root'
-      const files = await validatorCoreCandidatePaths()
-      for (const file of files) {
-        if (file === dest) continue
-        try {
-          const target = await fs.resolve(file)
-          const info = await fs.stat(target)
-          if (!info || info.type !== 'file') continue
-          const src = await fs.readText(target)
-          if (!src || src.indexOf('validateBlueprint') < 0) continue
-          await fs.writeText(await fs.resolve(dest), src, undefined, undefined, policy)
-          if (file.indexOf('/scripts/validate-core.cjs') !== -1) {
-            const root = file.slice(0, file.length - '/scripts/validate-core.cjs'.length)
-            if (root) {
-              try { await fs.writeText(await fs.resolve(pointer), root + '\n', undefined, undefined, policy) } catch (e) { /* 指针可选 */ }
-            }
-          }
-          return
-        } catch (e) { /* 尝试下一个候选 */ }
-      }
-    }
-    async function readValidatorCoreViaNode() {
-      if (subprocess === undefined) return null
-      const probe = [
-        "const fs=require('fs');const path=require('path');const os=require('os');",
-        "function tryFile(p){try{if(!p)return false;if(!fs.existsSync(p)||!fs.statSync(p).isFile())return false;const s=fs.readFileSync(p,'utf8');if(s.indexOf('function validateBlueprint')<0)return false;process.stdout.write(s);return true}catch(e){return false}}",
-        "function walk(d){for(let i=0;i<8&&d&&d!=='/';i++){if(tryFile(path.join(d,'scripts','validate-core.cjs')))return true;const n=path.dirname(d);if(n===d)break;d=n}return false}",
-        "const homes=[];if(process.env.DSH_HOME)homes.push(process.env.DSH_HOME);",
-        "try{homes.push(path.join(os.homedir(),'.dsh-workflow-dev'))}catch(e){}",
-        "for(const h of homes){if(tryFile(path.join(h,'visual-workflow','validate-core.cjs')))process.exit(0)}",
-        "const cands=[];try{cands.push(process.cwd())}catch(e){};if(process.env.PWD)cands.push(process.env.PWD);",
-        "for(const c of cands){if(walk(c))process.exit(0)}process.exit(2)",
-      ].join('')
-      const home = await dshHome()
-      const r = await runNode(['-e', probe], { cwd: home || '/' })
-      if (r.ok && r.stdout && r.stdout.indexOf('function validateBlueprint') >= 0) return r.stdout
-      return null
-    }
-    function loadValidatorCore() {
-      if (validatorCorePromise) return validatorCorePromise
-      const pending = (async () => {
-        // 动态会话 / 浏览器保存没有 currentInitiator；部署 cwd 也不是仓库根。
-        // 候选：会话 cwd、注入仓库根、宿主指针、插件 dist、DSH Home 副本；
-        // fs 沙箱读不到仓库时，再经 node 子进程按 DSH cwd 找内核。
-        if (fs !== undefined) {
-          const files = await validatorCoreCandidatePaths()
-          for (const file of files) {
-            try {
-              const target = await fs.resolve(file)
-              const info = await fs.stat(target)
-              if (!info || info.type !== 'file') continue
-              const src = await fs.readText(target)
-              const core = await evalValidatorCore(src)
-              if (core) return core
-            } catch (e) { /* 尝试下一个路径 */ }
-          }
-        }
-        const spawned = await readValidatorCoreViaNode()
-        if (spawned) return evalValidatorCore(spawned)
-        return null
-      })()
-      validatorCorePromise = pending.then((core) => {
-        if (!core) validatorCorePromise = null
-        return core
-      })
-      return validatorCorePromise
-    }
-
-    function formalArtifactCorePaths() {
-      const paths = []
-      const repo = repoRoot()
-      if (repo) paths.push(repo + '/scripts/formal-artifacts.cjs')
-      if (typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) {
-        paths.push(__VWF_REPO_ROOT__ + '/scripts/formal-artifacts.cjs')
-      }
-      if (typeof __VWF_PLUGIN_ROOT__ === 'string' && __VWF_PLUGIN_ROOT__) {
-        paths.push(__VWF_PLUGIN_ROOT__ + '/dist/formal-artifacts.cjs')
-      }
-      return paths
-    }
-
-    // Formal Artifact 摄入内核（#69）：仓库 scripts/ 或插件 dist/（正式安装）
-    let formalArtifactsCorePromise = null
-    function loadFormalArtifactsCore() {
-      if (!formalArtifactsCorePromise) {
-        formalArtifactsCorePromise = (async () => {
-          if (fs === undefined) return null
-          for (const targetRel of formalArtifactCorePaths()) {
-            try {
-              const target = await fs.resolve(targetRel)
-              const info = await fs.stat(target)
-              if (!info || info.type !== 'file') continue
-              const src = await fs.readText(target)
-              const module = { exports: {} }
-              new Function('module', 'exports', src)(module, module.exports)
-              return module.exports
-            } catch (e) { /* 尝试下一个路径 */ }
-          }
-          return null
-        })()
-      }
-      return formalArtifactsCorePromise
-    }
-
-    function ensureRunFormalRecords(runId) {
-      const rec = runs.get(runId)
-      if (!rec) return null
-      if (!Array.isArray(rec.formalRecords)) rec.formalRecords = []
-      return rec
-    }
-
-    // 保存前清洗（对应 Gold-Band sanitizedWorkflow）：entry 依拓扑归一（内核推导）、
-    // failure 边剔除 when、maxRounds 取整——DSL 形态变换，留在宿主。
+    // 保存前清洗：entry 依拓扑归一、failure 边剔除 when、maxRounds 取整
     function sanitizeDsl(dsl, core) {
       const next = JSON.parse(JSON.stringify(dsl || {}))
       next.edges = Array.isArray(next.edges) ? next.edges : []
       next.nodes = Array.isArray(next.nodes) ? next.nodes : []
-      if (core && core.deriveEntryCandidates) {
-        const candidates = core.deriveEntryCandidates(next.nodes, next.edges)
-        next.entry = candidates.length === 1 ? candidates[0] : (next.entry || '')
-      }
+      const candidates = core.deriveEntryCandidates(next.nodes, next.edges)
+      next.entry = candidates.length === 1 ? candidates[0] : (next.entry || '')
       next.edges = next.edges.map((e) => {
         const edge = { ...e }
         if (edge.on !== 'success') delete edge.when
@@ -812,1301 +337,642 @@ return {
       }
       return next
     }
-
-    // DSL 校验（编辑器/保存/运行共用）：返回 { ok, errors, fieldErrors, sanitized, warnings }
-    //  error: { at, message, fieldKey? }（lossless-JSON 守卫：可选键仅在定义时携带）
-    async function validatePipeline(dsl) {
-      const core = await loadValidatorCore()
-      if (!core) {
-        // lossless-JSON 守卫：所有键都必须有值，sanitized 早退时显式给 null
-        return { ok: false, errors: [{ at: '$', message: '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）' }], fieldErrors: {}, sanitized: null, warnings: [] }
-      }
-      if (!await loadProjectionCore()) {
-        return { ok: false, errors: [{ at: '$', message: projectionUnavailable().message }], fieldErrors: {}, sanitized: null, warnings: [] }
-      }
-      dsl = ingestToDsl(dsl)
-      if (!dsl || typeof dsl !== 'object') {
-        return { ok: false, errors: [{ at: '$', message: 'dsl 必须是对象' }], fieldErrors: {}, sanitized: null, warnings: [] }
-      }
-      // 原始边预检：failure 边带 when 必须报错（sanitize 会剔除 when，须在清洗前拦截）
-      const rawErrors = []
-      if (Array.isArray(dsl.edges)) {
-        dsl.edges.forEach((e, i) => {
-          if (e && e.when !== undefined && e.on !== 'success') {
-            rawErrors.push({ at: '$.edges[' + i + '].when', message: 'when 只允许用于 success 边', fieldKey: 'edge:' + i + ':when' })
-          }
-        })
-      }
-      const sanitized = sanitizeDsl(dsl, core)
-      const bp = projectToBlueprint(sanitized)
-      const v = core.validateBlueprint(bp, { requireModels: true })
+    // 返回 { ok, errors, fieldErrors, sanitized, warnings }；错误 { at, message, fieldKey? }
+    // （lossless-JSON 守卫：可选键仅在有值时携带，sanitized 早退时显式 null）
+    async function validatePipeline(input) {
+      const bad = (message) => ({ ok: false, errors: [{ at: '$', message: message }], fieldErrors: {}, sanitized: null, warnings: [] })
+      let core
+      try { core = await kernel() } catch (e) { return bad('校验内核不可用：' + errMsg(e)) }
+      const dsl = ingestToDsl(input, core)
+      if (!dsl || typeof dsl !== 'object') return bad('dsl 必须是对象')
       const errors = []
       const fieldErrors = {}
-      for (const e of rawErrors) {
-        errors.push(e)
-        if (e.fieldKey !== undefined) (fieldErrors[e.fieldKey] = fieldErrors[e.fieldKey] || []).push(e.message)
-      }
-      for (const e of v.errors || []) {
+      const push = (e) => {
         const entry = { at: e.at, message: e.message }
         if (e.fieldKey !== undefined) entry.fieldKey = e.fieldKey
         errors.push(entry)
         if (entry.fieldKey !== undefined) (fieldErrors[entry.fieldKey] = fieldErrors[entry.fieldKey] || []).push(e.message)
       }
-      return { ok: v.ok, errors, fieldErrors, sanitized, warnings: v.warnings || [] }
+      // 原始边预检：failure 边带 when 必须报错（sanitize 会剔除 when，须在清洗前拦截）
+      ;(Array.isArray(dsl.edges) ? dsl.edges : []).forEach((e, i) => {
+        if (e && e.when !== undefined && e.on !== 'success') push({ at: '$.edges[' + i + '].when', message: 'when 只允许用于 success 边', fieldKey: 'edge:' + i + ':when' })
+      })
+      const sanitized = sanitizeDsl(dsl, core)
+      const v = core.validateBlueprint(core.projectToBlueprint(sanitized), { requireModels: true })
+      for (const e of v.errors || []) push(e)
+      return { ok: v.ok && errors.length === 0, errors, fieldErrors, sanitized, warnings: v.warnings || [] }
     }
 
-    // ── 统一编译器管道（候选一 T-IMP-12）────────────────────────────────────
-    // compileDsl 已删除：单一编译器 = scripts/generate.mjs 的 compileBlueprint，
-    // 宿主按来源取译文（磁盘优先 + CLI 兜底）：
-    //   - 内置模板（fromTemplate，builtin）：读 .generated/<id>/script.mjs
-    //     （npm run generate 产物，含蓝图全部增强：折叠/可信度闸门/超限归因/异源日志）
-    //   - 用户模板（fromTemplate，user）：读 ~/.dsh/skills/<id>/script.mjs（save 闭环产物）
-    //   - 其余（编辑器实时查看 vwf.script / wf_run 临时图 args.dsl）：
-    //     逆投影蓝图 → spawn `node scripts/generate.mjs compile <临时蓝图>` 取译文
-    //   （DSL 不含增强字段，CLI 编译结果 = 蓝图内容决定的行为，与磁盘产物一致）
-
-    function metaFromDsl(dsl) {
-      return { name: 'vwf-' + (dsl.id || 'run'), description: dsl.name || dsl.id || 'visual workflow run', phases: (dsl.nodes || []).map(n => ({ title: (n.label || n.id) })) }
-    }
-
-    async function readTextIfExists(p) {
-      if (fs === undefined) return null
-      try {
-        const target = await fs.resolve(p)
-        const info = await fs.stat(target)
-        if (!info || info.type !== 'file') return null
-        return await fs.readText(target)
-      } catch (e) { return null }
-    }
-
-    // opts.fromTemplate = true：模板来源 → 磁盘产物优先；false：临时图 → CLI 编译。
-    async function compileViaPipeline(dsl, opts) {
-      const p = await rootPaths()
-      if (opts && opts.fromTemplate) {
-        // 磁盘产物优先：用户 skill 闭环产物（保存覆盖后必须盖过同 id 的 .generated）
-        // → 仓库 .generated → 宿主根 .generated（syncBuiltins 同步）
-        // bundleRoles 模板在产物目录旁带 roles/ 自包含角色包，命中则随译文返回 roleDir
-        const spots = [p.skillRoot, p.builtinDir, p.packageBuiltinDir, p.homeBuiltinDir]
-        for (const spot of spots) {
-          if (!spot) continue
+    // ── 编译：单一编译器 = scripts/generate.mjs compileBlueprint ─────────────────
+    // 模板来源（wf_run templateId）读磁盘产物：用户 skill 闭环产物 → 项目/代码根 .generated；
+    // 其余（编辑器当前图、wf_run 临时图）把蓝图作为参数交给 CLI 编译——编辑中未保存的
+    // 改动必须反映在脚本里，不能拿磁盘上的旧产物充数。
+    const metaFromDsl = (dsl) => ({ name: 'vwf-' + (dsl.id || 'run'), description: dsl.name || dsl.id || 'visual workflow run', phases: (dsl.nodes || []).map((n) => ({ title: n.label || n.id })) })
+    async function compileDsl(dsl, opts) {
+      const d = await homeDirs()
+      if (opts && opts.fromTemplate && d) {
+        for (const spot of [d.skillRoot].concat(generatedRoots())) {
           const script = await readTextIfExists(spot + '/' + dsl.id + '/script.mjs')
-          if (!script) continue
-          const out = { ok: true, script, meta: metaFromDsl(dsl) }
-          if (fs !== undefined) {
-            try {
-              const rolesDir = spot + '/' + dsl.id + '/roles'
-              const rd = await fs.resolve(rolesDir)
-              const ents = await fs.listDir(rd)
-              if (ents && ents.length) out.roleDir = rolesDir
-            } catch (e) { /* 无角色包则不携带 roleDir（调用方走 args.roleDir 或缺省 dsh/roles） */ }
-          }
+          if (script === null) continue
+          const out = { ok: true, script: script, meta: metaFromDsl(dsl) }
+          // bundleRoles 模板产物旁带 roles/ 自包含角色包，命中则随译文返回 roleDir
+          const roles = await listDirOrNull(spot + '/' + dsl.id + '/roles')
+          if (roles && roles.length) out.roleDir = spot + '/' + dsl.id + '/roles'
           return out
         }
       }
-      if (!await loadProjectionCore()) return { ok: false, detail: projectionUnavailable().message }
-      if (fs === undefined || subprocess === undefined || !p.generatorRoot || !p.generator || !p.userDir) {
-        return { ok: false, detail: '宿主子进程/文件能力不可用：无法编译临时图（模板来源请先运行 npm run generate 或经保存闭环）' }
-      }
-      // 临时蓝图落盘（用户目录 tmp 区，danger 策略）→ CLI compile → 清理
-      const bp = projectToBlueprint(dsl)
-      const tmp = p.userDir + '/tmp/compile-' + dsl.id + '-' + Date.now() + '.json'
-      try {
-        const target = await fs.resolve(tmp)
-        await fs.writeText(target, JSON.stringify(bp, null, 2) + '\n', undefined, undefined, writePolicy())
-      } catch (e) {
-        return { ok: false, detail: '临时蓝图写入失败：' + String((e && e.message) || e) }
-      }
-      // 编译 stdout 传输上限提到 1MB（Codex PR#130 第二轮 P1）：合法的「12 内置角色各
-      // 一节点」图的 JSON 响应约 66KB 已超默认 64KB——支持的图必须能被传输，不能静默截断。
-      // 引用过滤（generate.mjs ROLE_DEFS）已减小典型图体积，1MB 兜底覆盖全角色最坏情况。
-      const r = await runNode([p.generator, 'compile', tmp], { cwd: p.generatorRoot, graceMs: 30000, maxBytes: 1024 * 1024 })
-      try { await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", tmp], { cwd: p.generatorRoot }) } catch (e) {}
+      if (subprocess === undefined || !GENERATOR) return { ok: false, detail: '宿主子进程能力不可用或插件根未注入：无法编译（模板来源请先运行 npm run generate 或经保存闭环）' }
+      const bp = JSON.stringify((await kernel()).projectToBlueprint(dsl))
+      if (bp.length > 120 * 1024) return { ok: false, detail: '蓝图过大（超过 120KB），无法作为编译参数传递' }
+      // 编译输出上限 1MB：全内置角色内联的图约 66KB，默认 64KB 会静默截断
+      const r = await runNode([GENERATOR, 'compile', '--inline', bp], { graceMs: 30000, maxBytes: 1024 * 1024 })
       if (!r.ok) return { ok: false, detail: r.detail }
       try {
         const out = JSON.parse(r.stdout)
         if (!out.ok) return { ok: false, detail: '编译器返回错误：' + (out.error || '未知') }
         return { ok: true, script: out.script, meta: out.meta || metaFromDsl(dsl) }
-      } catch (e) {
-        return { ok: false, detail: '编译器输出不可解析：' + String((e && e.message) || e) }
-      }
+      } catch (e) { return { ok: false, detail: '编译器输出不可解析：' + errMsg(e) } }
     }
 
-    // 查找：用户覆盖优先 → 未删除的历史生成物 → 正式内置
-    async function findWorkflow(id) {
-      if (!id || typeof id !== 'string') return null
-      if (!await loadProjectionCore()) throw projectionUnavailable()
-      const users = await loadUserTemplates()
-      const bp = users.get(id)
-      if (bp) return projectToVwf(bp)
-      const removed = await loadRemovedIds()
-      if (removed.has(id)) return null
-      const { builtins, shipped } = await splitGenerated()
-      if (shipped.has(id)) return shipped.get(id)
-      if (builtins.has(id)) return builtins.get(id)
-      return null
-    }
-    // 合并：正式内置 builtin=true；历史生成物与用户模板 builtin=false。
-    // 同 id：用户覆盖优先；已删除标记的历史 id 不再从 .generated 列出。
-    async function listWorkflows() {
-      if (!await loadProjectionCore()) throw projectionUnavailable()
-      const [{ builtins, shipped }, users, removed] = await Promise.all([splitGenerated(), loadUserTemplates(), loadRemovedIds()])
-      const out = []
-      const seen = new Set()
-      for (const dsl of builtins.values()) {
-        out.push({ id: dsl.id, name: dsl.name, description: dsl.description || '', builtin: true, dsl: dsl })
-        seen.add(dsl.id)
-      }
-      for (const bp of users.values()) {
-        if (seen.has(bp.id)) continue
-        const dsl = projectToVwf(bp)
-        out.push({ id: bp.id, name: bp.displayName, description: bp.description || '', builtin: false, dsl: dsl })
-        seen.add(bp.id)
-      }
-      for (const dsl of shipped.values()) {
-        if (seen.has(dsl.id) || removed.has(dsl.id)) continue
-        out.push({ id: dsl.id, name: dsl.name, description: dsl.description || '', builtin: false, dsl: dsl })
-      }
-      out.sort((a, b) => (a.builtin === b.builtin ? (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) : a.builtin ? -1 : 1))
-      return out
-    }
+    // ── 运行记录：内存与磁盘同一结构，全部常驻内存 ────────────────────────────────
+    // 落盘 ~/.dsh/visual-workflow/runs/<encodeURIComponent(runId)>.json，启动时全量回载，
+    // 超过 RUNS_RETAIN 淘汰最旧（占用任务的记录不淘汰）。live 集合 = 本进程内执行中的 run；
+    // 重启后回载的 running 记录不在 live 中，因而不再占用其 taskId。
+    const RUNS_RETAIN = 50
+    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
+    const HD_STRING_KEYS = ['decision_id', 'reason', 'node']
+    const HD_NUMBER_KEYS = ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']
+    const HD_OBJECT_KEYS = ['decision_package', 'control_event', 'blocked_edge', 'results']
+    const runs = new Map()
+    const runFiles = new Map()
+    const live = new Set()
+    const runFile = (id) => runFiles.get(id) || (encodeURIComponent(String(id)) + '.json')
+    const isHumanWait = (s) => s === 'WAITING_HUMAN' || String(s || '').indexOf('AWAITING_HUMAN_') === 0
+    // workflow/end 只有 completed，可能在 wf_run 回写 WAITING_HUMAN 之后到达把等待态盖掉；
+    // 此时仍靠 decision_id + Package 识别可续跑的停机记录
+    const isParkedHd = (rec) => !!rec && (rec.status === 'WAITING_HUMAN' || (rec.status === 'completed' && !!rec.decision_id && !!rec.decision_package && typeof rec.decision_package === 'object'))
+    const holdsTask = (rec) => !!rec && !rec.supersededBy && (live.has(rec.id) || isHumanWait(rec.status) || isParkedHd(rec))
+    const runTs = (rec) => rec.updatedAt || rec.startedAt || 0
 
-    // ── 多 run 并行三约束（#19，P2-T4）──────────────────────────────────────
-    // workflow/start 载荷 WorkflowRunInfo = { id, meta } 不含 taskId/模板来源
-    // （taskId 只在引擎 start() 的 args 里），因此由 wf_run 启动边界自登记
-    // runTag（runId → { taskId, workflowId, startedAt, active }）。平台 workflow
-    // 工具直起的 run 无 tag，看板列表照常展示（taskId 列留空），不参与互斥。
-    // 约束②（同 taskId 互斥）：该 taskId 最新未接管的记录处于活跃态时拒绝新
-    // 启动。活跃判定不依赖 workflow/start 事件到达时机（start() 返回与 worker
-    // 线程事件投递之间有空窗）：登记时即置 tag.active=true，workflow/end 清除；
-    // AWAITING_HUMAN_* 终态由 runs 记录状态兜住。WAITING_HUMAN 仅匹配的
-    // decision_id 续跑放行；残留 AWAITING_HUMAN_* 仍靠 entry 续跑放行；并把同
-    // taskId 前序等待记录标记 supersededBy（旧卡片自动退出门禁队列）。
-    // 约束①③（并行隔离 / closeout 串行）在客户端看板呈现：数据本就按 runId
-    // 隔离，列表 + 门禁队列 + 并行警示条见 client.js Dashboard。
-    const runTags = new Map()
-    function isHumanWaitStatus(status) {
-      const s = String(status || '')
-      return s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0
+    function newRecord(id) {
+      return {
+        id: String(id), meta: { name: '', description: '' }, status: 'running', phase: '', logs: [], agents: [], formalRecords: [],
+        taskId: '', workflowId: '', startedAt: Date.now(), supersededBy: '',
+        decision_id: '', reason: '', decision_package: null, control_event: null, blocked_edge: null, results: null, history: null,
+        node: '', round: null, budgetUsed: null, maxRounds: null, decisionSeq: null, updatedAt: 0,
+      }
     }
-    function isActiveStatus(status) {
-      const s = String(status || '')
-      return s === 'running' || isHumanWaitStatus(s)
-    }
-    function dslUsesHumanDecision(dsl) {
-      if (!dsl || typeof dsl !== 'object') return false
-      if (dsl.humanDecision !== undefined) return true
-      const edges = Array.isArray(dsl.edges) ? dsl.edges : []
-      return edges.some((e) => e && (e.to === '$human-decision' || e.from === '$human-decision'))
-    }
-    function applyHumanDecisionValue(rec, val) {
-      if (!rec || !val || typeof val !== 'object') return
-      if (typeof val.decision_id === 'string' && val.decision_id) rec.decisionId = val.decision_id
-      if (typeof val.reason === 'string' && val.reason) rec.reason = val.reason
-      if (val.decision_package && typeof val.decision_package === 'object') rec.decisionPackage = val.decision_package
-      if (val.control_event && typeof val.control_event === 'object') rec.controlEvent = val.control_event
-      if (val.blocked_edge && typeof val.blocked_edge === 'object') rec.blockedEdge = val.blocked_edge
-      if (val.results && typeof val.results === 'object') rec.results = val.results
-      if (Array.isArray(val.history)) rec.history = val.history
-      if (typeof val.node === 'string' && val.node) rec.node = val.node
-      if (typeof val.round === 'number') rec.round = val.round
-      if (typeof val.budgetUsed === 'number') rec.budgetUsed = val.budgetUsed
-      if (typeof val.maxRounds === 'number') rec.maxRounds = val.maxRounds
-      if (typeof val.decisionSeq === 'number') rec.decisionSeq = val.decisionSeq
-    }
-    function isEmptyObject(val) {
-      return val == null || (typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length === 0)
-    }
-    // workflow/end 只有 stopReason=completed，可能在 wf_run 回写 WAITING_HUMAN 之后才到达，
-    // 把权威等待态盖掉；此时仍靠 decisionId + Package 识别可续跑的停机记录。
-    function isRecoverableCompletedHd(data) {
-      if (!data || String(data.status) !== 'completed') return false
-      const id = data.decisionId || data.decision_id
-      const pkg = data.decisionPackage || data.decision_package
-      return !!(id && pkg && typeof pkg === 'object')
-    }
-    function isParkedHumanDecisionRecord(rec) {
-      if (!rec) return false
-      if (rec.status === 'WAITING_HUMAN') return true
-      return isRecoverableCompletedHd(rec)
-    }
-    async function parkedHumanDecision(taskId) {
-      const hit = latestTagByTaskId(taskId)
-      if (!hit) return null
-      let rec = runs.get(hit.runId)
-      if (!rec) rec = await loadRunFromDisk(hit.runId)
-      if (!isParkedHumanDecisionRecord(rec)) return null
+    function ensureRun(id) {
+      let rec = runs.get(String(id))
+      if (!rec) { rec = newRecord(id); runs.set(rec.id, rec) }
       return rec
     }
-    // Map 保持插入序 = 启动序：取同 taskId 最后插入且未被续跑接管的记录
-    function latestTagByTaskId(taskId) {
+    function fromDisk(data) {
+      const rec = newRecord(data.id)
+      for (const k of Object.keys(rec)) if (data[k] !== undefined && data[k] !== null) rec[k] = data[k]
+      rec.meta = { name: String((data.meta && data.meta.name) || ''), description: String((data.meta && data.meta.description) || '') }
+      rec.status = typeof data.status === 'string' && data.status ? data.status : 'unknown'
+      rec.logs = Array.isArray(rec.logs) ? rec.logs.map(String).slice(-50) : []
+      rec.agents = Array.isArray(rec.agents) ? rec.agents.filter((a) => a && typeof a === 'object') : []
+      rec.formalRecords = Array.isArray(rec.formalRecords) ? rec.formalRecords : []
+      return rec
+    }
+    function applyHdValue(rec, val) {
+      if (!val || typeof val !== 'object') return
+      for (const k of HD_STRING_KEYS) if (typeof val[k] === 'string' && val[k]) rec[k] = val[k]
+      for (const k of HD_NUMBER_KEYS) if (typeof val[k] === 'number') rec[k] = val[k]
+      for (const k of HD_OBJECT_KEYS) if (val[k] && typeof val[k] === 'object') rec[k] = val[k]
+      if (Array.isArray(val.history)) rec.history = val.history
+    }
+    const summary = (rec) => ({ id: rec.id, name: rec.meta.name, status: rec.status, phase: rec.phase, taskId: rec.taskId, workflowId: rec.workflowId, startedAt: rec.startedAt, supersededBy: rec.supersededBy, decision_id: rec.decision_id, reason: rec.reason })
+
+    // 无定时器节流：每个 run 至多一个飞行中写入，期间变更只置 dirty，写完按最新态补一次尾写
+    const writeQueues = new Map()
+    function persist(runId) {
+      const id = String(runId || '')
+      if (!id) return
+      let q = writeQueues.get(id)
+      if (!q) { q = { dirty: false, pending: false }; writeQueues.set(id, q) }
+      q.dirty = true
+      if (!q.pending) drainWrite(id, q)
+    }
+    function drainWrite(id, q) {
+      if (!q.dirty) { writeQueues.delete(id); return }
+      q.dirty = false
+      q.pending = true
+      writeRun(id)
+        .catch((e) => log('运行记录落盘失败（不影响运行）：' + id + '：' + errMsg(e)))
+        .then(() => { q.pending = false; drainWrite(id, q); evictSoon() })
+    }
+    async function writeRun(id) {
+      const rec = runs.get(id)
+      const d = fs === undefined ? null : await homeDirs()
+      if (!rec || !d) return
+      rec.updatedAt = Date.now()
+      await writeText(d.runsDir + '/' + runFile(id), JSON.stringify(rec, null, 2) + '\n')
+    }
+    let evictChain = Promise.resolve()
+    let evictWarned = false
+    function evictSoon() { evictChain = evictChain.then(evictRuns).catch((e) => log('运行记录淘汰失败（不影响运行）：' + errMsg(e))) }
+    async function evictRuns() {
+      const d = fs === undefined ? null : await homeDirs()
+      if (!d || runs.size <= RUNS_RETAIN) return
+      if (subprocess === undefined) {
+        if (!evictWarned) { evictWarned = true; log('subprocess 服务不可用：运行记录淘汰暂停（' + runs.size + ' 条超过上限 ' + RUNS_RETAIN + '）') }
+        return
+      }
+      const ordered = Array.from(runs.values()).sort((a, b) => (runTs(a) - runTs(b)) || byId(a.id, b.id))
+      for (const rec of ordered.slice(0, ordered.length - RUNS_RETAIN)) {
+        if (holdsTask(rec)) continue
+        const r = await rm(d.runsDir + '/' + runFile(rec.id))
+        if (r.ok) { runs.delete(rec.id); runFiles.delete(rec.id) } else log('运行记录淘汰删除失败：' + rec.id + '：' + r.detail)
+      }
+    }
+    async function loadRuns() {
+      for (let attempt = 0; attempt < 10 && fs === undefined; attempt++) {
+        refreshServices()
+        if (fs !== undefined) break
+        // 动态会话 vm 沙箱没有真定时器（调用会被拦截）：无定时器则放弃重试
+        try { await new Promise((r) => setTimeout(r, 100 * (attempt + 1))) } catch (e) { break }
+      }
+      if (fs === undefined) { log('fs 服务不可用，运行记录未回载'); return }
+      const d = await homeDirs()
+      const entries = d ? await listDirOrNull(d.runsDir) : null
+      for (const ent of entries || []) {
+        if (!ent || ent.type !== 'file' || !/\.json$/i.test(ent.name)) continue
+        try {
+          const data = JSON.parse(await fs.readText(await fs.resolve(d.runsDir + '/' + ent.name)))
+          if (!data || typeof data.id !== 'string' || !data.id) throw new Error('缺少 id 字段')
+          if (runs.has(data.id)) continue
+          runs.set(data.id, fromDisk(data))
+          runFiles.set(data.id, ent.name)
+        } catch (e) { log('跳过损坏的运行记录：' + ent.name + '（' + errMsg(e) + '）') }
+      }
+      evictSoon()
+    }
+    const runsHydration = loadRuns().catch((e) => log('运行记录回载失败：' + errMsg(e)))
+
+    ctx.on('workflow/start', (info) => {
+      const rec = ensureRun(info.id)
+      rec.meta = { name: String((info.meta && info.meta.name) || ''), description: String((info.meta && info.meta.description) || '') }
+      persist(rec.id)
+    })
+    const onRun = (id, mutate) => { const rec = runs.get(String(id)); if (rec) { mutate(rec); persist(rec.id) } }
+    const pushLog = (rec, line) => { rec.logs.push(String(line)); if (rec.logs.length > 50) rec.logs.shift() }
+    ctx.on('workflow/phase', (info, title) => onRun(info.id, (rec) => { rec.phase = String(title); pushLog(rec, '[phase] ' + title) }))
+    ctx.on('workflow/log', (info, message) => onRun(info.id, (rec) => pushLog(rec, message)))
+    ctx.on('workflow/agent-start', (info, agent) => onRun(info.id, (rec) => rec.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' })))
+    // 按 seq 精确匹配：pipeline 并发下 agent-start/agent-end 可能交错到达
+    ctx.on('workflow/agent-end', (info, agent) => onRun(info.id, (rec) => { const a = rec.agents.find((x) => x.seq === agent.seq); if (a) a.outcome = String(agent.outcome) }))
+    ctx.on('workflow/end', (info, result) => {
+      live.delete(String(info.id))
+      onRun(info.id, (rec) => {
+        // wf_run 已回写的脚本权威终态（WAITING_HUMAN / DONE / …）不得被迟到的 end 盖掉
+        if (!TERMINAL_STATUS_RE.test(String(rec.status || ''))) rec.status = String(result.stopReason)
+        // 终局时仍 running 的子代理不可能再有结果（引擎对启动即失败的项不投递 agent-end）
+        for (const a of rec.agents) if (a.outcome === 'running') a.outcome = 'failed'
+      })
+    })
+
+    // 同 taskId 互斥：占用该任务的最新记录
+    function taskHolder(taskId) {
       let found = null
-      for (const [rid, tag] of runTags) {
-        if (tag && tag.taskId === taskId && !tag.supersededBy) found = { runId: rid, tag: tag }
+      if (!taskId) return null
+      for (const rec of runs.values()) {
+        if (rec.taskId === taskId && holdsTask(rec) && (!found || runTs(rec) >= runTs(found))) found = rec
       }
       return found
     }
-    function taskMutexBlocker(taskId) {
-      const hit = latestTagByTaskId(taskId)
-      if (!hit) return null
-      const rec = runs.get(hit.runId)
-      // 重启中断的 running 快照（评审 PRRT_kwDOT57Tec6b6Iuv）：进程已死且无门禁
-      // 语义，不得永久占用 taskId——放行新启动；旧记录保留展示，真实恢复走
-      // entry 续跑或直接重跑。
-      const staleRunning = !!(hit.tag && hit.tag.restoredRunning === true)
-      // 幽灵门禁（评审 PRRT_kwDOT57Tec6b6Iuz）：未水合进内存的窗口外记录，
-      // 以回载时的 lastStatus 参与互斥判定。兜底用 '' 而非 'running'——
-      // 运行期 tag 可能没有 lastStatus（execute 自登记早于任何落盘点），且
-      // runs 也可能无 rec（workflow/start 未投递）；此时状态由 tag.active 裁决，
-      // 若 active 已解除（终态），绝不能假想仍在运行而误判占用。
-      const status = rec ? rec.status : (hit.tag && hit.tag.lastStatus) || ''
-      const parkedHd = rec ? isParkedHumanDecisionRecord(rec) : !!(hit.tag && hit.tag.parkedHd)
-      const active = !staleRunning && ((hit.tag && hit.tag.active === true) || isActiveStatus(status) || parkedHd)
-      return active ? { runId: hit.runId, status: status || 'running' } : null
-    }
+    // 续跑启动后：同 taskId 的停机记录标记接管，旧卡片退出门禁队列
     function supersedeParked(taskId, newRunId) {
-      for (const [rid, tag] of runTags) {
-        if (rid === newRunId || !tag || tag.taskId !== taskId || tag.supersededBy) continue
-        const rec = runs.get(rid)
-        const parked = rec
-          ? (isHumanWaitStatus(rec.status) || isParkedHumanDecisionRecord(rec))
-          : (isHumanWaitStatus(tag.lastStatus) || !!(tag && tag.parkedHd))
-        if (parked) {
-          tag.supersededBy = newRunId
-          requestRunPersist(rid)
-          // 幽灵门禁（内存无完整记录）：按需水合后把接管标记回写磁盘
-          if (!rec) supersedeGhostOnDisk(rid, newRunId)
-        }
+      for (const rec of runs.values()) {
+        if (rec.id === newRunId || rec.taskId !== taskId || rec.supersededBy) continue
+        if (isHumanWait(rec.status) || isParkedHd(rec)) { rec.supersededBy = newRunId; persist(rec.id) }
       }
     }
-    // 幽灵门禁接管回写：从磁盘水合完整记录→补写 supersededBy→落盘（异步，
-    // 失败仅终端留痕，不影响续跑本身）
-    function supersedeGhostOnDisk(runId, newRunId) {
-      loadRunFromDisk(runId)
-        .then((rec) => {
-          if (!rec) return
-          const tag = runTags.get(runId)
-          if (tag) tag.supersededBy = newRunId
-          requestRunPersist(runId)
-        })
-        .catch((e) => console.log('[vwf] 幽灵门禁接管回写失败：' + runId + '：' + String((e && e.message) || e)))
-    }
-    // 引擎契约（dsh workflow types.ts）：WorkflowStopReason 只有
-    // 'completed' | 'cancelled' | 'error'，且 workflow/end 事件故意剥掉 value——
-    // 脚本终态（DONE / AWAITING_HUMAN_* / FAILED_* 等）只在 result.value 里，
-    // 恰好只有持有 run 并 await 的 wf_run 能看到。事件层的 'completed' 对门禁/
-    // 互斥语义不够：wf_run 收尾后用 value.status 回写权威终态。
-    // 终态集合（评审 PRRT_kwDOT57Tec6bfXfm/6b6ZN3）：节点 id 允许非 ASCII/
-    // 空白/标点（AWAITING_HUMAN_验收、FAILED_AT_调度A 等），前缀类用 .+ 宽匹配；
-    // fanout cap 失败态（FAILED_ITEM_CAP/FAILED_AGENT_CAP）同为脚本终态
-    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
     function canonicalStop(result) {
       const v = result && result.value
       const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
       return TERMINAL_STATUS_RE.test(cand) ? cand : ''
     }
-    // #93 A5（Codex Round 1）：脚本终态 → Core LIFECYCLE 映射，覆盖全部终态。
-    // 人工等待（WAITING_HUMAN / AWAITING_HUMAN_*）→ 保留态；成功（DONE）→
-    // COMPLETED；显式 STOPPED → STOPPED；其余失败/取消（FAILED_*、
-    // TECHNICAL_FAILURE、ENDED_*、ROUTE_HALTED、ERROR、cancelled、error）→ FAILED。
-    // 返回 Core 的 LIFECYCLE 枚举值字符串，无法归类时返回 null（保持原状态）。
-    function canonicalLifecycleFor(canon, stopReason) {
+    // 脚本终态 → workspace 生命周期：人工等待保留，DONE 完成，STOPPED 停止，其余失败
+    function lifecycleFor(canon, stopReason) {
       if (canon === 'DONE') return 'COMPLETED'
       if (canon === 'STOPPED') return 'STOPPED'
-      if (canon === 'WAITING_HUMAN' || canon.indexOf('AWAITING_HUMAN_') === 0) return 'WAITING_HUMAN'
-      if (canon) return 'FAILED'
-      // canon 为空：引擎层 cancelled / error
-      if (stopReason === 'cancelled' || stopReason === 'error') return 'FAILED'
+      if (isHumanWait(canon)) return 'WAITING_HUMAN'
+      if (canon || stopReason === 'cancelled' || stopReason === 'error') return 'FAILED'
       return null
     }
 
-    const runs = new Map()
-    ctx.on('workflow/start', (info) => {
-      runs.set(info.id, { meta: { name: (info.meta && info.meta.name) || '', description: (info.meta && info.meta.description) || '' }, status: 'running', phase: '', logs: [], agents: [], formalRecords: [], startedAt: Date.now() })
-      requestRunPersist(info.id)
-    })
-    ctx.on('workflow/phase', (info, title) => { const r = runs.get(info.id); if (r) { r.phase = String(title); r.logs.push('[phase] ' + title); if (r.logs.length > 50) r.logs.shift(); requestRunPersist(info.id) } })
-    ctx.on('workflow/log', (info, message) => { const r = runs.get(info.id); if (r) { r.logs.push(String(message)); if (r.logs.length > 50) r.logs.shift(); requestRunPersist(info.id) } })
-    ctx.on('workflow/agent-start', (info, agent) => { const r = runs.get(info.id); if (r) { r.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' }); requestRunPersist(info.id) } })
-    // 按 seq 精确匹配：pipeline 并发下 agent-start/agent-end 可能交错到达，
-    // 只看数组末位会把非最新项的结局事件丢掉（行卡在 running）
-    ctx.on('workflow/agent-end', (info, agent) => { const r = runs.get(info.id); if (!r) return; const a = r.agents.find((x) => x.seq === agent.seq); if (a) { a.outcome = String(agent.outcome); requestRunPersist(info.id) } })
-    // workflow/end 同时清 runTag.active（终态落定，含 AWAITING_HUMAN_*——门禁占用
-    // 由 isActiveStatus(runs 状态) 继续兜住），互斥的解除与维持由此统一裁决。
-    // 终态归一（#18 验收发现）：运行已终局却仍处 running 的子代理不可能再有结果
-    // 回报——引擎对「启动即失败」的项可能不投递 agent-end（如 provider 无法解析），
-    // 若保持 running，看板会把已失败项永久显示为进行中造成误判；统一按 failed
-    // 收口。迟到的 agent-end（乱序投递）仍会按 seq 覆盖回真实结果。
-    ctx.on('workflow/end', (info, result) => {
-      const r = runs.get(info.id)
-      if (r) {
-        // 脚本权威终态（WAITING_HUMAN / DONE / …）已由 wf_run 回写时，不得被
-        // 迟到的 workflow/end（stopReason=completed）盖掉，否则续跑找不到停机记录。
-        if (!TERMINAL_STATUS_RE.test(String(r.status || ''))) r.status = String(result.stopReason)
-        for (const a of r.agents) { if (a.outcome === 'running') a.outcome = 'failed' }
-        requestRunPersist(info.id)
-      }
-      const t = runTags.get(info.id); if (t) t.active = false
-    })
-
-    // ── runs 运行记录持久化（#40，P2-T2b）────────────────────────────────────
-    // 内存 runs/runTags 进程重启即失：事件流驱动的记录落盘到
-    // ~/.dsh/visual-workflow/runs/<runId>.json；插件启动回载最近 RUNS_RELOAD 条
-    // 进内存，其余留在磁盘由 vwf.state 按需回落读取；磁盘总量按 RUNS_RETAIN
-    // 淘汰最旧。落盘内容以事件流为界（meta/状态/阶段/日志/子代理 label+outcome
-    // + 启动边界登记的 taskId/workflowId/supersededBy），不含子代理返回内容。
-    // 所有落盘路径异常仅终端日志留痕，runs 内存态不受损（验收 AC4）。
-    const RUNS_RELOAD = 20
-    const RUNS_RETAIN = 50
-
-    function runFileName(runId) {
-      // 注入式编码（评审 PRRT_kwDOT57Tec6b6it5）：run/a 与 run:a 若都替换为 _
-      // 会碰撞成同一文件互相覆盖历史；encodeURIComponent 保持 runId→文件一一对应
-      return encodeURIComponent(String(runId || '')) + '.json'
-    }
-
-    // 事件流快照：只取叶子字段构造自有 JSON（logs 上限 50 已在事件层收紧；
-    // 数组在 stringify 同步执行期间无并发插入，无需深拷贝）
-    function runRecordPayload(runId) {
-      const rec = runs.get(runId)
-      if (!rec) return null
-      const tag = runTags.get(runId) || null
-      return {
-        id: String(runId),
-        meta: { name: (rec.meta && rec.meta.name) || '', description: (rec.meta && rec.meta.description) || '' },
-        status: String(rec.status || ''),
-        phase: String(rec.phase || ''),
-        logs: rec.logs || [],
-        agents: (rec.agents || []).map((a) => ({ seq: a.seq, label: a.label || '', phase: a.phase || '', outcome: a.outcome || '' })),
-        formalRecords: Array.isArray(rec.formalRecords) ? rec.formalRecords : [],
-        taskId: tag ? String(tag.taskId || '') : '',
-        workflowId: tag ? String(tag.workflowId || '') : '',
-        startedAt: rec.startedAt != null ? rec.startedAt : (tag && tag.startedAt != null ? tag.startedAt : null),
-        supersededBy: tag && tag.supersededBy ? String(tag.supersededBy) : '',
-        decision_id: rec.decisionId ? String(rec.decisionId) : '',
-        reason: rec.reason ? String(rec.reason) : '',
-        decision_package: rec.decisionPackage || null,
-        control_event: rec.controlEvent || null,
-        blocked_edge: rec.blockedEdge || null,
-        results: rec.results || null,
-        history: rec.history || null,
-        node: rec.node ? String(rec.node) : '',
-        round: typeof rec.round === 'number' ? rec.round : null,
-        budgetUsed: typeof rec.budgetUsed === 'number' ? rec.budgetUsed : null,
-        maxRounds: typeof rec.maxRounds === 'number' ? rec.maxRounds : null,
-        decisionSeq: typeof rec.decisionSeq === 'number' ? rec.decisionSeq : null,
-        updatedAt: Date.now(),
-      }
-    }
-
-    async function writeRunFile(runId) {
-      if (fs === undefined) return
-      const p = await rootPaths()
-      if (!p.runsDir) return
-      const payload = runRecordPayload(runId)
-      if (!payload) return
-      const file = runFileName(runId)
-      const target = await fs.resolve(p.runsDir + '/' + file)
-      await fs.writeText(target, JSON.stringify(payload, null, 2) + '\n', undefined, undefined, writePolicy())
-      runsDiskIndex.set(file, { file: file, id: payload.id, ts: payload.updatedAt || payload.startedAt || 0 })
-    }
-
-    // 无定时器节流（动态 vm 沙箱无真 setTimeout）：每个 run 至多一个飞行中
-    // 写入，期间的变更只置 dirty，当前写入完成后按最新内存态补一次尾写——
-    // start/phase/log/agent/end 全部走此队列，天然合并且终态不落空。
-    const runWriteQueues = new Map()
-    function requestRunPersist(runId) {
-      const id = String(runId || '')
-      if (!id) return
-      let q = runWriteQueues.get(id)
-      if (!q) { q = { dirty: false, pending: null }; runWriteQueues.set(id, q) }
-      q.dirty = true
-      if (!q.pending) drainRunWrite(id)
-    }
-    function drainRunWrite(id) {
-      const q = runWriteQueues.get(id)
-      if (!q) return
-      if (!q.dirty) { runWriteQueues.delete(id); return }
-      q.dirty = false
-      q.pending = writeRunFile(id)
-        .catch((e) => { console.log('[vwf] 运行记录落盘失败（不影响运行）：' + id + '：' + String((e && e.message) || e)) })
-        .then(() => { q.pending = null; drainRunWrite(id); evictRunsSoon() })
-    }
-
-    // 磁盘容量淘汰：启动回载重建索引，写入后增量更新；超出 RUNS_RETAIN 时
-    // 删除最旧（fs 服务无删除面，经子进程 rm；子进程缺失则暂停淘汰并仅记
-    // 一次日志——永不删除索引外的未知文件，方向安全）。
-    const runsDiskIndex = new Map()
-    let evictChain = Promise.resolve()
-    let evictWarned = false
-    function evictRunsSoon() {
-      evictChain = evictChain.then(evictRunsDisk).catch((e) => {
-        console.log('[vwf] 运行记录淘汰失败（不影响运行）：' + String((e && e.message) || e))
-      })
-    }
-    async function evictRunsDisk() {
-      if (fs === undefined) return
-      const p = await rootPaths()
-      if (!p.runsDir || runsDiskIndex.size <= RUNS_RETAIN) return
-      if (subprocess === undefined) {
-        if (!evictWarned) { evictWarned = true; console.log('[vwf] subprocess 服务不可用：运行记录淘汰暂停（磁盘条数 ' + runsDiskIndex.size + ' 超过上限 ' + RUNS_RETAIN + '）') }
-        return
-      }
-      const items = Array.from(runsDiskIndex.values()).sort((a, b) => (a.ts - b.ts) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
-      const victims = items.slice(0, items.length - RUNS_RETAIN)
-      for (const v of victims) {
-        // 活跃 run 不淘汰（保险带：按时间序正常轮不到；防止淘汰把进行中快照删掉）。
-        // 未接管的门禁同样不淘汰（评审 PRRT_kwDOT57Tec6b7RDw）：窗口外幽灵门禁
-        // 只在 runTags 登记、runs 无 rec——若被删，重启后门禁与互斥一并消失，
-        // 同 taskId 会被继续放行且丢失续跑历史
-        const rec = runs.get(v.id)
-        const tag = runTags.get(v.id)
-        const status = rec ? rec.status : (tag && tag.lastStatus) || ''
-        const unsuperseded = !(tag && tag.supersededBy)
-        if (unsuperseded && (isActiveStatus(status) || isParkedHumanDecisionRecord(rec) || (tag && tag.parkedHd))) continue
-        const r = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{force:true})", p.runsDir + '/' + v.file])
-        if (r.ok) runsDiskIndex.delete(v.file)
-        else console.log('[vwf] 运行记录淘汰删除失败：' + v.file + '：' + r.detail)
-      }
-    }
-
-    // 磁盘 → 内存水合：live 优先（runs 已有同 id 记录则不动）。回载的 runTag
-    // 以 active:false 恢复——进程重启后不存在执行中的 run；AWAITING_HUMAN_*
-    // 门禁状态经 isActiveStatus(runs) 继续保持 taskId 占用与接管语义。
-    function hydrateRunFromDisk(data) {
-      if (!data || typeof data !== 'object') return false
-      const id = typeof data.id === 'string' && data.id ? data.id : null
-      if (!id || runs.has(id)) return false
-      runs.set(id, {
-        meta: { name: (data.meta && data.meta.name) || '', description: (data.meta && data.meta.description) || '' },
-        status: typeof data.status === 'string' && data.status ? data.status : 'unknown',
-        phase: typeof data.phase === 'string' ? data.phase : '',
-        logs: Array.isArray(data.logs) ? data.logs.map((l) => String(l)).slice(-50) : [],
-        agents: Array.isArray(data.agents) ? data.agents.filter((a) => a && typeof a === 'object').map((a) => ({ seq: a.seq, label: String(a.label || ''), phase: a.phase ? String(a.phase) : '', outcome: String(a.outcome || '') })) : [],
-        formalRecords: Array.isArray(data.formalRecords) ? data.formalRecords : [],
-        startedAt: typeof data.startedAt === 'number' ? data.startedAt : null,
-        decisionId: typeof data.decision_id === 'string' && data.decision_id ? data.decision_id : null,
-        reason: typeof data.reason === 'string' && data.reason ? data.reason : '',
-        decisionPackage: data.decision_package && typeof data.decision_package === 'object' ? data.decision_package : null,
-        controlEvent: data.control_event && typeof data.control_event === 'object' ? data.control_event : null,
-        blockedEdge: data.blocked_edge && typeof data.blocked_edge === 'object' ? data.blocked_edge : null,
-        results: data.results && typeof data.results === 'object' ? data.results : null,
-        history: Array.isArray(data.history) ? data.history : null,
-        node: typeof data.node === 'string' ? data.node : '',
-        round: typeof data.round === 'number' ? data.round : null,
-        budgetUsed: typeof data.budgetUsed === 'number' ? data.budgetUsed : null,
-        maxRounds: typeof data.maxRounds === 'number' ? data.maxRounds : null,
-        decisionSeq: typeof data.decisionSeq === 'number' ? data.decisionSeq : null,
-      })
-      if (data.taskId || data.workflowId) {
-        const status = typeof data.status === 'string' && data.status ? data.status : 'unknown'
-        const tag = {
-          taskId: typeof data.taskId === 'string' ? data.taskId : '',
-          workflowId: typeof data.workflowId === 'string' ? data.workflowId : '',
-          startedAt: typeof data.startedAt === 'number' ? data.startedAt : null,
-          active: false,
-          // 重启中断的 running 快照标记（评审 PRRT_kwDOT57Tec6b6Iuv）：
-          // 进程死亡时该 run 不可能再有结果，互斥判定对其放行（见 taskMutexBlocker）
-          restoredRunning: status === 'running',
-          lastStatus: status,
-        }
-        if (typeof data.supersededBy === 'string' && data.supersededBy) tag.supersededBy = data.supersededBy
-        runTags.set(id, tag)
-      }
-      return true
-    }
-
-    // vwf.state 内存 miss 的磁盘回落：命中即水合进内存（后续列表/互斥照常工作）
-    async function loadRunFromDisk(runId) {
-      if (fs === undefined) return null
-      const p = await rootPaths()
-      if (!p.runsDir) return null
-      try {
-        const target = await fs.resolve(p.runsDir + '/' + runFileName(runId))
-        const info = await fs.stat(target)
-        if (!info || info.type !== 'file') return null
-        const data = JSON.parse(await fs.readText(target))
-        // 并发水合（评审 PRRT_kwDOT57Tec6b6it7）：另一请求可能抢先水合同一冷记录，
-        // hydrateRunFromDisk 返回 false；此时该记录已在 runs 中，属成功 cache hit
-        hydrateRunFromDisk(data)
-        return runs.get(data.id) || null
-      } catch (e) { return null }
-    }
-
-    // 启动回载：按时间升序插入（保持 runs Map 插入序=时间序，vwf.runs.list
-    // 反转后最新在前）；单文件损坏仅跳过留痕（验收 AC5）；回载后补一次淘汰
-    // （前序进程可能死在淘汰前）。
-    async function loadPersistedRuns() {
-      // fs 可能在 apply 后注入（静态 bundle 仅等待 webServer/tools，评审
-      // PRRT_kwDOT57Tec6b7RDu）：与 syncBuiltins 相同的轮询策略等待 fs 出现，
-      // 避免 runsHydration 在无 fs 时提前 resolve 而门禁从未加载
-      for (let attempt = 0; attempt < 10; attempt++) {
-        if (fs !== undefined) break
-        fs = ctx.get('fs')
-        if (fs !== undefined) break
-        try { await new Promise((r) => setTimeout(r, 100 * (attempt + 1))) } catch (e) { break }
-      }
-      if (fs === undefined) { console.log('[vwf] fs 服务不可用，运行记录回载未完成（本次互斥以内存态为准）'); return }
-      const p = await rootPaths()
-      if (!p.runsDir) return
-      let entries = null
-      try {
-        entries = await fs.listDir(await fs.resolve(p.runsDir))
-      } catch (e) { return } // 目录不存在 = 首次运行
-      const loaded = []
-      for (const ent of entries || []) {
-        if (!ent || ent.type !== 'file' || !/\.json$/i.test(ent.name)) continue
-        try {
-          const data = JSON.parse(await fs.readText(await fs.resolve(p.runsDir + '/' + ent.name)))
-          if (!data || typeof data.id !== 'string' || !data.id) throw new Error('缺少 id 字段')
-          const ts = (typeof data.updatedAt === 'number' && data.updatedAt) || (typeof data.startedAt === 'number' && data.startedAt) || 0
-          loaded.push({ file: ent.name, id: data.id, ts: ts, data: data })
-        } catch (e) {
-          console.log('[vwf] 跳过损坏的运行记录：' + ent.name + '（' + String((e && e.message) || e) + '）')
-        }
-      }
-      loaded.sort((a, b) => (a.ts - b.ts) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
-      for (const it of loaded) runsDiskIndex.set(it.file, { file: it.file, id: it.id, ts: it.ts })
-      const hydrated = new Set()
-      for (const it of loaded.slice(-RUNS_RELOAD)) { if (hydrateRunFromDisk(it.data)) hydrated.add(it.id) }
-      // 幽灵门禁（评审 PRRT_kwDOT57Tec6b6Iuz）：回载窗口之外的未接管 AWAITING_*
-      // 记录以 lastStatus 轻量登记进 runTags——taskMutexBlocker/supersedeParked
-      // 据此保持同 taskId 互斥与接管语义，完整记录仍留在磁盘按需水合
-      for (const it of loaded) {
-        if (hydrated.has(it.id) || runs.has(it.id)) continue
-        const d = it.data
-        const st = typeof d.status === 'string' ? d.status : ''
-        if (!isHumanWaitStatus(st) && !isRecoverableCompletedHd(d)) continue
-        if (typeof d.supersededBy === 'string' && d.supersededBy) continue
-        if (!d.taskId && !d.workflowId) continue
-        runTags.set(d.id, {
-          taskId: typeof d.taskId === 'string' ? d.taskId : '',
-          workflowId: typeof d.workflowId === 'string' ? d.workflowId : '',
-          startedAt: typeof d.startedAt === 'number' ? d.startedAt : null,
-          active: false,
-          ghost: true,
-          lastStatus: st,
-          parkedHd: isRecoverableCompletedHd(d),
-        })
-      }
-      evictRunsSoon()
-    }
-    // 与 apply 时序解耦的异步回载：不阻塞 apply，失败仅在终端日志留痕；
-    // 回载 promise 暴露给 wf_run 边界 await（评审 PRRT_kwDOT57Tec6b6Iu1：
-    // 互斥判定必须看到完整门禁状态，不能与回载竞速）
-    let runsHydration = null
-    runsHydration = loadPersistedRuns().catch((e) => console.log('[vwf] 运行记录回载失败（不影响本次运行）：' + String((e && e.message) || e)))
-
-
-    registerRpc('vwf.workflows.list', async () => listWorkflows())
+    // ── 模板 / 校验 / 编译 / 运行状态 RPC ─────────────────────────────────────
+    registerRpc('vwf.workflows.list', () => listWorkflows())
     registerRpc('vwf.workflows.save', async (a) => {
-      const dsl = a && a.dsl
-      const v = await validatePipeline(dsl)
+      const v = await validatePipeline(a.dsl)
       if (!v.ok) return { ok: false, errors: v.errors, fieldErrors: v.fieldErrors }
       const id = v.sanitized.id
-      const p = await rootPaths()
-      if (fs === undefined || !p.generatorRoot || !p.userDir || !p.skillRoot || !p.generator) {
-        return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法解析模板目录（需 fs/subprocess/sandboxPolicy 服务）' }] }
-      }
-      const [builtins, users] = await Promise.all([loadBuiltins(), loadUserTemplates()])
-      if (builtins.has(id)) {
-        return { ok: false, errors: [{ at: '$.id', message: '内置模板只读：' + id + ' 属于内置模板，不能覆盖，请改用新 id（另存为新模板）' }] }
-      }
-      const currentId = a && a.currentId
-      if (users.has(id) && currentId !== id) {
-        return { ok: false, errors: [{ at: '$.id', message: '已存在同名模板 ' + id + '：另存为新模板请修改模板 ID；更新当前模板请保持 ID 不变。' }] }
-      }
-      // 逆投影蓝图 → 落盘用户目录
-      const bp = projectToBlueprint(v.sanitized)
-      const file = p.userDir + '/' + id + '.json'
-      try {
-        const target = await fs.resolve(file)
-        await fs.writeText(target, JSON.stringify(bp, null, 2) + '\n', undefined, undefined, writePolicy())
-      } catch (e) {
-        return { ok: false, errors: [{ at: '$', message: '模板落盘失败：' + String((e && e.message) || e) }] }
-      }
-      // save 即闭环：spawn 生成器 user 子命令 → 自包含 skill 三件套到 ~/.dsh/skills/<id>/
-      // （生成器内部先跑蓝图校验含异源；失败 exit 1 输出错误）
-      const gen = await runNode([p.generator, 'user', file, p.skillRoot], { cwd: p.generatorRoot, graceMs: 60000 })
+      const d = fs === undefined ? null : await homeDirs()
+      if (!d || !GENERATOR) return fail('宿主文件能力不可用或插件根未注入：无法保存模板')
+      const [{ builtins }, users] = await Promise.all([splitGenerated(), loadUserTemplates()])
+      if (builtins.has(id)) return fail('内置模板只读：' + id + ' 属于内置模板，不能覆盖，请改用新 id（另存为新模板）', '$.id')
+      if (users.has(id) && a.currentId !== id) return fail('已存在同名模板 ' + id + '：另存为新模板请修改模板 ID；更新当前模板请保持 ID 不变。', '$.id')
+      const file = d.userDir + '/' + id + '.json'
+      try { await writeText(file, JSON.stringify((await kernel()).projectToBlueprint(v.sanitized), null, 2) + '\n') } catch (e) { return fail('模板落盘失败：' + errMsg(e)) }
+      // save 即闭环：生成器 user 子命令同步自包含 skill 到 ~/.dsh/skills/<id>/；失败回滚落盘保持原子
+      const gen = await runNode([GENERATOR, 'user', file, d.skillRoot], { graceMs: 60000 })
       if (!gen.ok) {
-        // 闭环失败：回滚已落盘蓝图，save 保持原子（蓝图级校验失败同此路径）
-        try {
-          await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.generatorRoot })
-        } catch (e) {}
-        return { ok: false, errors: [{ at: '$', message: '蓝图校验/技能生成失败（save 已回滚）：' + gen.detail }] }
+        await rm(file)
+        return fail('蓝图校验/技能生成失败（save 已回滚）：' + gen.detail)
       }
-      await clearRemoved(id)
-      return { ok: true, id: id, dsl: v.sanitized, warnings: v.warnings || [] }
+      if (isLegacyCustomId(id)) await rm(d.removedDir + '/' + id)
+      return { ok: true, id: id, dsl: v.sanitized, warnings: v.warnings }
     })
     registerRpc('vwf.workflows.remove', async (a) => {
-      const id = a && a.id
-      if (!id || typeof id !== 'string') return { ok: false, errors: [{ at: '$.id', message: '缺少模板 id' }] }
-      const p = await rootPaths()
-      if (fs === undefined || !p.generatorRoot || !p.userDir || !p.skillRoot) {
-        return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法删除用户模板' }] }
-      }
-      const builtins = await loadBuiltins()
-      if (builtins.has(id)) {
-        return { ok: false, errors: [{ at: '$.id', message: '内置模板只读：' + id + ' 属于内置模板，不能删除' }] }
-      }
-      const file = p.userDir + '/' + id + '.json'
-      let existed = false
-      try {
-        const target = await fs.resolve(file)
-        const info = await fs.stat(target)
-        existed = !!info
-      } catch (e) { existed = false }
-      const shipped = isLegacyCustomId(id)
-      if (!existed && !shipped) return { ok: false, errors: [{ at: '$.id', message: '用户模板不存在：' + id }] }
-      const removed = await loadRemovedIds()
-      if (!existed && shipped && removed.has(id)) return { ok: false, errors: [{ at: '$.id', message: '用户模板不存在：' + id }] }
-      // 删蓝图 + 同步删 ~/.dsh/skills/<id>/（fs 服务无删除能力，经子进程 rm）
+      const id = a.id
+      if (!id || typeof id !== 'string') return fail('缺少模板 id', '$.id')
+      const d = fs === undefined ? null : await homeDirs()
+      if (!d) return fail('宿主文件能力不可用：无法删除用户模板')
+      if ((await splitGenerated()).builtins.has(id)) return fail('内置模板只读：' + id + ' 属于内置模板，不能删除', '$.id')
+      const file = d.userDir + '/' + id + '.json'
+      const existed = (await readTextIfExists(file)) !== null
+      if (!existed && (!isLegacyCustomId(id) || (await loadRemovedIds()).has(id))) return fail('用户模板不存在：' + id, '$.id')
       if (existed) {
-        const rm = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.generatorRoot })
-        if (!rm.ok) return { ok: false, errors: [{ at: '$', message: '模板删除失败：' + rm.detail }] }
+        const r = await rm(file)
+        if (!r.ok) return fail('模板删除失败：' + r.detail)
       }
-      const skillDir = p.skillRoot + '/' + id
-      await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", skillDir], { cwd: p.generatorRoot })
-      await markRemoved(id)
+      await rm(d.skillRoot + '/' + id)
+      // 历史模板删除后写删除标记，避免生成物再次出现在模板库
+      if (isLegacyCustomId(id)) { try { await writeText(d.removedDir + '/' + id, '') } catch (e) { /* 标记失败不阻断删除 */ } }
       return { ok: true, id: id }
     })
     registerRpc('vwf.validate', async (a) => {
-      const v = await validatePipeline(a && a.dsl)
-      return { ok: v.ok, errors: v.errors, fieldErrors: v.fieldErrors, sanitized: v.sanitized, warnings: v.warnings || [] }
+      const v = await validatePipeline(a.dsl)
+      return { ok: v.ok, errors: v.errors, fieldErrors: v.fieldErrors, sanitized: v.sanitized, warnings: v.warnings }
     })
-    // vwf.compile 已删除（T-IMP-12）：统一编译器后无独立编译 RPC；脚本经 vwf.script 走管道。
+    // 编辑器「一键检测」入口：先静态校验；Runtime Preflight Probe（#74）未落地前明确返回 pending，避免伪装成已可探针。
+    registerRpc('vwf.probe', async (a) => {
+      const v = await validatePipeline(a.dsl)
+      if (!v.ok) {
+        return {
+          ok: false,
+          stage: 'static',
+          errors: v.errors,
+          fieldErrors: v.fieldErrors,
+          sanitized: v.sanitized,
+          warnings: v.warnings,
+        }
+      }
+      return {
+        ok: false,
+        stage: 'probe',
+        pending: true,
+        code: 'PROBE_NOT_IMPLEMENTED',
+        issue: 74,
+        errors: [{
+          path: '$',
+          message: '静态校验已通过；运行前探针（Preflight Probe，#74）尚未落地，一键检测暂不能验证模型可用性/走通条件。',
+        }],
+        sanitized: v.sanitized,
+        warnings: v.warnings,
+      }
+    })
+    // 会话 / wf_run 正式路径仍用 vwf.script；allocate:true 时分配隔离 workspace 并注入脚本默认 args（面板不再暴露预览/准备运行按钮）
     registerRpc('vwf.script', async (a) => {
-      const dsl = a && a.dsl
-      const v = await validatePipeline(dsl)
+      const v = await validatePipeline(a.dsl)
       if (!v.ok) return { ok: false, errors: v.errors }
-      // 模板命中（含 bundleRoles 用户级内置模板）走磁盘产物并带出 roleDir；否则 CLI 编译临时图
-      const fromTemplate = !!(dsl && typeof dsl.id === 'string' && (await findWorkflow(dsl.id)))
-      const c = await compileViaPipeline(v.sanitized, { fromTemplate })
-      if (!c.ok) return { ok: false, errors: [{ at: '$', message: c.detail }] }
-      // 正式「获取脚本 → 平台 workflow 工具」路径与 wf_run 共用同一分配边界：
-      // 调用方传 allocate:true（及 taskId）时先分配并注入脚本默认 args，避免 SOURCE 为空回退共享 RUNDIR。
+      const c = await compileDsl(v.sanitized)
+      if (!c.ok) return fail(c.detail)
       let script = c.script
       let workspaceArgs = null
-      const wantAlloc = !!(a && (a.allocate === true || a.taskId))
-      if (wantAlloc) {
-        const taskId = String((a && a.taskId) || ((dsl && dsl.id) ? (dsl.id + '-' + Date.now()) : ''))
-        const prepared = await prepareRunWorkspace({
-          taskId: taskId,
-          templateId: (a && a.templateId) || (dsl && dsl.id) || '',
-          baseBranch: (a && a.baseBranch) || 'main',
-        })
-        if (!prepared.ok) return { ok: false, errors: [{ at: '$', message: 'Run Workspace 分配失败，隔离保证无法建立：' + prepared.error }] }
+      if (a.allocate === true || a.taskId) {
+        const taskId = String(a.taskId || (v.sanitized.id + '-' + Date.now()))
+        const prepared = await prepareRunWorkspace({ taskId: taskId, templateId: a.templateId || v.sanitized.id, baseBranch: a.baseBranch || 'main' })
+        if (!prepared.ok) return fail('Run Workspace 分配失败，隔离保证无法建立：' + prepared.error)
         if (prepared.workspace) {
           workspaceArgs = scriptArgsFromWorkspace(prepared.workspace, prepared.capability, taskId)
-          workspaceArgs.taskId = taskId
           script = injectWorkspaceDefaults(script, workspaceArgs)
           await markWorkspaceLifecycle(taskId, 'RUNNING')
         }
       }
-      const out = { ok: true, engineAvailable: !!(resolveEngine()), script: script, meta: c.meta, workspaceArgs: workspaceArgs }
-      if (c.roleDir) out.roleDir = c.roleDir
-      return out
+      return { ok: true, engineAvailable: !!resolveEngine(), script: script, meta: c.meta, workspaceArgs: workspaceArgs }
     })
     registerRpc('vwf.state', async (a) => {
-      const id = a && a.runId
-      let s = id ? runs.get(id) : null
-      // 内存 miss 回落磁盘（#40）：重启后未回载进内存的历史记录按 runId 直查
-      if (!s && id) s = await loadRunFromDisk(id)
-      if (!s) return { found: false, state: null }
-      const tag = runTags.get(id) || null
-      return { found: true, state: { id: id, meta: s.meta, status: s.status, phase: s.phase, logs: s.logs, agents: s.agents,
-        formalRecords: Array.isArray(s.formalRecords) ? s.formalRecords : [],
-        taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: s.startedAt != null ? s.startedAt : (tag ? tag.startedAt : null),
-        supersededBy: tag && tag.supersededBy ? tag.supersededBy : '',
-        decision_id: s.decisionId || '', reason: s.reason || '',
-        decision_package: s.decisionPackage || null, control_event: s.controlEvent || null,
-        blocked_edge: s.blockedEdge || null, results: s.results || null,
-        budgetUsed: typeof s.budgetUsed === 'number' ? s.budgetUsed : null,
-        maxRounds: typeof s.maxRounds === 'number' ? s.maxRounds : null,
-        decisionSeq: typeof s.decisionSeq === 'number' ? s.decisionSeq : null } }
+      await runsHydration
+      const rec = a.runId ? runs.get(String(a.runId)) : null
+      return rec ? { found: true, state: rec } : { found: false, state: null }
     })
+    const listRunSummaries = async () => {
+      await runsHydration
+      return { runs: Array.from(runs.values()).map(summary).sort((a, b) => ((b.startedAt || 0) - (a.startedAt || 0)) || byId(b.id, a.id)) }
+    }
+    registerRpc('vwf.runs.list', listRunSummaries)
+    registerRpc('vwf.runs.history', listRunSummaries)
     registerRpc('vwf.artifacts.ingest', async (a) => {
-      const runId = a && a.runId
-      const nodeId = a && a.nodeId
-      const artifacts = a && a.artifacts
-      if (!runId || !nodeId || !Array.isArray(artifacts) || !artifacts.length) {
-        return { ok: false, errors: [{ at: '$', message: '缺少 runId / nodeId / artifacts' }] }
-      }
-      const rec = ensureRunFormalRecords(runId)
-      if (!rec) return { ok: false, errors: [{ at: '$.runId', message: '运行记录不存在：' + runId }] }
-      const core = await loadFormalArtifactsCore()
-      if (!core) return { ok: false, errors: [{ at: '$', message: 'Formal Artifact 内核不可用：缺少 scripts/formal-artifacts.cjs 或 dist/formal-artifacts.cjs' }] }
-      const tag = runTags.get(runId) || null
+      const { runId, nodeId, artifacts } = a
+      if (!runId || !nodeId || !Array.isArray(artifacts) || !artifacts.length) return fail('缺少 runId / nodeId / artifacts')
+      const rec = runs.get(String(runId))
+      if (!rec) return fail('运行记录不存在：' + runId, '$.runId')
+      let core
+      try { core = await loadDist('formal-artifacts.cjs') } catch (e) { return fail('Formal Artifact 内核不可用：' + errMsg(e)) }
       try {
         rec.formalRecords = core.ingestArtifacts(rec.formalRecords, {
-          runId: String(runId),
-          nodeId: String(nodeId),
-          artifacts: artifacts,
-          outcome: a && a.outcome !== undefined ? a.outcome : null,
+          runId: String(runId), nodeId: String(nodeId), artifacts: artifacts, outcome: a.outcome !== undefined ? a.outcome : null,
           provenance: {
-            logical_run_id: String(runId),
-            node: String(nodeId),
-            attempt: (a && a.attempt) || 1,
-            snapshot_revision: (a && a.snapshot_revision) || 'unspecified',
-            provider: (a && a.provider) || 'unknown',
-            model: (a && a.model) || 'unknown',
-            produced_by: (a && a.produced_by) || 'vwf:artifacts.ingest',
-            node_business_outcome: (a && a.outcome !== undefined) ? a.outcome : null,
+            logical_run_id: String(runId), node: String(nodeId), attempt: a.attempt || 1,
+            snapshot_revision: a.snapshot_revision || 'unspecified', provider: a.provider || 'unknown', model: a.model || 'unknown',
+            produced_by: a.produced_by || 'vwf:artifacts.ingest', node_business_outcome: a.outcome !== undefined ? a.outcome : null,
           },
         })
-        requestRunPersist(runId)
-        return { ok: true, formalRecords: rec.formalRecords, produced: artifacts.length, taskId: tag ? tag.taskId : '' }
-      } catch (e) {
-        return { ok: false, errors: [{ at: '$', message: String((e && e.message) || e) }] }
-      }
+        persist(rec.id)
+        return { ok: true, formalRecords: rec.formalRecords, produced: artifacts.length, taskId: rec.taskId }
+      } catch (e) { return fail(errMsg(e)) }
     })
-    // 多 run 并行（#19）：运行清单（最新在前），看板列表/门禁队列/并行警示的数据源
-    registerRpc('vwf.runs.list', async () => {
-      const out = []
-      for (const [rid, rec] of runs) {
-        const tag = runTags.get(rid) || null
-        out.push({ id: rid, name: (rec.meta && rec.meta.name) || '', status: rec.status, phase: rec.phase || '',
-          taskId: tag ? tag.taskId : '', workflowId: tag ? tag.workflowId : '', startedAt: rec.startedAt != null ? rec.startedAt : (tag ? tag.startedAt : null),
-          supersededBy: tag && tag.supersededBy ? tag.supersededBy : '',
-          decision_id: rec.decisionId || '', reason: rec.reason || '' })
-      }
-      // 按时间倒序（评审 PRRT_kwDOT57Tec6b6it9）：按需水合会把窗口外旧记录追加到
-      // runs map 尾部，若依赖插入序反转，选中的旧 run 会跳到清单最前并驻留；按
-      // startedAt 降序可稳定呈现真实时间序，同刻用 id 降序兜底
-      out.sort((a, b) => ((b.startedAt || 0) - (a.startedAt || 0)) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
-      return { runs: out }
-    })
-    // 磁盘全量运行清单（#40：运行历史浏览）。只读磁盘返回元数据，**不**水合进
-    // 内存——保持「启动回载最近 RUNS_RELOAD 条」的内存上限语义；用户点击某条
-    // 历史时仍走 vwf.state 磁盘回落按需水合。最新在前；损坏文件跳过。
-    registerRpc('vwf.runs.history', async () => {
-      if (fs === undefined) return { runs: [] }
-      const p = await rootPaths()
-      if (!p.runsDir) return { runs: [] }
-      let entries = null
-      try {
-        entries = await fs.listDir(await fs.resolve(p.runsDir))
-      } catch (e) { return { runs: [] } }
-      const out = []
-      for (const ent of entries || []) {
-        if (!ent || ent.type !== 'file' || !/\.json$/i.test(ent.name)) continue
-        try {
-          const data = JSON.parse(await fs.readText(await fs.resolve(p.runsDir + '/' + ent.name)))
-          if (!data || typeof data.id !== 'string' || !data.id) continue
-          const ts = (typeof data.updatedAt === 'number' && data.updatedAt) || (typeof data.startedAt === 'number' && data.startedAt) || 0
-          out.push({ id: data.id, name: (data.meta && data.meta.name) || '', status: data.status || '', phase: data.phase || '',
-            taskId: data.taskId || '', workflowId: data.workflowId || '', startedAt: data.startedAt != null ? data.startedAt : null,
-            supersededBy: data.supersededBy || '', ts: ts })
-        } catch (e) { /* 损坏文件跳过 */ }
-      }
-      out.sort((a, b) => (b.ts - a.ts) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      return { runs: out }
-    })
+    // llm 服务就绪可能晚于插件 apply：每次现取
     registerRpc('vwf.models', async () => {
-      // llm 每次现取而非 apply 时捕获：llm 服务就绪可能晚于插件 apply，
-      // 启动时一次性捕获会永久拿到 undefined 导致面板「未配置可用模型」
       const llm = ctx.get('llm')
-      if (llm === undefined) { console.log('[vwf] vwf.models：llm 服务不可用（未就绪或未注入），返回空 provider 列表'); return { providers: [] } }
-      const out = []
+      if (llm === undefined) { log('vwf.models：llm 服务不可用，返回空 provider 列表'); return { providers: [] } }
       let providers = []
-      try { providers = await Promise.resolve(llm.listProviders()) } catch (e) { console.log('[vwf] vwf.models：listProviders 失败：' + String((e && e.message) || e)); return { providers: [] } }
-      for (const p of providers || []) {
-        const id = String(p && (p.id || p.provider || p.name) || '')
+      try { providers = (await Promise.resolve(llm.listProviders())) || [] } catch (e) { log('vwf.models：listProviders 失败：' + errMsg(e)); return { providers: [] } }
+      const out = []
+      for (const p of providers) {
+        const id = String((p && (p.id || p.provider || p.name)) || '')
         if (!id) continue
         let models = []
-        try {
-          const ms = await llm.listModels(id)
-          models = (ms || []).map(m => String(m && (m.id || m.model || m.name) || '')).filter(Boolean)
-        } catch (e) { console.log('[vwf] vwf.models：listModels(' + id + ') 失败：' + String((e && e.message) || e)) }
+        try { models = ((await llm.listModels(id)) || []).map((m) => String((m && (m.id || m.model || m.name)) || '')).filter(Boolean) } catch (e) { log('vwf.models：listModels(' + id + ') 失败：' + errMsg(e)) }
         out.push({ id: id, models: models })
       }
       return { providers: out }
     })
+    // 界面文案：语言资源随插件 dist/locales/<locale>.json 分发，客户端按需拉取
+    registerRpc('vwf.i18n', async (a) => {
+      const locale = String(a.locale || 'zh').toLowerCase().slice(0, 2)
+      const id = /^[a-z]{2}$/.test(locale) ? locale : 'zh'
+      const messages = await loadDist('locales/' + id + '.json').catch(() => (
+        id === 'zh' ? null : loadDist('locales/zh.json').catch(() => null)
+      ))
+      return { locale: id, messages: messages || {} }
+    })
 
-    // ── 角色库（深模块 RoleLibrary + manifest 数据化）─────────────────────
-    // 模型：内置角色 = 系统正式角色（issue-81 的 12 角色），常驻、只读、可查看/选择/
-    // 基于其创建自定义变体；自定义角色 = 工作区 dsh/roles/ 下不属于内置集合的 *.md
-    // （与运行时 profile→<roleDir>/<id>.md 的消费契约一致：保存即被 wf_run 产出的
-    // 脚本按原机制读取，无需运行时改造）。引用 = 全部工作流（内置模板 + 用户模板）
-    // 节点 profile 命中该角色 id 的计数，删除/重命名前的安全保护以引用数裁决。
-    // issue-81：旧 dispatcher 已退出内置身份，迁为自定义角色（dsh/roles/dispatcher.md
-    // 原位保留，引用它的历史工作流无需任何改动即可继续工作）。
-    //
-    // 决策内核 = scripts/role-library.cjs（唯一实现：名称规则 / 来源优先级 / 摘要口径 /
-    // usage 统计 / 只读与回滚裁决）；内置清单事实源 = dsh/roles/builtin-roles.json。
-    // 本段只剩 cordis 胶水：core+manifest 同根成对加载、事实采集适配器（fs/subprocess）、
-    // 效果执行（写/重命名/删除 + 回滚）、RPC 转发。core 不可用时降级为嵌入只读清单
-    // （EMBEDDED_BUILTIN_MANIFEST：机器投影自 manifest，禁止手改；一致性由
-    // tests/role-manifest.test.mjs 保证）。
-    const EMBEDDED_BUILTIN_MANIFEST = [
-      // ── 通用基础能力 ──
-      { id: 'requirements', name: '需求分析', summary: '需求分析角色：三要素门禁，产出需求基线' },
-      { id: 'designer', name: '方案设计', summary: '方案设计角色：实施路径、关键取舍与风险' },
-      { id: 'dev', name: '开发', summary: '开发角色：测试驱动施工，满足质量闸门' },
-      { id: 'review', name: '审核', summary: '审核角色：规范与需求符合性、代码质量双轴审查' },
-      { id: 'test', name: '测试', summary: '测试角色：运行态验证，证据驱动判定' },
-      { id: 'evaluator', name: '评估', summary: '评估角色：按节点评价契约独立评估，场景差异由节点表达' },
-      { id: 'accept', name: '验收助手', summary: '验收助手角色：对照验收标准最终核验并等待人工签字' },
-      { id: 'closeout', name: '收口', summary: '收口角色：一致性收口与交接产物汇总' },
-      // ── 专业能力 ──
-      { id: 'diagnose', name: '缺陷诊断', summary: '缺陷诊断角色：先取证后结论，收敛到根因' },
-      { id: 'orchestrator', name: '探索统筹', summary: '探索统筹角色：设计研究方案与专家任务书' },
-      { id: 'researcher', name: '专家研究', summary: '专家研究角色：按任务书独立取证，含反证' },
-      { id: 'synthesizer', name: '综合分析', summary: '综合分析角色：把独立判断整合为可决策的观点地图' },
-    ]
-
-    // fs.resolve 句柄 → 子进程 argv 可用的绝对路径字符串（真实句柄含 displayPath）
+    // ── 角色库：决策内核 role-library.cjs + 清单 builtin-roles.json；本段只做事实采集与效果执行 ──
+    // 内置角色正文以插件打包快照（dist/roles/<id>.md）为准（与运行时 roleRef 同源）；
+    // 自定义角色 = 项目 dsh/roles/*.md 中不属于内置集合的文件；打包角色包只读回退，绝不回写。
+    const roleDir = () => { const p = projectRoot(); return p ? p + '/dsh/roles' : 'dsh/roles' }
     const pathOf = (h) => (typeof h === 'string') ? h : (h && (h.displayPath || h.targetKey)) || null
-    // 只有「确认不存在」（ENOENT 类）才算缺失目录；其余错误按瞬时 I/O 失败 fail-closed
-    const isMissingErr = (e) => /ENOENT|no such file|not exist|不存在/i.test(String((e && e.message) || e))
-    // 目录优先级（与 vwf.roles 旧版一致）：发起会话仓库根（动态模式，即会话工作区）
-    // → fs 服务默认 cwd 相对 'dsh/roles'（静态/web 模式无 agent 会话时兜底尝试）。
-    async function roleDirPath() {
-      const p = await rootPaths()
-      return p.repo ? p.repo + '/dsh/roles' : 'dsh/roles'
-    }
-    // 读取角色目录：返回 { files: Map<id,{content}>, state: ok|missing|error, message }。
-    // 摘要口径在内核（只传原始正文）。fail-closed：读取失败（而非目录缺失）必须阻断
-    // 后续唯一性校验与变更。
+    // 读取角色目录：{ files: Map<id,{content}>, state: ok|missing|error, message }
+    // 只有确认不存在（ENOENT）才算 missing；其余错误 fail-closed，防止把失败当空库放行而覆盖既有角色
     async function readRoleFiles() {
       const out = new Map()
-      if (fs === undefined) return { files: out, state: 'error', message: '宿主文件能力不可用' }
-      const roleDir = await roleDirPath()
-      // 只有「确认不存在」（ENOENT）归 missing（可作为空清单放行）；resolve 失败可能是
-      // 瞬时路径错误、stat 失败是瞬态读错误——都按 error fail-closed，避免创建/
-      // 重命名把失败当空库放行而覆盖既有角色。
-      let dir = null
-      try {
-        dir = await fs.resolve(roleDir)
-      } catch (e) {
-        if (isMissingErr(e)) return { files: out, state: 'missing', message: '角色目录不存在：' + roleDir }
-        return { files: out, state: 'error', message: '角色目录解析失败：' + String((e && e.message) || e) }
+      const error = (message) => ({ files: out, state: 'error', message: message })
+      if (fs === undefined) return error('宿主文件能力不可用')
+      const dir = roleDir()
+      let target, info
+      try { target = await fs.resolve(dir) } catch (e) { return isMissingErr(e) ? { files: out, state: 'missing', message: '角色目录不存在：' + dir } : error('角色目录解析失败：' + errMsg(e)) }
+      try { info = await fs.stat(target) } catch (e) { return error('角色目录状态读取失败：' + errMsg(e)) }
+      if (!info) return { files: out, state: 'missing', message: '角色目录不存在：' + dir }
+      if (info.type !== 'directory') return error('角色目录不是目录：' + dir)
+      let entries
+      try { entries = (await fs.listDir(target) || []).filter((e) => e && typeof e.name === 'string' && /\.md$/i.test(e.name)).sort((a, b) => byId(a.name, b.name)) } catch (e) { return error('角色目录读取失败：' + errMsg(e)) }
+      for (const ent of entries) {
+        let content = null
+        try { content = String(await fs.readText(await fs.resolve(dir + '/' + ent.name))) } catch (e) { /* 单文件失败保留 id 防同名覆盖 */ }
+        out.set(ent.name.replace(/\.md$/i, ''), { content: content })
       }
-      let info = null
-      try {
-        info = await fs.stat(dir)
-      } catch (e) {
-        return { files: out, state: 'error', message: '角色目录状态读取失败：' + String((e && e.message) || e) }
-      }
-      try {
-        if (!info) return { files: out, state: 'missing', message: '角色目录不存在：' + roleDir }
-        if (info.type !== 'directory') return { files: out, state: 'error', message: '角色目录不是目录：' + roleDir }
-        const entries = (await fs.listDir(dir) || [])
-          .filter(e => e && typeof e.name === 'string' && /\.md$/i.test(e.name))
-          .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-        for (const ent of entries) {
-          const id = ent.name.replace(/\.md$/i, '')
-          let content = null
-          try {
-            content = String(await fs.readText(await fs.resolve(roleDir + '/' + ent.name)))
-          } catch (e) { /* 单文件读取失败保留 id（防止同名覆盖），正文按缺失处理 */ }
-          out.set(id, { content })
-        }
-        return { files: out, state: 'ok' }
-      } catch (e) {
-        return { files: out, state: 'error', message: '角色目录读取失败：' + String((e && e.message) || e) }
-      }
+      return { files: out, state: 'ok' }
     }
-    // 内置角色打包快照（#129 遗留项 1）：__VWF_REPO_ROOT__/dsh/roles/<id>.md——与运行时
-    // roleRef 编译期内联同源（generate.mjs DEFAULT_ROLES_DIR 即同一目录）。读不到返回 null。
-    async function readBuiltinRoleSnapshot(id) {
-      const roots = [(typeof __VWF_REPO_ROOT__ === 'string' && __VWF_REPO_ROOT__) ? __VWF_REPO_ROOT__ : null].filter(Boolean)
-      for (const root of roots) {
-        try {
-          const target = await fs.resolve(root + '/dsh/roles/' + id + '.md')
-          const info = await fs.stat(target)
-          if (info && info.type === 'file') return String(await fs.readText(target))
-        } catch (e) { /* 尝试下一个根 */ }
-      }
-      return null
-    }
-    // 打包角色包回退（Codex PR#124 第二轮 P1）：bundleRoles 模板自带 roles/ 快照，
-    // 其中可能包含已迁出内置集合的历史自定义角色（如 dispatcher）。产品工作区没有
-    // 仓库 dsh/roles/，这类角色必须仍以「自定义」身份可见、可编辑，否则从角色库消失。
-    // 权威来源仍是工作区 dsh/roles/（用户状态）；打包快照只读回退，**绝不回写**——
-    // .generated 是生成产物，写入会变成可被重生成覆盖的用户状态（第二轮 P1 撤销项）。
+    // 打包角色包回退：bundleRoles 模板产物旁的 roles/ 快照（含已迁出内置集合的历史角色如 dispatcher）
     async function bundledLegacyRoles() {
       const out = new Map()
-      if (fs === undefined) return out
-      let p = null
-      try { p = await rootPaths() } catch (e) { return out }
-      const spots = [p && p.builtinDir, p && p.packageBuiltinDir, p && p.homeBuiltinDir, p && p.skillRoot]
-      for (const spot of spots) {
-        if (!spot) continue
-        let entries = null
-        try { entries = await fs.listDir(await fs.resolve(spot)) } catch (e) { continue }
-        for (const ent of entries || []) {
+      const d = await homeDirs()
+      for (const spot of generatedRoots().concat(d ? [d.skillRoot] : [])) {
+        for (const ent of (await listDirOrNull(spot)) || []) {
           if (!ent || ent.type !== 'directory' || !ent.name || ent.name === 'roles') continue
-          let roleEnts = null
-          try { roleEnts = await fs.listDir(await fs.resolve(spot + '/' + ent.name + '/roles')) } catch (e) { continue }
-          for (const rf of roleEnts || []) {
+          for (const rf of (await listDirOrNull(spot + '/' + ent.name + '/roles')) || []) {
             if (!rf || rf.type !== 'file' || !rf.name || !rf.name.endsWith('.md')) continue
             const id = rf.name.slice(0, -3)
             if (!id || out.has(id)) continue
-            try {
-              out.set(id, String(await fs.readText(await fs.resolve(spot + '/' + ent.name + '/roles/' + rf.name))))
-            } catch (e) { /* 单文件读取失败不影响其余 */ }
+            const text = await readTextIfExists(spot + '/' + ent.name + '/roles/' + rf.name)
+            if (text !== null) out.set(id, text)
           }
         }
       }
       return out
     }
-
-    // ── core 加载：role-library.cjs + builtin-roles.json 同根成对读取（不混根）────
-    // 信任/新鲜度顺序：动态开发优先当前 repo（最新源码），home 副本仅兜底；正式静态
-    // 优先可信插件 dist，绝不先 eval 任意会话工作区。源码静态测试（无 pluginRoot）
-    // 才允许 repo 根。缓存限定为本次插件激活。
-    let roleLibraryPromise = null
-    function evalRoleLibrary(src) {
-      const module = { exports: {} }
-      try { new Function('module', 'exports', src)(module, module.exports) } catch (e) { return null }
-      const ex = module.exports
-      if (!ex || typeof ex.createRoleLibrary !== 'function') return null
-      return ex
-    }
-    function addRoleAssetPairs(pairs, seen, root) {
-      let dir = root
-      for (let i = 0; i < 8 && dir; i++) {
-        const core = dir + '/scripts/role-library.cjs'
-        if (!seen.has(core)) {
-          seen.add(core)
-          pairs.push({ core: core, manifest: dir + '/dsh/roles/builtin-roles.json' })
-        }
-        dir = parentDir(dir)
-      }
-    }
-    async function roleAssetCandidatePairs() {
-      const pairs = []
-      const seen = new Set()
-      function addPair(core, manifest) {
-        if (!core || seen.has(core)) return
-        seen.add(core)
-        pairs.push({ core: core, manifest: manifest })
-      }
-      const pluginRoot = (typeof __VWF_PLUGIN_ROOT__ === 'string' && __VWF_PLUGIN_ROOT__) ? __VWF_PLUGIN_ROOT__ : null
-      // 正式静态：可信 dist 必须第一；不扫描任意会话工作区 CJS。
-      if (!isDynamicHost && pluginRoot) {
-        addPair(pluginRoot + '/dist/role-library.cjs', pluginRoot + '/dist/builtin-roles.json')
-      }
-      // 动态开发：当前 repo 最新源码必须先于可能过期的 home 同步副本。
-      if (isDynamicHost) {
-        addRoleAssetPairs(pairs, seen, injectedRepoRoot())
-        addRoleAssetPairs(pairs, seen, repoRoot())
-      } else if (!pluginRoot) {
-        // 源码静态测试形态（无正式 pluginRoot）
-        addRoleAssetPairs(pairs, seen, repoRoot())
-      }
-      const home = await dshHome()
-      if (home) addPair(home + '/visual-workflow/role-library.cjs', home + '/visual-workflow/builtin-roles.json')
-      if (isDynamicHost) {
-        addRoleAssetPairs(pairs, seen, await homeRepoPointer())
-        if (pluginRoot) addPair(pluginRoot + '/dist/role-library.cjs', pluginRoot + '/dist/builtin-roles.json')
-      }
-      return pairs
-    }
-    function loadRoleLibrary() {
-      if (roleLibraryPromise) return roleLibraryPromise
-      const pending = (async () => {
-        if (fs !== undefined) {
-          const pairs = await roleAssetCandidatePairs()
-          for (const pair of pairs) {
-            try {
-              const coreTarget = await fs.resolve(pair.core)
-              const coreInfo = await fs.stat(coreTarget)
-              if (!coreInfo || coreInfo.type !== 'file') continue
-              const manifestTarget = await fs.resolve(pair.manifest)
-              const manifestInfo = await fs.stat(manifestTarget)
-              if (!manifestInfo || manifestInfo.type !== 'file') continue
-              const coreSrc = await fs.readText(coreTarget)
-              const manifestSrc = await fs.readText(manifestTarget)
-              const mod = evalRoleLibrary(coreSrc)
-              if (!mod) continue
-              // 清单强校验（非法即 loud-fail 抛出）→ 该候选对损坏则尝试下一对
-              return mod.createRoleLibrary(JSON.parse(manifestSrc))
-            } catch (e) { /* 尝试下一个候选对 */ }
-          }
-        }
-        // 正式静态模式若可信 dist 无法读取，降级为嵌入只读清单；禁止通过
-        // subprocess 扫描任意 cwd。仅动态开发允许 node 子进程按开发根兜底。
-        return isDynamicHost ? await readRoleLibraryViaNode() : null
-      })()
-      roleLibraryPromise = pending
-      pending.catch(() => { if (roleLibraryPromise === pending) roleLibraryPromise = null })
-      return pending
-    }
-    // fs 沙箱读不到仓库时，经 node 子进程按 DSH home / cwd 找内核与清单（成对返回）。
-    async function readRoleLibraryViaNode() {
-      if (subprocess === undefined) return null
-      const probe = [
-        "const fs=require('fs');const path=require('path');const os=require('os');",
-        "function tryPair(c,m){try{if(!fs.existsSync(c)||!fs.statSync(c).isFile())return false;if(!fs.existsSync(m)||!fs.statSync(m).isFile())return false;const cs=fs.readFileSync(c,'utf8');if(cs.indexOf('createRoleLibrary')<0)return false;const ms=fs.readFileSync(m,'utf8');process.stdout.write(JSON.stringify({core:cs,manifest:ms}));return true}catch(e){return false}}",
-        "function walk(d){for(let i=0;i<8&&d&&d!=='/';i++){if(tryPair(path.join(d,'scripts','role-library.cjs'),path.join(d,'dsh','roles','builtin-roles.json')))return true;const n=path.dirname(d);if(n===d)break;d=n}return false}",
-        "const homes=[];if(process.env.DSH_HOME)homes.push(process.env.DSH_HOME);",
-        "try{homes.push(path.join(os.homedir(),'.dsh-workflow-dev'))}catch(e){}",
-        "for(const h of homes){if(tryPair(path.join(h,'visual-workflow','role-library.cjs'),path.join(h,'visual-workflow','builtin-roles.json')))process.exit(0)}",
-        "const cands=[];try{cands.push(process.cwd())}catch(e){};if(process.env.PWD)cands.push(process.env.PWD);",
-        "for(const c of cands){if(walk(c))process.exit(0)}process.exit(2)",
-      ].join('')
-      const home = await dshHome()
-      const r = await runNode(['-e', probe], { cwd: home || '/' })
-      if (!r.ok || !r.stdout) return null
-      try {
-        const data = JSON.parse(r.stdout)
-        const mod = evalRoleLibrary(data.core)
-        if (!mod) return null
-        return mod.createRoleLibrary(JSON.parse(data.manifest))
-      } catch (e) { return null }
-    }
-    // 与 apply 时序解耦的异步同步：把 core+manifest 复制到 home/visual-workflow/，
-    // 供无会话 cwd 的浏览器调用经候选根读取（与 syncValidatorCore 同一模式）。
-    async function syncRoleAssets() {
-      for (let attempt = 0; attempt < 10; attempt++) {
-        fs = ctx.get('fs')
-        subprocess = ctx.get('subprocess')
-        if (fs !== undefined) break
-        // 动态会话 vm 沙箱不提供真定时器：无定时器或调用被拦截则放弃重试
-        try {
-          await new Promise((r) => setTimeout(r, 100 * (attempt + 1)))
-        } catch (e) { break }
-      }
-      if (fs === undefined) return
-      const home = await dshHome()
-      if (!home) return
-      const policy = writePolicy()
-      const destCore = home + '/visual-workflow/role-library.cjs'
-      const destManifest = home + '/visual-workflow/builtin-roles.json'
-      const pairs = await roleAssetCandidatePairs()
-      for (const pair of pairs) {
-        if (pair.core === destCore) continue
-        try {
-          const coreTarget = await fs.resolve(pair.core)
-          const coreInfo = await fs.stat(coreTarget)
-          if (!coreInfo || coreInfo.type !== 'file') continue
-          const manifestTarget = await fs.resolve(pair.manifest)
-          const manifestInfo = await fs.stat(manifestTarget)
-          if (!manifestInfo || manifestInfo.type !== 'file') continue
-          const coreSrc = await fs.readText(coreTarget)
-          if (coreSrc.indexOf('createRoleLibrary') < 0) continue
-          const manifestSrc = await fs.readText(manifestTarget)
-          await fs.writeText(await fs.resolve(destCore), coreSrc, undefined, undefined, policy)
-          await fs.writeText(await fs.resolve(destManifest), manifestSrc, undefined, undefined, policy)
-          return
-        } catch (e) { /* 尝试下一个候选对 */ }
-      }
-    }
-
-    // ── 事实采集适配器（fs/subprocess 集中在此；core 永不接触路径/句柄）────
-    // 目录事实：{ state, message, workspace:[{id,content}], bundled:[{id,content}] }
+    // 目录事实带短时缓存：页面打开/角色管理/角色变更会连续拉取列表；自身写操作立即失效，
+    // 外部直接改文件的变更最迟 2 秒可见
+    let catalogCache = null
+    const invalidateCatalog = () => { catalogCache = null }
     async function collectRoleCatalog() {
+      if (catalogCache && Date.now() - catalogCache.at < 2000) return catalogCache.value
       const inv = await readRoleFiles()
-      const workspace = []
-      for (const [id, f] of inv.files) workspace.push({ id: id, content: f.content })
-      let bundledMap = null
-      try { bundledMap = await bundledLegacyRoles() } catch (e) { bundledMap = new Map() }
-      const bundled = []
-      for (const [id, content] of bundledMap) bundled.push({ id: id, content: content })
-      return { state: inv.state, message: inv.message || '', workspace: workspace, bundled: bundled }
-    }
-    async function collectBuiltinBodies() {
-      const bodies = {}
-      for (const r of EMBEDDED_BUILTIN_MANIFEST) {
-        try { bodies[r.id] = await readBuiltinRoleSnapshot(r.id) } catch (e) { bodies[r.id] = null }
+      let bundled = new Map()
+      try { bundled = await bundledLegacyRoles() } catch (e) { /* 回退源不可用不阻断 */ }
+      const value = {
+        state: inv.state, message: inv.message || '',
+        workspace: Array.from(inv.files, ([id, f]) => ({ id: id, content: f.content })),
+        bundled: Array.from(bundled, ([id, content]) => ({ id: id, content: content })),
       }
-      return bodies
+      catalogCache = { at: Date.now(), value: value }
+      return value
     }
-    // 引用事实：正式内置 + 用户模板 + 未删除的历史生成物 + 可选开放草稿。
-    // 同 id 用户覆盖优先；strict 读取失败按 error fail-closed。
+    let builtinBodiesPromise = null
+    function collectBuiltinBodies(lib) {
+      if (!builtinBodiesPromise) {
+        builtinBodiesPromise = (async () => {
+          const bodies = {}
+          for (const id of lib.describe().builtinIds) bodies[id] = await loadDist('roles/' + id + '.md').catch(() => null)
+          return bodies
+        })()
+      }
+      return builtinBodiesPromise
+    }
+    async function detailFacts(lib) {
+      return { includeContent: true, catalog: await collectRoleCatalog(), builtinBodies: await collectBuiltinBodies(lib) }
+    }
+    // 引用事实：正式内置 + 用户模板 + 未删除的历史生成物 + 可选开放草稿；strict 读取失败 fail-closed
     async function collectWorkflowFacts(draftDsl) {
       try {
-        if (!await loadProjectionCore()) throw projectionUnavailable()
-        const [{ builtins, shipped }, users, removed] = await Promise.all([splitGenerated(true), loadUserTemplates(true), loadRemovedIds()])
         const mapNodes = (dsl) => ((dsl && dsl.nodes) || []).map((n) => ({ id: n.id, label: n.label, profile: n.profile }))
-        const records = []
-        const seen = new Set()
-        for (const dsl of builtins.values()) {
-          records.push({ workflowId: String(dsl.id), workflowName: String(dsl.name), builtin: true, nodes: mapNodes(dsl) })
-          seen.add(dsl.id)
-        }
-        for (const bp of users.values()) {
-          if (seen.has(bp.id)) continue
-          records.push({ workflowId: String(bp.id), workflowName: String(bp.displayName), builtin: false, nodes: mapNodes(projectToVwf(bp)) })
-          seen.add(bp.id)
-        }
-        for (const dsl of shipped.values()) {
-          if (seen.has(dsl.id) || removed.has(dsl.id)) continue
-          records.push({ workflowId: String(dsl.id), workflowName: String(dsl.name), builtin: false, nodes: mapNodes(dsl) })
-        }
+        const records = (await workflowEntries(true)).map((w) => ({ workflowId: String(w.id), workflowName: String(w.name), builtin: w.builtin, nodes: mapNodes(w.dsl) }))
         const facts = { state: 'ok', records: records }
         if (draftDsl && Array.isArray(draftDsl.nodes)) {
-          const d = { name: draftDsl.name, nodes: mapNodes(draftDsl) }
-          if (draftDsl.id) d.id = draftDsl.id
-          facts.draft = d
+          facts.draft = { name: draftDsl.name, nodes: mapNodes(draftDsl) }
+          if (draftDsl.id) facts.draft.id = draftDsl.id
         }
         return facts
-      } catch (e) {
-        return { state: 'error', message: String((e && e.message) || e) }
-      }
+      } catch (e) { return { state: 'error', message: errMsg(e) } }
     }
-
-    // ── 效果执行适配器（唯一写/删出口）：路径解析、fs 句柄、子进程删除与回滚 ────
+    // 效果执行（唯一写/删出口）：写文件、重命名（写新→删旧，删失败回滚新）、删除
     async function applyRoleEffect(effect) {
-      const roleDir = await roleDirPath()
-      if (effect.kind === 'write') {
-        try {
-          const target = await fs.resolve(roleDir + '/' + effect.id + '.md')
-          await fs.writeText(target, effect.content, undefined, undefined, writePolicy())
-          return { ok: true }
-        } catch (e) {
-          return { ok: false, errors: [{ at: '$', message: '角色文件写入失败：' + String((e && e.message) || e) }] }
-        }
-      }
-      if (effect.kind === 'rename') {
-        let newAbs = null
-        try {
-          newAbs = await fs.resolve(roleDir + '/' + effect.to + '.md')
-          await fs.writeText(newAbs, effect.content, undefined, undefined, writePolicy())
-        } catch (e) {
-          return { ok: false, errors: [{ at: '$', message: '角色文件写入失败：' + String((e && e.message) || e) }] }
-        }
-        // 删除旧文件前经 fs 服务解析为绝对路径（避免相对 'dsh/roles' 在子进程 cwd=/ 下
-        // 指向错误位置）；删除失败则回滚刚写入的新文件，保持角色库原状。
+      try { return await applyEffect(effect) } finally { invalidateCatalog() }
+    }
+    async function applyEffect(effect) {
+      const dir = roleDir()
+      const file = (id) => dir + '/' + id + '.md'
+      if (effect.kind === 'write' || effect.kind === 'rename') {
+        try { await writeText(file(effect.kind === 'write' ? effect.id : effect.to), effect.content) } catch (e) { return fail('角色文件写入失败：' + errMsg(e)) }
+        if (effect.kind === 'write') return { ok: true }
         let oldAbs = null
-        try { oldAbs = pathOf(await fs.resolve(roleDir + '/' + effect.from + '.md')) } catch (e) { oldAbs = null }
-        const rmOld = oldAbs ? await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", oldAbs], { cwd: repoRoot() || '/' }) : { ok: false, detail: '旧角色文件路径解析失败' }
-        if (!rmOld.ok) {
-          const newPath = pathOf(newAbs)
-          const rmNew = newPath ? await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", newPath], { cwd: repoRoot() || '/' }) : null
-          return { ok: false, errors: [{ at: '$', message: '旧角色文件删除失败（已回滚新文件' + (rmNew && rmNew.ok ? '' : '，回滚失败，请手动清理 ') + '）：' + rmOld.detail }] }
-        }
-        return { ok: true }
+        try { oldAbs = pathOf(await fs.resolve(file(effect.from))) } catch (e) { /* 解析失败按删除失败处理 */ }
+        const rmOld = oldAbs ? await rm(oldAbs) : { ok: false, detail: '旧角色文件路径解析失败' }
+        if (rmOld.ok) return { ok: true }
+        let rolledBack = false
+        try { rolledBack = (await rm(pathOf(await fs.resolve(file(effect.to))))).ok } catch (e) { /* 回滚失败下方提示 */ }
+        return fail('旧角色文件删除失败（已回滚新文件' + (rolledBack ? '' : '，回滚失败，请手动清理 ') + '）：' + rmOld.detail)
       }
       if (effect.kind === 'remove') {
         let abs = null
-        try { abs = pathOf(await fs.resolve(roleDir + '/' + effect.id + '.md')) } catch (e) { abs = null }
-        const rm = abs ? await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", abs], { cwd: repoRoot() || '/' }) : { ok: false, detail: '角色文件路径解析失败' }
-        if (!rm.ok) return { ok: false, errors: [{ at: '$', message: '角色删除失败：' + rm.detail }] }
-        return { ok: true }
+        try { abs = pathOf(await fs.resolve(file(effect.id))) } catch (e) { /* 同下 */ }
+        const r = abs ? await rm(abs) : { ok: false, detail: '角色文件路径解析失败' }
+        return r.ok ? { ok: true } : fail('角色删除失败：' + r.detail)
       }
-      return { ok: false, errors: [{ at: '$', message: '未知角色变更意图：' + String(effect && effect.kind) }] }
+      return fail('未知角色变更意图：' + String(effect && effect.kind))
     }
-
-    // ── 只读降级（core 不可用：无 fs / 候选全损坏）────────────────────────────
-    // 只保证「内置角色常驻」这一产品契约；写操作在 RPC 层按能力 fail-closed。
-    function embeddedRoleList() {
-      return EMBEDDED_BUILTIN_MANIFEST.map((r) => ({ id: r.id, name: r.name, summary: r.summary, builtin: true }))
+    const withLib = (handler) => async (a) => {
+      let lib
+      try { lib = await roleLibrary() } catch (e) { return fail('角色库内核不可用：' + errMsg(e)) }
+      return handler(lib, a)
     }
-    function embeddedRoleDetail(id) {
-      let meta = null
-      for (const r of EMBEDDED_BUILTIN_MANIFEST) { if (r.id === id) { meta = r; break } }
-      if (!meta) return null
-      const content = '# ' + meta.name + '（' + meta.id + '）\n\n' + meta.summary + '\n\n> 当前工作区未包含该内置角色的完整定义（dsh/roles/' + meta.id + '.md），角色仍可正常选择使用。'
-      return { id: meta.id, name: meta.name, summary: meta.summary, builtin: true, content: content }
-    }
-
-    // ── RPC 薄壳：采集事实 → core 裁决 → 适配器执行 → 原样返回 ────────────────
-    // 角色列表（节点表单的角色选择器 + 角色管理列表数据源）：内置常驻 + 自定义。
-    registerRpc('vwf.roles', async () => {
-      const lib = await loadRoleLibrary()
-      if (!lib) return { roles: embeddedRoleList() }
-      const facts = { includeContent: false, catalog: await collectRoleCatalog(), builtinBodies: await collectBuiltinBodies() }
-      const r = await lib.execute({ operation: 'list', facts: facts })
+    registerRpc('vwf.roles', withLib(async (lib) => {
+      const r = await lib.execute({ operation: 'list', facts: { includeContent: false, catalog: await collectRoleCatalog(), builtinBodies: await collectBuiltinBodies(lib) } })
       return { roles: r.roles }
-    })
-    // 角色详情（查看内置/编辑自定义前的完整配置）
-    registerRpc('vwf.roles.get', async (a) => {
-      const id = a && a.id
-      const lib = await loadRoleLibrary()
-      if (!lib) {
-        const role = embeddedRoleDetail(id)
-        if (!role) return { ok: false, errors: [{ at: '$', message: '角色不存在：' + (id || '') }] }
-        return { ok: true, role: role }
-      }
-      const facts = { includeContent: true, catalog: await collectRoleCatalog(), builtinBodies: await collectBuiltinBodies() }
-      return lib.execute({ operation: 'get', id: id, facts: facts })
-    })
-    // 引用统计（删除/修改前的保护提示数据源）：可携带开放草稿 DSL 一并计数
-    registerRpc('vwf.roles.usage', async (a) => {
-      const id = a && a.id
-      if (!id || typeof id !== 'string') return { ok: false, errors: [{ at: '$.id', message: '缺少角色 id' }] }
-      const lib = await loadRoleLibrary()
-      if (!lib) return { ok: false, errors: [{ at: '$', message: '引用统计失败：角色库内核不可用' }] }
-      const facts = { workflows: await collectWorkflowFacts(a && a.draftDsl) }
-      return lib.execute({ operation: 'usage', id: id, facts: facts })
-    })
-    // 权威名称校验（UX 收紧：编辑/保存时即时提示 Host 裁决；客户端不再复制规则）
-    registerRpc('vwf.roles.validate', async (a) => {
-      const lib = await loadRoleLibrary()
-      if (!lib) return { ok: false, errors: [{ at: '$', message: '角色库内核不可用：无法校验名称' }] }
-      const facts = { catalog: await collectRoleCatalog() }
-      return lib.execute({ operation: 'validateName', name: a && a.name, excludeId: a && a.excludeId, facts: facts })
-    })
-    // 空白新增 / 基于角色创建：core 裁决（名称/内容/唯一性）→ 适配器写盘
-    registerRpc('vwf.roles.create', async (a) => {
-      if (fs === undefined) return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法创建角色' }] }
-      const lib = await loadRoleLibrary()
-      if (!lib) return { ok: false, errors: [{ at: '$', message: '角色库内核不可用：无法创建角色' }] }
-      const facts = {
-        capabilities: { fs: fs !== undefined, subprocess: subprocess !== undefined },
-        catalog: await collectRoleCatalog(),
-      }
-      const r = await lib.execute({ operation: 'change', action: 'create', name: a && a.name, content: a && a.content, facts: facts })
+    }))
+    registerRpc('vwf.roles.get', withLib(async (lib, a) => lib.execute({ operation: 'get', id: a.id, facts: await detailFacts(lib) })))
+    registerRpc('vwf.roles.usage', withLib(async (lib, a) => {
+      if (!a.id || typeof a.id !== 'string') return fail('缺少角色 id', '$.id')
+      return lib.execute({ operation: 'usage', id: a.id, facts: { workflows: await collectWorkflowFacts(a.draftDsl) } })
+    }))
+    registerRpc('vwf.roles.validate', withLib(async (lib, a) => lib.execute({ operation: 'validateName', name: a.name, excludeId: a.excludeId, facts: { catalog: await collectRoleCatalog() } })))
+    const changeFacts = async () => ({ capabilities: { fs: fs !== undefined, subprocess: subprocess !== undefined }, catalog: await collectRoleCatalog() })
+    registerRpc('vwf.roles.create', withLib(async (lib, a) => {
+      if (fs === undefined) return fail('宿主文件能力不可用：无法创建角色')
+      const r = await lib.execute({ operation: 'change', action: 'create', name: a.name, content: a.content, facts: await changeFacts() })
       if (!r.ok) return r
       const applied = await applyRoleEffect(r.effect)
-      if (!applied.ok) return applied
-      const detail = await lib.execute({ operation: 'get', id: r.effect.id, facts: { includeContent: true, catalog: await collectRoleCatalog(), builtinBodies: await collectBuiltinBodies() } })
-      return detail
-    })
-    // 编辑自定义角色：内容修改全局生效（引用按 id 天然共享）；重命名仅零引用时允许
-    // （引用按 id 字符串，重命名会令所有引用失效——服务端强制，客户端也先提示）。
-    // 仅重命名路径需要 subprocess（删除旧文件）；纯内容编辑只依赖 fs。
-    // 编辑打包回退角色（工作区无文件、定义来自内置模板角色包）时，写入即完成
-    // 「种子到自定义角色库」；.generated 打包快照不被改写（Codex PR#124 第二轮 P1）。
-    registerRpc('vwf.roles.update', async (a) => {
-      if (fs === undefined) return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法更新角色' }] }
-      const id = a && a.id
-      const lib = await loadRoleLibrary()
-      if (!lib) return { ok: false, errors: [{ at: '$', message: '角色库内核不可用：无法更新角色' }] }
-      const newName = String((a && a.name) || '').trim()
-      const facts = {
-        capabilities: { fs: fs !== undefined, subprocess: subprocess !== undefined },
-        catalog: await collectRoleCatalog(),
-      }
-      // 仅潜在大改名才采集引用事实（纯内容编辑不触发严格模板读取）
-      if (id && newName && newName !== id) facts.workflows = await collectWorkflowFacts(a && a.draftDsl)
-      const r = await lib.execute({ operation: 'change', action: 'update', id: id, name: a && a.name, content: a && a.content, facts: facts })
+      return applied.ok ? lib.execute({ operation: 'get', id: r.effect.id, facts: await detailFacts(lib) }) : applied
+    }))
+    // 内容修改全局生效（引用按 id 共享）；重命名仅零引用放行且需要 subprocess 删旧文件
+    registerRpc('vwf.roles.update', withLib(async (lib, a) => {
+      if (fs === undefined) return fail('宿主文件能力不可用：无法更新角色')
+      const facts = await changeFacts()
+      const newName = String(a.name || '').trim()
+      if (a.id && newName && newName !== a.id) facts.workflows = await collectWorkflowFacts(a.draftDsl)
+      const r = await lib.execute({ operation: 'change', action: 'update', id: a.id, name: a.name, content: a.content, facts: facts })
       if (!r.ok) return r
       const applied = await applyRoleEffect(r.effect)
-      if (!applied.ok) return applied
-      const target = r.effect.kind === 'rename' ? r.effect.to : id
-      const detail = await lib.execute({ operation: 'get', id: target, facts: { includeContent: true, catalog: await collectRoleCatalog(), builtinBodies: await collectBuiltinBodies() } })
-      return detail
-    })
-    // 删除自定义角色：内置拒绝；存在任意引用 → 阻止并提供引用详情（无强制删除）。
-    registerRpc('vwf.roles.remove', async (a) => {
-      if (fs === undefined || subprocess === undefined) return { ok: false, errors: [{ at: '$', message: '宿主文件能力不可用：无法删除角色' }] }
-      const id = a && a.id
-      const lib = await loadRoleLibrary()
-      if (!lib) return { ok: false, errors: [{ at: '$', message: '角色库内核不可用：无法删除角色' }] }
-      const facts = {
-        capabilities: { fs: fs !== undefined, subprocess: subprocess !== undefined },
-        catalog: await collectRoleCatalog(),
-        workflows: await collectWorkflowFacts(a && a.draftDsl),
-      }
-      const r = await lib.execute({ operation: 'change', action: 'remove', id: id, facts: facts })
+      return applied.ok ? lib.execute({ operation: 'get', id: r.effect.kind === 'rename' ? r.effect.to : a.id, facts: await detailFacts(lib) }) : applied
+    }))
+    registerRpc('vwf.roles.remove', withLib(async (lib, a) => {
+      if (fs === undefined || subprocess === undefined) return fail('宿主文件能力不可用：无法删除角色')
+      const facts = await changeFacts()
+      facts.workflows = await collectWorkflowFacts(a.draftDsl)
+      const r = await lib.execute({ operation: 'change', action: 'remove', id: a.id, facts: facts })
       if (!r.ok) return r
       const applied = await applyRoleEffect(r.effect)
-      if (!applied.ok) return applied
-      return { ok: true, id: id }
-    })
+      return applied.ok ? { ok: true, id: a.id } : applied
+    }))
 
-    // ── 静态 bundle 模式：webServer RPC 路由（动态模式走 harness.handle）────
-    // 信封与平台一致：POST /dsh-visual-workflow/<method>
-    //   请求 {type:'client-request', rpcId, method, payload}
-    //   响应 {rpcId, result}（result = 各 handler 的原样返回值）
-    // 加载时序：静态组合包的 webServer 服务可能晚于本插件激活（bundle 声明
-    // inject:['webServer'] 已让行级激活等待；此处对未声明 inject 的旧安装位
-    // 再兜底 ctx.inject 延迟注册，避免「路由未注册 → 浏览器 RPC 全 404/405」）。
+    // ── 工作区隔离：核心实现 = scripts/workspace-isolation.mjs，经包装脚本子进程调用 ──
+    async function wsHostCall(cmd, input, opts) {
+      if (!WS_HOST || (await readTextIfExists(WS_HOST)) === null) return { ok: false, notFound: true, error: 'workspace-isolation-host.mjs 未找到（宿主未部署 #93 集成）' }
+      const d = await homeDirs()
+      if (!d) return { ok: false, notFound: true, error: '无法解析 workspace 根目录' }
+      const payload = { ...input, work_root: input.work_root || d.workspaces }
+      const r = await runNode([WS_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 256 * 1024 })
+      if (!r.ok) return { ok: false, error: 'workspace host 调用失败：' + r.detail }
+      try {
+        const parsed = JSON.parse(r.stdout)
+        return parsed.ok ? parsed : { ok: false, error: parsed.error || 'workspace host 业务错误', detail: parsed.detail }
+      } catch (e) { return { ok: false, error: 'workspace host 输出不可解析：' + errMsg(e), raw: r.stdout } }
+    }
+    // 模板 id → 隔离策略模板类型
+    function mapTemplateId(id) {
+      const lower = String(id || '').toLowerCase()
+      if (/optim/.test(lower)) return 'optimize'
+      if (/diagnose|debug/.test(lower)) return 'diagnose'
+      if (/explore|research/.test(lower)) return 'explore'
+      return 'construction'
+    }
+    // 能力令牌：allocate 时由宿主生成，注入脚本 args；workspace RPC 必须携带匹配令牌，
+    // 防止猜测另一个 Run 的 taskId 越权读写对方现场（vm 沙箱无 crypto，用高熵拼接）
+    const workspaceCaps = new Map()
+    function capabilityFor(runId) {
+      let cap = workspaceCaps.get(runId)
+      if (!cap) {
+        const rand = () => Math.random().toString(36).slice(2)
+        cap = 'cap-' + rand() + rand() + rand() + Date.now().toString(36) + '-' + (workspaceCaps.size + 1)
+        workspaceCaps.set(runId, cap)
+      }
+      return cap
+    }
+    function scriptArgsFromWorkspace(ws, cap, taskId) {
+      return {
+        taskId: taskId || undefined, workspace_id: ws.workspace_id, workspace_path: ws.workspace_path, source_path: ws.source_path,
+        records_path: ws.records_path, work_branch: ws.work_branch, source_revision: ws.source_revision, workspace_capability: cap || undefined,
+      }
+    }
+    function injectWorkspaceDefaults(script, defaults) {
+      const payload = {}
+      for (const k of Object.keys(defaults || {})) if (defaults[k] !== undefined && defaults[k] !== null) payload[k] = defaults[k]
+      const json = JSON.stringify(payload)
+      const marker = 'const __VWF_WS_DEFAULTS__ = {}'
+      if (script && script.indexOf(marker) >= 0) return script.replace(marker, 'const __VWF_WS_DEFAULTS__ = ' + json)
+      const old = 'const A = args || {}'
+      if (script && script.indexOf(old) >= 0) return script.replace(old, 'const A = Object.assign({}, ' + json + ', args || {})')
+      return 'const A = Object.assign({}, ' + json + ', args || {})\n' + (script || '')
+    }
+    // 返回 { ok, workspace?, capability? }；包装脚本未部署 → ok 且无 workspace（回退旧行为）；
+    // 已部署但分配失败 → fail closed（隔离是核心保证，不得静默降级到共享现场）
+    async function prepareRunWorkspace(opts) {
+      const taskId = String(opts.taskId || '')
+      if (!taskId) return { ok: false, error: '缺少 taskId' }
+      const alloc = await wsHostCall('allocate', { logical_run_id: taskId, template_id: mapTemplateId(opts.templateId), repository_path: projectRoot() || null, base_ref: opts.baseBranch || 'main', task_identity: taskId })
+      if (alloc.notFound) return { ok: true, notFound: true }
+      if (!alloc.ok || !alloc.workspace) return { ok: false, error: alloc.error || 'workspace 分配失败（未知原因）' }
+      return { ok: true, workspace: alloc.workspace, capability: capabilityFor(taskId) }
+    }
+    async function markWorkspaceLifecycle(taskId, lifecycle) {
+      if (!taskId || !lifecycle) return
+      try { await wsHostCall('setLifecycle', { logical_run_id: String(taskId), lifecycle: lifecycle }) } catch (e) { /* 非阻断 */ }
+    }
+    // workspace RPC 表：[包装脚本命令, 是否校验能力令牌, 载荷映射]。供编译后的 workflow 脚本在节点内调用。
+    const str = (v) => String(v || '')
+    const WS_OPS = {
+      allocate: ['allocate', false, (a) => ({
+        logical_run_id: str(a.taskId), template_id: mapTemplateId(a.templateId), repository_path: a.repository_path || null, repository: a.repository || null,
+        base_ref: a.baseBranch || 'main', base_commit: a.base_commit || null, work_branch: a.work_branch || null, task_identity: str(a.taskId), allow_parallel: !!a.allow_parallel,
+      })],
+      get: ['get', true, (a, id) => ({ logical_run_id: id })],
+      setLifecycle: ['setLifecycle', true, (a, id) => ({ logical_run_id: id, lifecycle: str(a.lifecycle), extra: a.extra || {} })],
+      recordSourceSync: ['recordSourceSync', true, (a, id) => ({ logical_run_id: id, current_head: a.current_head || undefined, source_revision: a.source_revision || undefined })],
+      // 只接收 Run 身份，权威 workspace 由包装脚本从注册表解析，不信任调用方传入的路径
+      buildProvenance: ['buildAttemptProvenance', true, (a, id) => ({ logical_run_id: id, node: str(a.node), attempt: Number(a.attempt || 1) })],
+      acquireLock: ['acquireLock', true, (a, id) => ({ logical_run_id: id, resource_key: str(a.resource_key), owner: str(a.owner), ttl_ms: a.ttl_ms || undefined })],
+      releaseLock: ['releaseLock', true, (a, id) => ({ lock_id: str(a.lock_id), owner: str(a.owner), logical_run_id: id, reason: a.reason || undefined })],
+      cleanup: ['cleanup', true, (a, id) => ({ logical_run_id: id, opts: a.opts || {} })],
+      writeSource: ['writeSourceFile', true, (a, id) => ({ logical_run_id: id, rel: str(a.rel), content: str(a.content) })],
+      readSource: ['readSourceFile', true, (a, id) => ({ logical_run_id: id, rel: str(a.rel) })],
+      writeWorker: ['writeWorkerFile', true, (a, id) => ({ logical_run_id: id, worker_id: str(a.worker_id), rel: str(a.rel), content: str(a.content) })],
+      readWorker: ['readWorkerFile', true, (a, id) => ({ logical_run_id: id, worker_id: str(a.worker_id), rel: str(a.rel) })],
+      checkpoint: ['computeIntegrationCheckpointFromRepo', false, (a) => ({ base_ref: str(a.base_ref), base_commit: str(a.base_commit), repository_path: str(a.repository_path), target_ref: a.target_ref || undefined })],
+    }
+    for (const op of Object.keys(WS_OPS)) {
+      const [cmd, needsCap, build] = WS_OPS[op]
+      registerRpc('vwf.workspace.' + op, async (a) => {
+        const id = str(a.logical_run_id || a.workspace_id || a.taskId)
+        if (needsCap) {
+          if (!id) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
+          const expected = workspaceCaps.get(id)
+          if (!expected) return { ok: false, error: '该 Run 未登记 workspace capability（可能未经 wf_run 分配或已释放）' }
+          if (a.capability !== expected) return { ok: false, error: 'workspace capability 不匹配，拒绝越权访问' }
+        }
+        const result = await wsHostCall(cmd, build(a, id))
+        if (op === 'allocate' && result.ok && result.workspace && id) result.capability = capabilityFor(id)
+        return result
+      })
+    }
+
+    // ── 静态组合包：webServer 前缀路由（POST /dsh-visual-workflow/<method>，信封 {rpcId,method,payload}→{rpcId,result}）──
     if (!isDynamicHost) {
-      const vwfRoute = {
+      const route = {
         kind: 'prefix',
         path: '/dsh-visual-workflow',
         handler: function vwfRpcHandler(req, res) {
@@ -2114,616 +980,211 @@ return {
           let raw = ''
           req.on('data', (c) => { raw += c })
           req.on('end', async () => {
-            let rpcId = '', method = '', payload = {}
-            try {
-              const msg = JSON.parse(raw || '{}')
-              rpcId = String(msg.rpcId || '')
-              method = String(msg.method || '')
-              payload = msg.payload || {}
-            } catch (e) {}
-            const fn = rpcRoutes.get(method)
+            let msg = {}
+            try { msg = JSON.parse(raw || '{}') || {} } catch (e) { /* 空信封 */ }
+            const fn = rpcRoutes.get(String(msg.method || ''))
             let result
-            if (typeof fn !== 'function') result = { ok: false, errors: [{ at: '$', message: '未知方法：' + method }] }
-            else try { result = await fn(payload) } catch (e) { result = { ok: false, errors: [{ at: '$', message: String((e && e.message) || e) }] } }
-            try { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ rpcId: rpcId || 'r0', result: result === undefined ? null : result })) } catch (e) {}
+            if (typeof fn !== 'function') result = fail('未知方法：' + msg.method)
+            else try { result = await fn(msg.payload || {}) } catch (e) { result = fail(errMsg(e)) }
+            try { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ rpcId: String(msg.rpcId || 'r0'), result: result === undefined ? null : result })) } catch (e) { /* 连接已断 */ }
           })
         },
       }
       const registerOn = (owner, ws) => {
         if (!ws || typeof ws.register !== 'function') return false
-        if (owner && typeof owner.effect === 'function') owner.effect(() => ws.register(vwfRoute), 'vwf: rpc route')
-        else ws.register(vwfRoute)
+        if (owner && typeof owner.effect === 'function') owner.effect(() => ws.register(route), 'vwf: rpc route')
+        else ws.register(route)
         return true
       }
-      const webServer = ctx.get('webServer')
-      if (!registerOn(ctx, webServer) && typeof ctx.inject === 'function') {
-        ctx.inject(['webServer'], (wctx) => {
-          registerOn(wctx, (wctx && typeof wctx.get === 'function' ? wctx.get('webServer') : wctx) || wctx)
-        })
+      // webServer 可能晚于本插件激活（旧安装位未声明 inject）：经 ctx.inject 延迟注册
+      if (!registerOn(ctx, ctx.get('webServer')) && typeof ctx.inject === 'function') {
+        ctx.inject(['webServer'], (wctx) => registerOn(wctx, (wctx && typeof wctx.get === 'function' ? wctx.get('webServer') : wctx) || wctx))
       }
-      if (ctx.get('webServer') === undefined) {
-        console.log('[vwf] webServer 服务当前不可用：静态 RPC 路由延迟到 webServer 激活（bundle 已声明 inject）；若仍未注册请检查组合包版本')
-      }
+      if (ctx.get('webServer') === undefined) log('webServer 服务当前不可用：静态 RPC 路由延迟到 webServer 激活')
     }
 
-    // ── Workspace Isolation 包装脚本路径（#93 Runtime Integration）──
-    // Core 实现单一来源 = scripts/workspace-isolation.mjs；宿主通过 runNode 调用
-    // 包装脚本 scripts/workspace-isolation-host.mjs，禁止平行实现 Git/lock。
-    let _workspaceHostPath = null
-    async function workspaceHostPath() {
-      if (_workspaceHostPath) return _workspaceHostPath
-      const p = await rootPaths()
-      // 优先组合包注入的仓库根（静态 bundle），其次动态会话 cwd
-      const roots = [p.generatorRoot, p.repo].filter(Boolean)
-      for (const root of roots) {
-        const candidate = root + '/scripts/workspace-isolation-host.mjs'
-        if (fs !== undefined) {
-          try {
-            const st = await fs.stat(await fs.resolve(candidate))
-            if (st && st.type === 'file') { _workspaceHostPath = candidate; break }
-          } catch (e) { /* 尝试下一个根 */ }
-        }
-      }
-      return _workspaceHostPath
-    }
-    // workspace 根目录：开发 DSH 用 ~/.dsh-workflow-dev/workspaces/，产品 DSH 用 ~/.dsh/workspaces/
-    async function workspaceRoot() {
-      const home = await dshHome()
-      if (!home) return null
-      return home + '/workspaces'
-    }
-    // 调用 workspace-isolation-host.mjs；返回解析后的 JSON 结果。
-    // 包装脚本不存在时返回 { ok:false, error, notFound:true }——调用方据此区分
-    // 「宿主未部署 #93 集成（回退旧行为）」与「脚本存在但隔离建立失败（fail closed）」。
-    async function wsHostCall(cmd, input, opts) {
-      const host = await workspaceHostPath()
-      if (!host) return { ok: false, notFound: true, error: 'workspace-isolation-host.mjs 未找到（宿主未部署 #93 集成）' }
-      const wsr = await workspaceRoot()
-      if (!wsr) return { ok: false, notFound: true, error: '无法解析 workspace 根目录' }
-      const payload = { ...input, work_root: input.work_root || wsr }
-      const r = await runNode([host, cmd, JSON.stringify(payload)], { cwd: opts && opts.cwd ? opts.cwd : (await rootPaths()).generatorRoot, graceMs: (opts && opts.graceMs) || 30000, maxBytes: (opts && opts.maxBytes) || 256 * 1024 })
-      if (!r.ok) return { ok: false, error: 'workspace host 调用失败：' + r.detail }
-      try {
-        const parsed = JSON.parse(r.stdout)
-        if (!parsed.ok) return { ok: false, error: parsed.error || 'workspace host 业务错误', detail: parsed.detail }
-        return parsed
-      } catch (e) {
-        return { ok: false, error: 'workspace host 输出不可解析：' + String((e && e.message) || e), raw: r.stdout }
-      }
-    }
-    // 模板 id → TEMPLATE_ID 映射（#93 Policy 解析器消费）
-    function mapTemplateId(id) {
-      if (!id || typeof id !== 'string') return null
-      const lower = id.toLowerCase()
-      if (lower.indexOf('construction') >= 0 || lower.indexOf('bootstrap') >= 0) return 'construction'
-      if (lower.indexOf('optimize') >= 0 || lower.indexOf('optim') >= 0) return 'optimize'
-      if (lower.indexOf('diagnose') >= 0 || lower.indexOf('debug') >= 0) return 'diagnose'
-      if (lower.indexOf('explore') >= 0 || lower.indexOf('research') >= 0) return 'explore'
-      // 默认：建设类工作流（含 dev-workflow）走 ISOLATED_WRITE
-      if (lower.indexOf('dev-workflow') >= 0 || lower.indexOf('dev_') >= 0) return 'construction'
-      return 'construction'
-    }
-
-    // ── Workspace RPC 能力令牌（A3-2，Codex Round 2）───────────────────────
-    // logical_run_id → capability 映射：allocate 成功时由宿主生成不可伪造令牌，
-    // 注入 script args；RPC 调用必须携带匹配的 capability，否则拒绝。防止调用方
-    // 猜出另一个 Run 的可猜测 taskId 越权读写对方 workspace（注册表解析只验证
-    // ID 存在，不证明属于当前调用者）。
-    const workspaceCaps = new Map()
-    function genCapability() {
-      // vm 沙箱无 crypto；用高熵拼接（时间 + 随机 + 计数器）防猜测
-      const rand = () => Math.random().toString(36).slice(2)
-      return 'cap-' + rand() + rand() + rand() + Date.now().toString(36) + '-' + (workspaceCaps.size + 1)
-    }
-    // RPC handler 内调用：校验 payload 携带的 capability 与宿主登记的 Run 一致
-    function requireWorkspaceCapability(runId, cap) {
-      const expected = workspaceCaps.get(String(runId || ''))
-      if (!expected) return '该 Run 未登记 workspace capability（可能未经 wf_run 分配或已释放）'
-      if (typeof cap !== 'string' || cap !== expected) return 'workspace capability 不匹配，拒绝越权访问'
-      return null
-    }
-
-    function scriptArgsFromWorkspace(ws, cap, taskId) {
-      if (!ws) return {}
-      return {
-        taskId: taskId || undefined,
-        workspace_id: ws.workspace_id,
-        workspace_path: ws.workspace_path,
-        source_path: ws.source_path,
-        records_path: ws.records_path,
-        work_branch: ws.work_branch,
-        source_revision: ws.source_revision,
-        workspace_capability: cap || undefined,
-      }
-    }
-
-    function injectWorkspaceDefaults(script, defaults) {
-      const payload = {}
-      for (const k of Object.keys(defaults || {})) {
-        if (defaults[k] !== undefined && defaults[k] !== null) payload[k] = defaults[k]
-      }
-      const json = JSON.stringify(payload)
-      const marker = 'const __VWF_WS_DEFAULTS__ = {}'
-      if (script && script.indexOf(marker) >= 0) return script.replace(marker, 'const __VWF_WS_DEFAULTS__ = ' + json)
-      const old = 'const A = args || {}'
-      if (script && script.indexOf(old) >= 0) {
-        return script.replace(old, 'const A = Object.assign({}, ' + json + ', args || {})')
-      }
-      return 'const A = Object.assign({}, ' + json + ', args || {})\n' + (script || '')
-    }
-
-    async function prepareRunWorkspace(opts) {
-      const taskId = String((opts && opts.taskId) || '')
-      if (!taskId) return { ok: false, error: '缺少 taskId' }
-      const alloc = await wsHostCall('allocate', {
-        logical_run_id: taskId,
-        template_id: mapTemplateId((opts && opts.templateId) || ''),
-        repository_path: repoRoot() || null,
-        base_ref: (opts && opts.baseBranch) || 'main',
-        task_identity: taskId,
-      })
-      if (alloc.notFound) return { ok: true, degraded: true, notFound: true }
-      if (!alloc.ok || !alloc.workspace) return { ok: false, error: alloc.error || 'workspace 分配失败（未知原因）' }
-      const cap = genCapability()
-      workspaceCaps.set(taskId, cap)
-      return { ok: true, workspace: alloc.workspace, capability: cap }
-    }
-
-    async function markWorkspaceLifecycle(taskId, lifecycle) {
-      if (!taskId || !lifecycle) return
-      try { await wsHostCall('setLifecycle', { logical_run_id: String(taskId), lifecycle: lifecycle }) } catch (e) { /* 非阻断 */ }
-    }
-
-    // ── Workspace Isolation RPC（#93）──────────────────────────────────────
-    // 这些 RPC 供编译后的 workflow 脚本在节点内调用，获取 workspace 现场、
-    // 写 source/scratch、构建 provenance、管理集成锁。
-    registerRpc('vwf.workspace.allocate', async (a) => {
-      const templateId = mapTemplateId(a && a.templateId)
-      const spec = {
-        logical_run_id: String((a && a.taskId) || ''),
-        template_id: templateId,
-        repository_path: (a && a.repository_path) || null,
-        repository: (a && a.repository) || null,
-        base_ref: (a && a.baseBranch) || 'main',
-        base_commit: (a && a.base_commit) || null,
-        work_branch: (a && a.work_branch) || null,
-        task_identity: String((a && a.taskId) || ''),
-        allow_parallel: !!(a && a.allow_parallel),
-      }
-      const result = await wsHostCall('allocate', spec)
-      if (result.ok && result.workspace) {
-        const runId = String((a && a.taskId) || '')
-        if (runId) {
-          let cap = workspaceCaps.get(runId)
-          if (!cap) {
-            cap = genCapability()
-            workspaceCaps.set(runId, cap)
-          }
-          result.capability = cap
-        }
-      }
-      return result
-    })
-    registerRpc('vwf.workspace.get', async (a) => {
-      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || (a && a.taskId) || '')
-      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
-      const capErr = requireWorkspaceCapability(runId, a && a.capability)
-      if (capErr) return { ok: false, error: capErr }
-      return wsHostCall('get', { logical_run_id: runId })
-    })
-    registerRpc('vwf.workspace.setLifecycle', async (a) => {
-      const runId = String((a && a.logical_run_id) || '')
-      if (!runId) return { ok: false, error: '缺少 logical_run_id' }
-      const capErr = requireWorkspaceCapability(runId, a && a.capability)
-      if (capErr) return { ok: false, error: capErr }
-      return wsHostCall('setLifecycle', {
-        logical_run_id: runId,
-        lifecycle: String((a && a.lifecycle) || ''),
-        extra: (a && a.extra) || {},
-      })
-    })
-    registerRpc('vwf.workspace.recordSourceSync', async (a) => {
-      const runId = String((a && a.logical_run_id) || '')
-      if (!runId) return { ok: false, error: '缺少 logical_run_id' }
-      const capErr = requireWorkspaceCapability(runId, a && a.capability)
-      if (capErr) return { ok: false, error: capErr }
-      return wsHostCall('recordSourceSync', {
-        logical_run_id: runId,
-        current_head: (a && a.current_head) || undefined,
-        source_revision: (a && a.source_revision) || undefined,
-      })
-    })
-    registerRpc('vwf.workspace.buildProvenance', async (a) => {
-      // A4（Codex Round 1）：只接收 Run 身份，权威 workspace 由包装脚本从注册表解析，
-      // 不信任调用方传入的 workspace 对象（防伪造路径越权写其他 Run）。
-      // A3-2（Codex Round 2）：校验不可伪造 capability，防猜测 taskId 跨 Run 越权。
-      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
-      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
-      const capErr = requireWorkspaceCapability(runId, a && a.capability)
-      if (capErr) return { ok: false, error: capErr }
-      return wsHostCall('buildAttemptProvenance', {
-        logical_run_id: runId, node: String((a && a.node) || ''), attempt: Number((a && a.attempt) || 1),
-      })
-    })
-    registerRpc('vwf.workspace.acquireLock', async (a) => {
-      const runId = String((a && a.logical_run_id) || '')
-      if (!runId) return { ok: false, error: '缺少 logical_run_id' }
-      const capErr = requireWorkspaceCapability(runId, a && a.capability)
-      if (capErr) return { ok: false, error: capErr }
-      return wsHostCall('acquireLock', {
-        logical_run_id: runId,
-        resource_key: String((a && a.resource_key) || ''),
-        owner: String((a && a.owner) || ''),
-        ttl_ms: (a && a.ttl_ms) || undefined,
-      })
-    })
-    registerRpc('vwf.workspace.releaseLock', async (a) => {
-      const runId = String((a && a.logical_run_id) || '')
-      if (!runId) return { ok: false, error: '缺少 logical_run_id' }
-      const capErr = requireWorkspaceCapability(runId, a && a.capability)
-      if (capErr) return { ok: false, error: capErr }
-      return wsHostCall('releaseLock', {
-        lock_id: String((a && a.lock_id) || ''),
-        owner: String((a && a.owner) || ''),
-        logical_run_id: runId,
-        reason: (a && a.reason) || undefined,
-      })
-    })
-    registerRpc('vwf.workspace.cleanup', async (a) => {
-      const runId = String((a && a.logical_run_id) || '')
-      if (!runId) return { ok: false, error: '缺少 logical_run_id' }
-      const capErr = requireWorkspaceCapability(runId, a && a.capability)
-      if (capErr) return { ok: false, error: capErr }
-      return wsHostCall('cleanup', {
-        logical_run_id: runId,
-        opts: (a && a.opts) || {},
-      })
-    })
-    registerRpc('vwf.workspace.writeSource', async (a) => {
-      // A4：只接收 Run 身份；包装脚本内 resolveWorkspaceFromRegistry 取权威 workspace
-      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
-      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
-      const capErr = requireWorkspaceCapability(runId, a && a.capability)
-      if (capErr) return { ok: false, error: capErr }
-      return wsHostCall('writeSourceFile', { logical_run_id: runId, rel: String((a && a.rel) || ''), content: String((a && a.content) || '') })
-    })
-    registerRpc('vwf.workspace.readSource', async (a) => {
-      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
-      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
-      const capErr = requireWorkspaceCapability(runId, a && a.capability)
-      if (capErr) return { ok: false, error: capErr }
-      return wsHostCall('readSourceFile', { logical_run_id: runId, rel: String((a && a.rel) || '') })
-    })
-    registerRpc('vwf.workspace.writeWorker', async (a) => {
-      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
-      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
-      const capErr = requireWorkspaceCapability(runId, a && a.capability)
-      if (capErr) return { ok: false, error: capErr }
-      return wsHostCall('writeWorkerFile', { logical_run_id: runId, worker_id: String((a && a.worker_id) || ''), rel: String((a && a.rel) || ''), content: String((a && a.content) || '') })
-    })
-    registerRpc('vwf.workspace.readWorker', async (a) => {
-      const runId = String((a && a.logical_run_id) || (a && a.workspace_id) || '')
-      if (!runId) return { ok: false, error: '缺少 logical_run_id / workspace_id' }
-      const capErr = requireWorkspaceCapability(runId, a && a.capability)
-      if (capErr) return { ok: false, error: capErr }
-      return wsHostCall('readWorkerFile', { logical_run_id: runId, worker_id: String((a && a.worker_id) || ''), rel: String((a && a.rel) || '') })
-    })
-    registerRpc('vwf.workspace.checkpoint', async (a) => {
-      return wsHostCall('computeIntegrationCheckpointFromRepo', {
-        base_ref: String((a && a.base_ref) || ''),
-        base_commit: String((a && a.base_commit) || ''),
-        repository_path: String((a && a.repository_path) || ''),
-        target_ref: (a && a.target_ref) || undefined,
-      })
-    })
-
-    // ── workflowEngine 解析 ──────────────────────────────────────────────────
-    // 本部署中 workflowEngine 由 agent preset 平面挂载（workflow-worker-thread），
-    // 动态插件 host ctx 看不到；经 agentPresets.serviceFor 对当前发起 agent 做
-    // 只读桥接。所有分支均 try/catch，解析不到时优雅降级（不注册 wf_run）。
+    // ── workflowEngine：本部署由 agent preset 平面挂载，host ctx 看不到，经 agentPresets 对当前发起 agent 桥接 ──
     function resolveEngine() {
       if (engine !== undefined) return engine
       try {
         const ap = ctx.get('agentPresets')
-        if (!ap || typeof ap.serviceFor !== 'function') return undefined
-        if (agents === undefined || typeof agents.currentInitiator !== 'function') return undefined
+        if (!ap || typeof ap.serviceFor !== 'function' || agents === undefined || typeof agents.currentInitiator !== 'function') return undefined
         const a = agents.currentInitiator()
-        if (!a || !a.ctx) return undefined
-        return ap.serviceFor(a, 'workflowEngine') || undefined
+        return (a && a.ctx && ap.serviceFor(a, 'workflowEngine')) || undefined
       } catch (e) { return undefined }
     }
 
-    // wf_run 注册条件：有 agents 服务即注册（engine 解析不依赖 apply 时刻的
-    // currentInitiator——浏览器审批触发的激活无 initiator；engine 不可用推迟到
-    // execute 时优雅报错，且运行时模型调用通常有 currentInitiator）。
-    if (agents !== undefined) {
-      const tool = dtools.define({
-        name: 'wf_run',
-        description: '运行一个可视化工作流（DSL 图）：校验并编译为 workflow 脚本后交给引擎执行。args.templateId 用内置/用户模板，或 args.dsl 传自定义图。返回运行状态；Human Decision 以 WAITING_HUMAN 暂停，用 decision_id + user_choice 续跑；残留人工门禁以 AWAITING_HUMAN_<node> 暂停，用 entry + approved 续跑。',
-        parameters: {
-          templateId: { type: 'string', description: '内置/用户工作流 id，如 dev-workflow-2-0' },
-          dsl: { type: 'object', additionalProperties: true, description: '自定义工作流 DSL（nodes/edges/control）' },
-          taskId: { type: 'string', required: true, description: '任务标识，如 issue-12' },
-          runDir: { type: 'string', description: 'run 产物目录，缺省 .agent-runs/<taskId>' },
-          baseBranch: { type: 'string', description: 'base 分支，缺省 main' },
-          roleDir: { type: 'string', description: '角色目录，缺省 dsh/roles' },
-          issueRef: { type: 'string', description: 'issue 引用，如 #12' },
-          issueTitle: { type: 'string', description: 'issue 标题' },
-          issueBody: { type: 'string', description: 'issue 正文' },
-          issueComments: { type: 'string', description: 'issue 评论' },
-          requirement: { type: 'string', description: '原始需求文本（无 issue 时）' },
-          entry: { type: 'string', description: '续跑入口节点 id' },
-          approved: { type: 'boolean', description: '残留人工门禁续跑裁决（true 通过）；Human Decision 禁止此字段' },
-          feedback: { type: 'string', description: '人工打回意见（续跑）' },
-          startRound: { type: 'number', description: '续跑起始轮次' },
-          history: { type: 'array', description: '前次打回历史（续跑）' },
-          decision_id: { type: 'string', description: 'Human Decision 续跑：稳定 decision_id' },
-          user_choice: { type: 'string', description: 'Human Decision 续跑：Decision Result（如 STOP / USER_ACCEPTED / ADD_BUDGET）' },
-          blocked_edge: { type: 'object', additionalProperties: true, description: 'ADD_BUDGET 时被额度拦住的自动边 { from, to, on }' },
-          results: { type: 'object', additionalProperties: true, description: '续跑时带回的节点结果快照' },
-        },
-        output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
-        async execute(rawArgs) {
-          // 工具平台会对 execute 参数 deepFreeze（DSH tools snapshotJsonValue）。
-          // 续跑回填必须写到浅拷贝上，不能改冻结的 rawArgs。
-          const args = Object.assign({}, rawArgs || {})
-          // 约束②（同 taskId 互斥）：最新记录进行中/AWAITING_HUMAN 且非 entry 续跑 → 拒绝。
-          // 校验放最前（fail-fast），不浪费校验/编译开销。
-          // 先等启动回载完成（评审 PRRT_kwDOT57Tec6b6Iu1）：否则互斥判定可能与
-          // 磁盘门禁水合竞速，重启后立刻续跑会漏判占用
-          try { if (runsHydration) await runsHydration } catch (e) { /* 回载失败已留痕 */ }
-          const isHdResume = !!(args && args.decision_id)
-          const isLegacyResume = !!(args && args.entry)
-          const isResume = isHdResume || isLegacyResume
-          const blocker = taskMutexBlocker(String((args && args.taskId) || ''))
-          if (blocker) {
-            const st = String(blocker.status || '')
-            let rec = runs.get(blocker.runId)
-            if (!rec) rec = await loadRunFromDisk(blocker.runId)
-            let allow = false
-            if (st === 'WAITING_HUMAN' || isParkedHumanDecisionRecord(rec)) {
-              const parkedId = rec && rec.decisionId ? String(rec.decisionId) : ''
-              allow = isHdResume && (!parkedId || parkedId === String(args.decision_id))
-            } else if (st.indexOf('AWAITING_HUMAN_') === 0) {
-              allow = isLegacyResume
-            } else {
-              allow = isResume
-            }
-            if (!allow) {
-              return '错误：任务 ' + args.taskId + ' 已有进行中的运行 ' + blocker.runId + '（状态 ' + blocker.status +
-                '）：同 taskId 串行互斥。WAITING_HUMAN 请带 decision_id 与 user_choice 续跑；残留门禁请带 entry=<节点id> 与 approved；并行任务请换一个 taskId。'
-            }
-          }
-          let dsl = null
-          let fromTemplate = false
-          if (args.templateId) {
-            dsl = await findWorkflow(args.templateId)
-            if (!dsl) return '错误：未知工作流 ' + args.templateId + '（可用：' + (await listWorkflows()).map(w => w.id).join(', ') + '）'
-            fromTemplate = true
-          } else if (args.dsl) {
-            dsl = args.dsl
-          } else {
-            return '错误：必须提供 templateId 或 dsl'
-          }
-          if (dslUsesHumanDecision(dsl) && args && args.approved !== undefined) {
-            return '错误：Human Decision 续跑禁止 approved，请传 decision_id 与 user_choice'
-          }
-          if (isHdResume) {
-            const parked = await parkedHumanDecision(String((args && args.taskId) || ''))
-            if (parked) {
-              if (args.blocked_edge == null && parked.blockedEdge) args.blocked_edge = parked.blockedEdge
-              if (isEmptyObject(args.results) && parked.results) args.results = parked.results
-              if (isEmptyObject(args.results) && parked.node && parked.controlEvent && parked.controlEvent.triggering_node_outcome) {
-                args.results = { [parked.node]: parked.controlEvent.triggering_node_outcome }
-              }
-              if (args.history == null && parked.history) args.history = parked.history
-              if (args.startRound == null && parked.round != null) args.startRound = parked.round
-              if (args.budgetUsed == null && parked.budgetUsed != null) args.budgetUsed = parked.budgetUsed
-              if (args.maxRounds == null && parked.maxRounds != null) args.maxRounds = parked.maxRounds
-              if (args.decisionSeq == null && parked.decisionSeq != null) args.decisionSeq = parked.decisionSeq
-              if (!args.entry && parked.node) args.entry = parked.node
-            }
-          }
-          const v = await validatePipeline(dsl)
-          if (!v.ok) return 'DSL 校验失败：' + JSON.stringify(v.errors)
-          const c = await compileViaPipeline(v.sanitized, { fromTemplate })
-          if (!c.ok) return '编译失败：' + c.detail
-          const engineNow = resolveEngine()
-          if (engineNow === undefined) return '错误：当前宿主平面无法访问 workflowEngine（wf_run 需要 agent preset 挂载的工作流引擎）。可改用内置 workflow 工具执行 vwf.script 编译产物。'
-          const parent = agents.requireInitiator()
-
-          // ── #93 Workspace Isolation 集成：启动前分配 Workspace ───────────────
-          // 用 taskId 作为 portable run_id 占位 logical_run_id；模板类型决定 Policy。
-          // A2（Codex Round 1）：脚本存在但分配失败必须 fail closed——隔离是本 PR
-          // 交付的核心保证，瞬时故障静默降级会让两个 Run 重新写入共享现场。
-          // 例外：包装脚本不存在（宿主未部署 #93 集成，如旧安装/测试环境）→ 回退
-          // 旧行为（不注入 workspace，脚本自行管理路径），不把「未部署」当故障。
-          let workspaceInfo = null
-          let workspaceCap = null
-          const prepared = await prepareRunWorkspace({
-            taskId: String(args.taskId || ''),
-            templateId: args.templateId || (dsl && dsl.id) || '',
-            baseBranch: args.baseBranch || 'main',
-          })
-          if (!prepared.ok) {
-            console.log('[vwf] workspace allocate 失败（fail closed，拒绝启动）：' + prepared.error)
-            return '错误：Run Workspace 分配失败，隔离保证无法建立，工作流拒绝启动：' + prepared.error + '（请检查仓库根可访问性、DSH Home/workspaces 目录权限与 workspace-isolation-host.mjs 是否存在）'
-          }
-          if (prepared.workspace) {
-            workspaceInfo = prepared.workspace
-            workspaceCap = prepared.capability
-            console.log('[vwf] workspace allocated: ' + workspaceInfo.workspace_id + ' at ' + workspaceInfo.workspace_path)
-          } else if (prepared.notFound) {
-            console.log('[vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为')
-          }
-
-          // 注入 workspace 路径到 script args（#93）：脚本通过 host.call('vwf.workspace.get')
-          // 获取现场，而非猜路径。旧脚本无此字段时行为不变。
-          const scriptArgs = {
-            taskId: args.taskId, runDir: args.runDir, roleDir: args.roleDir || c.roleDir, baseBranch: args.baseBranch,
-            issueRef: args.issueRef, issueTitle: args.issueTitle, issueBody: args.issueBody, issueComments: args.issueComments,
-            requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
-            decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
-            budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
-            // #93: workspace 现场注入
-            workspace_id: workspaceInfo ? workspaceInfo.workspace_id : undefined,
-            workspace_path: workspaceInfo ? workspaceInfo.workspace_path : undefined,
-            source_path: workspaceInfo ? workspaceInfo.source_path : undefined,
-            records_path: workspaceInfo ? workspaceInfo.records_path : undefined,
-            work_branch: workspaceInfo ? workspaceInfo.work_branch : undefined,
-            source_revision: workspaceInfo ? workspaceInfo.source_revision : undefined,
-            // A3-2: RPC 越权防护——脚本节点调用 workspace RPC 必须携带此令牌
-            workspace_capability: workspaceCap || undefined,
-          }
-          // 剔除 undefined 键（lossless-JSON 守卫）
-          for (const k of Object.keys(scriptArgs)) {
-            if (scriptArgs[k] === undefined) delete scriptArgs[k]
-          }
-
-          // Codex Round 3：启动引擎前先持久化 RUNNING。崩溃/start 抛错/result
-          // rejection 不得把 workspace 永久留在 READY（recoverStale 只回收 RUNNING）。
-          if (workspaceInfo) await markWorkspaceLifecycle(String(args.taskId || ''), 'RUNNING')
-
-          const startReq = { script: c.script, meta: c.meta, args: scriptArgs, parent: parent }
-          if (workspaceInfo && workspaceInfo.source_path) {
-            startReq.cwd = workspaceInfo.source_path
-            startReq.workspaceRoot = workspaceInfo.source_path
-          }
-          let run
-          try {
-            run = engineNow.start(startReq)
-          } catch (e) {
-            if (workspaceInfo) await markWorkspaceLifecycle(String(args.taskId || ''), 'FAILED')
-            return '错误：工作流引擎启动失败，workspace 已标 FAILED：' + String((e && e.message) || e)
-          }
-          // 启动边界自登记（workflow/start 事件无 taskId，见 runTags 注释）；
-          // entry / decision_id 续跑把同 taskId 前序门禁记录标记接管，旧卡片退出门禁队列
-          runTags.set(String(run.id), {
-            taskId: String(args.taskId || ''),
-            workflowId: String(args.templateId || (v.sanitized && v.sanitized.id) || ''),
-            startedAt: Date.now(),
-            active: true,
-            // #93: 绑定 workspace 到 runTag，供后续节点通过 taskId 获取
-            workspace_id: workspaceInfo ? workspaceInfo.workspace_id : undefined,
-          })
-          // 启动边界同步落一份快照：workflow/start 事件可能晚于 tag 登记到达，
-          // 这里保证进行中的 run 后即有含 taskId 的可见快照（#40 AC2）
-          requestRunPersist(String(run.id))
-          if (isResume) supersedeParked(String(args.taskId), String(run.id))
-          let result
-          try {
-            result = await run.result
-          } catch (e) {
-            if (workspaceInfo) await markWorkspaceLifecycle(String(args.taskId || ''), 'FAILED')
-            return '错误：工作流运行失败，workspace 已标 FAILED：' + String((e && e.message) || e)
-          }
-          // 权威终态回写（见 canonicalStop 注释）：completed 时以脚本返回为准
-          // （DONE / WAITING_HUMAN / AWAITING_HUMAN_* / FAILED_*），cancelled/error 保持事件原样。
-          // 注意：wf_run 回执保持引擎原样 stopReason/value 不做翻译（runtime-host
-          // 套件 H1/H2 钉住该契约）；看板/互斥语义只消费这里回写的 runs 状态
-          const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
-          if (canon) {
-            const rec = runs.get(String(run.id))
-            if (rec) {
-              rec.status = canon
-              applyHumanDecisionValue(rec, result && result.value)
-              requestRunPersist(String(run.id))
-            }
-          }
-          // #93: 终态时更新 workspace lifecycle（非阻断）。
-          // A5（Codex Round 1）：覆盖 canonicalStop 全部终态 + cancelled/error 兜底。
-          // 人工等待类映射为保留态（cleanup 拒绝、可 Resume）；失败/取消类映射为
-          // FAILED（cleanup 可回收），避免 workspace 永久留在 READY 泄漏资源。
-          if (workspaceInfo) {
-            const canonLc = canonicalLifecycleFor(canon, result && result.stopReason)
-            if (canonLc) {
-              try { await wsHostCall('setLifecycle', { logical_run_id: String(args.taskId || ''), lifecycle: canonLc }) } catch (e) { /* 忽略 */ }
-            }
-          }
-          return JSON.stringify({ runId: String(run.id), stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
-        }
-      })
-      dtools.register(ctx, tool)
-      const wsTool = dtools.define({
-        name: 'vwf_workspace',
-        description: '按已分配的 Logical Run 访问隔离 workspace。必须携带本 Run 的 workspace_capability。op=get|writeSource|readSource|writeWorker|readWorker|acquireLock|releaseLock|checkpoint|buildProvenance|setLifecycle|recordSourceSync|cleanup',
-        parameters: {
-          op: { type: 'string', required: true, description: 'get | writeSource | readSource | writeWorker | readWorker | acquireLock | releaseLock | checkpoint | buildProvenance | setLifecycle | recordSourceSync | cleanup' },
-          logical_run_id: { type: 'string', required: true, description: 'Logical Run / taskId' },
-          capability: { type: 'string', required: true, description: 'wf_run 或获取脚本注入的 workspace_capability' },
-          rel: { type: 'string', description: '相对 source/worker 的路径' },
-          content: { type: 'string', description: '写入内容' },
-          worker_id: { type: 'string' },
-          resource_key: { type: 'string' },
-          owner: { type: 'string' },
-          lock_id: { type: 'string' },
-          node: { type: 'string' },
-          attempt: { type: 'number' },
-          lifecycle: { type: 'string' },
-        },
-        output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
-        async execute(rawArgs) {
-          const op = String((rawArgs && rawArgs.op) || '')
-          const fn = rpcRoutes.get('vwf.workspace.' + op)
-          if (typeof fn !== 'function') return JSON.stringify({ ok: false, error: '未知 workspace op：' + op })
-          try {
-            const res = await fn(rawArgs)
-            return typeof res === 'string' ? res : JSON.stringify(res)
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: String((e && e.message) || e) })
-          }
-        },
-      })
-      dtools.register(ctx, wsTool)
-      // 诊断工具（定位删除/路径问题）：op=paths 返回路径解析；op=remove 逐步执行删除
-      const debugTool = dtools.define({
-        name: 'vwf_debug',
-        description: 'vwf 插件诊断：op=paths 返回双根路径解析结果；op=remove <id> 逐步执行删除流程并返回每一步结果（含真实 rm 子进程输出），用于定位删除失败。',
-        parameters: {
-          op: { type: 'string', required: true, description: 'paths | remove' },
-          id: { type: 'string', description: 'remove 诊断的模板 id' },
-        },
-        output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] },
-        async execute(args) {
-          if (args.op === 'paths') {
-            const p = await rootPaths()
-            return JSON.stringify({
-              repoRoot: repoRoot(), knownCwd: knownCwd, dshHome: await dshHome(),
-              injectedRepoRoot: injectedRepoRoot(),
-              validatorCandidates: await validatorCoreCandidatePaths(),
-              userDir: p.userDir, skillRoot: p.skillRoot, builtinDir: p.builtinDir, homeBuiltinDir: p.homeBuiltinDir, generatorRoot: p.generatorRoot, generator: p.generator,
-              fsAvailable: fs !== undefined, subprocessAvailable: subprocess !== undefined,
-              nodePath: await resolveNode(),
-            }, null, 2)
-          }
-          if (args.op === 'remove' && args.id) {
-            const id = args.id
-            const p = await rootPaths()
-            const file = p.userDir + '/' + id + '.json'
-            const steps = { id: id, repo: p.repo, userDir: p.userDir, file: file }
-            try {
-              const target = await fs.resolve(file)
-              const info = await fs.stat(target)
-              steps.existed = !!info
-              steps.statType = info ? info.type : null
-            } catch (e) { steps.statError = String((e && e.message) || e) }
-            const rm = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", file], { cwd: p.generatorRoot })
-            steps.rm = rm
-            const skillDir = p.skillRoot + '/' + id
-            const rm2 = await runNode(['-e', "const fs=require('fs');fs.rmSync(process.argv[1],{recursive:true,force:true})", skillDir], { cwd: p.generatorRoot })
-            steps.rmSkill = rm2
-            try {
-              const after = await fs.stat(await fs.resolve(file))
-              steps.fileExistsAfter = !!after
-            } catch (e) { steps.fileExistsAfter = false }
-            return JSON.stringify(steps, null, 2)
-          }
-          return '用法：vwf_debug { op: "paths" } 或 { op: "remove", id: "<模板id>" }'
-        },
-      })
-      dtools.register(ctx, debugTool)
-    } else {
-      console.log('[vwf] workflowEngine 未解析（host ctx 与 agent-preset 桥接均不可用）或 agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行')
+    // ── 工具：有 agents 服务即注册；engine 不可用推迟到 execute 时报错 ────────────
+    if (agents === undefined) {
+      log('agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行')
+      return
     }
+    const textTool = (t) => dtools.define({ ...t, output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] } })
+    dtools.register(textTool({
+      name: 'wf_run',
+      description: '运行一个可视化工作流（DSL 图）：校验并编译为 workflow 脚本后交给引擎执行。args.templateId 用内置/用户模板，或 args.dsl 传自定义图。返回运行状态；Human Decision 以 WAITING_HUMAN 暂停，用 decision_id + user_choice 续跑；残留人工门禁以 AWAITING_HUMAN_<node> 暂停，用 entry + approved 续跑。',
+      parameters: {
+        templateId: { type: 'string', description: '内置/用户工作流 id，如 dev-workflow-2-0' },
+        dsl: { type: 'object', additionalProperties: true, description: '自定义工作流 DSL（nodes/edges/control）' },
+        taskId: { type: 'string', required: true, description: '任务标识，如 issue-12' },
+        runDir: { type: 'string', description: 'run 产物目录，缺省 .agent-runs/<taskId>' },
+        baseBranch: { type: 'string', description: 'base 分支，缺省 main' },
+        roleDir: { type: 'string', description: '角色目录，缺省 dsh/roles' },
+        issueRef: { type: 'string', description: 'issue 引用，如 #12' },
+        issueTitle: { type: 'string', description: 'issue 标题' },
+        issueBody: { type: 'string', description: 'issue 正文' },
+        issueComments: { type: 'string', description: 'issue 评论' },
+        requirement: { type: 'string', description: '原始需求文本（无 issue 时）' },
+        entry: { type: 'string', description: '续跑入口节点 id' },
+        approved: { type: 'boolean', description: '残留人工门禁续跑裁决（true 通过）；Human Decision 禁止此字段' },
+        feedback: { type: 'string', description: '人工打回意见（续跑）' },
+        startRound: { type: 'number', description: '续跑起始轮次' },
+        history: { type: 'array', description: '前次打回历史（续跑）' },
+        decision_id: { type: 'string', description: 'Human Decision 续跑：稳定 decision_id' },
+        user_choice: { type: 'string', description: 'Human Decision 续跑：Decision Result（如 STOP / USER_ACCEPTED / ADD_BUDGET）' },
+        blocked_edge: { type: 'object', additionalProperties: true, description: 'ADD_BUDGET 时被额度拦住的自动边 { from, to, on }' },
+        results: { type: 'object', additionalProperties: true, description: '续跑时带回的节点结果快照' },
+      },
+      async execute(rawArgs) {
+        refreshServices()
+        // 工具平台会 deepFreeze 入参：续跑回填写到浅拷贝上
+        const args = Object.assign({}, rawArgs || {})
+        const taskId = String(args.taskId || '')
+        // 互斥判定必须看到完整门禁状态，先等启动回载完成
+        await runsHydration
+        const isHdResume = !!args.decision_id
+        const isLegacyResume = !!args.entry
+        const holder = taskHolder(taskId)
+        if (holder) {
+          const st = String(holder.status || '')
+          let allow
+          if (st === 'WAITING_HUMAN' || isParkedHd(holder)) allow = isHdResume && (!holder.decision_id || holder.decision_id === String(args.decision_id))
+          else if (st.indexOf('AWAITING_HUMAN_') === 0) allow = isLegacyResume
+          else allow = isHdResume || isLegacyResume
+          if (!allow) {
+            return '错误：任务 ' + taskId + ' 已有进行中的运行 ' + holder.id + '（状态 ' + (st || 'running') +
+              '）：同 taskId 串行互斥。WAITING_HUMAN 请带 decision_id 与 user_choice 续跑；残留门禁请带 entry=<节点id> 与 approved；并行任务请换一个 taskId。'
+          }
+        }
+        let dsl = null
+        let fromTemplate = false
+        if (args.templateId) {
+          dsl = await findWorkflow(args.templateId)
+          if (!dsl) return '错误：未知工作流 ' + args.templateId + '（可用：' + (await listWorkflows()).map((w) => w.id).join(', ') + '）'
+          fromTemplate = true
+        } else if (args.dsl) dsl = args.dsl
+        else return '错误：必须提供 templateId 或 dsl'
+        const usesHd = dsl && typeof dsl === 'object' && (dsl.humanDecision !== undefined || (Array.isArray(dsl.edges) && dsl.edges.some((e) => e && (e.to === '$human-decision' || e.from === '$human-decision'))))
+        if (usesHd && args.approved !== undefined) return '错误：Human Decision 续跑禁止 approved，请传 decision_id 与 user_choice'
+        // Human Decision 续跑：从停机记录回填未显式传入的现场
+        const parked = isHdResume && holder && isParkedHd(holder) ? holder : null
+        if (parked) {
+          const emptyObj = (v) => v == null || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0)
+          if (args.blocked_edge == null && parked.blocked_edge) args.blocked_edge = parked.blocked_edge
+          if (emptyObj(args.results) && parked.results) args.results = parked.results
+          if (emptyObj(args.results) && parked.node && parked.control_event && parked.control_event.triggering_node_outcome) args.results = { [parked.node]: parked.control_event.triggering_node_outcome }
+          if (args.history == null && parked.history) args.history = parked.history
+          for (const k of ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']) {
+            const argKey = k === 'round' ? 'startRound' : k
+            if (args[argKey] == null && parked[k] != null) args[argKey] = parked[k]
+          }
+          if (!args.entry && parked.node) args.entry = parked.node
+        }
+        const v = await validatePipeline(dsl)
+        if (!v.ok) return 'DSL 校验失败：' + JSON.stringify(v.errors)
+        const c = await compileDsl(v.sanitized, { fromTemplate: fromTemplate })
+        if (!c.ok) return '编译失败：' + c.detail
+        const engineNow = resolveEngine()
+        if (engineNow === undefined) return '错误：当前宿主平面无法访问 workflowEngine（wf_run 需要 agent preset 挂载的工作流引擎）。可改用内置 workflow 工具执行 vwf.script 编译产物。'
+        const parent = agents.requireInitiator()
+
+        const prepared = await prepareRunWorkspace({ taskId: taskId, templateId: args.templateId || v.sanitized.id, baseBranch: args.baseBranch || 'main' })
+        if (!prepared.ok) {
+          log('workspace allocate 失败（fail closed，拒绝启动）：' + prepared.error)
+          return '错误：Run Workspace 分配失败，隔离保证无法建立，工作流拒绝启动：' + prepared.error + '（请检查仓库根可访问性、DSH Home/workspaces 目录权限与 workspace-isolation-host.mjs 是否存在）'
+        }
+        const ws = prepared.workspace || null
+        if (ws) log('workspace allocated: ' + ws.workspace_id + ' at ' + ws.workspace_path)
+        else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为')
+
+        const scriptArgs = Object.assign({
+          taskId: args.taskId, runDir: args.runDir, roleDir: args.roleDir || c.roleDir, baseBranch: args.baseBranch,
+          issueRef: args.issueRef, issueTitle: args.issueTitle, issueBody: args.issueBody, issueComments: args.issueComments,
+          requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
+          decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
+          budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
+        }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined) : {})
+        for (const k of Object.keys(scriptArgs)) if (scriptArgs[k] === undefined) delete scriptArgs[k]
+
+        // 启动引擎前先标 RUNNING：崩溃/start 抛错不得把 workspace 永久留在 READY
+        if (ws) await markWorkspaceLifecycle(taskId, 'RUNNING')
+        const startReq = { script: c.script, meta: c.meta, args: scriptArgs, parent: parent }
+        if (ws && ws.source_path) { startReq.cwd = ws.source_path; startReq.workspaceRoot = ws.source_path }
+        let run
+        try { run = engineNow.start(startReq) } catch (e) {
+          if (ws) await markWorkspaceLifecycle(taskId, 'FAILED')
+          return '错误：工作流引擎启动失败，workspace 已标 FAILED：' + errMsg(e)
+        }
+        // 启动边界自登记（workflow/start 事件不带 taskId）；续跑把同 taskId 前序门禁记录标记接管
+        const runId = String(run.id)
+        const rec = ensureRun(runId)
+        rec.taskId = taskId
+        rec.workflowId = String(args.templateId || v.sanitized.id || '')
+        live.add(runId)
+        persist(runId)
+        if (isHdResume || isLegacyResume) supersedeParked(taskId, runId)
+        let result
+        try { result = await run.result } catch (e) {
+          if (ws) await markWorkspaceLifecycle(taskId, 'FAILED')
+          return '错误：工作流运行失败，workspace 已标 FAILED：' + errMsg(e)
+        }
+        // 权威终态回写：completed 时以脚本返回 value.status 为准；回执保持引擎原样不翻译
+        const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
+        if (canon) onRun(runId, (r) => { r.status = canon; applyHdValue(r, result.value) })
+        if (ws) {
+          const lc = lifecycleFor(canon, result && result.stopReason)
+          if (lc) await markWorkspaceLifecycle(taskId, lc)
+        }
+        return JSON.stringify({ runId: runId, stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
+      },
+    }))
+    dtools.register(textTool({
+      name: 'vwf_workspace',
+      description: '按已分配的 Logical Run 访问隔离 workspace。必须携带本 Run 的 workspace_capability。op=' + Object.keys(WS_OPS).join('|'),
+      parameters: {
+        op: { type: 'string', required: true, description: Object.keys(WS_OPS).join(' | ') },
+        logical_run_id: { type: 'string', required: true, description: 'Logical Run / taskId' },
+        capability: { type: 'string', required: true, description: 'wf_run 或获取脚本注入的 workspace_capability' },
+        rel: { type: 'string', description: '相对 source/worker 的路径' },
+        content: { type: 'string', description: '写入内容' },
+        worker_id: { type: 'string' },
+        resource_key: { type: 'string' },
+        owner: { type: 'string' },
+        lock_id: { type: 'string' },
+        node: { type: 'string' },
+        attempt: { type: 'number' },
+        lifecycle: { type: 'string' },
+      },
+      async execute(rawArgs) {
+        const fn = rpcRoutes.get('vwf.workspace.' + String((rawArgs && rawArgs.op) || ''))
+        if (typeof fn !== 'function') return JSON.stringify({ ok: false, error: '未知 workspace op：' + (rawArgs && rawArgs.op) })
+        try { const res = await fn(rawArgs); return typeof res === 'string' ? res : JSON.stringify(res) } catch (e) { return JSON.stringify({ ok: false, error: errMsg(e) }) }
+      },
+    }))
+    dtools.register(textTool({
+      name: 'vwf_debug',
+      description: 'vwf 插件诊断：op=paths 返回路径解析结果与服务可用性。',
+      parameters: { op: { type: 'string', required: true, description: 'paths' } },
+      async execute(args) {
+        if (args.op !== 'paths') return '用法：vwf_debug { op: "paths" }'
+        refreshServices()
+        const d = await homeDirs()
+        return JSON.stringify({
+          pluginRoot: PLUGIN_ROOT, codeRoot: CODE_ROOT, dist: DIST, generator: GENERATOR, workspaceHost: WS_HOST,
+          projectRoot: projectRoot(), dshHome: await dshHome(), generatedRoots: generatedRoots(), userDir: d && d.userDir, skillRoot: d && d.skillRoot, runsDir: d && d.runsDir,
+          fsAvailable: fs !== undefined, subprocessAvailable: subprocess !== undefined, nodePath: await resolveNode(),
+        }, null, 2)
+      },
+    }))
   },
 }

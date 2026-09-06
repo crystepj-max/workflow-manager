@@ -22,6 +22,13 @@ const { createRoot } = await import('react-dom/client')
 const { act } = React
 
 const flush = () => new Promise((resolve) => setImmediate(resolve))
+async function mountPage(targetRoot, el) {
+  await act(async () => {
+    targetRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+}
 
 function byText(root, text) {
   return Array.from(root.querySelectorAll('*')).find((el) => el.children.length === 0 && (el.textContent || '').includes(text))
@@ -134,8 +141,21 @@ function makeRuntime() {
       case 'vwf.workflows.save':
         state.saved.push(args.dsl)
         return { ok: true, id: args.dsl.id, dsl: args.dsl }
+      case 'vwf.i18n':
+        return { locale: 'zh', messages: JSON.parse(readFileSync(join(here, '..', 'locales', 'zh.json'), 'utf8')) }
       case 'vwf.script':
         return { ok: true, engineAvailable: false, script: '// compiled' }
+      case 'vwf.probe':
+        return {
+          ok: false,
+          stage: 'probe',
+          pending: true,
+          code: 'PROBE_NOT_IMPLEMENTED',
+          issue: 74,
+          errors: [{ path: '$', message: 'probe pending' }],
+        }
+      case 'vwf.runs.list':
+        return { runs: [] }
       case 'vwf.state':
         return {
           found: true,
@@ -211,10 +231,7 @@ dom.window.HTMLDialogElement.prototype.close = function () {
 const root = createRoot(container)
 
 test('模板列表渲染并打开全局编辑层', async () => {
-  await act(async () => {
-    root.render(React.createElement(Page))
-    await flush()
-  })
+  await mountPage(root, container)
   const listItem = byText(container, '测试流')
   assert.ok(listItem, '模板列表渲染')
   await act(async () => {
@@ -942,6 +959,7 @@ test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async ()
   await act(async () => {
     freshRoot.render(React.createElement(Page))
     await flush()
+    await flush()
   })
   // 打开编辑器
   await act(async () => {
@@ -1032,6 +1050,7 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
   const freshRoot = createRoot(fresh)
   await act(async () => {
     freshRoot.render(React.createElement(Page))
+    await flush()
     await flush()
   })
   // 打开编辑器（画布右上角「角色库」常驻区含 管理角色/新增角色）
@@ -1174,6 +1193,7 @@ test('角色库：自定义角色「基于此创建」克隆 + usage 失败时�
   await act(async () => {
     freshRoot.render(React.createElement(Page))
     await flush()
+    await flush()
   })
   await act(async () => {
     const editBtn = byText(fresh, '编辑')
@@ -1260,6 +1280,7 @@ test('角色库 UX 收紧：首尾点/Windows 保留名保存时被 Host 权威�
   await act(async () => {
     freshRoot.render(React.createElement(Page))
     await flush()
+    await flush()
   })
   await act(async () => { byText(fresh, '编辑').click(); await flush() })
   const roleZone = fresh.querySelector('.vwf-role-zone')
@@ -1308,6 +1329,7 @@ test('角色库删除 fail-closed：usage 返回 ok:false 时不弹出删除确�
   const freshRoot = createRoot(fresh)
   await act(async () => {
     freshRoot.render(React.createElement(Page))
+    await flush()
     await flush()
   })
   await act(async () => { byText(fresh, '编辑').click(); await flush() })

@@ -46,317 +46,7 @@ return {
     const slots = ctx.get('slots')
     if (slots === undefined) return
 
-    // ── i18n（zh 默认；locale 服务 active==='en' 时切英文）──────────────────
-    const ZH = {
-      title: '工作流编辑器',
-      subtitle: '通过画布创建节点和边，并为每个节点绑定角色与模型；右键画布可添加结束节点。',
-      templateName: '模板名称',
-      templateId: '模板 ID',
-      saveAs: '另存为',
-      canvas: '画布',
-      saveWorkflow: '保存工作流',
-      getScript: '获取脚本',
-      inspector: '配置面板',
-      addNode: '新增节点',
-      deleteNode: '删除节点',
-      undo: '撤销',
-      redo: '重做',
-      addEndTarget: '添加结束节点',
-      nodeConfig: '节点配置',
-      edgeConfig: '边配置',
-      selectHint: '选择画布中的节点或边进行配置。',
-      workflowControls: '工作流控制',
-      workflowControlsHelp: '回合上限限制 failure 打回的最大轮次（1-9，留空默认 9）；异源检查声明 dev/review 必须异源；超限行为选打回超限后的处置。',
-      maxRounds: '打回上限',
-      maxRoundsHelp: '每个 failure 打回消耗一轮；系统约定上限 9，超过上限工作流失败。',
-      heteroCheck: '异源检查',
-      heteroCheckHelp: '声明 dev 与 review 节点必须异源（注入运行日志；异源硬规则全局强制，与开关无关）。',
-      onMaxRounds: '超限行为',
-      onMaxRoundsHelp: '打回超限后：return=直接终止；auto-reschedule=先做失败归因分析（归因/拆分/人工介入建议）再终止。',
-      nodeKind: '节点类型',
-      nodeKindWorker: '普通节点',
-      nodeKindFanout: '扇出节点',
-      fanoutItems: 'items 来源',
-      fanoutItemsHelp: '仅支持 $.results.<节点id>.<字段> 或 $.args.<字段>；目标中用 {{item}} 引用当前项。',
-      fanoutFailOn: '失败阈值',
-      fanoutFailOnHelp: 'any=任一项失败；all=全部失败（默认）；数字 N=失败数大于 N。',
-      fanoutFailOnNumber: '允许失败数',
-      perItemSchemaHelp: '该 Schema 校验每个子代理的结果；聚合包装对象不受此 Schema 校验。',
-      nodeId: '节点 ID',
-      nodeLabel: '显示名',
-      profile: '角色',
-      selectProfile: '选择角色',
-      profileHelp: '角色对应工作区 dsh/roles/<角色>.md 文件，运行时会把角色正文提供给 AI。',
-      manageRoles: '管理角色',
-      roleLibrary: '角色库',
-      roleManager: '角色管理',
-      roleMgmtHint: '节点配置负责选择角色，这里负责管理角色资产。',
-      builtinRoles: '内置角色',
-      customRoles: '自定义角色',
-      noCustomRoles: '暂无自定义角色',
-      newRole: '新增角色',
-      viewRole: '查看',
-      editRole: '编辑',
-      deleteRole: '删除',
-      back: '返回',
-      roleName: '角色名称',
-      roleNamePlaceholder: '例如：需求分析师',
-      roleFromSource: '来自「{src}」，保存后将创建独立副本。',
-      roleContent: '角色配置',
-      roleContentPlaceholder: '描述该角色的定位、职责、工作流程与产出要求（Markdown）。',
-      roleContentHelp: '保存到工作区 dsh/roles/<角色名称>.md；运行时该文件内容将提供给本节点 AI。',
-      createFromRole: '基于此角色创建自定义角色',
-      cloneFromRole: '基于此创建',
-      builtinRoleBadge: '内置角色',
-      customRoleBadge: '自定义角色',
-      saveRole: '保存角色',
-      cancelRole: '取消',
-      roleNameRequired: '角色名称不能为空',
-      roleContentRequired: '角色配置不能为空',
-      roleNameInvalid: '角色名称不能为空，且最长 64 字符、不含非法字符（/\\:*?"<>|）',
-      roleViewBuiltin: '内置角色为系统标准模板：不可修改、不可删除，仅可查看、选择使用或基于其创建自定义角色。',
-      roleDeleteTitle: '确定删除「',
-      roleDeleteTitleSuffix: '」吗？',
-      roleDeleteDesc: '删除后该角色将无法恢复和继续使用。',
-      roleDeleteBlocked: '「{name}」仍被 {n} 个节点使用，无法删除。请先将这些节点更换为其他角色，解除全部引用后再删除。',
-      roleRenameBlocked: '该角色仍被 {n} 个节点使用，重命名会导致这些引用全部失效；请先解除引用，或使用「基于此角色创建自定义角色」新建变体。',
-      roleUsageConfirm: '此角色当前被 {n} 个工作流节点使用，保存修改后这些位置将共同使用新的角色配置。',
-      confirmSaveRole: '确认并保存',
-      roleRefs: '引用位置',
-      roleBlockedTitle: '无法删除自定义角色',
-      roleUsageTitle: '修改影响范围确认',
-      roleLoading: '加载中…',
-      roleSaved: '角色已保存 ',
-      roleDeleted: '角色已删除 ',
-      roleSaveFailed: '保存失败：',
-      roleUsageFailed: '引用统计失败，未保存修改：',
-      roleDeleteFailed: '删除失败：',
-      agent: 'Agent',
-      selectAgent: '选择 Agent',
-      model: '模型',
-      selectModel: '默认模型',
-      goal: '节点目标',
-      defaultNodeGoal: '描述该节点需要完成的任务。',
-      resultMode: '节点结果判定方式',
-      resultModeDescription: 'AI 输出验证和人工 check 互斥；开启其中一个会自动关闭另一个。',
-      resultModeNone: '不启用',
-      outputValidation: 'AI 输出验证',
-      outputValidationDescription: '要求 AI 按约束输出 JSON，并用成功表达式自动判断该节点是成功还是失败。',
-      manualCheck: '人工 check',
-      manualCheckDescription: '节点运行到此后暂停，由人工裁决成功或失败（AWAITING_HUMAN）。',
-      outputSchema: 'JSON 输出约束',
-      outputSchemaPlaceholder: '标准 JSON Schema，例如 {"type":"object","properties":{"result":{"type":"boolean"}},"required":["result"]}',
-      outputSchemaHelp: '填写给 AI 的最终 JSON 输出结构（标准 JSON Schema）。保存时会校验成功表达式路径是否存在于其中。',
-      artifactFiles: 'Formal Artifact 声明',
-      artifactFilesHelp: '声明本节点应产出的正式交付物（相对 runDir 路径 + 格式 kind）；写入后产生不可覆盖的 Record Revision。',
-      artifactPath: '相对路径',
-      artifactKind: '格式',
-      addArtifact: '添加 Artifact',
-      removeArtifact: '移除',
-      formalArtifacts: 'Formal Artifacts',
-      artifactRevision: 'Revision',
-      noFormalArtifacts: '该 run 暂无 Formal Artifact 记录',
-      outputSchemaBeautify: '美化 JSON',
-      outputSchemaInvalid: 'JSON 格式无效，修正后才会写入工作流。',
-      successCondition: '成功表达式',
-      successConditionHelp: '填写用于判断节点成功的表达式，例如 $.result == true。支持多级路径。保存时会校验路径是否存在于 JSON 输出约束中。',
-      edgeOutcome: '边类型',
-      edgeTarget: '目标',
-      edgeWhen: 'when 条件',
-      edgeWhenHelp: '仅 success 边可带 when（$.path == value）。同一节点多条 success 出边时必须全部带 when。',
-      deleteEdge: '删除边',
-      validationDialogTitle: '工作流无法保存',
-      validationDialogDescription: '请先处理以下问题。关闭弹窗后，对应字段会以红色标出。',
-      validationDialogClose: '查看并修正',
-      validOk: '✓ 校验通过',
-      validIssues: '条校验问题',
-      unnamedNode: '未命名节点',
-      entryBadge: '入口',
-      endNode: '结束',
-      edgeSuccess: '成功',
-      edgeFailure: '失败',
-      templates: '模板库',
-      dashboard: '运行看板',
-      runMode: '运行方式',
-      runModePrimary: '正式路径：在编辑器中点「获取脚本」（会先分配隔离 workspace 并写入脚本默认 args），再把完整脚本交给平台 workflow 工具执行。',
-      runModeEnhanced: '增强路径：宿主 agents 可用时用 wf_run；与正式路径共用同一 workspace 分配边界。workflowEngine 解析失败时仍走正式路径。',
-      newTemplate: '新建模板',
-      editTemplate: '编辑',
-      deleteTemplate: '删除',
-      builtinBadge: '内置',
-      refresh: '刷新列表',
-      close: '关闭',
-      unsavedDraft: '有未保存改动',
-      confirmDiscard: '放弃未保存的改动并关闭？',
-      discardCancel: '我再想想',
-      discardConfirm: '不改了',
-      saved: '已保存 ',
-      saveFailed: '保存失败：',
-      deleted: '已删除 ',
-      deleteFailed: '删除失败：',
-      confirmDelete: '确认删除模板 ',
-      builtinReadonly: '内置模板不可删除',
-      noModels: '宿主未配置可用模型（vwf.models 返回空），provider/model 将保留文本输入。',
-      zoomIn: '放大',
-      zoomOut: '缩小',
-      fitView: '适配视图',
-      connectHint: '从节点右侧把手拖出连线到目标节点',
-    }
-    const EN = {
-      title: 'Workflow Editor',
-      subtitle: 'Create nodes and edges on the canvas and bind each node to a role and a model; right-click the canvas to add an end node.',
-      templateName: 'Template name',
-      templateId: 'Template ID',
-      saveAs: 'Save As',
-      canvas: 'Canvas',
-      saveWorkflow: 'Save Workflow',
-      getScript: 'Get Script',
-      inspector: 'Inspector',
-      addNode: 'Add Node',
-      deleteNode: 'Delete Node',
-      undo: 'Undo',
-      redo: 'Redo',
-      addEndTarget: 'Add End node',
-      nodeConfig: 'Node Config',
-      edgeConfig: 'Edge Config',
-      selectHint: 'Select a node or edge on the canvas to configure it.',
-      workflowControls: 'Workflow Controls',
-      workflowControlsHelp: 'Max reject rounds limits failure loops (1-9, blank uses 9); heterogeneity declares dev/review must differ; onMaxRounds picks the over-limit behavior.',
-      maxRounds: 'Max reject rounds',
-      maxRoundsHelp: 'Each failure transition consumes one round; the workflow fails beyond the limit (system cap 9).',
-      heteroCheck: 'Heterogeneity check',
-      heteroCheckHelp: 'Declares dev and review must use different models (runtime log injection; the hard rule is global regardless of the switch).',
-      onMaxRounds: 'Over-limit behavior',
-      onMaxRoundsHelp: 'After max rounds: return=terminate; auto-reschedule=run failure attribution (attribution/split/human advice) then terminate.',
-      nodeKind: 'Node type',
-      nodeKindWorker: 'Worker',
-      nodeKindFanout: 'Fan-out',
-      fanoutItems: 'Items source',
-      fanoutItemsHelp: 'Use $.results.<node-id>.<field> or $.args.<field>; reference the current item as {{item}} in the goal.',
-      fanoutFailOn: 'Failure threshold',
-      fanoutFailOnHelp: 'any=one failure; all=all fail (default); number N=failedCount > N.',
-      fanoutFailOnNumber: 'Allowed failures',
-      perItemSchemaHelp: 'This schema validates each sub-agent result, not the aggregate wrapper.',
-      nodeId: 'Node ID',
-      nodeLabel: 'Label',
-      profile: 'Profile',
-      selectProfile: 'Select profile',
-      profileHelp: 'A profile maps to dsh/roles/<profile>.md in the workspace; its content is provided to the AI at runtime.',
-      manageRoles: 'Manage roles',
-      roleLibrary: 'Role Library',
-      roleManager: 'Role Manager',
-      roleMgmtHint: 'Node config picks a role; this panel manages role assets.',
-      builtinRoles: 'Built-in Roles',
-      customRoles: 'Custom Roles',
-      noCustomRoles: 'No custom roles yet',
-      newRole: 'New Role',
-      viewRole: 'View',
-      editRole: 'Edit',
-      deleteRole: 'Delete',
-      back: 'Back',
-      roleName: 'Role name',
-      roleNamePlaceholder: 'e.g. Requirements Analyst',
-      roleFromSource: 'From "{src}"; saving creates an independent copy.',
-      roleContent: 'Role configuration',
-      roleContentPlaceholder: 'Describe the role positioning, duties, workflow and output requirements (Markdown).',
-      roleContentHelp: 'Saved to dsh/roles/<role-name>.md in the workspace; the file content is given to the node AI at runtime.',
-      createFromRole: 'Create custom role from this role',
-      cloneFromRole: 'Clone from this',
-      builtinRoleBadge: 'Built-in',
-      customRoleBadge: 'Custom',
-      saveRole: 'Save Role',
-      cancelRole: 'Cancel',
-      roleNameRequired: 'Role name is required',
-      roleContentRequired: 'Role configuration is required',
-      roleNameInvalid: 'Role name is required, at most 64 chars, no illegal chars (/\\:*?"<>|)',
-      roleViewBuiltin: 'Built-in roles are system standard templates: read-only; you may view, select, or create a custom variant from one.',
-      roleDeleteTitle: 'Delete role "',
-      roleDeleteTitleSuffix: '"?',
-      roleDeleteDesc: 'After deletion the role cannot be recovered or reused.',
-      roleDeleteBlocked: '"{name}" is still used by {n} node(s) and cannot be deleted. Switch those nodes to another role first, then delete after all references are gone.',
-      roleRenameBlocked: 'This role is still used by {n} node(s); renaming would break those references. Remove the references first, or use "Create custom role from this role" to make a variant.',
-      roleUsageConfirm: 'This role is used by {n} node(s); after saving, those positions will share the new configuration.',
-      confirmSaveRole: 'Confirm & Save',
-      roleRefs: 'References',
-      roleBlockedTitle: 'Cannot delete custom role',
-      roleUsageTitle: 'Impact confirmation',
-      roleLoading: 'Loading…',
-      roleSaved: 'Role saved ',
-      roleDeleted: 'Role deleted ',
-      roleSaveFailed: 'Save failed: ',
-      roleUsageFailed: 'Failed to read role usage; change not saved: ',
-      roleDeleteFailed: 'Delete failed: ',
-      agent: 'Agent',
-      selectAgent: 'Select agent',
-      model: 'Model',
-      selectModel: 'Default model',
-      goal: 'Goal',
-      defaultNodeGoal: 'Describe what this node should accomplish.',
-      resultMode: 'Node result mode',
-      resultModeDescription: 'AI output validation and manual check are mutually exclusive; enabling either one disables the other.',
-      resultModeNone: 'Disabled',
-      outputValidation: 'AI Output Validation',
-      outputValidationDescription: 'Require the AI to return constrained JSON, then use the success expression to decide success or failure.',
-      manualCheck: 'Manual check',
-      manualCheckDescription: 'The run pauses at this node (AWAITING_HUMAN) until a human decides success or failure.',
-      outputSchema: 'JSON output constraint',
-      outputSchemaPlaceholder: 'Standard JSON Schema, e.g. {"type":"object","properties":{"result":{"type":"boolean"}},"required":["result"]}',
-      outputSchemaHelp: 'Define the final JSON shape for the AI (standard JSON Schema). Save validates that the success expression path exists in it.',
-      artifactFiles: 'Formal Artifact declarations',
-      artifactFilesHelp: 'Declare formal deliverables for this node (runDir-relative path + kind); each write creates an append-only Record Revision.',
-      artifactPath: 'Relative path',
-      artifactKind: 'Kind',
-      addArtifact: 'Add artifact',
-      removeArtifact: 'Remove',
-      formalArtifacts: 'Formal Artifacts',
-      artifactRevision: 'Revision',
-      noFormalArtifacts: 'No Formal Artifact records for this run',
-      outputSchemaBeautify: 'Beautify JSON',
-      outputSchemaInvalid: 'Invalid JSON; fix it before it is written to the workflow.',
-      successCondition: 'Success expression',
-      successConditionHelp: 'Define how the node is considered successful, e.g. $.result == true. Nested paths supported. Save validates the path exists in the JSON output constraint.',
-      edgeOutcome: 'Edge Type',
-      edgeTarget: 'Target',
-      edgeWhen: 'when condition',
-      edgeWhenHelp: 'Only success edges may carry when ($.path == value). Multiple success out-edges must all carry when.',
-      deleteEdge: 'Delete Edge',
-      validationDialogTitle: 'Workflow cannot be saved',
-      validationDialogDescription: 'Fix these issues first. After closing, invalid fields are highlighted in red.',
-      validationDialogClose: 'Review and fix',
-      validOk: '✓ Valid',
-      validIssues: 'validation issue(s)',
-      unnamedNode: 'Unnamed node',
-      entryBadge: 'Entry',
-      endNode: 'End',
-      edgeSuccess: 'Success',
-      edgeFailure: 'Failure',
-      templates: 'Templates',
-      dashboard: 'Runs',
-      runMode: 'How to run',
-      runModePrimary: 'Standard path: click Get Script (this allocates an isolated workspace and bakes default args into the script), then run the full script with the platform workflow tool.',
-      runModeEnhanced: 'Enhanced path: use wf_run when host agents are available. It shares the same workspace allocation boundary as Get Script. If workflowEngine cannot be resolved, use the standard path.',
-      newTemplate: 'New Template',
-      editTemplate: 'Edit',
-      deleteTemplate: 'Delete',
-      builtinBadge: 'built-in',
-      refresh: 'Refresh',
-      close: 'Close',
-      unsavedDraft: 'Unsaved changes',
-      confirmDiscard: 'Discard unsaved changes and close?',
-      discardCancel: 'Not yet',
-      discardConfirm: 'Discard',
-      saved: 'Saved ',
-      saveFailed: 'Save failed: ',
-      deleted: 'Deleted ',
-      deleteFailed: 'Delete failed: ',
-      confirmDelete: 'Delete template ',
-      builtinReadonly: 'The built-in template cannot be deleted',
-      noModels: 'No models configured on the host (vwf.models empty); provider/model fall back to text inputs.',
-      zoomIn: 'Zoom in',
-      zoomOut: 'Zoom out',
-      fitView: 'Fit view',
-      connectHint: 'Drag from the right handle of a node onto a target node to connect',
-    }
+    // ── i18n：文案不进闭包。启动时按当前语言向宿主拉取 locales/<locale>.json ──
     let localeService
     try { localeService = ctx.get('locale') } catch (e) { localeService = undefined }
     const isEn = () => {
@@ -365,7 +55,13 @@ return {
         return !!(snap && String(snap.active || '').toLowerCase().indexOf('en') === 0)
       } catch (e) { return false }
     }
-    const t = (key) => (isEn() ? (EN[key] || ZH[key]) : ZH[key]) || key
+    let messages = {}
+    const t = (key, vars) => {
+      let s = messages[key]
+      if (s == null) s = key
+      if (vars) for (const k of Object.keys(vars)) s = String(s).split('{' + k + '}').join(String(vars[k]))
+      return s
+    }
 
     styles.insert(`
 .vwf-root { display:flex; flex-direction:column; gap:12px; font-size:13px; color:var(--dsw-alias-label-primary, inherit); }
@@ -538,24 +234,32 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     function clone(x) { return JSON.parse(JSON.stringify(x)) }
 
     // 编辑器 JSON tab 同时接受蓝图落盘格式（displayName / bindings.models）与 DSL。
-    // 粘贴 templates/*.json 时把模型绑到节点、展示名写入 name，画布才能显示 provider/model。
+    // 投影规则必须与 scripts/validate-core.cjs 的 projectToVwf 对齐——勿在此分叉。
     function ingestEditorJson(raw) {
-      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.nodes)) return raw
+      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return raw
       const models = (raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object')
         ? raw.bindings.models : {}
-      const isBlueprint = typeof raw.displayName === 'string' || Object.keys(models).length > 0
-      if (!isBlueprint) return raw
+      const hasBindings = Object.keys(models).length > 0
+      if (typeof raw.displayName !== 'string' && !hasBindings) return raw
+      const displayName = typeof raw.displayName === 'string' ? raw.displayName : (raw.name || raw.id || '')
       const nodes = raw.nodes.map((n) => {
         if (!n || typeof n !== 'object') return n
         if (n.model || !models[n.id]) return n
         return { ...n, model: models[n.id] }
       })
-      const name = (typeof raw.name === 'string' && raw.name.trim() && raw.name !== raw.id)
-        ? raw.name
-        : (typeof raw.displayName === 'string' ? raw.displayName : (raw.name || ''))
-      const next = { ...raw, nodes, name }
-      delete next.displayName
-      delete next.bindings
+      const next = {
+        id: raw.id,
+        name: displayName,
+        description: raw.description || '',
+        entry: raw.entry,
+        control: raw.control || { maxRounds: 9 },
+        nodes,
+        edges: raw.edges.map((e) => e),
+      }
+      if (raw.onMaxRounds !== undefined) next.onMaxRounds = raw.onMaxRounds
+      if (raw.heteroCheck) next.heteroCheck = true
+      if (raw.bundleRoles) next.bundleRoles = true
+      if (raw.humanDecision !== undefined) next.humanDecision = raw.humanDecision
       return next
     }
 
@@ -625,7 +329,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           })
           return
         }
-        if (idSet.has(e.to) || e.to === END_NODE) visit(e.from, e.to, e)
+        if (idSet.has(e.to) || e.to === END_NODE) {
+          // 成功环：目标已能回到起点则不推进主序号，避免画布被横向撑爆
+          if (e.to !== END_NODE && canReachInAdj(baseAdj, e.to, e.from)) return
+          visit(e.from, e.to, e)
+        }
       })
     }
     function successTopologyOrder(dsl) {
@@ -702,8 +410,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     function computeEdgeRoutes(edges, pos, lanes) {
       const routes = new Map()
       const infos = []
-      const sourceKindCount = new Map()
-      const sourceOrdinal = new Map()
       const laneCount = { up: 0, down: 0 }
       ;(edges || []).forEach((e, index) => {
         const a = pos[e.from]
@@ -715,33 +421,19 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         const y2 = b.y + b.h / 2
         const left = Math.min(x1, x2)
         const right = Math.max(x1, x2)
-        const top = Math.min(y1, y2) - 10
-        const bottom = Math.max(y1, y2) + 10
         const between = Object.keys(pos).map(id => ({ id, p: pos[id] })).filter(item => {
           const p = item.p
           if (item.id === e.from || item.id === e.to) return false
           return p.x < right && p.x + p.w > left
         })
-        const hits = between.filter(item => {
-          const p = item.p
-          return p.y < bottom && p.y + p.h > top
-        })
         const backward = lanes.has(index)
-        // 跨节点定义：前向边的水平区段内存在任一无关节点（即使不与端点纵向相交）→ 下绕。
+        // 跨节点定义：前向边的水平区段内存在任一无关节点 → 下绕。
         const kind = backward ? 'up' : (between.length > 0 ? 'down' : 'direct')
-        const sKey = e.from + '|' + kind
-        const sOrdinal = sourceOrdinal.get(sKey) || 0
-        sourceOrdinal.set(sKey, sOrdinal + 1)
-        const sCounts = sourceKindCount.get(e.from) || { up: 0, direct: 0, down: 0, total: 0 }
-        sCounts[kind] += 1
-        sCounts.total += 1
-        sourceKindCount.set(e.from, sCounts)
-        infos.push({ index, e, a, b, x1, y1, x2, y2, between, hits, kind, sOrdinal })
+        infos.push({ index, e, x1, y1, x2, y2, between, kind })
       })
 
-      // 起点锚点固定 3 个槽位（验收反馈优化 3）：上绕=上槽、直连=中槽（与连线源把手
-      // 位置一致，即节点右边框垂直居中）、下绕=下槽；同类边共享同一槽位。
-      const borderAnchor = (id, kind, ordinal) => {
+      // 起点锚点固定 3 个槽位：上绕=上槽、直连=中槽、下绕=下槽；同类边共享同一槽位。
+      const borderAnchor = (id, kind) => {
         const node = pos[id]
         if (!node) return 0
         const pad = 8
@@ -751,9 +443,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         return safeTop + (slot + 0.5) * ((safeBottom - safeTop) / 3)
       }
 
-      // 平行直连边（同 from→to 的多条条件边）共享起点槽位与终点垂直居中，但曲线必须
-      // 相互分离：命中路径完全重叠时后画的 SVG path 会拦截所有画布点击，前一条边无法
-      // 在画布上选中（仅能经 JSON 编辑）——按平行序号给控制点做微小横向偏移。
+      // 平行直连边共享起点槽位与终点垂直居中，但曲线必须分离以免后画的 path 拦截点击。
       const parallelDirect = new Map()
       infos.forEach((info) => {
         if (info.kind !== 'direct') return
@@ -762,12 +452,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         list.push(info)
         parallelDirect.set(pk, list)
       })
-      const PARALLEL_SPREAD = 3
 
       infos.forEach((info) => {
-        const { index, e, x1, y1, x2, y2, between, kind, sOrdinal } = info
-        const yStart = borderAnchor(e.from, kind, sOrdinal)
-        // #6：终点统一在节点左侧垂直居中，不做间隔。
+        const { index, e, x1, x2, y1, y2, between, kind } = info
+        const yStart = borderAnchor(e.from, kind)
         const yEnd = y2
         if (kind === 'direct') {
           const pk = e.from + '->' + e.to
@@ -1580,7 +1268,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             : h('input', { className: 'vwf-input', value: curModel, placeholder: 'deepseek-v4-flash', onChange: (ev) => props.onUpdate(node.id, { model: { provider: curProv || undefined, model: ev.target.value || undefined } }) })
         ),
         h(Field, { label: t('goal'), required: true, help: isFanout ? t('fanoutItemsHelp') : undefined, errors: errorsFor('goal') },
-          h('textarea', { className: 'vwf-textarea' + (errorsFor('goal').length ? ' err' : ''), rows: 3, value: node.goal || '', placeholder: isFanout ? '处理任务：{{item}}' : t('defaultNodeGoal'), onChange: (ev) => props.onUpdate(node.id, { goal: ev.target.value }) })
+          h('textarea', { className: 'vwf-textarea' + (errorsFor('goal').length ? ' err' : ''), rows: 3, value: node.goal || '', placeholder: isFanout ? t('fanoutGoalPlaceholder') : t('defaultNodeGoal'), onChange: (ev) => props.onUpdate(node.id, { goal: ev.target.value }) })
         ),
         isFanout ? h('div', { className: 'vwf-subsection' },
           h(Field, { label: t('fanoutItems'), required: true, help: t('fanoutItemsHelp'), errors: errorsFor('items') },
@@ -1761,7 +1449,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
       const openCreate = (source) => {
         setCurrent(source || null)
-        setDraftName(source ? source.id + ' - 自定义' : '')
+        setDraftName(source ? t('customRoleSuffix', { src: source.id }) : '')
         setDraftContent(source ? (source.content || '') : '')
         setFormMode('create')
         setError(null)
@@ -1774,7 +1462,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setCurrent(null); setError(null); setView('form'); setFormMode('create')
         host.call('vwf.roles.get', { id: role.id }).then((r) => {
           if (r && r.ok) {
-            setDraftName(r.role.id + ' - 自定义')
+            setDraftName(t('customRoleSuffix', { src: r.role.id }))
             setDraftContent(r.role.content || '')
           } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
         }).catch((e) => setError(String(e)))
@@ -2039,34 +1727,68 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
       const [historyVersion, setHistoryVersion] = React.useState(0)
       const historyRef = React.useRef({ past: [], future: [] })
-      // 历史上限：防止长编辑会话（每键一次快照 = 深拷贝 DSL + 完整 JSON）内存无限增长
+      const historyTimerRef = React.useRef(null)
+      const pendingHistoryRef = React.useRef(null)
+      // 历史上限：长编辑会话防止无限增长。快照只存 JSON 字符串，避免每键双份深拷贝。
       const HISTORY_MAX = 50
-      const pushHistory = (beforeDsl, beforeJson, beforeJsonError) => {
+      const HISTORY_DEBOUNCE_MS = 400
+      const edgeSigOf = (edge) => edge ? JSON.stringify({ from: edge.from || '', to: edge.to || '', on: edge.on || '', when: edge.when || '' }) : null
+      const captureBefore = (beforeDsl, beforeJson, beforeJsonError) => ({
+        json: beforeJson != null ? beforeJson : JSON.stringify(beforeDsl),
+        jsonError: beforeJsonError || null,
+        selNode: selectedNodeId,
+        selEdgeSig: edgeSigOf(selectedEdgeIndex !== null && wf.edges && wf.edges[selectedEdgeIndex] ? wf.edges[selectedEdgeIndex] : null),
+      })
+      const pushHistoryEntry = (entry) => {
         const h = historyRef.current
         const prev = h.past[h.past.length - 1]
-        // 相邻快照相同（同一变更被两个入口记录，如 JSON 编辑与同步）只保留一次。
-        if (prev && prev.json === beforeJson && prev.jsonError === (beforeJsonError || null) && JSON.stringify(prev.dsl) === JSON.stringify(beforeDsl)) return
-        const selEdge = selectedEdgeIndex !== null && wf.edges && wf.edges[selectedEdgeIndex] ? wf.edges[selectedEdgeIndex] : null
+        if (prev && prev.json === entry.json && prev.jsonError === entry.jsonError) return
         if (h.past.length >= HISTORY_MAX) h.past.shift()
-        h.past.push({
-          dsl: clone(beforeDsl),
-          json: beforeJson,
-          jsonError: beforeJsonError || null,
-          selNode: selectedNodeId,
-          selEdgeSig: selEdge ? JSON.stringify({ from: selEdge.from || '', to: selEdge.to || '', on: selEdge.on || '', when: selEdge.when || '' }) : null,
-        })
+        h.past.push(entry)
         h.future = []
         setHistoryVersion(v => v + 1)
       }
+      const flushHistory = () => {
+        if (historyTimerRef.current) { historyTimerRef.current(); historyTimerRef.current = null }
+        if (pendingHistoryRef.current) {
+          pushHistoryEntry(pendingHistoryRef.current)
+          pendingHistoryRef.current = null
+        }
+      }
+      const queueHistory = (entry, mode) => {
+        if (mode === false) return
+        if (mode === 'now') {
+          flushHistory()
+          pushHistoryEntry(entry)
+          return
+        }
+        // debounce：窗口内保留最早的 before，连续打字只产生一条撤销记录
+        if (!pendingHistoryRef.current) {
+          pendingHistoryRef.current = entry
+          setHistoryVersion(v => v + 1)
+        }
+        if (historyTimerRef.current) historyTimerRef.current()
+        historyTimerRef.current = ctx.timeout(() => {
+          historyTimerRef.current = null
+          if (pendingHistoryRef.current) {
+            pushHistoryEntry(pendingHistoryRef.current)
+            pendingHistoryRef.current = null
+          }
+        }, HISTORY_DEBOUNCE_MS)
+      }
       const applySnapshot = (entry) => {
-        const snapshot = normalizeEntry(entry.dsl)
-        // props.setWf 会同时置脏并同步父级草稿状态；与普通编辑走同一上层通道。
-        setWf(snapshot)
         setJsonDraft(entry.json)
         setJsonError(entry.jsonError || null)
         setFieldErrors({})
         setInvalidNodeIds(new Set())
         setLiveErrors([])
+        let parsed
+        try { parsed = JSON.parse(entry.json) } catch (e) {
+          // 非法 JSON 中间态：只恢复草稿文案，图模型保持当前合法态（与编辑时一致）
+          return
+        }
+        const snapshot = normalizeEntry(parsed)
+        setWf(snapshot)
         const nodeStillExists = !!entry.selNode && (snapshot.nodes || []).some(n => n.id === entry.selNode)
         if (nodeStillExists) {
           setSelectedNodeId(entry.selNode)
@@ -2075,45 +1797,32 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           setSelectedNodeId(null)
           let edgeMatchIndex = null
           if (entry.selEdgeSig) {
-            edgeMatchIndex = (snapshot.edges || []).findIndex(e => JSON.stringify({ from: e.from || '', to: e.to || '', on: e.on || '', when: e.when || '' }) === entry.selEdgeSig)
+            edgeMatchIndex = (snapshot.edges || []).findIndex(e => edgeSigOf(e) === entry.selEdgeSig)
           }
           if (edgeMatchIndex !== null && edgeMatchIndex >= 0) setSelectedEdgeIndex(edgeMatchIndex)
           else setSelectedEdgeIndex(null)
         }
-        // 撤销/重做同样触发防抖校验，保持与普通编辑一致的实时校验状态。
         scheduleValidate(snapshot)
       }
       const undo = () => {
+        flushHistory()
         const h = historyRef.current
         if (!h.past.length) return
         const previous = h.past.pop()
-        const currentEdge = selectedEdgeIndex !== null && wf.edges && wf.edges[selectedEdgeIndex] ? wf.edges[selectedEdgeIndex] : null
-        h.future.unshift({
-          dsl: clone(wf),
-          json: jsonDraft,
-          jsonError: jsonError,
-          selNode: selectedNodeId,
-          selEdgeSig: currentEdge ? JSON.stringify({ from: currentEdge.from || '', to: currentEdge.to || '', on: currentEdge.on || '', when: currentEdge.when || '' }) : null,
-        })
+        h.future.unshift(captureBefore(wf, jsonDraft, jsonError))
         applySnapshot(previous)
         setHistoryVersion(v => v + 1)
       }
       const redo = () => {
+        flushHistory()
         const h = historyRef.current
         if (!h.future.length) return
         const next = h.future.shift()
-        const currentEdge = selectedEdgeIndex !== null && wf.edges && wf.edges[selectedEdgeIndex] ? wf.edges[selectedEdgeIndex] : null
-        h.past.push({
-          dsl: clone(wf),
-          json: jsonDraft,
-          jsonError: jsonError,
-          selNode: selectedNodeId,
-          selEdgeSig: currentEdge ? JSON.stringify({ from: currentEdge.from || '', to: currentEdge.to || '', on: currentEdge.on || '', when: currentEdge.when || '' }) : null,
-        })
+        h.past.push(captureBefore(wf, jsonDraft, jsonError))
         applySnapshot(next)
         setHistoryVersion(v => v + 1)
       }
-      const canUndo = historyRef.current.past.length > 0
+      const canUndo = historyRef.current.past.length > 0 || !!pendingHistoryRef.current
       const canRedo = historyRef.current.future.length > 0
 
       const selectedNode = selectedNodeId ? (wf.nodes || []).find(n => n.id === selectedNodeId) || null : null
@@ -2122,9 +1831,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       // 编辑已有模板且 ID 已修改 → 保存置灰，只能另存为（currentId=原模板 id）
       const idChanged = props.currentId != null && wf.id !== props.currentId
 
-      // 变更同步：归一入口、清空校验标记、同步 JSON 草稿、通知上层、防抖实时校验
-      const syncWorkflow = (next) => {
-        pushHistory(wf, jsonDraft, jsonError)
+      // history: 'now' = 结构变更立即入栈；默认 debounce = 打字合并为一条
+      const syncWorkflow = (next, opts) => {
+        const mode = (opts && opts.history) || 'debounce'
+        queueHistory(captureBefore(wf, jsonDraft, jsonError), mode)
         const normalized = normalizeEntry(next)
         setFieldErrors({})
         setInvalidNodeIds(new Set())
@@ -2134,7 +1844,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setJsonDraft(JSON.stringify(normalized, null, 2))
         scheduleValidate(normalized)
       }
-      React.useEffect(() => () => { if (validateTimerRef.current) validateTimerRef.current() }, [])
+      React.useEffect(() => () => {
+        if (validateTimerRef.current) validateTimerRef.current()
+        if (historyTimerRef.current) historyTimerRef.current()
+      }, [])
       React.useEffect(() => {
         scheduleValidate(wf)
       }, [])
@@ -2143,16 +1856,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         if (from === END_NODE) return
         const edge = { from, to, on: 'success' }
         const next = { ...wf, edges: [...(wf.edges || []), edge] }
-        syncWorkflow(next)
+        syncWorkflow(next, { history: 'now' })
         setSelectedEdgeIndex(next.edges.length - 1)
         setSelectedNodeId(null)
       }
 
       const addNode = () => {
         const id = uniqueNodeId(wf, 'node-' + (wf.nodes.length + 1))
-        const node = { id, label: '节点' + id.replace(/\D+/g, ''), profile: 'dispatcher' }
+        const node = { id, label: t('defaultNodeLabel', { n: id.replace(/\D+/g, '') || String(wf.nodes.length + 1) }), profile: '' }
         const next = { ...wf, entry: wf.entry || id, nodes: [...wf.nodes, node] }
-        syncWorkflow(next)
+        syncWorkflow(next, { history: 'now' })
         setSelectedNodeId(id)
         setSelectedEdgeIndex(null)
       }
@@ -2166,7 +1879,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           nodes,
           edges: wf.edges.filter(e => e.from !== selectedNodeId && e.to !== selectedNodeId),
         }
-        syncWorkflow(next)
+        syncWorkflow(next, { history: 'now' })
         setSelectedNodeId((nodes[0] || {}).id || null)
       }
 
@@ -2178,7 +1891,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           nodes: wf.nodes.map(n => n.id === nodeId ? { ...n, ...patch, id: nextId || n.id } : n),
           edges: nextId ? wf.edges.map(e => ({ ...e, from: e.from === nodeId ? nextId : e.from, to: e.to === nodeId ? nextId : e.to })) : wf.edges,
         }
-        syncWorkflow(next)
+        syncWorkflow(next, nextId ? { history: 'now' } : undefined)
         if (nextId) setSelectedNodeId(nextId)
       }
 
@@ -2195,7 +1908,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
       const deleteSelectedEdge = () => {
         if (selectedEdgeIndex === null) return
-        syncWorkflow({ ...wf, edges: wf.edges.filter((_, i) => i !== selectedEdgeIndex) })
+        syncWorkflow({ ...wf, edges: wf.edges.filter((_, i) => i !== selectedEdgeIndex) }, { history: 'now' })
         setSelectedEdgeIndex(null)
       }
 
@@ -2269,7 +1982,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
 
       const onJsonChange = (value) => {
-        pushHistory(wf, jsonDraft, jsonError)
+        queueHistory(captureBefore(wf, jsonDraft, jsonError), 'debounce')
         setJsonDraft(value)
         setJsonError(null)
         try {
@@ -2326,7 +2039,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     h('button', { className: 'vwf-btn sm' + (tab === 'canvas' ? ' primary' : ''), onClick: () => setTab('canvas') }, t('canvas')),
                     h('button', { className: 'vwf-btn sm' + (tab === 'json' ? ' primary' : ''), onClick: () => setTab('json') }, 'JSON')
                   ),
-                  h('button', { className: 'vwf-btn sm', onClick: props.onScript }, t('getScript')),
+                  h('button', {
+                    className: 'vwf-btn sm',
+                    disabled: !!props.probing || !(wf.nodes || []).length,
+                    title: t('oneClickCheckHelp'),
+                    onClick: () => { void props.onOneClickCheck() },
+                  }, props.probing ? t('oneClickCheckRunning') : t('oneClickCheck')),
                   idChanged ? h('button', { className: 'vwf-btn sm', onClick: () => { void handleSave() } }, t('saveAs')) : null,
                   h('button', { className: 'vwf-btn sm primary', disabled: props.saving || !(wf.nodes || []).length || idChanged, onClick: () => { void handleSave() } }, t('saveWorkflow'))
                 )
@@ -2498,7 +2216,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     function statusBadge(status) {
       const s = String(status || '')
       const color = s === 'DONE' ? STATUS_COLOR.pass : s === 'running' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0) ? STATUS_COLOR.human : STATUS_COLOR.fail
-      return h('span', { className: 'vwf-badge', style: { color: color } }, s === 'WAITING_HUMAN' ? '等待人工' : s.indexOf('AWAITING_HUMAN_') === 0 ? '人工门禁' : (s || '—'))
+      const label = s === 'WAITING_HUMAN' ? t('dashWaitHuman') : s.indexOf('AWAITING_HUMAN_') === 0 ? t('dashHumanGate') : (s || '—')
+      return h('span', { className: 'vwf-badge', style: { color: color } }, label)
     }
     function isActiveRunStatus(status) {
       const s = String(status || '')
@@ -2512,7 +2231,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const [runId, setRunId] = React.useState('')
       const [snap, setSnap] = React.useState(null)
       const [runs, setRuns] = React.useState([])
-      const [older, setOlder] = React.useState([])
       const [tplMap, setTplMap] = React.useState({})
       const [auto, setAuto] = React.useState(true)
       const [page, setPage] = React.useState(0)
@@ -2535,9 +2253,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const selectRun = (id) => { setRunId(id); fetchState(id) }
       const refresh = React.useCallback(() => {
         host.call('vwf.runs.list').then((r) => setRuns((r && r.runs) || [])).catch(() => {})
-        // 磁盘历史随刷新重拉（评审 PRRT_kwDOT57Tec6b7TeY）：看板常驻期间发生
-        // 容量淘汰时，已淘汰冷记录要从 older 移除，否则出现 51 条/点陈旧行 not-found
-        host.call('vwf.runs.history').then((r) => setOlder((r && r.runs) || [])).catch(() => {})
         if (!runId) return
         fetchState(runId)
       }, [runId])
@@ -2545,19 +2260,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         if (!auto) return undefined
         return ctx.interval(refresh, 3000)
       }, [auto, refresh])
-      // 进入看板即时查询一次：不等首个 3s 轮询周期（避免首屏误显示「暂无运行记录」）；
-      // 磁盘全量历史已由 refresh 一并拉取（见 allRuns 合并）
       React.useEffect(() => { refresh() }, [])
-      // 展示列表 = 内存实时记录（最近回载，状态更新鲜） ∪ 磁盘历史（按 id 去重，历史追加在后）
       const allRuns = React.useMemo(() => {
-        const seen = new Set()
-        const merged = []
-        for (const r of runs) if (!seen.has(r.id)) { seen.add(r.id); merged.push(r) }
-        for (const r of older) if (!seen.has(r.id)) { seen.add(r.id); merged.push(r) }
-        // 统一按持久化时间倒序（评审 PRRT_kwDOT57Tec6b7TeU）：内存合并在前会把
-        // 按需水合的旧 run 提到磁盘冷记录之前，令表格/分页失序；排序恢复真实时序
-        return merged.sort((a, b) => ((b.startedAt || b.ts || 0) - (a.startedAt || a.ts || 0)) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
-      }, [runs, older])
+        return [...runs].sort((a, b) => ((b.startedAt || b.ts || 0) - (a.startedAt || a.ts || 0)) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      }, [runs])
       const activeCount = allRuns.filter((r) => !r.supersededBy && isActiveRunStatus(r.status)).length
       const gates = allRuns.filter((r) => !r.supersededBy && (String(r.status) === 'WAITING_HUMAN' || String(r.status).indexOf('AWAITING_HUMAN_') === 0))
       // 分页：数据刷新（新 run 落盘 / 历史拉取）时回到第 0 页
@@ -2573,15 +2279,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const st = snapState && dsl ? mapStatus(snapState, dsl) : {}
       return h('div', { className: 'vwf-root' },
         activeCount >= 2 ? h('div', { className: 'vwf-code', style: { borderColor: STATUS_COLOR.human, marginBottom: 8 } },
-          '⚠ 并行运行 ' + activeCount + ' 个：closeout 收口须串行执行，避免并发互踩；人工门禁请逐张裁决。') : null,
+          t('dashParallel', { n: activeCount })) : null,
         gates.length ? h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
-          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, '人工门禁队列（一次裁决一张）')),
+          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('dashGateQueue'))),
           h('div', { style: { padding: '4px 14px 10px' } },
             gates.map((g, i) => h('div', { key: g.id, style: { padding: '8px 0', borderTop: i ? '1px solid var(--dsw-alias-border-l2, #333)' : 'none' } },
               h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap' } },
-                h('span', { className: 'vwf-badge accent' }, i === 0 ? '裁决中' : '排队 #' + (i + 1)),
+                h('span', { className: 'vwf-badge accent' }, i === 0 ? t('dashDeciding') : t('dashQueued', { n: i + 1 })),
                 h('strong', null, g.taskId || g.id),
-                h('span', { className: 'vwf-muted-sm' }, (g.name || g.workflowId || '') + ' · ' + (String(g.status) === 'WAITING_HUMAN' ? ('Human Decision ' + (g.reason || '')) : ('门禁节点 ' + String(g.status).replace('AWAITING_HUMAN_', '')))),
+                h('span', { className: 'vwf-muted-sm' }, (g.name || g.workflowId || '') + ' · ' + (String(g.status) === 'WAITING_HUMAN' ? t('dashHumanDecision', { reason: g.reason || '' }) : t('dashGateNode', { node: String(g.status).replace('AWAITING_HUMAN_', '') }))),
                 statusBadge(g.status)
               ),
               h('div', { className: 'vwf-code', style: { marginTop: 4 } },
@@ -2592,30 +2298,30 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         ) : null,
         h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
           h('div', { className: 'vwf-card-head' },
-            h('div', { className: 'vwf-card-title' }, '运行列表'),
+            h('div', { className: 'vwf-card-title' }, t('dashRunList')),
             h('label', { className: 'vwf-row', style: { fontSize: 11 } },
               h('input', { type: 'checkbox', checked: auto, onChange: (ev) => setAuto(ev.target.checked) }),
-              ' 自动轮询 3s'
+              ' ' + t('dashAutoPoll')
             )
           ),
           h('div', { className: 'vwf-table-scroll', style: { maxHeight: 420, overflowY: 'auto' } },
             h('table', { className: 'vwf-table' },
-              h('thead', null, h('tr', null, h('th', null, 'taskId'), h('th', null, '工作流'), h('th', null, '状态'), h('th', null, '阶段'), h('th', null, 'runId'))),
+              h('thead', null, h('tr', null, h('th', null, 'taskId'), h('th', null, t('dashWorkflow')), h('th', null, t('dashStatus')), h('th', null, t('dashPhase')), h('th', null, 'runId'))),
               h('tbody', null, pageRuns.map((r) => h('tr', { key: r.id, onClick: () => selectRun(r.id), style: { cursor: 'pointer', opacity: r.supersededBy ? 0.5 : 1 } },
                 h('td', null, r.taskId || '—'),
                 h('td', null, r.name || r.workflowId || '—'),
-                h('td', null, r.supersededBy ? h('span', { className: 'vwf-badge' }, '已由续跑接管') : statusBadge(r.status)),
+                h('td', null, r.supersededBy ? h('span', { className: 'vwf-badge' }, t('dashTakenOver')) : statusBadge(r.status)),
                 h('td', null, r.phase || '—'),
                 h('td', { className: 'vwf-muted-sm' }, r.id)
               )))
             )
           ),
-          pageRuns && !pageRuns.length ? h('div', { className: 'vwf-empty' }, '暂无运行记录') : null,
+          pageRuns && !pageRuns.length ? h('div', { className: 'vwf-empty' }, t('dashNoRuns')) : null,
           h('div', { className: 'vwf-row', style: { marginTop: 8, flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
-            h('span', { className: 'vwf-muted-sm' }, '第 ' + (safePage + 1) + '/' + totalPages + ' 页 · 共 ' + allRuns.length + ' 条'),
-            h('button', { className: 'vwf-btn sm', disabled: safePage === 0, onClick: prevPage }, '上一页'),
-            h('button', { className: 'vwf-btn sm', disabled: safePage >= totalPages - 1, onClick: nextPage }, '下一页'),
-            h('span', { className: 'vwf-muted-sm' }, '每页'),
+            h('span', { className: 'vwf-muted-sm' }, t('dashPage', { page: safePage + 1, total: totalPages, n: allRuns.length })),
+            h('button', { className: 'vwf-btn sm', disabled: safePage === 0, onClick: prevPage }, t('dashPrev')),
+            h('button', { className: 'vwf-btn sm', disabled: safePage >= totalPages - 1, onClick: nextPage }, t('dashNext')),
+            h('span', { className: 'vwf-muted-sm' }, t('dashPerPage')),
             h('select', { className: 'vwf-input', style: { width: 70 }, value: pageSize, onChange: (ev) => setPageSize(Number(ev.target.value)) },
               [10, 20, 50, 100].map((n) => h('option', { key: n, value: n }, String(n)))
             )
@@ -2627,31 +2333,31 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           h('div', { className: 'vwf-muted', style: { marginTop: 2 } }, t('runModeEnhanced'))
         ),
         h('div', { className: 'vwf-row' },
-          h('input', { className: 'vwf-input', style: { flex: 1 }, placeholder: 'runId（点上方行自动填入，或手动粘贴）', value: runId, onChange: (ev) => setRunId(ev.target.value) }),
+          h('input', { className: 'vwf-input', style: { flex: 1 }, placeholder: t('dashRunIdPlaceholder'), value: runId, onChange: (ev) => setRunId(ev.target.value) }),
           h('button', { className: 'vwf-btn', onClick: refresh }, t('refresh'))
         ),
         snap === null
-          ? h('div', { className: 'vwf-muted' }, '选择或输入 runId 查看运行详情')
+          ? h('div', { className: 'vwf-muted' }, t('dashPickRun'))
           : !snap.found
-            ? h('div', { className: 'vwf-err-line' }, '未找到该 runId 的状态（内存与磁盘历史均无记录）')
+            ? h('div', { className: 'vwf-err-line' }, t('dashRunNotFound'))
             : h('div', null,
                 h('div', null,
                   h('div', { className: 'vwf-row' },
-                    h('span', null, '状态：' + snap.state.status),
-                    h('span', { className: 'vwf-muted' }, '当前阶段：' + (snap.state.phase || '—')),
-                    snap.state.taskId ? h('span', { className: 'vwf-muted' }, 'taskId：' + snap.state.taskId) : null
+                    h('span', null, t('dashStatusLabel', { status: snap.state.status })),
+                    h('span', { className: 'vwf-muted' }, t('dashPhaseLabel', { phase: snap.state.phase || '—' })),
+                    snap.state.taskId ? h('span', { className: 'vwf-muted' }, t('dashTaskIdLabel', { taskId: snap.state.taskId })) : null
                   ),
                   h('div', { className: 'vwf-row', style: { borderTop: '1px solid var(--dsw-alias-border-l2, #333)', marginTop: 6, paddingTop: 6 } },
-                    h('span', { className: 'vwf-muted', style: { fontSize: 10 } }, '画布图例：'),
+                    h('span', { className: 'vwf-muted', style: { fontSize: 10 } }, t('dashLegend')),
                     h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.running } }, 'running'),
                     h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, 'pass'),
                     h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.fail } }, 'fail'),
-                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, '人工门禁')
+                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('dashHumanGate'))
                   )
                 ),
                 dsl ? h('div', { className: 'vwf-card', style: { marginTop: 8 } }, h(Canvas, { dsl, readOnly: true, statusMap: st })) : null,
                 h('table', { className: 'vwf-table', style: { marginTop: 8 } },
-                  h('thead', null, h('tr', null, h('th', null, '#'), h('th', null, '节点'), h('th', null, '阶段'), h('th', null, '结果'))),
+                  h('thead', null, h('tr', null, h('th', null, t('dashColIndex')), h('th', null, t('dashColNode')), h('th', null, t('dashColPhase')), h('th', null, t('dashColResult')))),
                   h('tbody', null, dashboardAgentRows(snap.state.agents))
                 ),
                 (() => {
@@ -2664,7 +2370,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                           h('strong', null, artifactPathFromRecordId(rec.record_id)),
                           h('span', { className: 'vwf-badge accent' }, t('artifactRevision') + ' R' + rec.record_revision),
                           h('span', { className: 'vwf-muted-sm' }, rec.body && rec.body.media_type ? rec.body.media_type : ''),
-                          rec.provenance && rec.provenance.node ? h('span', { className: 'vwf-muted-sm' }, '节点 ' + rec.provenance.node) : null
+                          rec.provenance && rec.provenance.node ? h('span', { className: 'vwf-muted-sm' }, t('dashArtifactNode', { node: rec.provenance.node })) : null
                         ),
                         renderArtifactBody(rec)
                       )) : h('div', { className: 'vwf-muted-sm' }, t('noFormalArtifacts'))
@@ -2678,10 +2384,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     // ── 页面：模板库 + 全局编辑层 + 运行看板 ───────────────────────────────
     function Skeleton() {
-      return { id: 'my-flow', name: '我的工作流', description: '', entry: 'node-1', control: { maxRounds: 9 }, nodes: [{ id: 'node-1', profile: 'dispatcher', label: '节点1' }], edges: [{ from: 'node-1', to: '$end', on: 'success' }] }
+      return { id: 'my-flow', name: t('myWorkflow'), description: '', entry: 'node-1', control: { maxRounds: 9 }, nodes: [{ id: 'node-1', profile: '', label: t('defaultNodeLabel', { n: 1 }) }], edges: [{ from: 'node-1', to: '$end', on: 'success' }] }
     }
 
     function Page() {
+      const [i18nReady, setI18nReady] = React.useState(false)
       const [tab, setTab] = React.useState('templates')
       const [list, setList] = React.useState(null)
       const [editId, setEditId] = React.useState(null) // 编辑层中的模板 id
@@ -2717,6 +2424,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       // 角色数据源独立抓手：角色库变更后立即刷新，让新建/编辑的角色马上进入节点选择器
       const refetchRoles = React.useCallback(() => {
         host.call('vwf.roles').then(r => { if (r && r.roles) setRoles(r.roles) }).catch(() => {})
+      }, [])
+      React.useEffect(() => {
+        host.call('vwf.i18n', { locale: isEn() ? 'en' : 'zh' }).then((r) => {
+          messages = (r && r.messages) || {}
+          setI18nReady(true)
+        }).catch(() => { messages = {}; setI18nReady(true) })
       }, [])
       React.useEffect(() => { refresh() }, [])
       React.useEffect(() => {
@@ -2758,22 +2471,28 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         closeEditor()
         refresh()
       }
-      const onScript = () => {
-        if (!wf) return
-        const taskId = String((wf && wf.id) || 'task') + '-' + Date.now().toString(36)
-        host.call('vwf.script', { dsl: wf, allocate: true, taskId: taskId, templateId: wf.id }).then(r => {
-          if (!r || !r.ok) {
-            setMsg(JSON.stringify((r && r.errors) || r || { ok: false }))
+      const [probing, setProbing] = React.useState(false)
+      const onOneClickCheck = () => {
+        if (!wf || probing) return
+        setProbing(true)
+        host.call('vwf.probe', { dsl: wf }).then((r) => {
+          if (!r) { setMsg(t('oneClickCheckFailed')); return }
+          if (r.stage === 'static' && !r.ok) {
+            const first = (r.errors && r.errors[0] && r.errors[0].message) || t('oneClickCheckFailed')
+            setMsg(t('oneClickCheckStaticFail', { detail: first }))
             return
           }
-          const argsNote = r.workspaceArgs
-            ? ('\n\n---\n本脚本已注入隔离 workspace 默认 args（taskId=' + r.workspaceArgs.taskId + '）。交给平台 workflow 工具时请原样运行此完整脚本；勿删 __VWF_WS_DEFAULTS__。\n')
-            : ('\n\n---\n未部署 workspace-isolation-host.mjs：脚本未注入隔离现场，将回退旧 RUNDIR 行为。\n')
-          setMsg('✓ 编译通过 · 引擎可用：' + r.engineAvailable + argsNote + '\n' + r.script)
-        }).catch(() => {})
+          if (r.pending || r.code === 'PROBE_NOT_IMPLEMENTED') {
+            setMsg(t('oneClickCheckProbePending'))
+            return
+          }
+          if (r.ok) setMsg(t('oneClickCheckOk'))
+          else setMsg(t('oneClickCheckFailed') + ((r.errors && r.errors[0] && r.errors[0].message) || ''))
+        }).catch((e) => setMsg(t('oneClickCheckFailed') + String(e))).finally(() => setProbing(false))
       }
 
       const editingBuiltin = !!(list || []).find(x => x.id === editId && x.builtin)
+      if (!i18nReady) return h('div', { className: 'vwf-muted' }, t('i18nLoading'))
 
       return h('div', { className: 'vwf-root' },
         h('div', { className: 'vwf-tabs' },
@@ -2823,11 +2542,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           h('div', { className: 'vwf-editor-body' },
             h(Editor, {
               key: editId || 'new',
-              wf, providers, roles, saving,
+              wf, providers, roles, saving, probing,
               currentId: editId,
               setWf: (next) => { setWf(next); setDirty(true) },
               onSaved: (id) => { onSaved(id); if (!editId) setEditId(id) },
-              onScript,
+              onOneClickCheck,
               onRolesChanged: refetchRoles,
             })
           ),

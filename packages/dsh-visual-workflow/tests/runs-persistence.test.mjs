@@ -268,27 +268,25 @@ test('#40：重启后 AWAITING_HUMAN 门禁继续保持同 taskId 互斥；entry
   assert.equal(readRun(a.fs, 'rb-1').status, 'DONE', '续跑终态落盘')
 })
 
-test('#40：内存 miss 磁盘回落——未回载进内存的历史记录按 runId 直查并水合', async () => {
+test('#40：启动全量回载进内存，按 runId 可直接查看', async () => {
   const seed = {}
   for (let i = 0; i < 25; i++) {
     const id = 'seed-' + String(i).padStart(2, '0')
     seed[RUNS_DIR + '/' + id + '.json'] = seedRun(id, { startedAt: 2000 + i, updatedAt: 2000 + i })
   }
   const { handlers } = env({ seed })
-  await until(async () => (await call(handlers, 'vwf.runs.list', {})).runs.length === 20, '内存只回载最近 20 条')
+  await until(async () => (await call(handlers, 'vwf.runs.list', {})).runs.length === 25, '全部索引常驻内存')
   const list = await call(handlers, 'vwf.runs.list', {})
-  assert.ok(!list.runs.some(r => r.id === 'seed-00'), '最旧 5 条不占内存（留在磁盘）')
+  assert.ok(list.runs.some(r => r.id === 'seed-00'), '最旧记录也在内存')
   assert.ok(list.runs.some(r => r.id === 'seed-24'), '最新记录已回载')
 
   const s = await call(handlers, 'vwf.state', { runId: 'seed-00' })
-  assert.equal(s.found, true, '磁盘回落命中')
+  assert.equal(s.found, true, '全量回载后可直查')
   assert.equal(s.state.taskId, 'task-seed-00')
   assert.equal(s.state.status, 'DONE')
-  const list2 = await call(handlers, 'vwf.runs.list', {})
-  assert.equal(list2.runs.length, 21, '回落命中即水合进内存清单')
 })
 
-test('#40：vwf.runs.history 返回磁盘全量清单（最新在前、不水合内存、损坏跳过）', async () => {
+test('#40：vwf.runs.list / history 返回全量清单（最新在前、损坏跳过）', async () => {
   const seed = {}
   for (let i = 0; i < 25; i++) {
     const id = 'seed-' + String(i).padStart(2, '0')
@@ -296,15 +294,14 @@ test('#40：vwf.runs.history 返回磁盘全量清单（最新在前、不水合
   }
   seed[RUNS_DIR + '/broken.json'] = '{ 坏'
   const { handlers } = env({ seed })
-  await until(async () => (await call(handlers, 'vwf.runs.list', {})).runs.length === 20, '内存回载 20 条')
+  await until(async () => (await call(handlers, 'vwf.runs.list', {})).runs.length === 25, '全量回载 25 条')
   const hist = await call(handlers, 'vwf.runs.history', {})
-  assert.equal(hist.runs.length, 25, '磁盘全量 25 条（含未回载，跳过损坏文件）')
+  const list = await call(handlers, 'vwf.runs.list', {})
+  assert.equal(hist.runs.length, 25, '跳过损坏文件后 25 条')
+  assert.equal(list.runs.length, 25)
   assert.equal(hist.runs[0].id, 'seed-24', '最新在前')
   assert.equal(hist.runs[24].id, 'seed-00', '最旧在末')
   assert.equal(hist.runs[0].taskId, 'task-seed-24')
-  // 历史 RPC 只读不水合：内存清单仍保持 20 条上限语义
-  const list = await call(handlers, 'vwf.runs.list', {})
-  assert.equal(list.runs.length, 20, 'history 不水合进内存')
 })
 
 test('#40 AC3：容量淘汰——超过保留上限后最旧记录被清理（启动淘汰 + 运行期淘汰）', async () => {
@@ -327,11 +324,11 @@ test('#40 AC3：容量淘汰——超过保留上限后最旧记录被清理（�
   assert.ok(fs._files.has(RUNS_DIR + '/run-live.json'), '活跃 run 快照保留')
 })
 
-test('#40 评审修复：未接管门禁不被容量淘汰——幽灵门禁磁盘记录存活', async () => {
+test('#40 评审修复：未接管门禁不被容量淘汰', async () => {
   const seed = {}
   for (let i = 0; i < 53; i++) {
     const id = 'seed-' + String(i).padStart(2, '0')
-    const gate = i < 2 // 最旧两条为未接管门禁（回载窗口外 → 幽灵门禁，仅 runTags 登记）
+    const gate = i < 2
     seed[RUNS_DIR + '/' + id + '.json'] = seedRun(id, {
       startedAt: 1000 + i, updatedAt: 1000 + i,
       ...(gate ? { status: 'AWAITING_HUMAN_b', phase: 'b', taskId: 'task-gate-' + i, workflowId: 'dev-workflow-2-0' } : {}),
@@ -339,8 +336,8 @@ test('#40 评审修复：未接管门禁不被容量淘汰——幽灵门禁磁�
   }
   const { fs } = env({ seed })
   await until(() => runFiles(fs).length < 53, '触发启动淘汰')
-  assert.ok(fs._files.has(RUNS_DIR + '/seed-00.json'), '幽灵门禁 seed-00 不被淘汰')
-  assert.ok(fs._files.has(RUNS_DIR + '/seed-01.json'), '幽灵门禁 seed-01 不被淘汰')
+  assert.ok(fs._files.has(RUNS_DIR + '/seed-00.json'), '占用任务的门禁 seed-00 不被淘汰')
+  assert.ok(fs._files.has(RUNS_DIR + '/seed-01.json'), '占用任务的门禁 seed-01 不被淘汰')
   assert.ok(!fs._files.has(RUNS_DIR + '/seed-02.json'), '最旧 DONE 记录被淘汰')
 })
 

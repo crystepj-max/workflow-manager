@@ -905,19 +905,22 @@ function main() {
     return;
   }
 
-  // 子命令 compile：node scripts/generate.mjs compile <蓝图json路径>
+  // 子命令 compile：
+  //   node scripts/generate.mjs compile <蓝图json路径>
+  //   node scripts/generate.mjs compile --inline '<蓝图json>'
   //   —— 统一编译器管道兜底（候选一 T-IMP-12）：宿主 vwf 侧临时图/编辑器实时查看
   //   经 CLI 取译文。宿主先做 DSL 校验（validateDsl），此处不重复校验（保持行为对齐）。
   //   stdout 输出 JSON：{ ok:true, script, meta } 或 { ok:false, error }。
   if (process.argv[2] === 'compile') {
-    const bpPath = process.argv[3];
-    if (!bpPath) {
-      console.error('用法：node scripts/generate.mjs compile <蓝图json路径>');
+    const inline = process.argv[3] === '--inline';
+    const src = inline ? process.argv[4] : process.argv[3];
+    if (!src) {
+      console.error('用法：node scripts/generate.mjs compile <蓝图json路径> | compile --inline \'<蓝图json>\'');
       process.exit(1);
     }
     let bp;
     try {
-      bp = JSON.parse(fs.readFileSync(path.resolve(bpPath), 'utf8'));
+      bp = JSON.parse(inline ? src : fs.readFileSync(path.resolve(src), 'utf8'));
     } catch (e) {
       console.error(JSON.stringify({ ok: false, error: '蓝图解析失败：' + e.message }));
       process.exit(1);

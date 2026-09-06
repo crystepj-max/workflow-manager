@@ -56,6 +56,7 @@ test('静态 Host：正式 pluginRoot/dist 的投影内核可驱动校验链路'
   const projectionSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'projection-core.cjs'), 'utf8')
   const fs = makeFs({
     [REPO + '/scripts/validate-core.cjs']: validatorSrc,
+    [pluginRoot + '/dist/validate-core.cjs']: validatorSrc,
     [pluginRoot + '/dist/projection-core.cjs']: projectionSrc,
   })
   const loaded = loadStaticHost({
@@ -64,6 +65,7 @@ test('静态 Host：正式 pluginRoot/dist 的投影内核可驱动校验链路'
     pluginRoot,
     projectionCoreSeed: false,
     roleCoreSeed: false,
+    distKernelSeed: false,
     sandboxPolicy,
   })
   const result = await invokeStaticRpc(loaded.registered[0].route, 'vwf.validate', {
@@ -77,6 +79,24 @@ test('静态 Host：正式 pluginRoot/dist 的投影内核可驱动校验链路'
     },
   })
   assert.equal(result.ok, true, JSON.stringify(result.errors))
+})
+
+test('静态 bundle dist 含语言资源与内置角色正文', () => {
+  assert.ok(existsSync(join(here, '..', 'dist', 'locales', 'zh.json')), 'dist/locales/zh.json 必须存在')
+  assert.ok(existsSync(join(here, '..', 'dist', 'locales', 'en.json')), 'dist/locales/en.json 必须存在')
+  assert.ok(existsSync(join(here, '..', 'dist', 'roles', 'dev.md')), 'dist/roles/dev.md 必须存在')
+  assert.ok(existsSync(join(here, '..', 'dist', 'dynamic', 'host.js')), 'dist/dynamic/host.js 必须存在')
+  assert.ok(existsSync(join(here, '..', 'dist', 'dynamic', 'client.js')), 'dist/dynamic/client.js 必须存在')
+})
+
+test('开发粘贴用 dynamic 闭包双半均 ≤ 80KB', () => {
+  const host = readFileSync(join(here, '..', 'dist', 'dynamic', 'host.js'))
+  const client = readFileSync(join(here, '..', 'dist', 'dynamic', 'client.js'))
+  const limit = 80 * 1024
+  assert.ok(host.byteLength <= limit, `host ${host.byteLength} > ${limit}`)
+  assert.ok(client.byteLength <= limit, `client ${client.byteLength} > ${limit}`)
+  assert.match(host.toString('utf8'), /^return\{/, 'host 必须是 return {...} 闭包体')
+  assert.match(client.toString('utf8'), /^return\{/, 'client 必须是 return {...} 闭包体')
 })
 
 test('静态 bundle dist 含 role-library.cjs + builtin-roles.json 且内核可加载（角色库正式安装路径）', () => {

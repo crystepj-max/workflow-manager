@@ -239,6 +239,69 @@ function nodeIdMap(nodes) {
   return ids
 }
 
+// ---------- 蓝图 ↔ 编辑器 DSL 投影（唯一实现：生成器与宿主共用） ----------
+// 逐键条件装配：DSL 经 lossless-JSON RPC 传输，undefined 键会被拒绝；两侧投影必须互逆，
+// 否则内置模板在编辑器另存后会丢字段（verifyBranch 曾因此在生成器侧被丢掉）。
+const NODE_PASSTHROUGH = ['kind', 'items', 'failOn']
+function projectNode(n, models, blueprintSide) {
+  const o = { id: n.id, profile: n.profile, label: n.label || n.id }
+  if (blueprintSide) o.goal = n.goal || ''
+  else if (n.goal !== undefined && n.goal !== null) o.goal = n.goal
+  for (const k of NODE_PASSTHROUGH) if (n[k] !== undefined) o[k] = n[k]
+  if (n.output) o.output = n.output
+  if (n.manualCheck) o.manualCheck = true
+  if (n.verifyBranch) o.verifyBranch = true
+  if (models && models[n.id]) o.model = models[n.id]
+  return o
+}
+function projectEdge(e) {
+  const o = { from: e.from, to: e.to }
+  for (const k of ['on', 'when', 'result', 'outcome', 'countRound']) if (e[k] !== undefined) o[k] = e[k]
+  return o
+}
+function projectRules(src, dst) {
+  if (src.onMaxRounds !== undefined) dst.onMaxRounds = src.onMaxRounds
+  if (src.heteroCheck) dst.heteroCheck = true
+  if (src.bundleRoles) dst.bundleRoles = true
+  if (src.humanDecision !== undefined) dst.humanDecision = src.humanDecision
+  return dst
+}
+function projectToVwf(bp) {
+  const models = (bp.bindings && bp.bindings.models) || {}
+  return projectRules(bp, {
+    id: bp.id,
+    name: bp.displayName,
+    description: bp.description || '',
+    entry: bp.entry,
+    control: { maxRounds: (bp.control && bp.control.maxRounds) || 9 },
+    nodes: bp.nodes.map((n) => projectNode(n, models)),
+    edges: bp.edges.map(projectEdge),
+  })
+}
+function projectToBlueprint(dsl) {
+  const models = {}
+  const nodes = (dsl.nodes || []).map((n) => {
+    const o = projectNode(n, null, true)
+    if (n.model && typeof n.model === 'object' && n.model.provider && n.model.model) {
+      models[n.id] = { provider: n.model.provider, model: n.model.model }
+    }
+    return o
+  })
+  const bp = {
+    id: dsl.id,
+    // 空/空白名称原样保留（displayName 必填校验会拒绝），仅缺省（undefined）兜底 id
+    displayName: typeof dsl.name === 'string' ? dsl.name : (dsl.id || ''),
+    entry: dsl.entry,
+    nodes: nodes,
+    edges: (dsl.edges || []).map(projectEdge),
+  }
+  if (dsl.description) bp.description = dsl.description
+  if (dsl.control && dsl.control.maxRounds != null) bp.control = { maxRounds: dsl.control.maxRounds }
+  projectRules(dsl, bp)
+  if (Object.keys(models).length) bp.bindings = { models: models }
+  return bp
+}
+
 function reachable(entry, nodes, edges) {
   const ids = nodeIdMap(nodes)
   const reach = {}
@@ -850,6 +913,8 @@ module.exports = {
   validateStructure,
   validateBlueprint,
   deriveEntryCandidates,
+  projectToVwf,
+  projectToBlueprint,
   extractFileTokens,
   blueprintUsesHumanDecision,
   COND_RE,

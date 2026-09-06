@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -213,31 +212,9 @@ if (formalBundleInstalled) {
 }
 
 function syncDevKernelAssets() {
-  try {
-    const kernelSrc = join(repoRoot, 'scripts', 'validate-core.cjs')
-    const roleLibrarySrc = join(repoRoot, 'scripts', 'role-library.cjs')
-    const roleManifestSrc = join(repoRoot, 'dsh', 'roles', 'builtin-roles.json')
-    const assetDir = join(devHome, 'visual-workflow')
-    mkdirSync(assetDir, { recursive: true })
-    writeFileSync(join(assetDir, 'repo-root'), `${repoRoot}\n`)
-    if (!existsSync(kernelSrc)) {
-      fail(`缺少校验内核：${kernelSrc}`)
-    }
-    copyFileSync(kernelSrc, join(assetDir, 'validate-core.cjs'))
-    // 角色库内核 + 内置清单（RoleLibrary 深化）：候选根成对加载需要 home 副本
-    if (!existsSync(roleLibrarySrc)) {
-      fail(`缺少角色库内核：${roleLibrarySrc}`)
-    }
-    if (!existsSync(roleManifestSrc)) {
-      fail(`缺少内置角色清单：${roleManifestSrc}`)
-    }
-    copyFileSync(roleLibrarySrc, join(assetDir, 'role-library.cjs'))
-    copyFileSync(roleManifestSrc, join(assetDir, 'builtin-roles.json'))
-  } catch (e) {
-    // sync 是可选便利（浏览器侧候选根兜底）；写 dev home 被沙箱/权限拒绝时
-    // 不应让状态检查整体崩溃——插件运行时仍可从仓库根候选路径加载内核。
-    console.warn(`⚠️ 内核资产同步到开发 Home 失败（不影响仓库根加载）：${String((e && e.message) || e)}`)
-  }
+  const build = join(pluginRoot, 'scripts', 'build-bundle.mjs')
+  const r = spawnSync(process.execPath, [build], { cwd: pluginRoot, stdio: 'inherit' })
+  if (r.status !== 0) fail('插件构建失败：请先修复 packages/dsh-visual-workflow 后重试')
 }
 
 syncDevKernelAssets()
@@ -247,9 +224,9 @@ function printSyncGuide() {
 下一步：
 1. 启动或保持开发 DSH：npm run dev:plugin -- start
 2. 在该 DSH 会话中进入 Cordis 动态插件开发能力。
-3. 用 cordis_define 定义 ${version}；同一次定义的 code 必须同时包含：
-   - host：packages/dsh-visual-workflow/src/host.js
-   - client：packages/dsh-visual-workflow/src/client.js
+3. 用 cordis_define 定义 ${version}；同一次定义的 code 必须同时包含压缩产物（不要粘 src/）：
+   - host：packages/dsh-visual-workflow/dist/dynamic/host.js
+   - client：packages/dsh-visual-workflow/dist/dynamic/client.js
 4. 用 cordis_run 将这个完整 Package 作为一次更新激活；不得单独更新任一半。
 5. 用 cordis_inspect_self 核对当前 Package/Run 为 ${version}，再查看界面或宿主行为。
 6. 下次修改后重新运行 npm run dev:plugin，使用新的联合版本重复步骤 3–5。
