@@ -11,7 +11,7 @@ description: "在 DeepSeek Harness（DSH）会话中驱动「开发工作流 2.0
 - `SKILL.md` —— 本 runbook（真源 `dsh/skill/SKILL.md`）
 - `roles/` —— 六个节点角色提示词：dispatcher / dev / test / review / accept / closeout
 
-模型绑定已在**编译时固化**于蓝图 `bindings.models`（真源 `templates/dev-workflow-2-0.json`）：
+模型绑定已在**编译时固化**于蓝图 `bindings.models`（真源 `templates/custom-seeds/dev-workflow-2-0.json`）：
 **运行时不传 models**——改模型分配 = 改蓝图 `bindings.models` 后重装/重生成。
 
 加载本 skill 时会给出 base directory（本目录绝对路径），下文记作 `<SKILL_DIR>`。

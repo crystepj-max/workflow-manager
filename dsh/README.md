@@ -2,7 +2,7 @@
 
 「开发工作流 2.0」在 DeepSeek Harness（DSH）上的迁移实现。需求基线见
 [`docs/开发工作流2.0需求规格.md`](../docs/开发工作流2.0需求规格.md)；蓝图单一事实源见
-`templates/dev-workflow-2-0.json`（生成产物 `.generated/dev-workflow-2-0/`，契约见 `docs/design/blueprint-schema.md`）。
+`templates/custom-seeds/dev-workflow-2-0.json`（生成产物 `.generated/dev-workflow-2-0/`，契约见 `docs/design/blueprint-schema.md`）。
 
 ## 架构
 
@@ -52,11 +52,11 @@ workflow 编排脚本（.generated/dev-workflow-2-0/script.mjs——单一编译
 | `dsh/roles/accept.md` | 验收角色（acceptance-summary.md + accept-report.md） |
 | `dsh/roles/closeout.md` | 收口角色（cleanup-report.md） |
 | `dsh/skill/SKILL.md` | 运行 runbook 真源（取需求/角色快照/人工门禁/硬规则；安装时随技能包部署） |
-| `templates/dev-workflow-2-0.json` | 蓝图（唯一事实源；编译出 `.generated/dev-workflow-2-0/{script.mjs, meta.json, SKILL.md, vwf-dsl.json}`） |
+| `templates/custom-seeds/dev-workflow-2-0.json` | 蓝图（唯一事实源；编译出 `.generated/dev-workflow-2-0/{script.mjs, meta.json, SKILL.md, vwf-dsl.json}`） |
 | `dsh/skills/requirements-analysis/` | requirements-analysis 技能真源（SKILL.md + evals/ + references/，内联自洽版） |
 | `dsh/install-requirements-analysis.sh` | requirements-analysis 真源 → 公共池安装脚本（对齐 install-skill.sh 约定） |
 
-角色正文与蓝图 `templates/dev-workflow-2-0.json` 的 `nodes[].profile` 一一对应。
+角色正文与蓝图 `templates/custom-seeds/dev-workflow-2-0.json` 的 `nodes[].profile` 一一对应。
 
 ## 运行方式（主会话 runbook）
 
@@ -187,7 +187,7 @@ gh issue view <N> --json title,body,comments
 | 人工验收 | `kimi-coding/k3` | 中 |
 | 收口 | `deepseek-official/deepseek-v4-flash` | 低：机械整理 + 推送/合并/关闭 issue |
 
-配置方式：**蓝图 `bindings.models`（编译时固化）**——改分配 = 改 `templates/dev-workflow-2-0.json`
+配置方式：**蓝图 `bindings.models`（编译时固化）**——改分配 = 改 `templates/custom-seeds/dev-workflow-2-0.json`
 的 `bindings.models` 后 `npm run generate` 重生成（生成物禁手改）。当前分配见蓝图文件；
 编辑器（vwf）保存用户模板时在节点上配置模型，同样落盘为 `bindings.models`。
 
@@ -225,7 +225,7 @@ kimi 额度恢复后改回上面的推荐分配（跨 provider 真异源）。
 2. 直接说「用开发工作流 2.0 跑 issue #N」——技能触发后按 SKILL.md 的 runbook
    装配 args 并驱动全流程（角色快照自动拷贝进 `.agent-runs/<task>/roles/` 满足留痕）。
 
-**更新/重装技能**：`./dsh/install-skill.sh`（安装时从蓝图 `templates/dev-workflow-2-0.json`
+**更新/重装技能**：`./dsh/install-skill.sh`（安装时从蓝图 `templates/custom-seeds/dev-workflow-2-0.json`
 生成脚本与 meta + 部署 runbook/roles，改仓库即改全局）。
 
 ## 技能真源布局与安装脚本（仓库 = 真源）
@@ -234,7 +234,7 @@ kimi 额度恢复后改回上面的推荐分配（跨 provider 真异源）。
 
 | 技能 | 真源（本仓库） | 安装脚本 | 公共池目标 |
 |------|----------------|----------|------------|
-| dev-workflow-2-0 | `templates/dev-workflow-2-0.json`（蓝图）+ `dsh/roles/` + `dsh/skill/SKILL.md`（runbook） | `dsh/install-skill.sh` | `~/.agents/skills/dev-workflow-2-0/`（脚本/meta 安装时由蓝图生成） |
+| dev-workflow-2-0 | `templates/custom-seeds/dev-workflow-2-0.json`（蓝图）+ `dsh/roles/` + `dsh/skill/SKILL.md`（runbook） | `dsh/install-skill.sh` | `~/.agents/skills/dev-workflow-2-0/`（脚本/meta 安装时由蓝图生成） |
 | requirements-analysis | `dsh/skills/requirements-analysis/`（SKILL.md + evals/ + references/） | `dsh/install-requirements-analysis.sh` | `~/.agents/skills/requirements-analysis/` |
 
 **技能变更落地 GitHub 的同步流程：**

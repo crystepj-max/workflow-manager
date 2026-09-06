@@ -335,9 +335,8 @@ return {
     syncValidatorCore().catch((e) => console.log('[vwf] 校验内核同步失败：' + String((e && e.message) || e)))
     syncRoleAssets().catch((e) => console.log('[vwf] 角色库内核同步失败：' + String((e && e.message) || e)))
 
-    // 历史两套正式模板已按目标规格迁为 Custom Workflow，不再占用内置身份。
-    // 生成物仍可出现在模板库（任意项目可见的 default-workflow / 仓库内的
-    // dev-workflow-2-0），但 list 标 builtin=false，允许保存覆盖与删除。
+    // 历史两套已按 #82 迁为 Custom Workflow：蓝图真源在 templates/custom-seeds/，
+    // 生成物仍可出现在模板库，但 list 标 builtin=false，允许保存覆盖与删除。
     const LEGACY_CUSTOM_WORKFLOW_IDS = { 'default-workflow': true, 'dev-workflow-2-0': true }
     function isLegacyCustomId(id) { return !!LEGACY_CUSTOM_WORKFLOW_IDS[id] }
 
