@@ -19,11 +19,27 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const good = JSON.parse(readFileSync(path.join(here, '../../templates/custom-seeds/dev-workflow-2-0.json'), 'utf8'));
 const fanoutGood = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'));
 
+test('投影往返：蓝图 → DSL → 蓝图 与原蓝图语义等价（verifyBranch / bindings / 业务规则字段无损）', () => {
+  const { projectToVwf, projectToBlueprint } = validatorCore;
+  for (const file of ['../../templates/dev-workflow-2-0.json', '../../templates/default-workflow.json', 'fixtures/construction-rollback-mini.json']) {
+    const bp = JSON.parse(readFileSync(path.join(here, file), 'utf8'));
+    const back = projectToBlueprint(projectToVwf(bp));
+    const norm = (b) => JSON.parse(JSON.stringify({
+      ...b,
+      description: b.description || undefined,
+      control: b.control || undefined,
+      nodes: b.nodes.map((n) => ({ ...n, label: n.label || n.id, goal: n.goal || '' })),
+    }));
+    assert.deepEqual(norm(back), norm(bp), file + ' 往返后与原蓝图不一致');
+    assert.equal(validateBlueprint(back).ok, true, file + ' 往返产物必须仍通过校验');
+  }
+});
+
 test('S1 合法蓝图（dev-workflow-2-0 全量）通过校验', () => {
   const r = validateBlueprint(good);
   assert.equal(r.ok, true, JSON.stringify(r.errors));
-  assert.equal(r.counts.nodes, 7);
-  assert.equal(r.counts.edges, 13);
+  assert.equal(r.counts.nodes, 8);
+  assert.equal(r.counts.edges, 16);
 });
 
 test('fanout 合法夹具通过校验，worker 缺省 kind 保持兼容', () => {
@@ -125,7 +141,9 @@ test('S1 缺 $end 与无出边拒绝', () => {
 
 test('S1 多 success 出边缺 when 拒绝', () => {
   const b = clone();
-  b.edges[4].when = undefined;
+  const edge = b.edges.find((e) => e.from === 'route' && e.to === 'test' && e.on === 'success');
+  assert.ok(edge, '夹具须含 route→test success 边');
+  delete edge.when;
   expectReject(b, '多条 success 出边必须全部带 when', 'whenMissing');
 });
 
@@ -137,7 +155,9 @@ test('S1 successCondition 路径不在 schema 拒绝', () => {
 
 test('S1 verifyBranch 联动：required 缺 verified_* 拒绝', () => {
   const b = clone();
-  b.nodes[3].output.schema.required = ['result', 'reason', 'evidence'];
+  const testNode = b.nodes.find((n) => n.id === 'test');
+  assert.ok(testNode && testNode.verifyBranch, '夹具须含 verifyBranch 的 test 节点');
+  testNode.output.schema.required = ['result', 'reason', 'evidence'];
   expectReject(b, 'verified_branch', 'verify');
 });
 

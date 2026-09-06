@@ -22,6 +22,13 @@ const { createRoot } = await import('react-dom/client')
 const { act } = React
 
 const flush = () => new Promise((resolve) => setImmediate(resolve))
+async function mountPage(targetRoot, el) {
+  await act(async () => {
+    targetRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+}
 
 function byText(root, text) {
   return Array.from(root.querySelectorAll('*')).find((el) => el.children.length === 0 && (el.textContent || '').includes(text))
@@ -134,8 +141,21 @@ function makeRuntime() {
       case 'vwf.workflows.save':
         state.saved.push(args.dsl)
         return { ok: true, id: args.dsl.id, dsl: args.dsl }
+      case 'vwf.i18n':
+        return { locale: 'zh', messages: JSON.parse(readFileSync(join(here, '..', 'locales', 'zh.json'), 'utf8')) }
       case 'vwf.script':
         return { ok: true, engineAvailable: false, script: '// compiled' }
+      case 'vwf.probe':
+        return {
+          ok: false,
+          stage: 'probe',
+          pending: true,
+          code: 'PROBE_NOT_IMPLEMENTED',
+          issue: 74,
+          errors: [{ path: '$', message: 'probe pending' }],
+        }
+      case 'vwf.runs.list':
+        return { runs: [] }
       case 'vwf.state':
         return {
           found: true,
@@ -211,10 +231,7 @@ dom.window.HTMLDialogElement.prototype.close = function () {
 const root = createRoot(container)
 
 test('模板列表渲染并打开全局编辑层', async () => {
-  await act(async () => {
-    root.render(React.createElement(Page))
-    await flush()
-  })
+  await mountPage(root, container)
   const listItem = byText(container, '测试流')
   assert.ok(listItem, '模板列表渲染')
   await act(async () => {
@@ -792,6 +809,110 @@ test('防重叠：入口变化会触发画布布局重算', async () => {
   assert.ok(yOf('b') < yOf('a'), 'entry 改为 b 后 B 排在 A 上方')
 })
 
+test('两级序号：HD 透传后收口主序号在 UAT 右侧，不再与入口同列', async () => {
+  const hdDsl = {
+    id: 'hd-seq-layout',
+    name: 'HD 序号布局',
+    entry: 'preflight',
+    control: { maxRounds: 3 },
+    nodes: [
+      { id: 'preflight', profile: 'evaluator', label: '实施前检查' },
+      { id: 'dev', profile: 'dev', label: '开发' },
+      { id: 'uat', profile: 'accept', label: 'UAT 准备' },
+      { id: 'closeout', profile: 'closeout', label: '收口' },
+    ],
+    edges: [
+      { from: 'preflight', to: 'dev', outcome: 'PASS' },
+      { from: 'dev', to: 'uat', outcome: 'READY' },
+      { from: 'uat', to: '$human-decision', outcome: 'READY_FOR_HUMAN' },
+      { from: '$human-decision', to: 'closeout', outcome: 'ACCEPT' },
+      { from: '$human-decision', to: 'dev', outcome: 'REJECT' },
+      { from: 'closeout', to: '$end', outcome: 'DELIVERED' },
+    ],
+  }
+  // 为 outcome 边补最小 schema，避免编辑器侧校验干扰画布（本测只关心布局）
+  hdDsl.nodes.forEach((n) => {
+    if (n.id === 'preflight') n.output = { outcomePath: '$.route', schema: { type: 'object', properties: { route: { type: 'string', enum: ['PASS'] } }, required: ['route'], additionalProperties: false } }
+    if (n.id === 'dev') n.output = { outcomePath: '$.route', schema: { type: 'object', properties: { route: { type: 'string', enum: ['READY'] } }, required: ['route'], additionalProperties: false } }
+    if (n.id === 'uat') n.output = { outcomePath: '$.route', schema: { type: 'object', properties: { route: { type: 'string', enum: ['READY_FOR_HUMAN'] } }, required: ['route'], additionalProperties: false } }
+    if (n.id === 'closeout') n.output = { outcomePath: '$.status', schema: { type: 'object', properties: { status: { type: 'string', enum: ['DELIVERED'] } }, required: ['status'], additionalProperties: false } }
+  })
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(hdDsl, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  const xyOf = (id) => {
+    const g = container.querySelector('g[data-node-id="' + id + '"]')
+    assert.ok(g, '缺少节点 ' + id)
+    const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return { x: Number(match[1]), y: Number(match[2]) }
+  }
+  const seqOf = (id) => {
+    const g = container.querySelector('g[data-node-id="' + id + '"]')
+    const badge = g && g.querySelector('[data-node-seq]')
+    return badge ? badge.getAttribute('data-node-seq') : null
+  }
+  const pre = xyOf('preflight')
+  const close = xyOf('closeout')
+  assert.ok(close.x > pre.x + 50, '收口应在实施前检查右侧（HD 透传后主序号前进），got pre.x=' + pre.x + ' close.x=' + close.x)
+  assert.equal(seqOf('preflight'), '0')
+  assert.equal(seqOf('dev'), '1')
+  assert.equal(seqOf('uat'), '2')
+  assert.equal(seqOf('closeout'), '3')
+})
+
+test('两级序号：同列多节点显示 m.1 / m.2 且上小下大', async () => {
+  const parallelDsl = {
+    id: 'parallel-seq',
+    name: '同列序号',
+    entry: 'a',
+    control: { maxRounds: 9 },
+    nodes: [
+      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'b1', profile: 'dev', label: 'B1' },
+      { id: 'b2', profile: 'review', label: 'B2' },
+    ],
+    edges: [
+      { from: 'a', to: 'b1', on: 'success' },
+      { from: 'a', to: 'b2', on: 'success' },
+      { from: 'b1', to: '$end', on: 'success' },
+      { from: 'b2', to: '$end', on: 'success' },
+    ],
+  }
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(parallelDsl, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  const yOf = (id) => {
+    const g = container.querySelector('g[data-node-id="' + id + '"]')
+    const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return Number(match[2])
+  }
+  const seqOf = (id) => container.querySelector('g[data-node-id="' + id + '"] [data-node-seq]').getAttribute('data-node-seq')
+  assert.equal(seqOf('a'), '0')
+  assert.equal(seqOf('b1'), '1.1')
+  assert.equal(seqOf('b2'), '1.2')
+  assert.ok(yOf('b1') < yOf('b2'), '同列 1.1 应在 1.2 上方')
+})
+
 test('自环边：布局不进入死循环，终点仍在节点左边框垂直居中', async () => {
   const selfLoopDsl = {
     id: 'self-loop',
@@ -837,6 +958,7 @@ test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async ()
   const freshRoot = createRoot(fresh)
   await act(async () => {
     freshRoot.render(React.createElement(Page))
+    await flush()
     await flush()
   })
   // 打开编辑器
@@ -928,6 +1050,7 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
   const freshRoot = createRoot(fresh)
   await act(async () => {
     freshRoot.render(React.createElement(Page))
+    await flush()
     await flush()
   })
   // 打开编辑器（画布右上角「角色库」常驻区含 管理角色/新增角色）
@@ -1070,6 +1193,7 @@ test('角色库：自定义角色「基于此创建」克隆 + usage 失败时�
   await act(async () => {
     freshRoot.render(React.createElement(Page))
     await flush()
+    await flush()
   })
   await act(async () => {
     const editBtn = byText(fresh, '编辑')
@@ -1156,6 +1280,7 @@ test('角色库 UX 收紧：首尾点/Windows 保留名保存时被 Host 权威�
   await act(async () => {
     freshRoot.render(React.createElement(Page))
     await flush()
+    await flush()
   })
   await act(async () => { byText(fresh, '编辑').click(); await flush() })
   const roleZone = fresh.querySelector('.vwf-role-zone')
@@ -1204,6 +1329,7 @@ test('角色库删除 fail-closed：usage 返回 ok:false 时不弹出删除确�
   const freshRoot = createRoot(fresh)
   await act(async () => {
     freshRoot.render(React.createElement(Page))
+    await flush()
     await flush()
   })
   await act(async () => { byText(fresh, '编辑').click(); await flush() })

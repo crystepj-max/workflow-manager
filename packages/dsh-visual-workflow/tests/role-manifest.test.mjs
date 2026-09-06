@@ -87,18 +87,7 @@ test('manifest：dispatcher 登记为兼容角色（builtin:false），且不与
   }
 })
 
-test('嵌入降级清单 EMBEDDED_BUILTIN_MANIFEST 与 manifest 逐字段一致（无 fs 降级数据闸）', () => {
-  // host.js 无 fs / core 不可用时以嵌入清单兜底「内置角色常驻」。该清单是 manifest 的
-  // 机器投影（禁止手改），本测试是两份数据的一致性闸。
-  const m = loadManifest()
+test('host 不再内嵌 EMBEDDED_BUILTIN_MANIFEST 降级清单', () => {
   const hostSrc = readFileSync(join(repoRoot, 'packages', 'dsh-visual-workflow', 'src', 'host.js'), 'utf8')
-  const block = /const EMBEDDED_BUILTIN_MANIFEST = \[([\s\S]*?)\n\s*\]/.exec(hostSrc)
-  assert.ok(block, 'host.js 必须含 EMBEDDED_BUILTIN_MANIFEST 嵌入清单')
-  const embedded = new Function('return [' + block[1] + ']')()
-  assert.equal(embedded.length, m.builtins.length, '嵌入清单与 manifest 数量漂移')
-  for (let i = 0; i < m.builtins.length; i++) {
-    assert.equal(embedded[i].id, m.builtins[i].id, `第 ${i} 位 id 漂移`)
-    assert.equal(embedded[i].name, m.builtins[i].name, `第 ${i} 位 name 漂移`)
-    assert.equal(embedded[i].summary, m.builtins[i].summary, `第 ${i} 位 summary 漂移`)
-  }
+  assert.equal(hostSrc.includes('EMBEDDED_BUILTIN_MANIFEST'), false, '内核找不到应明确报错，不得再嵌入降级清单')
 })
