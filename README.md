@@ -54,7 +54,7 @@ Workflow Manager 不只是“按顺序调用 Agent”。它希望把 Workflow、
 
 探索模板总研究轮次最多 **3 轮（包含首次 BROAD）**；自动 TARGETED 补充最多 2 轮。
 
-历史 `default-workflow` 和 `dev-workflow-2-0` 将迁移为 Custom Workflow，不继续作为系统正式标准。
+历史 `default-workflow` 和 `dev-workflow-2-0` **已迁为 Custom Workflow**（蓝图在 `templates/custom-seeds/`，模板库无内置标签，可覆盖/删除），不继续作为系统正式标准。当前正式内置蓝图在 `templates/*.json`（建设模板等）。
 
 ### 12 个正式 Built-in Role
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 把「开发工作流 2.0」安装为公共池技能（真源：本仓库 templates/ 蓝图 + dsh/roles + dsh/skill）。
+# 把「开发工作流 2.0」安装为公共池技能（真源：历史自定义种子 templates/custom-seeds/ + dsh/roles + dsh/skill）。
 # 脚本与 meta 由单一编译器从蓝图生成（writeUserSkill 原子写盘，T-IMP-14），
 # 手写编排脚本已退役删除（T-05）；runbook 用 dsh/skill/SKILL.md（含取需求/快照/门禁细节）。
 # 用法：dsh/install-skill.sh [目标技能根]   默认 ~/.agents/skills（技能 = <根>/dev-workflow-2-0/）
@@ -9,7 +9,7 @@ SRC="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${1:-$HOME/.agents/skills}"
 
 # 从蓝图生成 {SKILL.md, script.mjs, meta.json}（生成器内部先校验蓝图，失败零残留）
-node "$SRC/scripts/generate.mjs" user "$SRC/templates/dev-workflow-2-0.json" "$DEST"
+node "$SRC/scripts/generate.mjs" user "$SRC/templates/custom-seeds/dev-workflow-2-0.json" "$DEST"
 SKILL_DIR="$DEST/dev-workflow-2-0"
 
 # runbook 用仓库真源（覆盖生成的通用版；内容含取需求/角色快照/人工门禁/硬规则）
