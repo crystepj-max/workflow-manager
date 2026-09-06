@@ -10,10 +10,12 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const hostPath = join(root, 'src', 'host.js')
 const clientPath = join(root, 'src', 'client.js')
 const roleLibraryPath = join(root, '..', '..', 'scripts', 'role-library.cjs')
+const projectionCorePath = join(root, '..', '..', 'scripts', 'projection-core.cjs')
 const roleManifestPath = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
 const stampPath = join(root, 'dist', '.src-stamp.json')
 const distHost = join(root, 'dist', 'host-entry.mjs')
 const distClient = join(root, 'dist', 'client.js')
+const distProjectionCore = join(root, 'dist', 'projection-core.cjs')
 const distRoleLibrary = join(root, 'dist', 'role-library.cjs')
 const distRoleManifest = join(root, 'dist', 'builtin-roles.json')
 
@@ -27,8 +29,8 @@ const fail = (msg) => {
 if (!existsSync(distHost) || !existsSync(distClient) || !existsSync(stampPath)) {
   fail('缺少 dist/host-entry.mjs、dist/client.js 或 dist/.src-stamp.json')
 }
-if (!existsSync(distRoleLibrary) || !existsSync(distRoleManifest)) {
-  fail('缺少 dist/role-library.cjs 或 dist/builtin-roles.json（角色库内核随包分发）')
+if (!existsSync(distProjectionCore) || !existsSync(distRoleLibrary) || !existsSync(distRoleManifest)) {
+  fail('缺少 dist/projection-core.cjs、dist/role-library.cjs 或 dist/builtin-roles.json（共享内核/清单随包分发）')
 }
 
 let stamp
@@ -45,9 +47,10 @@ if (stamp.host !== host || stamp.client !== client) {
 }
 // 角色库内核与清单也纳入新鲜度闸门：改内核/manifest 未重建 dist 时正式安装会加载过期逻辑
 const roleLibrary = sha256(roleLibraryPath)
+const projectionCore = sha256(projectionCorePath)
 const roleManifest = sha256(roleManifestPath)
-if (stamp.roleLibrary !== roleLibrary || stamp.roleManifest !== roleManifest) {
-  fail('角色库内核/清单哈希与 stamp 不符（roleLibrary ' + roleLibrary.slice(0, 12) + ' / roleManifest ' + roleManifest.slice(0, 12) + '）')
+if (stamp.projectionCore !== projectionCore || stamp.roleLibrary !== roleLibrary || stamp.roleManifest !== roleManifest) {
+  fail('共享内核/清单哈希与 stamp 不符（projectionCore ' + projectionCore.slice(0, 12) + ' / roleLibrary ' + roleLibrary.slice(0, 12) + ' / roleManifest ' + roleManifest.slice(0, 12) + '）')
 }
 
 const body = readFileSync(distHost, 'utf8')

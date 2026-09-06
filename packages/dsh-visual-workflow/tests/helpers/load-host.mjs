@@ -14,11 +14,16 @@ const src = readFileSync(join(here, '..', '..', 'src', 'host.js'), 'utf8')
 // 真实 HOME，repo 对兜底。readRoleFiles 只收 .md，manifest 的 .json 种子不影响角色目录语义。
 const roleCoreSrc = readFileSync(join(here, '..', '..', '..', '..', 'scripts', 'role-library.cjs'), 'utf8')
 const roleManifestSrc = readFileSync(join(here, '..', '..', '..', '..', 'dsh', 'roles', 'builtin-roles.json'), 'utf8')
+const projectionCoreSrc = readFileSync(join(here, '..', '..', '..', '..', 'scripts', 'projection-core.cjs'), 'utf8')
 export const ROLE_CORE_SEED = {
   [HOME + '/.dsh/visual-workflow/role-library.cjs']: roleCoreSrc,
   [HOME + '/.dsh/visual-workflow/builtin-roles.json']: roleManifestSrc,
   [REPO + '/scripts/role-library.cjs']: roleCoreSrc,
   [REPO + '/dsh/roles/builtin-roles.json']: roleManifestSrc,
+}
+export const PROJECTION_CORE_SEED = {
+  [HOME + '/.dsh/visual-workflow/projection-core.cjs']: projectionCoreSrc,
+  [REPO + '/scripts/projection-core.cjs']: projectionCoreSrc,
 }
 
 export function loadHost(overrides = {}) {
@@ -32,6 +37,9 @@ export function loadHost(overrides = {}) {
   // 默认注入角色库内核种子（显式缺省时可通过 roleCoreSeed:false 关闭）
   if (overrides.roleCoreSeed !== false && svc.fs && svc.fs._files) {
     for (const [k, v] of Object.entries(ROLE_CORE_SEED)) if (!svc.fs._files.has(k)) svc.fs._files.set(k, v)
+  }
+  if (overrides.projectionCoreSeed !== false && svc.fs && svc.fs._files) {
+    for (const [k, v] of Object.entries(PROJECTION_CORE_SEED)) if (!svc.fs._files.has(k)) svc.fs._files.set(k, v)
   }
   const ctx = {
     get: (name) => (svc[name] === undefined ? undefined : svc[name]),
@@ -59,6 +67,9 @@ export function loadStaticHost(overrides = {}) {
   }
   const { processValue = { env: { DSH_HOME, HOME }, cwd: () => REPO }, ...serviceOverrides } = overrides
   const svc = { fs: makeFs({}), subprocess: makeSubprocess({}), sandboxPolicy, ...serviceOverrides }
+  if (overrides.projectionCoreSeed !== false && svc.fs && svc.fs._files) {
+    for (const [k, v] of Object.entries(PROJECTION_CORE_SEED)) if (!svc.fs._files.has(k)) svc.fs._files.set(k, v)
+  }
   const ctx = {
     get: (name) => {
       if (name === 'webServer' && svc.webServer === undefined) return defaultWebServer
