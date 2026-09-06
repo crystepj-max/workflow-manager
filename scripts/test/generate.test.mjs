@@ -39,10 +39,10 @@ test('S2 生成器：vwf-dsl 注入模型绑定（bindings 编译期固化）', 
   assert.equal(accept.manualCheck, true);
 });
 
-test('S2 生成器：业务规则字段进 vwf DSL（候选二 Q7 修订），节点级 verifyBranch 不进', () => {
+test('S2 生成器：业务规则字段进 vwf DSL，节点级 verifyBranch 保持往返契约', () => {
   const { files } = generateAll(tplDir);
   const dsl = JSON.parse(files.get('dev-workflow-2-0/vwf-dsl.json'));
-  assert.ok(dsl.nodes.every((n) => !('verifyBranch' in n)), 'verifyBranch 节点级字段无编辑器 UI，不进 DSL');
+  assert.equal(dsl.nodes.find((n) => n.id === 'review').verifyBranch, true, 'verifyBranch 节点级字段必须进入 DSL');
   assert.equal(dsl.onMaxRounds, 'auto-reschedule', 'onMaxRounds 业务规则进 DSL（前端可配置）');
   assert.equal(dsl.heteroCheck, true, 'heteroCheck 业务规则进 DSL（前端可配置）');
   assert.equal(dsl.control.maxRounds, 9);

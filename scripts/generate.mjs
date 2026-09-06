@@ -8,11 +8,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // 统一校验内核（候选二 T-IMP-13，CJS 单文件——引擎 import / 宿主 vm eval 双形态）
 import validatorCore from './validate-core.cjs';
+// Blueprint ↔ VWF DSL 投影内核（候选一）：生成器与 Host 共用同一份字段契约。
+import projectionCore from './projection-core.cjs';
 // 角色库内核（候选二深化）：内置角色清单唯一事实源 = dsh/roles/builtin-roles.json；
 // 正文安全读取与「被引用角色文件打包」共享内核实现（含自定义角色——dispatcher 等）。
 import roleLibrary from './role-library.cjs';
 
 const { buildSnapshot, readRoleFileSafe, collectReferencedRoleFiles } = roleLibrary;
+const { projectToVwf } = projectionCore;
 
 const { validateBlueprint, COND_RE, HUMAN_DECISION_ID, HD_CONTROL_RESULTS, HD_PACKAGE_REQUIRED, HD_UNKNOWN, HD_EVENT_RECORD_KIND, HD_EVENT_TRIGGER } = validatorCore;
 
@@ -60,43 +63,8 @@ export function loadBuiltinRoleDefs(ids, rolesDir = DEFAULT_ROLES_DIR, io = fs) 
   return out;
 }
 
-// ---------- vwf 侧投影（契约 §4.1；候选二 Q7 修订：业务规则字段进入 DSL） ----------
-export function projectToVwf(bp) {
-  const models = (bp.bindings && bp.bindings.models) || {};
-  const out = {
-    id: bp.id,
-    name: bp.displayName,
-    description: bp.description || '',
-    entry: bp.entry,
-    control: { maxRounds: (bp.control && bp.control.maxRounds) || 9 },
-    nodes: bp.nodes.map((n) => {
-      const o = { id: n.id, profile: n.profile, label: n.label || n.id, goal: n.goal };
-      if (n.kind !== undefined) o.kind = n.kind;
-      if (n.items !== undefined) o.items = n.items;
-      if (n.failOn !== undefined) o.failOn = n.failOn;
-      if (n.output) o.output = n.output;
-      if (n.manualCheck) o.manualCheck = true;
-      if (models[n.id]) o.model = models[n.id];
-      return o;
-    }),
-    edges: bp.edges.map((e) => {
-      const o = { from: e.from, to: e.to };
-      if (e.on !== undefined) o.on = e.on;
-      if (e.when !== undefined) o.when = e.when;
-      if (e.result !== undefined) o.result = e.result;
-      if (e.outcome !== undefined) o.outcome = e.outcome;
-      if (e.countRound !== undefined) o.countRound = e.countRound;
-      return o;
-    }),
-  };
-  // 业务规则字段（编辑器可配置）：onMaxRounds / heteroCheck 进入 DSL；
-  // verifyBranch 为节点级字段，编辑器无 UI，暂不进入（契约修订，MAP 记录）
-  if (bp.onMaxRounds !== undefined) out.onMaxRounds = bp.onMaxRounds;
-  if (bp.heteroCheck) out.heteroCheck = true;
-  if (bp.bundleRoles) out.bundleRoles = true;
-  if (bp.humanDecision !== undefined) out.humanDecision = bp.humanDecision;
-  return out;
-}
+// ---------- vwf 侧投影（候选一：兼容保留既有 named export） ----------
+export { projectToVwf };
 
 // ---------- route 折叠识别（契约 §4.2） ----------
 // COND_RE 单一来源 = 校验内核（候选二）；生成脚本内嵌正则与其一致性由测试断言
