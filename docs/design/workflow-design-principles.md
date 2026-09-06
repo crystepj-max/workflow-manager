@@ -195,7 +195,7 @@ v0.1 运行中只允许修改 Provider / Model，并生成 Snapshot Revision；�
 
 已确认的本轮迁移口径：
 
-- `default-workflow` / `dev-workflow-2-0` 在正式四套模板落地时转为 Custom Workflow，不再作为系统内置模板；
+- `default-workflow` / `dev-workflow-2-0` **已转为 Custom Workflow**（蓝图在 `templates/custom-seeds/`，列表 `builtin=false`），不再作为系统内置模板；正式内置蓝图仅在 `templates/*.json`；
 - 当前已有内置角色若与新的正式基础角色能力相同，则由新的正式角色替换 / 升级；
 - `dispatcher` 转为 Custom Role，不再占据正式内置身份；
 - 迁移应尽量保留用户既有引用、Skill 触发兼容和历史运行可追溯性，不因「正式化」直接丢失旧资产。

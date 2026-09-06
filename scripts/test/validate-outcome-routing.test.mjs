@@ -7,8 +7,8 @@ import validatorCore from '../validate-core.cjs'
 
 const { validateBlueprint, deriveEntryCandidates } = validatorCore
 const here = path.dirname(fileURLToPath(import.meta.url))
-const good = JSON.parse(readFileSync(path.join(here, '../../templates/dev-workflow-2-0.json'), 'utf8'))
-const defaultWf = JSON.parse(readFileSync(path.join(here, '../../templates/default-workflow.json'), 'utf8'))
+const good = JSON.parse(readFileSync(path.join(here, '../../templates/custom-seeds/dev-workflow-2-0.json'), 'utf8'))
+const defaultWf = JSON.parse(readFileSync(path.join(here, '../../templates/custom-seeds/default-workflow.json'), 'utf8'))
 const hdGood = JSON.parse(readFileSync(path.join(here, 'fixtures/human-decision-blueprint.json'), 'utf8'))
 const fanoutGood = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'))
 const outcomeGood = JSON.parse(readFileSync(path.join(here, 'fixtures/outcome-evaluate-mini.json'), 'utf8'))

@@ -16,7 +16,7 @@ const {
 } = validatorCore;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const good = JSON.parse(readFileSync(path.join(here, '../../templates/dev-workflow-2-0.json'), 'utf8'));
+const good = JSON.parse(readFileSync(path.join(here, '../../templates/custom-seeds/dev-workflow-2-0.json'), 'utf8'));
 const fanoutGood = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'));
 
 test('S1 合法蓝图（dev-workflow-2-0 全量）通过校验', () => {

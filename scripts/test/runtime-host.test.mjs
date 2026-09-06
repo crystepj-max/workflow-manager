@@ -22,7 +22,7 @@ import { REPO, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } fro
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(here, '../..')
 const tplDir = path.join(root, 'templates')
-const tpl = JSON.parse(readFileSync(path.join(tplDir, 'dev-workflow-2-0.json'), 'utf8'))
+const tpl = JSON.parse(readFileSync(path.join(tplDir, 'custom-seeds', 'dev-workflow-2-0.json'), 'utf8'))
 const mini = JSON.parse(readFileSync(path.join(here, 'fixtures/hello-blueprint.json'), 'utf8'))
 const { files } = generateAll(tplDir)
 const tplVwfDsl = files.get('dev-workflow-2-0/vwf-dsl.json')

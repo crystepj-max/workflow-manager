@@ -10,7 +10,8 @@ import { compileBlueprint, generateAll, generateUserSkill, projectToVwf, skillWr
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tplDir = path.join(here, '../../templates');
-const bp = JSON.parse(readFileSync(path.join(tplDir, 'dev-workflow-2-0.json'), 'utf8'));
+const seedsDir = path.join(tplDir, 'custom-seeds');
+const bp = JSON.parse(readFileSync(path.join(seedsDir, 'dev-workflow-2-0.json'), 'utf8'));
 const fanoutBp = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'));
 
 test('S2 生成器：产物四件套齐全', () => {
@@ -19,13 +20,17 @@ test('S2 生成器：产物四件套齐全', () => {
   for (const rel of ['script.mjs', 'vwf-dsl.json', 'SKILL.md', 'meta.json']) {
     assert.ok(files.has(id + '/' + rel), '缺产物：' + rel);
   }
-  assert.equal(report.length, 2, '两个蓝图（dev-workflow-2-0 + default-workflow）都产出');
-  assert.equal(report[0].ok, true);
+  const ids = report.map((r) => r.id).sort();
+  assert.ok(ids.includes('construction-full-feature'), '正式内置建设模板应产出');
+  assert.ok(ids.includes('dev-workflow-2-0') && ids.includes('default-workflow'), '历史自定义种子应产出');
+  assert.ok(report.every((r) => r.ok), '全部蓝图生成成功');
 });
 
 test('S2 生成器：route 折叠识别（FOLDS 注入）', () => {
   const { files, report } = generateAll(tplDir);
-  assert.deepEqual(report[0].folds, ['route']);
+  const seeded = report.find((r) => r.id === 'dev-workflow-2-0');
+  assert.ok(seeded, '历史种子 dev-workflow-2-0 在报告中');
+  assert.deepEqual(seeded.folds, ['route']);
   const script = files.get('dev-workflow-2-0/script.mjs');
   assert.ok(script.includes('"route"'), '脚本应内嵌 FOLDS 含 route');
 });

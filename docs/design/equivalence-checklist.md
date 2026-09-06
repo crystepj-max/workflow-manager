@@ -8,7 +8,7 @@
 ## 核对对象
 
 - 旧：`dsh/workflow/dev-workflow-2.0.mjs`（手写，验收通过后**退役**；**已于 2026-08-20 删除**——neat-freak 收口执行收口步骤 4，入口由生成 skill 承接）
-- 新：`templates/dev-workflow-2-0.json` + 生成产物 `.generated/dev-workflow-2-0/script.mjs`（行为由运行时排练厅套件持续验证）
+- 新：`templates/custom-seeds/dev-workflow-2-0.json` + 生成产物 `.generated/dev-workflow-2-0/script.mjs`（行为由运行时排练厅套件持续验证）
 
 ## 8 维度核对清单
 

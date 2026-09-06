@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import validatorCore from './validate-core.cjs';
 const { validateBlueprint } = validatorCore;
-import { generateAll } from './generate.mjs';
+import { generateAll, listBlueprintJsonFiles } from './generate.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -22,17 +22,18 @@ let failures = 0;
 const fail = (msg) => { failures++; console.log('❌ ' + msg); };
 const pass = (msg) => console.log('✅ ' + msg);
 
-// ① 蓝图校验 + 等价断言
-const tpls = fs.readdirSync(TPL_DIR).filter((f) => f.endsWith('.json')).sort();
-console.log('—— ① 蓝图校验（' + tpls.length + ' 份）——');
-for (const f of tpls) {
-  const bp = JSON.parse(fs.readFileSync(path.join(TPL_DIR, f), 'utf8'));
+// ① 蓝图校验 + 等价断言（正式内置 + custom-seeds 历史种子）
+const tplAbs = listBlueprintJsonFiles(TPL_DIR);
+console.log('—— ① 蓝图校验（' + tplAbs.length + ' 份）——');
+for (const abs of tplAbs) {
+  const bp = JSON.parse(fs.readFileSync(abs, 'utf8'));
   const v = validateBlueprint(bp);
   if (!v.ok) {
     fail(bp.id + '：' + v.errors.map((e) => e.at + ' ' + e.message).join('；'));
     continue;
   }
-  pass(bp.id + '：结构合法（' + v.counts.nodes + ' 节点 / ' + v.counts.edges + ' 边）');
+  const kind = abs.includes(`${path.sep}custom-seeds${path.sep}`) ? '自定义种子' : '正式内置';
+  pass(bp.id + '（' + kind + '）：结构合法（' + v.counts.nodes + ' 节点 / ' + v.counts.edges + ' 边）');
   // 等价验证由步骤③的运行时排练厅套件承担（runtime.test.mjs / runtime-host.test.mjs，
   // 真实执行生成脚本断言返回体状态机——替代原字符串嗅探断言）
 }
