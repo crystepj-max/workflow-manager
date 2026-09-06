@@ -45,7 +45,7 @@
 | `output.completionPath` | 可选 | 完成类型字段路径（#92），语法同 `outcomePath`，允许二者相等。须有 schema、路径在内、叶子为 `string`；该节点必须有结构边到 `$end`。fanout 禁止。仅 `DONE` 时读 `results[node]` 写入 `completion` |
 | `output.files` | 可选 | 对象：`{ "<相对路径>": "json"\|"markdown"\|"text"\|"html"\|"canvas"\|"flowchart"\|"diagram" }`——本节点**应产出**的 Formal Artifact 声明式文件契约（D7，Q1 增补）；路径相对 `runDir/`；见 §6.4 |
 | `manualCheck` | 可选 | 布尔，默认 false；true = 人工门禁节点（vwf 编译为 `AWAITING_HUMAN_<id>` + resume 续跑；DSH 侧对应脚本返回 + 主会话裁决） |
-| `verifyBranch` | 可选 | 布尔，默认 false；DSH 增强（D4）：置 true 时 `output.schema.required` **必须**含 `verified_branch` 与 `verified_head`（可信度闸门，编译注入开工分支自检 + 结论硬校验）；vwf 侧 v1 忽略，**v1.1（候选一统一编译器）起按蓝图内容生效**——内置模板含本字段，vwf 入口同样硬校验 |
+| `verifyBranch` | 可选 | 布尔，默认 false；DSH 增强（D4）：置 true 时 `output.schema.required` **必须**含 `verified_branch` 与 `verified_head`（可信度闸门，编译注入开工分支自检 + 结论硬校验）；DSH 与 vwf 入口均按蓝图内容生效，且在 DSL 往返与保存重开中保留——编辑器暂无专门 UI，但 JSON 入口可使用 |
 
 ### 2.3 边
 
@@ -131,7 +131,7 @@
 
 ### 4.1 vwf 侧投影
 
-`projectToVwf(bp)`：字段映射为 vwf DSL 子集——`id`、`name = displayName`、`description`、`entry`、`control.maxRounds`；节点注入 `model = bindings.models[nodeId]`（无则省略）；保留 `output`（含 `outcomePath` / `completionPath`）/`manualCheck`；边**条件装配** `on` / `when` / `result` / `outcome` / `countRound`（无 `on` 的业务边不得伪造 `on`）；**业务规则字段（候选二 Q7 修订）：`onMaxRounds` / `heteroCheck` 进入 DSL（编辑器可配置）；`verifyBranch` 为节点级字段、编辑器无 UI，暂不进入**。产物可喂校验内核结构层（R-02/R-03）。
+`projectToVwf(bp)`：字段映射为 vwf DSL 子集——`id`、`name = displayName`、`description`、`entry`、`control.maxRounds`；节点注入 `model = bindings.models[nodeId]`（无则省略）；保留 `output`（含 `outcomePath` / `completionPath`）/`manualCheck`/`verifyBranch`；边**条件装配** `on` / `when` / `result` / `outcome` / `countRound`（无 `on` 的业务边不得伪造 `on`）；**业务规则字段（候选二 Q7 修订）：`onMaxRounds` / `heteroCheck` 进入 DSL（编辑器可配置）**。正向与逆向投影统一由 `scripts/projection-core.cjs` 提供，产物可喂校验内核结构层（R-02/R-03）。
 
 fanout 节点的 `kind` / `items` / `failOn` 必须双向透传；新模式边字段与 `completionPath` 同样必须双向透传。编辑器保存、重开不得丢失。Inspector Preset 选择器不在本契约（#75）。
 

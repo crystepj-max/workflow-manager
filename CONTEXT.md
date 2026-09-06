@@ -67,7 +67,8 @@
   `FAILED_ITEM_CAP` / `FAILED_AGENT_CAP`。
 - **业务规则前端可配置（候选二 Q7）**：编辑器工作流控制面板可配置——打回上限（1-9 系统上限钳制）、
   异源开关（heteroCheck）、超限行为（onMaxRounds return/auto-reschedule）；字段经 DSL 双向投影落盘蓝图，
-  校验与编译按蓝图内容生效。verifyBranch（节点级闸门）编辑器无 UI，列后续候选。
+  校验与编译按蓝图内容生效。verifyBranch（节点级闸门）已纳入 DSL 双向投影和保存往返；编辑器暂无专门 UI，
+  仍可通过蓝图 JSON 粘贴、校验与保存使用。
 - **受阻语义（Q12 修正）**：run 级无 BLOCKED；节点结果枚举（test `BLOCKED` / dev `blocked`）仍有效——
   dev 受阻 = `FAILED_AT_dev`（failure 边兜底），test 受阻 = 沿 failure 边打回开发。
 - **文件契约（候选五 C5）**：`output.files` 为权威声明；goal 与角色文件中**反引号引用**的交付物文件名
@@ -315,8 +316,6 @@
 - fanout 不参与 Business Outcome Routing / Completion Mapping。
 - 禁止 `outcomePath`、`completionPath`、`outcome` 边、`on: technical`。
 - `failOn` 仍走旧 failure（技术聚合失败）。探索业务结果写在 Evaluator。
-
-
 
 > AI 任务交付 Skill 集合（M1+M2启动+M3）：工程真源在本仓 `dsh/skills/` 与内置蓝图；  
 > 通用副本同步至 my-agent-skills。集合说明见 `docs/design/ai-task-define-delivery/skill-set.md`。

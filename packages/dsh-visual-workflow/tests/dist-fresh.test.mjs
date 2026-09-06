@@ -11,6 +11,7 @@ const pkgRoot = join(here, '..')
 const HOST = join(pkgRoot, 'src', 'host.js')
 const CLIENT = join(pkgRoot, 'src', 'client.js')
 const ROLE_LIBRARY = join(pkgRoot, '..', '..', 'scripts', 'role-library.cjs')
+const PROJECTION_CORE = join(pkgRoot, '..', '..', 'scripts', 'projection-core.cjs')
 const ROLE_MANIFEST = join(pkgRoot, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
 const STAMP = join(pkgRoot, 'dist', '.src-stamp.json')
 const DIST_HOST = join(pkgRoot, 'dist', 'host-entry.mjs')
@@ -20,12 +21,13 @@ function sha256(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex')
 }
 
-test('T2：dist/.src-stamp.json 与 src/host.js + src/client.js + 角色库内核/清单哈希一致', () => {
+test('T2：dist/.src-stamp.json 与 src/host.js + src/client.js + 共享内核/清单哈希一致', () => {
   assert.ok(existsSync(STAMP), '缺少 dist/.src-stamp.json：请运行 npm run build')
   const stamp = JSON.parse(readFileSync(STAMP, 'utf8'))
   assert.equal(stamp.host, sha256(HOST), 'host.js 已变更但 dist 未重建')
   assert.equal(stamp.client, sha256(CLIENT), 'client.js 已变更但 dist 未重建')
   assert.equal(stamp.roleLibrary, sha256(ROLE_LIBRARY), 'scripts/role-library.cjs 已变更但 dist 未重建')
+  assert.equal(stamp.projectionCore, sha256(PROJECTION_CORE), 'scripts/projection-core.cjs 已变更但 dist 未重建')
   assert.equal(stamp.roleManifest, sha256(ROLE_MANIFEST), 'dsh/roles/builtin-roles.json 已变更但 dist 未重建')
 })
 
