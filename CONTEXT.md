@@ -32,9 +32,10 @@
   原 `validate-blueprint.mjs` 与宿主 `validateDsl`/`heteroCheck`/拓扑推导/COND_RE 已删除。
   错误统一带坐标键 fieldKey（node:<id>:<field> / edge:<i>:<field> / control:<field> / heteroCheck /
   onMaxRounds）；**前端文案翻译 = 优化任务**（MAP Not yet specified）。
-- **布局拓扑（client）**：client 的 `successTopologyOrder`/`deriveEntryCandidates` 服务于画布分层、
-  入口徽标与保存前归一——UI 关注点，插件无法 import 共享文件（vm 沙箱），保留为独立实现；
-  入口唯一性的**权威判定**在校验内核（保存时宿主 sanitize 依内核拓扑重新归一）。
+- **布局拓扑（client）**：`client.js` 内的 `createVwfLayoutCore` 负责画布分层、路线、车道、
+  起点槽位和标签避让；`Canvas` 只把结果适配为 SVG 并处理交互。由于插件无法 import 共享文件
+  （vm 沙箱），布局内核保留在 client 文件内，并由 `tests/layout-core.test.mjs` 脱离 DOM 直测。
+  入口唯一性的**权威判定**仍在校验内核（保存时宿主 sanitize 依内核拓扑重新归一）。
 - **走通性（walkability）**：框架级保证——任何蓝图运行要么走通（DONE），要么以明确终态终止
   （`FAILED_AT_*` / `FAILED_MAX_ROUNDS` / `FAILED_ITEM_CAP` / `FAILED_AGENT_CAP` /
   `TECHNICAL_FAILURE` / `ENDED_NO_*` / `ERROR`），绝不卡死。

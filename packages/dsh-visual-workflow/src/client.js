@@ -508,30 +508,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     const h = React.createElement
 
-    // ── 图常量（对应 workflowGraph.ts）──────────────────────────────────────
-    const NODE_W = 220
-    const NODE_H = 66
-    const TERM_W = 140
-    const TERM_H = 44
-    const NODE_SEP = 88
-    const RANK_SEP = 116
-    const EDGE_LANE_GAP = 82
-    const EDGE_LANE_SEP = 38
-    const EDGE_ROUTE_STUB = 34
-    const EDGE_LABEL_W = 36
-    const EDGE_LABEL_H = 18
-    const MARGIN_X = 56
-    const MARGIN_Y = 64
-    const CANVAS_PAD = 24
-    const END_NODE = '$end'
-    const STATUS_COLOR = { running: 'var(--dsw-alias-brand-primary, #60a5fa)', pass: 'var(--dsw-alias-state-success-primary, #22c55e)', fail: 'var(--dsw-alias-state-error-primary, #ef4444)', human: 'var(--dsw-alias-state-warn-primary, #f59e0b)' }
-    const EDGE_OK = '#2563eb'
-    const EDGE_FAIL = 'var(--dsw-alias-state-error-primary, #f87171)'
-    const EDGE_SELECTED = '#111827'
-    const ACCENT = 'var(--dsw-alias-brand-primary, #60a5fa)'
-    const SCHEMA_DEBOUNCE_MS = 2000
-    const VALIDATE_DEBOUNCE_MS = 350
-
     function clone(x) { return JSON.parse(JSON.stringify(x)) }
 
     // 编辑器 JSON tab 同时接受蓝图落盘格式（displayName / bindings.models）与 DSL。
@@ -556,8 +532,27 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       return next
     }
 
+    // VWF_LAYOUT_CORE_BEGIN
+    // ── 图常量（对应 workflowGraph.ts）──────────────────────────────────────
+    const NODE_W = 220
+    const NODE_H = 66
+    const TERM_W = 140
+    const TERM_H = 44
+    const NODE_SEP = 88
+    const RANK_SEP = 116
+    const EDGE_LANE_GAP = 82
+    const EDGE_LANE_SEP = 38
+    const EDGE_ROUTE_STUB = 34
+    const EDGE_LABEL_W = 36
+    const EDGE_LABEL_H = 18
+    const MARGIN_X = 56
+    const MARGIN_Y = 64
+    const CANVAS_PAD = 24
+    const END_NODE = '$end'
+
     // ── 拓扑与布局（对应 workflowGraph.ts 的 successTopologyOrder /
     //    deriveEntryCandidateIds / computeBackwardLanes / layoutSuccessPath）──
+    function createVwfLayoutCore() {
     function hasOutcomeField(e) {
       return !!(e && e.outcome !== undefined && e.outcome !== null && e.outcome !== '')
     }
@@ -620,12 +615,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         incoming.add(e.to)
       })
       return (dsl.nodes || []).map(n => n && n.id).filter(id => Boolean(id) && !incoming.has(id))
-    }
-
-    function normalizeEntry(dsl) {
-      const candidates = deriveEntryCandidates(dsl)
-      const entry = candidates.length === 1 ? candidates[0] : (dsl.entry || '')
-      return dsl.entry === entry ? dsl : { ...dsl, entry }
     }
 
     function computeBackwardLanes(edges, order) {
@@ -718,7 +707,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           const list = parallelDirect.get(pk) || []
           const parallelIndex = list.indexOf(info)
           const parallelCount = list.length
-          routes.set(index, { kind, yStart, yEnd, routed: false, parallelIndex, parallelCount })
+          routes.set(index, {
+            kind,
+            yStart,
+            yEnd,
+            routed: false,
+            parallelIndex,
+            parallelCount,
+            labelX: (x1 + x2) / 2,
+            labelY: (yStart + yEnd) / 2,
+          })
           return
         }
         const lane = kind === 'up' ? laneCount.up++ : laneCount.down++
@@ -740,6 +738,42 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         })
       })
       return routes
+    }
+
+    function boxesOverlap(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+    }
+
+    function placeEdgeLabels(routes, pos) {
+      const placed = []
+      let maxLabelBottom = -Infinity
+      routes.forEach((route) => {
+        if (!route || !Number.isFinite(route.labelX) || !Number.isFinite(route.labelY)) return
+        let labelY = route.labelY
+        let labelBox = { x: route.labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
+        let attempts = 0
+        while (attempts++ < 10000) {
+          const hitsNode = Object.keys(pos).some(id => boxesOverlap(labelBox, pos[id]))
+          const hitsLabel = placed.some(rect => boxesOverlap(labelBox, rect))
+          if (!hitsNode && !hitsLabel) break
+          labelY += EDGE_LABEL_H
+          labelBox = { x: route.labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
+        }
+        if (attempts >= 10000) {
+          const occupiedBottom = [
+            ...Object.values(pos).map(rect => rect.y + rect.h),
+            ...placed.map(rect => rect.y + rect.h),
+          ].filter(Number.isFinite)
+          if (occupiedBottom.length) {
+            labelY = Math.max(labelY, Math.max(...occupiedBottom) + EDGE_LABEL_H)
+            labelBox = { x: route.labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
+          }
+        }
+        route.labelY = labelY
+        placed.push(labelBox)
+        maxLabelBottom = Math.max(maxLabelBottom, labelBox.y + labelBox.h)
+      })
+      return { maxLabelBottom }
     }
 
     // 分层布局：success/前向边最长路定 rank，rank 内按拓扑序纵向堆叠并整体居中
@@ -820,13 +854,33 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         routes.forEach(route => {
           route.yStart += routeShift
           route.yEnd += routeShift
-          if (route.routed) { route.laneY += routeShift; route.labelY += routeShift }
+          route.labelY += routeShift
+          if (route.routed) route.laneY += routeShift
         })
         maxY += routeShift
         maxRouteY += routeShift
       }
-      const contentBottom = Math.max(maxY, maxRouteY > -Infinity ? maxRouteY : maxY)
+      const labels = placeEdgeLabels(routes, pos)
+      const contentBottom = Math.max(maxY, maxRouteY > -Infinity ? maxRouteY : maxY, labels.maxLabelBottom)
       return { pos, W: maxX + MARGIN_X, H: contentBottom + MARGIN_Y, lanes, routes, order }
+    }
+
+      return { deriveEntryCandidates, layoutGraph }
+    }
+    // VWF_LAYOUT_CORE_END
+    const layoutCore = createVwfLayoutCore()
+    const STATUS_COLOR = { running: 'var(--dsw-alias-brand-primary, #60a5fa)', pass: 'var(--dsw-alias-state-success-primary, #22c55e)', fail: 'var(--dsw-alias-state-error-primary, #ef4444)', human: 'var(--dsw-alias-state-warn-primary, #f59e0b)' }
+    const EDGE_OK = '#2563eb'
+    const EDGE_FAIL = 'var(--dsw-alias-state-error-primary, #f87171)'
+    const EDGE_SELECTED = '#111827'
+    const ACCENT = 'var(--dsw-alias-brand-primary, #60a5fa)'
+    const SCHEMA_DEBOUNCE_MS = 2000
+    const VALIDATE_DEBOUNCE_MS = 350
+
+    function normalizeEntry(dsl) {
+      const candidates = layoutCore.deriveEntryCandidates(dsl)
+      const entry = candidates.length === 1 ? candidates[0] : (dsl.entry || '')
+      return dsl.entry === entry ? dsl : { ...dsl, entry }
     }
 
     function uniqueNodeId(dsl, base) {
@@ -896,7 +950,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const [menu, setMenu] = React.useState(null) // {x, y}
       const panRef = React.useRef(null)
       const lay = React.useMemo(
-        () => layoutGraph(dsl, props.visibleTerminals || []),
+        () => layoutCore.layoutGraph(dsl, props.visibleTerminals || []),
         [JSON.stringify({ entry: dsl.entry || '', n: (dsl.nodes || []).map(n => n.id), e: (dsl.edges || []).map(e => [e.from, e.to, e.on, e.outcome, e.countRound]), v: props.visibleTerminals || [] })]
       )
       const pos = lay.pos
@@ -1070,7 +1124,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       // ── 边 ──
       const edgeEls = []
       const labelEls = []
-      const labelRects = []
       ;(dsl.edges || []).forEach((e, idx) => {
         const a = pos[e.from]
         const b = pos[e.to]
@@ -1079,20 +1132,23 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         const y1 = a.y + a.h / 2
         const x2 = b.x
         const y2 = b.y + b.h / 2
-        const route = lay.routes.get(idx) || { kind: 'direct', yStart: y1, yEnd: y2, routed: false }
+        const route = lay.routes.get(idx) || {
+          kind: 'direct',
+          yStart: y1,
+          yEnd: y2,
+          routed: false,
+          labelX: (x1 + x2) / 2,
+          labelY: (y1 + y2) / 2,
+        }
         const isFail = e.on === 'failure'
         const color = isFail ? EDGE_FAIL : EDGE_OK
         const selected = props.selectedEdge === idx
         let d
-        let labelX
-        let labelY
         if (route.routed) {
           const so = route.channelStart
           const to = route.channelEnd
           const laneY = route.laneY
           d = 'M ' + x1 + ' ' + route.yStart + ' L ' + so + ' ' + route.yStart + ' L ' + so + ' ' + laneY + ' L ' + to + ' ' + laneY + ' L ' + to + ' ' + route.yEnd + ' L ' + x2 + ' ' + route.yEnd
-          labelX = route.labelX
-          labelY = route.labelY
         } else {
           const mx = x1 + (x2 - x1) / 2
           const sy = route.yStart
@@ -1102,21 +1158,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             ? (route.parallelIndex - (route.parallelCount - 1) / 2) * 3
             : 0
           d = 'M ' + x1 + ' ' + sy + ' C ' + (mx + off) + ' ' + sy + ', ' + (mx + off) + ' ' + ey + ', ' + x2 + ' ' + ey
-          labelX = mx
-          labelY = (sy + ey) / 2
         }
-        // 标签按实际短文案（成功/失败）估算为固定小矩形；若与节点或已有标签相碰，
-        // 沿垂直方向持续让位。节点/既有标签都是有限集合，不设固定次数上限。
-        let labelBox = { x: labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
-        const boxesOverlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
-        while (true) {
-          const hitsNode = Object.keys(pos).some(id => boxesOverlap(labelBox, pos[id]))
-          const hitsLabel = labelRects.some(rect => boxesOverlap(labelBox, rect))
-          if (!hitsNode && !hitsLabel) break
-          labelY += EDGE_LABEL_H
-          labelBox = { x: labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
-        }
-        labelRects.push(labelBox)
+        const labelX = route.labelX
+        const labelY = route.labelY
         edgeEls.push(h('path', {
           key: 'e' + idx, d, fill: 'none',
           className: 'vwf-edge-flow',
@@ -2040,7 +2084,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
       const selectedNode = selectedNodeId ? (wf.nodes || []).find(n => n.id === selectedNodeId) || null : null
       const selectedEdge = selectedEdgeIndex !== null ? (wf.edges || [])[selectedEdgeIndex] || null : null
-      const entryCandidates = React.useMemo(() => deriveEntryCandidates(wf), [wf])
+      const entryCandidates = React.useMemo(() => layoutCore.deriveEntryCandidates(wf), [wf])
       // 编辑已有模板且 ID 已修改 → 保存置灰，只能另存为（currentId=原模板 id）
       const idChanged = props.currentId != null && wf.id !== props.currentId
 

@@ -56,6 +56,23 @@ vwf 插件是 **Cordis 动态双半插件**（plain JS、无 import/JSX，`cordi
 - 内核缺失、损坏或接口不完整时 Host fail-closed，返回明确的投影内核错误。
 - 正式包的 `.src-stamp.json` 对该内核做哈希保护；重建由 `packages/dsh-visual-workflow/scripts/build-bundle.mjs` 完成。
 
+### 1.3 客户端布局内核（候选三）
+
+`packages/dsh-visual-workflow/src/client.js` 内的 `createVwfLayoutCore` 收拢画布布局的纯几何计算：
+入口候选、主链分层、回退车道、边路线、起点槽位、额外终点和标签避让。它通过
+`layoutCore.layoutGraph(dsl, extraTerminals)` 返回节点位置、画布尺寸、车道和完整路线；
+每条可渲染路线同时提供已经避开节点与既有标签的 `labelX` / `labelY`。
+
+- `Canvas` 不再维护 `labelRects` 或标签让位循环，只负责把路线适配为 SVG 路径、绘制文案并处理
+  点选、拖线、缩放、平移和定位问题节点。
+- `deriveEntryCandidates` 与 `scripts/validate-core.cjs` 在有效图纸上保持对拍；正式结构裁决仍以
+  校验内核为准，布局内核只服务可视化入口徽标和编辑器归一。
+- `tests/helpers/load-client-layout.mjs` 通过明确的源码接缝加载内核，
+  `tests/layout-core.test.mjs` 在无 DOM / React / DSH 服务条件下覆盖分层、路线、标签避让、
+  自环脏数据、额外终点、未知端点和输入不变。
+- 动态开发态与正式静态包继续使用同一份 `src/client.js`；构建后必须执行
+  `npm run check:dist`，真实浏览器中的视觉验收仍不能由直测替代。
+
 模板存储为**双根目录**（单一事实源 = 蓝图，见 `docs/design/blueprint-schema.md`）：
 
 | 根 | 路径 | 内容 | 来源 |
