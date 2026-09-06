@@ -44,6 +44,7 @@ function plantOfficialBuiltin(fs) {
 
 // 统一校验内核（候选二 T-IMP-13）：宿主经 fs 读源码求值——测试假 fs 需种入真实内核
 const validatorCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
+const projectionCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'projection-core.cjs'), 'utf8')
 
 function seedFs(extra = {}) {
   const seed = {
@@ -128,6 +129,8 @@ test('AC-2：历史模板从 .generated/ 目录加载为自定义（host.js 无�
     assert.ok(s.script.includes('const MAX_ROUNDS = 9'))
   }
 })
+
+
 
 test('内置根优先取发起 agent 会话 cwd（agentless 兜底 sandboxPolicy.workspaceRoot）', async () => {
   // agents 注入 currentInitiator → session.header.cwd = 会话工作区
@@ -1368,6 +1371,55 @@ test('动态插件：从插件 dist/validate-core.cjs 加载校验内核', async
   }
 })
 
+test('动态插件：从插件 dist/projection-core.cjs 加载投影内核', async () => {
+  const PLUGIN = '/plugin/projection'
+  const fs = makeFs({
+    [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+    [PLUGIN + '/dist/projection-core.cjs']: projectionCoreSrc,
+  })
+  const { handlers } = loadHost({
+    fs,
+    subprocess: makeSubprocess({ fs }),
+    pluginRoot: PLUGIN,
+    projectionCoreSeed: false,
+    roleCoreSeed: false,
+    sandboxPolicy: { workspaceRoot: '', resolve: () => ({ mode: 'danger-full-access', workspaceRoot: '' }) },
+  })
+  const v = await call(handlers, 'vwf.validate', { dsl: baseDsl() })
+  assert.equal(v.ok, true, JSON.stringify(v.errors))
+})
+
+test('动态插件：投影内核缺失时校验明确失败，不回退到宿主旧实现', async () => {
+  const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
+  const { handlers } = loadHost({
+    fs,
+    subprocess: makeSubprocess({ fs }),
+    projectionCoreSeed: false,
+    roleCoreSeed: false,
+    sandboxPolicy: { workspaceRoot: '', resolve: () => ({ mode: 'danger-full-access', workspaceRoot: '' }) },
+  })
+  const v = await call(handlers, 'vwf.validate', { dsl: baseDsl() })
+  assert.equal(v.ok, false)
+  assert.match(v.errors[0].message, /投影内核不可用/)
+})
+
+test('动态插件：投影内核接口不完整时校验明确失败', async () => {
+  const fs = makeFs({
+    [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+    [REPO + '/scripts/projection-core.cjs']: 'module.exports = { projectToVwf() { return {} } }',
+  })
+  const { handlers } = loadHost({
+    fs,
+    subprocess: makeSubprocess({ fs }),
+    projectionCoreSeed: false,
+    roleCoreSeed: false,
+    sandboxPolicy: { workspaceRoot: '', resolve: () => ({ mode: 'danger-full-access', workspaceRoot: '' }) },
+  })
+  const v = await call(handlers, 'vwf.validate', { dsl: baseDsl() })
+  assert.equal(v.ok, false)
+  assert.match(v.errors[0].message, /投影内核不可用/)
+})
+
 test('动态插件：repo-root 指针让浏览器保存使用仓库生成器', async () => {
   const previousRoot = globalThis.__VWF_REPO_ROOT__
   const previousAlias = globalThis.__VWF_REPO__
@@ -2072,4 +2124,3 @@ test('#93 DSH_HOME：明确 process.env.DSH_HOME 直接优先，不能被成功 
   const probe = sub._calls.find((c) => c.join(' ').includes('process.env.DSH_HOME') && c.join(' ').includes('.homedir'))
   assert.equal(probe, undefined, '明确 DSH_HOME 存在时不应再执行可能回落产品 ~/.dsh 的 probe')
 })
-
