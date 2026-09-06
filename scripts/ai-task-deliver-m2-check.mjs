@@ -28,17 +28,22 @@ ok(/定义外置|已定义/.test(m2), 'M2 须声明定义外置/已定义开工'
 read('docs/design/ai-task-define-delivery/preflight-check.md')
 read('docs/design/ai-task-define-delivery/uat-card-template.md')
 read('docs/design/ai-task-define-delivery/construction-bridge-m2.md')
+read('docs/design/ai-task-define-delivery/task-workspace-env.md')
+
+ok(fs.existsSync(path.join(root, 'scripts/ai-task-workspace-env.mjs')), '缺少 ai-task-workspace-env.mjs')
 
 const skill = read('dsh/skills/construction-bootstrap/SKILL.md')
 ok(/实施前检查/.test(skill), '建设 Skill 须含实施前检查')
 ok(/已定义/.test(skill), '建设 Skill 须从已定义开工')
 ok(/conditional_pass|有条件通过/.test(skill), '建设 Skill 须含有条件通过')
 ok(/auto_rework_limit\s*=\s*3|上限\*\*3\*\*|返工上限\*\*3\*\*/.test(skill), '建设 Skill 须写明返工 3')
+ok(/ai-task-workspace-env|施工环境/.test(skill), '建设 Skill 须提及施工环境/工作区解析')
 ok(!/本 Profile 主链尚未跳过 requirements/.test(skill), '不得再声称主链尚未跳过 requirements')
 
 const runbook = read('dsh/skills/construction-bootstrap/runbook.md')
 ok(/实施前检查/.test(runbook) && /UAT/.test(runbook), 'runbook 须含实施前检查与 UAT')
 ok(/conditional_pass/.test(runbook), 'runbook 须含 conditional_pass')
+ok(/workspace-env|施工环境/.test(runbook), 'runbook 须含施工环境解析')
 ok(/user_accepted/.test(runbook) === false || /禁止.*user_accepted|废弃.*user_accepted/.test(runbook), 'runbook 不得仍把 user_accepted 当正式路径')
 
 const schema = read('docs/design/construction-workflow/handoff.schema.json')

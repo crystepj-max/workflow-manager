@@ -1,7 +1,7 @@
 # 实施前检查清单（M2）
 
 > 交付从「已定义」开工前的硬门禁。权威流程见 `single-task-delivery-m2.md`。  
-> 机械检查：`node scripts/ai-task-preflight-check.mjs <issue-basics.md> <task-spec.md> [--run-baseline Vn]`
+> 机械检查：`node scripts/ai-task-preflight-check.mjs <issue-basics.md> <task-spec.md> [--run-baseline Vn] [--env-store <dir>]`
 
 ## 检查表
 
@@ -11,7 +11,10 @@
 - [ ] 任务规格位置指向可读的本地规格文件
 - [ ] 本地规格版本号与 Issue「需求基线版本」一致
 - [ ] （若已启动 Run）Run 绑定版本与 Issue 一致
-- [ ] 前置依赖 = **无**（V0.1；有依赖则阻断自动交付）
+- [ ] 前置依赖已填写（`无` 或具体任务标识）
+- [ ] 施工环境组已填写
+- [ ] 施工环境角色 = **独立** 或 **成员**
+- [ ] 若角色=成员：环境组已建立，且前置依赖任务均已完成（串行）
 - [ ] 规格中未决产品事项 = **0** / Definition Check 已通过声明存在
 - [ ] 优先级 ∈ {P0, P1, P2}
 - [ ] 定义时间已填写

@@ -16,6 +16,12 @@ cp -R "$SRC/dsh/skills/construction-bootstrap" "$SKILL_DIR"
 mkdir -p "$SKILL_DIR/assets"
 cp "$SRC"/scripts/cwf-*.mjs "$SKILL_DIR/assets/"
 cp "$SRC/scripts/ai-task-preflight-check.mjs" "$SKILL_DIR/assets/"
+cp "$SRC/scripts/ai-task-workspace-env.mjs" "$SKILL_DIR/assets/"
+cp "$SRC/scripts/workspace-isolation.mjs" "$SKILL_DIR/assets/"
+# workspace-isolation 依赖的同仓模块（缺一不可）
+for dep in cwf-checkpoint.mjs formal-records.mjs cwf-validate.mjs; do
+  if [[ -f "$SRC/scripts/$dep" ]]; then cp "$SRC/scripts/$dep" "$SKILL_DIR/assets/"; fi
+done
 cp "$SRC/docs/design/construction-workflow/handoff.schema.json" "$SKILL_DIR/assets/"
 cp "$SRC/docs/design/construction-workflow-portable-contract.md" "$SKILL_DIR/assets/"
 # M2 产品主链与清单（随 skill 可读）
@@ -24,6 +30,7 @@ cp "$SRC/docs/design/ai-task-define-delivery/single-task-delivery-m2.md" "$SKILL
 cp "$SRC/docs/design/ai-task-define-delivery/public-task-contract.md" "$SKILL_DIR/assets/ai-task-define-delivery/"
 cp "$SRC/docs/design/ai-task-define-delivery/preflight-check.md" "$SKILL_DIR/assets/ai-task-define-delivery/"
 cp "$SRC/docs/design/ai-task-define-delivery/uat-card-template.md" "$SKILL_DIR/assets/ai-task-define-delivery/"
+cp "$SRC/docs/design/ai-task-define-delivery/task-workspace-env.md" "$SKILL_DIR/assets/ai-task-define-delivery/"
 
 echo "installed -> $SKILL_DIR"
 find "$SKILL_DIR" -type f | sort

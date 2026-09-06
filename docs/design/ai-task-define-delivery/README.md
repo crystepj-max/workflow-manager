@@ -8,6 +8,7 @@
 | [definition-check.md](./definition-check.md) | Definition Check 清单 | M1 |
 | [baseline-change-v1-v2.md](./baseline-change-v1-v2.md) | 实质变更升版流程 | M1 |
 | [single-task-delivery-m2.md](./single-task-delivery-m2.md) | 单任务交付产品主链（定义外置） | M2 |
+| [task-workspace-env.md](./task-workspace-env.md) | 单任务分支/工作区：关联沿用、串行、全过再清理 | M2 |
 | [preflight-check.md](./preflight-check.md) | 实施前检查清单 | M2 |
 | [uat-card-template.md](./uat-card-template.md) | UAT 验收卡模板 | M2 |
 | [construction-bridge-m2.md](./construction-bridge-m2.md) | M2 已接线说明 | M2 |

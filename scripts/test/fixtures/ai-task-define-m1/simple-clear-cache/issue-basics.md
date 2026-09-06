@@ -10,6 +10,8 @@
 | 当前状态 | 已定义 |
 | 需求基线版本 | V1 |
 | 前置依赖 | 无 |
+| 施工环境组 | simple-clear-cache |
+| 施工环境角色 | 独立 |
 | 无人值守许可 | 允许 |
 | 任务规格位置 | `.scratch/simple-clear-cache/task-spec-V1.md` |
 | 定义时间 | 2026-09-05T10:00:00Z |
