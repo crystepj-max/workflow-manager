@@ -44,6 +44,18 @@ vwf 插件是 **Cordis 动态双半插件**（plain JS、无 import/JSX，`cordi
 - 测试：host.test.mjs 34+3 用例（含 Q7 闭环：开关/上限往返、上限 10 拒、坐标保真）+ 内核侧
   maxRounds 边界 + COND_RE 一致性断言（内核 vs 生成脚本内嵌）。
 
+### 1.2 统一投影内核（候选一）
+
+蓝图与 vwf DSL 的正向、逆向字段映射统一由 `scripts/projection-core.cjs` 提供。该文件只做
+纯对象转换，不访问文件、不校验业务规则、不解析路径；生成器直接调用，Host 则经受控文件读取
+加载并在本次激活内缓存。这样模板列表、JSON 粘贴、校验、保存和临时编译使用同一份字段白名单，
+`verifyBranch`、模型绑定、`outcome` / `countRound` 等字段不会因入口不同而消失。
+
+- 动态开发态优先当前仓库源码；无会话 cwd 时使用 DSH Home 副本或仓库指针。
+- 正式静态包优先 `dist/projection-core.cjs`，不扫描任意工作区替代正式资产。
+- 内核缺失、损坏或接口不完整时 Host fail-closed，返回明确的投影内核错误。
+- 正式包的 `.src-stamp.json` 对该内核做哈希保护；重建由 `packages/dsh-visual-workflow/scripts/build-bundle.mjs` 完成。
+
 模板存储为**双根目录**（单一事实源 = 蓝图，见 `docs/design/blueprint-schema.md`）：
 
 | 根 | 路径 | 内容 | 来源 |
@@ -51,7 +63,7 @@ vwf 插件是 **Cordis 动态双半插件**（plain JS、无 import/JSX，`cordi
 | 内置 | `<repo>/.generated/<id>/vwf-dsl.json` | vwf DSL（生成物） | `npm run generate`（CI 先跑） |
 | 用户 | `~/.dsh/visual-workflow/templates/<id>.json` | 蓝图 JSON | `vwf.workflows.save` 落盘 |
 
-- `list` 合并双根（`builtin` 标志 + id 字母序）；用户条目经内联 `projectToVwf` 投影为 vwf DSL。
+- `list` 合并双根（`builtin` 标志 + id 字母序）；用户条目经 `scripts/projection-core.cjs` 投影为 vwf DSL。
 - **save 即闭环**：校验（统一校验管道，结构+异源+模型必填）→ 撞名拒绝 → 逆投影蓝图落盘 →
   spawn 生成器 `node scripts/generate.mjs user <蓝图> ~/.dsh/skills` 同步自包含 skill 三件套。
   **原子性（候选四 T-IMP-14）**：skill 写盘 = 暂存目录 + 同父目录 rename 原子换入——

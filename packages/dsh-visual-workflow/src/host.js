@@ -25,7 +25,7 @@
 //    .generated 出现在模板库，但 builtin=false，可保存覆盖、可删除（删除后写
 //    ~/.dsh/visual-workflow/removed/<id> 删除标记，避免生成物再次出现）。
 //  - list 合并双根（builtin 标志 + id 字母序），用户条目 dsl = 蓝图→vwf DSL 投影
-//    （内联 projectToVwf，与 scripts/generate.mjs 行为一致）；用户覆盖优先于同 id 生成物。
+//    （经 scripts/projection-core.cjs 投影，与生成器共享同一份字段契约）；用户覆盖优先于同 id 生成物。
 //  - save：结构+异源校验 → 撞名拒绝（正式内置只读 / 当前编辑 id ≠ 目标 → 改名提示）→
 //    逆投影蓝图落盘 → spawn 生成器 user 子命令同步自包含 skill 到 ~/.dsh/skills/<id>/
 //    （save 即闭环；生成失败回滚落盘，保持原子）。save 新增参数 currentId。
@@ -333,6 +333,7 @@ return {
     // 与 apply 时序解耦的异步同步：不阻塞 apply，失败仅在终端日志留痕
     syncBuiltins().catch((e) => console.log('[vwf] 内置模板同步失败：' + String((e && e.message) || e)))
     syncValidatorCore().catch((e) => console.log('[vwf] 校验内核同步失败：' + String((e && e.message) || e)))
+    syncProjectionCore().catch((e) => console.log('[vwf] 投影内核同步失败：' + String((e && e.message) || e)))
     syncRoleAssets().catch((e) => console.log('[vwf] 角色库内核同步失败：' + String((e && e.message) || e)))
 
     // 历史两套已按 #82 迁为 Custom Workflow：蓝图真源在 templates/custom-seeds/，
@@ -458,89 +459,150 @@ return {
       return out
     }
 
-    // ── 蓝图 ↔ vwf DSL 投影（与 scripts/generate.mjs projectToVwf 行为一致；
-    // RPC 走 lossless-JSON 守卫，undefined 字段必须剔除，故条件装配）────────
-    function projectToVwf(bp) {
-      const models = (bp.bindings && bp.bindings.models) || {}
-      const out = {
-        id: bp.id,
-        name: bp.displayName,
-        description: bp.description || '',
-        entry: bp.entry,
-        control: { maxRounds: (bp.control && bp.control.maxRounds) || 9 },
-        nodes: bp.nodes.map((n) => {
-          const o = { id: n.id, profile: n.profile, label: n.label || n.id }
-          // lossless-JSON 守卫：undefined 键会被拒绝；与 generate.mjs 的
-          // JSON.stringify（剥除 undefined/null）语义保持逐键一致
-          if (n.goal !== undefined && n.goal !== null) o.goal = n.goal
-          if (n.kind !== undefined) o.kind = n.kind
-          if (n.items !== undefined) o.items = n.items
-          if (n.failOn !== undefined) o.failOn = n.failOn
-          if (n.output) o.output = n.output
-          if (n.manualCheck) o.manualCheck = true
-          if (n.verifyBranch) o.verifyBranch = true
-          if (models[n.id]) o.model = models[n.id]
-          return o
-        }),
-        edges: bp.edges.map((e) => {
-          const o = { from: e.from, to: e.to }
-          if (e.on !== undefined) o.on = e.on
-          if (e.when !== undefined) o.when = e.when
-          if (e.result !== undefined) o.result = e.result
-          if (e.outcome !== undefined) o.outcome = e.outcome
-          if (e.countRound !== undefined) o.countRound = e.countRound
-          return o
-        }),
-      }
-      // 业务规则字段（候选二 Q7，与 generate.mjs projectToVwf 一致）
-      if (bp.onMaxRounds !== undefined) out.onMaxRounds = bp.onMaxRounds
-      if (bp.heteroCheck) out.heteroCheck = true
-      if (bp.bundleRoles) out.bundleRoles = true
-      if (bp.humanDecision !== undefined) out.humanDecision = bp.humanDecision
-      return out
-    }
-    // 逆投影（save 落盘格式：蓝图 JSON；候选二 Q7：业务规则字段 onMaxRounds/
-    // heteroCheck 已在 DSL 中（前端可配置），原样带回蓝图；verifyBranch 无编辑器
-    // UI，但 JSON 粘贴/保存必须往返，否则建设蓝图的可信度闸门会在另存后丢失）
-    function projectToBlueprint(dsl) {
-      const models = {}
-      const nodes = (dsl.nodes || []).map((n) => {
-        const o = { id: n.id, profile: n.profile, label: n.label || n.id, goal: n.goal || '' }
-        if (n.kind !== undefined) o.kind = n.kind
-        if (n.items !== undefined) o.items = n.items
-        if (n.failOn !== undefined) o.failOn = n.failOn
-        if (n.output) o.output = n.output
-        if (n.manualCheck) o.manualCheck = true
-        if (n.verifyBranch) o.verifyBranch = true
-        if (n.model && typeof n.model === 'object' && n.model.provider && n.model.model) {
-          models[n.id] = { provider: n.model.provider, model: n.model.model }
+    // ── 蓝图 ↔ vwf DSL 投影内核加载 ─────────────────────────────────────────
+    // 动态闭包不能 import/require：从受信候选路径读取 CJS 源码，在本次插件激活内
+    // 求值并缓存。投影内核缺失时只返回明确错误，禁止回退到已经删除的内联实现。
+    let projectionCorePromise = null
+    let projectionCoreValue = null
+    function addProjectionRoot(paths, seen, root) {
+      let dir = root
+      for (let i = 0; i < 8 && dir; i++) {
+        const file = dir + '/scripts/projection-core.cjs'
+        if (!seen.has(file)) {
+          seen.add(file)
+          paths.push(file)
         }
-        return o
-      })
-      const bp = {
-        id: dsl.id,
-        // 空/空白名称原样保留（displayName 必填校验会拒绝），仅缺省（undefined）兜底 id
-        displayName: typeof dsl.name === 'string' ? dsl.name : (dsl.id || ''),
-        entry: dsl.entry,
-        nodes: nodes,
-        edges: (dsl.edges || []).map((e) => {
-          const o = { from: e.from, to: e.to }
-          if (e.on !== undefined) o.on = e.on
-          if (e.when !== undefined) o.when = e.when
-          if (e.result !== undefined) o.result = e.result
-          if (e.outcome !== undefined) o.outcome = e.outcome
-          if (e.countRound !== undefined) o.countRound = e.countRound
-          return o
-        }),
+        dir = parentDir(dir)
       }
-      if (dsl.description) bp.description = dsl.description
-      if (dsl.control && dsl.control.maxRounds != null) bp.control = { maxRounds: dsl.control.maxRounds }
-      if (dsl.onMaxRounds !== undefined) bp.onMaxRounds = dsl.onMaxRounds
-      if (dsl.heteroCheck) bp.heteroCheck = true
-      if (dsl.bundleRoles) bp.bundleRoles = true
-      if (dsl.humanDecision !== undefined) bp.humanDecision = dsl.humanDecision
-      if (Object.keys(models).length) bp.bindings = { models: models }
-      return bp
+    }
+    async function projectionCoreCandidatePaths() {
+      const paths = []
+      const seen = new Set()
+      function addFile(file) {
+        if (!file || seen.has(file)) return
+        seen.add(file)
+        paths.push(file)
+      }
+      const pluginRoot = (typeof __VWF_PLUGIN_ROOT__ === 'string' && __VWF_PLUGIN_ROOT__) ? __VWF_PLUGIN_ROOT__ : null
+      // 正式静态模式优先可信 dist，不能用任意会话工作区的旧源码替代正式资产。
+      if (!isDynamicHost && pluginRoot) addFile(pluginRoot + '/dist/projection-core.cjs')
+      // 动态开发模式优先当前仓库，保证源码修改在当前激活中生效。
+      if (isDynamicHost) {
+        addProjectionRoot(paths, seen, injectedRepoRoot())
+        addProjectionRoot(paths, seen, repoRoot())
+      } else if (!pluginRoot) {
+        // 源码静态测试形态（无正式 pluginRoot）仍可从当前仓库加载。
+        addProjectionRoot(paths, seen, repoRoot())
+      }
+      const home = await dshHome()
+      if (home) addFile(home + '/visual-workflow/projection-core.cjs')
+      // Home 副本或插件 dist 是动态浏览器调用的兜底来源。
+      if (isDynamicHost) {
+        addProjectionRoot(paths, seen, await homeRepoPointer())
+        if (pluginRoot) addFile(pluginRoot + '/dist/projection-core.cjs')
+      }
+      return paths
+    }
+    function evalProjectionCore(src) {
+      const module = { exports: {} }
+      try { new Function('module', 'exports', src)(module, module.exports) } catch (e) { return null }
+      const ex = module.exports
+      if (!ex || typeof ex.projectToVwf !== 'function' || typeof ex.projectToBlueprint !== 'function') return null
+      return ex
+    }
+    async function syncProjectionCore() {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        fs = ctx.get('fs')
+        subprocess = ctx.get('subprocess')
+        if (fs !== undefined) break
+        try {
+          await new Promise((r) => setTimeout(r, 100 * (attempt + 1)))
+        } catch (e) { break }
+      }
+      if (fs === undefined) return
+      const home = await dshHome()
+      if (!home) return
+      const policy = writePolicy()
+      const dest = home + '/visual-workflow/projection-core.cjs'
+      const pointer = home + '/visual-workflow/repo-root'
+      const files = await projectionCoreCandidatePaths()
+      for (const file of files) {
+        if (file === dest) continue
+        try {
+          const target = await fs.resolve(file)
+          const info = await fs.stat(target)
+          if (!info || info.type !== 'file') continue
+          const src = await fs.readText(target)
+          if (!evalProjectionCore(src)) continue
+          await fs.writeText(await fs.resolve(dest), src, undefined, undefined, policy)
+          if (file.indexOf('/scripts/projection-core.cjs') !== -1) {
+            const root = file.slice(0, file.length - '/scripts/projection-core.cjs'.length)
+            if (root) {
+              try { await fs.writeText(await fs.resolve(pointer), root + '\n', undefined, undefined, policy) } catch (e) { /* 指针可选 */ }
+            }
+          }
+          return
+        } catch (e) { /* 尝试下一个候选 */ }
+      }
+    }
+    async function readProjectionCoreViaNode() {
+      if (subprocess === undefined) return null
+      const probe = [
+        "const fs=require('fs');const path=require('path');const os=require('os');",
+        "function tryFile(p){try{if(!p)return false;if(!fs.existsSync(p)||!fs.statSync(p).isFile())return false;const s=fs.readFileSync(p,'utf8');if(s.indexOf('function projectToVwf')<0||s.indexOf('function projectToBlueprint')<0)return false;process.stdout.write(s);return true}catch(e){return false}}",
+        "function walk(d){for(let i=0;i<8&&d&&d!=='/';i++){if(tryFile(path.join(d,'scripts','projection-core.cjs')))return true;const n=path.dirname(d);if(n===d)break;d=n}return false}",
+        "const homes=[];if(process.env.DSH_HOME)homes.push(process.env.DSH_HOME);",
+        "try{homes.push(path.join(os.homedir(),'.dsh-workflow-dev'))}catch(e){}",
+        "for(const h of homes){if(tryFile(path.join(h,'visual-workflow','projection-core.cjs')))process.exit(0)}",
+        "const cands=[];try{cands.push(process.cwd())}catch(e){};if(process.env.PWD)cands.push(process.env.PWD);",
+        "for(const c of cands){if(walk(c))process.exit(0)}process.exit(2)",
+      ].join('')
+      const home = await dshHome()
+      const r = await runNode(['-e', probe], { cwd: home || '/' })
+      if (r.ok && r.stdout) return r.stdout
+      return null
+    }
+    function projectionUnavailable() {
+      return new Error('投影内核不可用：缺少或无法加载 scripts/projection-core.cjs（请确认插件资产完整）')
+    }
+    function projectToVwf(bp) {
+      if (!projectionCoreValue) throw projectionUnavailable()
+      return projectionCoreValue.projectToVwf(bp)
+    }
+    function projectToBlueprint(dsl) {
+      if (!projectionCoreValue) throw projectionUnavailable()
+      return projectionCoreValue.projectToBlueprint(dsl)
+    }
+    function loadProjectionCore() {
+      if (projectionCorePromise) return projectionCorePromise
+      const pending = (async () => {
+        if (fs === undefined) fs = ctx.get('fs')
+        if (subprocess === undefined) subprocess = ctx.get('subprocess')
+        if (fs !== undefined) {
+          const files = await projectionCoreCandidatePaths()
+          for (const file of files) {
+            try {
+              const target = await fs.resolve(file)
+              const info = await fs.stat(target)
+              if (!info || info.type !== 'file') continue
+              const core = evalProjectionCore(await fs.readText(target))
+              if (core) return core
+            } catch (e) { /* 尝试下一个路径 */ }
+          }
+        }
+        if (!isDynamicHost) return null
+        const spawned = await readProjectionCoreViaNode()
+        return spawned ? evalProjectionCore(spawned) : null
+      })()
+      projectionCorePromise = pending.then((core) => {
+        if (!core) projectionCorePromise = null
+        else projectionCoreValue = core
+        return core
+      }, (error) => {
+        projectionCorePromise = null
+        throw error
+      })
+      return projectionCorePromise
     }
 
     // JSON tab / 保存可能直接贴蓝图落盘格式（displayName、bindings.models）。
@@ -759,6 +821,9 @@ return {
         // lossless-JSON 守卫：所有键都必须有值，sanitized 早退时显式给 null
         return { ok: false, errors: [{ at: '$', message: '校验内核不可用：缺少 scripts/validate-core.cjs（请确认仓库完整）' }], fieldErrors: {}, sanitized: null, warnings: [] }
       }
+      if (!await loadProjectionCore()) {
+        return { ok: false, errors: [{ at: '$', message: projectionUnavailable().message }], fieldErrors: {}, sanitized: null, warnings: [] }
+      }
       dsl = ingestToDsl(dsl)
       if (!dsl || typeof dsl !== 'object') {
         return { ok: false, errors: [{ at: '$', message: 'dsl 必须是对象' }], fieldErrors: {}, sanitized: null, warnings: [] }
@@ -838,6 +903,7 @@ return {
           return out
         }
       }
+      if (!await loadProjectionCore()) return { ok: false, detail: projectionUnavailable().message }
       if (fs === undefined || subprocess === undefined || !p.generatorRoot || !p.generator || !p.userDir) {
         return { ok: false, detail: '宿主子进程/文件能力不可用：无法编译临时图（模板来源请先运行 npm run generate 或经保存闭环）' }
       }
@@ -868,6 +934,7 @@ return {
     // 查找：用户覆盖优先 → 未删除的历史生成物 → 正式内置
     async function findWorkflow(id) {
       if (!id || typeof id !== 'string') return null
+      if (!await loadProjectionCore()) throw projectionUnavailable()
       const users = await loadUserTemplates()
       const bp = users.get(id)
       if (bp) return projectToVwf(bp)
@@ -881,6 +948,7 @@ return {
     // 合并：正式内置 builtin=true；历史生成物与用户模板 builtin=false。
     // 同 id：用户覆盖优先；已删除标记的历史 id 不再从 .generated 列出。
     async function listWorkflows() {
+      if (!await loadProjectionCore()) throw projectionUnavailable()
       const [{ builtins, shipped }, users, removed] = await Promise.all([splitGenerated(), loadUserTemplates(), loadRemovedIds()])
       const out = []
       const seen = new Set()
@@ -1849,6 +1917,7 @@ return {
     // 同 id 用户覆盖优先；strict 读取失败按 error fail-closed。
     async function collectWorkflowFacts(draftDsl) {
       try {
+        if (!await loadProjectionCore()) throw projectionUnavailable()
         const [{ builtins, shipped }, users, removed] = await Promise.all([splitGenerated(true), loadUserTemplates(true), loadRemovedIds()])
         const mapNodes = (dsl) => ((dsl && dsl.nodes) || []).map((n) => ({ id: n.id, label: n.label, profile: n.profile }))
         const records = []
