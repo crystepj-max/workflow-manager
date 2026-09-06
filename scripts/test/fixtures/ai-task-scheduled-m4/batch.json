@@ -1,0 +1,21 @@
+{
+  "name": "m4-night-scene-1",
+  "maxConcurrency": 2,
+  "candidates": [
+    {
+      "id": "A",
+      "issueBasics": "../ai-task-execution-plan-m3/A/issue-basics.md",
+      "taskSpec": "../ai-task-execution-plan-m3/A/task-spec-V1.md"
+    },
+    {
+      "id": "B",
+      "issueBasics": "../ai-task-execution-plan-m3/B/issue-basics.md",
+      "taskSpec": "../ai-task-execution-plan-m3/B/task-spec-V1.md"
+    },
+    {
+      "id": "C",
+      "issueBasics": "../ai-task-execution-plan-m3/C/issue-basics.md",
+      "taskSpec": "../ai-task-execution-plan-m3/C/task-spec-V1.md"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "runAt": "2020-01-01T00:00:00.000Z",
+  "batch": "batch.json",
+  "simulate": "events-scene1.json",
+  "reportOut": "night-batch-report.md"
+}
