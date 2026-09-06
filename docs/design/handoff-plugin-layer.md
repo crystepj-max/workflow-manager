@@ -39,11 +39,21 @@
 - **`remove`**：仅用户模板可删（删蓝图 + 同步删 `~/.dsh/skills/<id>/`）；内置拒绝。
 - **`findWorkflow`**：内置优先（沿用），用户目录兜底。
 
-### 1.3 蓝图 → vwf DSL 投影（host 内联，~20 行）
+### 1.3 蓝图 ↔ vwf DSL 统一投影内核（候选一已实现）
 
-host 是 Cordis 动态插件（plain JS、**无 import**，host.js:18-19），不能复用 `scripts/generate.mjs` 的 ESM 导出。两个方案：
-- **A（推荐）**：host 内联 `projectToVwf`（映射：`id` / `name=displayName` / `description` / `entry` / `control.maxRounds`；节点注入 `model=bindings.models[nodeId]`；保留 `output`/`manualCheck`；剔除增强字段 `onMaxRounds/heteroCheck/verifyBranch`）——投影逻辑与 `scripts/generate.mjs` 的 `projectToVwf` 保持一致（已在引擎层测试覆盖，host 内联版按同样行为实现）。
-- B：save 时把 `vwf-dsl.json` 也写进用户目录（`~/.dsh/visual-workflow/generated/<id>/`）——多一份生成物，不推荐（双份来源）。
+host 是 Cordis 动态插件（plain JS、**无 import**），因此不直接导入生成器模块；当前由
+`scripts/projection-core.cjs` 提供 `projectToVwf` 与 `projectToBlueprint` 两个纯转换入口。
+生成器直接调用该内核，Host 通过受控文件能力读取源码并在本次激活内缓存，正式静态包则优先
+从 `dist/projection-core.cjs` 加载。
+
+统一投影保留 `id` / `name=displayName` / `description` / `entry` / `control.maxRounds`、
+模型绑定、`output` / `manualCheck` / `verifyBranch`、`kind` / `items` / `failOn`，以及
+`onMaxRounds` / `heteroCheck` / `bundleRoles` / `humanDecision` 和业务边字段
+`on` / `when` / `result` / `outcome` / `countRound`。没有定义的可选字段不会被伪造。
+`verifyBranch` 虽然编辑器暂无专门 UI，但经 JSON 粘贴、校验、保存和重新打开仍保持往返。
+
+投影内核缺失、损坏或导出接口不完整时，Host 明确失败，不回退到历史内联实现；保存时也不额外
+写入第二份用户 DSL 生成物，蓝图仍是用户模板的唯一事实源。
 
 ### 1.4 spawn 生成器（save 的 skill 同步）
 
