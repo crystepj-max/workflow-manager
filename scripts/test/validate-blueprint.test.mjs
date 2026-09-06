@@ -22,8 +22,8 @@ const fanoutGood = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blue
 test('S1 合法蓝图（dev-workflow-2-0 全量）通过校验', () => {
   const r = validateBlueprint(good);
   assert.equal(r.ok, true, JSON.stringify(r.errors));
-  assert.equal(r.counts.nodes, 7);
-  assert.equal(r.counts.edges, 13);
+  assert.equal(r.counts.nodes, 8);
+  assert.equal(r.counts.edges, 16);
 });
 
 test('fanout 合法夹具通过校验，worker 缺省 kind 保持兼容', () => {
@@ -125,7 +125,9 @@ test('S1 缺 $end 与无出边拒绝', () => {
 
 test('S1 多 success 出边缺 when 拒绝', () => {
   const b = clone();
-  b.edges[4].when = undefined;
+  const edge = b.edges.find((e) => e.from === 'route' && e.to === 'test' && e.on === 'success');
+  assert.ok(edge, '夹具须含 route→test success 边');
+  delete edge.when;
   expectReject(b, '多条 success 出边必须全部带 when', 'whenMissing');
 });
 
@@ -137,7 +139,9 @@ test('S1 successCondition 路径不在 schema 拒绝', () => {
 
 test('S1 verifyBranch 联动：required 缺 verified_* 拒绝', () => {
   const b = clone();
-  b.nodes[3].output.schema.required = ['result', 'reason', 'evidence'];
+  const testNode = b.nodes.find((n) => n.id === 'test');
+  assert.ok(testNode && testNode.verifyBranch, '夹具须含 verifyBranch 的 test 节点');
+  testNode.output.schema.required = ['result', 'reason', 'evidence'];
   expectReject(b, 'verified_branch', 'verify');
 });
 
