@@ -83,10 +83,18 @@ test('正例探针：design 门两态翻转', () => {
   assert.equal(validateRecord(schema, resolved).length, 0)
 })
 
-test('正例探针：user_accepted 知情接受通道', () => {
+test('正例探针：conditional_pass 有条件通过通道', () => {
+  const cp = rec('acceptance_package', {
+    status: 'decided', assembled, decision: 'conditional_pass', decided_by: 'x',
+    decided_at: '2026-08-30T08:00:00Z', feedback: '优化意见：下次加批量清除', verified_branch: 'b', verified_head: 'h',
+  }, 'human_acceptance')
+  assert.equal(validateRecord(schema, cp).length, 0)
+})
+
+test('负例探针：user_accepted 已废弃', () => {
   const ua = rec('acceptance_package', {
     status: 'decided', assembled, decision: 'user_accepted', decided_by: 'x',
-    decided_at: '2026-08-30T08:00:00Z', feedback: '知情接受差异说明', verified_branch: 'b', verified_head: 'h',
+    decided_at: '2026-08-30T08:00:00Z', feedback: '旧语义', verified_branch: 'b', verified_head: 'h',
   }, 'human_acceptance')
-  assert.equal(validateRecord(schema, ua).length, 0)
+  assert.ok(validateRecord(schema, ua).length > 0)
 })

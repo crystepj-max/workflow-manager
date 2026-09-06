@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// 证据链机器校验引擎（契约 §8.3 九项呈递/签收前校验）
-// 用法：node scripts/cwf-evidence-verify.mjs <runDir> [--decision user_accepted]
-//   默认校验 accept 路径；--decision user_accepted 启用知情接受例外（②⑧ 放宽，feedback 必填）
+// 证据链机器校验引擎（契约 §8.3 九项呈递/签收前校验；M2 验收三态）
+// 用法：node scripts/cwf-evidence-verify.mjs <runDir>
+//   accept / conditional_pass 均要求 review approve + test pass（有条件通过 ≠ 知情接受未达标）
 // 输出逐项 JSON 判定；exit 0 全部通过，exit 1 任一失败
 
 import { execFileSync } from 'node:child_process'
@@ -49,7 +49,7 @@ function loadJson(p) {
   return JSON.parse(readFileSync(p, 'utf-8'))
 }
 
-export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false, live = null } = {}) {
+export function verifyEvidenceChain(runDir, { live = null } = {}) {
   // live：实况 HEAD/branch 注入（测试）或缺省从 git 读取——Proof 绑定比对以实况为准，不信任 run.json 缓存
   const checks = []
   const check = (id, name, ok, detail) => checks.push({ id, name, ok, detail })
@@ -80,12 +80,8 @@ export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false, live 
   const dev = records.dev_handoff, design = records.design_package
   const baseline = records.requirements_baseline
 
-  // ② review approve + test pass（user_accepted 例外放宽）
-  if (relaxedUserAccepted) {
-    // 例外可达性（PR #132 Review）：签收在引擎校验之后，feedback 由 schema 在签收写入时强制——
-    // 此处只放行证据链并提示该强制点，不得在 awaiting 态要求 feedback
-    check('②', 'user_accepted 例外：允许 fail/blocked 证据链知情接受', true, '放行；签收写入时 schema 强制 feedback（§3.6）')
-  } else {
+  // ② review approve + test pass（M2：conditional_pass 同样要求）
+  {
     const ok = review?.payload?.verdict === 'approve' && test?.payload?.verdict === 'pass'
     check('②', 'review approve 且 test pass', ok, ok ? 'ok' : `review=${review?.payload?.verdict} test=${test?.payload?.verdict}`)
   }
@@ -166,12 +162,12 @@ export function verifyEvidenceChain(runDir, { relaxedUserAccepted = false, live 
   const extra = mapping.filter(m => !want.includes(m))
   let ok8 = missing.length === 0 && extra.length === 0 && dup.length === 0
   let detail8 = ok8 ? 'ok' : `missing=${missing.length} extra=${extra.length} dup=${dup.length}`
-  if (ok8 && !relaxedUserAccepted) {
+  if (ok8) {
     const notPass = (test.payload.acceptance_mapping || []).filter(m => m.result !== 'pass')
     ok8 = notPass.length === 0
     if (!ok8) detail8 = `非 pass 结果 ${notPass.length} 项`
   }
-  check('⑧', '验收映射完整无重复（accept 场景全 pass）', ok8, detail8)
+  check('⑧', '验收映射完整无重复（accept/conditional_pass 场景全 pass）', ok8, detail8)
 
   // ⑨ review/test 产生者异于 dev 且独立会话标志为真（异源自证禁令 + 自声明缺一不可）
   const ok9 = review && test && dev
@@ -186,11 +182,14 @@ function main() {
   const args = process.argv.slice(2)
   const runDir = args[0]
   if (!runDir) {
-    console.error('用法: node scripts/cwf-evidence-verify.mjs <runDir> [--decision user_accepted]')
+    console.error('用法: node scripts/cwf-evidence-verify.mjs <runDir>')
     process.exit(2)
   }
-  const relaxedUserAccepted = args.includes('--decision') && args[args.indexOf('--decision') + 1] === 'user_accepted'
-  const result = verifyEvidenceChain(runDir, { relaxedUserAccepted })
+  if (args.includes('--decision') && args[args.indexOf('--decision') + 1] === 'user_accepted') {
+    console.error('M2：已废弃 --decision user_accepted。有条件通过请用 conditional_pass（仍要求审查通过+测试通过，并在 feedback 记录优化意见）。')
+    process.exit(2)
+  }
+  const result = verifyEvidenceChain(runDir)
   console.log(JSON.stringify(result, null, 2))
   process.exit(result.ok ? 0 : 1)
 }

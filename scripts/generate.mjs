@@ -688,7 +688,16 @@ export function compileBlueprint(bp, opts = {}) {
 }
 
 // ---------- skill 包装（契约 FR-2/FR-6；runbook 覆盖全部返回状态，T-IMP-09） ----------
+/** 正式内置在 templates/<id>.json；历史迁出的自定义种子在 templates/custom-seeds/。 */
+export function blueprintSourceRel(bpId) {
+  if (bpId === 'default-workflow' || bpId === 'dev-workflow-2-0') {
+    return 'templates/custom-seeds/' + bpId + '.json';
+  }
+  return 'templates/' + bpId + '.json';
+}
+
 export function skillWrap(bp) {
+  const src = blueprintSourceRel(bp.id);
   return [
     '---',
     'name: ' + bp.id,
@@ -697,7 +706,7 @@ export function skillWrap(bp) {
     '',
     '# ' + bp.displayName + '（生成 skill）',
     '',
-    '本 skill 由生成器从蓝图 `templates/' + bp.id + '.json` 编译产出（NFR-1：生成物不可手改，改蓝图重生成）。',
+    '本 skill 由生成器从蓝图 `' + src + '` 编译产出（NFR-1：生成物不可手改，改蓝图重生成）。',
     '',
     '## runbook',
     '',
@@ -717,7 +726,7 @@ export function skillWrap(bp) {
     '',
     '## 生成信息',
     '',
-    '- 蓝图：`templates/' + bp.id + '.json`',
+    '- 蓝图：`' + src + '`',
     '- 节点：' + bp.nodes.length + ' · 边：' + bp.edges.length + ' · 最大轮次：' + ((bp.control && bp.control.maxRounds) || 9),
     '',
   ].join('\n');
@@ -728,15 +737,32 @@ export function buildMeta(bp) {
   return { name: 'vwf-' + bp.id, description: bp.displayName, phases: bp.nodes.map((n) => ({ title: n.label || n.id })) };
 }
 
+/** 正式内置：templates/*.json；历史自定义种子：templates/custom-seeds/*.json（#82）。 */
+export function listBlueprintJsonFiles(templatesDir) {
+  const out = [];
+  if (!fs.existsSync(templatesDir)) return out;
+  for (const f of fs.readdirSync(templatesDir).filter((x) => x.endsWith('.json')).sort()) {
+    out.push(path.join(templatesDir, f));
+  }
+  const seeds = path.join(templatesDir, 'custom-seeds');
+  if (fs.existsSync(seeds)) {
+    for (const f of fs.readdirSync(seeds).filter((x) => x.endsWith('.json')).sort()) {
+      out.push(path.join(seeds, f));
+    }
+  }
+  return out;
+}
+
 // ---------- 生成（纯函数） ----------
 export function generateAll(templatesDir) {
   const files = new Map();
   const report = [];
-  const tpls = fs.readdirSync(templatesDir).filter((f) => f.endsWith('.json')).sort();
-  for (const f of tpls) {
+  const tpls = listBlueprintJsonFiles(templatesDir);
+  for (const abs of tpls) {
+    const f = path.basename(abs);
     let bp;
     try {
-      bp = JSON.parse(fs.readFileSync(path.join(templatesDir, f), 'utf8'));
+      bp = JSON.parse(fs.readFileSync(abs, 'utf8'));
     } catch (e) {
       report.push({ id: f.replace(/\.json$/, ''), ok: false, errors: [{ at: '$', message: 'JSON 解析失败：' + e.message }] });
       continue;

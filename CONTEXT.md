@@ -78,7 +78,7 @@
 ## 插件界面层（编辑器与运行看板）
 
 - **工作流面板**：DSH 设置页注入的 `settings.section`（`client.js` 末尾 `slots.inject`），内含两个页签。
-- **模板库（templates 页签）**：工作流清单（一行一个模板）。正式内置标 builtin 且只读；当前两套历史模板 `default-workflow` / `dev-workflow-2-0` 已迁为自定义（无内置标签，可编辑/删除）。操作 = 新建 / 编辑 / 删除。
+- **模板库（templates 页签）**：工作流清单（一行一个模板）。正式内置标 builtin 且只读（蓝图真源 `templates/*.json`，当前含建设 · 完整功能开发）；历史两套 `default-workflow` / `dev-workflow-2-0` 真源在 `templates/custom-seeds/`，已迁为自定义（无内置标签，可编辑/删除）。操作 = 新建 / 编辑 / 删除。
 - **运行看板（dashboard 页签）**：每 3 秒轮询 `vwf.runs.list` + `vwf.state`，呈现**运行列表**（可点选切换）、
   当前 run 的状态/阶段、只读画布（节点按状态染色，按 workflowId 匹配模板 DSL）、**子代理表格**与
   最近 20 条日志。**与模板库无关**（两者常被混指）。
@@ -164,6 +164,22 @@
   `dsh-cordis`（必须在 DSH 会话对着插件运行时开发）。
 - **storageDomain（历史方案）**：DSH 宿主持久化域；P2-D3 原定用它存模板与运行记录，
   T2（#17）改双轨方案（宿主目录文件 + save 即生成 skill）后不再依赖。
+
+## AI 任务定义与批量交付（V0.1 / M1+M2）
+
+> 权威：`docs/design/ai-task-define-delivery/public-task-contract.md` +  
+> `single-task-delivery-m2.md`。定义入口 = 现有 `requirements-analysis`；  
+> 交付入口 = 现有 `construction-bootstrap`（从已定义开工，不新建第二入口）。
+
+- **已定义（DEFINED）**：Definition Check 通过、未决产品事项为 0、人工确认基线、Issue 基本信息与本地任务规格版本一致后的状态；交付应从这里开工。
+- **Definition Check（定义完成检查）**：进入「待确认」前的门禁清单（目标范围/规则边界/决策完整性/任务组织/验收/无人值守）。
+- **本地任务规格（task spec）**：详细需求事实源（`.scratch/<slug>/task-spec-V<n>.md`）；与 Issue 控制字段分工见公共契约。
+- **无人值守许可**：`允许` / `不允许`；进入已定义后必填。
+- **前置依赖**：无强制前置时必须写「无」；V0.1 批量不自动调度有前置依赖的任务。
+- **实施前检查（preflight）**：交付开工硬门禁（已定义 / 允许无人值守 / 版本一致 / 前置依赖=无 等）。
+- **UAT 验收卡**：等待人工验收前的可操作验收清单。
+- **验收严格三态**：`ACCEPT`/`accept`（通过）/ `REJECT`/`reject`（退回）/ `CONDITIONAL_PASS`/`conditional_pass`（有条件通过：基线已做对，优化进下一轮定义；**不是**历史 `user_accepted` 知情接受未达标）。
+- **自动返工上限**：产品拍板 **3**（`auto_rework_limit = 3`；与建设默认额度一致；覆盖上游规格文中的 2）。
 
 ## v0.1 目标词汇（尚未进入 main）
 
@@ -298,3 +314,5 @@
 - fanout 不参与 Business Outcome Routing / Completion Mapping。
 - 禁止 `outcomePath`、`completionPath`、`outcome` 边、`on: technical`。
 - `failOn` 仍走旧 failure（技术聚合失败）。探索业务结果写在 Evaluator。
+
+> AI 任务定义 Skill 正本：my-agent-skills / requirements-analysis；本仓库交付契约见 docs/design/ai-task-define-delivery/。

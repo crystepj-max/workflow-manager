@@ -15,7 +15,7 @@
 | 生成器（内置） | `scripts/generate.mjs` | `npm run generate` → `.generated/<id>/{script.mjs, vwf-dsl.json, SKILL.md, meta.json}` |
 | 生成器（用户 skill） | `scripts/generate.mjs user <蓝图json> <skillDir>` | **已实现**：校验 + 生成自包含三件套（SKILL.md/script.mjs/meta.json）到 `<skillDir>/<id>/` |
 | 校验器 | `scripts/validate-blueprint.mjs` | 规则全集含**异源硬规则 7**（T-06 已实现，返回 `{ok, errors, warnings}`） |
-| 内置蓝图 | `templates/dev-workflow-2-0.json` | 7 节点/12 边，bindings dev=deepseek-official/v4-pro、review=kimi-coding/k3（真异源） |
+| 历史自定义种子蓝图 | `templates/custom-seeds/dev-workflow-2-0.json` | 已退出内置身份（#82）；7 节点/13 边，bindings 异源 |
 | 等价断言 | `scripts/equivalence.mjs` | 10 项断言（CI 用） |
 | 测试 | `scripts/test/` | 32 测试全绿（含异源 T1-T5、generateUserSkill） |
 

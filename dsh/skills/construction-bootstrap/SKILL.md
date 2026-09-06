@@ -1,51 +1,69 @@
 ---
 name: construction-bootstrap
-description: "在 DSH 会话中驱动「建设 · 完整功能开发」Bootstrap 工作流：以 GitHub issue 为需求来源，按冻结契约执行 需求基线 → 设计 → 开发 → 独立审核 → 独立测试 → 人工验收 → 收口 七阶段主链；全程产出 schema 可校验的七类证据记录、自动回退额度 3、blocked 挂起恢复、AI 不代签人工门。当用户说「建设工作流」「construction」「用建设工作流跑 issue」「完整功能开发」「按契约跑 issue」「construction-bootstrap」时使用。"
+description: "在 DSH 会话中驱动「建设 · 完整功能开发」单任务交付：从「已定义」任务开工，按 实施前检查 → 开发 → 收敛审查 → 测试 → UAT 验收卡 → 等待人工验收 → 收口；自动返工上限 3；验收严格三态（通过/退回/有条件通过）；AI 不代签。当用户说「建设工作流」「construction」「用建设工作流跑 issue」「完整功能开发」「单任务交付」「按已定义开工」「construction-bootstrap」时使用。"
 ---
 
-# 建设 · 完整功能开发 · DSH Bootstrap Profile
+# 建设 · 完整功能开发 · 单任务交付（M2）
 
-本 skill 是**建设工作流 Portable Contract**（`docs/design/construction-workflow-portable-contract.md`，版本以文档头为准）的 DSH Bootstrap 执行 Profile。
+本 skill 是**建设工作流**的 DSH Bootstrap 执行 Profile，产品主链以 **AI 任务定义与批量交付 V0.1 / M2** 为准：
 
-> **语义纪律（契约 §9.2）**：业务语义的唯一来源是契约文档；本 skill 只做驱动纪律与工具映射，**不复制契约正文语义**。下文引用契约小节锚点（如 §3.4）时，以契约文档为权威。
+> 权威产品主链：`docs/design/ai-task-define-delivery/single-task-delivery-m2.md`  
+> 公共字段/状态/验收三态/返工上限：`docs/design/ai-task-define-delivery/public-task-contract.md`  
+> 证据底物契约：`docs/design/construction-workflow-portable-contract.md`（内部交接包；**不得**在交付中重开定义决策闭环）
+
+## 产品可见主链
+
+```text
+实施前检查 → 开发 → 收敛审查 → 测试 → UAT 验收卡 → WAITING_HUMAN → 人工三态 → 收口
+```
+
+- **定义外置**：需求分析（`requirements-analysis`）先产出「已定义」；本 skill **从已定义开工**，不在主链内做需求分析 + 方案设计人工门。
+- **自动返工上限**：**3**（产品拍板；`auto_rework_limit = 3`，与 run `rollback_budget` 默认一致）。
+- **验收严格三态**：通过 (`accept`) / 退回 (`reject`) / 有条件通过 (`conditional_pass`)。有条件通过 = 本任务收口 + 优化意见留给下次定义。**禁止**用历史 `user_accepted` 表达有条件通过。
 
 ## 自包含内容
 
 - `SKILL.md`（本文件）——入口与使用方式
-- `runbook.md` —— controller 逐阶段驱动细则（执行时逐条遵循）
-- `shim-map.md` —— 正式 Runtime 未落地能力的 shim 边界与向 #82 收敛的退役映射表
+- `runbook.md` —— controller 逐节点驱动细则
+- `shim-map.md` —— shim 边界与退役映射
 
 ## 支撑工具（仓库内脚本）
 
 | 脚本 | 用途 |
 |---|---|
-| `scripts/cwf-run-init.mjs` | Run 引导：从 target 建分支 + worktree + run 目录 + portable run identity（契约 §7.1），并把 handoff schema 提供到目标 workspace |
-| `scripts/cwf-record.mjs` | 证据记录：组装信封 + schema 校验 + 落盘；回退额度记账（§4.2）；`--by human` 人工回退；`budget` 人工调额入账 |
-| `scripts/cwf-checkpoint.mjs` | Integration Checkpoint：从实际仓库状态计算 target 是否前进（§7.3） |
-| `scripts/cwf-validate.mjs` | 零依赖 JSON Schema 校验器（七类交接包机械校验） |
+| `scripts/ai-task-preflight-check.mjs` | 实施前检查（已定义 / 无人值守 / 版本一致 / 无前置依赖） |
+| `scripts/cwf-run-init.mjs` | Run 引导：分支 + worktree + run 目录 |
+| `scripts/cwf-record.mjs` | 证据记录 + 返工额度记账 |
+| `scripts/cwf-checkpoint.mjs` | Integration Checkpoint |
+| `scripts/cwf-validate.mjs` | 交接包 schema 校验 |
+| `scripts/cwf-evidence-verify.mjs` | 呈递/签收前证据链校验 |
 
-> 安装后这些脚本与 schema 随 skill 分发到 `<SKILL_DIR>/assets/`（自包含，外仓库可直接调用）。
+> 安装后 `cwf-*.mjs` 与 schema 随 skill 分发到 `<SKILL_DIR>/assets/`；实施前检查脚本一并复制。
 
 ## 前置条件
 
+- 目标任务已由「做需求分析」落成 **已定义**（Issue 基本信息 + 本地任务规格版本一致）；
 - 当前会话工作区 = 目标仓库；`git` / `gh` 可用；
-- 契约文档与 schema 随 skill 分发于 `<SKILL_DIR>/assets/`（`construction-workflow-portable-contract.md` 与 `handoff.schema.json`；在本源仓库内开发时也可读 `docs/design/` 原版）；
-- 目标 issue 在 GitHub 可访问（`gh` 已认证）。
+- 无人值守许可 = 允许（否则不得自动施工到等待验收）。
 
 ## 使用方式
 
-在具备 bash/git/gh 能力的 DSH 会话中：
-
 ```
-用建设工作流跑 issue #N
+用建设工作流跑已定义 issue #N
 ```
 
-会话即按 `runbook.md` 驱动一个完整 Run：每阶段产出对应证据记录并通过 schema 校验后才允许推进；人工门（基线确认、条件决策、最终验收）一律挂起呈递、AI 不代签（契约 §3.6/§5.4）。
+或：
 
-## 硬规则速览（详见 runbook.md 与契约）
+```
+完整功能开发 / 单任务交付 #N
+```
 
-1. 每 Run 独立 worktree/branch，禁止共享 main cwd 开发（§7.2）；
-2. review/test 必须独立会话产出（§2 不变量 2），`produced_by` 必须异于 dev；
-3. 回退一次一条边、按根因路由、自动额度默认 3（§4）；额度耗尽保留原结果升级人工（§4.3）；
-4. 一切 Proof 绑定真实 `verified_branch`/`verified_head`（§7.3）；
-5. Role 只报告专业结果，路由由本 runbook（controller）决定（§6.1）。
+会话按 `runbook.md` 驱动：实施前检查不过则受阻停止；通过后无人值守跑到 UAT 验收卡并挂起等人；人工三态裁决后从**原 Run**继续收口或返工。
+
+## 硬规则速览
+
+1. 未通过实施前检查 → 禁止开发；
+2. 交付中不得自行改需求基线；必须改产品结果 → `BLOCKED：需要重新定义`；
+3. review/test 独立会话；自动返工最多 3 轮；
+4. AI 不代签人工验收；
+5. 有条件通过须保留优化意见供下次定义，且本轮正常收口。

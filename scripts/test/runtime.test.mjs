@@ -13,7 +13,7 @@ import { runGeneratedScript, makeAgentScript } from './helpers/runtime-harness.m
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const tplDir = path.join(here, '../../templates')
-const tpl = JSON.parse(readFileSync(path.join(tplDir, 'dev-workflow-2-0.json'), 'utf8'))
+const tpl = JSON.parse(readFileSync(path.join(tplDir, 'custom-seeds', 'dev-workflow-2-0.json'), 'utf8'))
 const mini = JSON.parse(readFileSync(path.join(here, 'fixtures/hello-blueprint.json'), 'utf8'))
 const fanoutFixture = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'))
 
