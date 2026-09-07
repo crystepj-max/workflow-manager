@@ -2310,7 +2310,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               h('tbody', null, pageRuns.map((r) => h('tr', { key: r.id, onClick: () => selectRun(r.id), style: { cursor: 'pointer', opacity: r.supersededBy ? 0.5 : 1 } },
                 h('td', null, r.taskId || '—'),
                 h('td', null, r.name || r.workflowId || '—'),
-                h('td', null, r.supersededBy ? h('span', { className: 'vwf-badge' }, t('dashTakenOver')) : statusBadge(r.status)),
+                // #79 最小适配：属于逻辑运行的"已由续跑接管"升级为"同一次运行 · 第 N 段"；
+                // 多段运行在当前段补一个段位徽标。旧记录（无逻辑运行归属）呈现不变。
+                h('td', null, r.supersededBy
+                  ? h('span', { className: 'vwf-badge' }, r.logical_run_id ? ('同一次运行 · 第 ' + (r.segment || '—') + ' 段') : t('dashTakenOver'))
+                  : h('span', null, statusBadge(r.status),
+                      (r.logical_run_id && r.segment_count > 1) ? h('span', { className: 'vwf-badge', style: { marginLeft: 4 } }, '第 ' + (r.segment || '—') + '/' + r.segment_count + ' 段') : null)),
                 h('td', null, r.phase || '—'),
                 h('td', { className: 'vwf-muted-sm' }, r.id)
               )))

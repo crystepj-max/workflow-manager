@@ -119,13 +119,28 @@ return {
     const rm = (path) => runNode(['-e', "require('fs').rmSync(process.argv[1],{recursive:true,force:true})", path])
 
     // DSH Home：显式 DSH_HOME 是宿主事实，直接采用；vm 沙箱无 process 时经子进程探测一次。
+    // #79：新 harness 对子进程环境剥离全部 DSH_* 变量（scrubbedParentEnv），探针子进程
+    // 读不到 DSH_HOME 会误落到产品 ~/.dsh——探针沿祖先进程链 `ps eww` 读回真实
+    // DSH_HOME（产品/开发 DSH 各自命中宿主进程自身环境），最后才回落 ~/.dsh。
     let dshHomePromise = null
     function dshHome() {
       if (!dshHomePromise) {
         dshHomePromise = (async () => {
           const env = (typeof process !== 'undefined' && process && process.env) || {}
           if (typeof env.DSH_HOME === 'string' && env.DSH_HOME) return env.DSH_HOME
-          const r = await runNode(['-e', "console.log(process.env.DSH_HOME || require('path').join(require('os').homedir(), '.dsh'))"], { env: {} })
+          const probe = [
+            "const cp=require('child_process'),path=require('path'),os=require('os');",
+            "if (process.env.DSH_HOME) { console.log(process.env.DSH_HOME); process.exit(0); }",
+            "function envOf(pid){try{return cp.execSync('ps eww '+pid+' 2>/dev/null',{encoding:'utf8'})}catch(e){return ''}}",
+            "let pid=process.ppid;",
+            "for (let i=0;i<8&&pid&&pid>1;i++){",
+            "  const m=envOf(pid).match(/DSH_HOME=([^\\s]+)/);",
+            "  if (m){console.log(m[1]);process.exit(0);}",
+            "  try{pid=Number(cp.execSync('ps -o ppid= -p '+pid+' 2>/dev/null',{encoding:'utf8'}).trim());}catch(e){break;}",
+            "}",
+            "console.log(path.join(os.homedir(), '.dsh'));",
+          ].join('')
+          const r = await runNode(['-e', probe], { env: {} })
           if (r.ok && r.stdout.trim()) return r.stdout.trim()
           return typeof env.HOME === 'string' && env.HOME ? env.HOME.replace(/\/$/, '') + '/.dsh' : null
         })()
@@ -141,6 +156,8 @@ return {
           userDir: home + '/visual-workflow/templates',
           removedDir: home + '/visual-workflow/removed',
           runsDir: home + '/visual-workflow/runs',
+          // 逻辑运行摘要目录（#79）：<logical_run_id>.json 一任务一文件
+          logicalRunsDir: home + '/visual-workflow/logical-runs',
           skillRoot: home + '/skills',
           workspaces: home + '/workspaces',
         } : null))
@@ -512,6 +529,412 @@ return {
     }
     const runsHydration = loadRuns().catch((e) => log('运行记录回载失败：' + errMsg(e)))
 
+    // ── Logical Run 逻辑运行摘要（#79）────────────────────────────────────
+    // 一次任务 = 一个逻辑运行：人工恢复/暂停/受阻/模型切换都发生在同一次运行内，
+    // 形成"第 N 段执行"，不产生新的用户级 Run。固定八态 Lifecycle（仅后三者为终态）
+    // + 结构化 reason；运行创建时冻结快照 Rev 1，v0.1 运行中仅可更换 Provider/Model
+    // 并产生追加式修订（旧修订永不覆盖）。新语义只写运行摘要（logical-runs 目录），
+    // 既有 runs/ 事件流记录语义零改动（#87 锁定）。持久化同构 runs 记录（节流写队列/
+    // 启动全量回载）；摘要是追溯档案单元，不做容量淘汰。
+    const LIFECYCLE_STATES = ['READY', 'RUNNING', 'WAITING_HUMAN', 'PAUSED', 'BLOCKED', 'COMPLETED', 'STOPPED', 'FAILED']
+    const LIFECYCLE_TERMINAL = ['COMPLETED', 'STOPPED', 'FAILED']
+    const LOGICAL_RUN_SCHEMA = 1
+    const logicalRuns = new Map()           // logical_run_id → 摘要对象（启动全量回载，追溯档案）
+    const logicalRunByEngineRun = new Map() // 引擎运行 id → logical_run_id（段反查，看板 join 用）
+
+    const logicalRunFile = (id) => encodeURIComponent(String(id || '')) + '.json'
+    const logicalReason = (code, message) => {
+      const r = { code: String(code || 'UNSPECIFIED') }
+      if (message !== undefined && message !== null && String(message) !== '') r.message = String(message)
+      return r
+    }
+    function newLogicalRecord(info) {
+      const now = Date.now()
+      const providerModel = {}
+      for (const n of (info.dsl && info.dsl.nodes) || []) {
+        if (n && n.model && (n.model.provider || n.model.model)) {
+          providerModel[n.id] = { provider: String(n.model.provider || 'default'), model: String(n.model.model || 'default') }
+        }
+      }
+      const rec = {
+        logical_run_id: String(info.logical_run_id),
+        schema: LOGICAL_RUN_SCHEMA,
+        task_id: String(info.taskId || ''),
+        template_id: String(info.templateId || ''),
+        title: String((info.dsl && info.dsl.name) || info.templateId || ''),
+        derived_from: info.derivedFrom ? String(info.derivedFrom) : null,
+        created_at: now,
+        updated_at: now,
+        lifecycle: { state: 'READY', reason: null },
+        terminal: false,
+        completion: null,
+        segments: [],
+        snapshots: [],
+        node_attempts: [],
+        business_outcomes: {},
+        workspace: null,
+      }
+      // Rev 1 冻结：工作流定义 + 角色（编译产物内联角色正文与路由）+ Provider/Model
+      // 绑定 + 运行关键配置。修订仅 Provider/Model，不改脚本，故后续修订以 script_ref
+      // 指向 Rev 1，不再复制。
+      rec.snapshots.push({
+        revision: 1,
+        created_at: now,
+        active: true,
+        workflow: { id: String((info.dsl && info.dsl.id) || info.templateId || ''), name: String((info.dsl && info.dsl.name) || ''), dsl: info.dsl || null },
+        roles: { role_dir: String(info.roleDir || '') },
+        script: info.script || null,
+        provider_model: providerModel,
+        config: info.config || {},
+      })
+      return rec
+    }
+    function createLogicalRun(info) {
+      const rec = newLogicalRecord(info)
+      logicalRuns.set(rec.logical_run_id, rec)
+      requestLogicalPersist(rec.logical_run_id)
+      return rec
+    }
+    function activeSnapshot(rec) {
+      for (const s of rec.snapshots) if (s.active) return s
+      return rec.snapshots[rec.snapshots.length - 1] || null
+    }
+    // 仅 Provider/Model 可改（R3）：追加修订，旧修订 active 翻转保留，不无痕覆盖。
+    // 合并语义与编译脚本一致：显式节点覆盖优先，$default 只作用于未显式覆盖的节点。
+    function appendSnapshotRevision(rec, overrides) {
+      const prev = activeSnapshot(rec)
+      if (!prev) return null
+      const ov = (overrides && typeof overrides === 'object') ? overrides : {}
+      const def = (ov.$default && typeof ov.$default === 'object') ? ov.$default : null
+      const merged = {}
+      for (const k of Object.keys(prev.provider_model || {})) {
+        const cur = prev.provider_model[k] || {}
+        const o = (ov[k] && typeof ov[k] === 'object') ? ov[k] : def
+        merged[k] = {
+          provider: (o && o.provider !== undefined && o.provider !== '') ? String(o.provider) : String(cur.provider || 'default'),
+          model: (o && o.model !== undefined && o.model !== '') ? String(o.model) : String(cur.model || 'default'),
+        }
+      }
+      const now = Date.now()
+      prev.active = false
+      const next = {
+        revision: prev.revision + 1,
+        created_at: now,
+        active: true,
+        workflow: prev.workflow,
+        roles: prev.roles,
+        script_ref: 1,
+        provider_model: merged,
+        config: prev.config,
+      }
+      rec.snapshots.push(next)
+      rec.updated_at = now
+      return next
+    }
+    function effectiveProviderModel(rec, nodeId) {
+      const snap = activeSnapshot(rec)
+      const pm = (snap && snap.provider_model) || {}
+      return pm[nodeId] || null
+    }
+    function logicalSetState(rec, state, reason) {
+      if (LIFECYCLE_STATES.indexOf(state) < 0) return false
+      rec.lifecycle = { state: state, reason: reason || null }
+      rec.terminal = LIFECYCLE_TERMINAL.indexOf(state) >= 0
+      rec.updated_at = Date.now()
+      return true
+    }
+    function appendLogicalSegment(rec, runId, trigger, decisionId) {
+      const seg = {
+        index: rec.segments.length + 1,
+        run_id: String(runId),
+        trigger: String(trigger || 'start'),
+        started_at: Date.now(),
+        ended_at: null,
+        status: 'running',
+        active: true,
+      }
+      if (decisionId) seg.decision_id = String(decisionId)
+      for (const s of rec.segments) s.active = false
+      rec.segments.push(seg)
+      logicalRunByEngineRun.set(String(runId), rec.logical_run_id)
+      rec.updated_at = Date.now()
+      return seg
+    }
+    function endLogicalSegment(rec, runId, status) {
+      const seg = rec.segments.find((s) => s.run_id === String(runId)) || null
+      if (!seg) return null
+      seg.status = String(status || '')
+      seg.ended_at = Date.now()
+      seg.active = false
+      rec.updated_at = Date.now()
+      return seg
+    }
+    // 段收尾 → 八态 Lifecycle + 结构化 reason（R1/R6/R11）。引擎段状态原样保留在
+    // segment.status；Lifecycle 闸门不改写专业结果（R7）——业务结果由
+    // recordNodeAttempts 独立落档，不参与状态映射。
+    function logicalTransitionFor(canon, stopReason, value) {
+      const v = value && typeof value === 'object' ? value : {}
+      const reasonFromValue = typeof v.reason === 'string' && v.reason ? logicalReason(v.reason) : null
+      if (canon === 'DONE') return { state: 'COMPLETED', reason: null }
+      if (canon === 'STOPPED') return { state: 'STOPPED', reason: reasonFromValue || logicalReason('STOPPED') }
+      if (canon === 'WAITING_HUMAN') return { state: 'WAITING_HUMAN', reason: reasonFromValue || logicalReason('ESCALATED_DECISION') }
+      if (canon.indexOf('AWAITING_HUMAN_') === 0) return { state: 'WAITING_HUMAN', reason: logicalReason('LEGACY_GATE', canon) }
+      if (canon === 'ROUTE_HALTED') return { state: 'WAITING_HUMAN', reason: reasonFromValue || logicalReason('ROUTE_HALTED') }
+      if (canon) return { state: 'FAILED', reason: logicalReason('RUN_FAILED', canon) }
+      if (stopReason === 'cancelled') return { state: 'FAILED', reason: logicalReason('ENGINE_CANCELLED') }
+      if (stopReason === 'error') return { state: 'FAILED', reason: logicalReason('ENGINE_ERROR') }
+      return null
+    }
+    // 业务结果提取：新模式 outcomePath/completionPath（$.x.y 语法）；旧模式无声明
+    // 不编造。control_event.triggering_node_outcome 兜底（额度耗尽时触发节点）。
+    function readOutcomePath(obj, path) {
+      const raw = String(path || '')
+      const keys = (raw.indexOf('$.') === 0 ? raw.slice(2) : raw).split('.').filter(Boolean)
+      let cur = obj
+      for (const k of keys) {
+        if (cur == null || typeof cur !== 'object') return undefined
+        cur = cur[k]
+      }
+      return cur
+    }
+    function outcomePathOf(dsl, nodeId) {
+      const node = ((dsl && dsl.nodes) || []).find((n) => n && n.id === nodeId) || null
+      return (node && node.output && (node.output.outcomePath || node.output.completionPath)) || null
+    }
+    // 段内新完成节点（段末 results − 段首 results）→ node_attempts 记录当时实际
+    // Snapshot Revision / Provider / Model（段内修订冻结，逐节点准确）+ 声明了业务
+    // 结果路径的节点入 business_outcomes（与 Lifecycle 分别持久化）。
+    function recordNodeAttempts(rec, dsl, beforeKeys, results, controlEvent) {
+      const snap = activeSnapshot(rec)
+      const segNo = rec.segments.length
+      let added = 0
+      for (const nodeId of Object.keys(results || {})) {
+        if (beforeKeys && beforeKeys.has(nodeId)) continue
+        const r = results[nodeId]
+        if (r == null || typeof r !== 'object') continue
+        const eff = effectiveProviderModel(rec, nodeId)
+        const path = outcomePathOf(dsl, nodeId)
+        let outcome = path !== null ? readOutcomePath(r, path) : undefined
+        if (outcome === undefined && controlEvent && controlEvent.node_id === nodeId && controlEvent.triggering_node_outcome !== undefined) {
+          outcome = controlEvent.triggering_node_outcome
+        }
+        const attempt = {
+          node: String(nodeId),
+          segment: segNo,
+          snapshot_revision: snap ? snap.revision : null,
+          provider: String((eff && eff.provider) || 'default'),
+          model: String((eff && eff.model) || 'default'),
+          outcome: outcome === undefined ? null : outcome,
+          completed_at: Date.now(),
+        }
+        rec.node_attempts.push(attempt)
+        if (outcome !== undefined && outcome !== null) {
+          rec.business_outcomes[String(nodeId)] = {
+            outcome: outcome,
+            path: path,
+            segment: segNo,
+            snapshot_revision: attempt.snapshot_revision,
+            at: attempt.completed_at,
+          }
+        }
+        added++
+      }
+      if (added) rec.updated_at = Date.now()
+      return added
+    }
+    function logicalRunPayload(rec) {
+      return {
+        logical_run_id: rec.logical_run_id,
+        schema: LOGICAL_RUN_SCHEMA,
+        task_id: rec.task_id,
+        template_id: rec.template_id,
+        title: rec.title,
+        derived_from: rec.derived_from,
+        created_at: rec.created_at,
+        updated_at: rec.updated_at,
+        lifecycle: { state: rec.lifecycle.state, reason: rec.lifecycle.reason },
+        terminal: rec.terminal === true,
+        completion: rec.completion || null,
+        segments: rec.segments.map((s) => {
+          const out = { index: s.index, run_id: s.run_id, trigger: s.trigger, started_at: s.started_at, ended_at: s.ended_at, status: s.status, active: s.active === true }
+          if (s.decision_id) out.decision_id = s.decision_id
+          return out
+        }),
+        snapshots: rec.snapshots,
+        node_attempts: rec.node_attempts,
+        business_outcomes: rec.business_outcomes,
+        workspace: rec.workspace || null,
+      }
+    }
+    const logicalWriteQueues = new Map()
+    function requestLogicalPersist(id) {
+      const key = String(id || '')
+      if (!key) return
+      let q = logicalWriteQueues.get(key)
+      if (!q) { q = { dirty: false, pending: false }; logicalWriteQueues.set(key, q) }
+      q.dirty = true
+      if (!q.pending) drainLogicalWrite(key, q)
+    }
+    function drainLogicalWrite(key, q) {
+      if (!q.dirty) { logicalWriteQueues.delete(key); return }
+      q.dirty = false
+      q.pending = true
+      writeLogicalRun(key)
+        .catch((e) => log('逻辑运行摘要落盘失败（不影响运行）：' + key + '：' + errMsg(e)))
+        .then(() => { q.pending = false; drainLogicalWrite(key, q) })
+    }
+    async function writeLogicalRun(id) {
+      const rec = logicalRuns.get(id)
+      const d = fs === undefined ? null : await homeDirs()
+      if (!rec || !d) return
+      rec.updated_at = Date.now()
+      await writeText(d.logicalRunsDir + '/' + logicalRunFile(id), JSON.stringify(logicalRunPayload(rec), null, 2) + '\n')
+    }
+    function hydrateLogicalRunFromDisk(data) {
+      if (!data || typeof data !== 'object') return false
+      const id = typeof data.logical_run_id === 'string' && data.logical_run_id ? data.logical_run_id : null
+      if (!id || logicalRuns.has(id)) return false
+      const lc = data.lifecycle && LIFECYCLE_STATES.indexOf(data.lifecycle.state) >= 0
+        ? { state: data.lifecycle.state, reason: data.lifecycle.reason || null }
+        : { state: 'FAILED', reason: logicalReason('RECORD_CORRUPTED', 'lifecycle 缺失或非法') }
+      const rec = {
+        logical_run_id: id,
+        schema: typeof data.schema === 'number' ? data.schema : LOGICAL_RUN_SCHEMA,
+        task_id: typeof data.task_id === 'string' ? data.task_id : '',
+        template_id: typeof data.template_id === 'string' ? data.template_id : '',
+        title: typeof data.title === 'string' ? data.title : '',
+        derived_from: typeof data.derived_from === 'string' ? data.derived_from : null,
+        created_at: typeof data.created_at === 'number' ? data.created_at : null,
+        updated_at: typeof data.updated_at === 'number' ? data.updated_at : null,
+        lifecycle: lc,
+        terminal: data.terminal === true || LIFECYCLE_TERMINAL.indexOf(lc.state) >= 0,
+        completion: data.completion && typeof data.completion === 'object' ? data.completion : null,
+        segments: Array.isArray(data.segments) ? data.segments.filter((s) => s && typeof s === 'object' && typeof s.run_id === 'string' && s.run_id) : [],
+        snapshots: Array.isArray(data.snapshots) ? data.snapshots.filter((s) => s && typeof s === 'object') : [],
+        node_attempts: Array.isArray(data.node_attempts) ? data.node_attempts.filter((s) => s && typeof s === 'object') : [],
+        business_outcomes: data.business_outcomes && typeof data.business_outcomes === 'object' && !Array.isArray(data.business_outcomes) ? data.business_outcomes : {},
+        workspace: data.workspace && typeof data.workspace === 'object' ? data.workspace : null,
+      }
+      logicalRuns.set(id, rec)
+      for (const s of rec.segments) if (s.run_id) logicalRunByEngineRun.set(s.run_id, id)
+      return true
+    }
+    async function loadLogicalRuns() {
+      for (let attempt = 0; attempt < 10 && fs === undefined; attempt++) {
+        refreshServices()
+        if (fs !== undefined) break
+        try { await new Promise((r) => setTimeout(r, 100 * (attempt + 1))) } catch (e) { break }
+      }
+      if (fs === undefined) return
+      const d = await homeDirs()
+      const entries = d ? await listDirOrNull(d.logicalRunsDir) : null
+      const loaded = []
+      for (const ent of entries || []) {
+        if (!ent || ent.type !== 'file' || !/\.json$/i.test(ent.name)) continue
+        try {
+          const data = JSON.parse(await fs.readText(await fs.resolve(d.logicalRunsDir + '/' + ent.name)))
+          if (!data || typeof data.logical_run_id !== 'string' || !data.logical_run_id) throw new Error('缺少 logical_run_id 字段')
+          loaded.push(data)
+        } catch (e) { log('跳过损坏的逻辑运行摘要：' + ent.name + '（' + errMsg(e) + '）') }
+      }
+      loaded.sort((a, b) => ((a.created_at || 0) - (b.created_at || 0)))
+      for (const data of loaded) hydrateLogicalRunFromDisk(data)
+    }
+    loadLogicalRuns().catch((e) => log('逻辑运行摘要回载失败：' + errMsg(e)))
+
+    function latestLogicalRunForTask(taskId) {
+      let found = null
+      for (const rec of logicalRuns.values()) {
+        if (rec.task_id === String(taskId || '')) {
+          if (!found || (rec.created_at || 0) >= (found.created_at || 0)) found = rec
+        }
+      }
+      return found
+    }
+    // 终态后继续 = 派生新逻辑运行并保留来源关系（R8）：taskId#2、taskId#3 …
+    function nextLogicalRunId(taskId) {
+      const base = String(taskId || '')
+      let n = 2
+      while (logicalRuns.has(base + '#' + n)) n++
+      return base + '#' + n
+    }
+    // 看板 join（不改 runs/ 记录语义，R13）：引擎运行 id → 逻辑运行段信息
+    function logicalJoinForRun(runId) {
+      const lrId = logicalRunByEngineRun.get(String(runId || ''))
+      if (!lrId) return null
+      const rec = logicalRuns.get(lrId)
+      if (!rec) return { logical_run_id: lrId }
+      const seg = rec.segments.find((s) => s.run_id === String(runId)) || null
+      return {
+        logical_run_id: lrId,
+        segment: seg ? seg.index : null,
+        segment_count: rec.segments.length,
+        logical_state: rec.lifecycle.state,
+      }
+    }
+    // 平台 workflow 工具直起的引擎运行（无 wf_run 边界）：按事件流可得信息落退化摘要
+    // ——单段、completion=null（事件层 value 被剥掉，任务规格风险第 3 条已知限制）。
+    function recordDegenerateLogicalRun(runId, stopReason) {
+      const id = String(runId || '')
+      if (!id || logicalRunByEngineRun.has(id)) return
+      const now = Date.now()
+      const runRec = runs.get(id)
+      const rec = {
+        logical_run_id: id,
+        schema: LOGICAL_RUN_SCHEMA,
+        task_id: '',
+        template_id: '',
+        title: runRec && runRec.meta ? String(runRec.meta.name || '') : '',
+        derived_from: null,
+        created_at: now,
+        updated_at: now,
+        lifecycle: {
+          state: stopReason === 'completed' ? 'COMPLETED' : 'FAILED',
+          reason: stopReason === 'completed' ? null : logicalReason(stopReason === 'cancelled' ? 'ENGINE_CANCELLED' : 'ENGINE_ERROR'),
+        },
+        terminal: true,
+        completion: null,
+        segments: [{ index: 1, run_id: id, trigger: 'engine_event', started_at: now, ended_at: now, status: String(stopReason || ''), active: false }],
+        snapshots: [],
+        node_attempts: [],
+        business_outcomes: {},
+        workspace: null,
+      }
+      logicalRuns.set(id, rec)
+      logicalRunByEngineRun.set(id, id)
+      requestLogicalPersist(id)
+    }
+    // #93 工作区上下文入档（消费 #93 数据契约）：身份视图 + 事件时间线 + 清理审计，
+    // 复制进摘要，Workspace 清理后仍可完整追溯（R9）。非阻断：#93 未部署（notFound）
+    // 或调用失败时保留现有入档。
+    async function refreshWorkspaceContext(rec, taskId) {
+      if (fs === undefined || typeof wsHostCall !== 'function') return
+      let r = null
+      try { r = await wsHostCall('context', { logical_run_id: String(taskId || '') }) } catch (e) { return }
+      if (!r || !r.ok) return
+      const ws = r.workspace || null
+      const events = Array.isArray(r.events) ? r.events : []
+      const prev = rec.workspace
+      rec.workspace = {
+        workspace_id: ws ? ws.workspace_id : (prev && prev.workspace_id) || null,
+        mode: ws ? ws.workspace_mode : (prev && prev.mode) || null,
+        workspace_path: ws ? ws.workspace_path : (prev && prev.workspace_path) || null,
+        source_path: ws ? ws.source_path : (prev && prev.source_path) || null,
+        source_revision: ws ? ws.source_revision : (prev && prev.source_revision) || null,
+        work_branch: ws ? ws.work_branch : (prev && prev.work_branch) || null,
+        current_head: ws ? ws.current_head : (prev && prev.current_head) || null,
+        base_commit: ws ? ws.base_commit : (prev && prev.base_commit) || null,
+        lifecycle: ws ? ws.lifecycle : (prev && prev.lifecycle) || null,
+        allocated_at: ws ? ws.created_at : (prev && prev.allocated_at) || null,
+        events: events,
+        resource_locks: events.filter((e) => e && (e.type === 'lock_acquired' || e.type === 'lock_released')),
+        integration_checkpoints: events.filter((e) => e && e.type === 'integration_checkpoint'),
+        cleanup: r.cleanup || (prev && prev.cleanup) || null,
+        refreshed_at: Date.now(),
+      }
+      rec.updated_at = Date.now()
+    }
+
     ctx.on('workflow/start', (info) => {
       const rec = ensureRun(info.id)
       rec.meta = { name: String((info.meta && info.meta.name) || ''), description: String((info.meta && info.meta.description) || '') }
@@ -532,6 +955,9 @@ return {
         // 终局时仍 running 的子代理不可能再有结果（引擎对启动即失败的项不投递 agent-end）
         for (const a of rec.agents) if (a.outcome === 'running') a.outcome = 'failed'
       })
+      // #79：未纳管引擎运行（平台 workflow 工具直起）按事件流可得信息落退化摘要。
+      // wf_run 边界运行在此处必已登记，不会进入该分支。
+      if (!logicalRunByEngineRun.has(String(info.id))) recordDegenerateLogicalRun(info.id, String((result && result.stopReason) || ''))
     })
 
     // 同 taskId 互斥：占用该任务的最新记录
@@ -662,10 +1088,35 @@ return {
     })
     const listRunSummaries = async () => {
       await runsHydration
-      return { runs: Array.from(runs.values()).map(summary).sort((a, b) => ((b.startedAt || 0) - (a.startedAt || 0)) || byId(b.id, a.id)) }
+      const out = Array.from(runs.values()).map((rec) => {
+        const row = summary(rec)
+        // #79：逻辑运行 join（第 N 段呈现数据源；旧记录无逻辑运行归属时不加字段）
+        const lj = logicalJoinForRun(rec.id)
+        if (lj) Object.assign(row, lj)
+        return row
+      }).sort((a, b) => ((b.startedAt || 0) - (a.startedAt || 0)) || byId(b.id, a.id))
+      return { runs: out }
     }
     registerRpc('vwf.runs.list', listRunSummaries)
     registerRpc('vwf.runs.history', listRunSummaries)
+    // #79：逻辑运行摘要只读取（为 #75 Run Dashboard 冻结的数据模型）
+    registerRpc('vwf.logicalRuns.get', async (a) => {
+      const id = String((a && a.logical_run_id) || '')
+      if (!id) return { found: false, record: null }
+      let rec = logicalRuns.get(id)
+      if (!rec) {
+        // 内存 miss 回落磁盘（同 runs 记录口径）：重启后未回载进内存的摘要按 id 直查
+        const d = fs === undefined ? null : await homeDirs()
+        if (d) {
+          try {
+            hydrateLogicalRunFromDisk(JSON.parse(await fs.readText(await fs.resolve(d.logicalRunsDir + '/' + logicalRunFile(id)))))
+          } catch (e) { /* 不存在或损坏：按缺失返回 */ }
+          rec = logicalRuns.get(id)
+        }
+      }
+      if (!rec) return { found: false, record: null }
+      return { found: true, record: logicalRunPayload(rec) }
+    })
     registerRpc('vwf.artifacts.ingest', async (a) => {
       const { runId, nodeId, artifacts } = a
       if (!runId || !nodeId || !Array.isArray(artifacts) || !artifacts.length) return fail('缺少 runId / nodeId / artifacts')
@@ -966,6 +1417,16 @@ return {
         }
         const result = await wsHostCall(cmd, build(a, id))
         if (op === 'allocate' && result.ok && result.workspace && id) result.capability = capabilityFor(id)
+        // #79：清理审计沿真实调用时序入档——终态收尾刷新早于清理（#93 cleanup 要求
+        // workspace 已终态），cleanup 审计只能在本钩子落摘要；最新逻辑运行承接该
+        // workspace 的最终审计，保留既有身份/事件入档。
+        if (op === 'cleanup' && result && result.ok) {
+          const rec = latestLogicalRunForTask(id)
+          if (rec) {
+            await refreshWorkspaceContext(rec, id)
+            requestLogicalPersist(rec.logical_run_id)
+          }
+        }
         return result
       })
     }
@@ -1044,6 +1505,7 @@ return {
         user_choice: { type: 'string', description: 'Human Decision 续跑：Decision Result（如 STOP / USER_ACCEPTED / ADD_BUDGET）' },
         blocked_edge: { type: 'object', additionalProperties: true, description: 'ADD_BUDGET 时被额度拦住的自动边 { from, to, on }' },
         results: { type: 'object', additionalProperties: true, description: '续跑时带回的节点结果快照' },
+        model_overrides: { type: 'object', additionalProperties: true, description: '#79 续跑时可更换 Provider/Model：{ 节点id | "$default": { provider, model } }；产生追加式快照修订（旧修订保留可查），仅续跑生效' },
       },
       async execute(rawArgs) {
         refreshServices()
@@ -1098,6 +1560,65 @@ return {
         if (engineNow === undefined) return '错误：当前宿主平面无法访问 workflowEngine（wf_run 需要 agent preset 挂载的工作流引擎）。可改用内置 workflow 工具执行 vwf.script 编译产物。'
         const parent = agents.requireInitiator()
 
+        // ── #79 Logical Run 归属解析 ─────────────────────────────────────────
+        // 新启 = 创建逻辑运行（快照 Rev 1 冻结）；同 taskId 终态后再启 = 派生新运行
+        // （R8）；崩溃残留的非终态运行标 FAILED 后派生；续跑 = 挂到同一逻辑运行追加
+        // 执行分段（R2）。摘要回载完成后才裁决（runsHydration 前置已 await）。
+        const logicalTaskId = taskId
+        const beforeResultKeys = new Set(Object.keys((args.results && typeof args.results === 'object' && !Array.isArray(args.results)) ? args.results : {}))
+        const logicalRunConfig = () => {
+          const cfg = { runDir: args.runDir, baseBranch: args.baseBranch, roleDir: args.roleDir || c.roleDir, issueRef: args.issueRef, issueTitle: args.issueTitle }
+          for (const k of Object.keys(cfg)) { if (cfg[k] === undefined || cfg[k] === null || cfg[k] === '') delete cfg[k] }
+          return cfg
+        }
+        let logicalRec = null
+        let logicalTrigger = 'start'
+        if (isHdResume || isLegacyResume) {
+          const latest = latestLogicalRunForTask(logicalTaskId)
+          if (latest && latest.terminal) {
+            return '错误：任务 ' + logicalTaskId + ' 的逻辑运行 ' + latest.logical_run_id + ' 已终态（' + latest.lifecycle.state + '），同一运行不能继续。请直接重新发起（将派生新运行并保留来源关系）。'
+          }
+          logicalTrigger = isHdResume ? 'human_decision' : 'legacy_resume'
+          if (latest) {
+            logicalRec = latest
+          } else {
+            // 旧形态挂起记录（升级前）升级后续跑：由本段起新建逻辑运行承接，不回写旧记录（R14）
+            logicalRec = createLogicalRun({
+              logical_run_id: logicalTaskId,
+              taskId: logicalTaskId,
+              templateId: String(args.templateId || v.sanitized.id || ''),
+              dsl: v.sanitized,
+              script: c.script,
+              roleDir: args.roleDir || c.roleDir || '',
+              config: logicalRunConfig(),
+            })
+          }
+        } else {
+          const latest = latestLogicalRunForTask(logicalTaskId)
+          if (latest && !latest.terminal) {
+            // 互斥已放行的崩溃残留：前任标 FAILED（结构化 reason），派生新运行
+            logicalSetState(latest, 'FAILED', logicalReason('RUNTIME_RESTARTED', '同 taskId 重新发起，前任运行进程已中断'))
+            await refreshWorkspaceContext(latest, logicalTaskId)
+            requestLogicalPersist(latest.logical_run_id)
+          }
+          logicalRec = createLogicalRun({
+            logical_run_id: latest ? nextLogicalRunId(logicalTaskId) : logicalTaskId,
+            taskId: logicalTaskId,
+            templateId: String(args.templateId || v.sanitized.id || ''),
+            dsl: v.sanitized,
+            script: c.script,
+            roleDir: args.roleDir || c.roleDir || '',
+            config: logicalRunConfig(),
+            derivedFrom: latest ? latest.logical_run_id : null,
+          })
+        }
+        // #79 快照修订（R3/R4）：续跑携带 model_overrides → 追加 Rev N（仅
+        // Provider/Model），旧修订保留，新修订只影响后续执行
+        if ((isHdResume || isLegacyResume) && args.model_overrides && typeof args.model_overrides === 'object' && !Array.isArray(args.model_overrides) && Object.keys(args.model_overrides).length) {
+          const rev = appendSnapshotRevision(logicalRec, args.model_overrides)
+          if (rev) requestLogicalPersist(logicalRec.logical_run_id)
+        }
+
         const prepared = await prepareRunWorkspace({ taskId: taskId, templateId: args.templateId || v.sanitized.id, baseBranch: args.baseBranch || 'main' })
         if (!prepared.ok) {
           log('workspace allocate 失败（fail closed，拒绝启动）：' + prepared.error)
@@ -1113,6 +1634,10 @@ return {
           requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
           decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
           budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
+          // #79: 续跑快照修订的 Provider/Model 覆盖（编译脚本按节点合并进 MODELS）。
+          // 仅续跑生效（与快照修订闸门一致）：新启透传会让脚本用覆盖模型执行而
+          // Rev1 快照仍记蓝图绑定，节点实际模型归因静默失真。
+          model_overrides: (isHdResume || isLegacyResume) ? args.model_overrides : undefined,
         }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined) : {})
         for (const k of Object.keys(scriptArgs)) if (scriptArgs[k] === undefined) delete scriptArgs[k]
 
@@ -1123,6 +1648,10 @@ return {
         let run
         try { run = engineNow.start(startReq) } catch (e) {
           if (ws) await markWorkspaceLifecycle(taskId, 'FAILED')
+          if (logicalRec) {
+            logicalSetState(logicalRec, 'FAILED', logicalReason('ENGINE_START_FAILED', errMsg(e)))
+            requestLogicalPersist(logicalRec.logical_run_id)
+          }
           return '错误：工作流引擎启动失败，workspace 已标 FAILED：' + errMsg(e)
         }
         // 启动边界自登记（workflow/start 事件不带 taskId）；续跑把同 taskId 前序门禁记录标记接管
@@ -1133,14 +1662,46 @@ return {
         live.add(runId)
         persist(runId)
         if (isHdResume || isLegacyResume) supersedeParked(taskId, runId)
+        // #79：本段执行挂到逻辑运行（READY/WAITING_HUMAN → RUNNING，清 reason）
+        if (logicalRec) {
+          appendLogicalSegment(logicalRec, runId, logicalTrigger, isHdResume ? String(args.decision_id || '') : '')
+          logicalSetState(logicalRec, 'RUNNING', null)
+          requestLogicalPersist(logicalRec.logical_run_id)
+        }
         let result
         try { result = await run.result } catch (e) {
           if (ws) await markWorkspaceLifecycle(taskId, 'FAILED')
+          if (logicalRec) {
+            endLogicalSegment(logicalRec, runId, 'ENGINE_ERROR')
+            logicalSetState(logicalRec, 'FAILED', logicalReason('ENGINE_ERROR', errMsg(e)))
+            requestLogicalPersist(logicalRec.logical_run_id)
+          }
           return '错误：工作流运行失败，workspace 已标 FAILED：' + errMsg(e)
         }
         // 权威终态回写：completed 时以脚本返回 value.status 为准；回执保持引擎原样不翻译
         const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
         if (canon) onRun(runId, (r) => { r.status = canon; applyHdValue(r, result.value) })
+        // #79 逻辑运行收尾：八态映射 + 完成类型镜像 + 节点实际修订/模型/业务结果
+        // 记录 + 工作区上下文入档。Lifecycle 闸门不改写专业结果（R7）。
+        if (logicalRec) {
+          const value = result && result.value
+          endLogicalSegment(logicalRec, runId, canon || String((result && result.stopReason) || ''))
+          if (canon === 'DONE') {
+            const comp = value && value.completion
+            if (comp && typeof comp === 'object' && typeof comp.type === 'string' && comp.type.trim()) {
+              logicalRec.completion = {
+                type: comp.type,
+                node: comp.node !== undefined && comp.node !== null ? String(comp.node) : '',
+                path: comp.path !== undefined && comp.path !== null ? String(comp.path) : '',
+              }
+            }
+          }
+          recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, value && value.results, value && value.control_event)
+          const trans = logicalTransitionFor(canon, result && result.stopReason, value)
+          if (trans) logicalSetState(logicalRec, trans.state, trans.reason)
+          await refreshWorkspaceContext(logicalRec, logicalTaskId)
+          requestLogicalPersist(logicalRec.logical_run_id)
+        }
         if (ws) {
           const lc = lifecycleFor(canon, result && result.stopReason)
           if (lc) await markWorkspaceLifecycle(taskId, lc)
