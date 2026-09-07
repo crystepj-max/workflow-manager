@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import validatorCore from '../../../scripts/validate-core.cjs'
 
-const { validateBlueprint } = validatorCore
+const { validateBlueprint, COND_RE } = validatorCore
 
 const here = dirname(fileURLToPath(import.meta.url))
 const src = readFileSync(join(here, '..', 'src', 'client.js'), 'utf8')
@@ -121,4 +121,14 @@ test('verifyBranch=true 生成的 schema 通过 validate-core（required 含 ver
     id: 'n1', profile: 'test', goal: 'g', verifyBranch: true, output: { schema, successCondition: '$.result == "PASSED"' },
   }))
   assert.equal(r.ok, true, JSON.stringify(r.errors))
+})
+
+// 防漂移门禁：client.js 是浏览器动态闭包，无法 import 内核，内联了一份成功表达式正则。
+// 两侧一旦漂移，自动生成的 schema 与保存校验会给出不一致的路径判定，故在此锁定字面一致。
+test('防漂移门禁：client.js 的 COND_RE 与 validate-core.cjs 字面一致', () => {
+  assert.equal(
+    plugin.COND_RE.source,
+    COND_RE.source,
+    'client.js 的 conditionRegex() 与 scripts/validate-core.cjs 的 COND_RE 已漂移，请同步两侧'
+  )
 })

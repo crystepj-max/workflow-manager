@@ -44,6 +44,7 @@ return {
   name: 'visual-workflow-client',
   inject: ['slots', 'timer'],
   buildSchemaTemplate: buildSchemaTemplate,
+  COND_RE: conditionRegex(),
   apply(ctx) {
     const slots = ctx.get('slots')
     if (slots === undefined) return
@@ -1384,7 +1385,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               h('input', {
                 className: 'vwf-input vwf-mono' + (errorsFor('output.successCondition').length ? ' err' : ''),
                 value: (node.output && node.output.successCondition) || '', placeholder: '$.result == true',
-                onChange: (ev) => props.onUpdate(node.id, { output: { ...(node.output || {}), successCondition: ev.target.value } }),
+                onChange: (ev) => { setSchemaNotice(null); props.onUpdate(node.id, { output: { ...(node.output || {}), successCondition: ev.target.value } }) },
               })
             )
           ) : null,
@@ -2600,6 +2601,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 // 注：本函数刻意定义在 return 之后 —— #175 起 build-bundle.mjs 要求压缩后的动态闭包体
 // 必须以 return{ 开头（顶层不得出现任何前置语句）。函数声明会被提升，因此 return 中的
 // buildSchemaTemplate 属性导出与 apply 内的调用均不受影响。
+
+// ── 成功表达式解析正则（单一来源，防止与内核字面漂移）────────────────────────
+// client.js 是浏览器动态闭包，无法 import scripts/validate-core.cjs，故此处保留一份
+// 字面量；由 tests/schema-template.test.mjs 断言其 source 与内核 COND_RE 完全一致
+// （防漂移门禁）。buildSchemaTemplate 一律经本函数取用，避免同一正则散落多处。
+function conditionRegex() {
+  return /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
+}
+
 // ── 基础 Schema 模板生成（独立纯函数，供 beautifySchema 空字段分支与单测复用）──
 // 输入：{ kind: 'worker'|'fanout', successCondition?: string, verifyBranch?: boolean }
 // 输出：标准 JSON Schema 对象（type/properties/required）。类型推导与多级路径展开
@@ -2612,7 +2622,7 @@ function buildSchemaTemplate(input) {
 
   if (kind === 'worker') {
     const cond = typeof opts.successCondition === 'string' ? opts.successCondition.trim() : ''
-    const m = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/.exec(cond)
+    const m = conditionRegex().exec(cond)
     if (m) {
       // 按比较值推导叶子字段类型：==true/false→boolean、=="字符串"→string、
       // ==数字→number、推导不出（null 等）→string 兜底
