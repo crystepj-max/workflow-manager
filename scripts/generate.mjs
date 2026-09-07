@@ -17,7 +17,7 @@ import roleLibrary from './role-library.cjs';
 const { buildSnapshot, readRoleFileSafe, collectReferencedRoleFiles } = roleLibrary;
 const { projectToVwf } = projectionCore;
 
-const { validateBlueprint, COND_RE, HUMAN_DECISION_ID, HD_CONTROL_RESULTS, HD_PACKAGE_REQUIRED, HD_UNKNOWN, HD_EVENT_RECORD_KIND, HD_EVENT_TRIGGER } = validatorCore;
+const { validateBlueprint, compileInputSizeViolation, COND_RE, HUMAN_DECISION_ID, HD_CONTROL_RESULTS, HD_PACKAGE_REQUIRED, HD_UNKNOWN, HD_EVENT_RECORD_KIND, HD_EVENT_TRIGGER } = validatorCore;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TPL_DIR = path.join(__dirname, '..', 'templates');
@@ -100,6 +100,11 @@ function foldableNodes(bp) {
 // 统一编译器（候选一 T-IMP-12）：DSH 与 vwf 双入口的唯一翻译员。
 // 宿主侧 compileDsl 已删除，经管道消费本函数产物（磁盘产物优先 + CLI compile 兜底）。
 export function compileBlueprint(bp, opts = {}) {
+  // 编译输入尺寸闸门（#131）：CLI compile 不做蓝图校验，vwf.script / wf_run 的临时图
+  // 直达此处——主闸必须在编译器入口，保证任何进入编译的文档响应必小于通道上限。
+  // 限额与计量同源自 validate-core（单点定义，防两闸口径漂移）。
+  const sizeViolation = compileInputSizeViolation(bp);
+  if (sizeViolation) throw new Error('工作流文档过大：' + sizeViolation.message);
   const maxRounds = (bp.control && bp.control.maxRounds) || 9;
   const models = (bp.bindings && bp.bindings.models) || {};
   const folds = foldableNodes(bp);
