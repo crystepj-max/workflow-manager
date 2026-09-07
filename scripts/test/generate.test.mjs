@@ -121,7 +121,7 @@ test('#128 投影：outcome / countRound / completionPath 透传，业务边不�
   assert.equal(tech.from, 'evaluate');
   assert.equal(Object.prototype.hasOwnProperty.call(tech, 'outcome'), false);
   const hdOut = dsl.edges.find((e) => e.from === '$human-decision');
-  assert.equal(hdOut.outcome, 'USER_ACCEPTED');
+  assert.equal(hdOut.outcome, 'CONFIRM_PROCEED');
   assert.equal(Object.prototype.hasOwnProperty.call(hdOut, 'on'), false);
 });
 
