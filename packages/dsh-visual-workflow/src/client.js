@@ -1210,6 +1210,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
       const beautifySchema = () => {
         if (!schemaDraft.trim()) {
+          // 取消残留的 2s 防抖，避免「输入后清空再点 ✨」时旧防抖在稍后把刚填入的模板覆盖为 null
+          if (debounceRef.current) debounceRef.current()
           const template = buildSchemaTemplate({
             kind: isFanout ? 'fanout' : 'worker',
             successCondition: (node.output && node.output.successCondition) || '',
