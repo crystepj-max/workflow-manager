@@ -108,6 +108,7 @@
   "noFormalArtifacts": "No Formal Artifact records for this run",
   "outputSchemaBeautify": "Beautify JSON",
   "outputSchemaInvalid": "Invalid JSON; fix it before it is written to the workflow.",
+  "outputSchemaAutofilled": "Basic JSON Schema generated and filled in. You can keep editing.",
   "successCondition": "Success expression",
   "successConditionHelp": "Define how the node is considered successful, e.g. $.result == true. Nested paths supported. Save validates the path exists in the JSON output constraint.",
   "edgeOutcome": "Edge Type",

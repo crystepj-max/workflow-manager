@@ -108,6 +108,7 @@
   "noFormalArtifacts": "该 run 暂无 Formal Artifact 记录",
   "outputSchemaBeautify": "美化 JSON",
   "outputSchemaInvalid": "JSON 格式无效，修正后才会写入工作流。",
+  "outputSchemaAutofilled": "已自动生成并填入基础 JSON Schema，可继续编辑。",
   "successCondition": "成功表达式",
   "successConditionHelp": "填写用于判断节点成功的表达式，例如 $.result == true。支持多级路径。保存时会校验路径是否存在于 JSON 输出约束中。",
   "edgeOutcome": "边类型",
