@@ -21,7 +21,7 @@ const fanoutGood = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blue
 
 test('投影往返：蓝图 → DSL → 蓝图 与原蓝图语义等价（verifyBranch / bindings / 业务规则字段无损）', () => {
   const { projectToVwf, projectToBlueprint } = validatorCore;
-  for (const file of ['../../templates/dev-workflow-2-0.json', '../../templates/default-workflow.json', 'fixtures/construction-rollback-mini.json']) {
+  for (const file of ['../../templates/custom-seeds/dev-workflow-2-0.json', '../../templates/custom-seeds/default-workflow.json', 'fixtures/construction-rollback-mini.json']) {
     const bp = JSON.parse(readFileSync(path.join(here, file), 'utf8'));
     const back = projectToBlueprint(projectToVwf(bp));
     const norm = (b) => JSON.parse(JSON.stringify({
