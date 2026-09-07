@@ -215,7 +215,8 @@ test('#79 model_overrides 续跑：追加 Rev2 不覆盖 Rev1，节点保留当�
     model_overrides: { explore: { provider: 'p2', model: 'm2' } },
   })
   await until(() => eng.starts.length >= 2, '启动2')
-  assert.deepEqual(eng.starts[1].args.model_overrides, { explore: { provider: 'p2', model: 'm2' } }, '覆盖透传给编译脚本')
+  // Codex R2 ②：透传的是 active 快照的合并绑定（含未覆盖节点），而非本次 delta
+  assert.deepEqual(eng.starts[1].args.model_overrides, { explore: { provider: 'p2', model: 'm2' }, closeout: { provider: 'p1', model: 'm1' } }, '合并绑定透传给编译脚本')
   events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
   settleRun(eng, events, 'run-2', 'DONE', { results: { closeout: { result: 'ok' } } })
   await p2
@@ -520,4 +521,108 @@ test('#79 DSH Home 探针：子进程 DSH_* 被剥离时沿祖先进程链读回
   const rec = JSON.parse(fs._files.get(CUSTOM_HOME + '/visual-workflow/logical-runs/' + encodeURIComponent('uat-home-01') + '.json'))
   assert.equal(rec.task_id, 'uat-home-01', '运行摘要落在祖链解析出的真实 Home')
   assert.ok(![...fs._files.keys()].some((k) => k.startsWith(DSH_HOME + '/visual-workflow/logical-runs/')), '不再误落默认 ~/.dsh')
+})
+
+test('#79 Codex R2 ②：多轮修订累积——Rev3 只改 B 时，A 仍按 Rev2 合并值执行', async () => {
+  const eng = makeEngine()
+  const { events, definedTools, fs: fs0 } = engineEnv(eng)
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  // 段 1：发起（Rev1：explore=p1/m1, closeout=p1/m1）→ 停人工
+  const p1 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-cum' })
+  await until(() => eng.starts.length >= 1, '启动1')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-1', 'WAITING_HUMAN', { reason: 'ESCALATED_DECISION', decision_id: 'd1', decision_package: {}, results: {} })
+  await p1
+  await drain()
+  // 段 2：Rev2 = explore → p2/m2，再停人工
+  const p2 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-cum', decision_id: 'd1', user_choice: 'USER_ACCEPTED', model_overrides: { explore: { provider: 'p2', model: 'm2' } } })
+  await until(() => eng.starts.length >= 2, '启动2')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-2', 'WAITING_HUMAN', { reason: 'ESCALATED_DECISION', decision_id: 'd2', decision_package: {}, results: {} })
+  await p2
+  await drain()
+  // 段 3：Rev3 只改 closeout → p3/m3；explore 必须仍按 Rev2 的 p2/m2 执行
+  const p3 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-cum', decision_id: 'd2', user_choice: 'USER_ACCEPTED', model_overrides: { closeout: { provider: 'p3', model: 'm3' } } })
+  await until(() => eng.starts.length >= 3, '启动3')
+  assert.deepEqual(
+    eng.starts[2].args.model_overrides,
+    { explore: { provider: 'p2', model: 'm2' }, closeout: { provider: 'p3', model: 'm3' } },
+    '传入的是 active 快照的合并绑定（Rev2 explore + Rev3 closeout），而非本次 delta'
+  )
+  events.get('workflow/start')({ id: 'run-3', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-3', 'DONE', { results: { explore: { verdict: 'PASS' }, closeout: { result: 'ok' } } })
+  await p3
+  await drain()
+  const rec = readLogical(fs0, 'issue-cum')
+})
+
+test('#79 Codex R2 ①：模板等待期间被修改，续跑仍执行 Rev1 冻结脚本', async () => {
+  const eng = makeEngine()
+  const { events, definedTools, fs } = engineEnv(eng)
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const p1 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-frozen' })
+  await until(() => eng.starts.length >= 1, '启动1')
+  const scriptV1 = eng.starts[0].script
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-1', 'WAITING_HUMAN', { reason: 'ESCALATED_DECISION', decision_id: 'd1', decision_package: {}, results: {} })
+  await p1
+  await drain()
+  // 等待期间模板被改（换 id 不同名，模拟用户在编辑器另存覆盖）
+  const mutated = JSON.parse(JSON.stringify(SPEC_BLUEPRINT))
+  mutated.nodes[0].goal = '被修改过的目标'
+  fs._files.set(USER_DIR + '/logical-run-spec.json', JSON.stringify(mutated, null, 2) + '\n')
+
+  const p2 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-frozen', decision_id: 'd1', user_choice: 'USER_ACCEPTED' })
+  await until(() => eng.starts.length >= 2, '启动2')
+  assert.equal(eng.starts[1].script, scriptV1, '续跑执行 Rev1 冻结脚本，而非重新编译的新脚本')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-2', 'DONE', { results: { closeout: { result: 'ok' } } })
+  await p2
+  await drain()
+})
+
+test('#79 Codex R2 ③：派生运行按自身 logical_run_id 分配 workspace', async () => {
+  const fs = makeFs({
+    [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+    [USER_DIR + '/logical-run-spec.json']: JSON.stringify(SPEC_BLUEPRINT, null, 2) + '\n',
+    [SKILL_ROOT + '/logical-run-spec/script.mjs']: '//MOCK-SCRIPT',
+    [REPO + '/scripts/workspace-isolation-host.mjs']: '//wrapper-stub',
+  })
+  const base = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
+  const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
+  const reply = (body) => ({ pid: 1, done: Promise.resolve({ exitCode: 0, signal: null }), collected: { stdout: reader(JSON.stringify(body)), stderr: reader('') }, terminate() {}, waitForExit: async () => true })
+  const origSpawn = base.spawn.bind(base)
+  const allocCalls = []
+  base.spawn = (spec) => {
+    const a = spec.argv
+    if (a.some((x) => String(x).includes('workspace-isolation-host.mjs'))) {
+      const cmd = a[2]
+      if (cmd === 'allocate') {
+        const req = JSON.parse(a[3] || '{}')
+        allocCalls.push(req.logical_run_id)
+        return reply({ ok: true, workspace: { workspace_id: 'ws-' + req.logical_run_id, workspace_path: '/ws/' + req.logical_run_id, source_path: '/ws/' + req.logical_run_id + '/source' } })
+      }
+      return reply({ ok: true, workspace: {} })
+    }
+    return origSpawn(spec)
+  }
+  const eng = makeEngine()
+  const { events, definedTools } = loadHost({ fs, subprocess: base, sandboxPolicy, workflowEngine: eng, agents: { requireInitiator: () => ({}), currentInitiator: () => null } })
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  // 第一轮完成（终态）
+  const p1 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-wsid' })
+  await until(() => eng.starts.length >= 1, '启动1')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-1', 'DONE', { results: { explore: { verdict: 'PASS' } } })
+  await p1
+  await drain()
+  // 重新发起 = 派生 issue-wsid#2，workspace 分配必须用派生 id
+  const p2 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-wsid' })
+  await until(() => eng.starts.length >= 2, '启动2')
+  assert.equal(eng.starts[1].args.workspace_id, 'ws-issue-wsid#2', '派生运行分配到自己的 workspace 身份')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-2', 'DONE', { results: { explore: { verdict: 'PASS' } } })
+  await p2
+  await drain()
+  assert.deepEqual(allocCalls, ['issue-wsid', 'issue-wsid#2'], '两次分配分别用原始 id 与派生 id')
 })

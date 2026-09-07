@@ -840,7 +840,7 @@ return {
       loaded.sort((a, b) => ((a.created_at || 0) - (b.created_at || 0)))
       for (const data of loaded) hydrateLogicalRunFromDisk(data)
     }
-    loadLogicalRuns().catch((e) => log('逻辑运行摘要回载失败：' + errMsg(e)))
+    const logicalRunsHydration = loadLogicalRuns().catch((e) => log('逻辑运行摘要回载失败：' + errMsg(e)))
 
     function latestLogicalRunForTask(taskId) {
       let found = null
@@ -1563,7 +1563,9 @@ return {
         // ── #79 Logical Run 归属解析 ─────────────────────────────────────────
         // 新启 = 创建逻辑运行（快照 Rev 1 冻结）；同 taskId 终态后再启 = 派生新运行
         // （R8）；崩溃残留的非终态运行标 FAILED 后派生；续跑 = 挂到同一逻辑运行追加
-        // 执行分段（R2）。摘要回载完成后才裁决（runsHydration 前置已 await）。
+        // 执行分段（R2）。逻辑运行摘要回载完成后才裁决（Codex R2 ⑤：只 await
+        // runsHydration 会与 loadLogicalRuns 竞速，重启窗口内误判"无前任"）。
+        try { if (typeof logicalRunsHydration !== 'undefined' && logicalRunsHydration) await logicalRunsHydration } catch (e) { /* 回载失败已留痕 */ }
         const logicalTaskId = taskId
         const beforeResultKeys = new Set(Object.keys((args.results && typeof args.results === 'object' && !Array.isArray(args.results)) ? args.results : {}))
         const logicalRunConfig = () => {
@@ -1618,9 +1620,27 @@ return {
           const rev = appendSnapshotRevision(logicalRec, args.model_overrides)
           if (rev) requestLogicalPersist(logicalRec.logical_run_id)
         }
+        // Codex R2 ①：续跑必须执行 Rev 1 冻结脚本（R3：运行中仅 Provider/Model 可改，
+        // 工作流定义冻结）——等待期间模板被修改时，重新编译会让"新脚本 + script_ref:1
+        // 快照"静默失配。Rev 1 无脚本（旧形态承接）时才用当前编译产物。
+        const snap1 = (logicalRec.snapshots || []).find((s) => s.revision === 1) || null
+        const frozenScript = snap1 && typeof snap1.script === 'string' && snap1.script ? snap1.script : null
+        const execScript = (isHdResume || isLegacyResume) && frozenScript ? frozenScript : c.script
+        // Codex R2 ②：续跑传入 active 快照的合并绑定（而非本次 delta）——Rev3 只改 B
+        // 时，A 必须仍用 Rev2 的覆盖值执行；合并语义与编译脚本一致（显式覆盖优先，
+        // $default 兜底未显式覆盖节点）。
+        const activeSnap = activeSnapshot(logicalRec)
+        const modelOverridesForExec = (isHdResume || isLegacyResume) ? structuredClone(activeSnap ? activeSnap.provider_model : null) : undefined
 
-        const prepared = await prepareRunWorkspace({ taskId: taskId, templateId: args.templateId || v.sanitized.id, baseBranch: args.baseBranch || 'main' })
+        // Codex R2 ③：派生运行按自身 logical_run_id 分配 workspace——沿用原 taskId 会让
+        // #93 注册表把前任（仍注册）的 workspace 复用给派生运行，或在清理后把溯源记到
+        // 旧身份下。markWorkspaceLifecycle/refreshWorkspaceContext 同步用该 ID。
+        const wsIdentity = logicalRec.logical_run_id
+        const prepared = await prepareRunWorkspace({ taskId: wsIdentity, templateId: args.templateId || v.sanitized.id, baseBranch: args.baseBranch || 'main' })
         if (!prepared.ok) {
+          // Codex R2 ⑥：分配失败不得留下 READY 悬挂记录（否则下次重试被误判为崩溃残留）
+          logicalSetState(logicalRec, 'FAILED', logicalReason('WORKSPACE_ALLOCATE_FAILED', String(prepared.error || '')))
+          requestLogicalPersist(logicalRec.logical_run_id)
           log('workspace allocate 失败（fail closed，拒绝启动）：' + prepared.error)
           return '错误：Run Workspace 分配失败，隔离保证无法建立，工作流拒绝启动：' + prepared.error + '（请检查仓库根可访问性、DSH Home/workspaces 目录权限与 workspace-isolation-host.mjs 是否存在）'
         }
@@ -1634,20 +1654,20 @@ return {
           requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
           decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
           budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
-          // #79: 续跑快照修订的 Provider/Model 覆盖（编译脚本按节点合并进 MODELS）。
-          // 仅续跑生效（与快照修订闸门一致）：新启透传会让脚本用覆盖模型执行而
-          // Rev1 快照仍记蓝图绑定，节点实际模型归因静默失真。
-          model_overrides: (isHdResume || isLegacyResume) ? args.model_overrides : undefined,
+          // #79: 快照修订的 Provider/Model（Codex R2 ②：active 快照的合并绑定；仅续跑
+          // 生效——新启透传会让脚本用覆盖模型执行而 Rev1 快照仍记蓝图绑定，归因失真）
+          model_overrides: modelOverridesForExec,
         }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined) : {})
         for (const k of Object.keys(scriptArgs)) if (scriptArgs[k] === undefined) delete scriptArgs[k]
 
         // 启动引擎前先标 RUNNING：崩溃/start 抛错不得把 workspace 永久留在 READY
-        if (ws) await markWorkspaceLifecycle(taskId, 'RUNNING')
-        const startReq = { script: c.script, meta: c.meta, args: scriptArgs, parent: parent }
+        if (ws) await markWorkspaceLifecycle(wsIdentity, 'RUNNING')
+        // Codex R2 ①：续跑执行 Rev 1 冻结脚本（见上方 execScript 说明）
+        const startReq = { script: execScript, meta: c.meta, args: scriptArgs, parent: parent }
         if (ws && ws.source_path) { startReq.cwd = ws.source_path; startReq.workspaceRoot = ws.source_path }
         let run
         try { run = engineNow.start(startReq) } catch (e) {
-          if (ws) await markWorkspaceLifecycle(taskId, 'FAILED')
+          if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
           if (logicalRec) {
             logicalSetState(logicalRec, 'FAILED', logicalReason('ENGINE_START_FAILED', errMsg(e)))
             requestLogicalPersist(logicalRec.logical_run_id)
@@ -1670,7 +1690,7 @@ return {
         }
         let result
         try { result = await run.result } catch (e) {
-          if (ws) await markWorkspaceLifecycle(taskId, 'FAILED')
+          if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
           if (logicalRec) {
             endLogicalSegment(logicalRec, runId, 'ENGINE_ERROR')
             logicalSetState(logicalRec, 'FAILED', logicalReason('ENGINE_ERROR', errMsg(e)))
@@ -1704,7 +1724,7 @@ return {
         }
         if (ws) {
           const lc = lifecycleFor(canon, result && result.stopReason)
-          if (lc) await markWorkspaceLifecycle(taskId, lc)
+          if (lc) await markWorkspaceLifecycle(wsIdentity, lc)
         }
         return JSON.stringify({ runId: runId, stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
       },
