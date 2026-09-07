@@ -47,7 +47,7 @@ test('S2 生成器：vwf-dsl 注入模型绑定（bindings 编译期固化）', 
 test('S2 生成器：业务规则字段进 vwf DSL（候选二 Q7 修订），节点级 verifyBranch 随 DSL 往返', () => {
   const { files } = generateAll(tplDir);
   const dsl = JSON.parse(files.get('dev-workflow-2-0/vwf-dsl.json'));
-  const bp = JSON.parse(readFileSync(path.join(tplDir, 'dev-workflow-2-0.json'), 'utf8'));
+  const bp = JSON.parse(readFileSync(path.join(seedsDir, 'dev-workflow-2-0.json'), 'utf8'));
   const gated = bp.nodes.filter((n) => n.verifyBranch).map((n) => n.id);
   assert.ok(gated.length >= 1, '夹具须含 verifyBranch 节点');
   assert.deepEqual(dsl.nodes.filter((n) => n.verifyBranch).map((n) => n.id), gated,

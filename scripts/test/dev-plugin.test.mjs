@@ -333,7 +333,7 @@ fi
   }
 })
 
-test('status 把校验内核与仓库指针同步到开发 Home', () => {
+test('status 重建开发态动态产物（内核只信插件 dist，不再向开发 Home 复制）', () => {
   const root = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-kernel-'))
   try {
     const devHome = join(root, 'dev-home')
@@ -348,11 +348,13 @@ test('status 把校验内核与仓库指针同步到开发 Home', () => {
       },
     })
     assert.equal(result.status, 0, result.stderr)
+    const pluginRoot = join(dirname(dirname(scriptPath)), 'packages', 'dsh-visual-workflow')
+    const hostBundle = join(pluginRoot, 'dist', 'dynamic', 'host.js')
+    const clientBundle = join(pluginRoot, 'dist', 'dynamic', 'client.js')
+    assert.equal(existsSync(hostBundle), true, 'status 应重建开发态 host 动态产物')
+    assert.equal(existsSync(clientBundle), true, 'status 应重建开发态 client 动态产物')
     const kernel = join(devHome, 'visual-workflow', 'validate-core.cjs')
-    const pointer = join(devHome, 'visual-workflow', 'repo-root')
-    assert.equal(existsSync(kernel), true, '应复制 scripts/validate-core.cjs')
-    assert.match(readFileSync(kernel, 'utf8'), /validateBlueprint/)
-    assert.equal(readFileSync(pointer, 'utf8').trim(), dirname(dirname(scriptPath)))
+    assert.equal(existsSync(kernel), false, '内核只信插件 dist，不再向开发 Home 复制')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -379,9 +381,10 @@ function waitForExit(child) {
 function waitForOutput(child, expected) {
   return new Promise((resolve, reject) => {
     let output = ''
+    // 启动器每次都会重建插件产物（约 1.5s，并发跑测试时更久），预算按重建耗时放宽
     const timer = setTimeout(() => {
       reject(new Error(`未等到启动输出：${expected}\n${output}`))
-    }, 5000)
+    }, 20000)
     const onData = (chunk) => {
       output += chunk.toString()
       if (!output.includes(expected)) return

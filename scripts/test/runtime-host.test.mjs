@@ -79,11 +79,8 @@ test('H2 用户模板磁盘路径：wf_run(templateId) 收到 save 闭环产物�
   assert.equal(captured.script, userScript, '用户模板走 save 闭环产物')
 })
 
-test('H3 临时图 CLI 兜底：wf_run(args.dsl) → 逆投影蓝图落盘 + compile 子命令 + 清理', async () => {
+test('H3 临时图 CLI 兜底：wf_run(args.dsl) → 逆投影蓝图经 --inline 交给 compile 子命令', async () => {
   const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
-  const writes = []
-  const origWrite = fs.writeText
-  fs.writeText = async (t, content, ...rest) => { writes.push([t.displayPath || t.targetKey, content]); return origWrite.call(fs, t, content, ...rest) }
   const sub = makeSubprocess({ fs, compileScript: '//CLI-SCRIPT' })
   const captured = {}
   const engine = { start: (spec) => { captured.script = spec.script; return { id: 'r1', result: Promise.resolve({ stopReason: 'completed', value: {}, agentsStarted: 1 }) } } }
@@ -94,16 +91,14 @@ test('H3 临时图 CLI 兜底：wf_run(args.dsl) → 逆投影蓝图落盘 + com
   assert.equal(captured.script, '//CLI-SCRIPT', '引擎收到 CLI 编译译文')
   const compileCall = sub._calls.find((c) => c.join(' ').includes('generate.mjs') && c.join(' ').includes(' compile '))
   assert.ok(compileCall, '已 spawn generate.mjs compile')
-  const tmpPath = compileCall[compileCall.length - 1]
-  const written = writes.find(([p]) => p === tmpPath)
-  assert.ok(written, '临时蓝图已落盘（逆投影）')
-  const bp = JSON.parse(written[1])
+  // 蓝图以 --inline 参数直传 CLI：编辑器未保存的改动必须进译文，
+  // 不再落临时蓝图文件（避免磁盘旧产物充数与临时文件残留）。
+  const inlineAt = compileCall.indexOf('--inline')
+  assert.ok(inlineAt > 0, 'compile 必须带 --inline 蓝图参数')
+  const bp = JSON.parse(compileCall[inlineAt + 1])
   assert.equal(bp.id, 'hello')
   assert.equal(bp.entry, 'dispatch')
   assert.ok(bp.bindings.models.work, '节点 model 逆投影为 bindings.models')
-  const rmCall = sub._calls.find((c) => c.join(' ').includes('rmSync'))
-  assert.ok(rmCall && rmCall[rmCall.length - 1] === tmpPath, '清理目标为同一临时文件')
-  assert.ok(!fs._files.has(tmpPath), '临时蓝图已从假 fs 清除')
 })
 
 test('H4 vwf.script RPC（编辑器实时查看）→ 同一 CLI 管道', async () => {
