@@ -40,57 +40,6 @@
 //  注入符号；计时器走 ctx.timeout/ctx.interval——inject: ['slots','timer']）。
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── 基础 Schema 模板生成（独立纯函数，供 beautifySchema 空字段分支与单测复用）──
-// 输入：{ kind: 'worker'|'fanout', successCondition?: string, verifyBranch?: boolean }
-// 输出：标准 JSON Schema 对象（type/properties/required）。类型推导与多级路径展开
-// 规则见 docs/design/output-schema-beautify-autofill-requirements.md；成功表达式
-// 解析正则与 scripts/validate-core.cjs 的 COND_RE 保持一致（==/!= 字面量比较）。
-function buildSchemaTemplate(input) {
-  const opts = input || {}
-  const kind = opts.kind === 'fanout' ? 'fanout' : 'worker'
-  const schema = { type: 'object', properties: {}, required: [] }
-
-  if (kind === 'worker') {
-    const cond = typeof opts.successCondition === 'string' ? opts.successCondition.trim() : ''
-    const m = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/.exec(cond)
-    if (m) {
-      // 按比较值推导叶子字段类型：==true/false→boolean、=="字符串"→string、
-      // ==数字→number、推导不出（null 等）→string 兜底
-      const token = m[3]
-      const valueType = token === 'true' || token === 'false' ? 'boolean'
-        : (token.length >= 2 && token.charCodeAt(0) === 34) ? 'string'
-          : /^-?\d+(\.\d+)?$/.test(token) ? 'number'
-            : 'string'
-      // 多级路径 $.a.b == x 按嵌套对象展开；每一级路径都在父对象中标记 required
-      const segments = m[1].split('.')
-      let cursor = schema
-      for (let i = 0; i < segments.length; i += 1) {
-        const seg = segments[i]
-        cursor.required.push(seg)
-        if (i === segments.length - 1) {
-          cursor.properties[seg] = { type: valueType }
-        } else {
-          let next = cursor.properties[seg]
-          if (!next || typeof next !== 'object' || next.type !== 'object') {
-            next = { type: 'object', properties: {}, required: [] }
-            cursor.properties[seg] = next
-          }
-          cursor = next
-        }
-      }
-    }
-    // 可信度闸门：required 必须含 verified_branch 与 verified_head
-    if (opts.verifyBranch === true) {
-      if (!schema.properties.verified_branch) schema.properties.verified_branch = { type: 'string' }
-      if (!schema.properties.verified_head) schema.properties.verified_head = { type: 'string' }
-      if (schema.required.indexOf('verified_branch') < 0) schema.required.push('verified_branch')
-      if (schema.required.indexOf('verified_head') < 0) schema.required.push('verified_head')
-    }
-  }
-
-  return schema
-}
-
 return {
   name: 'visual-workflow-client',
   inject: ['slots', 'timer'],
@@ -2646,4 +2595,58 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       () => h(Page, null)
     ))
   },
+}
+
+// 注：本函数刻意定义在 return 之后 —— #175 起 build-bundle.mjs 要求压缩后的动态闭包体
+// 必须以 return{ 开头（顶层不得出现任何前置语句）。函数声明会被提升，因此 return 中的
+// buildSchemaTemplate 属性导出与 apply 内的调用均不受影响。
+// ── 基础 Schema 模板生成（独立纯函数，供 beautifySchema 空字段分支与单测复用）──
+// 输入：{ kind: 'worker'|'fanout', successCondition?: string, verifyBranch?: boolean }
+// 输出：标准 JSON Schema 对象（type/properties/required）。类型推导与多级路径展开
+// 规则见 docs/design/output-schema-beautify-autofill-requirements.md；成功表达式
+// 解析正则与 scripts/validate-core.cjs 的 COND_RE 保持一致（==/!= 字面量比较）。
+function buildSchemaTemplate(input) {
+  const opts = input || {}
+  const kind = opts.kind === 'fanout' ? 'fanout' : 'worker'
+  const schema = { type: 'object', properties: {}, required: [] }
+
+  if (kind === 'worker') {
+    const cond = typeof opts.successCondition === 'string' ? opts.successCondition.trim() : ''
+    const m = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/.exec(cond)
+    if (m) {
+      // 按比较值推导叶子字段类型：==true/false→boolean、=="字符串"→string、
+      // ==数字→number、推导不出（null 等）→string 兜底
+      const token = m[3]
+      const valueType = token === 'true' || token === 'false' ? 'boolean'
+        : (token.length >= 2 && token.charCodeAt(0) === 34) ? 'string'
+          : /^-?\d+(\.\d+)?$/.test(token) ? 'number'
+            : 'string'
+      // 多级路径 $.a.b == x 按嵌套对象展开；每一级路径都在父对象中标记 required
+      const segments = m[1].split('.')
+      let cursor = schema
+      for (let i = 0; i < segments.length; i += 1) {
+        const seg = segments[i]
+        cursor.required.push(seg)
+        if (i === segments.length - 1) {
+          cursor.properties[seg] = { type: valueType }
+        } else {
+          let next = cursor.properties[seg]
+          if (!next || typeof next !== 'object' || next.type !== 'object') {
+            next = { type: 'object', properties: {}, required: [] }
+            cursor.properties[seg] = next
+          }
+          cursor = next
+        }
+      }
+    }
+    // 可信度闸门：required 必须含 verified_branch 与 verified_head
+    if (opts.verifyBranch === true) {
+      if (!schema.properties.verified_branch) schema.properties.verified_branch = { type: 'string' }
+      if (!schema.properties.verified_head) schema.properties.verified_head = { type: 'string' }
+      if (schema.required.indexOf('verified_branch') < 0) schema.required.push('verified_branch')
+      if (schema.required.indexOf('verified_head') < 0) schema.required.push('verified_head')
+    }
+  }
+
+  return schema
 }
