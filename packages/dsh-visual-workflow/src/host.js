@@ -1600,7 +1600,7 @@ return {
           if (latest && !latest.terminal) {
             // 互斥已放行的崩溃残留：前任标 FAILED（结构化 reason），派生新运行
             logicalSetState(latest, 'FAILED', logicalReason('RUNTIME_RESTARTED', '同 taskId 重新发起，前任运行进程已中断'))
-            await refreshWorkspaceContext(latest, logicalTaskId)
+            await refreshWorkspaceContext(latest, latest.logical_run_id)
             requestLogicalPersist(latest.logical_run_id)
           }
           logicalRec = createLogicalRun({
@@ -1719,7 +1719,7 @@ return {
           recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, value && value.results, value && value.control_event)
           const trans = logicalTransitionFor(canon, result && result.stopReason, value)
           if (trans) logicalSetState(logicalRec, trans.state, trans.reason)
-          await refreshWorkspaceContext(logicalRec, logicalTaskId)
+          await refreshWorkspaceContext(logicalRec, wsIdentity)
           requestLogicalPersist(logicalRec.logical_run_id)
         }
         if (ws) {
