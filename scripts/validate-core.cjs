@@ -529,6 +529,48 @@ function extractFileTokens(text) {
   return [...out]
 }
 
+// ---------- 编译输入尺寸闸门（#131） ----------
+// 编译产物把整份蓝图内嵌后经定长通道回传（host.js runNode stdout maxBytes 1MB）：
+// 文档越大响应越大，任何定长上限都会被打爆——超限在 JSON.parse 前被截断，
+// vwf.script / wf_run(args.dsl) 对合法大图直接崩溃。
+// 计量口径 = 转义后字节（JSON.stringify 产物，与编译嵌入同源）：中文按 UTF-8 计 3 字节，
+// 引号/反斜杠计转义；禁止用原始字符数近似。总闸对现状体量（内置图约 66KB）留一个数量级冗余，
+// 同时给内置角色正文内联、CLI 二次 JSON 包装与转义膨胀留实测余量（见 compile-input-size-gate 测试）。
+const COMPILE_INPUT_LIMIT_TOTAL_BYTES = 850 * 1024
+const COMPILE_INPUT_LIMIT_GOAL_BYTES = 425 * 1024
+
+function escapedJsonBytes(v) {
+  return Buffer.byteLength(JSON.stringify(v))
+}
+
+function sizeKb(bytes) {
+  return Math.ceil(bytes / 1024) + 'KB'
+}
+
+// 返回首个超限描述 { at, message }，未超限返回 null。
+// 单节点 goal 优先于总量：报错能定位到具体节点；同一次只报一项，不叠加刷屏。
+function compileInputSizeViolation(bp) {
+  if (!bp || typeof bp !== 'object' || !Array.isArray(bp.nodes)) return null
+  for (const n of bp.nodes) {
+    if (!n || typeof n.goal !== 'string') continue
+    const bytes = escapedJsonBytes(n.goal)
+    if (bytes > COMPILE_INPUT_LIMIT_GOAL_BYTES) {
+      return {
+        at: '$.nodes[' + n.id + '].goal',
+        message: '节点 ' + n.id + ' 的 goal ' + sizeKb(bytes) + ' 超过单节点上限 ' + sizeKb(COMPILE_INPUT_LIMIT_GOAL_BYTES) + '——请精简该节点 goal 或拆分节点',
+      }
+    }
+  }
+  const total = escapedJsonBytes(bp)
+  if (total > COMPILE_INPUT_LIMIT_TOTAL_BYTES) {
+    return {
+      at: '$',
+      message: '蓝图总量 ' + sizeKb(total) + ' 超过上限 ' + sizeKb(COMPILE_INPUT_LIMIT_TOTAL_BYTES) + '——请精简节点 goal 或拆分节点',
+    }
+  }
+  return null
+}
+
 // ---------- 业务规则层（蓝图声明的规则） ----------
 // opts：{ requireModels }——宿主编辑器保存路径的产品收紧（每节点模型绑定必填）。
 function validateBlueprint(bp, opts) {
@@ -544,6 +586,10 @@ function validateBlueprint(bp, opts) {
 
   if (!Array.isArray(bp.nodes) || bp.nodes.length === 0) { err('$.nodes', 'nodes 至少一个节点'); return { ok: false, errors, warnings: [] } }
   if (!Array.isArray(bp.edges)) { err('$.edges', 'edges 必填（数组）'); return { ok: false, errors, warnings: [] } }
+
+  // 编译输入尺寸闸门（#131）：保存/校验路径最早拒绝超大文档，报错进错误列表可定位
+  const sizeViolation = compileInputSizeViolation(bp)
+  if (sizeViolation) err(sizeViolation.at, sizeViolation.message)
 
   const structure = validateStructure(bp.nodes, bp.edges, {
     entry: bp.entry,
@@ -922,6 +968,9 @@ module.exports = {
   projectToBlueprint,
   extractFileTokens,
   blueprintUsesHumanDecision,
+  compileInputSizeViolation,
+  COMPILE_INPUT_LIMIT_TOTAL_BYTES,
+  COMPILE_INPUT_LIMIT_GOAL_BYTES,
   COND_RE,
   MAX_ROUNDS_CAP,
   HUMAN_DECISION_ID,
