@@ -89,13 +89,11 @@ test('H3 临时图 CLI 兜底：wf_run(args.dsl) → 逆投影蓝图经 --inline
   const out = await runTool(tool, { dsl: projectToVwf(mini), taskId: 't' })
   assert.equal(out.stopReason, 'completed')
   assert.equal(captured.script, '//CLI-SCRIPT', '引擎收到 CLI 编译译文')
-  const compileCall = sub._calls.find((c) => c.join(' ').includes('generate.mjs') && c.join(' ').includes(' compile '))
-  assert.ok(compileCall, '已 spawn generate.mjs compile')
   // 蓝图以 --inline 参数直传 CLI：编辑器未保存的改动必须进译文，
   // 不再落临时蓝图文件（避免磁盘旧产物充数与临时文件残留）。
-  const inlineAt = compileCall.indexOf('--inline')
-  assert.ok(inlineAt > 0, 'compile 必须带 --inline 蓝图参数')
-  const bp = JSON.parse(compileCall[inlineAt + 1])
+  const compileCall = sub._calls.find((c) => c.join(' ').includes('generate.mjs') && c.join(' ').includes(' compile ') && c.join(' ').includes('--inline'))
+  assert.ok(compileCall, '已 spawn generate.mjs compile --inline')
+  const bp = JSON.parse(compileCall[compileCall.indexOf('--inline') + 1])
   assert.equal(bp.id, 'hello')
   assert.equal(bp.entry, 'dispatch')
   assert.ok(bp.bindings.models.work, '节点 model 逆投影为 bindings.models')

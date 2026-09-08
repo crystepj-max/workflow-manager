@@ -58,7 +58,7 @@
     { "from": "evaluate", "to": "execute", "outcome": "OPTIMIZE", "countRound": true },
     { "from": "evaluate", "to": "$human-decision", "outcome": "CONFIRM" },
     { "from": "evaluate", "to": "evaluate", "on": "technical" },
-    { "from": "$human-decision", "to": "$end", "outcome": "USER_ACCEPTED" }
+    { "from": "$human-decision", "to": "$end", "outcome": "CONFIRM_PROCEED" }
   ],
   "bindings": {
     "models": {

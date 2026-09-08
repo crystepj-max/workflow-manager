@@ -4,10 +4,11 @@
 //   dist/client.js      — 自包含经典脚本（向 DSH ModuleLoader 注册 factory），供浏览器 /plugins/<id>/client.js 加载
 //   dist/dynamic/*.js   — esbuild 压缩后的闭包体，供开发态 cordis_define 粘贴（不要粘 src/）
 //   dist/locales / dist/roles — 语言资源与内置角色正文
-//   dist/.src-stamp.json — 源码哈希戳，供 check-dist-fresh 校验「源码变更后必须重建」
+//   dist/.src-stamp.json — 源码哈希戳：既供 check-dist-fresh 校验「源码变更后必须重建」，
+//   也用于源码未变时跳过重建（#179）
 // 单一事实源仍是 src/*.js；本脚本只做形态包装与压缩，不做逻辑转换。
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { transformSync } from 'esbuild'
@@ -41,28 +42,96 @@ function minifyDynamicClosure(src) {
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const dist = join(root, 'dist')
-mkdirSync(dist, { recursive: true })
+const selfPath = fileURLToPath(import.meta.url)
+const force = process.argv.includes('--force')
 
 const hostPath = join(root, 'src', 'host.js')
 const clientPath = join(root, 'src', 'client.js')
 const formalArtifactsSrc = join(root, '..', '..', 'scripts', 'formal-artifacts.cjs')
 const roleLibrarySrc = join(root, '..', '..', 'scripts', 'role-library.cjs')
 const projectionCoreSrc = join(root, '..', '..', 'scripts', 'projection-core.cjs')
+const validateCoreSrc = join(root, '..', '..', 'scripts', 'validate-core.cjs')
 const roleManifestSrc = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
+const localesSrc = join(root, 'locales')
+const rolesSrc = join(root, '..', '..', 'dsh', 'roles')
+
 const hostBody = readFileSync(hostPath, 'utf8')
 const clientBody = readFileSync(clientPath, 'utf8')
 const roleLibraryBody = readFileSync(roleLibrarySrc, 'utf8')
 const projectionCoreBody = readFileSync(projectionCoreSrc, 'utf8')
 const roleManifestBody = readFileSync(roleManifestSrc, 'utf8')
+const formalArtifactsBody = readFileSync(formalArtifactsSrc, 'utf8')
+const validateCoreBody = readFileSync(validateCoreSrc, 'utf8')
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
+const listNames = (dir, ext) => readdirSync(dir).filter((n) => n.endsWith(ext)).sort()
+// 目录级输入按「文件名 + 大小 + 修改时间」聚合：改名、增删文件、改内容都能被捕获。
+// 这里刻意不读文件内容（#179）：本机实测逐个 readFileSync 这些小文件要 1.6 秒
+// （每个 open 约 0.1 秒），而 statSync 几乎零成本；文件一旦被改写，mtime 必然变化。
+// 万一遇到「内容改了但 mtime 未变」的极端情况，可用 --force 强制重建兜底。
+const dirStamp = (dir, ext) =>
+  sha256(
+    listNames(dir, ext)
+      .map((n) => {
+        const st = statSync(join(dir, n))
+        return `${n}:${st.size}:${st.mtimeMs}`
+      })
+      .join('|'),
+  )
 const stamp = {
   host: sha256(hostBody),
   client: sha256(clientBody),
   roleLibrary: sha256(roleLibraryBody),
   projectionCore: sha256(projectionCoreBody),
   roleManifest: sha256(roleManifestBody),
+  formalArtifacts: sha256(formalArtifactsBody),
+  validateCore: sha256(validateCoreBody),
+  locales: dirStamp(localesSrc, '.json'),
+  roles: dirStamp(rolesSrc, '.md'),
+  // 打包脚本自身也计入：改了包装/压缩逻辑后产物必须重建
+  builder: sha256(readFileSync(selfPath, 'utf8')),
   builtAt: new Date().toISOString(),
 }
+
+// 源码未变则跳过重建（#179）：发布/校验与开发启动器都会调用本脚本，
+// 无条件重建会让 dev:plugin 每次多花约 1.5s。判据是「全部产物齐全 + 源码戳逐项一致」；
+// builtAt 不参与比较，否则永远不可能命中。
+const requiredArtifacts = [
+  join(dist, 'host-entry.mjs'),
+  join(dist, 'client.js'),
+  join(dist, 'formal-artifacts.cjs'),
+  join(dist, 'validate-core.cjs'),
+  join(dist, 'projection-core.cjs'),
+  join(dist, 'role-library.cjs'),
+  join(dist, 'builtin-roles.json'),
+  join(dist, 'dynamic', 'host.js'),
+  join(dist, 'dynamic', 'client.js'),
+  ...listNames(localesSrc, '.json').map((n) => join(dist, 'locales', n)),
+  ...listNames(rolesSrc, '.md').map((n) => join(dist, 'roles', n)),
+]
+
+function distUpToDate() {
+  const stampPath = join(dist, '.src-stamp.json')
+  if (!existsSync(stampPath)) return false
+  if (!requiredArtifacts.every(existsSync)) return false
+  let prev = null
+  try {
+    prev = JSON.parse(readFileSync(stampPath, 'utf8'))
+  } catch (e) {
+    return false
+  }
+  for (const [key, value] of Object.entries(stamp)) {
+    if (key === 'builtAt') continue
+    if (prev[key] !== value) return false
+  }
+  return true
+}
+
+if (!force && distUpToDate()) {
+  console.log('up-to-date: 源码未变，跳过构建（强制重建：node scripts/build-bundle.mjs --force）')
+  process.exit(0)
+}
+
+mkdirSync(dist, { recursive: true })
 
 writeFileSync(
   join(dist, 'host-entry.mjs'),
@@ -107,20 +176,18 @@ writeFileSync(
 
 writeFileSync(join(dist, '.src-stamp.json'), JSON.stringify(stamp, null, 2) + '\n')
 copyFileSync(formalArtifactsSrc, join(dist, 'formal-artifacts.cjs'))
-copyFileSync(join(root, '..', '..', 'scripts', 'validate-core.cjs'), join(dist, 'validate-core.cjs'))
+copyFileSync(validateCoreSrc, join(dist, 'validate-core.cjs'))
 copyFileSync(projectionCoreSrc, join(dist, 'projection-core.cjs'))
 // 角色库内核 + 内置角色清单：静态安装的可信加载源（host.js 只从 pluginRoot/dist 加载）
 copyFileSync(roleLibrarySrc, join(dist, 'role-library.cjs'))
 copyFileSync(roleManifestSrc, join(dist, 'builtin-roles.json'))
-const localesSrc = join(root, 'locales')
 mkdirSync(join(dist, 'locales'), { recursive: true })
-for (const name of readdirSync(localesSrc)) {
-  if (name.endsWith('.json')) copyFileSync(join(localesSrc, name), join(dist, 'locales', name))
+for (const name of listNames(localesSrc, '.json')) {
+  copyFileSync(join(localesSrc, name), join(dist, 'locales', name))
 }
-const rolesSrc = join(root, '..', '..', 'dsh', 'roles')
 mkdirSync(join(dist, 'roles'), { recursive: true })
-for (const name of readdirSync(rolesSrc)) {
-  if (name.endsWith('.md')) copyFileSync(join(rolesSrc, name), join(dist, 'roles', name))
+for (const name of listNames(rolesSrc, '.md')) {
+  copyFileSync(join(rolesSrc, name), join(dist, 'roles', name))
 }
 
 mkdirSync(join(dist, 'dynamic'), { recursive: true })

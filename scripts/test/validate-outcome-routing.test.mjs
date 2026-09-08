@@ -75,7 +75,7 @@ test('#126 L2 自定义 $.decision 合法', () => {
       { from: 'desk', to: '$end', outcome: 'PUBLISH' },
       { from: 'desk', to: 'desk', outcome: 'REWRITE' },
       { from: 'desk', to: '$human-decision', outcome: 'LEGAL_REVIEW' },
-      { from: '$human-decision', to: '$end', outcome: 'USER_ACCEPTED' },
+      { from: '$human-decision', to: '$end', outcome: 'CONFIRM_PROCEED' },
     ],
   }
   expectOk(b, 'custom-decision')
@@ -214,10 +214,18 @@ test('#126 无入边的 HD 出边拒绝', () => {
     }],
     edges: [
       { from: 'work', to: '$end', outcome: 'DONE' },
-      { from: '$human-decision', to: '$end', outcome: 'USER_ACCEPTED' },
+      { from: '$human-decision', to: '$end', outcome: 'CONFIRM_PROCEED' },
     ],
   }
   expectReject(b, '$human-decision', 'hd-no-in')
+})
+
+test('#163 新式 outcome 出边占用框架控制名拒绝（USER_ACCEPTED / ADD_BUDGET / STOP）', () => {
+  for (const name of ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP']) {
+    const b = clone(outcomeGood)
+    b.edges.find((e) => e.from === '$human-decision').outcome = name
+    expectReject(b, '控制类 Result', '#163-' + name)
+  }
 })
 
 test('#126 有入边的 HD 缺出边拒绝', () => {

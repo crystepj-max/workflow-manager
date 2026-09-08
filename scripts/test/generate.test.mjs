@@ -121,7 +121,7 @@ test('#128 投影：outcome / countRound / completionPath 透传，业务边不�
   assert.equal(tech.from, 'evaluate');
   assert.equal(Object.prototype.hasOwnProperty.call(tech, 'outcome'), false);
   const hdOut = dsl.edges.find((e) => e.from === '$human-decision');
-  assert.equal(hdOut.outcome, 'USER_ACCEPTED');
+  assert.equal(hdOut.outcome, 'CONFIRM_PROCEED');
   assert.equal(Object.prototype.hasOwnProperty.call(hdOut, 'on'), false);
 });
 
@@ -363,8 +363,7 @@ test('S7 #93：编译脚本注入 workspace 默认 args 与 SOURCE cwd', () => {
   const { script } = compileBlueprint(bp)
   assert.ok(script.includes('const __VWF_WS_DEFAULTS__ = {}'), '宿主可替换的 workspace 默认 args 桩')
   assert.ok(script.includes("const A = Object.assign({}, __VWF_WS_DEFAULTS__, args || {})"), 'args 覆盖注入的默认 workspace 字段')
-  assert.ok(script.includes('if (SOURCE) opts.cwd = SOURCE'), 'callNode 把业务源码目录绑到 agent cwd')
-  assert.ok(script.includes('if (SOURCE) itemOpts.cwd = SOURCE'), 'fanout 子代理同样绑定 cwd')
+  assert.ok(!script.includes('opts.cwd = SOURCE'), 'callNode/fanout 不再逐节点传 cwd（新引擎白名单拒 cwd，工作区由 run 级 startReq.cwd 承载）')
   assert.ok(script.includes('【本节点应产出 Formal Artifact】'), '与 #69 Formal Artifact 提示并存')
   assert.ok(script.includes('业务源码读写目录'), 'SOURCE 存在时提示隔离现场')
 })
