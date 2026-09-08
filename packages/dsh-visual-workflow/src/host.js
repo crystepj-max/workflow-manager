@@ -842,6 +842,111 @@ return {
     }
     const logicalRunsHydration = loadLogicalRuns().catch((e) => log('逻辑运行摘要回载失败：' + errMsg(e)))
 
+    // ── #74 Runtime Preflight Probe（运行前模型可用性探针）────────────────
+    // Static Validation 回答"配置是否合法"；Probe 回答"当前是否具备实际模型运行
+    // 条件"：对去重后的 provider+model 做最小真实调用（不携带业务正文/角色 Prompt/
+    // 产物，不评价回答质量）。探针降级（llm 服务无生成流能力）只如实标注，不伪装
+    // available；BLOCKED 只用于探针明确失败（可恢复的外部问题）。
+    const PROBE_CACHE_TTL_MS = 60000
+    const probeCache = new Map() // 指纹 → { at, results }；仅性能优化，重启即失效
+    const probeOk = (r) => r.status === 'available'
+    // sanitized DSL / 快照 provider_model → 去重绑定集合（provider+model 相同只探一次）
+    function dedupeProbeBindings(nodeBindings) {
+      const out = new Map()
+      for (const [nodeId, pm] of Object.entries(nodeBindings || {})) {
+        if (!pm || typeof pm !== 'object' || (!pm.provider && !pm.model)) continue
+        const provider = String(pm.provider || 'default')
+        const model = String(pm.model || 'default')
+        const key = provider + '\u0000' + model
+        let b = out.get(key)
+        if (!b) { b = { key: key, provider: provider, model: model, nodes: [] }; out.set(key, b) }
+        b.nodes.push(String(nodeId))
+      }
+      return Array.from(out.values())
+    }
+    function probeBindingsOfDsl(dsl) {
+      const map = {}
+      for (const n of (dsl && dsl.nodes) || []) if (n && n.id && n.model) map[String(n.id)] = n.model
+      return dedupeProbeBindings(map)
+    }
+    // 探针上下文指纹：绑定列表 + llm provider 目录。目录变化（增删 provider/模型，
+    // 即 credential/context 变化的可观察事实）即换指纹，缓存失效。
+    async function probeFingerprint(llm, bindings) {
+      let catalog = 'catalog-error'
+      try {
+        const providers = (await Promise.resolve(llm.listProviders())) || []
+        catalog = providers.map((p) => String((p && (p.id || p.provider || p.name)) || '')).filter(Boolean).sort().join(',')
+      } catch (e) { /* 目录不可读不阻断探针，指纹退化为绑定列表 */ catalog = 'catalog-error' }
+      return bindings.map((b) => b.key).sort().join('|') + '#' + catalog
+    }
+    // 错误安全清洗：剥离常见凭证/密钥形态，限长；只用于展示，不参与路由解析
+    function sanitizeProbeMessage(raw) {
+      let t = String(raw == null ? '' : raw)
+      t = t.replace(/sk-[A-Za-z0-9_-]{6,}/g, 'sk-***')
+      t = t.replace(/Bearer\s+[A-Za-z0-9._~+/-]{6,}/gi, 'Bearer ***')
+      t = t.replace(/(?:api[-_]?key|token)["'=:\s]+[A-Za-z0-9._~+/-]{6,}/gi, '$1 ***')
+      t = t.replace(/\b[0-9a-f]{24,}\b/gi, '***')
+      return t.slice(0, 300)
+    }
+    // 宿主 LlmError.code（provider-neutral）+ status → 七类探针结论
+    function classifyProbeFailure(err) {
+      const code = String((err && err.code) || '').toUpperCase()
+      const status = (err && err.failure && typeof err.failure.status === 'number') ? err.failure.status : null
+      const message = sanitizeProbeMessage((err && err.message) || err)
+      if (code === 'AUTH') return { status: status === 403 ? 'permission_denied' : 'auth_failed', code: code || 'AUTH', message: message }
+      if (code === 'QUOTA') return { status: 'quota', code: code, message: message }
+      if (code === 'RATE_LIMIT') return { status: 'rate_limit', code: code, message: message }
+      if (code === 'TIMEOUT' || code === 'ABORTED') return { status: 'timeout', code: code || 'TIMEOUT', message: message }
+      if (code === 'UNKNOWN_MODEL' || code === 'HTTP_404' || code === 'HTTP_403' || code === 'CONTEXT_WINDOW_EXCEEDED') return { status: 'model_unavailable', code: code, message: message }
+      if (code === 'NO_ADAPTER' || code === 'TRANSPORT' || code === 'SERVER' || code === 'HTTP_5XX' || (status !== null && status >= 500)) return { status: 'provider_unreachable', code: code, message: message }
+      if (/fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|ECONNRESET|network/i.test(message)) return { status: 'provider_unreachable', code: code || 'TRANSPORT', message: message }
+      return { status: 'provider_error', code: code || 'UNKNOWN', message: message }
+    }
+    // 单绑定最小真实调用：maxTokens=1 的 "ping"，消费至流结束（正常结束=可用）。
+    // 兼容流/流承诺两种返回形态；不可迭代 = 探针降级（宿主无生成流能力）。
+    async function probeOneBinding(llm, binding) {
+      const base = { key: binding.key, provider: binding.provider, model: binding.model, nodes: binding.nodes.slice() }
+      const started = Date.now()
+      const finish = (status, code, message) => ({ ...base, status: status, code: code, message: message || '', checked_at: Date.now(), duration_ms: Date.now() - started })
+      try {
+        let iter = llm.stream({ provider: binding.provider, model: binding.model, messages: [{ role: 'user', content: 'ping' }], maxTokens: 1 })
+        if (!iter || typeof iter[Symbol.asyncIterator] !== 'function') {
+          if (iter && typeof iter.then === 'function') iter = await iter
+          if (!iter || typeof iter[Symbol.asyncIterator] !== 'function') {
+            const e = new Error('llm 服务未提供可消费的生成流（探针降级）')
+            e.probeCapability = true
+            throw e
+          }
+        }
+        for await (const chunk of iter) { void chunk }
+        return finish('available', 'OK', '')
+      } catch (e) {
+        if (e && typeof e === 'object' && e.probeCapability) return finish('probe_degraded', 'PROBE_DEGRADED', sanitizeProbeMessage(errMsg(e)))
+        const c = classifyProbeFailure(e)
+        return finish(c.status, c.code, c.message)
+      }
+    }
+    // 去重并发探测；成功结果短时缓存（credential/context 变化 → 指纹变化 → 失效；
+    // force 跳过缓存）。缓存仅性能优化，不作长 Run 持续可用保证。
+    async function probeBindings(llm, bindings, opts) {
+      const force = !!(opts && opts.force)
+      const fingerprint = await probeFingerprint(llm, bindings)
+      const hit = force ? null : probeCache.get(fingerprint)
+      if (hit && Date.now() - hit.at < PROBE_CACHE_TTL_MS) {
+        return { ok: hit.results.every(probeOk), results: hit.results.map((r) => ({ ...r, cached: true })), fingerprint: fingerprint, cached: true }
+      }
+      const results = await Promise.all(bindings.map((b) => probeOneBinding(llm, b)))
+      probeCache.set(fingerprint, { at: Date.now(), results: results })
+      while (probeCache.size > 32) probeCache.delete(probeCache.keys().next().value)
+      return { ok: results.every(probeOk), results: results, fingerprint: fingerprint, cached: false }
+    }
+    // 探针失败一行摘要（BLOCKED reason 与回执用）；已清洗，不含凭证
+    function probeFailureSummary(results) {
+      return (results || []).filter((r) => !probeOk(r))
+        .map((r) => r.provider + '/' + r.model + '：' + r.status + (r.message ? '（' + r.message + '）' : ''))
+        .join('；')
+    }
+
     function latestLogicalRunForTask(taskId) {
       let found = null
       for (const rec of logicalRuns.values()) {
@@ -1034,7 +1139,8 @@ return {
       const v = await validatePipeline(a.dsl)
       return { ok: v.ok, errors: v.errors, fieldErrors: v.fieldErrors, sanitized: v.sanitized, warnings: v.warnings }
     })
-    // 编辑器「一键检测」入口：先静态校验；Runtime Preflight Probe（#74）未落地前明确返回 pending，避免伪装成已可探针。
+    // 编辑器「一键检测」入口：先静态校验（失败不发起 Probe）；通过后对去重绑定
+    // 做最小真实调用，报告每 provider+model 状态、可操作失败原因与受影响节点。
     registerRpc('vwf.probe', async (a) => {
       const v = await validatePipeline(a.dsl)
       if (!v.ok) {
@@ -1047,18 +1153,30 @@ return {
           warnings: v.warnings,
         }
       }
+      const base = { sanitized: v.sanitized, warnings: v.warnings }
+      const bindings = probeBindingsOfDsl(v.sanitized)
+      if (!bindings.length) {
+        return { ...base, ok: true, stage: 'probe', results: [], summary: '无显式模型绑定，无可探测项' }
+      }
+      const llm = ctx.get('llm')
+      if (llm === undefined) {
+        return {
+          ...base,
+          ok: false,
+          stage: 'probe',
+          code: 'LLM_SERVICE_UNAVAILABLE',
+          errors: [{ path: '$', message: 'llm 服务不可用：无法发起运行前探针。请确认 DSH 宿主已挂载 llm 服务。' }],
+          results: bindings.map((b) => ({ key: b.key, provider: b.provider, model: b.model, nodes: b.nodes.slice(), status: 'unknown', code: 'LLM_SERVICE_UNAVAILABLE', message: 'llm 服务不可用' })),
+        }
+      }
+      const r = await probeBindings(llm, bindings, { force: a.force === true })
       return {
-        ok: false,
+        ...base,
+        ok: r.results.every(probeOk),
         stage: 'probe',
-        pending: true,
-        code: 'PROBE_NOT_IMPLEMENTED',
-        issue: 74,
-        errors: [{
-          path: '$',
-          message: '静态校验已通过；运行前探针（Preflight Probe，#74）尚未落地，一键检测暂不能验证模型可用性/走通条件。',
-        }],
-        sanitized: v.sanitized,
-        warnings: v.warnings,
+        results: r.results,
+        checked_at: Date.now(),
+        cached: r.cached === true,
       }
     })
     // 会话 / wf_run 正式路径仍用 vwf.script；allocate:true 时分配隔离 workspace 并注入脚本默认 args（面板不再暴露预览/准备运行按钮）
@@ -1575,6 +1693,9 @@ return {
         }
         let logicalRec = null
         let logicalTrigger = 'start'
+        // #74：BLOCKED（探针失败）恢复 = 同一逻辑运行修改 Provider/Model → 新 Revision
+        // → 重新 Probe → Resume；不是新启，也不是崩溃残留派生。
+        let probeResume = false
         if (isHdResume || isLegacyResume) {
           const latest = latestLogicalRunForTask(logicalTaskId)
           if (latest && latest.terminal) {
@@ -1597,40 +1718,84 @@ return {
           }
         } else {
           const latest = latestLogicalRunForTask(logicalTaskId)
-          if (latest && !latest.terminal) {
-            // 互斥已放行的崩溃残留：前任标 FAILED（结构化 reason），派生新运行
-            logicalSetState(latest, 'FAILED', logicalReason('RUNTIME_RESTARTED', '同 taskId 重新发起，前任运行进程已中断'))
-            await refreshWorkspaceContext(latest, latest.logical_run_id)
-            requestLogicalPersist(latest.logical_run_id)
+          const blockedProbe = latest && !latest.terminal
+            && latest.lifecycle.state === 'BLOCKED'
+            && latest.lifecycle.reason && latest.lifecycle.reason.code === 'PROBE_FAILED'
+          if (blockedProbe) {
+            const ov = args.model_overrides
+            if (!ov || typeof ov !== 'object' || Array.isArray(ov) || !Object.keys(ov).length) {
+              return '错误：任务 ' + logicalTaskId + ' 的逻辑运行 ' + latest.logical_run_id + ' 因运行前模型探针未通过而 BLOCKED（' + String((latest.lifecycle.reason && latest.lifecycle.reason.message) || '') + '）。请带 model_overrides 修改当前 Run 的 Provider/Model 后重试：将产生新的 Snapshot Revision、重新探针并恢复同一逻辑运行。'
+            }
+            logicalRec = latest
+            logicalTrigger = 'model_recovery'
+            probeResume = true
+          } else {
+            if (latest && !latest.terminal) {
+              // 互斥已放行的崩溃残留：前任标 FAILED（结构化 reason），派生新运行
+              logicalSetState(latest, 'FAILED', logicalReason('RUNTIME_RESTARTED', '同 taskId 重新发起，前任运行进程已中断'))
+              await refreshWorkspaceContext(latest, latest.logical_run_id)
+              requestLogicalPersist(latest.logical_run_id)
+            }
+            logicalRec = createLogicalRun({
+              logical_run_id: latest ? nextLogicalRunId(logicalTaskId) : logicalTaskId,
+              taskId: logicalTaskId,
+              templateId: String(args.templateId || v.sanitized.id || ''),
+              dsl: v.sanitized,
+              script: c.script,
+              roleDir: args.roleDir || c.roleDir || '',
+              config: logicalRunConfig(),
+              derivedFrom: latest ? latest.logical_run_id : null,
+            })
           }
-          logicalRec = createLogicalRun({
-            logical_run_id: latest ? nextLogicalRunId(logicalTaskId) : logicalTaskId,
-            taskId: logicalTaskId,
-            templateId: String(args.templateId || v.sanitized.id || ''),
-            dsl: v.sanitized,
-            script: c.script,
-            roleDir: args.roleDir || c.roleDir || '',
-            config: logicalRunConfig(),
-            derivedFrom: latest ? latest.logical_run_id : null,
-          })
         }
         // #79 快照修订（R3/R4）：续跑携带 model_overrides → 追加 Rev N（仅
-        // Provider/Model），旧修订保留，新修订只影响后续执行
-        if ((isHdResume || isLegacyResume) && args.model_overrides && typeof args.model_overrides === 'object' && !Array.isArray(args.model_overrides) && Object.keys(args.model_overrides).length) {
+        // Provider/Model），旧修订保留，新修订只影响后续执行；#74 BLOCKED 恢复同理。
+        if (((isHdResume || isLegacyResume) || probeResume) && args.model_overrides && typeof args.model_overrides === 'object' && !Array.isArray(args.model_overrides) && Object.keys(args.model_overrides).length) {
           const rev = appendSnapshotRevision(logicalRec, args.model_overrides)
           if (rev) requestLogicalPersist(logicalRec.logical_run_id)
         }
         // Codex R2 ①：续跑必须执行 Rev 1 冻结脚本（R3：运行中仅 Provider/Model 可改，
         // 工作流定义冻结）——等待期间模板被修改时，重新编译会让"新脚本 + script_ref:1
         // 快照"静默失配。Rev 1 无脚本（旧形态承接）时才用当前编译产物。
+        // #74 BLOCKED 恢复同为既有运行的继续，遵守同一冻结纪律。
         const snap1 = (logicalRec.snapshots || []).find((s) => s.revision === 1) || null
         const frozenScript = snap1 && typeof snap1.script === 'string' && snap1.script ? snap1.script : null
-        const execScript = (isHdResume || isLegacyResume) && frozenScript ? frozenScript : c.script
+        const execScript = (isHdResume || isLegacyResume || probeResume) && frozenScript ? frozenScript : c.script
         // Codex R2 ②：续跑传入 active 快照的合并绑定（而非本次 delta）——Rev3 只改 B
         // 时，A 必须仍用 Rev2 的覆盖值执行；合并语义与编译脚本一致（显式覆盖优先，
         // $default 兜底未显式覆盖节点）。
         const activeSnap = activeSnapshot(logicalRec)
-        const modelOverridesForExec = (isHdResume || isLegacyResume) ? structuredClone(activeSnap ? activeSnap.provider_model : null) : undefined
+        const modelOverridesForExec = (isHdResume || isLegacyResume || probeResume) ? structuredClone(activeSnap ? activeSnap.provider_model : null) : undefined
+
+        // #74 Preflight Probe：业务节点执行前对本次将使用的 active 快照去重探测。
+        // 探针明确失败 → BLOCKED（可恢复，不改写 Workflow Outcome）；探针降级
+        // （llm 服务无生成流能力）只如实标注不阻断，避免异常部署环境卡死全部 Run。
+        if (logicalRec) {
+          const activeBindings = dedupeProbeBindings(activeSnap ? activeSnap.provider_model : null)
+          if (activeBindings.length) {
+            const llmSvc = ctx.get('llm')
+            if (llmSvc === undefined) {
+              log('vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）')
+            } else {
+              const probe = await probeBindings(llmSvc, activeBindings, {})
+              const blocking = probe.results.filter((r) => r.status !== 'available' && r.status !== 'probe_degraded')
+              if (blocking.length) {
+                const summaryText = probeFailureSummary(blocking)
+                logicalSetState(logicalRec, 'BLOCKED', logicalReason('PROBE_FAILED', summaryText))
+                requestLogicalPersist(logicalRec.logical_run_id)
+                return JSON.stringify({
+                  blocked: true,
+                  stage: 'preflight_probe',
+                  logical_run_id: logicalRec.logical_run_id,
+                  snapshot_revision: activeSnap ? activeSnap.revision : null,
+                  failures: blocking,
+                  hint: '模型探针未通过：请修改当前 Run 的 Provider/Model 后，用 wf_run（同 taskId + model_overrides）恢复同一逻辑运行；完成后将产生新的 Snapshot Revision 并重新探针。',
+                }, null, 2)
+              }
+              if (probe.results.some((r) => r.status === 'probe_degraded')) log('vwf.probe(preflight)：探针降级（无生成流能力），结果仅作参考，不阻断启动')
+            }
+          }
+        }
 
         // Codex R2 ③：派生运行按自身 logical_run_id 分配 workspace——沿用原 taskId 会让
         // #93 注册表把前任（仍注册）的 workspace 复用给派生运行，或在清理后把溯源记到

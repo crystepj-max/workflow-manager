@@ -2073,6 +2073,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     title: t('oneClickCheckHelp'),
                     onClick: () => { void props.onOneClickCheck() },
                   }, props.probing ? t('oneClickCheckRunning') : t('oneClickCheck')),
+                  h('button', {
+                    className: 'vwf-btn sm ghost',
+                    disabled: !!props.probing || !(wf.nodes || []).length,
+                    title: t('probeForceRerunHint'),
+                    onClick: () => { void props.onOneClickCheck(true) },
+                  }, t('probeForceRerun')),
                   idChanged ? h('button', { className: 'vwf-btn sm', onClick: () => { void handleSave() } }, t('saveAs')) : null,
                   h('button', { className: 'vwf-btn sm primary', disabled: props.saving || !(wf.nodes || []).length || idChanged, onClick: () => { void handleSave() } }, t('saveWorkflow'))
                 )
@@ -2505,10 +2511,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         refresh()
       }
       const [probing, setProbing] = React.useState(false)
-      const onOneClickCheck = () => {
+      // #74 探针结论 → 用户文案（host 侧已做错误清洗，此处只做呈现映射）
+      const probeStatusText = (r) => {
+        const map = {
+          available: t('probeStatusAvailable'), auth_failed: t('probeStatusAuthFailed'), quota: t('probeStatusQuota'),
+          rate_limit: t('probeStatusRateLimit'), model_unavailable: t('probeStatusModelUnavailable'), permission_denied: t('probeStatusPermissionDenied'),
+          provider_unreachable: t('probeStatusUnreachable'), timeout: t('probeStatusTimeout'), provider_error: t('probeStatusOther'),
+          probe_degraded: t('probeStatusDegraded'), unknown: t('probeStatusUnknown'),
+        }
+        return map[r.status] || r.status || t('probeStatusUnknown')
+      }
+      const onOneClickCheck = (force) => {
         if (!wf || probing) return
         setProbing(true)
-        host.call('vwf.probe', { dsl: wf }).then((r) => {
+        host.call('vwf.probe', { dsl: wf, force: force === true }).then((r) => {
           if (!r) { setMsg(t('oneClickCheckFailed')); return }
           if (r.stage === 'static' && !r.ok) {
             const first = (r.errors && r.errors[0] && r.errors[0].message) || t('oneClickCheckFailed')
@@ -2517,6 +2533,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           }
           if (r.pending || r.code === 'PROBE_NOT_IMPLEMENTED') {
             setMsg(t('oneClickCheckProbePending'))
+            return
+          }
+          if (r.code === 'LLM_SERVICE_UNAVAILABLE') { setMsg(t('probeLlmUnavailable')); return }
+          if (Array.isArray(r.results)) {
+            if (!r.results.length) { setMsg(t('probeNoBindings')); return }
+            const lines = r.results.map((x) =>
+              x.provider + '/' + x.model + '：' + probeStatusText(x) + (x.message ? '（' + x.message + '）' : '') + (x.cached ? t('probeCachedSuffix') : '')
+            )
+            setMsg(t(r.ok ? 'probeResultOk' : 'probeResultFail') + '\n' + lines.join('\n'))
             return
           }
           if (r.ok) setMsg(t('oneClickCheckOk'))

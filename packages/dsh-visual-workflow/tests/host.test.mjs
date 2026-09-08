@@ -1904,7 +1904,7 @@ test('vwf.i18n 按需从 dist/locales 返回当前语言文案', async () => {
   assert.equal(en.messages.oneClickCheck, 'One-click check')
 })
 
-test('vwf.probe：静态失败先返回；通过后对 #74 探针明确 pending', async () => {
+test('vwf.probe：静态失败先返回且不发起探针；llm 服务缺失时如实报错不伪装可用', async () => {
   const { handlers } = env()
   const bad = await call(handlers, 'vwf.probe', { dsl: { id: 'bad', name: 'bad', nodes: [], edges: [] } })
   assert.equal(bad.ok, false)
@@ -1913,9 +1913,9 @@ test('vwf.probe：静态失败先返回；通过后对 #74 探针明确 pending'
   const good = await call(handlers, 'vwf.probe', { dsl: baseDsl() })
   assert.equal(good.ok, false)
   assert.equal(good.stage, 'probe')
-  assert.equal(good.pending, true)
-  assert.equal(good.code, 'PROBE_NOT_IMPLEMENTED')
-  assert.equal(good.issue, 74)
+  assert.equal(good.code, 'LLM_SERVICE_UNAVAILABLE')
+  assert.ok(Array.isArray(good.results) && good.results.length > 0)
+  assert.ok(good.results.every((r) => r.status === 'unknown'))
 })
 
 test('vwf.script 预览不分配 workspace；prepare 才带 allocate', async () => {

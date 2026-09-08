@@ -147,12 +147,12 @@ function makeRuntime() {
         return { ok: true, engineAvailable: false, script: '// compiled' }
       case 'vwf.probe':
         return {
-          ok: false,
+          ok: true,
           stage: 'probe',
-          pending: true,
-          code: 'PROBE_NOT_IMPLEMENTED',
-          issue: 74,
-          errors: [{ path: '$', message: 'probe pending' }],
+          results: [
+            { key: 'p1\u0000m1', provider: 'p1', model: 'm1', nodes: ['node-1'], status: 'available', code: 'OK', message: '', cached: false },
+          ],
+          cached: false,
         }
       case 'vwf.runs.list':
         return { runs: [] }
