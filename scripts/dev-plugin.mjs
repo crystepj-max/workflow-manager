@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -22,6 +23,7 @@ const configuredHome = process.env.DSH_HOME ? resolve(process.env.DSH_HOME) : nu
 const productHome = resolve(process.env.VWF_PRODUCT_DSH_HOME || defaultProductHome)
 const dshBin = process.env.VWF_DEV_DSH_BIN || 'dsh'
 const lsofBin = process.env.VWF_DEV_LSOF_BIN || (existsSync('/usr/sbin/lsof') ? '/usr/sbin/lsof' : 'lsof')
+const runsDir = resolve(process.env.VWF_RUNS_DIR || join(repoRoot, '.agent-runs'))
 const webProfile = join(devHome, 'profiles', 'web')
 const profilePackage = join(webProfile, 'package.json')
 const pidFile = join(devHome, '.vwf-dev-dsh.pid')
@@ -66,6 +68,26 @@ function hasFormalBundle(pkg) {
       name === 'dsh-visual-workflow' ||
       String(source).includes('/dsh-visual-workflow'),
   )
+}
+
+function registeredRunHomes() {
+  // #185：Run worktree 内 .agent-runs/<run_id>/run.json 登记的独占开发 Home。
+  // 只作提示，不改变默认 Home 选择；run.json 损坏不应阻断开发状态检查
+  if (!existsSync(runsDir)) return []
+  const homes = []
+  for (const entry of readdirSync(runsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const runPath = join(runsDir, entry.name, 'run.json')
+    if (!existsSync(runPath)) continue
+    try {
+      const run = JSON.parse(readFileSync(runPath, 'utf8'))
+      const home = run?.env_resources?.dev_dsh_home?.path
+      if (home) homes.push({ run_id: run.run_id || entry.name, home: resolve(home) })
+    } catch {
+      // 提示性扫描：忽略不可解析的 run.json
+    }
+  }
+  return homes
 }
 
 function readPid() {
@@ -203,6 +225,18 @@ console.log(
   }`,
 )
 console.log(`- 当前联合版本：${version}（host + client + role-library + role-manifest）`)
+
+const runHomes = registeredRunHomes()
+const adoptedRuns = runHomes.filter((item) => comparisonPath(item.home) === comparisonPath(devHome))
+const otherRuns = runHomes.filter((item) => comparisonPath(item.home) !== comparisonPath(devHome))
+if (adoptedRuns.length > 0) {
+  console.log(`- 独占开发 Home：已按 Run ${adoptedRuns.map((item) => item.run_id).join('、')} 的登记使用`)
+}
+if (otherRuns.length > 0) {
+  console.log('⚠️ 本工作区有 Run 登记了独占开发 Home，但当前未使用它（多任务并行时会共用同一开发 DSH）：')
+  for (const item of otherRuns) console.log(`   - ${item.run_id} → ${item.home}`)
+  console.log('   请以 VWF_DEV_DSH_HOME=<上述路径> 重新运行 npm run dev:plugin；不设时沿用当前默认 Home。')
+}
 
 if (formalBundleInstalled) {
   fail(

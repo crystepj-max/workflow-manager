@@ -18,7 +18,16 @@ node "$CWF_ASSETS/cwf-run-init.mjs" <issue编号> <run_id>
 
 - 产出独立分支 / worktree / `.agent-runs/<run_id>/run.json`。
 - 在 run.json 记录绑定的**需求基线版本**（与 Issue 当前版本一致）；之后不得静默换版。
-- **之后全部工作在该 worktree 内进行**。
+- **之后全部工作在该 worktree 内进行**；任何 git / npm 命令一律 `git -C <worktree>` 或先 `cd <worktree>` 并核对 `git rev-parse --abbrev-ref HEAD` = `run.json.work_branch`，不一致即停（不得在主检出或别的 worktree 里"顺手"执行）。
+- 同时分配本 Run **独占的开发 DSH Home**（默认 `~/.dsh-workflow-dev/tasks/<run_id>`，可用 `VWF_DEV_DSH_TASKS_ROOT` 改道）：登记进 `run.json.env_resources.dev_dsh_home`，Home 内写归属 marker `task-env.json`；目录已被其他 Run 占用或无 marker 时 run-init 直接报错，不静默接管。
+- **运行期一切 DSH 开发操作只用本 Run 的 Home**（进程 / 端口 / 插件 / 工具名 / 工作区注册表随之隔离）：
+
+```bash
+export VWF_DEV_DSH_HOME="$(node -e 'console.log(require(process.argv[1]).env_resources.dev_dsh_home.path)' <runDir>/run.json)"
+npm run dev:plugin            # 未采用登记 Home 时会打印 ⚠️ 告警
+```
+
+- **taskId / workspace 键必须带 Run 命名空间**：以 `run.json.task_id_namespace`（= run_id）为前缀，如 `cwf-185-01-uat-01`；不得使用无前缀裸名，避免与其他任务撞名。
 
 ---
 
