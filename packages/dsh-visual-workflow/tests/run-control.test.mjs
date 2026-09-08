@@ -296,6 +296,64 @@ test('#80 状态语义拒绝：resume_paused 仅用于 PAUSED；缺检查点诚�
   assert.ok(String(err2).includes('entry'), '降级现场要求人工指定入口：' + err2)
 })
 
+test('#80 $end 检查点防护：图走完不产生 PAUSED；中断现场跳过 $end 行', async () => {
+  const eng = makeEngine()
+  const { events, definedTools, fs } = env({ extra: { engine: eng } })
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const ctl = definedTools.find((t) => t.name === 'wf_control')
+  // 场景 1：最后一个节点运行期间请求暂停 → '$end' 检查点不得触发中止 → 段正常完成
+  const p1 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-end' })
+  await until(() => eng.starts.length >= 1, '启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  assert.equal(JSON.parse(await ctl.execute({ action: 'pause', logical_run_id: 'issue-end' })).ok, true)
+  events.get('workflow/log')({ id: 'run-1' }, '[pw-ckpt]' + JSON.stringify({ c: '$end', r: { closeout: { result: 'ok' } }, h: [], rd: 0, fb: '', bu: 0, mr: 9, ds: 0 }))
+  settle(eng, events, 'run-1', 'completed', { status: 'DONE', results: { closeout: { result: 'ok' } } })
+  const out1 = JSON.parse(await p1)
+  await drain()
+  assert.equal(out1.paused, undefined, '$end 边界不得暂停')
+  assert.equal(out1.stopReason, 'completed')
+  const rec1 = readLogical(fs, 'issue-end')
+  assert.equal(rec1.lifecycle.state, 'COMPLETED')
+  assert.ok(rec1.control_events.some((e) => e.type === 'control_voided'), '取消请求随正常收束失效')
+  // 场景 2：中断后若最后一条检查点是 '$end'（竞速残留），提取器跳过它取真实节点
+  const p2 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-end2' })
+  await until(() => eng.starts.length >= 2, '第二次启动')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
+  events.get('workflow/log')({ id: 'run-2' }, '[pw-ckpt]' + JSON.stringify({ c: 'closeout', r: { explore: { verdict: 'PASS' } }, h: [], rd: 0, fb: '', bu: 0, mr: 9, ds: 0 }))
+  events.get('workflow/log')({ id: 'run-2' }, '[pw-ckpt]' + JSON.stringify({ c: '$end', r: {}, h: [], rd: 0, fb: '', bu: 0, mr: 9, ds: 0 }))
+  assert.equal(JSON.parse(await ctl.execute({ action: 'interrupt', logical_run_id: 'issue-end2' })).ok, true)
+  settle(eng, events, 'run-2', 'cancelled', null)
+  await p2
+  await drain()
+  const rec2 = readLogical(fs, 'issue-end2')
+  assert.equal(rec2.lifecycle.state, 'PAUSED')
+  assert.equal(rec2.pause_resume.entry, 'closeout', '$end 行被跳过，取真实检查点')
+})
+
+test('#80 回跳防护：待回跑修订时拒绝显式 entry', async () => {
+  const eng = makeEngine()
+  const { events, definedTools, fs } = env({ extra: { engine: eng } })
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const ctl = definedTools.find((t) => t.name === 'wf_control')
+  const p1 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-re' })
+  await until(() => eng.starts.length >= 1, '启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settle(eng, events, 'run-1', 'completed', { status: 'WAITING_HUMAN', node: 'explore', decision_id: 'd1', decision_package: {}, results: { explore: { verdict: 'PASS' } }, control_event: { node_id: 'explore', triggering_node_outcome: { verdict: 'PASS' } } })
+  await p1
+  await drain()
+  const p2 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-re', decision_id: 'd1', user_choice: 'ADD_BUDGET', blocked_edge: { from: 'explore', to: 'closeout', on: 'PASS' } })
+  await until(() => eng.starts.length >= 2, 'HD 续跑')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
+  ckptLog(events, 'run-2', 'closeout', { explore: { verdict: 'PASS' } })
+  assert.equal(JSON.parse(await ctl.execute({ action: 'pause', logical_run_id: 'issue-re' })).ok, true)
+  settle(eng, events, 'run-2', 'cancelled', null)
+  await p2
+  await drain()
+  assert.equal(JSON.parse(await ctl.execute({ action: 'guidance', logical_run_id: 'issue-re', text: '改范围', mode: 'baseline', new_baseline: '范围加 X' })).ok, true)
+  const err = await wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-re', resume_paused: true, entry: 'closeout' })
+  assert.ok(String(err).includes('不接受显式 entry'), '显式 entry 不得绕过基线回跳：' + err)
+})
+
 test('#80 编译产物：节点检查点行 + Guidance/基线修订注入行存在', async () => {
   // 直接调用真编译器（宿主测试环境的编译通道是 mock，不反映生成脚本）
   const { compileBlueprint } = await import(join(here, '..', '..', '..', 'scripts', 'generate.mjs'))

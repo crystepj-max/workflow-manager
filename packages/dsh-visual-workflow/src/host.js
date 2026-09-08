@@ -969,14 +969,21 @@ return {
     // 恢复现场从 [pw-ckpt] 检查点行重建（引擎不回传 results，宿主自建）；无检查点=
     // 降级，恢复要求人工指定 entry，不猜。
     const segmentCtrls = new Map() // 引擎运行 id → AbortController（段取消）
-    // Safe Pause 的检查点观察：仅 action=pause 等待检查点；interrupt 即时路径不经此
+    // Safe Pause 的检查点观察：仅 action=pause 等待检查点；interrupt 即时路径不经此。
+    // c='$end' 的检查点代表图已走完（随后正常收束走 control_voided），不得在其上中止。
     function maybeAbortAtCheckpoint(engineRunId, message) {
       const lrId = logicalRunByEngineRun.get(String(engineRunId || ''))
       const lrec = lrId ? logicalRuns.get(lrId) : null
       if (!lrec || !lrec.pause_state || lrec.pause_state.action !== 'pause') return
-      if (String(message || '').indexOf('[pw-ckpt]') < 0) return
-      const ctl = segmentCtrls.get(String(engineRunId || ''))
-      if (ctl && typeof ctl.abort === 'function') ctl.abort()
+      const raw = String(message || '')
+      const idx = raw.indexOf('[pw-ckpt]')
+      if (idx < 0) return
+      try {
+        const ck = JSON.parse(raw.slice(idx + '[pw-ckpt]'.length))
+        if (!ck || typeof ck !== 'object' || ck.c === '$end') return
+        const ctl = segmentCtrls.get(String(engineRunId || ''))
+        if (ctl && typeof ctl.abort === 'function') ctl.abort()
+      } catch (e) { /* 损坏行不作为中止依据 */ }
     }
     function controlEvent(rec, type, extra) {
       const ev = Object.assign({ type: String(type), at: Date.now() }, extra && typeof extra === 'object' ? extra : {})
@@ -994,7 +1001,8 @@ return {
         if (idx < 0) continue
         try {
           const ck = JSON.parse(line.slice(idx + '[pw-ckpt]'.length))
-          if (ck && typeof ck === 'object' && typeof ck.c === 'string' && ck.c) {
+          // c='$end' 只是循环退出标记，不是可恢复节点：跳过它向前找真实检查点
+          if (ck && typeof ck === 'object' && typeof ck.c === 'string' && ck.c && ck.c !== '$end') {
             return {
               entry: ck.c,
               results: ck.r && typeof ck.r === 'object' ? ck.r : {},
@@ -1061,13 +1069,15 @@ return {
       const pending = (rec.baseline_revisions || []).filter((r) => r.revision > applied)
       const lastRev = pending.length ? pending[pending.length - 1] : (rec.baseline_revisions || [])[rec.baseline_revisions.length - 1]
       if (lastRev) args.baseline_amendment = lastRev.text
+      let rebaseBlocked = false
       if (pending.length) {
         const rev1Dsl = rec.snapshots && rec.snapshots[0] && rec.snapshots[0].workflow && rec.snapshots[0].workflow.dsl
         if (rev1Dsl && rev1Dsl.entry) args.entry = rev1Dsl.entry
+        else rebaseBlocked = true
       }
       const coach = (rec.guidance || []).filter((g) => g.mode === 'coach' && g.text)
       if (coach.length) args.guidance_text = coach.map((g) => '- ' + g.text).join('\n')
-      return args
+      return { args: args, pendingRebase: pending.length > 0, rebaseBlocked: rebaseBlocked }
     }
 
     ctx.on('workflow/start', (info) => {
@@ -1778,7 +1788,12 @@ return {
             if (!latest) return '错误：任务 ' + logicalTaskId + ' 没有可恢复的逻辑运行，resume_paused 仅用于恢复 PAUSED 运行。'
             if (latest.lifecycle.state !== 'PAUSED') return '错误：逻辑运行 ' + latest.logical_run_id + ' 当前为 ' + latest.lifecycle.state + '（非 PAUSED）：resume_paused 不适用于该状态，Guidance / Human Decision / BLOCKED 三态语义不混用。'
             if (!latest.pause_resume) return '错误：逻辑运行 ' + latest.logical_run_id + ' 缺少暂停恢复现场（该段未产生可用检查点）；请人工确认入口节点后改用 entry=<节点id> 续跑。'
-            const prArgs = buildPauseResumeArgs(latest)
+            const built = buildPauseResumeArgs(latest)
+            if (!built) return '错误：逻辑运行 ' + latest.logical_run_id + ' 缺少暂停恢复现场；请人工确认续跑入口节点后改用 entry=<节点id> 续跑。'
+            if (built.rebaseBlocked) return '错误：逻辑运行 ' + latest.logical_run_id + ' 存在待回跑的基线修订，但 Rev1 冻结工作流缺少入口节点，无法自动回跳基线负责节点；请人工处理基线变更后重试。'
+            // 待回跑修订存在时不接受显式 entry：显式入口会绕过基线节点重跑（§9 规则 7）
+            if (built.pendingRebase && args.entry !== undefined) return '错误：逻辑运行 ' + latest.logical_run_id + ' 存在待回跑的基线修订，resume_paused 不接受显式 entry（回跳基线负责节点是强制路径）；请去掉 entry 直接恢复。'
+            const prArgs = built.args
             if (prArgs.entry === undefined && args.entry === undefined) return '错误：暂停现场无检查点入口（降级现场），请人工确认续跑入口节点后改用 entry=<节点id> 续跑。'
             for (const k of Object.keys(prArgs)) if (args[k] === undefined || args[k] === null || (typeof args[k] === 'object' && !Array.isArray(args[k]) && args[k] !== null && Object.keys(args[k]).length === 0)) args[k] = prArgs[k]
           }
@@ -1892,15 +1907,6 @@ return {
         live.add(runId)
         persist(runId)
         if (isHdResume || isLegacyResume || isPauseResume) supersedeParked(taskId, runId)
-        // #80：待生效基线修订随本次恢复消费（回跳基线节点整体重跑，Timeline 记 rebase）；
-        // 之后无新修订的恢复回到检查点现场。放在段成功启动之后，恢复失败不提前消费。
-        if (isPauseResume && logicalRec) {
-          const lastApplied = (logicalRec.baseline_revisions || [])[logicalRec.baseline_revisions.length - 1]
-          if (lastApplied && (logicalRec.baseline_applied_upto || 0) < lastApplied.revision) {
-            logicalRec.baseline_applied_upto = lastApplied.revision
-            controlEvent(logicalRec, 'baseline_rebase', { revision: lastApplied.revision, entry: args.entry })
-          }
-        }
         // #79：本段执行挂到逻辑运行（READY/WAITING_HUMAN → RUNNING，清 reason）
         if (logicalRec) {
           appendLogicalSegment(logicalRec, runId, logicalTrigger, isHdResume ? String(args.decision_id || '') : '')
@@ -1930,7 +1936,9 @@ return {
           : null
         if (pauseAction) {
           const ck = extractCheckpoint(runs.get(runId))
-          logicalRec.pause_resume = ck
+          // 本段无可用检查点时保留上一有效现场（保守可恢复），不用降级现场静默覆盖
+          const prevPr = logicalRec.pause_resume
+          if (!(ck.degraded && prevPr && prevPr.degraded === false)) logicalRec.pause_resume = ck
           logicalRec.pause_state = null
           endLogicalSegment(logicalRec, runId, pauseAction === 'interrupt' ? 'CANCELLED_INTERRUPT' : 'CANCELLED_PAUSE')
           // #79 逐节点语义在取消段不缺位：检查点 results（段首基线之后新完成的节点）
@@ -1979,6 +1987,15 @@ return {
           recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, value && value.results, value && value.control_event)
           const trans = logicalTransitionFor(canon, result && result.stopReason, value)
           if (trans) logicalSetState(logicalRec, trans.state, trans.reason)
+          // #80：基线修订在恢复段正常收束（脚本权威终态，含 WAITING_HUMAN）时消费——
+          // ENGINE_ERROR/取消不消费，回跳会在下次恢复时重新发生
+          if (isPauseResume && canon) {
+            const lastApplied = (logicalRec.baseline_revisions || [])[logicalRec.baseline_revisions.length - 1]
+            if (lastApplied && (logicalRec.baseline_applied_upto || 0) < lastApplied.revision) {
+              logicalRec.baseline_applied_upto = lastApplied.revision
+              controlEvent(logicalRec, 'baseline_rebase', { revision: lastApplied.revision, entry: args.entry })
+            }
+          }
           await refreshWorkspaceContext(logicalRec, wsIdentity)
           requestLogicalPersist(logicalRec.logical_run_id)
         }
