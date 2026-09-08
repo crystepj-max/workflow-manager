@@ -416,7 +416,9 @@ return {
     // 超过 RUNS_RETAIN 淘汰最旧（占用任务的记录不淘汰）。live 集合 = 本进程内执行中的 run；
     // 重启后回载的 running 记录不在 live 中，因而不再占用其 taskId。
     const RUNS_RETAIN = 50
-    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
+    // #80：PAUSED 属权威运行状态（宿主回写后不得被迟到的 workflow/end 以 'cancelled' 盖掉），
+    // 但不是终态——终态判定仍以 LIFECYCLE_TERMINAL 为准。
+    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
     const HD_STRING_KEYS = ['decision_id', 'reason', 'node']
     const HD_NUMBER_KEYS = ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']
     const HD_OBJECT_KEYS = ['decision_package', 'control_event', 'blocked_edge', 'results']
@@ -428,7 +430,8 @@ return {
     // workflow/end 只有 completed，可能在 wf_run 回写 WAITING_HUMAN 之后到达把等待态盖掉；
     // 此时仍靠 decision_id + Package 识别可续跑的停机记录
     const isParkedHd = (rec) => !!rec && (rec.status === 'WAITING_HUMAN' || (rec.status === 'completed' && !!rec.decision_id && !!rec.decision_package && typeof rec.decision_package === 'object'))
-    const holdsTask = (rec) => !!rec && !rec.supersededBy && (live.has(rec.id) || isHumanWait(rec.status) || isParkedHd(rec))
+    // #80：PAUSED 记录持有任务（可恢复现场），占用 taskId 直到恢复或派生
+    const holdsTask = (rec) => !!rec && !rec.supersededBy && (live.has(rec.id) || isHumanWait(rec.status) || isParkedHd(rec) || rec.status === 'PAUSED')
     const runTs = (rec) => rec.updatedAt || rec.startedAt || 0
 
     function newRecord(id) {
@@ -572,6 +575,12 @@ return {
         snapshots: [],
         node_attempts: [],
         business_outcomes: {},
+        // #80 运行控制面：Guidance Record / 控制事件 / 基线修订均为追加式，不覆盖
+        guidance: [],
+        control_events: [],
+        baseline_revisions: [],
+        pause_state: null,     // { action: 'pause'|'interrupt', requested_at } 段取消后翻译为 PAUSED
+        pause_resume: null,    // PAUSED 后的恢复现场（检查点重建）{ entry, results, history, round, feedback, budgetUsed, maxRounds, decisionSeq, degraded }
         workspace: null,
       }
       // Rev 1 冻结：工作流定义 + 角色（编译产物内联角色正文与路由）+ Provider/Model
@@ -763,6 +772,11 @@ return {
         snapshots: rec.snapshots,
         node_attempts: rec.node_attempts,
         business_outcomes: rec.business_outcomes,
+        guidance: rec.guidance || [],
+        control_events: rec.control_events || [],
+        baseline_revisions: rec.baseline_revisions || [],
+        pause_state: rec.pause_state || null,
+        pause_resume: rec.pause_resume || null,
         workspace: rec.workspace || null,
       }
     }
@@ -813,6 +827,11 @@ return {
         snapshots: Array.isArray(data.snapshots) ? data.snapshots.filter((s) => s && typeof s === 'object') : [],
         node_attempts: Array.isArray(data.node_attempts) ? data.node_attempts.filter((s) => s && typeof s === 'object') : [],
         business_outcomes: data.business_outcomes && typeof data.business_outcomes === 'object' && !Array.isArray(data.business_outcomes) ? data.business_outcomes : {},
+        guidance: Array.isArray(data.guidance) ? data.guidance.filter((g) => g && typeof g === 'object') : [],
+        control_events: Array.isArray(data.control_events) ? data.control_events.filter((e) => e && typeof e === 'object') : [],
+        baseline_revisions: Array.isArray(data.baseline_revisions) ? data.baseline_revisions.filter((r) => r && typeof r === 'object') : [],
+        pause_state: data.pause_state && typeof data.pause_state === 'object' ? data.pause_state : null,
+        pause_resume: data.pause_resume && typeof data.pause_resume === 'object' ? data.pause_resume : null,
         workspace: data.workspace && typeof data.workspace === 'object' ? data.workspace : null,
       }
       logicalRuns.set(id, rec)
@@ -870,6 +889,7 @@ return {
         segment: seg ? seg.index : null,
         segment_count: rec.segments.length,
         logical_state: rec.lifecycle.state,
+        pause_pending: !!rec.pause_state,
       }
     }
     // 平台 workflow 工具直起的引擎运行（无 wf_run 边界）：按事件流可得信息落退化摘要
@@ -935,6 +955,92 @@ return {
       rec.updated_at = Date.now()
     }
 
+    // ── #80 运行控制面：Pause / Interrupt / Guidance / Resume ────────────────
+    // 机制（对齐引擎真实契约 R-03/worker.cjs）：abort signal → 引擎在当前钩子边界抛
+    // CANCELLED（进行中的 agent 自然跑完，不硬杀）→ 段以 stopReason='cancelled' 收束且
+    // 脚本返回值被强制丢弃（value=null）→ 宿主按 pause_state 把段翻译为 PAUSED，恢复
+    // 现场从编译脚本输出的 [pw-ckpt] 检查点行重建（引擎不回传 results，宿主自建）。
+    const segmentCtrls = new Map() // 引擎运行 id → AbortController（段取消）
+    function controlEvent(rec, type, extra) {
+      const ev = Object.assign({ type: String(type), at: Date.now() }, extra && typeof extra === 'object' ? extra : {})
+      rec.control_events.push(ev)
+      rec.updated_at = ev.at
+      return ev
+    }
+    // 从 run 记录日志提取最后一条检查点（脚本每完成一个节点路由后输出）。
+    // 无检查点 = 该段无可用现场（旧脚本/解析失败）：恢复退化为人工指定 entry，不猜。
+    function extractCheckpoint(runRec) {
+      if (!runRec) return null
+      for (let i = runRec.logs.length - 1; i >= 0; i--) {
+        const line = String(runRec.logs[i] || '')
+        const idx = line.indexOf('[pw-ckpt]')
+        if (idx < 0) continue
+        try {
+          const ck = JSON.parse(line.slice(idx + '[pw-ckpt]'.length))
+          if (ck && typeof ck === 'object' && typeof ck.c === 'string' && ck.c) {
+            return {
+              entry: ck.c,
+              results: ck.r && typeof ck.r === 'object' ? ck.r : {},
+              history: Array.isArray(ck.h) ? ck.h : [],
+              round: Number(ck.rd) || 0,
+              feedback: typeof ck.fb === 'string' ? ck.fb : '',
+              budgetUsed: Number(ck.bu) || 0,
+              maxRounds: Number(ck.mr) || 0,
+              decisionSeq: Number(ck.ds) || 0,
+              degraded: false,
+            }
+          }
+        } catch (e) { /* 损坏行跳过，继续向前找 */ }
+      }
+      return { entry: null, results: {}, history: [], round: 0, feedback: '', budgetUsed: 0, maxRounds: 0, decisionSeq: 0, degraded: true }
+    }
+    // Guidance Record（Run 级适用）：mode=coach 普通指导；mode=baseline 实质基线变更，
+    // 必须提供新基线要点并产生追加式 Baseline Revision（配对提交，无孤儿 Guidance）。
+    function appendGuidanceRecord(rec, { text, mode, new_baseline }) {
+      const m = mode === 'baseline' ? 'baseline' : 'coach'
+      if (m === 'baseline' && !(typeof new_baseline === 'string' && new_baseline.trim())) {
+        return { ok: false, error: '改基线声明必须提供 new_baseline（新基线要点）：实质基线变更不允许只留意图不留内容。' }
+      }
+      const seq = rec.guidance.length + 1
+      const g = { seq: seq, mode: m, text: String(text || ''), at: Date.now() }
+      if (m === 'baseline') {
+        g.new_baseline = String(new_baseline).trim()
+        const revision = { revision: rec.baseline_revisions.length + 1, text: g.new_baseline, guidance_seq: seq, created_at: g.at }
+        rec.baseline_revisions.push(revision)
+        // 受影响 Proof 保守全失效（运行时依赖图信息不足时的既定口径，规格 §18）：
+        // 基线变更前产生的业务结果标记 stale，重跑通过后由新结果自然覆盖。
+        for (const k of Object.keys(rec.business_outcomes || {})) {
+          const bo = rec.business_outcomes[k]
+          if (bo && !bo.stale) { bo.stale = true; bo.stale_reason = 'BASELINE_CHANGE_R' + revision.revision }
+        }
+        controlEvent(rec, 'baseline_change', { revision: revision.revision, guidance_seq: seq })
+      }
+      rec.guidance.push(g)
+      controlEvent(rec, 'guidance', { guidance_seq: seq, mode: m })
+      requestLogicalPersist(rec.logical_run_id)
+      return { ok: true, guidance: g }
+    }
+    // 恢复载荷：检查点现场 + 适用 Guidance（Run 级，全部窗口）+ 最新基线修订文本
+    function buildPauseResumeArgs(rec) {
+      const pr = rec.pause_resume || null
+      if (!pr) return null
+      const args = {
+        entry: pr.entry || undefined,
+        results: pr.results && typeof pr.results === 'object' ? structuredClone(pr.results) : {},
+        history: Array.isArray(pr.history) ? structuredClone(pr.history) : [],
+        startRound: Number(pr.round) || 0,
+        feedback: typeof pr.feedback === 'string' ? pr.feedback : '',
+        budgetUsed: Number(pr.budgetUsed) || 0,
+        maxRounds: Number(pr.maxRounds) || 0,
+        decisionSeq: Number(pr.decisionSeq) || 0,
+      }
+      const coach = rec.guidance.filter((g) => g.mode === 'coach' && g.text)
+      if (coach.length) args.guidance_text = coach.map((g) => '- ' + g.text).join('\n')
+      const lastRev = rec.baseline_revisions[rec.baseline_revisions.length - 1]
+      if (lastRev) args.baseline_amendment = lastRev.text
+      return args
+    }
+
     ctx.on('workflow/start', (info) => {
       const rec = ensureRun(info.id)
       rec.meta = { name: String((info.meta && info.meta.name) || ''), description: String((info.meta && info.meta.description) || '') }
@@ -969,11 +1075,11 @@ return {
       }
       return found
     }
-    // 续跑启动后：同 taskId 的停机记录标记接管，旧卡片退出门禁队列
+    // 续跑启动后：同 taskId 的停机记录标记接管，旧卡片退出门禁队列（#80：PAUSED 同理）
     function supersedeParked(taskId, newRunId) {
       for (const rec of runs.values()) {
         if (rec.id === newRunId || rec.taskId !== taskId || rec.supersededBy) continue
-        if (isHumanWait(rec.status) || isParkedHd(rec)) { rec.supersededBy = newRunId; persist(rec.id) }
+        if (isHumanWait(rec.status) || isParkedHd(rec) || rec.status === 'PAUSED') { rec.supersededBy = newRunId; persist(rec.id) }
       }
     }
     function canonicalStop(result) {
@@ -1136,6 +1242,41 @@ return {
         persist(rec.id)
         return { ok: true, formalRecords: rec.formalRecords, produced: artifacts.length, taskId: rec.taskId }
       } catch (e) { return fail(errMsg(e)) }
+    })
+    // #80 运行控制面：pause / interrupt（RUNNING 专属）与 guidance（PAUSED 专属）。
+    // 状态语义不混用：WAITING_HUMAN 归 Human Decision 流程、BLOCKED 归外部条件恢复。
+    registerRpc('vwf.run.control', async (a) => {
+      await runsHydration
+      try { if (typeof logicalRunsHydration !== 'undefined' && logicalRunsHydration) await logicalRunsHydration } catch (e) { /* 回载失败已留痕 */ }
+      const action = String((a && a.action) || '')
+      const lrId = String((a && a.logical_run_id) || '')
+      const rec = logicalRuns.get(lrId)
+      if (!rec) return fail('逻辑运行不存在：' + lrId, '$.logical_run_id')
+      if (rec.terminal) return fail('逻辑运行已终态（' + rec.lifecycle.state + '），控制面不可用：' + lrId)
+      if (action === 'pause' || action === 'interrupt') {
+        if (rec.lifecycle.state !== 'RUNNING') return fail('仅 RUNNING 的逻辑运行可' + (action === 'interrupt' ? '中断' : '暂停') + '；当前为 ' + rec.lifecycle.state + '（WAITING_HUMAN / BLOCKED / PAUSED 三态语义不混用）')
+        const activeSeg = rec.segments.find((s) => s.active) || null
+        if (!activeSeg) return fail('无活动执行段，无法下发控制')
+        const ctl = segmentCtrls.get(String(activeSeg.run_id))
+        if (!ctl || typeof ctl.abort !== 'function') return fail('当前宿主不支持运行中止（AbortController 不可用），控制请求被拒绝：不静默无效。')
+        if (rec.pause_state) return fail('已有待生效的 ' + rec.pause_state.action + ' 请求，请等待其生效。')
+        rec.pause_state = { action: action, requested_at: Date.now() }
+        controlEvent(rec, action === 'interrupt' ? 'interrupt_requested' : 'pause_requested', { run_id: String(activeSeg.run_id) })
+        requestLogicalPersist(lrId)
+        try { ctl.abort() } catch (e) { rec.pause_state = null; requestLogicalPersist(lrId); return fail('中止信号下发失败：' + errMsg(e)) }
+        return { ok: true, action: action, state: 'requested', logical_run_id: lrId, run_id: String(activeSeg.run_id) }
+      }
+      if (action === 'guidance') {
+        if (rec.lifecycle.state !== 'PAUSED') return fail('仅 PAUSED 的逻辑运行可提交 Guidance；当前为 ' + rec.lifecycle.state + '（Guidance 与 Human Decision / BLOCKED 语义不混用）')
+        const r = appendGuidanceRecord(rec, { text: a && a.text, mode: a && a.mode, new_baseline: a && a.new_baseline })
+        if (!r.ok) return fail(r.error)
+        // 顺带 persist 最近段的 run 记录：看板以 run.updatedAt 驱动 PAUSED 卡刷新
+        const lastSeg = rec.segments[rec.segments.length - 1]
+        const rr = lastSeg ? runs.get(String(lastSeg.run_id)) : null
+        if (rr) persist(rr.id)
+        return { ok: true, guidance: r.guidance, baseline_revisions: rec.baseline_revisions.length, logical_run_id: lrId }
+      }
+      return fail('未知 action：' + action + '（可用：pause | interrupt | guidance）')
     })
     // llm 服务就绪可能晚于插件 apply：每次现取
     registerRpc('vwf.models', async () => {
@@ -1506,6 +1647,7 @@ return {
         blocked_edge: { type: 'object', additionalProperties: true, description: 'ADD_BUDGET 时被额度拦住的自动边 { from, to, on }' },
         results: { type: 'object', additionalProperties: true, description: '续跑时带回的节点结果快照' },
         model_overrides: { type: 'object', additionalProperties: true, description: '#79 续跑时可更换 Provider/Model：{ 节点id | "$default": { provider, model } }；产生追加式快照修订（旧修订保留可查），仅续跑生效' },
+        resume_paused: { type: 'boolean', description: '#80 暂停恢复：对 PAUSED 的逻辑运行按检查点现场续跑同一 Logical Run；恢复后的节点读取暂停期间提交的全部 Guidance 与最新基线修订（wf_control 提交）' },
       },
       async execute(rawArgs) {
         refreshServices()
@@ -1516,16 +1658,20 @@ return {
         await runsHydration
         const isHdResume = !!args.decision_id
         const isLegacyResume = !!args.entry
+        // #80：暂停恢复是独立续跑形态——按检查点现场回填 entry/results，不得当成新启动
+        const isPauseResume = args.resume_paused === true
+        const isResumeLike = isHdResume || isLegacyResume || isPauseResume
         const holder = taskHolder(taskId)
         if (holder) {
           const st = String(holder.status || '')
           let allow
           if (st === 'WAITING_HUMAN' || isParkedHd(holder)) allow = isHdResume && (!holder.decision_id || holder.decision_id === String(args.decision_id))
           else if (st.indexOf('AWAITING_HUMAN_') === 0) allow = isLegacyResume
+          else if (st === 'PAUSED') allow = isPauseResume
           else allow = isHdResume || isLegacyResume
           if (!allow) {
             return '错误：任务 ' + taskId + ' 已有进行中的运行 ' + holder.id + '（状态 ' + (st || 'running') +
-              '）：同 taskId 串行互斥。WAITING_HUMAN 请带 decision_id 与 user_choice 续跑；残留门禁请带 entry=<节点id> 与 approved；并行任务请换一个 taskId。'
+              '）：同 taskId 串行互斥。WAITING_HUMAN 请带 decision_id 与 user_choice 续跑；残留门禁请带 entry=<节点id> 与 approved；PAUSED 请带 resume_paused=true 恢复同一逻辑运行；并行任务请换一个 taskId。'
           }
         }
         let dsl = null
@@ -1575,12 +1721,21 @@ return {
         }
         let logicalRec = null
         let logicalTrigger = 'start'
-        if (isHdResume || isLegacyResume) {
+        if (isHdResume || isLegacyResume || isPauseResume) {
           const latest = latestLogicalRunForTask(logicalTaskId)
           if (latest && latest.terminal) {
             return '错误：任务 ' + logicalTaskId + ' 的逻辑运行 ' + latest.logical_run_id + ' 已终态（' + latest.lifecycle.state + '），同一运行不能继续。请直接重新发起（将派生新运行并保留来源关系）。'
           }
-          logicalTrigger = isHdResume ? 'human_decision' : 'legacy_resume'
+          logicalTrigger = isHdResume ? 'human_decision' : (isPauseResume ? 'pause_resume' : 'legacy_resume')
+          // #80 暂停恢复：检查点现场 + 适用 Guidance（Run 级）+ 最新基线修订回填执行载荷
+          if (isPauseResume) {
+            if (!latest) return '错误：任务 ' + logicalTaskId + ' 没有可恢复的逻辑运行，resume_paused 仅用于恢复 PAUSED 运行。'
+            if (latest.lifecycle.state !== 'PAUSED') return '错误：逻辑运行 ' + latest.logical_run_id + ' 当前为 ' + latest.lifecycle.state + '（非 PAUSED）：resume_paused 不适用于该状态，Guidance / Human Decision / BLOCKED 三态语义不混用。'
+            if (!latest.pause_resume) return '错误：逻辑运行 ' + latest.logical_run_id + ' 缺少暂停恢复现场（该段未产生可用检查点）；请人工确认入口节点后改用 entry=<节点id> 续跑。'
+            const prArgs = buildPauseResumeArgs(latest)
+            if (prArgs.entry === undefined && args.entry === undefined) return '错误：暂停现场无检查点入口（降级现场），请人工确认续跑入口节点后改用 entry=<节点id> 续跑。'
+            for (const k of Object.keys(prArgs)) if (args[k] === undefined || args[k] === null || (typeof args[k] === 'object' && !Array.isArray(args[k]) && args[k] !== null && Object.keys(args[k]).length === 0)) args[k] = prArgs[k]
+          }
           if (latest) {
             logicalRec = latest
           } else {
@@ -1616,7 +1771,7 @@ return {
         }
         // #79 快照修订（R3/R4）：续跑携带 model_overrides → 追加 Rev N（仅
         // Provider/Model），旧修订保留，新修订只影响后续执行
-        if ((isHdResume || isLegacyResume) && args.model_overrides && typeof args.model_overrides === 'object' && !Array.isArray(args.model_overrides) && Object.keys(args.model_overrides).length) {
+        if ((isHdResume || isLegacyResume || isPauseResume) && args.model_overrides && typeof args.model_overrides === 'object' && !Array.isArray(args.model_overrides) && Object.keys(args.model_overrides).length) {
           const rev = appendSnapshotRevision(logicalRec, args.model_overrides)
           if (rev) requestLogicalPersist(logicalRec.logical_run_id)
         }
@@ -1625,12 +1780,12 @@ return {
         // 快照"静默失配。Rev 1 无脚本（旧形态承接）时才用当前编译产物。
         const snap1 = (logicalRec.snapshots || []).find((s) => s.revision === 1) || null
         const frozenScript = snap1 && typeof snap1.script === 'string' && snap1.script ? snap1.script : null
-        const execScript = (isHdResume || isLegacyResume) && frozenScript ? frozenScript : c.script
+        const execScript = (isHdResume || isLegacyResume || isPauseResume) && frozenScript ? frozenScript : c.script
         // Codex R2 ②：续跑传入 active 快照的合并绑定（而非本次 delta）——Rev3 只改 B
         // 时，A 必须仍用 Rev2 的覆盖值执行；合并语义与编译脚本一致（显式覆盖优先，
         // $default 兜底未显式覆盖节点）。
         const activeSnap = activeSnapshot(logicalRec)
-        const modelOverridesForExec = (isHdResume || isLegacyResume) ? structuredClone(activeSnap ? activeSnap.provider_model : null) : undefined
+        const modelOverridesForExec = (isHdResume || isLegacyResume || isPauseResume) ? structuredClone(activeSnap ? activeSnap.provider_model : null) : undefined
 
         // Codex R2 ③：派生运行按自身 logical_run_id 分配 workspace——沿用原 taskId 会让
         // #93 注册表把前任（仍注册）的 workspace 复用给派生运行，或在清理后把溯源记到
@@ -1654,6 +1809,9 @@ return {
           requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
           decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
           budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
+          // #80：暂停期间的用户指导（Run 级）与最新基线修订文本——经脚本 runtimeCtx/issueBlock
+          // 注入执行上下文；普通 Guidance 不触碰基线，基线修订只经显式 mode=baseline 产生
+          guidance_text: args.guidance_text, baseline_amendment: args.baseline_amendment,
           // #79: 快照修订的 Provider/Model（Codex R2 ②：active 快照的合并绑定；仅续跑
           // 生效——新启透传会让脚本用覆盖模型执行而 Rev1 快照仍记蓝图绑定，归因失真）
           model_overrides: modelOverridesForExec,
@@ -1664,6 +1822,11 @@ return {
         if (ws) await markWorkspaceLifecycle(wsIdentity, 'RUNNING')
         // Codex R2 ①：续跑执行 Rev 1 冻结脚本（见上方 execScript 说明）
         const startReq = { script: execScript, meta: c.meta, args: scriptArgs, parent: parent }
+        // #80：段取消信号——pause/interrupt 经 vwf.run.control 中止本段（引擎在当前钩子
+        // 边界抛 CANCELLED，进行中 agent 自然完成，不硬杀）。宿主不支持 AbortController
+        // 时不下发 signal：pause/interrupt 会得到明确失败而不是静默无效。
+        const segCtl = typeof AbortController === 'function' ? new AbortController() : null
+        if (segCtl) startReq.signal = segCtl.signal
         if (ws && ws.source_path) { startReq.cwd = ws.source_path; startReq.workspaceRoot = ws.source_path }
         let run
         try { run = engineNow.start(startReq) } catch (e) {
@@ -1676,12 +1839,13 @@ return {
         }
         // 启动边界自登记（workflow/start 事件不带 taskId）；续跑把同 taskId 前序门禁记录标记接管
         const runId = String(run.id)
+        if (segCtl) segmentCtrls.set(runId, segCtl)
         const rec = ensureRun(runId)
         rec.taskId = taskId
         rec.workflowId = String(args.templateId || v.sanitized.id || '')
         live.add(runId)
         persist(runId)
-        if (isHdResume || isLegacyResume) supersedeParked(taskId, runId)
+        if (isHdResume || isLegacyResume || isPauseResume) supersedeParked(taskId, runId)
         // #79：本段执行挂到逻辑运行（READY/WAITING_HUMAN → RUNNING，清 reason）
         if (logicalRec) {
           appendLogicalSegment(logicalRec, runId, logicalTrigger, isHdResume ? String(args.decision_id || '') : '')
@@ -1690,6 +1854,7 @@ return {
         }
         let result
         try { result = await run.result } catch (e) {
+          segmentCtrls.delete(runId)
           if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
           if (logicalRec) {
             endLogicalSegment(logicalRec, runId, 'ENGINE_ERROR')
@@ -1698,9 +1863,44 @@ return {
           }
           return '错误：工作流运行失败，workspace 已标 FAILED：' + errMsg(e)
         }
+        segmentCtrls.delete(runId)
         // 权威终态回写：completed 时以脚本返回 value.status 为准；回执保持引擎原样不翻译
         const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
         if (canon) onRun(runId, (r) => { r.status = canon; applyHdValue(r, result.value) })
+        // #80 暂停/中断收束：引擎取消段（stopReason=cancelled，脚本返回值被引擎强制丢弃）
+        // 且控制面有待生效请求 → 翻译为 PAUSED，恢复现场从检查点行重建；不经 FAILED 映射。
+        const pauseAction = logicalRec && logicalRec.pause_state && result && result.stopReason === 'cancelled'
+          ? String(logicalRec.pause_state.action || 'pause')
+          : null
+        if (pauseAction) {
+          const ck = extractCheckpoint(runs.get(runId))
+          logicalRec.pause_resume = ck
+          logicalRec.pause_state = null
+          endLogicalSegment(logicalRec, runId, pauseAction === 'interrupt' ? 'CANCELLED_INTERRUPT' : 'CANCELLED_PAUSE')
+          // 中断语义：进行中的 Node Attempt 记 INTERRUPTED（不产生正式成功结果，恢复后整体重跑）
+          if (pauseAction === 'interrupt' && ck.entry) {
+            const snap = activeSnapshot(logicalRec)
+            const eff = effectiveProviderModel(logicalRec, ck.entry)
+            logicalRec.node_attempts.push({
+              node: ck.entry, segment: logicalRec.segments.length,
+              snapshot_revision: snap ? snap.revision : null,
+              provider: String((eff && eff.provider) || 'default'), model: String((eff && eff.model) || 'default'),
+              outcome: 'INTERRUPTED', completed_at: Date.now(),
+            })
+          }
+          logicalSetState(logicalRec, 'PAUSED', logicalReason(pauseAction === 'interrupt' ? 'USER_INTERRUPT' : 'USER_PAUSE', ck.degraded ? '该段无可用检查点，恢复需人工指定 entry' : ''))
+          controlEvent(logicalRec, pauseAction === 'interrupt' ? 'interrupted' : 'paused', { run_id: runId, checkpoint_entry: ck.entry || null, checkpoint_degraded: ck.degraded === true })
+          await refreshWorkspaceContext(logicalRec, wsIdentity)
+          requestLogicalPersist(logicalRec.logical_run_id)
+          onRun(runId, (r) => { r.status = 'PAUSED'; r.reason = pauseAction === 'interrupt' ? 'USER_INTERRUPT' : 'USER_PAUSE' })
+          if (ws) await markWorkspaceLifecycle(wsIdentity, 'PAUSED')
+          return JSON.stringify({ runId: runId, stopReason: 'paused', paused: true, action: pauseAction, logical_run_id: logicalRec.logical_run_id, checkpoint_entry: ck.entry || null, checkpoint_degraded: ck.degraded === true, engine_stop_reason: 'cancelled', value: result.value, agentsStarted: result.agentsStarted })
+        }
+        if (logicalRec && logicalRec.pause_state) {
+          // 取消请求下发后段仍正常收束（abort 与完成竞速）：请求失效，按正常终态走
+          logicalRec.pause_state = null
+          controlEvent(logicalRec, 'control_voided', { run_id: runId })
+        }
         // #79 逻辑运行收尾：八态映射 + 完成类型镜像 + 节点实际修订/模型/业务结果
         // 记录 + 工作区上下文入档。Lifecycle 闸门不改写专业结果（R7）。
         if (logicalRec) {
@@ -1750,6 +1950,22 @@ return {
         const fn = rpcRoutes.get('vwf.workspace.' + String((rawArgs && rawArgs.op) || ''))
         if (typeof fn !== 'function') return JSON.stringify({ ok: false, error: '未知 workspace op：' + (rawArgs && rawArgs.op) })
         try { const res = await fn(rawArgs); return typeof res === 'string' ? res : JSON.stringify(res) } catch (e) { return JSON.stringify({ ok: false, error: errMsg(e) }) }
+      },
+    }))
+    dtools.register(textTool({
+      name: 'wf_control',
+      description: '对 Logical Run 下发运行控制（#80）：action=pause 安全暂停（当前节点到检查点后进入 PAUSED）；action=interrupt 立即中断当前 Node Attempt（记 INTERRUPTED，不产生正式成功结果，进入 PAUSED）；action=guidance 暂停期间提交用户指导（mode=coach 普通指导，不改基线；mode=baseline 实质基线变更，必须提供 new_baseline 要点，恢复后从基线节点重跑）。恢复同一逻辑运行：wf_run + resume_paused=true。',
+      parameters: {
+        action: { type: 'string', required: true, description: 'pause | interrupt | guidance' },
+        logical_run_id: { type: 'string', required: true, description: 'Logical Run id（看板「同一次运行」卡片或 wf_run 返回中的 logical_run_id）' },
+        text: { type: 'string', description: 'guidance：指导内容（可多轮提交）' },
+        mode: { type: 'string', description: 'guidance：coach（默认，仅指导）| baseline（实质基线变更）' },
+        new_baseline: { type: 'string', description: 'guidance mode=baseline 必填：新基线要点（目标/范围/硬性要求的变化说明）' },
+      },
+      async execute(rawArgs) {
+        const fn = rpcRoutes.get('vwf.run.control')
+        if (typeof fn !== 'function') return JSON.stringify({ ok: false, errors: [{ at: '$', message: '控制面不可用' }] })
+        try { const res = await fn(rawArgs || {}); return typeof res === 'string' ? res : JSON.stringify(res) } catch (e) { return JSON.stringify({ ok: false, errors: [{ at: '$', message: errMsg(e) }] }) }
       },
     }))
     dtools.register(textTool({
