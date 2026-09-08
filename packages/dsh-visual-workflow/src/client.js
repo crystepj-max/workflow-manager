@@ -39,9 +39,12 @@
 //  运行约束：动态客户端闭包（plain JS、无 JSX/import；React/host/styles 为
 //  注入符号；计时器走 ctx.timeout/ctx.interval——inject: ['slots','timer']）。
 // ─────────────────────────────────────────────────────────────────────────────
+
 return {
   name: 'visual-workflow-client',
   inject: ['slots', 'timer'],
+  buildSchemaTemplate: buildSchemaTemplate,
+  COND_RE: conditionRegex(),
   apply(ctx) {
     const slots = ctx.get('slots')
     if (slots === undefined) return
@@ -104,6 +107,7 @@ return {
 .vwf-mono { font-family:var(--dsw-font-family-mono, ui-monospace, SFMono-Regular, Consolas, monospace); }
 .vwf-input.err, .vwf-select.err, .vwf-textarea.err { border-color:var(--dsw-alias-state-error-primary, #e5484d); }
 .vwf-err-line { color:var(--dsw-alias-state-error-primary, #e5484d); font-size:11px; margin-top:2px; }
+.vwf-ok-line { color:var(--dsw-alias-state-success-primary, #34d399); font-size:11px; margin-top:2px; }
 .vwf-section { border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); padding:10px 12px; margin-top:10px; }
 .vwf-subsection { border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; background:var(--dsw-alias-bg-layer-2, #242424); padding:10px 12px; margin-top:10px; }
 .vwf-editor-dialog { --vwf-editor-safe-gap:clamp(12px, 3vw, 32px); position:fixed; inset:var(--vwf-editor-safe-gap); z-index:900; width:min(1440px, calc(100vw - var(--vwf-editor-safe-gap) - var(--vwf-editor-safe-gap))); height:min(920px, calc(100vh - var(--vwf-editor-safe-gap) - var(--vwf-editor-safe-gap))); max-width:none; max-height:none; margin:auto; padding:0; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:18px; background:var(--dsw-alias-bg-layer-1, #1b1b1b); color:var(--dsw-alias-label-primary, #e8e8e8); box-shadow:0 24px 80px rgba(0,0,0,.48); overflow:hidden; }
@@ -1107,6 +1111,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const [idComposing, setIdComposing] = React.useState(false)
       const [schemaDraft, setSchemaDraft] = React.useState(node.output && node.output.schema ? JSON.stringify(node.output.schema, null, 2) : '')
       const [schemaError, setSchemaError] = React.useState(null)
+      const [schemaNotice, setSchemaNotice] = React.useState(null)
       const [schemaDirty, setSchemaDirty] = React.useState(false)
       const debounceRef = React.useRef(null)
 
@@ -1114,6 +1119,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       React.useEffect(() => {
         setSchemaDraft(node.output && node.output.schema ? JSON.stringify(node.output.schema, null, 2) : '')
         setSchemaError(null)
+        setSchemaNotice(null)
         setSchemaDirty(false)
       }, [node.id])
       React.useEffect(() => () => { if (debounceRef.current) debounceRef.current() }, [])
@@ -1144,6 +1150,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const onSchemaChange = (value) => {
         setSchemaDraft(value)
         setSchemaError(null)
+        setSchemaNotice(null)
         setSchemaDirty(true)
         if (debounceRef.current) debounceRef.current()
         debounceRef.current = ctx.timeout(() => {
@@ -1152,15 +1159,32 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         }, SCHEMA_DEBOUNCE_MS)
       }
       const beautifySchema = () => {
-        if (!schemaDraft.trim()) { setSchemaDirty(false); commitSchema(schemaDraft); return }
+        if (!schemaDraft.trim()) {
+          // 取消残留的 2s 防抖，避免「输入后清空再点 ✨」时旧防抖在稍后把刚填入的模板覆盖为 null
+          if (debounceRef.current) debounceRef.current()
+          const template = buildSchemaTemplate({
+            kind: isFanout ? 'fanout' : 'worker',
+            successCondition: (node.output && node.output.successCondition) || '',
+            verifyBranch: !!node.verifyBranch,
+          })
+          const formatted = JSON.stringify(template, null, 2)
+          setSchemaDraft(formatted)
+          setSchemaDirty(false)
+          setSchemaError(null)
+          setSchemaNotice(t('outputSchemaAutofilled'))
+          props.onUpdate(node.id, { output: { ...(node.output || {}), schema: template } })
+          return
+        }
         try {
           const formatted = JSON.stringify(JSON.parse(schemaDraft), null, 2)
           setSchemaDraft(formatted)
           setSchemaDirty(false)
-          props.onUpdate(node.id, { output: { ...(node.output || {}), schema: JSON.parse(schemaDraft) } })
           setSchemaError(null)
+          setSchemaNotice(null)
+          props.onUpdate(node.id, { output: { ...(node.output || {}), schema: JSON.parse(schemaDraft) } })
         } catch (e) {
           setSchemaError(t('outputSchemaInvalid'))
+          setSchemaNotice(null)
         }
       }
 
@@ -1310,7 +1334,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 onClick: beautifySchema,
               }, '✨')
             ),
-            schemaError ? h('div', { className: 'vwf-err-line' }, schemaError) : null
+            schemaError
+              ? h('div', { className: 'vwf-err-line' }, schemaError)
+              : (schemaNotice ? h('div', { className: 'vwf-ok-line' }, schemaNotice) : null)
           )
         ) : h('div', { className: 'vwf-subsection' },
           h('div', { style: { fontSize: 13, fontWeight: 500 } }, t('resultMode')),
@@ -1351,13 +1377,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                   onClick: beautifySchema,
                 }, '✨')
               ),
-              schemaError ? h('div', { className: 'vwf-err-line' }, schemaError) : null
+              schemaError
+                ? h('div', { className: 'vwf-err-line' }, schemaError)
+                : (schemaNotice ? h('div', { className: 'vwf-ok-line' }, schemaNotice) : null)
             ),
             h(Field, { label: t('successCondition'), required: true, help: t('successConditionHelp'), errors: errorsFor('output.successCondition') },
               h('input', {
                 className: 'vwf-input vwf-mono' + (errorsFor('output.successCondition').length ? ' err' : ''),
                 value: (node.output && node.output.successCondition) || '', placeholder: '$.result == true',
-                onChange: (ev) => props.onUpdate(node.id, { output: { ...(node.output || {}), successCondition: ev.target.value } }),
+                onChange: (ev) => { setSchemaNotice(null); props.onUpdate(node.id, { output: { ...(node.output || {}), successCondition: ev.target.value } }) },
               })
             )
           ) : null,
@@ -2573,4 +2601,67 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       () => h(Page, null)
     ))
   },
+}
+
+// 注：本函数刻意定义在 return 之后 —— #175 起 build-bundle.mjs 要求压缩后的动态闭包体
+// 必须以 return{ 开头（顶层不得出现任何前置语句）。函数声明会被提升，因此 return 中的
+// buildSchemaTemplate 属性导出与 apply 内的调用均不受影响。
+
+// ── 成功表达式解析正则（单一来源，防止与内核字面漂移）────────────────────────
+// client.js 是浏览器动态闭包，无法 import scripts/validate-core.cjs，故此处保留一份
+// 字面量；由 tests/schema-template.test.mjs 断言其 source 与内核 COND_RE 完全一致
+// （防漂移门禁）。buildSchemaTemplate 一律经本函数取用，避免同一正则散落多处。
+function conditionRegex() {
+  return /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
+}
+
+// ── 基础 Schema 模板生成（独立纯函数，供 beautifySchema 空字段分支与单测复用）──
+// 输入：{ kind: 'worker'|'fanout', successCondition?: string, verifyBranch?: boolean }
+// 输出：标准 JSON Schema 对象（type/properties/required）。类型推导与多级路径展开
+// 规则见 docs/design/output-schema-beautify-autofill-requirements.md；成功表达式
+// 解析正则与 scripts/validate-core.cjs 的 COND_RE 保持一致（==/!= 字面量比较）。
+function buildSchemaTemplate(input) {
+  const opts = input || {}
+  const kind = opts.kind === 'fanout' ? 'fanout' : 'worker'
+  const schema = { type: 'object', properties: {}, required: [] }
+
+  if (kind === 'worker') {
+    const cond = typeof opts.successCondition === 'string' ? opts.successCondition.trim() : ''
+    const m = conditionRegex().exec(cond)
+    if (m) {
+      // 按比较值推导叶子字段类型：==true/false→boolean、=="字符串"→string、
+      // ==数字→number、推导不出（null 等）→string 兜底
+      const token = m[3]
+      const valueType = token === 'true' || token === 'false' ? 'boolean'
+        : (token.length >= 2 && token.charCodeAt(0) === 34) ? 'string'
+          : /^-?\d+(\.\d+)?$/.test(token) ? 'number'
+            : 'string'
+      // 多级路径 $.a.b == x 按嵌套对象展开；每一级路径都在父对象中标记 required
+      const segments = m[1].split('.')
+      let cursor = schema
+      for (let i = 0; i < segments.length; i += 1) {
+        const seg = segments[i]
+        cursor.required.push(seg)
+        if (i === segments.length - 1) {
+          cursor.properties[seg] = { type: valueType }
+        } else {
+          let next = cursor.properties[seg]
+          if (!next || typeof next !== 'object' || next.type !== 'object') {
+            next = { type: 'object', properties: {}, required: [] }
+            cursor.properties[seg] = next
+          }
+          cursor = next
+        }
+      }
+    }
+    // 可信度闸门：required 必须含 verified_branch 与 verified_head
+    if (opts.verifyBranch === true) {
+      if (!schema.properties.verified_branch) schema.properties.verified_branch = { type: 'string' }
+      if (!schema.properties.verified_head) schema.properties.verified_head = { type: 'string' }
+      if (schema.required.indexOf('verified_branch') < 0) schema.required.push('verified_branch')
+      if (schema.required.indexOf('verified_head') < 0) schema.required.push('verified_head')
+    }
+  }
+
+  return schema
 }
