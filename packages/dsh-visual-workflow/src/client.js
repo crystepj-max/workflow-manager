@@ -114,6 +114,7 @@ return {
 .vwf-editor-dialog[open] { display:flex; flex-direction:column; }
 .vwf-editor-dialog::backdrop { background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.56)); backdrop-filter:blur(2px); }
 .vwf-editor-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); flex:0 0 auto; }
+.vwf-editor-msg { flex:0 0 auto; max-height:180px; margin:10px 16px 0; white-space:pre-wrap; }
 .vwf-editor-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; overscroll-behavior:contain; }
 .vwf-editor { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:12px; align-items:stretch; height:100%; min-height:0; }
 @media (max-width: 900px) { .vwf-editor { grid-template-columns:minmax(0,1fr); height:auto; } .vwf-inspector { position:static; height:auto; } }
@@ -2078,7 +2079,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     disabled: !!props.probing || !(wf.nodes || []).length,
                     title: t('probeForceRerunHint'),
                     onClick: () => { void props.onOneClickCheck(true) },
-                  }, t('probeForceRerun')),
+                  }, props.probing ? t('oneClickCheckRunning') : t('probeForceRerun')),
                   idChanged ? h('button', { className: 'vwf-btn sm', onClick: () => { void handleSave() } }, t('saveAs')) : null,
                   h('button', { className: 'vwf-btn sm primary', disabled: props.saving || !(wf.nodes || []).length || idChanged, onClick: () => { void handleSave() } }, t('saveWorkflow'))
                 )
@@ -2597,6 +2598,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             h('span', { className: 'vwf-spacer' }),
             h('button', { className: 'vwf-btn sm', onClick: requestCloseEditor }, t('close'))
           ),
+          // 检测/探针结果同时显示在编辑器内：结果条若只渲染在外层主面板，
+          // 会被全屏编辑器 dialog 完全遮挡（#74 UAT 反馈）
+          msg ? h('div', { className: 'vwf-code vwf-editor-msg' }, msg) : null,
           h('div', { className: 'vwf-editor-body' },
             h(Editor, {
               key: editId || 'new',
