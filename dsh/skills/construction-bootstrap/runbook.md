@@ -139,7 +139,24 @@ node "$CWF_ASSETS/cwf-record.mjs" rollback .agent-runs/<run_id> dev \
 
 1. 仅 `accept` / `conditional_pass` 可收口；`reject` 禁止。
 2. `closeout_summary`：`acceptance_outcome` 与验收包 `decision` 一致；`conditional_pass` 时 `leftovers` 收录优化意见。
-3. 本任务标记环境组完成，并仅在**同组全部完成**时清理工作区：
+3. **环境回收**（#185；在清理 worktree 之前）：若开发 DSH 会话仍在，先用公开的 `cordis_stop` / `cordis_undefine` 清理本 Run 的动态 Package，再回收本 Run 独占开发 Home：
+
+```bash
+node "$CWF_ASSETS/cwf-env-recycle.mjs" recycle .agent-runs/<run_id> --stop \
+  --report .agent-runs/<run_id>/cleanup-report.md
+```
+
+   - 只在 `run.json.env_resources.dev_dsh_home` 与 Home 内 marker 归属一致时删除；`--stop` 只终止本 Home 登记的开发 DSH 进程；仍有进程占用、归属不符或 marker 缺失 → exit 1 且不删除。
+   - **回收失败不阻塞合并主路径**，但脚本输出必须原样进入 `closeout_summary.leftovers` / `cleanup-report.md` 后续事项，不得谎报已回收。
+   - 兜底 GC（任何时间可跑，默认 dry-run 只列清单）：
+
+```bash
+node "$CWF_ASSETS/cwf-env-recycle.mjs" gc                     # 列出 ~/.dsh-workflow-dev/tasks 下残留 Home 及是否合格
+node "$CWF_ASSETS/cwf-env-recycle.mjs" gc --force             # 只删「已过期（默认 14 天）且无占用且有 marker」的项
+node "$CWF_ASSETS/cwf-env-recycle.mjs" gc --max-age-days 3    # 调整过期阈值；无 marker 的项永远只列出、标注请人工确认
+```
+
+4. 本任务标记环境组完成，并仅在**同组全部完成**时清理工作区：
 
 ```bash
 node "$CWF_ASSETS/ai-task-workspace-env.mjs" mark-completed \
@@ -147,8 +164,8 @@ node "$CWF_ASSETS/ai-task-workspace-env.mjs" mark-completed \
 node "$CWF_ASSETS/ai-task-workspace-env.mjs" maybe-cleanup \
   --store <环境组登记目录> --env <施工环境组>
 ```
-3. PR/合并按仓库规则；Issue → 已完成。
-4. 归档：
+5. PR/合并按仓库规则；Issue → 已完成。
+6. 归档：
 
 ```bash
 node "$CWF_ASSETS/cwf-record.mjs" archive .agent-runs/<run_id>

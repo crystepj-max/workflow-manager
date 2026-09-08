@@ -39,6 +39,7 @@ description: "在 DSH 会话中驱动「建设 · 完整功能开发」单任务
 | `scripts/cwf-checkpoint.mjs` | Integration Checkpoint |
 | `scripts/cwf-validate.mjs` | 交接包 schema 校验 |
 | `scripts/cwf-evidence-verify.mjs` | 呈递/签收前证据链校验 |
+| `scripts/cwf-env-recycle.mjs` | 任务环境回收：`recycle` 按双证归属回收本 Run 独占开发 DSH Home；`gc` 兜底扫描残留（默认 dry-run） |
 
 > 安装后 `cwf-*.mjs` 与 schema 随 skill 分发到 `<SKILL_DIR>/assets/`；实施前检查脚本一并复制。
 
