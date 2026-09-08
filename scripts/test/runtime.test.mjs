@@ -307,7 +307,7 @@ test('#93 运行时：SOURCE 注入业务目录并绑定 agent cwd', async () =>
   const dispatch = agentCalls[0]
   assert.ok(dispatch.prompt.includes('/tmp/ws-source'), 'prompt 含 SOURCE 业务源码目录')
   assert.ok(dispatch.prompt.includes('【本节点应产出 Formal Artifact】'), 'Formal Artifact 提示仍在')
-  assert.equal(dispatch.opts.cwd, '/tmp/ws-source', 'agent opts.cwd 绑定 SOURCE')
+  assert.equal(dispatch.opts.cwd, undefined, 'agent opts.cwd 不再携带 cwd（工作区由引擎 run 级 startReq.cwd 承载，新引擎白名单拒 cwd）')
 })
 
 test('T2 模板回归-三要素缺失：dispatch 判定失败 → FAILED_AT_dispatch', async () => {
