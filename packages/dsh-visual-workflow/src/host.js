@@ -579,6 +579,7 @@ return {
         guidance: [],
         control_events: [],
         baseline_revisions: [],
+        baseline_applied_upto: 0,
         pause_state: null,     // { action: 'pause'|'interrupt', requested_at } 段取消后翻译为 PAUSED
         pause_resume: null,    // PAUSED 后的恢复现场（检查点重建）{ entry, results, history, round, feedback, budgetUsed, maxRounds, decisionSeq, degraded }
         workspace: null,
@@ -775,6 +776,7 @@ return {
         guidance: rec.guidance || [],
         control_events: rec.control_events || [],
         baseline_revisions: rec.baseline_revisions || [],
+        baseline_applied_upto: rec.baseline_applied_upto || 0,
         pause_state: rec.pause_state || null,
         pause_resume: rec.pause_resume || null,
         workspace: rec.workspace || null,
@@ -830,6 +832,7 @@ return {
         guidance: Array.isArray(data.guidance) ? data.guidance.filter((g) => g && typeof g === 'object') : [],
         control_events: Array.isArray(data.control_events) ? data.control_events.filter((e) => e && typeof e === 'object') : [],
         baseline_revisions: Array.isArray(data.baseline_revisions) ? data.baseline_revisions.filter((r) => r && typeof r === 'object') : [],
+        baseline_applied_upto: Number(data.baseline_applied_upto) || 0,
         pause_state: data.pause_state && typeof data.pause_state === 'object' ? data.pause_state : null,
         pause_resume: data.pause_resume && typeof data.pause_resume === 'object' ? data.pause_resume : null,
         workspace: data.workspace && typeof data.workspace === 'object' ? data.workspace : null,
@@ -956,11 +959,25 @@ return {
     }
 
     // ── #80 运行控制面：Pause / Interrupt / Guidance / Resume ────────────────
-    // 机制（对齐引擎真实契约 R-03/worker.cjs）：abort signal → 引擎在当前钩子边界抛
-    // CANCELLED（进行中的 agent 自然跑完，不硬杀）→ 段以 stopReason='cancelled' 收束且
-    // 脚本返回值被强制丢弃（value=null）→ 宿主按 pause_state 把段翻译为 PAUSED，恢复
-    // 现场从编译脚本输出的 [pw-ckpt] 检查点行重建（引擎不回传 results，宿主自建）。
+    // 机制（对齐真实引擎契约 R-03 + worker.cjs/index.js 源码核实）：abort signal →
+    // 引擎 cancel() 并经共享信号中止进行中的子代理请求，在钩子边界抛 CANCELLED →
+    // 段以 stopReason='cancelled' 收束，且脚本返回值被引擎强制丢弃（value=null）。
+    // - Interrupt：立即 abort（当前 Attempt 即刻终止）。
+    // - Safe Pause：不立即 abort——workflow/log 观察到最近完成节点的 [pw-ckpt] 检查点
+    //   后才 abort（生效点=节点边界，最坏等待一个节点完成）；检查点与 abort 之间若
+    //   下一节点已启动，其 Attempt 被中止并在恢复后整体重跑。
+    // 恢复现场从 [pw-ckpt] 检查点行重建（引擎不回传 results，宿主自建）；无检查点=
+    // 降级，恢复要求人工指定 entry，不猜。
     const segmentCtrls = new Map() // 引擎运行 id → AbortController（段取消）
+    // Safe Pause 的检查点观察：仅 action=pause 等待检查点；interrupt 即时路径不经此
+    function maybeAbortAtCheckpoint(engineRunId, message) {
+      const lrId = logicalRunByEngineRun.get(String(engineRunId || ''))
+      const lrec = lrId ? logicalRuns.get(lrId) : null
+      if (!lrec || !lrec.pause_state || lrec.pause_state.action !== 'pause') return
+      if (String(message || '').indexOf('[pw-ckpt]') < 0) return
+      const ctl = segmentCtrls.get(String(engineRunId || ''))
+      if (ctl && typeof ctl.abort === 'function') ctl.abort()
+    }
     function controlEvent(rec, type, extra) {
       const ev = Object.assign({ type: String(type), at: Date.now() }, extra && typeof extra === 'object' ? extra : {})
       rec.control_events.push(ev)
@@ -997,6 +1014,9 @@ return {
     // Guidance Record（Run 级适用）：mode=coach 普通指导；mode=baseline 实质基线变更，
     // 必须提供新基线要点并产生追加式 Baseline Revision（配对提交，无孤儿 Guidance）。
     function appendGuidanceRecord(rec, { text, mode, new_baseline }) {
+      if (!(typeof text === 'string' && text.trim())) {
+        return { ok: false, error: 'Guidance 内容不能为空：请提供 text。' }
+      }
       const m = mode === 'baseline' ? 'baseline' : 'coach'
       if (m === 'baseline' && !(typeof new_baseline === 'string' && new_baseline.trim())) {
         return { ok: false, error: '改基线声明必须提供 new_baseline（新基线要点）：实质基线变更不允许只留意图不留内容。' }
@@ -1020,7 +1040,10 @@ return {
       requestLogicalPersist(rec.logical_run_id)
       return { ok: true, guidance: g }
     }
-    // 恢复载荷：检查点现场 + 适用 Guidance（Run 级，全部窗口）+ 最新基线修订文本
+    // 恢复载荷：检查点现场 + 适用 Guidance（Run 级，全部窗口）+ 待生效基线修订。
+    // 实质基线变更未被消费时（baseline_applied_upto 之后仍有修订），恢复回跳基线
+    // 负责节点整体重跑——v0.1 = Rev1 冻结工作流的入口节点（建设模板即 preflight；
+    // 其余模板由 #82 承接），变更前业务结果已保守标失效，重跑后由新结果覆盖恢复。
     function buildPauseResumeArgs(rec) {
       const pr = rec.pause_resume || null
       if (!pr) return null
@@ -1034,10 +1057,16 @@ return {
         maxRounds: Number(pr.maxRounds) || 0,
         decisionSeq: Number(pr.decisionSeq) || 0,
       }
-      const coach = rec.guidance.filter((g) => g.mode === 'coach' && g.text)
-      if (coach.length) args.guidance_text = coach.map((g) => '- ' + g.text).join('\n')
-      const lastRev = rec.baseline_revisions[rec.baseline_revisions.length - 1]
+      const applied = rec.baseline_applied_upto || 0
+      const pending = (rec.baseline_revisions || []).filter((r) => r.revision > applied)
+      const lastRev = pending.length ? pending[pending.length - 1] : (rec.baseline_revisions || [])[rec.baseline_revisions.length - 1]
       if (lastRev) args.baseline_amendment = lastRev.text
+      if (pending.length) {
+        const rev1Dsl = rec.snapshots && rec.snapshots[0] && rec.snapshots[0].workflow && rec.snapshots[0].workflow.dsl
+        if (rev1Dsl && rev1Dsl.entry) args.entry = rev1Dsl.entry
+      }
+      const coach = (rec.guidance || []).filter((g) => g.mode === 'coach' && g.text)
+      if (coach.length) args.guidance_text = coach.map((g) => '- ' + g.text).join('\n')
       return args
     }
 
@@ -1049,7 +1078,10 @@ return {
     const onRun = (id, mutate) => { const rec = runs.get(String(id)); if (rec) { mutate(rec); persist(rec.id) } }
     const pushLog = (rec, line) => { rec.logs.push(String(line)); if (rec.logs.length > 50) rec.logs.shift() }
     ctx.on('workflow/phase', (info, title) => onRun(info.id, (rec) => { rec.phase = String(title); pushLog(rec, '[phase] ' + title) }))
-    ctx.on('workflow/log', (info, message) => onRun(info.id, (rec) => pushLog(rec, message)))
+    ctx.on('workflow/log', (info, message) => {
+      onRun(info.id, (rec) => pushLog(rec, message))
+      maybeAbortAtCheckpoint(info.id, message)
+    })
     ctx.on('workflow/agent-start', (info, agent) => onRun(info.id, (rec) => rec.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' })))
     // 按 seq 精确匹配：pipeline 并发下 agent-start/agent-end 可能交错到达
     ctx.on('workflow/agent-end', (info, agent) => onRun(info.id, (rec) => { const a = rec.agents.find((x) => x.seq === agent.seq); if (a) a.outcome = String(agent.outcome) }))
@@ -1258,12 +1290,26 @@ return {
         const activeSeg = rec.segments.find((s) => s.active) || null
         if (!activeSeg) return fail('无活动执行段，无法下发控制')
         const ctl = segmentCtrls.get(String(activeSeg.run_id))
-        if (!ctl || typeof ctl.abort !== 'function') return fail('当前宿主不支持运行中止（AbortController 不可用），控制请求被拒绝：不静默无效。')
-        if (rec.pause_state) return fail('已有待生效的 ' + rec.pause_state.action + ' 请求，请等待其生效。')
+        if (!ctl || typeof ctl.abort !== 'function') return fail('运行控制通道不可用（宿主不支持中止，或该段已收尾/宿主已重启）：控制请求被拒绝，不静默无效。')
+        if (rec.pause_state) {
+          // §11.2：等待检查点的暂停请求可升级为立即中断；其余重复请求拒绝
+          if (rec.pause_state.action === 'pause' && action === 'interrupt') {
+            rec.pause_state.action = 'interrupt'
+            controlEvent(rec, 'interrupt_requested', { run_id: String(activeSeg.run_id), upgraded_from: 'pause' })
+            requestLogicalPersist(lrId)
+            try { ctl.abort() } catch (e) { return fail('中止信号下发失败：' + errMsg(e)) }
+            return { ok: true, action: 'interrupt', state: 'requested', upgraded: true, logical_run_id: lrId, run_id: String(activeSeg.run_id) }
+          }
+          return fail('已有待生效的 ' + rec.pause_state.action + ' 请求，请等待其生效。')
+        }
         rec.pause_state = { action: action, requested_at: Date.now() }
         controlEvent(rec, action === 'interrupt' ? 'interrupt_requested' : 'pause_requested', { run_id: String(activeSeg.run_id) })
         requestLogicalPersist(lrId)
-        try { ctl.abort() } catch (e) { rec.pause_state = null; requestLogicalPersist(lrId); return fail('中止信号下发失败：' + errMsg(e)) }
+        if (action === 'interrupt') {
+          // Interrupt 不等检查点：立即中止（当前 Attempt 即刻终止）
+          try { ctl.abort() } catch (e) { rec.pause_state = null; requestLogicalPersist(lrId); return fail('中止信号下发失败：' + errMsg(e)) }
+        }
+        // pause 不在此处 abort：workflow/log 检查点观察者会在最近完成节点的检查点后中止
         return { ok: true, action: action, state: 'requested', logical_run_id: lrId, run_id: String(activeSeg.run_id) }
       }
       if (action === 'guidance') {
@@ -1846,6 +1892,15 @@ return {
         live.add(runId)
         persist(runId)
         if (isHdResume || isLegacyResume || isPauseResume) supersedeParked(taskId, runId)
+        // #80：待生效基线修订随本次恢复消费（回跳基线节点整体重跑，Timeline 记 rebase）；
+        // 之后无新修订的恢复回到检查点现场。放在段成功启动之后，恢复失败不提前消费。
+        if (isPauseResume && logicalRec) {
+          const lastApplied = (logicalRec.baseline_revisions || [])[logicalRec.baseline_revisions.length - 1]
+          if (lastApplied && (logicalRec.baseline_applied_upto || 0) < lastApplied.revision) {
+            logicalRec.baseline_applied_upto = lastApplied.revision
+            controlEvent(logicalRec, 'baseline_rebase', { revision: lastApplied.revision, entry: args.entry })
+          }
+        }
         // #79：本段执行挂到逻辑运行（READY/WAITING_HUMAN → RUNNING，清 reason）
         if (logicalRec) {
           appendLogicalSegment(logicalRec, runId, logicalTrigger, isHdResume ? String(args.decision_id || '') : '')
@@ -1857,6 +1912,7 @@ return {
           segmentCtrls.delete(runId)
           if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
           if (logicalRec) {
+            logicalRec.pause_state = null
             endLogicalSegment(logicalRec, runId, 'ENGINE_ERROR')
             logicalSetState(logicalRec, 'FAILED', logicalReason('ENGINE_ERROR', errMsg(e)))
             requestLogicalPersist(logicalRec.logical_run_id)
@@ -1877,7 +1933,11 @@ return {
           logicalRec.pause_resume = ck
           logicalRec.pause_state = null
           endLogicalSegment(logicalRec, runId, pauseAction === 'interrupt' ? 'CANCELLED_INTERRUPT' : 'CANCELLED_PAUSE')
-          // 中断语义：进行中的 Node Attempt 记 INTERRUPTED（不产生正式成功结果，恢复后整体重跑）
+          // #79 逐节点语义在取消段不缺位：检查点 results（段首基线之后新完成的节点）
+          // 照常入档 node_attempts / business_outcomes（含溯源与结果提取）
+          recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, ck.results, null)
+          // 中断语义：进行中/待执行的检查点节点 Attempt 记 INTERRUPTED（不产生正式成功
+          // 结果，恢复后整体重跑）；降级现场（无检查点）无法定位节点，登记为已知限制
           if (pauseAction === 'interrupt' && ck.entry) {
             const snap = activeSnapshot(logicalRec)
             const eff = effectiveProviderModel(logicalRec, ck.entry)
@@ -1954,7 +2014,7 @@ return {
     }))
     dtools.register(textTool({
       name: 'wf_control',
-      description: '对 Logical Run 下发运行控制（#80）：action=pause 安全暂停（当前节点到检查点后进入 PAUSED）；action=interrupt 立即中断当前 Node Attempt（记 INTERRUPTED，不产生正式成功结果，进入 PAUSED）；action=guidance 暂停期间提交用户指导（mode=coach 普通指导，不改基线；mode=baseline 实质基线变更，必须提供 new_baseline 要点，恢复后从基线节点重跑）。恢复同一逻辑运行：wf_run + resume_paused=true。',
+      description: '对 Logical Run 下发运行控制（#80）：action=pause 安全暂停（等待最近完成节点的检查点后生效，最坏等待一个节点完成；检查点后已启动的下一节点将被中止并在恢复后整体重跑）；action=interrupt 立即中断当前 Node Attempt（记 INTERRUPTED，不产生正式成功结果；等待中的暂停请求会升级为中断）；action=guidance 暂停期间提交用户指导（mode=coach 普通指导，不改基线；mode=baseline 实质基线变更，必须提供 new_baseline 要点，恢复后回基线负责节点整体重跑）。恢复同一逻辑运行：wf_run + resume_paused=true。',
       parameters: {
         action: { type: 'string', required: true, description: 'pause | interrupt | guidance' },
         logical_run_id: { type: 'string', required: true, description: 'Logical Run id（看板「同一次运行」卡片或 wf_run 返回中的 logical_run_id）' },

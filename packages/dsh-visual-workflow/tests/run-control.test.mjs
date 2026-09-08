@@ -1,9 +1,11 @@
 // #80 Pause / Interrupt / Guidance / Resume 单元测试（fake fs + fake 引擎）：
 // Safe Pause 段取消 → PAUSED 翻译与检查点现场重建 / Interrupt 记 INTERRUPTED /
 // Guidance 多轮提交与 baseline 配对修订（缺要点拒绝、业务结果保守标失效）/
-// resume_paused 回填现场与 Guidance / 三态语义拒绝（WAITING_HUMAN 不可 pause、
-// RUNNING 不可 guidance、重复 pause 拒绝）/ 同 Logical Run 新段与旧记录接管 /
-// 编译产物含节点检查点与 Guidance/基线注入行
+// resume_paused 回填现场与 Guidance / 改基线恢复回跳基线节点 / 暂停升级中断 /
+// 三态语义拒绝（WAITING_HUMAN 不可 pause、RUNNING 不可 guidance、重复 pause 拒绝）/
+// 同 Logical Run 新段与旧记录接管 / 编译产物含节点检查点与 Guidance/基线注入行
+// 保真边界：fake 引擎只建模 start/end + 事件时序，不建模 signal 与子代理中止
+// （真实引擎经共享信号中止进行中子代理——signal 行为在产品模式 UAT 验证）
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -130,6 +132,9 @@ test('#80 Safe Pause：RUNNING 暂停 → 段取消翻译 PAUSED + 检查点现�
   assert.equal(rec.pause_resume.results.explore.verdict, 'PASS')
   assert.equal(rec.pause_resume.degraded, false)
   assert.equal(rec.segments[0].status, 'CANCELLED_PAUSE')
+  // 取消段内已完成节点照常入档（#79 逐节点语义不缺位）
+  assert.equal(rec.business_outcomes.explore.outcome, 'PASS')
+  assert.ok(rec.node_attempts.some((a) => a.node === 'explore' && a.segment === 1))
   const types = rec.control_events.map((e) => e.type)
   assert.ok(types.includes('pause_requested') && types.includes('paused'), '控制事件入 Timeline：' + types.join(','))
   // 持久化：磁盘摘要同为 PAUSED（刷新/重进不丢）
@@ -137,6 +142,28 @@ test('#80 Safe Pause：RUNNING 暂停 → 段取消翻译 PAUSED + 检查点现�
   const runRec = readRun(fs, 'run-1')
   assert.equal(runRec.status, 'PAUSED')
   assert.equal(runRec.reason, 'USER_PAUSE')
+})
+
+test('#80 暂停升级中断：等待检查点期间的 pause 可升级为立即 interrupt', async () => {
+  const eng = makeEngine()
+  const { events, definedTools, fs } = env({ extra: { engine: eng } })
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const ctl = definedTools.find((t) => t.name === 'wf_control')
+  const p = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-up' })
+  await until(() => eng.starts.length >= 1, '启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  ckptLog(events, 'run-1', 'closeout', { explore: { verdict: 'PASS' } })
+  assert.equal(JSON.parse(await ctl.execute({ action: 'pause', logical_run_id: 'issue-up' })).ok, true)
+  const up = JSON.parse(await ctl.execute({ action: 'interrupt', logical_run_id: 'issue-up' }))
+  assert.equal(up.ok, true)
+  assert.equal(up.upgraded, true)
+  settle(eng, events, 'run-1', 'cancelled', null)
+  const out = JSON.parse(await p)
+  await drain()
+  assert.equal(out.action, 'interrupt')
+  const rec = readLogical(fs, 'issue-up')
+  assert.equal(rec.lifecycle.reason.code, 'USER_INTERRUPT')
+  assert.equal(rec.node_attempts.filter((a) => a.outcome === 'INTERRUPTED').length, 1)
 })
 
 test('#80 Interrupt：进行中 Attempt 记 INTERRUPTED，不产生正式成功结果', async () => {
@@ -213,16 +240,17 @@ test('#80 Guidance：PAUSED 期间多轮 coach + baseline 配对修订（缺要�
   assert.equal(rec.business_outcomes.explore.stale, true)
   assert.equal(rec.business_outcomes.explore.stale_reason, 'BASELINE_CHANGE_R1')
   assert.ok(rec.control_events.some((e) => e.type === 'baseline_change'))
-  // 恢复：同 Logical Run 新段，现场 + 全部 Guidance + 最新基线修订注入执行载荷
+  // 恢复：存在待生效基线修订 → 回跳基线负责节点（Rev1 工作流入口 = explore）整体重跑，
+  // 现场与全部 Guidance 与基线修订注入执行载荷；同 Logical Run 新段
   const p3 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-g', resume_paused: true })
   await until(() => eng.starts.length >= 3, '暂停恢复启动')
   const req3 = eng.starts[2]
-  assert.equal(req3.args.entry, 'closeout')
+  assert.equal(req3.args.entry, 'explore', '改基线恢复应回跳基线负责节点')
   assert.equal(req3.args.results.explore.verdict, 'PASS')
   assert.ok(String(req3.args.guidance_text).includes('输出用中文'))
   assert.equal(req3.args.baseline_amendment, '范围增加 X 功能')
   events.get('workflow/start')({ id: 'run-3', meta: { name: 'x' } })
-  settle(eng, events, 'run-3', 'completed', { status: 'DONE', results: { closeout: { result: 'ok' } }, completion: { type: '正常完成', node: 'closeout', path: '' } })
+  settle(eng, events, 'run-3', 'completed', { status: 'DONE', results: { explore: { verdict: 'PASS' }, closeout: { result: 'ok' } }, completion: { type: '正常完成', node: 'closeout', path: '' } })
   const out3 = JSON.parse(await p3)
   await drain()
   assert.equal(out3.stopReason, 'completed')
@@ -230,6 +258,11 @@ test('#80 Guidance：PAUSED 期间多轮 coach + baseline 配对修订（缺要�
   assert.equal(rec3.segments.length, 3)
   assert.equal(rec3.segments[2].trigger, 'pause_resume')
   assert.equal(rec3.lifecycle.state, 'COMPLETED')
+  assert.equal(rec3.baseline_applied_upto, 1, '基线修订随本次恢复消费')
+  assert.ok(rec3.control_events.some((e) => e.type === 'baseline_rebase'))
+  // 变更前标失效的业务结果被重跑新结果覆盖恢复
+  assert.equal(rec3.business_outcomes.explore.stale, undefined)
+  assert.equal(rec3.business_outcomes.explore.outcome, 'PASS')
   // 旧 PAUSED run 记录被新段接管
   assert.equal(readRun(fs, 'run-2').supersededBy, 'run-3')
 })
