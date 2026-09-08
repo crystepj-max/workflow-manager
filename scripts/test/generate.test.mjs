@@ -256,19 +256,23 @@ test('S3 用户 skill 捆绑蓝图引用的内置角色定义（issue-81，产�
   try {
     const r = writeUserSkill(bp, tmp, realIo)
     assert.equal(r.ok, true, r.error)
-    // bp = dev-workflow-2-0 模板，节点 profile = dispatcher/dev/review/test/accept/closeout
+    // 蓝图引用了哪些内置角色就从蓝图取，新增节点或角色时无需再来此处补名单
     const rolesDir = path.join(r.dir, 'roles')
     const roleFiles = fs.readdirSync(rolesDir).sort()
-    for (const id of ['dispatcher', 'dev', 'review', 'test', 'accept', 'closeout']) {
+    const referenced = [...new Set((bp.nodes || []).map((n) => n.profile).filter(Boolean))].sort()
+    assert.ok(referenced.length > 0, '测试用蓝图应至少引用一个内置角色')
+    for (const id of referenced) {
       assert.ok(roleFiles.includes(id + '.md'), '角色已捆绑：' + id)
     }
-    // 内容与源一致
+    // 内容与源一致（逐个引用的角色都比，而不是只抽查某一个）
     const srcDir = path.join(here, '..', '..', 'dsh', 'roles')
-    assert.equal(
-      readFileSync(path.join(r.dir, 'roles', 'dispatcher.md'), 'utf8'),
-      readFileSync(path.join(srcDir, 'dispatcher.md'), 'utf8'),
-      'dispatcher 内容与源一致'
-    )
+    for (const id of referenced) {
+      assert.equal(
+        readFileSync(path.join(r.dir, 'roles', id + '.md'), 'utf8'),
+        readFileSync(path.join(srcDir, id + '.md'), 'utf8'),
+        id + ' 内容与源一致'
+      )
+    }
     // 三件套仍在
     for (const rel of ['SKILL.md', 'script.mjs', 'meta.json']) {
       assert.ok(fs.existsSync(path.join(r.dir, rel)), '三件套仍在：' + rel)

@@ -772,20 +772,22 @@ export function buildMeta(bp) {
   return { name: 'vwf-' + bp.id, description: bp.displayName, phases: bp.nodes.map((n) => ({ title: n.label || n.id })) };
 }
 
-/** 正式内置：templates/*.json；历史自定义种子：templates/custom-seeds/*.json（#82）。 */
+/**
+ * 递归收集 templates/ 下所有蓝图 JSON。
+ * 原先只扫 templates/ 与 templates/custom-seeds/ 两层，往更深或新目录放蓝图会被漏掉。
+ */
 export function listBlueprintJsonFiles(templatesDir) {
   const out = [];
   if (!fs.existsSync(templatesDir)) return out;
-  for (const f of fs.readdirSync(templatesDir).filter((x) => x.endsWith('.json')).sort()) {
-    out.push(path.join(templatesDir, f));
-  }
-  const seeds = path.join(templatesDir, 'custom-seeds');
-  if (fs.existsSync(seeds)) {
-    for (const f of fs.readdirSync(seeds).filter((x) => x.endsWith('.json')).sort()) {
-      out.push(path.join(seeds, f));
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (entry.name.endsWith('.json')) out.push(p);
     }
-  }
-  return out;
+  };
+  walk(templatesDir);
+  return out.sort();
 }
 
 // ---------- 生成（纯函数） ----------
