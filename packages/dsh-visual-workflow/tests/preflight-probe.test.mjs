@@ -144,7 +144,7 @@ test('vwf.probe：全可用 + 同绑定去重（两节点只探一次）', async
   assert.equal(llm._streams[0].messages[0].content, 'ping', '不携带业务正文')
 })
 
-test('vwf.probe：单模型失败分类 + 凭证清洗 + 缓存与强制重新验证', async () => {
+test('vwf.probe：单模型失败分类 + 凭证清洗 + 失败结果不缓存（修复后立即重探生效）', async () => {
   const llm = makeLlm({ fail: { 'p2\u0000m2': { code: 'AUTH', message: 'invalid api key: sk-secret-abc123456789', status: 401 } } })
   const { handlers } = env({ extra: { llm } })
   const dsl = JSON.parse(JSON.stringify(SPEC_BLUEPRINT))
@@ -161,14 +161,27 @@ test('vwf.probe：单模型失败分类 + 凭证清洗 + 缓存与强制重新�
   assert.equal(r1.results.find((x) => x.provider === 'p1').status, 'available')
   const callsAfterFirst = llm._streams.length
   const r2 = await call(handlers, 'vwf.probe', { dsl: dsl })
-  assert.equal(r2.cached, true, '短时缓存命中')
+  assert.equal(r2.cached, false, '失败结果不缓存：立即重探')
+  assert.ok(llm._streams.length > callsAfterFirst, '第二次发起真实调用（模拟修复凭证后立即生效）')
+  assert.equal(r2.results.find((x) => x.provider === 'p2').status, 'auth_failed')
+})
+
+test('vwf.probe：全可用结果 5s 去抖窗口命中缓存，force 强制真实重探', async () => {
+  const llm = makeLlm()
+  const { handlers } = env({ extra: { llm } })
+  const r1 = await call(handlers, 'vwf.probe', { dsl: EDITOR_DSL })
+  assert.equal(r1.cached, false)
+  const callsAfterFirst = llm._streams.length
+  const r2 = await call(handlers, 'vwf.probe', { dsl: EDITOR_DSL })
+  assert.equal(r2.cached, true, '去抖窗口内命中缓存')
   assert.equal(llm._streams.length, callsAfterFirst, '缓存命中不发新调用')
-  const r3 = await call(handlers, 'vwf.probe', { dsl: dsl, force: true })
+  assert.deepEqual(r2.results[0].nodes.sort(), ['a', 'b'], '命中时 nodes 以当前请求回填')
+  const r3 = await call(handlers, 'vwf.probe', { dsl: EDITOR_DSL, force: true })
   assert.equal(r3.cached, false, '强制重新验证')
   assert.ok(llm._streams.length > callsAfterFirst, '强刷真实重探')
 })
 
-test('vwf.probe：错误分类映射（quota/rate_limit/timeout/model_unavailable/permission_denied/unreachable）', async () => {
+test('vwf.probe：错误分类映射（quota/rate_limit/timeout/model_unavailable/permission_denied/unreachable/真实适配器码）', async () => {
   const llm = makeLlm({
     fail: {
       'p1\u0000quota': { code: 'QUOTA', message: 'insufficient balance' },
@@ -177,13 +190,20 @@ test('vwf.probe：错误分类映射（quota/rate_limit/timeout/model_unavailabl
       'p1\u0000mu': { code: 'UNKNOWN_MODEL', message: 'model not found' },
       'p1\u0000pd': { code: 'AUTH', message: 'forbidden', status: 403 },
       'p1\u0000un': { code: 'TRANSPORT', message: 'fetch failed' },
+      'p1\u0000nw': { code: 'NETWORK', message: 'socket hang up' },
+      'p1\u0000pv': { code: 'PROVIDER', message: 'provider refused' },
+      'p1\u0000q2': { code: 'PROVIDER', message: 'payment required', status: 402 },
+      'p1\u0000n4': { code: 'PROVIDER', message: 'no such model', status: 404 },
     },
     providers: ['p1'],
-    models: { p1: ['quota', 'rl', 'to', 'mu', 'pd', 'un'] },
+    models: { p1: ['quota', 'rl', 'to', 'mu', 'pd', 'un', 'nw', 'pv', 'q2', 'n4'] },
   })
   const { handlers } = env({ extra: { llm } })
   const mk = (model) => ({ ...EDITOR_DSL, nodes: [{ id: 'a', profile: 'dispatcher', label: 'A', goal: 'g', model: { provider: 'p1', model: model } }], edges: [{ from: 'a', to: '$end', on: 'success' }] })
-  const cases = { quota: 'quota', rl: 'rate_limit', to: 'timeout', mu: 'model_unavailable', pd: 'permission_denied', un: 'provider_unreachable' }
+  const cases = {
+    quota: 'quota', rl: 'rate_limit', to: 'timeout', mu: 'model_unavailable', pd: 'permission_denied', un: 'provider_unreachable',
+    nw: 'provider_unreachable', pv: 'provider_error', q2: 'quota', n4: 'model_unavailable',
+  }
   for (const [model, want] of Object.entries(cases)) {
     const r = await call(handlers, 'vwf.probe', { dsl: mk(model), force: true })
     assert.equal(r.results[0].status, want, model + ' → ' + want)
@@ -282,4 +302,38 @@ test('wf_run 新启全可用：探针通过后正常启动', async () => {
   assert.equal(rec.lifecycle.state, 'COMPLETED')
   assert.equal(rec.snapshots.length, 1)
   assert.equal(llm._streams.length, 2, '两个不同绑定各探一次')
+})
+
+test('wf_run 恢复后再失败：新 Revision 保留 + 再次 BLOCKED + 引擎零启动', async () => {
+  const llm = makeLlm({ fail: {
+    'p2\u0000m2': { code: 'AUTH', message: 'invalid api key', status: 401 },
+    'p3\u0000m3': { code: 'QUOTA', message: 'insufficient balance' },
+  }, providers: ['p1', 'p2', 'p3'], models: { p1: ['m1'], p2: ['m2'], p3: ['m3'] } })
+  const eng = makeEngine()
+  const { definedTools, fs } = engineEnv(eng, { extra: { llm } })
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  await wfRun.execute({ templateId: 'preflight-spec', taskId: 'issue-p2' })
+  const out = await wfRun.execute({ templateId: 'preflight-spec', taskId: 'issue-p2', model_overrides: { $default: { provider: 'p3', model: 'm3' } } })
+  const payload = JSON.parse(out)
+  assert.equal(payload.blocked, true, '恢复后探针仍失败 → 再次 BLOCKED')
+  assert.equal(payload.failures[0].status, 'quota')
+  assert.equal(eng.starts.length, 0)
+  await drain()
+  const rec = readLogical(fs, 'issue-p2')
+  assert.equal(rec.lifecycle.state, 'BLOCKED')
+  assert.equal(rec.snapshots.length, 2, 'Rev 2 保留不被回滚')
+  assert.equal(rec.snapshots[1].provider_model.closeout.provider, 'p3')
+  assert.equal(rec.snapshots[1].active, true)
+})
+
+test('wf_run 无 llm 服务：跳过探针不阻断启动', async () => {
+  const eng = makeEngine()
+  const { events, definedTools } = engineEnv(eng)
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const p = wfRun.execute({ templateId: 'preflight-spec', taskId: 'issue-nl' })
+  await until(() => eng.starts.length >= 1, '无 llm 服务不阻断启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: '探针规格图' } })
+  eng.end('run-1', 'completed', { status: 'DONE', results: { explore: { verdict: 'PASS' }, closeout: { result: 'ok' } } })
+  events.get('workflow/end')({ id: 'run-1' }, { stopReason: 'completed' })
+  await p
 })

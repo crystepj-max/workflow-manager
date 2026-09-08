@@ -842,12 +842,17 @@ return {
     }
     const logicalRunsHydration = loadLogicalRuns().catch((e) => log('逻辑运行摘要回载失败：' + errMsg(e)))
 
-    // ── #74 Runtime Preflight Probe（运行前模型可用性探针）────────────────
+    // #74 Runtime Preflight Probe（运行前模型可用性探针）────────────────
     // Static Validation 回答"配置是否合法"；Probe 回答"当前是否具备实际模型运行
     // 条件"：对去重后的 provider+model 做最小真实调用（不携带业务正文/角色 Prompt/
     // 产物，不评价回答质量）。探针降级（llm 服务无生成流能力）只如实标注，不伪装
     // available；BLOCKED 只用于探针明确失败（可恢复的外部问题）。
-    const PROBE_CACHE_TTL_MS = 60000
+    // 缓存（审查 R1 阻断项修复）：宿主 llm 服务不暴露凭证可观察信号，无法检测
+    // credential 变化——因此只保留 5s 去抖窗口（防一键检测连点）且只缓存全部可用
+    // 的结果；失败结果永不缓存（修复凭证后立即重探立即生效）；Run Preflight 恒为
+    // 真实探测（force）。「credential/context 变化即失效」由 5s 失效上界 + 失败不
+    // 缓存共同保证。
+    const PROBE_DEBOUNCE_MS = 5000
     const probeCache = new Map() // 指纹 → { at, results }；仅性能优化，重启即失效
     const probeOk = (r) => r.status === 'available'
     // sanitized DSL / 快照 provider_model → 去重绑定集合（provider+model 相同只探一次）
@@ -884,21 +889,26 @@ return {
       let t = String(raw == null ? '' : raw)
       t = t.replace(/sk-[A-Za-z0-9_-]{6,}/g, 'sk-***')
       t = t.replace(/Bearer\s+[A-Za-z0-9._~+/-]{6,}/gi, 'Bearer ***')
-      t = t.replace(/(?:api[-_]?key|token)["'=:\s]+[A-Za-z0-9._~+/-]{6,}/gi, '$1 ***')
+      t = t.replace(/(api[-_]?key|token|password)["'=:\s]+[A-Za-z0-9._~+/-]{6,}/gi, '$1 ***')
+      t = t.replace(/AIza[0-9A-Za-z_-]{10,}/g, 'AIza***')
+      t = t.replace(/eyJ[A-Za-z0-9_-]{10,}(\.[A-Za-z0-9_-]+){1,2}/g, 'jwt-***')
       t = t.replace(/\b[0-9a-f]{24,}\b/gi, '***')
       return t.slice(0, 300)
     }
-    // 宿主 LlmError.code（provider-neutral）+ status → 七类探针结论
+    // 宿主 LlmError.code（provider-neutral）+ HTTP status → 七类探针结论。
+    // 码表覆盖两套事实源：dsh 宿主 llm 运行时（QUOTA/TIMEOUT/UNKNOWN_MODEL/
+    // TRANSPORT/SERVER/NO_ADAPTER/HTTP_N…）与仓内适配器（NETWORK/PROVIDER…），
+    // status 作兜底维度（402 配额 / 404 模型不存在 / 5xx 不可达）。
     function classifyProbeFailure(err) {
       const code = String((err && err.code) || '').toUpperCase()
       const status = (err && err.failure && typeof err.failure.status === 'number') ? err.failure.status : null
       const message = sanitizeProbeMessage((err && err.message) || err)
       if (code === 'AUTH') return { status: status === 403 ? 'permission_denied' : 'auth_failed', code: code || 'AUTH', message: message }
-      if (code === 'QUOTA') return { status: 'quota', code: code, message: message }
+      if (code === 'QUOTA' || code === 'QUOTA_EXCEEDED' || status === 402) return { status: 'quota', code: code || 'QUOTA', message: message }
       if (code === 'RATE_LIMIT') return { status: 'rate_limit', code: code, message: message }
       if (code === 'TIMEOUT' || code === 'ABORTED') return { status: 'timeout', code: code || 'TIMEOUT', message: message }
-      if (code === 'UNKNOWN_MODEL' || code === 'HTTP_404' || code === 'HTTP_403' || code === 'CONTEXT_WINDOW_EXCEEDED') return { status: 'model_unavailable', code: code, message: message }
-      if (code === 'NO_ADAPTER' || code === 'TRANSPORT' || code === 'SERVER' || code === 'HTTP_5XX' || (status !== null && status >= 500)) return { status: 'provider_unreachable', code: code, message: message }
+      if (code === 'UNKNOWN_MODEL' || code === 'HTTP_404' || code === 'HTTP_403' || code === 'CONTEXT_WINDOW_EXCEEDED' || status === 404) return { status: 'model_unavailable', code: code || 'HTTP_404', message: message }
+      if (code === 'NO_ADAPTER' || code === 'NETWORK' || code === 'TRANSPORT' || code === 'SERVER' || code === 'HTTP_5XX' || (status !== null && status >= 500)) return { status: 'provider_unreachable', code: code, message: message }
       if (/fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|ECONNRESET|network/i.test(message)) return { status: 'provider_unreachable', code: code || 'TRANSPORT', message: message }
       return { status: 'provider_error', code: code || 'UNKNOWN', message: message }
     }
@@ -918,7 +928,15 @@ return {
             throw e
           }
         }
-        for await (const chunk of iter) { void chunk }
+        for await (const chunk of iter) {
+          // 防御：部分适配器可能以终态 error 事件（而非抛异常）传递失败（审查 R1 非2）
+          if (chunk && typeof chunk === 'object' && (chunk.type === 'error' || (chunk.error && typeof chunk.error === 'object'))) {
+            const err = (chunk.error && typeof chunk.error === 'object') ? chunk.error : chunk
+            const c = classifyProbeFailure(err)
+            return finish(c.status, c.code, c.message)
+          }
+          void chunk
+        }
         return finish('available', 'OK', '')
       } catch (e) {
         if (e && typeof e === 'object' && e.probeCapability) return finish('probe_degraded', 'PROBE_DEGRADED', sanitizeProbeMessage(errMsg(e)))
@@ -931,13 +949,24 @@ return {
     async function probeBindings(llm, bindings, opts) {
       const force = !!(opts && opts.force)
       const fingerprint = await probeFingerprint(llm, bindings)
+      // 去抖窗口（5s）只服务一键检测连点；命中时以当前请求 bindings 回填 nodes
+      //（指纹不含 workflow 身份，防止跨工作流回填错误受影响节点）。
       const hit = force ? null : probeCache.get(fingerprint)
-      if (hit && Date.now() - hit.at < PROBE_CACHE_TTL_MS) {
-        return { ok: hit.results.every(probeOk), results: hit.results.map((r) => ({ ...r, cached: true })), fingerprint: fingerprint, cached: true }
+      if (hit && Date.now() - hit.at < PROBE_DEBOUNCE_MS) {
+        const byKey = new Map(bindings.map((b) => [b.key, b.nodes]))
+        return {
+          ok: hit.results.every(probeOk),
+          results: hit.results.map((r) => ({ ...r, nodes: byKey.get(r.key) || r.nodes, cached: true })),
+          fingerprint: fingerprint,
+          cached: true,
+        }
       }
       const results = await Promise.all(bindings.map((b) => probeOneBinding(llm, b)))
-      probeCache.set(fingerprint, { at: Date.now(), results: results })
-      while (probeCache.size > 32) probeCache.delete(probeCache.keys().next().value)
+      // 只缓存全部可用结果：失败永不缓存——修复凭证/配额后立即重探立即生效
+      if (results.every(probeOk)) {
+        probeCache.set(fingerprint, { at: Date.now(), results: results })
+        while (probeCache.size > 32) probeCache.delete(probeCache.keys().next().value)
+      }
       return { ok: results.every(probeOk), results: results, fingerprint: fingerprint, cached: false }
     }
     // 探针失败一行摘要（BLOCKED reason 与回执用）；已清洗，不含凭证
@@ -1777,7 +1806,9 @@ return {
             if (llmSvc === undefined) {
               log('vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）')
             } else {
-              const probe = await probeBindings(llmSvc, activeBindings, {})
+              // Run 启动探针恒为真实探测（force）：缓存只服务一键检测连点，
+              // 避免 BLOCKED 恢复或启动前读到去抖窗口内的陈旧结论（审查 R1 阻断项）
+              const probe = await probeBindings(llmSvc, activeBindings, { force: true })
               const blocking = probe.results.filter((r) => r.status !== 'available' && r.status !== 'probe_degraded')
               if (blocking.length) {
                 const summaryText = probeFailureSummary(blocking)
@@ -1789,7 +1820,7 @@ return {
                   logical_run_id: logicalRec.logical_run_id,
                   snapshot_revision: activeSnap ? activeSnap.revision : null,
                   failures: blocking,
-                  hint: '模型探针未通过：请修改当前 Run 的 Provider/Model 后，用 wf_run（同 taskId + model_overrides）恢复同一逻辑运行；完成后将产生新的 Snapshot Revision 并重新探针。',
+                  hint: '模型探针未通过：请修改当前 Run 的 Provider/Model 后，用 wf_run（同 taskId + model_overrides）恢复同一逻辑运行；完成后将产生新的 Snapshot Revision 并重新探针。若本运行此前因人工决策处于 WAITING_HUMAN，请在原续跑参数（decision_id/user_choice）基础上追加 model_overrides 恢复。',
                 }, null, 2)
               }
               if (probe.results.some((r) => r.status === 'probe_degraded')) log('vwf.probe(preflight)：探针降级（无生成流能力），结果仅作参考，不阻断启动')
