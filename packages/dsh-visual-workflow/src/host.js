@@ -777,6 +777,7 @@ return {
         control_events: rec.control_events || [],
         baseline_revisions: rec.baseline_revisions || [],
         baseline_applied_upto: rec.baseline_applied_upto || 0,
+        last_engine_error: rec.last_engine_error || null,
         pause_state: rec.pause_state || null,
         pause_resume: rec.pause_resume || null,
         workspace: rec.workspace || null,
@@ -833,6 +834,7 @@ return {
         control_events: Array.isArray(data.control_events) ? data.control_events.filter((e) => e && typeof e === 'object') : [],
         baseline_revisions: Array.isArray(data.baseline_revisions) ? data.baseline_revisions.filter((r) => r && typeof r === 'object') : [],
         baseline_applied_upto: Number(data.baseline_applied_upto) || 0,
+        last_engine_error: typeof data.last_engine_error === 'string' ? data.last_engine_error : null,
         pause_state: data.pause_state && typeof data.pause_state === 'object' ? data.pause_state : null,
         pause_resume: data.pause_resume && typeof data.pause_resume === 'object' ? data.pause_resume : null,
         workspace: data.workspace && typeof data.workspace === 'object' ? data.workspace : null,
@@ -1929,6 +1931,13 @@ return {
         // 权威终态回写：completed 时以脚本返回 value.status 为准；回执保持引擎原样不翻译
         const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
         if (canon) onRun(runId, (r) => { r.status = canon; applyHdValue(r, result.value) })
+        // 诊断可追溯：引擎 error/cancelled 的渲染错误写入运行记录（此前 result.error 被丢弃，
+        // 现场只能看到 status=error 无从定位）
+        if (result && result.error) {
+          const detail = String(result.error).slice(0, 500)
+          onRun(runId, (r) => { r.error_detail = detail })
+          log('段错误详情（' + runId + '）：' + detail)
+        }
         // #80 暂停/中断收束：引擎取消段（stopReason=cancelled，脚本返回值被引擎强制丢弃）
         // 且控制面有待生效请求 → 翻译为 PAUSED，恢复现场从检查点行重建；不经 FAILED 映射。
         const pauseAction = logicalRec && logicalRec.pause_state && result && result.stopReason === 'cancelled'
@@ -1974,6 +1983,10 @@ return {
         if (logicalRec) {
           const value = result && result.value
           endLogicalSegment(logicalRec, runId, canon || String((result && result.stopReason) || ''))
+          if (!canon && result && result.error) {
+            // 引擎错误详情进逻辑运行摘要，看板与归档可追溯
+            logicalRec.last_engine_error = String(result.error).slice(0, 500)
+          }
           if (canon === 'DONE') {
             const comp = value && value.completion
             if (comp && typeof comp === 'object' && typeof comp.type === 'string' && comp.type.trim()) {
