@@ -54,7 +54,7 @@
 | `from` / `to` | ✅ | 节点 id；`to` 可为 `$end`（结束）或 `$human-decision`（升 Human Decision）；`from` 可为 `$human-decision`（决策结果出边）。`$human-decision` 不是节点、无 LLM |
 | `on` | 旧模式必填；新模式业务边不写 | `'success'` \| `'failure'` \| `'technical'`。旧模式：升 HD 的入边与 HD 出边均为 `success`。新模式：禁止 `success`/`failure`；技术失败走可选 `{ on: "technical" }`（没有则运行时 `TECHNICAL_FAILURE`）。`outcome` 与 `on` 互斥 |
 | `when` | 可选 | 仅旧模式普通节点 success 边；`$.path ==|!= value`；多 success 出边必须**全部**带 when；failure 边最多一条。新模式与 `technical` 边禁止 |
-| `outcome` | 新模式业务边必填 | 与该节点 `outcomePath` 指向的值等值匹配（含 boolean `true`/`false`）。同一取值只能有一条出边，且须覆盖全部可穷举值。`$human-decision` 出边在新模式下用 `outcome`（**允许** `outcome: "USER_ACCEPTED"`，因为不是 `result` 字段） |
+| `outcome` | 新模式业务边必填 | 与该节点 `outcomePath` 指向的值等值匹配（含 boolean `true`/`false`）。同一取值只能有一条出边，且须覆盖全部可穷举值。`$human-decision` 出边在新模式下用 `outcome`（**禁止**占用框架控制名 `USER_ACCEPTED` / `ADD_BUDGET` / `STOP`，与 `result` 同规，#163） |
 | `countRound` | 可选 | 仅业务边。布尔；`true` 则走该边消耗 1 点自动回退额度；`false` 或缺省不消耗但仍记入 `history`。额度耗尽不走边，进入 `WAITING_HUMAN` + `MAX_ROUNDS_REACHED`，保留原 Node Business Outcome（#73） |
 | `result` | 旧 HD 出边必填 | 业务 Decision Result id（`SCREAMING_SNAKE`，如 `SHIP`）。**不得**占用框架控制类 `USER_ACCEPTED` / `ADD_BUDGET` / `STOP` |
 
@@ -70,6 +70,12 @@
 > 命中运行时保留键（`toString` / `constructor` / `__proto__` 等 `Object.prototype` 成员）时校验期同样
 > 显式拒绝并报真实边坐标：画卡装配的 `subsequent_effects` 以普通对象承载，这些 id 会被判为已占用而把
 > 该出边静默丢弃，请改用显式 `result` 命名。
+>
+> **框架控制名对业务出边全写法保留（#163）**：`USER_ACCEPTED` / `ADD_BUDGET` / `STOP` 由运行期在业务
+> 出边查找**之前**解释（USER_ACCEPTED→DONE / STOP→STOPPED / ADD_BUDGET→预算续跑），新式业务
+> `outcome` 出边与旧式 `result` 出边同样不得占用（校验期显式拒绝）：占用会让画卡选项显示业务说明、
+> 按下却按控制含义处理，声明的 `to` 永不可达。业务上想表达"接受并结束"时，改用普通业务名并让该边
+> 指向 `$end` 即可。
 
 ### 2.4 Human Decision 控制面键名（#116 钉死；机器英文）
 

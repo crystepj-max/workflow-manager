@@ -889,7 +889,12 @@ function validateBlueprint(bp, opts) {
           seenHdOutcomes[key] = true
           const id = hdChoiceId(e)
           if (id !== null) {
-            if (HD_RUNTIME_RESERVED_IDS.has(id)) {
+            if (HD_CONTROL_RESULTS.includes(id)) {
+              // #163：运行期续跑先解释控制名（USER_ACCEPTED→DONE / STOP→STOPPED /
+              // ADD_BUDGET→预算续跑），outcome 边占用控制名会让声明 to 永不可达、
+              // 画卡承诺与实际行为不符；与 result 同规，校验期显式拒绝。
+              err(at + '.outcome', '控制类 Result（USER_ACCEPTED / ADD_BUDGET / STOP）由框架解释，不得作为蓝图出边 outcome（#163）；请改用业务名（如 CONFIRM_PROCEED）')
+            } else if (HD_RUNTIME_RESERVED_IDS.has(id)) {
               // #159（A1）：判重表本身已无原型污染（Map），但该 id 运行期无法表示——
               // 普通对象 subsequent_effects 会把继承键当已占用、静默丢弃该出边；此处
               // 显式拒绝并给出真实边坐标与修复指引，不允许校验放行后运行期再次不可达。
