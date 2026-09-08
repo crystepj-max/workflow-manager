@@ -62,14 +62,42 @@ try {
 } catch (e) {
   fail('引擎层测试失败：' + String(e.stdout || e.message).split('\n').slice(-4).join('\n'));
 }
-console.log('—— ③′ 包测试（packages/dsh-visual-workflow：host 双根/异源 + client 冒烟 + 静态 bundle）——');
-try {
-  const pkg = path.join(root, 'packages', 'dsh-visual-workflow');
-  execFileSync(process.execPath, ['scripts/build-bundle.mjs'], { cwd: pkg, stdio: 'pipe' });
-  execFileSync('npm', ['test'], { cwd: pkg, stdio: 'pipe', shell: true });
-  pass('包测试全绿');
-} catch (e) {
-  fail('包测试失败：' + String(e.stdout || e.message).split('\n').slice(-4).join('\n'));
+// ③′ 包测试：自动发现 packages/* 下所有带 test 脚本的包。
+// 新增包会自动纳入，无需在此登记——此前硬编码单个包名导致
+// packages/dsh-llm-account-auth 的测试从未被执行（#184 同类问题）。
+const packagesDir = path.join(root, 'packages');
+const testPackages = (fs.existsSync(packagesDir) ? fs.readdirSync(packagesDir, { withFileTypes: true }) : [])
+  .filter((d) => d.isDirectory())
+  .map((d) => {
+    const dir = path.join(packagesDir, d.name);
+    const manifest = path.join(dir, 'package.json');
+    if (!fs.existsSync(manifest)) return null;
+    let scripts = {};
+    try {
+      scripts = JSON.parse(fs.readFileSync(manifest, 'utf8')).scripts || {};
+    } catch (e) {
+      return null;
+    }
+    return scripts.test ? { name: d.name, dir, scripts } : null;
+  })
+  .filter(Boolean);
+// 直接执行 package.json 里声明的命令，而非 `npm run`：npm 启动本身有约 5s 开销，
+// 两个包就是 10s。开头的 node 换成当前进程的可执行文件，保证与本次校验同一版本。
+const runInPkg = (scriptLine, cwd) =>
+  execFileSync(scriptLine.replace(/^node\b/, JSON.stringify(process.execPath)), { cwd, stdio: 'pipe', shell: true });
+if (testPackages.length === 0) {
+  fail('未发现任何带 test 脚本的包（packages/ 下应至少有一个），包测试被跳过');
+} else {
+  console.log('—— ③′ 包测试（' + testPackages.map((p) => p.name).join('、') + '）——');
+  for (const pkg of testPackages) {
+    try {
+      if (pkg.scripts.build) runInPkg(pkg.scripts.build, pkg.dir);
+      runInPkg(pkg.scripts.test, pkg.dir);
+      pass('包测试全绿：' + pkg.name);
+    } catch (e) {
+      fail('包测试失败（' + pkg.name + '）：' + String(e.stdout || e.message).split('\n').slice(-4).join('\n'));
+    }
+  }
 }
 
 console.log(failures === 0 ? '\n✅ validate 通过' : '\n❌ validate 失败（' + failures + ' 项）');
