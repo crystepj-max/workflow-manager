@@ -427,15 +427,73 @@ return {
     // 落盘 ~/.dsh/visual-workflow/runs/<encodeURIComponent(runId)>.json，启动时全量回载，
     // 超过 RUNS_RETAIN 淘汰最旧（占用任务的记录不淘汰）。live 集合 = 本进程内执行中的 run；
     // 重启后回载的 running 记录不在 live 中，因而不再占用其 taskId。
+    // ── 运行记录存储内核（LOC-004）：单飞行写队列/写盘/回载重试各实现一次，
+    // runs 与 logicalRuns 是同一 store 的两个实例；淘汰为 runs 专属（onDrained 挂钩）。
+    function createRecordStore({ label, dirKey, touch, serialize, onDrained }) {
+      const records = new Map()
+      const fileNames = new Map()
+      const fileOf = (id) => fileNames.get(id) || (encodeURIComponent(String(id)) + '.json')
+      const queues = new Map()
+      function persist(id) {
+        id = String(id || '')
+        if (!id) return
+        let q = queues.get(id)
+        if (!q) { q = { dirty: false, pending: false }; queues.set(id, q) }
+        q.dirty = true
+        if (!q.pending) drain(id, q)
+      }
+      function drain(id, q) {
+        if (!q.dirty) { queues.delete(id); return }
+        q.dirty = false
+        q.pending = true
+        write(id)
+          .catch((e) => log(label + '落盘失败（不影响运行）：' + id + '：' + errMsg(e)))
+          .then(() => { q.pending = false; drain(id, q); if (onDrained) onDrained() })
+      }
+      async function write(id) {
+        const rec = records.get(id)
+        const d = fs === undefined ? null : await homeDirs()
+        if (!rec || !d) return
+        if (touch) touch(rec)
+        await writeText(d[dirKey] + '/' + fileOf(id), JSON.stringify(serialize ? serialize(rec) : rec, null, 2) + '\n')
+      }
+      // fs 服务等待重试 + 目录列举；JSON 解析与水合留给调用方（错误文案各自保留）
+      async function loadEntries() {
+        for (let attempt = 0; attempt < 10 && fs === undefined; attempt++) {
+          refreshServices()
+          if (fs !== undefined) break
+          // 动态会话 vm 沙箱没有真定时器（调用会被拦截）：无定时器则放弃重试
+          try { await new Promise((r) => setTimeout(r, 100 * (attempt + 1))) } catch (e) { break }
+        }
+        if (fs === undefined) return null
+        const d = await homeDirs()
+        const entries = d ? await listDirOrNull(d[dirKey]) : null
+        const out = []
+        for (const ent of entries || []) {
+          if (!ent || ent.type !== 'file' || !/\.json$/i.test(ent.name)) continue
+          try { out.push({ name: ent.name, text: await fs.readText(await fs.resolve(d[dirKey] + '/' + ent.name)) }) }
+          catch (e) { log('跳过损坏的' + label + '：' + ent.name + '（' + errMsg(e) + '）') }
+        }
+        return out
+      }
+      return { records, fileNames, fileOf, persist, loadEntries }
+    }
+
     const RUNS_RETAIN = 50
     const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
     const HD_STRING_KEYS = ['decision_id', 'reason', 'node']
     const HD_NUMBER_KEYS = ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']
     const HD_OBJECT_KEYS = ['decision_package', 'control_event', 'blocked_edge', 'results']
-    const runs = new Map()
-    const runFiles = new Map()
+    const runsStore = createRecordStore({
+      label: '运行记录',
+      dirKey: 'runsDir',
+      touch: (rec) => { rec.updatedAt = Date.now() },
+      onDrained: () => evictSoon(),
+    })
+    const runs = runsStore.records
+    const runFiles = runsStore.fileNames
+    const runFile = (id) => runsStore.fileOf(id)
     const live = new Set()
-    const runFile = (id) => runFiles.get(id) || (encodeURIComponent(String(id)) + '.json')
     const isHumanWait = (s) => s === 'WAITING_HUMAN' || String(s || '').indexOf('AWAITING_HUMAN_') === 0
     // workflow/end 只有 completed，可能在 wf_run 回写 WAITING_HUMAN 之后到达把等待态盖掉；
     // 此时仍靠 decision_id + Package 识别可续跑的停机记录
@@ -476,30 +534,8 @@ return {
     const summary = (rec) => ({ id: rec.id, name: rec.meta.name, status: rec.status, phase: rec.phase, taskId: rec.taskId, workflowId: rec.workflowId, startedAt: rec.startedAt, supersededBy: rec.supersededBy, decision_id: rec.decision_id, reason: rec.reason })
 
     // 无定时器节流：每个 run 至多一个飞行中写入，期间变更只置 dirty，写完按最新态补一次尾写
-    const writeQueues = new Map()
-    function persist(runId) {
-      const id = String(runId || '')
-      if (!id) return
-      let q = writeQueues.get(id)
-      if (!q) { q = { dirty: false, pending: false }; writeQueues.set(id, q) }
-      q.dirty = true
-      if (!q.pending) drainWrite(id, q)
-    }
-    function drainWrite(id, q) {
-      if (!q.dirty) { writeQueues.delete(id); return }
-      q.dirty = false
-      q.pending = true
-      writeRun(id)
-        .catch((e) => log('运行记录落盘失败（不影响运行）：' + id + '：' + errMsg(e)))
-        .then(() => { q.pending = false; drainWrite(id, q); evictSoon() })
-    }
-    async function writeRun(id) {
-      const rec = runs.get(id)
-      const d = fs === undefined ? null : await homeDirs()
-      if (!rec || !d) return
-      rec.updatedAt = Date.now()
-      await writeText(d.runsDir + '/' + runFile(id), JSON.stringify(rec, null, 2) + '\n')
-    }
+    // （队列实现收敛于 runsStore，LOC-004；此处保留原函数名作为薄委托，19 个调用点零改动）
+    function persist(runId) { runsStore.persist(runId) }
     let evictChain = Promise.resolve()
     let evictWarned = false
     function evictSoon() { evictChain = evictChain.then(evictRuns).catch((e) => log('运行记录淘汰失败（不影响运行）：' + errMsg(e))) }
@@ -518,24 +554,16 @@ return {
       }
     }
     async function loadRuns() {
-      for (let attempt = 0; attempt < 10 && fs === undefined; attempt++) {
-        refreshServices()
-        if (fs !== undefined) break
-        // 动态会话 vm 沙箱没有真定时器（调用会被拦截）：无定时器则放弃重试
-        try { await new Promise((r) => setTimeout(r, 100 * (attempt + 1))) } catch (e) { break }
-      }
-      if (fs === undefined) { log('fs 服务不可用，运行记录未回载'); return }
-      const d = await homeDirs()
-      const entries = d ? await listDirOrNull(d.runsDir) : null
-      for (const ent of entries || []) {
-        if (!ent || ent.type !== 'file' || !/\.json$/i.test(ent.name)) continue
+      const list = await runsStore.loadEntries()
+      if (list === null) { log('fs 服务不可用，运行记录未回载'); return }
+      for (const { name, text } of list) {
         try {
-          const data = JSON.parse(await fs.readText(await fs.resolve(d.runsDir + '/' + ent.name)))
+          const data = JSON.parse(text)
           if (!data || typeof data.id !== 'string' || !data.id) throw new Error('缺少 id 字段')
           if (runs.has(data.id)) continue
           runs.set(data.id, fromDisk(data))
-          runFiles.set(data.id, ent.name)
-        } catch (e) { log('跳过损坏的运行记录：' + ent.name + '（' + errMsg(e) + '）') }
+          runFiles.set(data.id, name)
+        } catch (e) { log('跳过损坏的运行记录：' + name + '（' + errMsg(e) + '）') }
       }
       evictSoon()
     }
@@ -546,15 +574,19 @@ return {
     // 形成"第 N 段执行"，不产生新的用户级 Run。固定八态 Lifecycle（仅后三者为终态）
     // + 结构化 reason；运行创建时冻结快照 Rev 1，v0.1 运行中仅可更换 Provider/Model
     // 并产生追加式修订（旧修订永不覆盖）。新语义只写运行摘要（logical-runs 目录），
-    // 既有 runs/ 事件流记录语义零改动（#87 锁定）。持久化同构 runs 记录（节流写队列/
-    // 启动全量回载）；摘要是追溯档案单元，不做容量淘汰。
+    // 既有 runs/ 事件流记录语义零改动（#87 锁定）。持久化管线与 runs 共用同一 store
+    // （LOC-004 收敛，见 createRecordStore）；摘要是追溯档案单元，不做容量淘汰。
     const LIFECYCLE_STATES = ['READY', 'RUNNING', 'WAITING_HUMAN', 'PAUSED', 'BLOCKED', 'COMPLETED', 'STOPPED', 'FAILED']
     const LIFECYCLE_TERMINAL = ['COMPLETED', 'STOPPED', 'FAILED']
     const LOGICAL_RUN_SCHEMA = 1
-    const logicalRuns = new Map()           // logical_run_id → 摘要对象（启动全量回载，追溯档案）
+    const logicalStore = createRecordStore({
+      label: '逻辑运行摘要',
+      dirKey: 'logicalRunsDir',
+      touch: (rec) => { rec.updated_at = Date.now() },
+      serialize: (rec) => logicalRunPayload(rec),
+    })
+    const logicalRuns = logicalStore.records
     const logicalRunByEngineRun = new Map() // 引擎运行 id → logical_run_id（段反查，看板 join 用）
-
-    const logicalRunFile = (id) => encodeURIComponent(String(id || '')) + '.json'
     const logicalReason = (code, message) => {
       const r = { code: String(code || 'UNSPECIFIED') }
       if (message !== undefined && message !== null && String(message) !== '') r.message = String(message)
@@ -778,30 +810,8 @@ return {
         workspace: rec.workspace || null,
       }
     }
-    const logicalWriteQueues = new Map()
-    function requestLogicalPersist(id) {
-      const key = String(id || '')
-      if (!key) return
-      let q = logicalWriteQueues.get(key)
-      if (!q) { q = { dirty: false, pending: false }; logicalWriteQueues.set(key, q) }
-      q.dirty = true
-      if (!q.pending) drainLogicalWrite(key, q)
-    }
-    function drainLogicalWrite(key, q) {
-      if (!q.dirty) { logicalWriteQueues.delete(key); return }
-      q.dirty = false
-      q.pending = true
-      writeLogicalRun(key)
-        .catch((e) => log('逻辑运行摘要落盘失败（不影响运行）：' + key + '：' + errMsg(e)))
-        .then(() => { q.pending = false; drainLogicalWrite(key, q) })
-    }
-    async function writeLogicalRun(id) {
-      const rec = logicalRuns.get(id)
-      const d = fs === undefined ? null : await homeDirs()
-      if (!rec || !d) return
-      rec.updated_at = Date.now()
-      await writeText(d.logicalRunsDir + '/' + logicalRunFile(id), JSON.stringify(logicalRunPayload(rec), null, 2) + '\n')
-    }
+    // 队列实现收敛于 logicalStore（LOC-004）；保留原函数名作为薄委托，11 个调用点零改动
+    function requestLogicalPersist(id) { logicalStore.persist(id) }
     function hydrateLogicalRunFromDisk(data) {
       if (!data || typeof data !== 'object') return false
       const id = typeof data.logical_run_id === 'string' && data.logical_run_id ? data.logical_run_id : null
@@ -832,22 +842,15 @@ return {
       return true
     }
     async function loadLogicalRuns() {
-      for (let attempt = 0; attempt < 10 && fs === undefined; attempt++) {
-        refreshServices()
-        if (fs !== undefined) break
-        try { await new Promise((r) => setTimeout(r, 100 * (attempt + 1))) } catch (e) { break }
-      }
-      if (fs === undefined) return
-      const d = await homeDirs()
-      const entries = d ? await listDirOrNull(d.logicalRunsDir) : null
+      const list = await logicalStore.loadEntries()
+      if (list === null) return
       const loaded = []
-      for (const ent of entries || []) {
-        if (!ent || ent.type !== 'file' || !/\.json$/i.test(ent.name)) continue
+      for (const { name, text } of list) {
         try {
-          const data = JSON.parse(await fs.readText(await fs.resolve(d.logicalRunsDir + '/' + ent.name)))
+          const data = JSON.parse(text)
           if (!data || typeof data.logical_run_id !== 'string' || !data.logical_run_id) throw new Error('缺少 logical_run_id 字段')
           loaded.push(data)
-        } catch (e) { log('跳过损坏的逻辑运行摘要：' + ent.name + '（' + errMsg(e) + '）') }
+        } catch (e) { log('跳过损坏的逻辑运行摘要：' + name + '（' + errMsg(e) + '）') }
       }
       loaded.sort((a, b) => ((a.created_at || 0) - (b.created_at || 0)))
       for (const data of loaded) hydrateLogicalRunFromDisk(data)
@@ -1121,7 +1124,7 @@ return {
         const d = fs === undefined ? null : await homeDirs()
         if (d) {
           try {
-            hydrateLogicalRunFromDisk(JSON.parse(await fs.readText(await fs.resolve(d.logicalRunsDir + '/' + logicalRunFile(id)))))
+            hydrateLogicalRunFromDisk(JSON.parse(await fs.readText(await fs.resolve(d.logicalRunsDir + '/' + logicalStore.fileOf(id)))))
           } catch (e) { /* 不存在或损坏：按缺失返回 */ }
           rec = logicalRuns.get(id)
         }
