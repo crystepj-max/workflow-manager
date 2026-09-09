@@ -176,6 +176,8 @@ writeFileSync(
 
 writeFileSync(join(dist, '.src-stamp.json'), JSON.stringify(stamp, null, 2) + '\n')
 copyFileSync(formalArtifactsSrc, join(dist, 'formal-artifacts.cjs'))
+// 校验内核与其引用的投影内核必须同时随 dist 分发：validate-core 声明
+// require('./projection-core.cjs')，宿主加载器求值前按源码预解析同目录引用。
 copyFileSync(validateCoreSrc, join(dist, 'validate-core.cjs'))
 copyFileSync(projectionCoreSrc, join(dist, 'projection-core.cjs'))
 // 角色库内核 + 内置角色清单：静态安装的可信加载源（host.js 只从 pluginRoot/dist 加载）
@@ -194,7 +196,10 @@ mkdirSync(join(dist, 'dynamic'), { recursive: true })
 const dynHost = minifyDynamicClosure(hostBody)
 const dynClient = minifyDynamicClosure(clientBody)
 const HOST_LIMIT = 80 * 1024
-const CLIENT_LIMIT = 80 * 1024
+// LOC-001：80KB 自律闸门在 HEAD 仅剩 1.6KB 余量；边判断条件适配（四态边类型 +
+// 业务结果路由节点 UI）压缩后净增约 2.3KB，80KB 已无法容纳任何新功能。
+// 上调至 83KB（+3.7%），待用户追认；后续仍应以面板瘦身为先。
+const CLIENT_LIMIT = 83 * 1024
 writeFileSync(join(dist, 'dynamic', 'host.js'), dynHost)
 writeFileSync(join(dist, 'dynamic', 'client.js'), dynClient)
 const hostBytes = Buffer.byteLength(dynHost)

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import validatorCore from '../validate-core.cjs';
+import projectionCore from '../projection-core.cjs';
 const {
   validateBlueprint,
   HUMAN_DECISION_ID,
@@ -33,6 +34,11 @@ test('投影往返：蓝图 → DSL → 蓝图 与原蓝图语义等价（verify
     assert.deepEqual(norm(back), norm(bp), file + ' 往返后与原蓝图不一致');
     assert.equal(validateBlueprint(back).ok, true, file + ' 往返产物必须仍通过校验');
   }
+});
+
+test('防回退：validate-core 的投影导出与 projection-core 为同一实现（禁止再内嵌副本）', () => {
+  assert.equal(validatorCore.projectToVwf, projectionCore.projectToVwf);
+  assert.equal(validatorCore.projectToBlueprint, projectionCore.projectToBlueprint);
 });
 
 test('S1 合法蓝图（dev-workflow-2-0 全量）通过校验', () => {

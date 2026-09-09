@@ -42,8 +42,10 @@ function plantOfficialBuiltin(fs) {
   fs._files.set(REPO + '/.generated/official-builtin/vwf-dsl.json', OFFICIAL_BUILTIN)
 }
 
-// 统一校验内核（候选二 T-IMP-13）：宿主经 fs 读源码求值——测试假 fs 需种入真实内核
+// 统一校验内核（候选二 T-IMP-13）：宿主经 fs 读源码求值——测试假 fs 需种入真实内核。
+// validate-core require('./projection-core.cjs')（唯一投影实现）：两者必须同时种入。
 const validatorCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
+const projectionCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'projection-core.cjs'), 'utf8')
 
 function seedFs(extra = {}) {
   const seed = {
@@ -1231,6 +1233,7 @@ test('从插件 dist/validate-core.cjs 加载校验内核', async () => {
   const PLUGIN = '/plugin/pkg'
   const fs = makeFs({
     [PLUGIN + '/dist/validate-core.cjs']: validatorCoreSrc,
+    [PLUGIN + '/dist/projection-core.cjs']: projectionCoreSrc,
   })
   const { handlers } = loadHost({
     fs,
@@ -1883,6 +1886,7 @@ test('角色库 core 加载：只信插件 dist 清单，home / repo 旧清单�
     [PLUGIN + '/dist/role-library.cjs']: ROLE_CORE_SEED[REPO + '/scripts/role-library.cjs'],
     [PLUGIN + '/dist/builtin-roles.json']: JSON.stringify(trusted),
     [PLUGIN + '/dist/validate-core.cjs']: validatorCoreSrc,
+    [PLUGIN + '/dist/projection-core.cjs']: projectionCoreSrc,
     [DSH_HOME + '/visual-workflow/builtin-roles.json']: JSON.stringify(staleHome),
     [REPO + '/dsh/roles/builtin-roles.json']: JSON.stringify(staleRepo),
   })
