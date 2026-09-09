@@ -904,7 +904,9 @@ return {
       const status = (err && err.failure && typeof err.failure.status === 'number') ? err.failure.status : null
       const message = sanitizeProbeMessage((err && err.message) || err)
       if (code === 'AUTH') return { status: status === 403 ? 'permission_denied' : 'auth_failed', code: code || 'AUTH', message: message }
-      if (code === 'QUOTA' || code === 'QUOTA_EXCEEDED' || status === 402) return { status: 'quota', code: code || 'QUOTA', message: message }
+      // 配额判定含中文 Provider 文案（UAT-01 实测：zai 429 + 「余额不足或无可用资源包」），
+      // 须先于 RATE_LIMIT——同一 429 在余额耗尽时应报 quota 而非 rate_limit
+      if (code === 'QUOTA' || code === 'QUOTA_EXCEEDED' || status === 402 || /余额不足|无可用资源包|请充值|usage[\s_-]*limit[\s_-]*(has\s*)?been[\s_-]*reached|insufficient/i.test(message)) return { status: 'quota', code: code || 'QUOTA', message: message }
       if (code === 'RATE_LIMIT') return { status: 'rate_limit', code: code, message: message }
       if (code === 'TIMEOUT' || code === 'ABORTED') return { status: 'timeout', code: code || 'TIMEOUT', message: message }
       if (code === 'UNKNOWN_MODEL' || code === 'HTTP_404' || code === 'HTTP_403' || code === 'CONTEXT_WINDOW_EXCEEDED' || status === 404) return { status: 'model_unavailable', code: code || 'HTTP_404', message: message }
@@ -912,7 +914,11 @@ return {
       if (/fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|ECONNRESET|network/i.test(message)) return { status: 'provider_unreachable', code: code || 'TRANSPORT', message: message }
       return { status: 'provider_error', code: code || 'UNKNOWN', message: message }
     }
-    // 单绑定最小真实调用：maxTokens=1 的 "ping"，消费至流结束（正常结束=可用）。
+    // 单绑定最小真实调用：maxTokens=1 的 "ping"，消费至流结束。可用判据 = 流以
+    // finish(stop) 正常收尾且收到过至少一个模型输出证据 chunk（text/reasoning/
+    // tool-call delta 或 usage）——空结束不判可用（UAT-01 实测教训：zai 余额不足、
+    // codex 撞额度时 LlmRuntime.stream() 把失败归一化为终态 finish 而非抛异常，
+    // reason.kind='error'/'aborted' 且携带结构化 failure）。
     // 兼容流/流承诺两种返回形态；不可迭代 = 探针降级（宿主无生成流能力）。
     async function probeOneBinding(llm, binding) {
       const base = { key: binding.key, provider: binding.provider, model: binding.model, nodes: binding.nodes.slice() }
@@ -928,15 +934,39 @@ return {
             throw e
           }
         }
+        let sawEvidence = false
+        let sawFinish = false
         for await (const chunk of iter) {
-          // 防御：部分适配器可能以终态 error 事件（而非抛异常）传递失败（审查 R1 非2）
-          if (chunk && typeof chunk === 'object' && (chunk.type === 'error' || (chunk.error && typeof chunk.error === 'object'))) {
-            const err = (chunk.error && typeof chunk.error === 'object') ? chunk.error : chunk
-            const c = classifyProbeFailure(err)
-            return finish(c.status, c.code, c.message)
+          if (chunk && typeof chunk === 'object') {
+            if (chunk.type === 'text-delta' || chunk.type === 'reasoning-delta' || chunk.type === 'tool-call-delta' || chunk.type === 'usage') sawEvidence = true
+            // 终态 finish：检查 reason.kind（error/aborted 携带结构化 failure）
+            if (chunk.type === 'finish') {
+              sawFinish = true
+              const reason = chunk.reason
+              const kind = (reason && typeof reason === 'object') ? String(reason.kind || '') : String(reason || '')
+              if (kind === 'error' || kind === 'aborted') {
+                const failure = (reason && typeof reason === 'object' && reason.failure && typeof reason.failure === 'object') ? reason.failure : null
+                const synthetic = new Error(sanitizeProbeMessage((failure && failure.message) || errMsg(reason || chunk)))
+                if (failure) {
+                  synthetic.code = failure.code
+                  synthetic.failure = failure
+                }
+                const c = classifyProbeFailure(synthetic)
+                return finish(c.status, c.code, c.message)
+              }
+              // 'stop' / 未知 kind（merge-extensible）视为正常收尾，继续等流关闭
+            }
+            // 防御：个别适配器以显式 error 事件（而非 finish reason）传递失败
+            if (chunk.type === 'error' || (chunk.error && typeof chunk.error === 'object')) {
+              const err = (chunk.error && typeof chunk.error === 'object') ? chunk.error : chunk
+              const c = classifyProbeFailure(err)
+              return finish(c.status, c.code, c.message)
+            }
           }
           void chunk
         }
+        if (!sawFinish) return finish('provider_error', 'STREAM_CLOSED', sanitizeProbeMessage('流在收尾事件前关闭，结果不可信'))
+        if (!sawEvidence) return finish('provider_error', 'EMPTY_RESPONSE', sanitizeProbeMessage('流正常结束但未收到任何模型输出（空响应），不判可用'))
         return finish('available', 'OK', '')
       } catch (e) {
         if (e && typeof e === 'object' && e.probeCapability) return finish('probe_degraded', 'PROBE_DEGRADED', sanitizeProbeMessage(errMsg(e)))

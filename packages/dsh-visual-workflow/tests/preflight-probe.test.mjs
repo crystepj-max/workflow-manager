@@ -44,7 +44,7 @@ async function until(fn, label, ms = 4000) {
   }
 }
 
-function makeLlm({ providers = ['p1', 'p2'], models = { p1: ['m1'], p2: ['m2'] }, fail = {}, noStream = false } = {}) {
+function makeLlm({ providers = ['p1', 'p2'], models = { p1: ['m1'], p2: ['m2'] }, fail = {}, noStream = false, emptyStop = false, closeEarly = false } = {}) {
   const streams = []
   const llm = {
     listProviders() { return providers.map((id) => ({ id: id, name: id })) },
@@ -52,14 +52,21 @@ function makeLlm({ providers = ['p1', 'p2'], models = { p1: ['m1'], p2: ['m2'] }
     stream(opts) {
       streams.push(opts)
       if (noStream) return { not: 'iterable' }
-      const f = fail[opts.provider + '\u0000' + opts.model]
+      const key = opts.provider + '\u0000' + opts.model
+      const f = fail[key]
       if (f) {
-        const e = new Error(f.message || 'probe fail')
-        e.code = f.code
-        if (f.status) e.failure = { status: f.status }
-        return (async function* () { throw e })()
+        // 真实宿主形态：LlmRuntime.stream() 把失败归一化为终态 finish（error/aborted + failure）
+        const kind = f.kind || 'error'
+        const failure = { message: f.message || 'probe fail', code: f.code }
+        if (f.status) failure.status = f.status
+        return (async function* () { yield { type: 'finish', reason: { kind: kind, failure: failure } } })()
       }
-      return (async function* () { yield { type: 'text', text: 'ok' } })()
+      if (emptyStop) return (async function* () { yield { type: 'finish', reason: { kind: 'stop' } } })()
+      if (closeEarly) return (async function* () { yield { type: 'text-delta', index: 0, text: 'partial' } })()
+      return (async function* () {
+        yield { type: 'text-delta', index: 0, text: 'ok' }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      })()
     },
     _streams: streams,
   }
@@ -208,6 +215,38 @@ test('vwf.probe：错误分类映射（quota/rate_limit/timeout/model_unavailabl
     const r = await call(handlers, 'vwf.probe', { dsl: mk(model), force: true })
     assert.equal(r.results[0].status, want, model + ' → ' + want)
   }
+})
+
+test('vwf.probe：终态 finish 误报回归（UAT-01 实测）——zai 余额不足 / codex 撞额度必须报 quota 而非 available', async () => {
+  const llm = makeLlm({
+    fail: {
+      'p1\u0000zai': { code: 'RATE_LIMIT', message: '429: {"code":"1113","message":"余额不足或无可用资源包,请充值。"}' },
+      'p1\u0000zai2': { code: 'RATE_LIMIT', message: '余额不足或无可用资源包,请充值。' },
+      'p1\u0000codex': { code: 'PROVIDER', message: 'Codex error: The usage limit has been reached' },
+    },
+    providers: ['p1'],
+    models: { p1: ['zai', 'zai2', 'codex'] },
+  })
+  const { handlers } = env({ extra: { llm } })
+  const mk = (model) => ({ ...EDITOR_DSL, nodes: [{ id: 'a', profile: 'dispatcher', label: 'A', goal: 'g', model: { provider: 'p1', model: model } }], edges: [{ from: 'a', to: '$end', on: 'success' }] })
+  for (const model of ['zai', 'zai2', 'codex']) {
+    const r = await call(handlers, 'vwf.probe', { dsl: mk(model), force: true })
+    assert.equal(r.ok, false, model + ' 不得判可用')
+    assert.equal(r.results[0].status, 'quota', model + ' → quota（余额/额度耗尽）')
+  }
+})
+
+test('vwf.probe：空响应（finish stop 无输出）与流提前关闭不得判可用', async () => {
+  const { handlers } = env({ extra: { llm: makeLlm({ emptyStop: true }) } })
+  const r1 = await call(handlers, 'vwf.probe', { dsl: EDITOR_DSL })
+  assert.equal(r1.ok, false)
+  assert.equal(r1.results[0].status, 'provider_error')
+  assert.equal(r1.results[0].code, 'EMPTY_RESPONSE')
+  const { handlers: h2 } = env({ extra: { llm: makeLlm({ closeEarly: true }) } })
+  const r2 = await call(h2, 'vwf.probe', { dsl: EDITOR_DSL, force: true })
+  assert.equal(r2.ok, false)
+  assert.equal(r2.results[0].status, 'provider_error')
+  assert.equal(r2.results[0].code, 'STREAM_CLOSED')
 })
 
 test('wf_run 新启：探针失败 → BLOCKED + 引擎不启动 + reason 结构化', async () => {
