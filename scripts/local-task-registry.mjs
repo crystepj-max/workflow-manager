@@ -19,14 +19,20 @@ import { fileURLToPath } from 'node:url'
 export const TASK_ID_PREFIX = 'LOC-'
 export const ID_PATTERN = /^LOC-(\d{3,})$/
 
+// 状态词汇唯一来源（LOC-002）：merge / preflight 一律引用这里的常量，禁止字面量重抄。
+export const STATUS_LOCAL_DEFINED = '本地已定义'
+export const STATUS_WAITING_ACCEPTANCE = '等待验收'
+export const STATUS_EXECUTION_BLOCKED = '执行受阻'
+export const STATUS_MERGED = '已合并'
+
 export const STATUSES = [
   '定义中',
   '待确认',
-  '本地已定义',
+  STATUS_LOCAL_DEFINED,
   '交付中',
-  '等待验收',
-  '执行受阻',
-  '已合并',
+  STATUS_WAITING_ACCEPTANCE,
+  STATUS_EXECUTION_BLOCKED,
+  STATUS_MERGED,
 ]
 
 export function nextSeq(records) {
