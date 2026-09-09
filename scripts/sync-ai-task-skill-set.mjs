@@ -7,6 +7,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -37,6 +38,26 @@ function copyDir(src, dst) {
   }
 }
 
+// 安装态配套资产：技能脱离本仓库后仍需执行的脚本与文档
+const assetScripts = {
+  'requirements-analysis': ['local-task-registry.mjs'],
+  'construction-bootstrap': [
+    ...fs.readdirSync(path.join(wmRoot, 'scripts')).filter(n => /^cwf-.*\.mjs$/.test(n)),
+    'ai-task-preflight-check.mjs',
+    'ai-task-workspace-env.mjs',
+    'workspace-isolation.mjs',
+    'formal-records.mjs',
+    'formal-artifacts.cjs',
+    'local-task-registry.mjs',
+    'local-task-merge.mjs',
+  ],
+  'execution-plan': ['ai-task-execution-plan.mjs', 'ai-task-preflight-check.mjs', 'ai-task-scheduled-trigger.mjs'],
+}
+const assetDocs = {
+  'construction-bootstrap': ['single-task-delivery-m2', 'public-task-contract', 'preflight-check', 'uat-card-template', 'task-workspace-env'],
+  'execution-plan': ['execution-plan-m3', 'scheduled-trigger-m4', 'public-task-contract', 'skill-set'],
+}
+
 const copied = []
 for (const [relSrc, relDst] of pairs) {
   const src = path.join(wmRoot, relSrc)
@@ -45,8 +66,36 @@ for (const [relSrc, relDst] of pairs) {
     console.error(`缺少源: ${src}`)
     process.exit(1)
   }
-  fs.rmSync(dst, { recursive: true, force: true })
+  if (fs.existsSync(dst)) {
+    const backup = path.join(targetRoot, '.skill-sync-backups', `${Date.now()}-${path.basename(dst)}`)
+    fs.mkdirSync(path.dirname(backup), { recursive: true })
+    fs.renameSync(dst, backup)
+  }
   copyDir(src, dst)
+  const name = path.basename(dst)
+  if (assetScripts[name]) {
+    const assetDir = path.join(dst, 'assets')
+    fs.mkdirSync(assetDir, { recursive: true })
+    for (const n of assetScripts[name]) fs.copyFileSync(path.join(wmRoot, 'scripts', n), path.join(assetDir, n))
+    if (assetDocs[name]) {
+      fs.mkdirSync(path.join(assetDir, 'ai-task-define-delivery'), { recursive: true })
+      for (const n of assetDocs[name]) fs.copyFileSync(path.join(wmRoot, 'docs/design/ai-task-define-delivery', n + '.md'), path.join(assetDir, 'ai-task-define-delivery', n + '.md'))
+    }
+    if (name === 'construction-bootstrap') {
+      fs.copyFileSync(path.join(wmRoot, 'docs/design/construction-workflow/handoff.schema.json'), path.join(assetDir, 'handoff.schema.json'))
+      fs.copyFileSync(path.join(wmRoot, 'docs/design/construction-workflow-portable-contract.md'), path.join(assetDir, 'construction-workflow-portable-contract.md'))
+    }
+  }
+  const hashes = {}
+  function recordFiles(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name)
+      if (entry.isDirectory()) recordFiles(file)
+      else hashes[path.relative(dst, file)] = createHash('sha256').update(fs.readFileSync(file)).digest('hex')
+    }
+  }
+  recordFiles(dst)
+  fs.writeFileSync(path.join(dst, 'source-manifest.json'), JSON.stringify({ upstream: 'workflow-manager', files: hashes }, null, 2) + '\n')
   copied.push(relDst)
 }
 

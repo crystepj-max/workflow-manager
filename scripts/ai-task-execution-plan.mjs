@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
-const preflight = path.join(root, 'scripts/ai-task-preflight-check.mjs')
+const preflight = path.join(__dirname, 'ai-task-preflight-check.mjs')
 
 const argv = process.argv.slice(2)
 if (argv.length < 1) {
