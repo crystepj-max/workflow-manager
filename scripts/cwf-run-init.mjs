@@ -65,11 +65,27 @@ export function assertRunIdSafe(runId) {
 
 export function findIdentityMismatch(stored, requested) {
   // 幂等复用前校验身份一致：run_id 相同不代表 issue/base/budget 相同
+  // base_ref_kind 缺失时按历史行为视为 remote，保证旧 run.json 可读
   const mismatches = []
+  const storedKind = stored.base_ref_kind ?? 'remote'
+  const reqKind = requested.base_ref_kind ?? 'remote'
   if (stored.issue_or_task_identity !== requested.issue_or_task_identity) mismatches.push(`issue(${stored.issue_or_task_identity}≠${requested.issue_or_task_identity})`)
   if (stored.base_ref !== requested.base_ref) mismatches.push(`base_ref(${stored.base_ref}≠${requested.base_ref})`)
+  if (storedKind !== reqKind) mismatches.push(`base_ref_kind(${storedKind}≠${reqKind})`)
   if ((stored.rollback_budget ?? DEFAULT_BUDGET) !== requested.rollback_budget) mismatches.push(`budget(${stored.rollback_budget}≠${requested.rollback_budget})`)
   return mismatches
+}
+
+/**
+ * 解析开工基线。
+ * localBase=true（本地轨道 / GitHub 不可用）：不访问远程，直接以本地分支为基线；
+ * 否则沿用历史行为：先 fetch 再以 origin/<base> 为基线。
+ * git 可注入以便测试。
+ */
+export function resolveBase({ base, localBase = false, git } = {}) {
+  if (localBase) return { baseRef: base, kind: 'local' }
+  git(['fetch', 'origin', base])
+  return { baseRef: `origin/${base}`, kind: 'remote' }
 }
 
 function git(args, cwd) {
@@ -79,15 +95,16 @@ function git(args, cwd) {
 function parseArgs(argv) {
   const [issue, runId, ...rest] = argv
   if (!issue || !runId) {
-    console.error('用法: node scripts/cwf-run-init.mjs <issue_id> <run_id> [--base <ref>] [--budget <n>]')
+    console.error('用法: node scripts/cwf-run-init.mjs <issue_id|任务标识> <run_id> [--base <ref>] [--budget <n>] [--local-base]')
     process.exit(2)
   }
   assertRunIdSafe(runId)
-  const opts = { base: 'main', budget: DEFAULT_BUDGET }
+  const opts = { base: 'main', budget: DEFAULT_BUDGET, localBase: false }
   for (let i = 0; i < rest.length; i++) {
     try {
       if (rest[i] === '--base') opts.base = rest[++i]
       else if (rest[i] === '--budget') opts.budget = parseBudget(rest[++i])
+      else if (rest[i] === '--local-base' || rest[i] === '--no-fetch') opts.localBase = true
       else {
         console.error(`未知参数: ${rest[i]}`)
         process.exit(2)
@@ -101,13 +118,12 @@ function parseArgs(argv) {
 }
 
 function main() {
-  const { issue, runId, base, budget } = parseArgs(process.argv.slice(2))
+  const { issue, runId, base, budget, localBase } = parseArgs(process.argv.slice(2))
   const repo = git(['rev-parse', '--show-toplevel'])
   const branch = branchName(runId)
   const runDirRel = join('.agent-runs', runId)
 
-  git(['fetch', 'origin', base], repo)
-  const baseRef = `origin/${base}`
+  const { baseRef, kind: baseRefKind } = resolveBase({ base, localBase, git: (a) => git(a, repo) })
   const baseCommit = git(['rev-parse', baseRef], repo)
   const worktreeDir = `.scratch/worktrees/${branch}`
   const worktreePath = join(repo, worktreeDir)
@@ -121,6 +137,7 @@ function main() {
         const mismatches = findIdentityMismatch(existing, {
           issue_or_task_identity: `#${issue}`,
           base_ref: base,
+          base_ref_kind: baseRefKind,
           rollback_budget: budget,
         })
         // 校验 worktree 实际 git 分支与记录一致（防止检出被切换后 lineage 自相矛盾）
@@ -164,6 +181,7 @@ function main() {
     workspace_id: `wt-${branch}`,
     repository: repoSlugFromUrl(git(['remote', 'get-url', 'origin'], repo)),
     base_ref: base,
+    base_ref_kind: baseRefKind,
     base_commit: baseCommit,
     work_branch: branch,
     current_head: baseCommit,

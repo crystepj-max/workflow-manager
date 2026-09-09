@@ -12,9 +12,22 @@
 
 ## 0. Run 引导
 
+**GitHub 轨道（远程可用）**
+
 ```bash
 node "$CWF_ASSETS/cwf-run-init.mjs" <issue编号> <run_id>
 ```
+
+**本地轨道（GitHub 不可用）——不访问远程，以本地 main 为基线**
+
+```bash
+node "$CWF_ASSETS/cwf-run-init.mjs" <任务标识> <run_id> --local-base
+# 示例：node scripts/cwf-run-init.mjs LOC-001 loc-001-r1 --local-base
+```
+
+- 任务标识取 `LOC-<序号>`（小写后可直接作 run_id：`loc-001-r1`）。
+- `--local-base` 等价于 `--no-fetch`：跳过 `git fetch`，基线 = 本地 `main` 当前提交，`run.json` 记录 `base_ref_kind = local`。
+- 同一 run_id 复用时，若上次是远程基线、这次请求本地基线（或反之），脚本拒绝静默复用。
 
 - 产出独立分支 / worktree / `.agent-runs/<run_id>/run.json`。
 - 在 run.json 记录绑定的**需求基线版本**（与 Issue 当前版本一致）；之后不得静默换版。
@@ -24,7 +37,7 @@ node "$CWF_ASSETS/cwf-run-init.mjs" <issue编号> <run_id>
 
 ## 1. 实施前检查（产品节点；硬门禁）
 
-1. 从 Issue 读取：当前状态、无人值守许可、需求基线版本、前置依赖、施工环境组、施工环境角色、任务规格位置、优先级、定义时间。
+1. 从 **Issue（GitHub 轨道）或本地任务卡 `docs/tasks/<任务标识>-<slug>.md`（本地轨道）** 读取：任务标识、当前状态、无人值守许可、需求基线版本、前置依赖、施工环境组、施工环境角色、任务规格位置、优先级、定义时间。
 2. 读取本地任务规格全文。
 3. 执行机械检查：
 
@@ -34,7 +47,7 @@ node "$CWF_ASSETS/ai-task-preflight-check.mjs" <issue-basics快照.md> <task-spe
   [--env-store <环境组登记目录>]
 ```
 
-4. **失败**：Issue → 执行受阻；Run → `BLOCKED`；写明原因；**停止**（不进入开发）。
+4. **失败**：Issue/任务卡 → 执行受阻；Run → `BLOCKED`；写明原因；**停止**（不进入开发）。
 5. **通过后解析施工环境**（批量调度不得代劳）：
 
 ```bash
@@ -88,7 +101,7 @@ node "$CWF_ASSETS/cwf-record.mjs" rollback <runDir> dev
 
 ## 5. UAT 准备 → 等待验收
 
-1. 按 `docs/design/ai-task-define-delivery/uat-card-template.md` 生成验收卡（落盘到 run 目录，如 `uat-card.md`）。
+1. 按 `<SKILL_DIR>/assets/ai-task-define-delivery/uat-card-template.md`（源码态为 `docs/design/ai-task-define-delivery/uat-card-template.md`）生成验收卡（落盘到 run 目录，如 `uat-card.md`）。
 2. Integration Checkpoint：
 
 ```bash
@@ -102,7 +115,12 @@ node "$CWF_ASSETS/cwf-checkpoint.mjs" .agent-runs/<run_id>
 node "$CWF_ASSETS/cwf-evidence-verify.mjs" .agent-runs/<run_id>
 ```
 
-5. Issue → **等待验收**；Run → **`WAITING_HUMAN`**；呈递 UAT 卡与验收包。**AI 不代签**。
+5. Issue（GitHub 轨道）/ 本地任务卡（本地轨道）→ **等待验收**；Run → **`WAITING_HUMAN`**；呈递 UAT 卡与验收包。**AI 不代签**。
+   本地轨道同步登记册（合并门禁要求此状态）：
+
+```bash
+node scripts/local-task-registry.mjs set --task <任务标识> --status 等待验收 --branch <工作分支>
+```
 6. 无人工操作 → 保持等待（跨日从**原 Run**恢复，禁止另起丢失上下文的新 Run）。
 
 ---
@@ -138,11 +156,35 @@ node "$CWF_ASSETS/ai-task-workspace-env.mjs" mark-completed \
 node "$CWF_ASSETS/ai-task-workspace-env.mjs" maybe-cleanup \
   --store <环境组登记目录> --env <施工环境组>
 ```
-3. PR/合并按仓库规则；Issue → 已完成。
-4. 归档：
+
+4. **合并成果**（务必先跑一遍门禁，冲突时脚本会中止且不改动主干）：
+
+   - **GitHub 轨道**：按仓库规则开 PR 并合并；Issue → 已完成。
+   - **本地轨道**（GitHub 不可用）：合并回本地主干，一任务一提交：
+
+```bash
+node scripts/local-task-merge.mjs --task <任务标识> --branch <工作分支> \
+  --decision accept|conditional_pass [--scope <范围>] [--feedback <优化意见>] \
+  --run-id <run_id> [--mirror <镜像远程名>] [--dry-run]
+```
+
+   门禁（任一不满足即中止）：验收结果为 `accept`/`conditional_pass`；登记册状态为「等待验收」；任务卡与规格版本一致；任务分支确有新增提交；主干与任务工作区均无未提交改动；任务分支并入主干无冲突。
+
+   通过后自动完成：一任务一提交 → 打标签 `task/<loc-001>/<v1>` → 任务卡与规格归档至 `docs/tasks/archive/<任务标识>/` 并**随同一提交入库** → 登记册状态改「已合并」、记录合并提交 → 重写看板 → 可选推送镜像仓库。
+
+   🔴 工作区与分支**暂不删除**，保留供 GitHub 恢复后补 PR；`GitHub 同步` 保持 `pending`。
+
+5. 归档：
 
 ```bash
 node "$CWF_ASSETS/cwf-record.mjs" archive .agent-runs/<run_id>
+```
+
+6. **本地轨道收尾**：把「有条件通过」的优化意见登记为新的候选任务（分配新的 `LOC-` 号），不改已合并基线：
+
+```bash
+node scripts/local-task-registry.mjs allocate --name "<优化任务名>" --source 会话录入
+node scripts/local-task-registry.mjs board
 ```
 
 ---

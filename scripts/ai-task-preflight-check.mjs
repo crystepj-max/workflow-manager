@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 /**
  * M2 实施前检查：校验「已定义」任务是否具备无人值守开工条件。
+ * 本地轨道（GitHub 不可用）：状态「本地已定义」与「已定义」开工资格等价，
+ * 但必须带 `GitHub 同步` 字段（pending / synced#N / not-applicable）。
  * 用法：
- *   node scripts/ai-task-preflight-check.mjs <issue-basics.md> <task-spec.md> [--run-baseline Vn]
+ *   node scripts/ai-task-preflight-check.mjs <task-basics.md> <task-spec.md> [--run-baseline Vn]
  * exit 0 = 通过；exit 1 = 受阻（打印原因）
  */
 import fs from 'node:fs'
 import path from 'node:path'
+
+export const DEFINED_STATUSES = new Set(['已定义', '本地已定义'])
+export const GITHUB_SYNC_VALUES = /^(not-applicable|pending|synced\s*#?\d+)$/i
 
 const args = process.argv.slice(2)
 if (args.length < 2) {
@@ -50,12 +55,17 @@ const priority = field(issue, '优先级')
 const definedAt = field(issue, '定义时间')
 const envGroup = field(issue, '施工环境组')
 const envRole = field(issue, '施工环境角色')
+const taskId = field(issue, '任务标识')
+const githubSync = field(issue, 'GitHub 同步')
 
 let envStore = null
 const esIdx = args.indexOf('--env-store')
 if (esIdx >= 0) envStore = args[esIdx + 1]
 
-if (status !== '已定义') fail(`当前状态必须为「已定义」，实际：${status ?? '（缺失）'}`)
+if (!status) fail('当前状态缺失')
+else if (!DEFINED_STATUSES.has(status)) {
+  fail(`当前状态必须为「已定义」或「本地已定义」，实际：${status}`)
+}
 if (unattended !== '允许') fail(`无人值守许可必须为「允许」，实际：${unattended ?? '（缺失）'}`)
 if (!baseline || !/^V\d+$/i.test(baseline)) fail(`需求基线版本缺失或非法：${baseline ?? '（缺失）'}`)
 if (!deps || deps === '') fail('前置依赖缺失')
@@ -68,13 +78,19 @@ if (!priority || !/^P[012]$/.test(priority)) fail(`优先级必须为 P0/P1/P2�
 if (!definedAt) fail('定义时间缺失')
 if (!specLoc) fail('任务规格位置缺失')
 
+// 本地轨道附加校验：任务标识 + GitHub 同步状态
+if (status === '本地已定义') {
+  if (!taskId) fail('本地轨道任务必须填写「任务标识」（LOC-<序号>）')
+  if (!githubSync) fail('本地轨道任务必须填写「GitHub 同步」（pending / synced#N）')
+  else if (!GITHUB_SYNC_VALUES.test(githubSync.trim())) {
+    fail(`GitHub 同步取值非法：${githubSync}（应为 pending / synced#N / not-applicable）`)
+  }
+}
+
 // 可选：联调环境组串行门禁（不创建 Git）
 if (envStore && failures.length === 0) {
   const { planDeliveryWorkspace, loadEnv, parseDeps, normalizeRole } = await import('./ai-task-workspace-env.mjs')
-  const taskId =
-    field(issue, '任务标识') ||
-    path.basename(path.dirname(specPath)) ||
-    'task'
+  const envTaskId = taskId || path.basename(path.dirname(specPath)) || 'task'
   let roleNorm
   try {
     roleNorm = normalizeRole(envRole)
@@ -85,7 +101,7 @@ if (envStore && failures.length === 0) {
   if (roleNorm) {
     const existing = loadEnv(path.resolve(envStore), envGroup)
     const plan = planDeliveryWorkspace({
-      taskId,
+      taskId: envTaskId,
       envId: envGroup,
       role: envRole,
       deps: parseDeps(deps),
@@ -145,7 +161,10 @@ if (failures.length) {
 
 const result = {
   ok: true,
-  status: '已定义',
+  track: status === '本地已定义' ? 'local' : 'github',
+  task_id: taskId ?? null,
+  github_sync: githubSync ?? null,
+  status,
   baseline,
   unattended_permission: '允许',
   dependencies: deps,

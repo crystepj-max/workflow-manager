@@ -1,7 +1,7 @@
 // cwf-run-init.mjs 纯逻辑测试（分支命名、run_id 安全、身份比对）
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { branchName, assertRunIdSafe, findIdentityMismatch, parseBudget, ensureGitExclude, repoSlugFromUrl } from '../cwf-run-init.mjs'
+import { branchName, assertRunIdSafe, findIdentityMismatch, parseBudget, ensureGitExclude, repoSlugFromUrl, resolveBase } from '../cwf-run-init.mjs'
 
 test('branchName：run_id 直接进分支名（单射）', () => {
   assert.equal(branchName('cwf-123-01'), 'dev-cwf-123-01')
@@ -51,6 +51,39 @@ test('ensureGitExclude：幂等追加本地排除（入参为 exclude 文件路�
   // 幂等：重复调用不追加
   const second = ensureGitExclude(excl, ['.scratch/'])
   assert.deepEqual(second, [])
+})
+
+test('resolveBase：远程模式先 fetch 再用 origin/<base>', () => {
+  const calls = []
+  const out = resolveBase({ base: 'main', localBase: false, git: (a) => calls.push(a) })
+  assert.deepEqual(out, { baseRef: 'origin/main', kind: 'remote' })
+  assert.deepEqual(calls, [['fetch', 'origin', 'main']])
+})
+
+test('resolveBase：本地轨道不访问远程，直接用本地分支', () => {
+  const calls = []
+  const out = resolveBase({ base: 'main', localBase: true, git: (a) => calls.push(a) })
+  assert.deepEqual(out, { baseRef: 'main', kind: 'local' })
+  assert.deepEqual(calls, [])
+})
+
+test('findIdentityMismatch：基线来源不同（local vs remote）视为不一致', () => {
+  const stored = { issue_or_task_identity: '#123', base_ref: 'main', base_ref_kind: 'local', rollback_budget: 3 }
+  assert.deepEqual(findIdentityMismatch(stored, { ...stored }), [])
+  assert.equal(
+    findIdentityMismatch(stored, { ...stored, base_ref_kind: 'remote' }).length,
+    1,
+  )
+  // 历史 run.json 无 base_ref_kind 字段时按 remote 处理，不误报
+  const legacy = { issue_or_task_identity: '#123', base_ref: 'main', rollback_budget: 3 }
+  assert.deepEqual(
+    findIdentityMismatch(legacy, { ...legacy, base_ref_kind: 'remote' }),
+    [],
+  )
+  assert.equal(
+    findIdentityMismatch(legacy, { ...legacy, base_ref_kind: 'local' }).length,
+    1,
+  )
 })
 
 test('repoSlugFromUrl：剥离认证信息（与 hostname 无关）', () => {
