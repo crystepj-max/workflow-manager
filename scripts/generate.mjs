@@ -904,6 +904,51 @@ export function writeUserSkill(bp, skillDir, io = fs, rolesDir = DEFAULT_ROLES_D
   }
 }
 
+// ---------- 生成物比对与孤儿清理（LOC-006：单一权威，generate CLI 与 validate 步骤② 共用） ----------
+
+function readGeneratedDir(outDir) {
+  if (!fs.existsSync(outDir)) return null;
+  return new Map(
+    fs.readdirSync(outDir, { recursive: true })
+      .filter((f) => fs.statSync(path.join(outDir, f)).isFile())
+      .map((f) => [f, fs.readFileSync(path.join(outDir, f), 'utf8')])
+  );
+}
+
+/**
+ * 三态 diff：missing = map 有磁盘无（将新增）；extra = 磁盘有 map 无（孤儿，由 prune 收敛）；
+ * changed = 两侧都有但内容不同（生成物过期或手改）。
+ */
+export function compareGeneratedFiles(files, outDir) {
+  const disk = readGeneratedDir(outDir);
+  if (!disk) return { missing: [...files.keys()], extra: [], changed: [] };
+  const missing = [];
+  const extra = [];
+  const changed = [];
+  for (const [k, v] of files) {
+    if (!disk.has(k)) missing.push(k);
+    else if (disk.get(k) !== v) changed.push(k);
+  }
+  for (const k of disk.keys()) if (!files.has(k)) extra.push(k);
+  return { missing, extra, changed };
+}
+
+/**
+ * 清理孤儿产物目录：outDir 下目录名不在当前 files map 顶层 id 集内的整目录移除
+ * （.generated 本为生成物目录，仓库规则禁手改）。返回被移除的目录名。
+ */
+export function pruneGenerated(files, outDir) {
+  const removed = [];
+  if (!fs.existsSync(outDir)) return removed;
+  const liveIds = new Set([...files.keys()].map((f) => f.split('/')[0]));
+  for (const entry of fs.readdirSync(outDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || liveIds.has(entry.name)) continue;
+    fs.rmSync(path.join(outDir, entry.name), { recursive: true, force: true });
+    removed.push(entry.name);
+  }
+  return removed;
+}
+
 // ---------- CLI（薄壳：参数解析 + 写盘 + 幂等比对，T-IMP-10 接入 validate） ----------
 function writeAll(files, outDir) {
   for (const [rel, content] of files) {
@@ -972,29 +1017,22 @@ function main() {
 
   const tplDir = process.argv[2] || DEFAULT_TPL_DIR;
   const outDir = process.argv[3] || DEFAULT_OUT_DIR;
-  const prev = fs.existsSync(outDir)
-    ? new Map(fs.readdirSync(outDir, { recursive: true }).filter((f) => fs.statSync(path.join(outDir, f)).isFile())
-      .map((f) => [f, fs.readFileSync(path.join(outDir, f), 'utf8')]))
-    : null;
+  const hadDisk = fs.existsSync(outDir);
   const { files, report } = generateAll(tplDir);
+  const diff = compareGeneratedFiles(files, outDir);
   writeAll(files, outDir);
-  let idem = null;
-  if (prev) {
-    const keys = new Set([...prev.keys(), ...files.keys()]);
-    let identical = true;
-    let reason = '';
-    for (const k of keys) {
-      if (!prev.has(k)) { identical = false; reason = '新增文件：' + k; break; }
-      if (!files.has(k)) { identical = false; reason = '缺失文件：' + k; break; }
-      if (prev.get(k) !== files.get(k)) { identical = false; reason = '内容不一致：' + k + '（生成物过期或手改，已重建）'; break; }
-    }
-    idem = { identical, reason };
-  }
+  const pruned = pruneGenerated(files, outDir);
+  // 幂等报告（LOC-006：比对单一权威；孤儿产物已由 prune 就地收敛）
+  const idemReason = diff.missing.length ? '新增文件：' + diff.missing[0]
+    : diff.extra.length ? '缺失文件：' + diff.extra[0] + '（孤儿产物已清理）'
+    : diff.changed.length ? '内容不一致：' + diff.changed[0] + '（生成物过期或手改，已重建）'
+    : null;
   for (const r of report) {
     if (r.ok) console.log('✅ ' + r.id + '：' + r.nodes + ' 节点 / ' + r.edges + ' 边' + (r.folds.length ? ' / 折叠：' + r.folds.join(',') : ''));
     else { console.log('❌ ' + r.id + '：' + r.errors.map((e) => e.at + ' ' + e.message).join('；')); }
   }
-  if (idem) console.log(idem.identical ? '✅ 幂等：生成物与上次一致' : '⚠️ ' + idem.reason);
+  if (pruned.length) console.log('🧹 清理孤儿产物目录：' + pruned.join('、'));
+  if (hadDisk) console.log(idemReason ? '⚠️ ' + idemReason : '✅ 幂等：生成物与上次一致');
   if (report.some((r) => !r.ok)) process.exit(1);
 }
 
