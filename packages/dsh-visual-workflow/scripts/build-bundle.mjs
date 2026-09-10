@@ -191,7 +191,17 @@ for (const name of listNames(rolesSrc, '.md')) {
 }
 
 mkdirSync(join(dist, 'dynamic'), { recursive: true })
-const dynHost = minifyDynamicClosure(hostBody)
+// 动态产物头部注入（backlog dev-plugin-sync-gap 方案 A）：cordis 动态沙箱不注入
+// __VWF_PLUGIN_ROOT__/__VWF_REPO_ROOT__，也不提供 Buffer（dist/validate-core.cjs 的
+// 输入尺寸检查会调用 Buffer.byteLength）——静态 bundle 靠构建期常量与 Node 全局，
+// 动态闭包体必须自带。常量指向宿主构建时的真实路径（开发 DSH 单机部署场景成立），
+// Buffer 用沙箱已有的 TextEncoder 实现最小垫片（host.js 只用 byteLength 等静态方法）。
+const DYN_HOST_PRELUDE = [
+  `const __VWF_PLUGIN_ROOT__ = ${JSON.stringify(root)};`,
+  `const __VWF_REPO_ROOT__ = ${JSON.stringify(dirname(dirname(root)))};`,
+  'if (typeof globalThis.Buffer === "undefined") { const enc = new TextEncoder(); globalThis.Buffer = { from(s, e) { if (e === "base64" && typeof atob === "function") { const bin = atob(s); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; } return enc.encode(String(s)); }, byteLength(s) { return enc.encode(String(s)).length; }, isBuffer() { return false; }, alloc(n) { return new Uint8Array(n); }, concat(list) { const out = []; for (const a of list) out.push(...a); return new Uint8Array(out); } }; }',
+].join('\n') + '\n'
+const dynHost = DYN_HOST_PRELUDE + minifyDynamicClosure(hostBody)
 const dynClient = minifyDynamicClosure(clientBody)
 const HOST_LIMIT = 80 * 1024
 const CLIENT_LIMIT = 80 * 1024

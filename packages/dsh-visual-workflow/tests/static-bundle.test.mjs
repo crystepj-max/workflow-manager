@@ -89,14 +89,21 @@ test('静态 bundle dist 含语言资源与内置角色正文', () => {
   assert.ok(existsSync(join(here, '..', 'dist', 'dynamic', 'client.js')), 'dist/dynamic/client.js 必须存在')
 })
 
-test('开发粘贴用 dynamic 闭包双半均 ≤ 80KB', () => {
+test('开发粘贴用 dynamic 闭包双半均 ≤ 80KB，host 自带头部常量与 Buffer 垫片', () => {
   const host = readFileSync(join(here, '..', 'dist', 'dynamic', 'host.js'))
   const client = readFileSync(join(here, '..', 'dist', 'dynamic', 'client.js'))
   const limit = 80 * 1024
   assert.ok(host.byteLength <= limit, `host ${host.byteLength} > ${limit}`)
   assert.ok(client.byteLength <= limit, `client ${client.byteLength} > ${limit}`)
-  assert.match(host.toString('utf8'), /^return\{/, 'host 必须是 return {...} 闭包体')
-  assert.match(client.toString('utf8'), /^return\{/, 'client 必须是 return {...} 闭包体')
+  const hostText = host.toString('utf8')
+  const clientText = client.toString('utf8')
+  // 闭包体形态：前置语句（注入头/垫片）之后必须是 return {...}（宿主以函数体求值）
+  assert.match(hostText, /\nreturn\{name:"visual-workflow-host"/, 'host 必须以注入头 + return {...} 闭包体收尾')
+  assert.match(clientText, /^return\{/, 'client 必须是 return {...} 闭包体')
+  // 动态沙箱缺省注入：插件根常量（loadDist 内核来源）与 Buffer 垫片（validate-core 尺寸检查依赖）
+  assert.match(hostText, /const __VWF_PLUGIN_ROOT__ = "/, 'host 必须自注入 __VWF_PLUGIN_ROOT__（动态沙箱不提供）')
+  assert.match(hostText, /const __VWF_REPO_ROOT__ = "/, 'host 必须自注入 __VWF_REPO_ROOT__（generate/workspace-host 路径来源）')
+  assert.match(hostText, /globalThis\.Buffer/, 'host 必须注入 globalThis.Buffer 垫片（validate-core 尺寸检查依赖）')
 })
 
 test('静态 bundle dist 含 role-library.cjs + builtin-roles.json 且内核可加载（角色库正式安装路径）', () => {
