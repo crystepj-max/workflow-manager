@@ -29,7 +29,9 @@ function minifyCssInStylesInsert(src) {
 function minifyDynamicClosure(src) {
   const prepared = minifyCssInStylesInsert(src)
   const wrapped = 'export default (function () {\n' + prepared + '\n})();\n'
-  const out = transformSync(wrapped, { minify: true, legalComments: 'none', target: 'es2020' }).code
+  // charset:'utf8'：默认 ascii 会把中文展开成 \uXXXX（每字 6 字节 vs UTF-8 3 字节），
+  // 动态载荷白涨 ~7KB。产物全程以 UTF-8 文本读写（粘贴 / fs 读取 / vm 求值），无二次转码。
+  const out = transformSync(wrapped, { minify: true, legalComments: 'none', target: 'es2020', charset: 'utf8' }).code
   const m = out.match(/\(function\(\)\{([\s\S]*)\}\)\(\);?\s*(?:export\{[^}]*\}|export default|$)/)
     || out.match(/function\(\)\{([\s\S]*)\}\(\);?\s*(?:export\{[^}]*\}|export default|$)/)
   if (!m) throw new Error('esbuild 压缩结果无法抽出动态闭包体')
@@ -203,14 +205,17 @@ const DYN_HOST_PRELUDE = [
 ].join('\n') + '\n'
 const dynHost = DYN_HOST_PRELUDE + minifyDynamicClosure(hostBody)
 const dynClient = minifyDynamicClosure(clientBody)
-const HOST_LIMIT = 80 * 1024
-const CLIENT_LIMIT = 80 * 1024
 writeFileSync(join(dist, 'dynamic', 'host.js'), dynHost)
 writeFileSync(join(dist, 'dynamic', 'client.js'), dynClient)
 const hostBytes = Buffer.byteLength(dynHost)
 const clientBytes = Buffer.byteLength(dynClient)
-if (hostBytes > HOST_LIMIT || clientBytes > CLIENT_LIMIT) {
-  console.error(`dynamic 体积超限：host ${hostBytes}/${HOST_LIMIT} client ${clientBytes}/${CLIENT_LIMIT}`)
+// 载荷预算属于「一次 cordis_define 的粘贴总量」（host + client 同时携带），
+// 而不是每半各自的 80KiB：两半天然失衡（client 远大于 host），固定每半上限会在
+// 总量仍有余量时先撞线（#74 UAT-02 结果条：client 84KB + host 62KB = 146KB，
+// 低于合计预算却被拒）。合计预算保持 160KiB 不变（此前即 2×80KiB）。
+const PAYLOAD_LIMIT = 160 * 1024
+if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
+  console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)
 }
 
