@@ -98,7 +98,8 @@ function foldableNodes(bp) {
 
 // ---------- DSH 侧编译（契约 §4.2/§4.3，移植 host.js compileDsl + 增强） ----------
 // 统一编译器（候选一 T-IMP-12）：DSH 与 vwf 双入口的唯一翻译员。
-// 宿主侧 compileDsl 已删除，经管道消费本函数产物（磁盘产物优先 + CLI compile 兜底）。
+// 宿主侧 compileDsl 经管道消费本函数产物：一律现编译优先（与引擎契约同源），
+// 磁盘预编译产物仅在无子进程环境整体回落（UAT-80 实证过期产物与引擎不兼容）。
 export function compileBlueprint(bp, opts = {}) {
   // 编译输入尺寸闸门（#131）：CLI compile 不做蓝图校验，vwf.script / wf_run 的临时图
   // 直达此处——主闸必须在编译器入口，保证任何进入编译的文档响应必小于通道上限。
@@ -175,6 +176,10 @@ export function compileBlueprint(bp, opts = {}) {
     'const ROLE_DEFS = ' + JSON.stringify(builtinRoleDefs),
     'const BYID = {}',
     'for (const n of NODES) BYID[n.id] = n',
+    // #80 暂停/中断恢复现场：每个节点完成路由后输出检查点行（current/results/history 全量）。
+    // 引擎取消后脚本返回值被强制丢弃（value=null），宿主据此行重建 resume 载荷；
+    // 解析失败或缺失时宿主诚实降级（要求人工指定 entry，不猜现场）。
+    'function pwCk(next) { try { log(\'[pw-ckpt]\' + JSON.stringify({ c: next, r: results, h: history, rd: round, fb: feedback, bu: budgetUsed, mr: maxRounds, ds: decisionSeq })) } catch (e) { /* 检查点失败不影响运行 */ } }',
   ];
   if (hetero) {
     lines.push(
@@ -222,9 +227,12 @@ export function compileBlueprint(bp, opts = {}) {
     '  return failedCount > failOn',
     '}',
     'function issueBlock() {',
-    '  if (A.issueBody) return \'GitHub issue \' + (A.issueRef || \'\') + \'\\n标题：\' + (A.issueTitle || \'（未提供）\') + \'\\n正文：\\n\' + A.issueBody + (A.issueComments ? \'\\n\\n需求确认相关评论：\\n\' + A.issueComments : \'\')',
-    '  if (A.requirement) return \'原始需求文本（运行时直接给出，以此为准）：\\n\' + A.requirement',
-    '  return \'（本任务未提供 issue 或需求文本，请以前序产物为准）\'',
+    '  let s = \'\'',
+    '  if (A.issueBody) s = \'GitHub issue \' + (A.issueRef || \'\') + \'\\n标题：\' + (A.issueTitle || \'（未提供）\') + \'\\n正文：\\n\' + A.issueBody + (A.issueComments ? \'\\n\\n需求确认相关评论：\\n\' + A.issueComments : \'\')',
+    '  else if (A.requirement) s = \'原始需求文本（运行时直接给出，以此为准）：\\n\' + A.requirement',
+    '  else s = \'（本任务未提供 issue 或需求文本，请以前序产物为准）\'',
+    '  if (A.baseline_amendment) s += \'\\n\\n【需求基线修订（用户暂停期间显式变更，以此为准覆盖原基线相应内容）】\\n\' + A.baseline_amendment',
+    '  return s',
     '}',
     'function roleRef(name) {',
     opts.noRole
@@ -254,6 +262,7 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (WS) s += \'\\n- workspace 路径：\' + WS + \'（#93 隔离工作区，其下 source=业务源码、records=Formal Records、tmp/build/cache=按 Run 隔离资源）\'',
     '  if (RECORDS) s += \'\\n- records 路径：\' + RECORDS + \'（Formal Records 证据记录目录，业务证据写入此目录）\'',
     '  if (A.workspace_capability) s += \'\\n- workspace RPC 能力令牌（调用 vwf.workspace.* / vwf_workspace 时必须原样携带）：\' + A.workspace_capability + \'（仅限本 Run 使用，禁止用于其他 Run 的 taskId）\'',
+    '  if (A.guidance_text) s += \'\\n【用户指导（用户暂停期间补充的执行指导，必须遵循）】\\n\' + A.guidance_text + \'\\n\'',
     '  s += \'\\n- 当前节点：\' + (n.label || nodeId) + \'\\n- 完成本节点后更新 \' + RUNDIR + \'/STATE.md（stage / round / status / updated，时间用 date -u +%FT%TZ）\\n\'',
     '  if (n.output && n.output.files) {',
     '    const _hints = Object.entries(n.output.files).map(([p,k]) => p + \'(\' + k + \')\' + ({ html: \'（完整 HTML 文档）\', canvas: \'（JSON 画布结构）\', flowchart: \'（JSON 流程图）\', diagram: \'（JSON 结构图）\' }[k] || \'\'))',
@@ -577,6 +586,7 @@ export function compileBlueprint(bp, opts = {}) {
     '    const e = route(current, results[current], true)',
     '    if (!e) return { status: \'ERROR\', detail: \'折叠节点无出边：\' + current }',
     '    current = e.to',
+    '    pwCk(current)',
     '    continue',
     '  }',
     '  if (n.manualCheck) {',
@@ -648,11 +658,12 @@ export function compileBlueprint(bp, opts = {}) {
     '        history.push({ round: round, stage: failId, from: failId, to: et.to, on: \'technical\', countRound: false })',
     '        current = et.to',
     '        feedback = \'【\' + failLabel + \' agent 技术失败】请重试并自查（上一轮最终回复未通过格式校验，请只输出符合本节点 output.schema 的裸 JSON）。\'',
+    '        pwCk(current)',
     '        continue',
     '      }',
     '      const ef = route(failId, null, false)',
     '      if (!ef || ef.to === \'$end\') return { status: \'TECHNICAL_FAILURE\', stage: failId, round: round, results: results, history: history }',
-    '      current = ef.to; round++; feedback = \'【\' + failLabel + \' agent 技术失败】请重试并自查（上一轮最终回复未通过格式校验，请只输出符合本节点 output.schema 的裸 JSON）。\'; continue',
+    '      current = ef.to; round++; feedback = \'【\' + failLabel + \' agent 技术失败】请重试并自查（上一轮最终回复未通过格式校验，请只输出符合本节点 output.schema 的裸 JSON）。\'; pwCk(current); continue',
     '    }',
     '    ok = n.output && n.output.successCondition ? cond(n.output.successCondition, res) : true',
     '  }',
@@ -665,6 +676,7 @@ export function compileBlueprint(bp, opts = {}) {
     '        history.push({ round: round, stage: current, from: current, to: et.to, on: \'technical\', countRound: false })',
     '        current = et.to',
     '        feedback = \'【\' + (n.label || current) + \' 可信度闸门失败】\' + ce',
+    '        pwCk(current)',
     '        continue',
     '      }',
     '      return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, detail: ce, results: results, history: history }',
@@ -689,6 +701,7 @@ export function compileBlueprint(bp, opts = {}) {
     '      return translateRouteHalted({ status: \'ROUTE_HALTED\', reason: \'HUMAN_DECISION\', node: current }, res)',
     '    }',
     '    current = e.to',
+    '    pwCk(current)',
     '    continue',
     '  }',
     '  const e = route(current, res, ok)',
@@ -714,6 +727,7 @@ export function compileBlueprint(bp, opts = {}) {
     '    feedback = \'\'',
     '  }',
     '  current = e.to',
+    '  pwCk(current)',
     '}',
     'const done = { status: \'DONE\', taskId: TASK, round: round, results: results, history: history, completion: completionOf(lastNode), budgetUsed: budgetUsed, maxRounds: maxRounds }',
     'if (choiceEvent) { done.decision_id = A.decision_id; done.user_choice = A.user_choice; done.control_event = choiceEvent }',

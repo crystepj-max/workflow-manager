@@ -2481,13 +2481,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     function statusBadge(status) {
       const s = String(status || '')
-      const color = s === 'DONE' ? STATUS_COLOR.pass : s === 'running' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0) ? STATUS_COLOR.human : STATUS_COLOR.fail
+      // #80：PAUSED 用人工关注色（可恢复等待态），不落 fail 色
+      const color = s === 'DONE' ? STATUS_COLOR.pass : s === 'running' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED') ? STATUS_COLOR.human : STATUS_COLOR.fail
       const label = s === 'WAITING_HUMAN' ? t('dashWaitHuman') : s.indexOf('AWAITING_HUMAN_') === 0 ? t('dashHumanGate') : (s || '—')
       return h('span', { className: 'vwf-badge', style: { color: color } }, label)
     }
     function isActiveRunStatus(status) {
       const s = String(status || '')
-      return s === 'running' || s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0
+      return s === 'running' || s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED'
     }
 
     // 运行看板（#19 多 run 并行）：运行清单 + 切换、门禁卡片队列（一次裁决一张）、
@@ -2543,6 +2544,19 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const snapState = snap && snap.found ? snap.state : null
       const dsl = snapState ? (tplMap[snapState.workflowId] || null) : null
       const st = snapState && dsl ? mapStatus(snapState, dsl) : {}
+      // #80 运行控制面：暂停/中断经看板下发（运行中 Chat 被 wf_run 阻塞，看板 RPC 是唯一
+      // 实时通道）；恢复与指导保持命令式入口（与 Human Decision 续跑同模式），最终 UI 归 #75。
+      // 状态与待生效标志取 runs.list join（host 权威）；PAUSED 详情卡轮询逻辑运行摘要。
+      const selRow = snapState ? (allRuns.find((r) => r.id === snapState.id) || null) : null
+      const lrunId = selRow ? String(selRow.logical_run_id || '') : ''
+      const lrState = selRow ? String(selRow.logical_state || '') : ''
+      const [lrun, setLrun] = React.useState(null)
+      React.useEffect(() => { if (lrunId && lrState === 'PAUSED') host.call('vwf.logicalRuns.get', { logical_run_id: lrunId }).then((r) => { if (r && r.found) setLrun(r.record) }).catch(() => {}) }, [lrunId, lrState, snapState ? snapState.updatedAt : 0])
+      const sendControl = (action) => {
+        if (!lrunId) return
+        if (action === 'interrupt' && !window.confirm(t('ctlConfirmInterrupt'))) return
+        host.call('vwf.run.control', { action, logical_run_id: lrunId }).then((r) => { if (r && r.ok) fetchState(runId) }).catch(() => {})
+      }
       return h('div', { className: 'vwf-root' },
         activeCount >= 2 ? h('div', { className: 'vwf-code', style: { borderColor: STATUS_COLOR.human, marginBottom: 8 } },
           t('dashParallel', { n: activeCount })) : null,
@@ -2624,7 +2638,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, 'pass'),
                     h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.fail } }, 'fail'),
                     h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('dashHumanGate'))
-                  )
+                  ),
+                  lrState ? h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 6, flexWrap: 'wrap' } },
+                    lrState === 'RUNNING' ? h('button', { className: 'vwf-btn sm', onClick: () => sendControl('pause') }, t('ctlPause')) : null,
+                    lrState === 'RUNNING' ? h('button', { className: 'vwf-btn sm', onClick: () => sendControl('interrupt') }, t('ctlInterrupt')) : null,
+                    selRow.pause_pending ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('ctlPending')) : null) : null,
+                  lrState === 'PAUSED' && lrun ? h('div', { className: 'vwf-card', style: { marginTop: 8, padding: '10px 14px' } },
+                    h('div', { className: 'vwf-card-title' }, t('pausedTitle', { id: lrun.logical_run_id, code: (lrun.lifecycle && lrun.lifecycle.reason && lrun.lifecycle.reason.code) || 'PAUSED' })),
+                    h('div', { className: 'vwf-code', style: { marginTop: 6 } }, t('pausedResumeCmd', { taskId: snapState.taskId, tpl: snapState.workflowId }) + '\n' + t('pausedGuidanceCmd', { id: lrun.logical_run_id })),
+                    (lrun.guidance && lrun.guidance.length) ? h('div', { className: 'vwf-code', style: { marginTop: 8 } },
+                      t('guidanceTimeline') + '\n' + lrun.guidance.map((g) => '#' + g.seq + ' · ' + t(g.mode === 'baseline' ? 'guidanceBaseline' : 'guidanceCoach') + ' · ' + new Date(g.at).toLocaleString() + ' · ' + (g.mode === 'baseline' ? t('baselineNewText') + (g.new_baseline || '') : (g.text || ''))).join('\n')) : null) : null,
                 ),
                 dsl ? h('div', { className: 'vwf-card', style: { marginTop: 8 } }, h(Canvas, { dsl, readOnly: true, statusMap: st })) : null,
                 h('table', { className: 'vwf-table', style: { marginTop: 8 } },
