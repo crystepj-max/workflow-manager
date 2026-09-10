@@ -387,6 +387,21 @@ return {
     const metaFromDsl = (dsl) => ({ name: 'vwf-' + (dsl.id || 'run'), description: dsl.name || dsl.id || 'visual workflow run', phases: (dsl.nodes || []).map((n) => ({ title: n.label || n.id })) })
     async function compileDsl(dsl, opts) {
       const d = await homeDirs()
+      // 先现编译（与当前生成器/引擎契约同源），预编译产物仅作无子进程环境的回落：
+      // 保存闭环产物可能出自旧版生成器（如 agent cwd 契约收紧前），优先复用会让
+      // 运行时执行与引擎不兼容的过期脚本（UAT 实证：skill 产物带 cwd 被新引擎拒绝）
+      if (subprocess !== undefined && GENERATOR) {
+        const bp = JSON.stringify((await kernel()).projectToBlueprint(dsl))
+        if (bp.length > 120 * 1024) return { ok: false, detail: '蓝图过大（超过 120KB），无法作为编译参数传递' }
+        // 编译输出上限 1MB：全内置角色内联的图约 66KB，默认 64KB 会静默截断
+        const r = await runNode([GENERATOR, 'compile', '--inline', bp], { graceMs: 30000, maxBytes: 1024 * 1024 })
+        if (!r.ok) return { ok: false, detail: r.detail }
+        try {
+          const out = JSON.parse(r.stdout)
+          if (!out.ok) return { ok: false, detail: '编译器返回错误：' + (out.error || '未知') }
+          return { ok: true, script: out.script, meta: out.meta || metaFromDsl(dsl) }
+        } catch (e) { return { ok: false, detail: '编译器输出不可解析：' + errMsg(e) } }
+      }
       if (opts && opts.fromTemplate && d) {
         for (const spot of [d.skillRoot].concat(generatedRoots())) {
           const script = await readTextIfExists(spot + '/' + dsl.id + '/script.mjs')
@@ -398,17 +413,7 @@ return {
           return out
         }
       }
-      if (subprocess === undefined || !GENERATOR) return { ok: false, detail: '宿主子进程能力不可用或插件根未注入：无法编译（模板来源请先运行 npm run generate 或经保存闭环）' }
-      const bp = JSON.stringify((await kernel()).projectToBlueprint(dsl))
-      if (bp.length > 120 * 1024) return { ok: false, detail: '蓝图过大（超过 120KB），无法作为编译参数传递' }
-      // 编译输出上限 1MB：全内置角色内联的图约 66KB，默认 64KB 会静默截断
-      const r = await runNode([GENERATOR, 'compile', '--inline', bp], { graceMs: 30000, maxBytes: 1024 * 1024 })
-      if (!r.ok) return { ok: false, detail: r.detail }
-      try {
-        const out = JSON.parse(r.stdout)
-        if (!out.ok) return { ok: false, detail: '编译器返回错误：' + (out.error || '未知') }
-        return { ok: true, script: out.script, meta: out.meta || metaFromDsl(dsl) }
-      } catch (e) { return { ok: false, detail: '编译器输出不可解析：' + errMsg(e) } }
+      return { ok: false, detail: '宿主子进程能力不可用或插件根未注入：无法编译（模板来源请先运行 npm run generate 或经保存闭环）' }
     }
 
     // ── 运行记录：内存与磁盘同一结构，全部常驻内存 ────────────────────────────────
