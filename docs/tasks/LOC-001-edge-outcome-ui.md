@@ -10,7 +10,7 @@
 | 任务名称 | 编辑器边判断条件适配业务结果路由 |
 | 任务类型 | 完整功能开发 |
 | 优先级 | P1 |
-| 当前状态 | 等待验收 |
+| 当前状态 | 已合并（CNB） |
 | 需求基线版本 | V2 |
 | 前置依赖 | 无 |
 | 施工环境组 | LOC-001 |
@@ -126,4 +126,4 @@
 - 动态开发态仍在运行（`vwf-1` / `pkg-8`）：收尾时应 `cordis_stop`（保留 Package 与授权，可一键恢复）；开发阶段整体结束或转产品验收时再 `cordis_undefine`。**动态开发态不是发布证据**，PR/Release 前须关开发 DSH、重启产品 DSH 并从真实安装路径验证正式 `dsh-visual-workflow` 组合包。
 - 本轮临时调查脚手架（`.scratch/dev-bug-repro/`、`.scratch/routing-demo/`）**未删除成功**：harness 的 safe-delete 守卫改走系统 Trash 失败（`FSMoveObjectToTrashSync status -5000`，拒绝对外删除，fail-closed），已放弃绕过。两者均在 `.gitignore`（`.scratch/`）内，不影响构建/测试/运行与提交；可复用的证据已内联于上一节，故这两个目录可随时由人工删除（Finder 或普通终端 `rm -rf`）。
 - 示例模板 `outcome-routing-demo` 在开发 Home 内（`~/.dsh-workflow-loc001/visual-workflow/templates/`，用户保存时同步生成了 `~/.dsh-workflow-loc001/skills/outcome-routing-demo/`），不属仓库资产；不想要可在「模板库」删除模板（连带删 skill）。
-
+| 2026-09-11 | 已合并（CNB） | 用户验收通过，随 `fix/vwf-payload-limit` 合并请求收口（同批修正动态载荷合计预算 160KiB→176KiB 的构建侧硬闸门，测试侧已由 57c25f6 同步） |
