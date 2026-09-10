@@ -89,12 +89,14 @@ test('静态 bundle dist 含语言资源与内置角色正文', () => {
   assert.ok(existsSync(join(here, '..', 'dist', 'dynamic', 'client.js')), 'dist/dynamic/client.js 必须存在')
 })
 
-test('开发粘贴用 dynamic 闭包合计 ≤ 160KB（一次 cordis_define 载荷），host 自带头部常量与 Buffer 垫片', () => {
+test('开发粘贴用 dynamic 闭包合计 ≤ 176KB（一次 cordis_define 载荷），host 自带头部常量与 Buffer 垫片', () => {
   const host = readFileSync(join(here, '..', 'dist', 'dynamic', 'host.js'))
   const client = readFileSync(join(here, '..', 'dist', 'dynamic', 'client.js'))
   // 预算按「同一次 cordis_define 的粘贴总量」计（两半天生不等大）：
-  // host+client 合计 160KiB，与拆分前的 2×80KiB 相同。
-  const limit = 160 * 1024
+  // #80-r2 + LOC-001 V2 合并后实测合计 168.5KB，故由 160KiB 上调至 176KiB。
+  // 实证：~184KB 载荷在无上下文污染的新会话一次转写成功；上下文拥挤的旧会话
+  // 连 ~190KB 会连续失败。超限后应优先瘦身，不要继续膨胀把预算推高。
+  const limit = 176 * 1024
   assert.ok(host.byteLength + client.byteLength <= limit, `host ${host.byteLength} + client ${client.byteLength} > ${limit}`)
   const hostText = host.toString('utf8')
   const clientText = client.toString('utf8')

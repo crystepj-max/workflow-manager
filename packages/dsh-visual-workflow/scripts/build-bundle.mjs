@@ -212,8 +212,9 @@ const clientBytes = Buffer.byteLength(dynClient)
 // 载荷预算属于「一次 cordis_define 的粘贴总量」（host + client 同时携带），
 // 而不是每半各自的 80KiB：两半天然失衡（client 远大于 host），固定每半上限会在
 // 总量仍有余量时先撞线（#74 UAT-02 结果条：client 84KB + host 62KB = 146KB，
-// 低于合计预算却被拒）。合计预算保持 160KiB 不变（此前即 2×80KiB）。
-const PAYLOAD_LIMIT = 160 * 1024
+// 低于合计预算却被拒）。#80-r2 + LOC-001 V2 合并后实测合计 168.5KB，由 160KiB
+// 上调至 176KiB（实证 ~184KB 一次转写可行；超限后应优先瘦身，不要继续推高）。
+const PAYLOAD_LIMIT = 176 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)
