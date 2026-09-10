@@ -211,6 +211,10 @@
   "probeStatusUnreachable": "provider unreachable",
   "probeStatusTimeout": "timeout",
   "probeStatusOther": "other provider error",
+  "probeStatusProviderNotConfigured": "provider not configured",
+  "probeStatusModelNotConfigured": "model not configured (absent from catalog)",
+  "probeStatusInternalError": "probe internal error (not a provider verdict)",
+  "probeBindingNodes": " (nodes: {nodes})",
   "probeStatusDegraded": "probe degraded (no real call)",
   "probeStatusUnknown": "unknown"
 }

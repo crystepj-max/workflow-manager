@@ -1,8 +1,9 @@
 // #74 Runtime Preflight Probe 测试（fake fs/llm 服务）：
 // 静态失败不发起探针 / 全可用 / 单模型失败分类与错误清洗 / 绑定去重 /
 // 短时缓存与强制重新验证 / wf_run 新启探针失败 BLOCKED / BLOCKED 恢复
-// （model_overrides → 新 Revision → 重探 → 同一 logical_run_id）/ 恢复缺
-// model_overrides 提示 / 探针降级不阻断启动
+// （model_overrides → 新 Revision → 重探 → 同一 run_id）/ 恢复缺
+// model_overrides 提示 / 探针降级不阻断启动 / 请求形态契约（UAT-02 误报回归）/
+// 配置判定（已删除的 Provider/Model）/ 探针内部错误不阻断
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -44,14 +45,34 @@ async function until(fn, label, ms = 4000) {
   }
 }
 
-function makeLlm({ providers = ['p1', 'p2'], models = { p1: ['m1'], p2: ['m2'] }, fail = {}, noStream = false, emptyStop = false, closeEarly = false } = {}) {
+function makeLlm({ providers = ['p1', 'p2'], models = { p1: ['m1'], p2: ['m2'] }, fail = {}, noStream = false, emptyStop = false, closeEarly = false, internalError = false, modelsThrow = false } = {}) {
   const streams = []
   const llm = {
     listProviders() { return providers.map((id) => ({ id: id, name: id })) },
-    async listModels(id) { return (models[id] || []).map((m) => ({ id: m, name: m })) },
+    async listModels(id) {
+      if (modelsThrow) throw new Error('catalog unavailable')
+      return (models[id] || []).map((m) => ({ id: m, name: m }))
+    },
     stream(opts) {
       streams.push(opts)
+      // 真实宿主形态约束（UAT-02 误报回归的根因）：LlmRuntime.stream() 会对
+      // message.content 做文件/图片投影（contentHasFile/contentHasImage），
+      // 文本模型上 content 不是内容块数组时抛 TypeError「content.some is not a
+      // function」，并被归一化为终态 finish(error)。这里复刻该约束：探针一旦
+      // 回退到裸字符串 content，全部"可用"用例会立刻失败，而不是继续通过。
+      for (const m of opts.messages || []) {
+        if (!Array.isArray(m.content)) {
+          return (async function* () {
+            yield { type: 'finish', reason: { kind: 'error', failure: { message: 'content.some is not a function', code: 'UNKNOWN' } } }
+          })()
+        }
+      }
       if (noStream) return { not: 'iterable' }
+      if (internalError) {
+        return (async function* () {
+          yield { type: 'finish', reason: { kind: 'error', failure: { message: 'content.some is not a function', code: 'UNKNOWN' } } }
+        })()
+      }
       const key = opts.provider + '\u0000' + opts.model
       const f = fail[key]
       if (f) {
@@ -148,7 +169,10 @@ test('vwf.probe：全可用 + 同绑定去重（两节点只探一次）', async
   assert.equal(llm._streams.length, 1)
   assert.equal(llm._streams[0].maxTokens, 1, '最小真实调用')
   assert.equal(llm._streams[0].messages.length, 1)
-  assert.equal(llm._streams[0].messages[0].content, 'ping', '不携带业务正文')
+  // 请求形态契约（UAT-02）：content 必须是内容块数组，不能是裸字符串——宿主
+  // LlmRuntime 会对 content 做投影，字符串会 TypeError 并被归一化为终态失败。
+  assert.ok(Array.isArray(llm._streams[0].messages[0].content), 'content 必须是内容块数组')
+  assert.deepEqual(llm._streams[0].messages[0].content, [{ type: 'text', text: 'ping' }], '只发最小 ping 内容块')
 })
 
 test('vwf.probe：单模型失败分类 + 凭证清洗 + 失败结果不缓存（修复后立即重探生效）', async () => {
@@ -375,4 +399,97 @@ test('wf_run 无 llm 服务：跳过探针不阻断启动', async () => {
   eng.end('run-1', 'completed', { status: 'DONE', results: { explore: { verdict: 'PASS' }, closeout: { result: 'ok' } } })
   events.get('workflow/end')({ id: 'run-1' }, { stopReason: 'completed' })
   await p
+})
+
+// ── UAT-02 误报回归（可用模型被判不可用）────────────────────────────────────
+// 根因：探针用裸字符串 content 发起请求，宿主 LlmRuntime 对 content 做图片投影
+// （contentHasImage → content.some）时抛 TypeError，被归一化为终态 finish(error)，
+// 于是所有绑定一律报"其他 Provider 错误"。三层护栏：
+//   ① fake llm 复刻宿主形态约束（回退字符串 content 时全部用例立即失败）；
+//   ② 断言探针发出的 content 是内容块数组；
+//   ③ 配置判定与可用性判定分开，已删除配置的模型报"未配置"而不是"可用"或"其他错误"。
+
+test('vwf.probe：请求形态护栏——fake 按宿主形态拒绝裸字符串 content（回归护栏自证有效）', async () => {
+  const llm = makeLlm()
+  const { handlers } = env({ extra: { llm } })
+  const r = await call(handlers, 'vwf.probe', { dsl: EDITOR_DSL, force: true })
+  assert.equal(r.ok, true, '内容块数组形态必须判可用')
+  const sent = llm._streams[0].messages[0].content
+  assert.ok(Array.isArray(sent) && sent[0] && sent[0].type === 'text', 'content 必须是 [{type:"text"}]')
+  // 形态护栏自证：沿同一 fake 直接发字符串 content，必须复现宿主 TypeError 形态
+  const iter = llm.stream({ provider: 'p1', model: 'm1', messages: [{ role: 'user', content: 'ping' }], maxTokens: 1 })
+  const chunks = []
+  for await (const c of iter) chunks.push(c)
+  assert.equal(chunks[0].reason.kind, 'error')
+  assert.equal(chunks[0].reason.failure.message, 'content.some is not a function')
+})
+
+test('vwf.probe：配置判定——已删除的 Provider/Model 报未配置且不发真实调用', async () => {
+  const llm = makeLlm({ providers: ['deepseek-official'], models: { 'deepseek-official': ['deepseek-v4.1-flash'] } })
+  const { handlers } = env({ extra: { llm } })
+  const mk = (provider, model) => ({ ...EDITOR_DSL, nodes: [{ id: 'a', profile: 'dispatcher', label: 'A', goal: 'g', model: { provider: provider, model: model } }], edges: [{ from: 'a', to: '$end', on: 'success' }] })
+  // 已删除配置的模型：上游也许仍能应答，但配置已失效 → 必须报未配置（用户口径）
+  const goneModel = await call(handlers, 'vwf.probe', { dsl: mk('deepseek-official', 'deepseek-v4-pro') })
+  assert.equal(goneModel.ok, false)
+  assert.equal(goneModel.results[0].status, 'model_not_configured')
+  assert.equal(goneModel.results[0].code, 'MODEL_NOT_CONFIGURED')
+  assert.ok(goneModel.results[0].message.includes('deepseek-v4-pro'), '消息点明具体模型')
+  assert.deepEqual(goneModel.results[0].nodes, ['a'], '受影响节点回填')
+  const goneProvider = await call(handlers, 'vwf.probe', { dsl: mk('kimi-coding', 'k3') })
+  assert.equal(goneProvider.results[0].status, 'provider_not_configured')
+  assert.equal(goneProvider.results[0].code, 'PROVIDER_NOT_CONFIGURED')
+  assert.equal(llm._streams.length, 0, '配置判定不发真实调用')
+  // 已配置的绑定仍走真实探针并判可用
+  const live = await call(handlers, 'vwf.probe', { dsl: mk('deepseek-official', 'deepseek-v4.1-flash') })
+  assert.equal(live.ok, true)
+  assert.equal(live.results[0].status, 'available')
+  assert.equal(llm._streams.length, 1)
+})
+
+test('vwf.probe：模型目录不可读（listModels 抛错）不做配置判定——退回真实探针', async () => {
+  const llm = makeLlm({ modelsThrow: true })
+  const { handlers } = env({ extra: { llm } })
+  const r = await call(handlers, 'vwf.probe', { dsl: EDITOR_DSL })
+  assert.equal(r.ok, true, '目录不可读不得据此判不可用')
+  assert.equal(r.results[0].status, 'available')
+  assert.equal(llm._streams.length, 1, '目录不可读时退回真实探针')
+})
+
+test('vwf.probe：探针内部错误单独成类，不伪装成"其他 Provider 错误"', async () => {
+  const llm = makeLlm({ internalError: true })
+  const { handlers } = env({ extra: { llm } })
+  const r = await call(handlers, 'vwf.probe', { dsl: EDITOR_DSL, force: true })
+  assert.equal(r.ok, false)
+  assert.equal(r.results[0].status, 'probe_internal_error')
+  assert.ok(r.results[0].message.includes('content.some is not a function'), '保留宿主原始信息供定位')
+})
+
+test('wf_run：探针内部错误（疑似探针缺陷）不阻断启动', async () => {
+  const llm = makeLlm({ internalError: true })
+  const eng = makeEngine()
+  const { events, definedTools } = engineEnv(eng, { extra: { llm } })
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const p = wfRun.execute({ templateId: 'preflight-spec', taskId: 'issue-ie' })
+  await until(() => eng.starts.length >= 1, '探针内部错误不阻断启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: '探针规格图' } })
+  eng.end('run-1', 'completed', { status: 'DONE', results: { explore: { verdict: 'PASS' }, closeout: { result: 'ok' } } })
+  events.get('workflow/end')({ id: 'run-1' }, { stopReason: 'completed' })
+  await p
+})
+
+test('wf_run：绑定模型已从配置删除 → BLOCKED 且原因为模型未配置', async () => {
+  const llm = makeLlm({ providers: ['p1', 'p2'], models: { p1: ['m1'], p2: ['m9'] } })
+  const eng = makeEngine()
+  const { definedTools, fs } = engineEnv(eng, { extra: { llm } })
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const out = await wfRun.execute({ templateId: 'preflight-spec', taskId: 'issue-nc' })
+  const payload = JSON.parse(out)
+  assert.equal(payload.blocked, true)
+  assert.equal(payload.stage, 'preflight_probe')
+  assert.equal(payload.failures[0].status, 'model_not_configured')
+  assert.equal(eng.starts.length, 0, '配置失效不得启动引擎')
+  await drain()
+  const rec = readLogical(fs, 'issue-nc')
+  assert.equal(rec.lifecycle.state, 'BLOCKED')
+  assert.equal(rec.lifecycle.reason.code, 'PROBE_FAILED')
 })

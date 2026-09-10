@@ -855,6 +855,12 @@ return {
     const PROBE_DEBOUNCE_MS = 5000
     const probeCache = new Map() // 指纹 → { at, results }；仅性能优化，重启即失效
     const probeOk = (r) => r.status === 'available'
+    // 不阻断启动的探针结论：这些状态不表达"该绑定不可用"的事实，只是探针自身
+    // 的局限（宿主无生成流能力 / 探针请求形态被宿主拒绝）。阻断只留给对绑定本身
+    // 有结论的失败（配置缺失、鉴权、配额、不可达、模型不存在…），否则探针缺陷
+    // 会变成"全量 BLOCKED"（UAT-02 教训）。
+    const PROBE_NON_BLOCKING = new Set(['available', 'probe_degraded', 'probe_internal_error'])
+    const probeBlocksStart = (r) => !PROBE_NON_BLOCKING.has(r.status)
     // sanitized DSL / 快照 provider_model → 去重绑定集合（provider+model 相同只探一次）
     function dedupeProbeBindings(nodeBindings) {
       const out = new Map()
@@ -873,6 +879,51 @@ return {
       const map = {}
       for (const n of (dsl && dsl.nodes) || []) if (n && n.id && n.model) map[String(n.id)] = n.model
       return dedupeProbeBindings(map)
+    }
+    // 绑定 → 配置事实（listProviders/listModels）：provider 是否注册、model 是否
+    // 在已配置目录中。这不是可用性判定（目录成员资格是 advisory），而是"节点绑定
+    // 指向的路由是否还存在"的判定：UAT-02 实测——已删除配置的 v4-pro/v4-flash 上游
+    // 仍能应答，只有配置判定能识别它们"确实不可用"（用户口径：配置已删除即不可用）。
+    // 目录读不到（listProviders 抛错 / listModels 抛错或返回空目录）一律按"无法判定"
+    // 处理，退回真实探针结论，避免目录不完整造成新的误报。
+    async function probeCatalog(llm, bindings) {
+      let registered = null
+      try {
+        const list = (await Promise.resolve(llm.listProviders())) || []
+        registered = new Set(list.map((p) => String((p && (p.id || p.provider || p.name)) || '')).filter(Boolean))
+      } catch (e) { return null }
+      const models = new Map()
+      for (const b of bindings) {
+        if (!registered.has(b.provider) || models.has(b.provider)) continue
+        let set = null
+        try {
+          const list = (await Promise.resolve(llm.listModels(b.provider))) || []
+          const ids = list.map((m) => String((m && (m.id || m.model || m.name)) || '')).filter(Boolean)
+          set = ids.length ? new Set(ids) : null // 空目录视为未知，不据此判不可用
+        } catch (e) { set = null }
+        models.set(b.provider, set)
+      }
+      return { registered: registered, models: models }
+    }
+    // 配置判定结论（null = 无法判定/配置正常，交给真实探针）
+    function classifyProbeBinding(catalog, binding) {
+      if (!catalog) return null
+      if (!catalog.registered.has(binding.provider)) {
+        return {
+          status: 'provider_not_configured',
+          code: 'PROVIDER_NOT_CONFIGURED',
+          message: 'Provider「' + binding.provider + '」当前未配置（可能已删除或改名）：请检查该节点的模型绑定。',
+        }
+      }
+      const models = catalog.models.get(binding.provider)
+      if (models && !models.has(binding.model)) {
+        return {
+          status: 'model_not_configured',
+          code: 'MODEL_NOT_CONFIGURED',
+          message: '模型「' + binding.model + '」不在 Provider「' + binding.provider + '」当前已配置的模型目录中（可能已删除或改名）：请重新选择该节点的模型。',
+        }
+      }
+      return null
     }
     // 探针上下文指纹：绑定列表 + llm provider 目录。目录变化（增删 provider/模型，
     // 即 credential/context 变化的可观察事实）即换指纹，缓存失效。
@@ -912,6 +963,12 @@ return {
       if (code === 'UNKNOWN_MODEL' || code === 'HTTP_404' || code === 'HTTP_403' || code === 'CONTEXT_WINDOW_EXCEEDED' || status === 404) return { status: 'model_unavailable', code: code || 'HTTP_404', message: message }
       if (code === 'NO_ADAPTER' || code === 'NETWORK' || code === 'TRANSPORT' || code === 'SERVER' || code === 'HTTP_5XX' || (status !== null && status >= 500)) return { status: 'provider_unreachable', code: code, message: message }
       if (/fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|ECONNRESET|network/i.test(message)) return { status: 'provider_unreachable', code: code || 'TRANSPORT', message: message }
+      // 探针自身请求形态 / 宿主内部脚本异常（不是 Provider 的结论）：单独成类，
+      // 否则探针缺陷会被伪装成"其他 Provider 错误"，把误报指向 Provider（UAT-02
+      // 实测：content.some is not a function 曾被报成 provider_error）。此类不阻断启动。
+      if (code === 'UNKNOWN' && /is not a function|Cannot read propert|Cannot destructure|is not iterable|undefined is not an object|of undefined|of null/i.test(message)) {
+        return { status: 'probe_internal_error', code: code, message: '探针请求未被宿主接受（疑似探针/宿主缺陷，非 Provider 结论）：' + message }
+      }
       return { status: 'provider_error', code: code || 'UNKNOWN', message: message }
     }
     // 单绑定最小真实调用：maxTokens=1 的 "ping"，消费至流结束。可用判据 = 流以
@@ -919,13 +976,21 @@ return {
     // tool-call delta 或 usage）——空结束不判可用（UAT-01 实测教训：zai 余额不足、
     // codex 撞额度时 LlmRuntime.stream() 把失败归一化为终态 finish 而非抛异常，
     // reason.kind='error'/'aborted' 且携带结构化 failure）。
+    // 请求形态是硬约束（UAT-02 误报回归的根因）：messages[].content 必须是内容块
+    // 数组（[{ type: 'text', text }]），不能是裸字符串。宿主 LlmRuntime 会对
+    // message.content 做文件/图片投影（contentHasFile/contentHasImage →
+    // projectImagesForTextModel），文本模型上字符串 content 触发
+    // TypeError「content.some is not a function」，被归一化为终态 finish(error)，
+    // 于是**所有**绑定一律误报不可用。宿主对 content 的类型不做请求期校验，
+    // 所以这里必须自己守住形态。
     // 兼容流/流承诺两种返回形态；不可迭代 = 探针降级（宿主无生成流能力）。
     async function probeOneBinding(llm, binding) {
       const base = { key: binding.key, provider: binding.provider, model: binding.model, nodes: binding.nodes.slice() }
       const started = Date.now()
       const finish = (status, code, message) => ({ ...base, status: status, code: code, message: message || '', checked_at: Date.now(), duration_ms: Date.now() - started })
       try {
-        let iter = llm.stream({ provider: binding.provider, model: binding.model, messages: [{ role: 'user', content: 'ping' }], maxTokens: 1 })
+        const messages = [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }]
+        let iter = llm.stream({ provider: binding.provider, model: binding.model, messages: messages, maxTokens: 1 })
         if (!iter || typeof iter[Symbol.asyncIterator] !== 'function') {
           if (iter && typeof iter.then === 'function') iter = await iter
           if (!iter || typeof iter[Symbol.asyncIterator] !== 'function') {
@@ -991,7 +1056,20 @@ return {
           cached: true,
         }
       }
-      const results = await Promise.all(bindings.map((b) => probeOneBinding(llm, b)))
+      const catalog = await probeCatalog(llm, bindings)
+      const results = await Promise.all(bindings.map((b) => {
+        // 配置判定先行：绑定指向的路由已不存在（Provider/Model 从配置里删除或改名）
+        // 时不必也不应发起真实调用——它表达的是"配置已失效"，而不是"网络此刻不通"。
+        const configFailure = classifyProbeBinding(catalog, b)
+        if (configFailure) {
+          return {
+            key: b.key, provider: b.provider, model: b.model, nodes: b.nodes.slice(),
+            status: configFailure.status, code: configFailure.code, message: configFailure.message,
+            checked_at: Date.now(), duration_ms: 0, catalog: 'not_configured',
+          }
+        }
+        return probeOneBinding(llm, b)
+      }))
       // 只缓存全部可用结果：失败永不缓存——修复凭证/配额后立即重探立即生效
       if (results.every(probeOk)) {
         probeCache.set(fingerprint, { at: Date.now(), results: results })
@@ -1828,7 +1906,8 @@ return {
 
         // #74 Preflight Probe：业务节点执行前对本次将使用的 active 快照去重探测。
         // 探针明确失败 → BLOCKED（可恢复，不改写 Workflow Outcome）；探针降级
-        // （llm 服务无生成流能力）只如实标注不阻断，避免异常部署环境卡死全部 Run。
+        // （llm 服务无生成流能力）与探针自身缺陷（probe_internal_error）只如实标注
+        // 不阻断，避免探针问题卡死全部 Run。
         if (logicalRec) {
           const activeBindings = dedupeProbeBindings(activeSnap ? activeSnap.provider_model : null)
           if (activeBindings.length) {
@@ -1839,7 +1918,7 @@ return {
               // Run 启动探针恒为真实探测（force）：缓存只服务一键检测连点，
               // 避免 BLOCKED 恢复或启动前读到去抖窗口内的陈旧结论（审查 R1 阻断项）
               const probe = await probeBindings(llmSvc, activeBindings, { force: true })
-              const blocking = probe.results.filter((r) => r.status !== 'available' && r.status !== 'probe_degraded')
+              const blocking = probe.results.filter(probeBlocksStart)
               if (blocking.length) {
                 const summaryText = probeFailureSummary(blocking)
                 logicalSetState(logicalRec, 'BLOCKED', logicalReason('PROBE_FAILED', summaryText))
@@ -1854,6 +1933,7 @@ return {
                 }, null, 2)
               }
               if (probe.results.some((r) => r.status === 'probe_degraded')) log('vwf.probe(preflight)：探针降级（无生成流能力），结果仅作参考，不阻断启动')
+              if (probe.results.some((r) => r.status === 'probe_internal_error')) log('vwf.probe(preflight)：探针请求未被宿主接受（疑似探针缺陷），结果仅作参考，不阻断启动')
             }
           }
         }

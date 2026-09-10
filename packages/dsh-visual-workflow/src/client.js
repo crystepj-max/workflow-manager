@@ -2518,6 +2518,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           available: t('probeStatusAvailable'), auth_failed: t('probeStatusAuthFailed'), quota: t('probeStatusQuota'),
           rate_limit: t('probeStatusRateLimit'), model_unavailable: t('probeStatusModelUnavailable'), permission_denied: t('probeStatusPermissionDenied'),
           provider_unreachable: t('probeStatusUnreachable'), timeout: t('probeStatusTimeout'), provider_error: t('probeStatusOther'),
+          provider_not_configured: t('probeStatusProviderNotConfigured'), model_not_configured: t('probeStatusModelNotConfigured'),
+          probe_internal_error: t('probeStatusInternalError'),
           probe_degraded: t('probeStatusDegraded'), unknown: t('probeStatusUnknown'),
         }
         return map[r.status] || r.status || t('probeStatusUnknown')
@@ -2540,7 +2542,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           if (Array.isArray(r.results)) {
             if (!r.results.length) { setMsg(t('probeNoBindings')); return }
             const lines = r.results.map((x) =>
-              x.provider + '/' + x.model + '：' + probeStatusText(x) + (x.message ? '（' + x.message + '）' : '') + (x.cached ? t('probeCachedSuffix') : '')
+              x.provider + '/' + x.model + '：' + probeStatusText(x) + (x.message ? '（' + x.message + '）' : '') +
+              (x.status !== 'available' && x.nodes && x.nodes.length ? t('probeBindingNodes', { nodes: x.nodes.join('、') }) : '') +
+              (x.cached ? t('probeCachedSuffix') : '')
             )
             setMsg(t(r.ok ? 'probeResultOk' : 'probeResultFail') + '\n' + lines.join('\n'))
             return

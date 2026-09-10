@@ -211,6 +211,10 @@
   "probeStatusUnreachable": "服务不可达",
   "probeStatusTimeout": "超时",
   "probeStatusOther": "其他 Provider 错误",
+  "probeStatusProviderNotConfigured": "Provider 未配置",
+  "probeStatusModelNotConfigured": "模型未配置（不在模型目录中）",
+  "probeStatusInternalError": "探针内部错误（非 Provider 结论）",
+  "probeBindingNodes": "（节点：{nodes}）",
   "probeStatusDegraded": "探针降级（无法真实调用）",
   "probeStatusUnknown": "未知"
 }
