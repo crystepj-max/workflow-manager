@@ -114,7 +114,14 @@ return {
 .vwf-editor-dialog[open] { display:flex; flex-direction:column; }
 .vwf-editor-dialog::backdrop { background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.56)); backdrop-filter:blur(2px); }
 .vwf-editor-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); flex:0 0 auto; }
-.vwf-editor-msg { flex:0 0 auto; max-height:180px; margin:10px 16px 0; white-space:pre-wrap; }
+.vwf-editor-msg { flex:0 0 auto; max-height:min(320px, 38vh); margin:10px 16px 0; white-space:pre-wrap; }
+/* 结果条分级呈现（UAT-02 反馈）：## 一级=整体结论，### 二级=逐节点一行；✅/❌/⚠️/➖ 决定色调 */
+.vwf-msg-line.l1 { font-weight:600; font-size:13px; margin:2px 0 3px; }
+.vwf-msg-line.l2 { padding-left:12px; }
+.vwf-msg-line.ok { color:var(--dsw-alias-state-success-primary, #3fb950); }
+.vwf-msg-line.bad { color:var(--dsw-alias-state-error-primary, #f85149); }
+.vwf-msg-line.warn { color:var(--dsw-alias-state-warn-primary, #f59e0b); }
+.vwf-msg-line.muted { color:var(--dsw-alias-label-tertiary, #8a8a8a); }
 .vwf-editor-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; overscroll-behavior:contain; }
 .vwf-editor { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:12px; align-items:stretch; height:100%; min-height:0; }
 @media (max-width: 900px) { .vwf-editor { grid-template-columns:minmax(0,1fr); height:auto; } .vwf-inspector { position:static; height:auto; } }
@@ -2541,20 +2548,91 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           if (r.code === 'LLM_SERVICE_UNAVAILABLE') { setMsg(t('probeLlmUnavailable')); return }
           if (Array.isArray(r.results)) {
             if (!r.results.length) { setMsg(t('probeNoBindings')); return }
-            const lines = r.results.map((x) =>
-              x.provider + '/' + x.model + '：' + probeStatusText(x) + (x.message ? '（' + x.message + '）' : '') +
-              (x.status !== 'available' && x.nodes && x.nodes.length ? t('probeBindingNodes', { nodes: x.nodes.join('、') }) : '') +
-              (x.cached ? t('probeCachedSuffix') : '')
-            )
-            setMsg(t(r.ok ? 'probeResultOk' : 'probeResultFail') + '\n' + lines.join('\n'))
+            setMsg(probeReport(r))
             return
           }
           if (r.ok) setMsg(t('oneClickCheckOk'))
           else setMsg(t('oneClickCheckFailed') + ((r.errors && r.errors[0] && r.errors[0].message) || ''))
         }).catch((e) => setMsg(t('oneClickCheckFailed') + String(e))).finally(() => setProbing(false))
       }
+      // #74 UAT-02 反馈：探针结论按「节点顺序」逐节点呈现。
+      // 一级（##）给整体结论，二级（###）每个节点一行：✅ 可用 / ❌ 不可用（带 host 侧
+      // 清洗过的原因）/ ⚠️ 未定论（探针降级、探针内部错误、未返回结论）/ ➖ 未指定模型。
+      // 同一绑定被多个节点引用时逐节点展开（一键检测要回答的是"哪个节点不行"）。
+      const probeReport = (r) => {
+        const all = Array.isArray(r.results) ? r.results : []
+        const byNode = new Map()
+        for (const x of all) for (const id of (x.nodes || [])) byNode.set(String(id), x)
+        const nodes = (wf && Array.isArray(wf.nodes)) ? wf.nodes : []
+        const blueprintModels = (wf && wf.bindings && wf.bindings.models) || null
+        const modelOf = (n) => {
+          if (n && n.model && (n.model.provider || n.model.model)) return n.model
+          return (blueprintModels && blueprintModels[String(n && n.id)]) || null
+        }
+        const rows = []
+        const covered = new Set()
+        let ok = 0
+        let bad = 0
+        let soft = 0
+        let unbound = 0
+        nodes.forEach((n, i) => {
+          const label = (i + 1) + '. ' + (n.label || n.id) + '（' + n.id + '）'
+          const m = modelOf(n)
+          const x = byNode.get(String(n.id)) || null
+          if (!x) {
+            if (!m) {
+              unbound += 1
+              rows.push('### ➖ ' + label + ' · ' + t('probeNodeInherit'))
+              return
+            }
+            soft += 1
+            rows.push('### ⚠️ ' + label + ' · ' + String(m.provider || 'default') + '/' + String(m.model || 'default') + ' · ' + t('probeNodeNotProbed'))
+            return
+          }
+          covered.add(String(n.id))
+          if (x.status === 'available') {
+            ok += 1
+            rows.push('### ✅ ' + label + ' · ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) + (x.cached ? t('probeCachedSuffix') : ''))
+            return
+          }
+          const undecided = x.status === 'probe_degraded' || x.status === 'probe_internal_error'
+          if (undecided) soft += 1
+          else bad += 1
+          rows.push('### ' + (undecided ? '⚠️' : '❌') + ' ' + label + ' · ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) +
+            (x.message ? '：' + x.message : '') + (x.cached ? t('probeCachedSuffix') : ''))
+        })
+        // 防御：结果里出现当前节点表未覆盖的绑定（DSL 与结果不同步）时也要如实呈现
+        for (const x of all) {
+          const rest = (x.nodes || []).filter((id) => !covered.has(String(id)) && !nodes.some((n) => String(n.id) === String(id)))
+          if (!rest.length) continue
+          if (x.status === 'available') ok += rest.length
+          else if (x.status === 'probe_degraded' || x.status === 'probe_internal_error') soft += rest.length
+          else bad += rest.length
+          rows.push('### ' + (x.status === 'available' ? '✅' : '❌') + ' ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) +
+            (x.message ? '：' + x.message : '') + t('probeBindingNodes', { nodes: rest.join('、') }))
+        }
+        const total = ok + bad + soft + unbound
+        const notes = []
+        if (soft) notes.push(t('probeNoteSoft', { n: soft }))
+        if (unbound) notes.push(t('probeNoteUnbound', { n: unbound }))
+        const head = (bad === 0 ? '## ✅ ' + t('probeReportOk', { ok: ok, total: total }) : '## ❌ ' + t('probeReportFail', { total: total, bad: bad })) +
+          (notes.length ? t('probeReportNotes', { notes: notes.join('，') }) : '')
+        return [head].concat(rows).join('\n')
+      }
 
       const editingBuiltin = !!(list || []).find(x => x.id === editId && x.builtin)
+      // 结果条按行分级渲染：`## ` 一级（整体结论）、`### ` 二级（逐节点），
+      // ✅/❌/⚠️/➖ 决定色调，让"哪些节点可用、哪些不行"一眼可见。
+      const renderMsg = (text) => h('div', { className: 'vwf-code' },
+        String(text).split('\n').map((line, i) => {
+          const level = line.indexOf('### ') === 0 ? ' l2' : (line.indexOf('## ') === 0 ? ' l1' : '')
+          const tone = line.indexOf('❌') >= 0 ? ' bad'
+            : line.indexOf('⚠️') >= 0 ? ' warn'
+              : line.indexOf('✅') >= 0 ? ' ok'
+                : line.indexOf('➖') >= 0 ? ' muted' : ''
+          return h('div', { key: 'msg-line-' + i, className: 'vwf-msg-line' + level + tone }, line)
+        })
+      )
       if (!i18nReady) return h('div', { className: 'vwf-muted' }, t('i18nLoading'))
 
       return h('div', { className: 'vwf-root' },
@@ -2585,7 +2663,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           )
         ) : null,
         tab === 'dashboard' ? h(Dashboard, { wf }) : null,
-        msg ? h('div', { className: 'vwf-code' }, msg) : null,
+        msg ? renderMsg(msg) : null,
         wf ? h('dialog', {
           className: 'vwf-editor-dialog',
           ref: editorDialogRef,
@@ -2604,7 +2682,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           ),
           // 检测/探针结果同时显示在编辑器内：结果条若只渲染在外层主面板，
           // 会被全屏编辑器 dialog 完全遮挡（#74 UAT 反馈）
-          msg ? h('div', { className: 'vwf-code vwf-editor-msg' }, msg) : null,
+          msg ? h('div', { className: 'vwf-editor-msg' }, renderMsg(msg)) : null,
           h('div', { className: 'vwf-editor-body' },
             h(Editor, {
               key: editId || 'new',

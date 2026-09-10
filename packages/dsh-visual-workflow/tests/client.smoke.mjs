@@ -146,6 +146,7 @@ function makeRuntime() {
       case 'vwf.script':
         return { ok: true, engineAvailable: false, script: '// compiled' }
       case 'vwf.probe':
+        if (state.probe) return state.probe
         return {
           ok: true,
           stage: 'probe',
@@ -1415,6 +1416,74 @@ test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链从左到右
   const values = selects.map((s) => s.value)
   assert.ok(values.includes('kimi-coding'), '节点 provider 从 bindings.models 投影：' + JSON.stringify(values))
   assert.ok(values.includes('k3'), '节点 model 从 bindings.models 投影：' + JSON.stringify(values))
+})
+
+test('一键检测结果条：按节点顺序逐节点呈现（## 总览 / ### 每节点 ✅❌ 与原因）', async () => {
+  const blueprint = {
+    id: 'probe-report',
+    displayName: '探针结果条',
+    entry: 'a',
+    bindings: {
+      models: {
+        a: { provider: 'kimi-coding', model: 'k3' },
+        b: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+        c: { provider: 'kimi-coding', model: 'k3' },
+      },
+    },
+    nodes: [
+      { id: 'a', label: '需求分析', profile: 'dispatcher', goal: 'g' },
+      { id: 'b', label: '方案设计', profile: 'dispatcher', goal: 'g' },
+      { id: 'c', label: '开发', profile: 'dispatcher', goal: 'g' },
+    ],
+    edges: [
+      { from: 'a', to: 'b', on: 'success' },
+      { from: 'b', to: 'c', on: 'success' },
+      { from: 'c', to: '$end', on: 'success' },
+    ],
+  }
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(blueprint, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  // 同一绑定被两个节点引用（a/c）+ 一个失败节点（b）：逐节点展开、按节点顺序排列
+  state.probe = {
+    ok: false,
+    stage: 'probe',
+    results: [
+      { key: 'kimi-coding\u0000k3', provider: 'kimi-coding', model: 'k3', nodes: ['a', 'c'], status: 'available', code: 'OK', message: '', cached: false },
+      { key: 'deepseek-official\u0000deepseek-v4-pro', provider: 'deepseek-official', model: 'deepseek-v4-pro', nodes: ['b'], status: 'model_not_configured', code: 'MODEL_NOT_CONFIGURED', message: '模型「deepseek-v4-pro」不在 Provider「deepseek-official」当前已配置的模型目录中（可能已删除或改名）：请重新选择该节点的模型。', cached: false },
+    ],
+    cached: false,
+  }
+  await act(async () => {
+    byText(container, '一键检测').click()
+    await flush()
+    await flush()
+  })
+  const block = container.querySelector('.vwf-editor-msg .vwf-code')
+  assert.ok(block, '结果条渲染在编辑器内')
+  const lines = Array.from(block.querySelectorAll('.vwf-msg-line')).map((el) => el.textContent)
+  assert.equal(lines.length, 4, '一条 ## 总览 + 三个节点各一行 ###：' + JSON.stringify(lines))
+  assert.ok(lines[0].indexOf('## ❌') === 0, '一级行给整体结论：' + lines[0])
+  assert.ok(lines[0].includes('3 个节点') && lines[0].includes('1 个不可用'), '总览含节点总数与不可用数：' + lines[0])
+  assert.ok(lines[1].indexOf('### ✅ 1. 需求分析（a）') === 0 && lines[1].includes('kimi-coding/k3'), '节点1 按序号在前且 ✅：' + lines[1])
+  assert.ok(lines[2].indexOf('### ❌ 2. 方案设计（b）') === 0, '节点2 ❌：' + lines[2])
+  assert.ok(lines[2].includes('模型未配置') && lines[2].includes('deepseek-v4-pro'), '失败行带状态与 host 侧原因：' + lines[2])
+  assert.ok(lines[3].indexOf('### ✅ 3. 开发（c）') === 0 && lines[3].includes('kimi-coding/k3'), '同绑定的第二个节点也逐节点呈现：' + lines[3])
+  const css = styleText.join('\n')
+  assert.match(css, /\.vwf-msg-line\.l1/, '一级行有独立样式')
+  assert.match(css, /\.vwf-msg-line\.l2/, '二级行有独立样式')
+  assert.match(css, /\.vwf-msg-line\.bad/, '失败行有独立色调')
+  state.probe = null
 })
 
 test('清理：卸载冒烟测试根节点', async () => {
