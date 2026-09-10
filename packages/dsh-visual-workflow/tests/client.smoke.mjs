@@ -1418,7 +1418,7 @@ test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链从左到右
   assert.ok(values.includes('k3'), '节点 model 从 bindings.models 投影：' + JSON.stringify(values))
 })
 
-test('一键检测结果条：按节点顺序逐节点呈现（## 总览 / ### 每节点 ✅❌ 与原因）', async () => {
+test('一键检测结果条：整体结论 + 一级节点 + 同列二级节点三级呈现（无 ## / ### 标记）', async () => {
   const blueprint = {
     id: 'probe-report',
     displayName: '探针结果条',
@@ -1426,18 +1426,22 @@ test('一键检测结果条：按节点顺序逐节点呈现（## 总览 / ### �
     bindings: {
       models: {
         a: { provider: 'kimi-coding', model: 'k3' },
-        b: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+        b1: { provider: 'kimi-coding', model: 'k3' },
+        b2: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
         c: { provider: 'kimi-coding', model: 'k3' },
       },
     },
     nodes: [
       { id: 'a', label: '需求分析', profile: 'dispatcher', goal: 'g' },
-      { id: 'b', label: '方案设计', profile: 'dispatcher', goal: 'g' },
-      { id: 'c', label: '开发', profile: 'dispatcher', goal: 'g' },
+      { id: 'b1', label: '开发1', profile: 'dispatcher', goal: 'g' },
+      { id: 'b2', label: '开发2', profile: 'dispatcher', goal: 'g' },
+      { id: 'c', label: '收口', profile: 'dispatcher', goal: 'g' },
     ],
     edges: [
-      { from: 'a', to: 'b', on: 'success' },
-      { from: 'b', to: 'c', on: 'success' },
+      { from: 'a', to: 'b1', on: 'success' },
+      { from: 'a', to: 'b2', on: 'success' },
+      { from: 'b1', to: 'c', on: 'success' },
+      { from: 'b2', to: 'c', on: 'success' },
       { from: 'c', to: '$end', on: 'success' },
     ],
   }
@@ -1454,13 +1458,13 @@ test('一键检测结果条：按节点顺序逐节点呈现（## 总览 / ### �
     canvasTab.click()
     await flush()
   })
-  // 同一绑定被两个节点引用（a/c）+ 一个失败节点（b）：逐节点展开、按节点顺序排列
+  // 画布两级序号：a=0；b1/b2 同列 → 1.1/1.2（二级节点）；c=2（一级节点）
   state.probe = {
     ok: false,
     stage: 'probe',
     results: [
-      { key: 'kimi-coding\u0000k3', provider: 'kimi-coding', model: 'k3', nodes: ['a', 'c'], status: 'available', code: 'OK', message: '', cached: false },
-      { key: 'deepseek-official\u0000deepseek-v4-pro', provider: 'deepseek-official', model: 'deepseek-v4-pro', nodes: ['b'], status: 'model_not_configured', code: 'MODEL_NOT_CONFIGURED', message: '模型「deepseek-v4-pro」不在 Provider「deepseek-official」当前已配置的模型目录中（可能已删除或改名）：请重新选择该节点的模型。', cached: false },
+      { key: 'kimi-coding\u0000k3', provider: 'kimi-coding', model: 'k3', nodes: ['a', 'b1', 'c'], status: 'available', code: 'OK', message: '', cached: false },
+      { key: 'deepseek-official\u0000deepseek-v4-pro', provider: 'deepseek-official', model: 'deepseek-v4-pro', nodes: ['b2'], status: 'model_not_configured', code: 'MODEL_NOT_CONFIGURED', message: '模型「deepseek-v4-pro」不在 Provider「deepseek-official」当前已配置的模型目录中（可能已删除或改名）：请重新选择该节点的模型。', cached: false },
     ],
     cached: false,
   }
@@ -1471,17 +1475,26 @@ test('一键检测结果条：按节点顺序逐节点呈现（## 总览 / ### �
   })
   const block = container.querySelector('.vwf-editor-msg .vwf-code')
   assert.ok(block, '结果条渲染在编辑器内')
-  const lines = Array.from(block.querySelectorAll('.vwf-msg-line')).map((el) => el.textContent)
-  assert.equal(lines.length, 4, '一条 ## 总览 + 三个节点各一行 ###：' + JSON.stringify(lines))
-  assert.ok(lines[0].indexOf('## ❌') === 0, '一级行给整体结论：' + lines[0])
-  assert.ok(lines[0].includes('3 个节点') && lines[0].includes('1 个不可用'), '总览含节点总数与不可用数：' + lines[0])
-  assert.ok(lines[1].indexOf('### ✅ 1. 需求分析（a）') === 0 && lines[1].includes('kimi-coding/k3'), '节点1 按序号在前且 ✅：' + lines[1])
-  assert.ok(lines[2].indexOf('### ❌ 2. 方案设计（b）') === 0, '节点2 ❌：' + lines[2])
-  assert.ok(lines[2].includes('模型未配置') && lines[2].includes('deepseek-v4-pro'), '失败行带状态与 host 侧原因：' + lines[2])
-  assert.ok(lines[3].indexOf('### ✅ 3. 开发（c）') === 0 && lines[3].includes('kimi-coding/k3'), '同绑定的第二个节点也逐节点呈现：' + lines[3])
+  const rowOf = (el) => ({ cls: el.className, text: el.textContent })
+  const rows = Array.from(block.querySelectorAll('.vwf-msg-line')).map(rowOf)
+  assert.equal(rows.length, 5, '整体结论 1 行 + 4 个节点各 1 行：' + JSON.stringify(rows.map((r) => r.text)))
+  for (const r of rows) assert.ok(r.text.indexOf('##') < 0, '不写 markdown 标记：' + r.text)
+  // 一级：整体结论
+  assert.match(rows[0].cls, /l1/, '整体结论为一级：' + rows[0].cls)
+  assert.ok(rows[0].text.indexOf('❌') === 0 && rows[0].text.includes('4 个节点') && rows[0].text.includes('1 个不可用'), '整体结论文案：' + rows[0].text)
+  // 二级：一级节点（按画布序号排序，单列节点）
+  assert.match(rows[1].cls, /l2/, '一级节点为二级层级：' + rows[1].cls)
+  assert.ok(rows[1].text.indexOf('✅ 0 需求分析（a）') === 0 && rows[1].text.includes('kimi-coding/k3'), '序号 0 的需求分析可用：' + rows[1].text)
+  assert.match(rows[2].cls, /l3/, '同列并行节点为三级层级：' + rows[2].cls)
+  assert.ok(rows[2].text.indexOf('✅ 1.1 开发1（b1）') === 0, '二级节点 1.1：' + rows[2].text)
+  assert.match(rows[3].cls, /l3/, '二级节点 1.2 同为三级：' + rows[3].cls)
+  assert.ok(rows[3].text.indexOf('❌ 1.2 开发2（b2）') === 0 && rows[3].text.includes('模型未配置') && rows[3].text.includes('deepseek-v4-pro'), '二级节点 1.2 失败并带原因：' + rows[3].text)
+  assert.match(rows[4].cls, /l2/, '收口回到二级层级：' + rows[4].cls)
+  assert.ok(rows[4].text.indexOf('✅ 2 收口（c）') === 0, '序号 2 的收口可用：' + rows[4].text)
   const css = styleText.join('\n')
   assert.match(css, /\.vwf-msg-line\.l1/, '一级行有独立样式')
   assert.match(css, /\.vwf-msg-line\.l2/, '二级行有独立样式')
+  assert.match(css, /\.vwf-msg-line\.l3/, '三级行有独立样式')
   assert.match(css, /\.vwf-msg-line\.bad/, '失败行有独立色调')
   state.probe = null
 })

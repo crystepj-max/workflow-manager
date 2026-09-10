@@ -117,7 +117,8 @@ return {
 .vwf-editor-msg { flex:0 0 auto; max-height:min(320px, 38vh); margin:10px 16px 0; white-space:pre-wrap; }
 /* 结果条分级呈现（UAT-02 反馈）：## 一级=整体结论，### 二级=逐节点一行；✅/❌/⚠️/➖ 决定色调 */
 .vwf-msg-line.l1 { font-weight:600; font-size:13px; margin:2px 0 3px; }
-.vwf-msg-line.l2 { padding-left:12px; }
+.vwf-msg-line.l2 { padding-left:10px; }
+.vwf-msg-line.l3 { padding-left:26px; }
 .vwf-msg-line.ok { color:var(--dsw-alias-state-success-primary, #3fb950); }
 .vwf-msg-line.bad { color:var(--dsw-alias-state-error-primary, #f85149); }
 .vwf-msg-line.warn { color:var(--dsw-alias-state-warn-primary, #f59e0b); }
@@ -2555,10 +2556,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           else setMsg(t('oneClickCheckFailed') + ((r.errors && r.errors[0] && r.errors[0].message) || ''))
         }).catch((e) => setMsg(t('oneClickCheckFailed') + String(e))).finally(() => setProbing(false))
       }
-      // #74 UAT-02 反馈：探针结论按「节点顺序」逐节点呈现。
-      // 一级（##）给整体结论，二级（###）每个节点一行：✅ 可用 / ❌ 不可用（带 host 侧
-      // 清洗过的原因）/ ⚠️ 未定论（探针降级、探针内部错误、未返回结论）/ ➖ 未指定模型。
-      // 同一绑定被多个节点引用时逐节点展开（一键检测要回答的是"哪个节点不行"）。
+      // #74 UAT-02 反馈：探针结论按「节点序号」逐节点呈现，三级层级用视觉区分（不写 markdown 标记）：
+      //   一级 = 整体结论；二级 = 一级节点（单列序号 0/1/2…）；三级 = 二级节点（同列并行 1.1/1.2…，如有）。
+      // 序号直接复用画布的两级序号（layoutGraph().seqLabels），与节点卡片角标一一对应。
+      // 图标：✅ 可用 / ❌ 不可用（带 host 侧清洗过的原因）/ ⚠️ 未定论（探针降级、探针内部错误、
+      // 未返回结论）/ ➖ 未指定模型（继承会话模型）。同一绑定被多个节点引用时逐节点展开。
       const probeReport = (r) => {
         const all = Array.isArray(r.results) ? r.results : []
         const byNode = new Map()
@@ -2569,37 +2571,53 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           if (n && n.model && (n.model.provider || n.model.model)) return n.model
           return (blueprintModels && blueprintModels[String(n && n.id)]) || null
         }
+        // 画布两级序号：单列 "m"，同列并行 "m.1"/"m.2"；布局拿不到时退化为数组顺序
+        let labels = {}
+        try { labels = layoutGraph(wf || {}, []).seqLabels || {} } catch (e) { labels = {} }
+        const seqOf = (n) => (labels[n.id] === undefined ? '' : String(labels[n.id]))
+        const keyOf = (n) => {
+          const parts = seqOf(n).split('.')
+          const main = parts[0] === '' ? 1e6 : Number(parts[0])
+          return [isFinite(main) ? main : 1e6, parts.length > 1 ? Number(parts[1]) || 0 : 0]
+        }
+        const ordered = nodes.slice().sort((a, b) => { const ka = keyOf(a); const kb = keyOf(b); return (ka[0] - kb[0]) || (ka[1] - kb[1]) })
         const rows = []
         const covered = new Set()
         let ok = 0
         let bad = 0
         let soft = 0
         let unbound = 0
-        nodes.forEach((n, i) => {
-          const label = (i + 1) + '. ' + (n.label || n.id) + '（' + n.id + '）'
+        ordered.forEach((n) => {
+          const seq = seqOf(n)
+          // 二级节点（同列并行）进第三级缩进；一级节点（单列）进第二级
+          const level = seq.indexOf('.') >= 0 ? 3 : 2
+          const label = (seq ? seq + ' ' : '') + (n.label || n.id) + '（' + n.id + '）'
           const m = modelOf(n)
           const x = byNode.get(String(n.id)) || null
           if (!x) {
             if (!m) {
               unbound += 1
-              rows.push('### ➖ ' + label + ' · ' + t('probeNodeInherit'))
+              rows.push({ level: level, tone: 'muted', text: '➖ ' + label + ' · ' + t('probeNodeInherit') })
               return
             }
             soft += 1
-            rows.push('### ⚠️ ' + label + ' · ' + String(m.provider || 'default') + '/' + String(m.model || 'default') + ' · ' + t('probeNodeNotProbed'))
+            rows.push({ level: level, tone: 'warn', text: '⚠️ ' + label + ' · ' + String(m.provider || 'default') + '/' + String(m.model || 'default') + ' · ' + t('probeNodeNotProbed') })
             return
           }
           covered.add(String(n.id))
           if (x.status === 'available') {
             ok += 1
-            rows.push('### ✅ ' + label + ' · ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) + (x.cached ? t('probeCachedSuffix') : ''))
+            rows.push({ level: level, tone: 'ok', text: '✅ ' + label + ' · ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) + (x.cached ? t('probeCachedSuffix') : '') })
             return
           }
           const undecided = x.status === 'probe_degraded' || x.status === 'probe_internal_error'
           if (undecided) soft += 1
           else bad += 1
-          rows.push('### ' + (undecided ? '⚠️' : '❌') + ' ' + label + ' · ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) +
-            (x.message ? '：' + x.message : '') + (x.cached ? t('probeCachedSuffix') : ''))
+          rows.push({
+            level: level, tone: undecided ? 'warn' : 'bad',
+            text: (undecided ? '⚠️ ' : '❌ ') + label + ' · ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) +
+              (x.message ? '：' + x.message : '') + (x.cached ? t('probeCachedSuffix') : ''),
+          })
         })
         // 防御：结果里出现当前节点表未覆盖的绑定（DSL 与结果不同步）时也要如实呈现
         for (const x of all) {
@@ -2608,31 +2626,37 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           if (x.status === 'available') ok += rest.length
           else if (x.status === 'probe_degraded' || x.status === 'probe_internal_error') soft += rest.length
           else bad += rest.length
-          rows.push('### ' + (x.status === 'available' ? '✅' : '❌') + ' ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) +
-            (x.message ? '：' + x.message : '') + t('probeBindingNodes', { nodes: rest.join('、') }))
+          rows.push({
+            level: 2, tone: x.status === 'available' ? 'ok' : 'bad',
+            text: (x.status === 'available' ? '✅ ' : '❌ ') + x.provider + '/' + x.model + ' · ' + probeStatusText(x) +
+              (x.message ? '：' + x.message : '') + t('probeBindingNodes', { nodes: rest.join('、') }),
+          })
         }
         const total = ok + bad + soft + unbound
         const notes = []
         if (soft) notes.push(t('probeNoteSoft', { n: soft }))
         if (unbound) notes.push(t('probeNoteUnbound', { n: unbound }))
-        const head = (bad === 0 ? '## ✅ ' + t('probeReportOk', { ok: ok, total: total }) : '## ❌ ' + t('probeReportFail', { total: total, bad: bad })) +
+        const head = (bad === 0 ? '✅ ' + t('probeReportOk', { ok: ok, total: total }) : '❌ ' + t('probeReportFail', { total: total, bad: bad })) +
           (notes.length ? t('probeReportNotes', { notes: notes.join('，') }) : '')
-        return [head].concat(rows).join('\n')
+        return { lines: [{ level: 1, tone: bad === 0 ? 'ok' : 'bad', text: head }].concat(rows) }
       }
 
       const editingBuiltin = !!(list || []).find(x => x.id === editId && x.builtin)
-      // 结果条按行分级渲染：`## ` 一级（整体结论）、`### ` 二级（逐节点），
-      // ✅/❌/⚠️/➖ 决定色调，让"哪些节点可用、哪些不行"一眼可见。
-      const renderMsg = (text) => h('div', { className: 'vwf-code' },
-        String(text).split('\n').map((line, i) => {
-          const level = line.indexOf('### ') === 0 ? ' l2' : (line.indexOf('## ') === 0 ? ' l1' : '')
-          const tone = line.indexOf('❌') >= 0 ? ' bad'
-            : line.indexOf('⚠️') >= 0 ? ' warn'
-              : line.indexOf('✅') >= 0 ? ' ok'
-                : line.indexOf('➖') >= 0 ? ' muted' : ''
-          return h('div', { key: 'msg-line-' + i, className: 'vwf-msg-line' + level + tone }, line)
-        })
-      )
+      // 结果条按行分级渲染：一级加粗放大、二级缩进、三级再缩进一层；✅/❌/⚠️/➖ 决定色调。
+      // 纯文本消息（保存/删除回执等）按单级普通行渲染。
+      const renderMsg = (m) => {
+        const rows = (m && Array.isArray(m.lines)) ? m.lines : String(m == null ? '' : m).split('\n').map((line) => ({ text: line }))
+        return h('div', { className: 'vwf-code' },
+          rows.map((row, i) => {
+            const text = String(row.text == null ? '' : row.text)
+            const tone = row.tone || (text.indexOf('❌') >= 0 ? 'bad'
+              : text.indexOf('⚠️') >= 0 ? 'warn'
+                : text.indexOf('✅') >= 0 ? 'ok'
+                  : text.indexOf('➖') >= 0 ? 'muted' : '')
+            return h('div', { key: 'msg-line-' + i, className: 'vwf-msg-line l' + (row.level || 0) + (tone ? ' ' + tone : '') }, text)
+          })
+        )
+      }
       if (!i18nReady) return h('div', { className: 'vwf-muted' }, t('i18nLoading'))
 
       return h('div', { className: 'vwf-root' },
