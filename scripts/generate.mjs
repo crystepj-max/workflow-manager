@@ -98,7 +98,8 @@ function foldableNodes(bp) {
 
 // ---------- DSH 侧编译（契约 §4.2/§4.3，移植 host.js compileDsl + 增强） ----------
 // 统一编译器（候选一 T-IMP-12）：DSH 与 vwf 双入口的唯一翻译员。
-// 宿主侧 compileDsl 已删除，经管道消费本函数产物（磁盘产物优先 + CLI compile 兜底）。
+// 宿主侧 compileDsl 经管道消费本函数产物：一律现编译优先（与引擎契约同源），
+// 磁盘预编译产物仅在无子进程环境整体回落（UAT-80 实证过期产物与引擎不兼容）。
 export function compileBlueprint(bp, opts = {}) {
   // 编译输入尺寸闸门（#131）：CLI compile 不做蓝图校验，vwf.script / wf_run 的临时图
   // 直达此处——主闸必须在编译器入口，保证任何进入编译的文档响应必小于通道上限。

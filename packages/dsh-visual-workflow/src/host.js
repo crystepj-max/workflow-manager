@@ -381,10 +381,20 @@ return {
     }
 
     // ── 编译：单一编译器 = scripts/generate.mjs compileBlueprint ─────────────────
-    // 模板来源（wf_run templateId）读磁盘产物：用户 skill 闭环产物 → 项目/代码根 .generated；
-    // 其余（编辑器当前图、wf_run 临时图）把蓝图作为参数交给 CLI 编译——编辑中未保存的
-    // 改动必须反映在脚本里，不能拿磁盘上的旧产物充数。
+    // 一律现编译（与当前生成器/引擎契约同源）；预编译产物仅在无子进程环境整体回落。
+    // 现编译后仍探测产物旁 roles/ 自包含角色包随译文返回 roleDir——兼容角色
+    // （builtin:false，不内联）靠它走读文件路径，磁盘旧脚本不再复用但角色包必须保留。
     const metaFromDsl = (dsl) => ({ name: 'vwf-' + (dsl.id || 'run'), description: dsl.name || dsl.id || 'visual workflow run', phases: (dsl.nodes || []).map((n) => ({ title: n.label || n.id })) })
+    // 探测 <id>/roles/ 自包含角色包（只取角色目录，不取旧脚本）
+    async function findRoleDir(dslId) {
+      const d = await homeDirs()
+      if (!d) return null
+      for (const spot of [d.skillRoot].concat(generatedRoots())) {
+        const roles = await listDirOrNull(spot + '/' + dslId + '/roles')
+        if (roles && roles.length) return spot + '/' + dslId + '/roles'
+      }
+      return null
+    }
     async function compileDsl(dsl, opts) {
       const d = await homeDirs()
       // 先现编译（与当前生成器/引擎契约同源），预编译产物仅作无子进程环境的回落：
@@ -399,7 +409,10 @@ return {
         try {
           const out = JSON.parse(r.stdout)
           if (!out.ok) return { ok: false, detail: '编译器返回错误：' + (out.error || '未知') }
-          return { ok: true, script: out.script, meta: out.meta || metaFromDsl(dsl) }
+          const result = { ok: true, script: out.script, meta: out.meta || metaFromDsl(dsl) }
+          const roleDir = await findRoleDir(dsl.id)
+          if (roleDir) result.roleDir = roleDir
+          return result
         } catch (e) { return { ok: false, detail: '编译器输出不可解析：' + errMsg(e) } }
       }
       if (opts && opts.fromTemplate && d) {
@@ -444,6 +457,7 @@ return {
         id: String(id), meta: { name: '', description: '' }, status: 'running', phase: '', logs: [], agents: [], formalRecords: [],
         taskId: '', workflowId: '', startedAt: Date.now(), supersededBy: '',
         decision_id: '', reason: '', decision_package: null, control_event: null, blocked_edge: null, results: null, history: null,
+        error_detail: '',
         node: '', round: null, budgetUsed: null, maxRounds: null, decisionSeq: null, updatedAt: 0,
       }
     }

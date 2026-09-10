@@ -1,10 +1,12 @@
 // 统一编译器验收套件（候选一 T-IMP-12）——原「双编译器对拍」的差异断言已翻转为一致断言：
 // 单一编译器 = scripts/generate.mjs compileBlueprint；宿主经管道取译文。
-// H1 内置模板磁盘路径：wf_run(templateId) → 引擎收到 .generated/script.mjs（含全部增强）
-// H2 用户模板磁盘路径：wf_run(templateId) → 引擎收到 ~/.dsh/skills/<id>/script.mjs（save 闭环产物）
-// H3 临时图 CLI 兜底：wf_run(args.dsl) → 临时蓝图落盘 + compile 子命令 + 清理
+// 现编译优先契约（UAT-80 实证：磁盘产物可能出自旧版生成器，与引擎选项契约不兼容）：
+// H1 内置模板：wf_run(templateId) → 同一 CLI 编译管道现编译（磁盘旧产物不直接执行）
+// H2 用户模板：wf_run(templateId) → 同上；过期 save 闭环产物不被静默执行
+// H2b 编译通道不可用 → 显式失败关闭（不静默回落磁盘产物）
+// H3 临时图 CLI 兜底：wf_run(args.dsl) → 逆投影蓝图经 --inline 交给 compile 子命令
 // H4 vwf.script RPC（编辑器实时查看）→ 同一 CLI 管道
-// H5 行为统一：宿主管道交付的译文跑原三差异场景 → 折叠零出场 / 闸门拦 / 归因出场
+// H5 行为统一：编译器产物形态跑原三差异场景 → 折叠零出场 / 闸门拦 / 归因出场
 // H6 CLI 集成：真实 spawn generate.mjs compile → 产物可被排练厅真实执行
 
 import { test } from 'node:test'
@@ -58,6 +60,8 @@ test('H1 内置模板现编译优先：wf_run(templateId) 走同一 CLI 编译�
     fsSeed: {
       [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: tplVwfDsl,
       [REPO + '/.generated/dev-workflow-2-0/script.mjs']: tplScript,
+      // 兼容角色（builtin:false）靠产物旁 roles/ 走读文件路径：现编译不得丢 roleDir
+      [REPO + '/.generated/dev-workflow-2-0/roles/dispatcher.md']: '# dispatcher 角色包',
     },
   })
   const out = await runTool(tool, { templateId: 'dev-workflow-2-0', taskId: 't' })
@@ -68,6 +72,7 @@ test('H1 内置模板现编译优先：wf_run(templateId) 走同一 CLI 编译�
   assert.equal(captured.script, '//MOCK-SCRIPT', '引擎收到 CLI 编译译文')
   assert.notEqual(captured.script, tplScript, '磁盘旧产物不再直接执行')
   assert.ok(sub._calls.find((c) => c.join(' ').includes('generate.mjs') && c.join(' ').includes('--inline')), '已 spawn generate.mjs compile --inline')
+  assert.equal(captured.args.roleDir, REPO + '/.generated/dev-workflow-2-0/roles', '现编译仍随译文返回 roles/ 角色包（兼容角色可读）')
 })
 
 test('H2 用户模板现编译优先：过期 save 闭环产物不再直接执行', async () => {
