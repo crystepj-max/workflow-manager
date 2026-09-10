@@ -194,14 +194,15 @@ mkdirSync(join(dist, 'dynamic'), { recursive: true })
 const dynHost = minifyDynamicClosure(hostBody)
 const dynClient = minifyDynamicClosure(clientBody)
 const HOST_LIMIT = 80 * 1024
+// 软上限（用户拍板）：超过仅警告不阻断，产物照常写出。
+// 80KB 作为瘦身高水位线看待；持续超出时仍应回做面板瘦身。
 const CLIENT_LIMIT = 80 * 1024
 writeFileSync(join(dist, 'dynamic', 'host.js'), dynHost)
 writeFileSync(join(dist, 'dynamic', 'client.js'), dynClient)
 const hostBytes = Buffer.byteLength(dynHost)
 const clientBytes = Buffer.byteLength(dynClient)
 if (hostBytes > HOST_LIMIT || clientBytes > CLIENT_LIMIT) {
-  console.error(`dynamic 体积超限：host ${hostBytes}/${HOST_LIMIT} client ${clientBytes}/${CLIENT_LIMIT}`)
-  process.exit(1)
+  console.warn(`⚠️ dynamic 体积超限（软上限，仅警告）：host ${hostBytes}/${HOST_LIMIT} client ${clientBytes}/${CLIENT_LIMIT}`)
 }
 
 console.log('built:', join(dist, 'host-entry.mjs'))

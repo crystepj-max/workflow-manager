@@ -8,8 +8,9 @@
 //   - 自动分层布局（success 主链最长路分层，LR），节点保持安全间距且不可手拖；
 //     回退边与跨节点边统一走上方外围车道，标签随车道路径避让节点内容
 //   - 节点卡片 220x66（圆角 14、label + 类型小字、入口徽标）、$end 虚线圆形
-//     终止节点、左右连接把手；边带流动虚线动画 + 箭头；成功边/标签为蓝色、
-//     失败为红色、选中为主文字色加粗
+//     终止节点、左右连接把手；边带流动虚线动画 + 箭头；成功/业务 outcome 边
+//     标签为蓝色（outcome 边标签显示 outcome 名）、失败为红色、技术重试为
+//     中性灰、选中为主文字色加粗
 //   - 交互：首次打开/重置时纵横居中；点选节点/边；从源把手拖出连线落到目标
 //     节点建边；右键画布弹出「添加结束节点」菜单；滚轮缩放（指针锚定）+
 //     空白区域四向拖动 + 缩放控件
@@ -21,7 +22,9 @@
 //     Agent 重置模型）、节点目标、结果判定方式三态（不启用 / AI 输出验证 /
 //     人工 check，互斥切换同 Gold-Band）、JSON 输出约束（2s 防抖 + 失焦提交 +
 //     美化按钮 + 非法 JSON 不写入）、成功表达式
-//   - 边表单：边类型 / 目标 / when 条件（仅 success 边）/ 删除边
+//   - 边表单：边类型四态（成功 / 失败 / 技术重试 / 业务 outcome + countRound）、
+//     目标 / when 条件（仅 success 边）/ 删除边；on 与 outcome 互斥清理与
+//     validate-core 边规则同构
 //   - 保存校验：校验失败弹窗列问题 → 关闭后逐字段标红 + 画布红圈 + 定位首个
 //     问题节点；画布/JSON 双 tab 实时互同步；变更后防抖实时校验状态行
 //
@@ -33,8 +36,8 @@
 //    → 点编辑弹抽屉」的原始形态
 //  - 纵向滚动条定位到画布内部（canvas-wrap overflow + 常显滚动条样式），
 //    取消页面级滚动容器
-//  - 保留：画布工具栏文档流一行（不遮挡入口节点）、边标签统一成功/失败
-//    （when 悬停 title 可见）
+//  - 保留：画布工具栏文档流一行（不遮挡入口节点）、边标签按类型与 outcome 名
+//    如实显示（when 悬停 title 可见）
 //
 //  运行约束：动态客户端闭包（plain JS、无 JSX/import；React/host/styles 为
 //  注入符号；计时器走 ctx.timeout/ctx.interval——inject: ['slots','timer']）。
@@ -45,6 +48,9 @@ return {
   inject: ['slots', 'timer'],
   buildSchemaTemplate: buildSchemaTemplate,
   COND_RE: conditionRegex(),
+  edgeKind: edgeKind,
+  applyEdgeKind: applyEdgeKind,
+  edgeLabelText: edgeLabelText,
   apply(ctx) {
     const slots = ctx.get('slots')
     if (slots === undefined) return
@@ -220,7 +226,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     const EDGE_LANE_GAP = 82
     const EDGE_LANE_SEP = 38
     const EDGE_ROUTE_STUB = 34
-    const EDGE_LABEL_W = 36
     const EDGE_LABEL_H = 18
     const MARGIN_X = 56
     const MARGIN_Y = 64
@@ -230,6 +235,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     const STATUS_COLOR = { running: 'var(--dsw-alias-brand-primary, #60a5fa)', pass: 'var(--dsw-alias-state-success-primary, #22c55e)', fail: 'var(--dsw-alias-state-error-primary, #ef4444)', human: 'var(--dsw-alias-state-warn-primary, #f59e0b)' }
     const EDGE_OK = '#2563eb'
     const EDGE_FAIL = 'var(--dsw-alias-state-error-primary, #f87171)'
+    const EDGE_TECH = 'var(--dsw-alias-label-tertiary, #8a8a8a)'
     const EDGE_SELECTED = '#111827'
     const ACCENT = 'var(--dsw-alias-brand-primary, #60a5fa)'
     const SCHEMA_DEBOUNCE_MS = 2000
@@ -845,7 +851,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         const y2 = b.y + b.h / 2
         const route = lay.routes.get(idx) || { kind: 'direct', yStart: y1, yEnd: y2, routed: false }
         const isFail = e.on === 'failure'
-        const color = isFail ? EDGE_FAIL : EDGE_OK
+        const isTech = e.on === 'technical'
+        const color = isFail ? EDGE_FAIL : isTech ? EDGE_TECH : EDGE_OK
         const selected = props.selectedEdge === idx
         let d
         let labelX
@@ -869,25 +876,27 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           labelX = mx
           labelY = (sy + ey) / 2
         }
-        // 标签按实际短文案（成功/失败）估算为固定小矩形；若与节点或已有标签相碰，
-        // 沿垂直方向持续让位。节点/既有标签都是有限集合，不设固定次数上限。
-        let labelBox = { x: labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
+        // 标签按实际短文案估算宽度（11px 字号：CJK 约 11px/字，拉丁约 7px/字，取 9 折中）；
+        // 若与节点或已有标签相碰，沿垂直方向持续让位。节点/既有标签都是有限集合，不设固定次数上限。
+        const lbl = edgeLabelText(e, { success: t('edgeSuccess'), failure: t('edgeFailure'), technical: t('edgeTechnical') })
+        const lblW = Math.max(12, lbl.length * 9)
+        let labelBox = { x: labelX - lblW / 2, y: labelY - EDGE_LABEL_H, w: lblW, h: EDGE_LABEL_H }
         const boxesOverlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
         while (true) {
           const hitsNode = Object.keys(pos).some(id => boxesOverlap(labelBox, pos[id]))
           const hitsLabel = labelRects.some(rect => boxesOverlap(labelBox, rect))
           if (!hitsNode && !hitsLabel) break
           labelY += EDGE_LABEL_H
-          labelBox = { x: labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
+          labelBox = { x: labelX - lblW / 2, y: labelY - EDGE_LABEL_H, w: lblW, h: EDGE_LABEL_H }
         }
         labelRects.push(labelBox)
         edgeEls.push(h('path', {
           key: 'e' + idx, d, fill: 'none',
           className: 'vwf-edge-flow',
           stroke: selected ? EDGE_SELECTED : color,
-          strokeWidth: selected ? 4.2 : (isFail ? 2 : 2.2),
-          opacity: isFail || route.routed ? 0.92 : 1,
-          markerEnd: 'url(#vwf-arrow' + (selected ? '-sel' : isFail ? '-fail' : '') + ')',
+          strokeWidth: selected ? 4.2 : (isFail || isTech ? 2 : 2.2),
+          opacity: isFail || isTech || route.routed ? 0.92 : 1,
+          markerEnd: 'url(#vwf-arrow' + (selected ? '-sel' : isFail ? '-fail' : isTech ? '-tech' : '') + ')',
         }))
         edgeEls.push(h('path', {
           key: 'eh' + idx, d, className: 'vwf-edge-hit',
@@ -900,8 +909,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           fill: selected ? EDGE_SELECTED : color,
           stroke: selected ? EDGE_SELECTED : color, strokeWidth: 1,
         }))
-        // 边标签统一显示 成功/失败；when 条件悬停可见（title），表单/JSON 面板可编辑
-        const lbl = isFail ? t('edgeFailure') : t('edgeSuccess')
+        // 边标签按类型与 outcome 名如实显示；when 条件悬停可见（title），表单/JSON 面板可编辑
         labelEls.push(h('text', {
           key: 'lb' + idx, x: labelX, y: labelY - 6, textAnchor: 'middle', fontSize: 11, fontWeight: selected ? 700 : 600,
           fill: selected ? EDGE_SELECTED : color,
@@ -1002,6 +1010,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                   h('circle', { cx: 1, cy: 1, r: 1, fill: 'var(--dsw-alias-border-l2, #333)' })),
                 h('marker', { id: 'vwf-arrow', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_OK })),
                 h('marker', { id: 'vwf-arrow-fail', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_FAIL })),
+                h('marker', { id: 'vwf-arrow-tech', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_TECH })),
                 h('marker', { id: 'vwf-arrow-sel', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_SELECTED }))
               ),
               h('rect', { width: W, height: H, fill: 'url(#vwf-dots)', 'data-vwf-pane': 'true' }),
@@ -1126,7 +1135,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
       const validationEnabled = !!node.output
       const manualEnabled = !!node.manualCheck
-      const resultMode = validationEnabled ? 'ai' : manualEnabled ? 'manual' : 'none'
+      // 业务结果路由（outcomePath）节点：output.outcomePath 存在即视为该模式，
+      // 空串（编辑中）不跳回其他模式
+      const routingEnabled = !!node.output && node.output.outcomePath != null
+      const resultMode = routingEnabled ? 'routing' : validationEnabled ? 'ai' : manualEnabled ? 'manual' : 'none'
       const isFanout = node.kind === 'fanout'
       const failOnValue = node.failOn === undefined ? 'all' : node.failOn
       const failOnMode = Number.isInteger(failOnValue) ? 'number' : failOnValue
@@ -1188,6 +1200,27 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         }
       }
 
+      // schema 编辑块（textarea + ✨ 美化 + 错误/提示行）：fanout / ai / routing 三处共用
+      const schemaField = (opts) => h(Field, { label: opts.label, required: opts.required, help: opts.help, errors: errorsFor('output.schema') },
+        h('div', { style: { position: 'relative' } },
+          h('textarea', {
+            className: 'vwf-textarea vwf-mono' + (errorsFor('output.schema').length ? ' err' : ''),
+            rows: 6, value: schemaDraft, placeholder: t('outputSchemaPlaceholder'),
+            onChange: (ev) => onSchemaChange(ev.target.value),
+            onBlur: () => { if (schemaDirty) { commitSchema(schemaDraft); setSchemaDirty(false) } },
+          }),
+          h('button', {
+            className: 'vwf-btn sm', title: t('outputSchemaBeautify'),
+            style: { position: 'absolute', right: 6, top: 6 },
+            onMouseDown: (ev) => ev.preventDefault(),
+            onClick: beautifySchema,
+          }, '✨')
+        ),
+        schemaError
+          ? h('div', { className: 'vwf-err-line' }, schemaError)
+          : (schemaNotice ? h('div', { className: 'vwf-ok-line' }, schemaNotice) : null)
+      )
+
       const commitNodeId = (value) => {
         if (value === node.id) { setIdDraft(node.id); return }
         props.onUpdate(node.id, { id: value })
@@ -1197,6 +1230,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         if (kind === 'fanout') {
           const output = { ...(node.output || {}), schema: (node.output && node.output.schema) || null }
           delete output.successCondition
+          // fanout 节点禁止 outcomePath（不参与 Business Outcome Routing）
+          delete output.outcomePath
           setSchemaDraft(output.schema ? JSON.stringify(output.schema, null, 2) : '')
           props.onUpdate(node.id, {
             kind: 'fanout',
@@ -1319,25 +1354,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               onChange: (ev) => props.onUpdate(node.id, { failOn: Math.max(0, Math.trunc(Number(ev.target.value) || 0)) }),
             }) : null
           ),
-          h(Field, { label: t('outputSchema'), help: t('perItemSchemaHelp'), errors: errorsFor('output.schema') },
-            h('div', { style: { position: 'relative' } },
-              h('textarea', {
-                className: 'vwf-textarea vwf-mono' + (errorsFor('output.schema').length ? ' err' : ''),
-                rows: 6, value: schemaDraft, placeholder: t('outputSchemaPlaceholder'),
-                onChange: (ev) => onSchemaChange(ev.target.value),
-                onBlur: () => { if (schemaDirty) { commitSchema(schemaDraft); setSchemaDirty(false) } },
-              }),
-              h('button', {
-                className: 'vwf-btn sm', title: t('outputSchemaBeautify'),
-                style: { position: 'absolute', right: 6, top: 6 },
-                onMouseDown: (ev) => ev.preventDefault(),
-                onClick: beautifySchema,
-              }, '✨')
-            ),
-            schemaError
-              ? h('div', { className: 'vwf-err-line' }, schemaError)
-              : (schemaNotice ? h('div', { className: 'vwf-ok-line' }, schemaNotice) : null)
-          )
+          schemaField({ label: t('outputSchema'), help: t('perItemSchemaHelp') })
         ) : h('div', { className: 'vwf-subsection' },
           h('div', { style: { fontSize: 13, fontWeight: 500 } }, t('resultMode')),
           h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('resultModeDescription')),
@@ -1348,39 +1365,31 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 { value: 'none', label: t('resultModeNone') },
                 { value: 'ai', label: t('outputValidation') },
                 { value: 'manual', label: t('manualCheck') },
+                { value: 'routing', label: t('resultModeRouting') },
               ],
               onChange: (mode) => {
-                setSchemaDraft('')
                 setSchemaError(null)
                 setSchemaDirty(false)
-                if (mode === 'ai') props.onUpdate(node.id, { output: { schema: (node.output && node.output.schema) || null, successCondition: (node.output && node.output.successCondition) || '', files: (node.output && node.output.files) || undefined }, manualCheck: null })
-                else if (mode === 'manual') props.onUpdate(node.id, { output: (node.output && node.output.files) ? { files: node.output.files } : null, manualCheck: true })
-                else props.onUpdate(node.id, { output: (node.output && node.output.files) ? { files: node.output.files } : null, manualCheck: null })
+                setSchemaNotice(null)
+                const out = node.output || {}
+                if (mode === 'routing') {
+                  // 保留已编辑的 schema：业务结果路由必须有 output.schema
+                  setSchemaDraft(out.schema ? JSON.stringify(out.schema, null, 2) : '')
+                  props.onUpdate(node.id, { output: { schema: out.schema || null, outcomePath: out.outcomePath || '' }, manualCheck: null })
+                } else {
+                  setSchemaDraft('')
+                  if (mode === 'ai') props.onUpdate(node.id, { output: { schema: out.schema || null, successCondition: out.successCondition || '', files: out.files || undefined }, manualCheck: null })
+                  else if (mode === 'manual') props.onUpdate(node.id, { output: out.files ? { files: out.files } : null, manualCheck: true })
+                  else props.onUpdate(node.id, { output: out.files ? { files: out.files } : null, manualCheck: null })
+                }
               },
             })
           ),
           resultMode === 'ai' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('outputValidationDescription')) : null,
           resultMode === 'manual' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('manualCheckDescription')) : null,
+          resultMode === 'routing' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('resultModeRoutingDescription')) : null,
           resultMode === 'ai' ? h('div', null,
-            h(Field, { label: t('outputSchema'), required: true, help: t('outputSchemaHelp'), errors: errorsFor('output.schema') },
-              h('div', { style: { position: 'relative' } },
-                h('textarea', {
-                  className: 'vwf-textarea vwf-mono' + (errorsFor('output.schema').length ? ' err' : ''),
-                  rows: 6, value: schemaDraft, placeholder: t('outputSchemaPlaceholder'),
-                  onChange: (ev) => onSchemaChange(ev.target.value),
-                  onBlur: () => { if (schemaDirty) { commitSchema(schemaDraft); setSchemaDirty(false) } },
-                }),
-                h('button', {
-                  className: 'vwf-btn sm', title: t('outputSchemaBeautify'),
-                  style: { position: 'absolute', right: 6, top: 6 },
-                  onMouseDown: (ev) => ev.preventDefault(),
-                  onClick: beautifySchema,
-                }, '✨')
-              ),
-              schemaError
-                ? h('div', { className: 'vwf-err-line' }, schemaError)
-                : (schemaNotice ? h('div', { className: 'vwf-ok-line' }, schemaNotice) : null)
-            ),
+            schemaField({ label: t('outputSchema'), required: true, help: t('outputSchemaHelp') }),
             h(Field, { label: t('successCondition'), required: true, help: t('successConditionHelp'), errors: errorsFor('output.successCondition') },
               h('input', {
                 className: 'vwf-input vwf-mono' + (errorsFor('output.successCondition').length ? ' err' : ''),
@@ -1389,18 +1398,35 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               })
             )
           ) : null,
+          resultMode === 'routing' ? h('div', null,
+            h(Field, { label: t('routingOutcomePath'), required: true, help: t('routingOutcomePathHelp'), errors: errorsFor('output.outcomePath') },
+              h('input', {
+                className: 'vwf-input vwf-mono' + (errorsFor('output.outcomePath').length ? ' err' : ''),
+                value: (node.output && node.output.outcomePath) || '', placeholder: '$.route',
+                onChange: (ev) => props.onUpdate(node.id, { output: { ...(node.output || {}), outcomePath: ev.target.value } }),
+              })
+            ),
+            schemaField({ label: t('outputSchema'), required: true, help: t('outputSchemaHelp') })
+          ) : null,
           !isFanout ? h(ArtifactFilesEditor, { node, onUpdate: props.onUpdate, errorsFor }) : null
         )
       )
     }
 
     // ── 边配置表单（对应 EdgeInspector）──────────────────────────────────────
+    // 边类型四态与 validate-core 同构：成功（可带 when）/ 失败 / 技术重试（自环）/
+    // 业务 outcome（名称 + countRound 回退记账）。类型切换经 updateEdge({kind})
+    // 走 applyEdgeKind 互斥清理，保证 on 与 outcome 不并存。
     function EdgeInspector(props) {
       const edge = props.edge
       const dsl = props.dsl
       const index = props.index
       const errorsFor = (field) => (props.fieldErrors || {})['edge:' + index + ':' + field] || []
+      const kind = edgeKind(edge)
       const targetOpts = (dsl.nodes || []).map(n => ({ value: n.id, label: (n.label ? n.label + ' · ' : '') + n.id })).concat([{ value: END_NODE, label: END_NODE + ' · ' + t('endNode') }])
+      // HD 的 result 边沿原字段编辑；业务 outcome 边编辑 outcome 字段
+      const outField = hasOutcomeField(edge) ? 'outcome' : (edge && edge.result !== undefined ? 'result' : 'outcome')
+      const outValue = edge[outField] == null ? '' : String(edge[outField])
       return h('div', { className: 'vwf-section' },
         h('div', { className: 'vwf-row' },
           h('strong', null, t('edgeConfig')),
@@ -1409,11 +1435,24 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         ),
         h(Field, { label: t('edgeOutcome'), required: true, errors: errorsFor('on') },
           h(VwfSelect, {
-            value: edge.on,
-            options: [{ value: 'success', label: 'success' }, { value: 'failure', label: 'failure' }],
-            onChange: (v) => props.onUpdate(index, { on: v }),
+            value: kind,
+            options: ['success', 'failure', 'technical', 'outcome'].map(v => ({ value: v, label: t('edgeType_' + v) })),
+            onChange: (v) => props.onUpdate(index, { kind: v }),
           })
         ),
+        kind === 'outcome' ? h(Field, { label: t('edgeOutcomeName'), required: true, help: t('edgeOutcomeNameHelp'), errors: errorsFor('outcome') },
+          h('input', {
+            className: 'vwf-input vwf-mono' + (errorsFor('outcome').length ? ' err' : ''),
+            value: outValue, placeholder: 'PASS',
+            onChange: (ev) => props.onUpdate(index, { [outField]: ev.target.value }),
+          })
+        ) : null,
+        kind === 'outcome' ? h('label', { className: 'vwf-field-label', style: { cursor: 'pointer' } },
+          h('input', { type: 'checkbox', checked: !!edge.countRound, style: { margin: 0 }, onChange: (ev) => props.onUpdate(index, { countRound: ev.target.checked }) }),
+          t('edgeCountRound'),
+          h('span', { className: 'vwf-help', title: t('edgeCountRoundHelp') }, '?')
+        ) : null,
+        kind === 'technical' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('edgeTechnicalHelp')) : null,
         h(Field, { label: t('edgeTarget'), required: true, errors: errorsFor('to') },
           h(VwfSelect, {
             value: edge.to,
@@ -1421,7 +1460,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             onChange: (v) => props.onUpdate(index, { to: v }),
           })
         ),
-        edge.on === 'success' ? h(Field, { label: t('edgeWhen'), help: t('edgeWhenHelp'), errors: errorsFor('when') },
+        kind === 'success' ? h(Field, { label: t('edgeWhen'), help: t('edgeWhenHelp'), errors: errorsFor('when') },
           h('input', {
             className: 'vwf-input vwf-mono' + (errorsFor('when').length ? ' err' : ''),
             value: edge.when || '', placeholder: '$.need_integration_test == true',
@@ -1750,7 +1789,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           host.call('vwf.validate', { dsl: snapshot }).then(r => {
             if (seq !== validateSeqRef.current) return
             setLiveErrors(r.ok ? [] : (r.errors || []))
-          }).catch(() => {})
+          }).catch((e) => {
+            // 实时校验失败也必须可见：否则状态行会一直停在旧结论上
+            if (seq !== validateSeqRef.current) return
+            setLiveErrors([{ message: t('validateUnavailable') + String((e && e.message) || e) }])
+          })
         }, VALIDATE_DEBOUNCE_MS)
       }
       const [historyVersion, setHistoryVersion] = React.useState(0)
@@ -1923,12 +1966,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         if (nextId) setSelectedNodeId(nextId)
       }
 
+      // patch.kind 触发边类型切换（applyEdgeKind 互斥清理）；其余 patch 后做与
+      // validate-core 一致的兜底清理：when 仅 success、countRound 仅业务边。
       const updateEdge = (index, patch) => {
         const current = wf.edges[index]
         if (!current) return
-        const updated = { ...current, ...patch }
+        let updated
+        if (patch && patch.kind !== undefined) {
+          const rest = { ...patch }
+          delete rest.kind
+          updated = applyEdgeKind({ ...current, ...rest }, patch.kind)
+        } else {
+          updated = { ...current, ...patch }
+        }
         if (updated.on !== 'success') delete updated.when
         else if (patch.when !== undefined && !String(patch.when).trim()) delete updated.when
+        if (edgeKind(updated) !== 'outcome' || !updated.countRound) delete updated.countRound
         const next = { ...wf, edges: wf.edges.map((e, i) => i === index ? updated : e) }
         syncWorkflow(next)
         setSelectedEdgeIndex(index)
@@ -1962,7 +2015,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           toSave = normalizeEntry(ingestEditorJson(parsed))
           setWf(toSave)
         }
-        const v = await host.call('vwf.validate', { dsl: toSave }).catch(() => null)
+        // RPC 异常（宿主 handler 抛错 / 校验服务不可用）必须走进校验弹窗：
+        // 静默 return 会表现为「点保存没反应」且 dirty 不清、退出时才提示未保存
+        const v = await host.call('vwf.validate', { dsl: toSave }).catch((e) => ({
+          ok: false,
+          errors: [{ at: '$', message: t('validateUnavailable') + String((e && e.message) || e) }],
+        }))
         if (!v) return
         if (!v.ok) {
           setPendingValidation(v)
@@ -2664,4 +2722,48 @@ function buildSchemaTemplate(input) {
   }
 
   return schema
+}
+
+// ── 边类型模型（与 validate-core 边规则同构）────────────────────────────────
+// 引擎边定义 = on ∈ { success, failure, technical } ∪ 业务 outcome 边（与节点
+// output.outcomePath 配套，可带 countRound）。UI 类型语义：
+//   'success'/'failure' → on 同名边（when 仅 success）；'technical' → 技术重试自环；
+//   'outcome' → 业务 outcome 边（HD 的 result 边沿 result 字段展示/编辑）。
+// 编辑中 outcome 置空串仍按 outcome 类型呈现（表单不跳变）；空值由保存校验拦截。
+function edgeKind(e) {
+  if (!e || typeof e !== 'object') return 'success'
+  if (e.outcome != null || (e.result != null && e.result !== '')) return 'outcome'
+  if (e.on === 'technical' || e.on === 'failure') return e.on
+  return 'success'
+}
+
+// 类型切换的字段互斥清理，与内核校验一一对应：
+//   outcome 与 on 互斥；when 仅 success；countRound 仅业务边；technical 禁 when/countRound。
+// 返回新对象，不改入参。
+function applyEdgeKind(e, k) {
+  const n = { ...(e || {}) }
+  if (k === 'outcome') {
+    delete n.on
+    delete n.when
+    if (!n.countRound) delete n.countRound
+    if (n.outcome === undefined && n.result === undefined) n.outcome = ''
+  } else {
+    delete n.outcome
+    delete n.result
+    delete n.countRound
+    n.on = k === 'technical' || k === 'failure' ? k : 'success'
+    if (n.on !== 'success') delete n.when
+  }
+  return n
+}
+
+// 画布短标签：业务边显示 outcome 名（HD result 边同），其余按类型取文案。
+// labels = { success, failure, technical }，由调用方传入 i18n 文案。
+function edgeLabelText(e, l) {
+  l = l || {}
+  const v = e.outcome != null && e.outcome !== '' ? e.outcome : e.result != null && e.result !== '' ? e.result : null
+  if (v != null) return String(v)
+  if (e.on === 'technical') return l.technical || 'technical'
+  if (e.on === 'failure') return l.failure || 'failure'
+  return l.success || 'success'
 }

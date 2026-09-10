@@ -364,9 +364,25 @@ return {
       if (!dsl || typeof dsl !== 'object') return bad('dsl 必须是对象')
       const errors = []
       const fieldErrors = {}
+      // 内核只产出 fieldKey（逐字段标红）与坐标串；编辑器「关闭弹窗后定位首个问题」
+      // 还需要 nodeId / edgeIndex 才能选中节点/边并滚动过去（LOC-001 §5「定位到该边字段」）。
+      // 坐标串是唯一事实源：从 `at` 反解，不额外引入第二套坐标。
+      const locateOf = (at) => {
+        if (typeof at !== 'string') return null
+        const node = /^\$\.nodes\[([^\]]+)\]/.exec(at)
+        if (node) return { nodeId: node[1] }
+        const edge = /^\$\.edges\[(\d+)\]/.exec(at)
+        if (edge) return { edgeIndex: Number(edge[1]) }
+        return null
+      }
       const push = (e) => {
         const entry = { at: e.at, message: e.message }
         if (e.fieldKey !== undefined) entry.fieldKey = e.fieldKey
+        const loc = locateOf(e.at)
+        if (loc) {
+          if (loc.nodeId !== undefined) entry.nodeId = loc.nodeId
+          if (loc.edgeIndex !== undefined) entry.edgeIndex = loc.edgeIndex
+        }
         errors.push(entry)
         if (entry.fieldKey !== undefined) (fieldErrors[entry.fieldKey] = fieldErrors[entry.fieldKey] || []).push(e.message)
       }

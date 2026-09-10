@@ -89,12 +89,11 @@ test('静态 bundle dist 含语言资源与内置角色正文', () => {
   assert.ok(existsSync(join(here, '..', 'dist', 'dynamic', 'client.js')), 'dist/dynamic/client.js 必须存在')
 })
 
-test('开发粘贴用 dynamic 闭包双半均 ≤ 80KB', () => {
+test('开发粘贴用 dynamic 闭包体形态检查（80KB 为软上限，超限由 build 警告）', () => {
   const host = readFileSync(join(here, '..', 'dist', 'dynamic', 'host.js'))
   const client = readFileSync(join(here, '..', 'dist', 'dynamic', 'client.js'))
-  const limit = 80 * 1024
-  assert.ok(host.byteLength <= limit, `host ${host.byteLength} > ${limit}`)
-  assert.ok(client.byteLength <= limit, `client ${client.byteLength} > ${limit}`)
+  // 体积软上限（80KB）的治理在 scripts/build-bundle.mjs：超过仅警告不阻断（用户拍板），
+  // 此处只锁闭包体形态，不做字节数硬断言。
   assert.match(host.toString('utf8'), /^return\{/, 'host 必须是 return {...} 闭包体')
   assert.match(client.toString('utf8'), /^return\{/, 'client 必须是 return {...} 闭包体')
 })
