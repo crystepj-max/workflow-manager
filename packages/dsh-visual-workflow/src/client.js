@@ -51,6 +51,14 @@ return {
   edgeKind: edgeKind,
   applyEdgeKind: applyEdgeKind,
   edgeLabelText: edgeLabelText,
+  routingNameOf: routingNameOf,
+  normalizeRoutingName: normalizeRoutingName,
+  routingPathOf: routingPathOf,
+  enumerableValues: enumerableValues,
+  routingCandidates: routingCandidates,
+  routingValuesOf: routingValuesOf,
+  applyRoutingWrite: applyRoutingWrite,
+  routingEdgeStatus: routingEdgeStatus,
   apply(ctx) {
     const slots = ctx.get('slots')
     if (slots === undefined) return
@@ -75,6 +83,12 @@ return {
     styles.insert(`
 .vwf-root { display:flex; flex-direction:column; gap:12px; font-size:13px; color:var(--dsw-alias-label-primary, inherit); }
 .vwf-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+/* 业务结果取值行（LOC-001 V2）：取值 / 状态图标 / 操作必须在同一行。
+   .vwf-input 默认 width:100%，在 flex 行里会把后两者挤到下一行，这里改为可伸缩宽度。 */
+.vwf-routing-row { flex-wrap:nowrap; gap:6px; }
+.vwf-routing-row .vwf-input { flex:1 1 auto; min-width:0; width:auto; }
+.vwf-routing-row .vwf-btn, .vwf-routing-badge { flex:0 0 auto; white-space:nowrap; }
+.vwf-routing-badge { cursor:help; font-size:12px; line-height:1; }
 .vwf-spacer { flex:1; }
 .vwf-muted { color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:12px; }
 .vwf-muted-sm { color:var(--dsw-alias-label-tertiary, #8a8a8a); font-size:11px; }
@@ -1131,6 +1145,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const [schemaError, setSchemaError] = React.useState(null)
       const [schemaNotice, setSchemaNotice] = React.useState(null)
       const [schemaDirty, setSchemaDirty] = React.useState(false)
+      // V2：业务结果字段名与取值列表的本地草稿（提交时用 applyRoutingWrite 合并写回 schema）
+      const [routingNameDraft, setRoutingNameDraft] = React.useState(() => routingNameOf(node.output && node.output.outcomePath))
+      const [routingValuesDraft, setRoutingValuesDraft] = React.useState(() => routingValuesOf(node))
+      const [routingValuesDirty, setRoutingValuesDirty] = React.useState(false)
+      const [routingNotice, setRoutingNotice] = React.useState(null)
       const debounceRef = React.useRef(null)
 
       React.useEffect(() => { setIdDraft(node.id) }, [node.id])
@@ -1139,6 +1158,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setSchemaError(null)
         setSchemaNotice(null)
         setSchemaDirty(false)
+        setRoutingNameDraft(routingNameOf(node.output && node.output.outcomePath))
+        setRoutingValuesDraft(routingValuesOf(node))
+        setRoutingValuesDirty(false)
+        setRoutingNotice(null)
       }, [node.id])
       React.useEffect(() => () => { if (debounceRef.current) debounceRef.current() }, [])
 
@@ -1151,6 +1174,25 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const isFanout = node.kind === 'fanout'
       const failOnValue = node.failOn === undefined ? 'all' : node.failOn
       const failOnMode = Number.isInteger(failOnValue) ? 'number' : failOnValue
+
+      // V2 业务结果路由：取值列表的权威是 schema，边存在性每次渲染实时算（R7）
+      const routingName = routingNameOf(node.output && node.output.outcomePath)
+      const routingSchema = (node.output && node.output.schema) || null
+      const routingProp = (routingSchema && routingSchema.properties && routingSchema.properties[routingName]) || null
+      const routingEnumerable = enumerableValues(routingProp)
+      const routingIsBoolean = !!(routingProp && routingProp.type === 'boolean')
+      const routingCandidateList = routingCandidates(routingSchema)
+      const routingStatus = routingEdgeStatus(props.dsl || { nodes: [], edges: [] }, node.id)
+      const commitRouting = (name, values) => {
+        const out = applyRoutingWrite(node, name, values)
+        props.onUpdate(node.id, { output: out })
+        // 与 JSON 编辑器保持同源：写回后同步草稿，避免旧草稿回写覆盖（D2）
+        if (out.schema) setSchemaDraft(JSON.stringify(out.schema, null, 2))
+      }
+      const commitRoutingValues = (values) => {
+        setRoutingValuesDraft(values)
+        commitRouting(routingName, values)
+      }
 
       const commitSchema = (value) => {
         if (!value.trim()) {
@@ -1381,16 +1423,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 setSchemaDirty(false)
                 setSchemaNotice(null)
                 const out = node.output || {}
-                if (mode === 'routing') {
-                  // 保留已编辑的 schema：业务结果路由必须有 output.schema
-                  setSchemaDraft(out.schema ? JSON.stringify(out.schema, null, 2) : '')
-                  props.onUpdate(node.id, { output: { schema: out.schema || null, outcomePath: out.outcomePath || '' }, manualCheck: null })
-                } else {
-                  setSchemaDraft('')
-                  if (mode === 'ai') props.onUpdate(node.id, { output: { schema: out.schema || null, successCondition: out.successCondition || '', files: out.files || undefined }, manualCheck: null })
-                  else if (mode === 'manual') props.onUpdate(node.id, { output: out.files ? { files: out.files } : null, manualCheck: true })
-                  else props.onUpdate(node.id, { output: out.files ? { files: out.files } : null, manualCheck: null })
+                // 切档只允许清掉档位专属字段（successCondition / outcomePath / manualCheck），
+                // 不得丢 output.schema：内核契约是「output 非空 ⇒ output.schema 必填」，
+                // 丢 schema 会让节点变成自己校验不过、且本档没有 schema 输入框可改的死状态。
+                setSchemaDraft(out.schema ? JSON.stringify(out.schema, null, 2) : '')
+                const kept = (extra) => {
+                  const next = { ...(extra || {}) }
+                  if (out.schema) next.schema = out.schema
+                  if (out.files) next.files = out.files
+                  return Object.keys(next).length ? next : null
                 }
+                if (mode === 'routing') props.onUpdate(node.id, { output: kept({ schema: out.schema || null, outcomePath: out.outcomePath || '' }), manualCheck: null })
+                else if (mode === 'ai') props.onUpdate(node.id, { output: kept({ schema: out.schema || null, successCondition: out.successCondition || '' }), manualCheck: null })
+                else if (mode === 'manual') props.onUpdate(node.id, { output: kept(), manualCheck: true })
+                else props.onUpdate(node.id, { output: kept(), manualCheck: null })
               },
             })
           ),
@@ -1408,15 +1454,99 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             )
           ) : null,
           resultMode === 'routing' ? h('div', null,
-            h(Field, { label: t('routingOutcomePath'), required: true, help: t('routingOutcomePathHelp'), errors: errorsFor('output.outcomePath') },
+            // F1：只填参数名（`$.` 前缀属于实现细节，对用户不可见）；粘贴 `$.route` 会自动归一
+            h(Field, { label: t('routingFieldName'), required: true, help: t('routingFieldNameHelp'), errors: errorsFor('output.outcomePath') },
               h('input', {
                 className: 'vwf-input vwf-mono' + (errorsFor('output.outcomePath').length ? ' err' : ''),
-                value: (node.output && node.output.outcomePath) || '', placeholder: '$.route',
-                onChange: (ev) => props.onUpdate(node.id, { output: { ...(node.output || {}), outcomePath: ev.target.value } }),
+                value: routingNameDraft, placeholder: 'route', list: 'vwf-routing-candidates',
+                onChange: (ev) => {
+                  setRoutingNotice(null)
+                  setRoutingNameDraft(ev.target.value)
+                  const name = normalizeRoutingName(ev.target.value)
+                  if (name) commitRouting(name, routingValuesDraft)
+                },
+                onBlur: () => {
+                  const name = normalizeRoutingName(routingNameDraft)
+                  if (routingNameDraft !== name) setRoutingNameDraft(name)
+                  if (!name && routingNameDraft.trim()) setRoutingNotice(t('routingNameInvalid'))
+                },
               })
             ),
+            // 该字段的作用用可见文字说明（不只放在 ? tooltip 里）
+            h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('routingFieldNameHint')),
+            // 候选：schema 中已有的可穷举字段（R6/E2）
+            h('datalist', { id: 'vwf-routing-candidates' },
+              routingCandidateList.map((c) => h('option', { key: c, value: c }))
+            ),
+            !routingName
+              ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('routingNeedFieldName'))
+              : h('div', { className: 'vwf-field', style: { marginTop: 6 } },
+                h('div', { className: 'vwf-field-label' }, t('routingValues'), h('span', { className: 'req' }, '*'),
+                  h('span', { className: 'vwf-help', title: t('routingValuesHelp') }, '?')),
+                // F2：取值参数项（+/-），写入 schema enum；F3：每行边存在性图标 + 一键补边
+                routingValuesDraft.map((v, i) => {
+                  const st = routingStatus.values.find((x) => x.value === v)
+                  const state = st ? st.state : 'missing'
+                  return h('div', { key: i, className: 'vwf-row vwf-routing-row', style: { marginTop: 4 } },
+                    h('input', {
+                      className: 'vwf-input vwf-mono', value: v, placeholder: 'pass',
+                      onChange: (ev) => {
+                        const next = routingValuesDraft.slice()
+                        next[i] = ev.target.value
+                        setRoutingValuesDraft(next)
+                        setRoutingValuesDirty(true)
+                      },
+                      onBlur: () => { if (routingValuesDirty) { commitRoutingValues(routingValuesDraft); setRoutingValuesDirty(false) } },
+                    }),
+                    h('span', {
+                      className: 'vwf-routing-badge',
+                      title: state === 'ok' ? t('routingEdgeExists') : state === 'duplicated' ? t('routingEdgeDuplicated') : t('routingEdgeMissing'),
+                    }, state === 'ok' ? '✅' : state === 'duplicated' ? '❗' : '⚠️'),
+                    state !== 'ok' && props.onAddOutcomeEdge
+                      ? h('button', {
+                        className: 'vwf-btn sm',
+                        onClick: () => props.onAddOutcomeEdge(node.id, normalizeRoutingName(v)),
+                      }, t('routingAddEdge'))
+                      : null,
+                    h('button', {
+                      className: 'vwf-btn sm ghost', title: t('routingRemoveValue'),
+                      onClick: () => {
+                        if (st && st.state !== 'missing') { setRoutingNotice(t('routingRemoveBlocked')); return }
+                        const next = routingValuesDraft.filter((_, j) => j !== i)
+                        setRoutingValuesDraft(next)
+                        setRoutingValuesDirty(false)
+                        commitRoutingValues(next)
+                      },
+                    }, '−')
+                  )
+                }),
+                h('button', {
+                  className: 'vwf-btn sm', style: { marginTop: 6 },
+                  onClick: () => { setRoutingValuesDraft(routingValuesDraft.concat([''])); setRoutingNotice(null) },
+                }, '＋ ' + t('routingAddValue')),
+                // E3/E4：不可穷举或 boolean 型路由字段
+                !routingEnumerable && routingValuesDraft.filter((v) => String(v).trim()).length === 0
+                  ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('routingValuesEmpty'))
+                  : null,
+                routingIsBoolean
+                  ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('routingBooleanUnsupported'))
+                  : (!routingEnumerable && routingValuesDraft.filter((v) => String(v).trim()).length > 0
+                    ? h('div', { className: 'vwf-err-line' }, t('routingNotEnumerable'))
+                    : null),
+                // F4：反向告警——图中存在未声明的 outcome 取值
+                routingStatus.undeclared.length
+                  ? h('div', { className: 'vwf-err-line' }, t('routingUndeclaredEdges') + routingStatus.undeclared.map((x) => x.value + ' → ' + x.to).join('、'))
+                  : null,
+                routingNotice ? h('div', { className: 'vwf-err-line' }, routingNotice) : null
+              ),
             schemaField({ label: t('outputSchema'), required: true, help: t('outputSchemaHelp') })
           ) : null,
+          // 「人工验收 / 无」两档不渲染 outcomePath/successCondition，但只要节点仍持有 output
+          // （典型场景：只声明了交付文件 files），内核就要求 output.schema —— 必须给出可编辑入口，
+          // 否则保存被拦却无处可改。
+          (resultMode === 'manual' || resultMode === 'none') && node.output
+            ? schemaField({ label: t('outputSchema'), required: true, help: t('outputSchemaHelp') })
+            : null,
           !isFanout ? h(ArtifactFilesEditor, { node, onUpdate: props.onUpdate, errorsFor }) : null
         )
       )
@@ -1436,6 +1566,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       // HD 的 result 边沿原字段编辑；业务 outcome 边编辑 outcome 字段
       const outField = hasOutcomeField(edge) ? 'outcome' : (edge && edge.result !== undefined ? 'result' : 'outcome')
       const outValue = edge[outField] == null ? '' : String(edge[outField])
+      // V2（F5）：源节点处于业务结果路由档时，outcome 名称改为「从节点声明取值中选」；
+      // 非路由档保持文本输入（兼容手写图）；未被声明的历史/手写取值仍可见并标注。
+      const srcValues = routingValuesOf((dsl.nodes || []).find(n => n && n.id === edge.from))
+      const usedByOthers = {}
+      if (srcValues.length) {
+        ;(dsl.edges || []).forEach((e2, i2) => {
+          if (i2 === index || !e2 || e2.from !== edge.from) return
+          if (e2.outcome === undefined || e2.outcome === null || e2.outcome === '') return
+          usedByOthers[String(e2.outcome)] = true
+        })
+      }
       return h('div', { className: 'vwf-section' },
         h('div', { className: 'vwf-row' },
           h('strong', null, t('edgeConfig')),
@@ -1449,12 +1590,26 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             onChange: (v) => props.onUpdate(index, { kind: v }),
           })
         ),
-        kind === 'outcome' ? h(Field, { label: t('edgeOutcomeName'), required: true, help: t('edgeOutcomeNameHelp'), errors: errorsFor('outcome') },
-          h('input', {
-            className: 'vwf-input vwf-mono' + (errorsFor('outcome').length ? ' err' : ''),
-            value: outValue, placeholder: 'PASS',
-            onChange: (ev) => props.onUpdate(index, { [outField]: ev.target.value }),
-          })
+        kind === 'outcome' ? h(Field, { label: t('edgeOutcomeName'), required: true, help: srcValues.length ? t('edgeOutcomeNameSelectHelp') : t('edgeOutcomeNameHelp'), errors: errorsFor('outcome') },
+          srcValues.length
+            ? h(VwfSelect, {
+              value: outValue,
+              invalid: errorsFor('outcome').length > 0,
+              options: [{ value: '', label: t('edgeOutcomePlaceholder') }].concat(srcValues.map((v) => ({
+                value: v,
+                label: v + (usedByOthers[v] ? '（' + t('edgeOutcomeUsed') + '）' : ''),
+              }))).concat(
+                outValue && !srcValues.includes(outValue)
+                  ? [{ value: outValue, label: outValue + '（' + t('edgeOutcomeUndeclared') + '）' }]
+                  : []
+              ),
+              onChange: (v) => props.onUpdate(index, { [outField]: v }),
+            })
+            : h('input', {
+              className: 'vwf-input vwf-mono' + (errorsFor('outcome').length ? ' err' : ''),
+              value: outValue, placeholder: 'PASS',
+              onChange: (ev) => props.onUpdate(index, { [outField]: ev.target.value }),
+            })
         ) : null,
         kind === 'outcome' ? h('label', { className: 'vwf-field-label', style: { cursor: 'pointer' } },
           h('input', { type: 'checkbox', checked: !!edge.countRound, style: { margin: 0 }, onChange: (ev) => props.onUpdate(index, { countRound: ev.target.checked }) }),
@@ -1941,6 +2096,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setSelectedNodeId(null)
       }
 
+      // V2 F3：取值行缺失对应边时的一键补边（默认落 $end，建后选中可改目标）
+      const addOutcomeEdge = (from, outcome) => {
+        if (!from || !outcome) return
+        const edge = { from, to: END_NODE, outcome }
+        const next = { ...wf, edges: [...(wf.edges || []), edge] }
+        syncWorkflow(next, { history: 'now' })
+        setSelectedEdgeIndex(next.edges.length - 1)
+        setSelectedNodeId(null)
+      }
+
       const addNode = () => {
         const id = uniqueNodeId(wf, 'node-' + (wf.nodes.length + 1))
         const node = { id, label: t('defaultNodeLabel', { n: id.replace(/\D+/g, '') || String(wf.nodes.length + 1) }), profile: '' }
@@ -2240,7 +2405,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 )
               )
             ),
-            selectedNode ? h(NodeInspector, { node: selectedNode, dsl: wf, fieldErrors, providers: props.providers, roles: props.roles, onUpdate: updateNode }) : null,
+            selectedNode ? h(NodeInspector, { node: selectedNode, dsl: wf, fieldErrors, providers: props.providers, roles: props.roles, onUpdate: updateNode, onAddOutcomeEdge: addOutcomeEdge }) : null,
             selectedEdge ? h(EdgeInspector, { edge: selectedEdge, index: selectedEdgeIndex, dsl: wf, fieldErrors, onUpdate: updateEdge, onDelete: deleteSelectedEdge }) : null,
             !selectedNode && !selectedEdge ? h('div', { className: 'vwf-empty', style: { marginTop: 10 } }, t('selectHint')) : null
           )
@@ -2901,4 +3066,106 @@ function edgeLabelText(e, l) {
   if (e.on === 'technical') return l.technical || 'technical'
   if (e.on === 'failure') return l.failure || 'failure'
   return l.success || 'success'
+}
+
+// ── 业务结果路由模型（LOC-001 V2：录入体验改造）──────────────────────────────
+// 契约不变原则：界面只让用户填「参数名 + 取值列表」，写入仍是内核既有形态
+//   output.outcomePath = '$.<name>'
+//   output.schema.properties.<name> = { type: 'string', enum: [...values] }
+// schema 是取值列表的唯一真源（D2）：列表只是它的编辑器，改动即合并写回。
+
+/** `$.route` → `route`；非单段路径返回 '' */
+function routingNameOf(outcomePath) {
+  if (typeof outcomePath !== 'string') return ''
+  const m = /^\$\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(outcomePath.trim())
+  return m ? m[1] : ''
+}
+
+/** 友好录入归一：接受 `route` / `$.route` / 含空白；非法返回 '' */
+function normalizeRoutingName(input) {
+  const raw = String(input == null ? '' : input).trim().replace(/^\$\./, '')
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(raw) ? raw : ''
+}
+
+function routingPathOf(name) {
+  return name ? '$.' + name : ''
+}
+
+/** 与内核一致的「可穷举」判定：enum / oneOf 全常量 / const / boolean */
+function enumerableValues(prop) {
+  if (!prop || typeof prop !== 'object') return null
+  if (Array.isArray(prop.enum) && prop.enum.length) return prop.enum.map(String)
+  if (Array.isArray(prop.oneOf) && prop.oneOf.length) {
+    const vals = prop.oneOf.filter((x) => x && x.const !== undefined).map((x) => String(x.const))
+    if (vals.length === prop.oneOf.length) return vals
+  }
+  if (prop.const !== undefined) return [String(prop.const)]
+  if (prop.type === 'boolean') return ['true', 'false']
+  return null
+}
+
+/** schema 中可作路由字段的属性名候选（进档恢复 R6 用） */
+function routingCandidates(schema) {
+  const props = (schema && schema.properties) || {}
+  return Object.keys(props).filter((k) => enumerableValues(props[k]))
+}
+
+/** 节点当前声明的取值列表（schema 权威） */
+function routingValuesOf(node) {
+  const out = (node && node.output) || null
+  if (!out) return []
+  const name = routingNameOf(out.outcomePath)
+  if (!name) return []
+  return enumerableValues(out.schema && out.schema.properties && out.schema.properties[name]) || []
+}
+
+/**
+ * 写入：参数名 + 取值 → 新的 output（保留 schema 其它属性、required 与 files）。
+ * 改名时清掉旧属性键，避免 schema 里留下孤儿枚举。
+ */
+function applyRoutingWrite(node, name, values) {
+  const out = (node && node.output) || {}
+  const baseSchema = (out.schema && typeof out.schema === 'object') ? out.schema : { type: 'object' }
+  const properties = { ...(baseSchema.properties || {}) }
+  const clean = (values || []).map((v) => String(v == null ? '' : v).trim()).filter((v) => v !== '')
+  const prev = routingNameOf(out.outcomePath)
+  if (name) {
+    const prop = clean.length
+      ? { type: 'string', enum: clean }
+      : { type: 'string' }
+    properties[name] = prop
+    if (prev && prev !== name && properties[prev] !== undefined) delete properties[prev]
+    const required = Array.isArray(baseSchema.required) ? baseSchema.required.slice() : []
+    if (!required.includes(name)) required.push(name)
+    return { ...out, schema: { ...baseSchema, properties, required }, outcomePath: routingPathOf(name) }
+  }
+  if (prev && properties[prev] !== undefined) delete properties[prev]
+  return { ...out, schema: { ...baseSchema, properties }, outcomePath: routingPathOf('') }
+}
+
+/**
+ * 边存在性（F3/F4）：对每个声明取值给出 { value, state, edgeIndexes }，
+ * 并回出「用了未声明取值」的边。state ∈ ok | missing | duplicated。
+ */
+function routingEdgeStatus(dsl, nodeId) {
+  const nodes = (dsl && dsl.nodes) || []
+  const edges = (dsl && dsl.edges) || []
+  const values = routingValuesOf(nodes.find((n) => n && n.id === nodeId))
+  const rows = values.map((v) => {
+    const hits = []
+    edges.forEach((e, i) => {
+      if (e && e.from === nodeId && e.outcome !== undefined && e.outcome !== null && String(e.outcome) === v) hits.push(i)
+    })
+    return { value: v, edgeIndexes: hits, state: hits.length === 0 ? 'missing' : (hits.length > 1 ? 'duplicated' : 'ok') }
+  })
+  const declared = {}
+  values.forEach((v) => { declared[v] = true })
+  const undeclared = []
+  edges.forEach((e, i) => {
+    if (!e || e.from !== nodeId) return
+    if (e.outcome === undefined || e.outcome === null || e.outcome === '') return
+    const v = String(e.outcome)
+    if (!declared[v]) undeclared.push({ edgeIndex: i, value: v, to: e.to })
+  })
+  return { values: rows, undeclared }
 }
