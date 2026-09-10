@@ -120,6 +120,15 @@ return {
 .vwf-editor-dialog[open] { display:flex; flex-direction:column; }
 .vwf-editor-dialog::backdrop { background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.56)); backdrop-filter:blur(2px); }
 .vwf-editor-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); flex:0 0 auto; }
+.vwf-editor-msg { flex:0 0 auto; max-height:min(320px, 38vh); margin:10px 16px 0; white-space:pre-wrap; }
+/* 结果条分级呈现（UAT-02 反馈）：## 一级=整体结论，### 二级=逐节点一行；✅/❌/⚠️/➖ 决定色调 */
+.vwf-msg-line.l1 { font-weight:600; font-size:13px; margin:2px 0 3px; }
+.vwf-msg-line.l2 { padding-left:10px; }
+.vwf-msg-line.l3 { padding-left:26px; }
+.vwf-msg-line.ok { color:var(--dsw-alias-state-success-primary, #3fb950); }
+.vwf-msg-line.bad { color:var(--dsw-alias-state-error-primary, #f85149); }
+.vwf-msg-line.warn { color:var(--dsw-alias-state-warn-primary, #f59e0b); }
+.vwf-msg-line.muted { color:var(--dsw-alias-label-tertiary, #8a8a8a); }
 .vwf-editor-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; overscroll-behavior:contain; }
 .vwf-editor { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:12px; align-items:stretch; height:100%; min-height:0; }
 @media (max-width: 900px) { .vwf-editor { grid-template-columns:minmax(0,1fr); height:auto; } .vwf-inspector { position:static; height:auto; } }
@@ -2131,6 +2140,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     title: t('oneClickCheckHelp'),
                     onClick: () => { void props.onOneClickCheck() },
                   }, props.probing ? t('oneClickCheckRunning') : t('oneClickCheck')),
+                  h('button', {
+                    className: 'vwf-btn sm ghost',
+                    disabled: !!props.probing || !(wf.nodes || []).length,
+                    title: t('probeForceRerunHint'),
+                    onClick: () => { void props.onOneClickCheck(true) },
+                  }, props.probing ? t('oneClickCheckRunning') : t('probeForceRerun')),
                   idChanged ? h('button', { className: 'vwf-btn sm', onClick: () => { void handleSave() } }, t('saveAs')) : null,
                   h('button', { className: 'vwf-btn sm primary', disabled: props.saving || !(wf.nodes || []).length || idChanged, onClick: () => { void handleSave() } }, t('saveWorkflow'))
                 )
@@ -2563,10 +2578,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         refresh()
       }
       const [probing, setProbing] = React.useState(false)
-      const onOneClickCheck = () => {
+      // #74 探针结论 → 用户文案（host 侧已做错误清洗，此处只做呈现映射）
+      const probeStatusText = (r) => {
+        const map = {
+          available: t('probeStatusAvailable'), auth_failed: t('probeStatusAuthFailed'), quota: t('probeStatusQuota'),
+          rate_limit: t('probeStatusRateLimit'), model_unavailable: t('probeStatusModelUnavailable'), permission_denied: t('probeStatusPermissionDenied'),
+          provider_unreachable: t('probeStatusUnreachable'), timeout: t('probeStatusTimeout'), provider_error: t('probeStatusOther'),
+          provider_not_configured: t('probeStatusProviderNotConfigured'), model_not_configured: t('probeStatusModelNotConfigured'),
+          probe_internal_error: t('probeStatusInternalError'),
+          probe_degraded: t('probeStatusDegraded'), unknown: t('probeStatusUnknown'),
+        }
+        return map[r.status] || r.status || t('probeStatusUnknown')
+      }
+      const onOneClickCheck = (force) => {
         if (!wf || probing) return
         setProbing(true)
-        host.call('vwf.probe', { dsl: wf }).then((r) => {
+        host.call('vwf.probe', { dsl: wf, force: force === true }).then((r) => {
           if (!r) { setMsg(t('oneClickCheckFailed')); return }
           if (r.stage === 'static' && !r.ok) {
             const first = (r.errors && r.errors[0] && r.errors[0].message) || t('oneClickCheckFailed')
@@ -2577,12 +2604,117 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             setMsg(t('oneClickCheckProbePending'))
             return
           }
+          if (r.code === 'LLM_SERVICE_UNAVAILABLE') { setMsg(t('probeLlmUnavailable')); return }
+          if (Array.isArray(r.results)) {
+            if (!r.results.length) { setMsg(t('probeNoBindings')); return }
+            setMsg(probeReport(r))
+            return
+          }
           if (r.ok) setMsg(t('oneClickCheckOk'))
           else setMsg(t('oneClickCheckFailed') + ((r.errors && r.errors[0] && r.errors[0].message) || ''))
         }).catch((e) => setMsg(t('oneClickCheckFailed') + String(e))).finally(() => setProbing(false))
       }
+      // #74 UAT-02 反馈：探针结论按「节点序号」逐节点呈现，三级层级用视觉区分（不写 markdown 标记）：
+      //   一级 = 整体结论；二级 = 一级节点（单列序号 0/1/2…）；三级 = 二级节点（同列并行 1.1/1.2…，如有）。
+      // 序号直接复用画布的两级序号（layoutGraph().seqLabels），与节点卡片角标一一对应。
+      // 图标：✅ 可用 / ❌ 不可用（带 host 侧清洗过的原因）/ ⚠️ 未定论（探针降级、探针内部错误、
+      // 未返回结论）/ ➖ 未指定模型（继承会话模型）。同一绑定被多个节点引用时逐节点展开。
+      const probeReport = (r) => {
+        const all = Array.isArray(r.results) ? r.results : []
+        const byNode = new Map()
+        for (const x of all) for (const id of (x.nodes || [])) byNode.set(String(id), x)
+        const nodes = (wf && Array.isArray(wf.nodes)) ? wf.nodes : []
+        const blueprintModels = (wf && wf.bindings && wf.bindings.models) || null
+        const modelOf = (n) => {
+          if (n && n.model && (n.model.provider || n.model.model)) return n.model
+          return (blueprintModels && blueprintModels[String(n && n.id)]) || null
+        }
+        // 画布两级序号：单列 "m"，同列并行 "m.1"/"m.2"；布局拿不到时退化为数组顺序
+        let labels = {}
+        try { labels = layoutGraph(wf || {}, []).seqLabels || {} } catch (e) { labels = {} }
+        const seqOf = (n) => (labels[n.id] === undefined ? '' : String(labels[n.id]))
+        const keyOf = (n) => {
+          const parts = seqOf(n).split('.')
+          const main = parts[0] === '' ? 1e6 : Number(parts[0])
+          return [isFinite(main) ? main : 1e6, parts.length > 1 ? Number(parts[1]) || 0 : 0]
+        }
+        const ordered = nodes.slice().sort((a, b) => { const ka = keyOf(a); const kb = keyOf(b); return (ka[0] - kb[0]) || (ka[1] - kb[1]) })
+        const rows = []
+        const covered = new Set()
+        let ok = 0
+        let bad = 0
+        let soft = 0
+        let unbound = 0
+        ordered.forEach((n) => {
+          const seq = seqOf(n)
+          // 二级节点（同列并行）进第三级缩进；一级节点（单列）进第二级
+          const level = seq.indexOf('.') >= 0 ? 3 : 2
+          const label = (seq ? seq + ' ' : '') + (n.label || n.id) + '（' + n.id + '）'
+          const m = modelOf(n)
+          const x = byNode.get(String(n.id)) || null
+          if (!x) {
+            if (!m) {
+              unbound += 1
+              rows.push({ level: level, tone: 'muted', text: '➖ ' + label + ' · ' + t('probeNodeInherit') })
+              return
+            }
+            soft += 1
+            rows.push({ level: level, tone: 'warn', text: '⚠️ ' + label + ' · ' + String(m.provider || 'default') + '/' + String(m.model || 'default') + ' · ' + t('probeNodeNotProbed') })
+            return
+          }
+          covered.add(String(n.id))
+          if (x.status === 'available') {
+            ok += 1
+            rows.push({ level: level, tone: 'ok', text: '✅ ' + label + ' · ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) + (x.cached ? t('probeCachedSuffix') : '') })
+            return
+          }
+          const undecided = x.status === 'probe_degraded' || x.status === 'probe_internal_error'
+          if (undecided) soft += 1
+          else bad += 1
+          rows.push({
+            level: level, tone: undecided ? 'warn' : 'bad',
+            text: (undecided ? '⚠️ ' : '❌ ') + label + ' · ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) +
+              (x.message ? '：' + x.message : '') + (x.cached ? t('probeCachedSuffix') : ''),
+          })
+        })
+        // 防御：结果里出现当前节点表未覆盖的绑定（DSL 与结果不同步）时也要如实呈现
+        for (const x of all) {
+          const rest = (x.nodes || []).filter((id) => !covered.has(String(id)) && !nodes.some((n) => String(n.id) === String(id)))
+          if (!rest.length) continue
+          if (x.status === 'available') ok += rest.length
+          else if (x.status === 'probe_degraded' || x.status === 'probe_internal_error') soft += rest.length
+          else bad += rest.length
+          rows.push({
+            level: 2, tone: x.status === 'available' ? 'ok' : 'bad',
+            text: (x.status === 'available' ? '✅ ' : '❌ ') + x.provider + '/' + x.model + ' · ' + probeStatusText(x) +
+              (x.message ? '：' + x.message : '') + t('probeBindingNodes', { nodes: rest.join('、') }),
+          })
+        }
+        const total = ok + bad + soft + unbound
+        const notes = []
+        if (soft) notes.push(t('probeNoteSoft', { n: soft }))
+        if (unbound) notes.push(t('probeNoteUnbound', { n: unbound }))
+        const head = (bad === 0 ? '✅ ' + t('probeReportOk', { ok: ok, total: total }) : '❌ ' + t('probeReportFail', { total: total, bad: bad })) +
+          (notes.length ? t('probeReportNotes', { notes: notes.join('，') }) : '')
+        return { lines: [{ level: 1, tone: bad === 0 ? 'ok' : 'bad', text: head }].concat(rows) }
+      }
 
       const editingBuiltin = !!(list || []).find(x => x.id === editId && x.builtin)
+      // 结果条按行分级渲染：一级加粗放大、二级缩进、三级再缩进一层；✅/❌/⚠️/➖ 决定色调。
+      // 纯文本消息（保存/删除回执等）按单级普通行渲染。
+      const renderMsg = (m) => {
+        const rows = (m && Array.isArray(m.lines)) ? m.lines : String(m == null ? '' : m).split('\n').map((line) => ({ text: line }))
+        return h('div', { className: 'vwf-code' },
+          rows.map((row, i) => {
+            const text = String(row.text == null ? '' : row.text)
+            const tone = row.tone || (text.indexOf('❌') >= 0 ? 'bad'
+              : text.indexOf('⚠️') >= 0 ? 'warn'
+                : text.indexOf('✅') >= 0 ? 'ok'
+                  : text.indexOf('➖') >= 0 ? 'muted' : '')
+            return h('div', { key: 'msg-line-' + i, className: 'vwf-msg-line l' + (row.level || 0) + (tone ? ' ' + tone : '') }, text)
+          })
+        )
+      }
       if (!i18nReady) return h('div', { className: 'vwf-muted' }, t('i18nLoading'))
 
       return h('div', { className: 'vwf-root' },
@@ -2613,7 +2745,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           )
         ) : null,
         tab === 'dashboard' ? h(Dashboard, { wf }) : null,
-        msg ? h('div', { className: 'vwf-code' }, msg) : null,
+        msg ? renderMsg(msg) : null,
         wf ? h('dialog', {
           className: 'vwf-editor-dialog',
           ref: editorDialogRef,
@@ -2630,6 +2762,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             h('span', { className: 'vwf-spacer' }),
             h('button', { className: 'vwf-btn sm', onClick: requestCloseEditor }, t('close'))
           ),
+          // 检测/探针结果同时显示在编辑器内：结果条若只渲染在外层主面板，
+          // 会被全屏编辑器 dialog 完全遮挡（#74 UAT 反馈）
+          msg ? h('div', { className: 'vwf-editor-msg' }, renderMsg(msg)) : null,
           h('div', { className: 'vwf-editor-body' },
             h(Editor, {
               key: editId || 'new',

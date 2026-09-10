@@ -29,7 +29,9 @@ function minifyCssInStylesInsert(src) {
 function minifyDynamicClosure(src) {
   const prepared = minifyCssInStylesInsert(src)
   const wrapped = 'export default (function () {\n' + prepared + '\n})();\n'
-  const out = transformSync(wrapped, { minify: true, legalComments: 'none', target: 'es2020' }).code
+  // charset:'utf8'：默认 ascii 会把中文展开成 \uXXXX（每字 6 字节 vs UTF-8 3 字节），
+  // 动态载荷白涨 ~7KB。产物全程以 UTF-8 文本读写（粘贴 / fs 读取 / vm 求值），无二次转码。
+  const out = transformSync(wrapped, { minify: true, legalComments: 'none', target: 'es2020', charset: 'utf8' }).code
   const m = out.match(/\(function\(\)\{([\s\S]*)\}\)\(\);?\s*(?:export\{[^}]*\}|export default|$)/)
     || out.match(/function\(\)\{([\s\S]*)\}\(\);?\s*(?:export\{[^}]*\}|export default|$)/)
   if (!m) throw new Error('esbuild 压缩结果无法抽出动态闭包体')
@@ -191,18 +193,30 @@ for (const name of listNames(rolesSrc, '.md')) {
 }
 
 mkdirSync(join(dist, 'dynamic'), { recursive: true })
-const dynHost = minifyDynamicClosure(hostBody)
+// 动态产物头部注入（backlog dev-plugin-sync-gap 方案 A）：cordis 动态沙箱不注入
+// __VWF_PLUGIN_ROOT__/__VWF_REPO_ROOT__，也不提供 Buffer（dist/validate-core.cjs 的
+// 输入尺寸检查会调用 Buffer.byteLength）——静态 bundle 靠构建期常量与 Node 全局，
+// 动态闭包体必须自带。常量指向宿主构建时的真实路径（开发 DSH 单机部署场景成立），
+// Buffer 用沙箱已有的 TextEncoder 实现最小垫片（host.js 只用 byteLength 等静态方法）。
+const DYN_HOST_PRELUDE = [
+  `const __VWF_PLUGIN_ROOT__ = ${JSON.stringify(root)};`,
+  `const __VWF_REPO_ROOT__ = ${JSON.stringify(dirname(dirname(root)))};`,
+  'if (typeof globalThis.Buffer === "undefined") { const enc = new TextEncoder(); globalThis.Buffer = { from(s, e) { if (e === "base64" && typeof atob === "function") { const bin = atob(s); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; } return enc.encode(String(s)); }, byteLength(s) { return enc.encode(String(s)).length; }, isBuffer() { return false; }, alloc(n) { return new Uint8Array(n); }, concat(list) { const out = []; for (const a of list) out.push(...a); return new Uint8Array(out); } }; }',
+].join('\n') + '\n'
+const dynHost = DYN_HOST_PRELUDE + minifyDynamicClosure(hostBody)
 const dynClient = minifyDynamicClosure(clientBody)
-const HOST_LIMIT = 80 * 1024
-// 软上限（用户拍板）：超过仅警告不阻断，产物照常写出。
-// 80KB 作为瘦身高水位线看待；持续超出时仍应回做面板瘦身。
-const CLIENT_LIMIT = 80 * 1024
 writeFileSync(join(dist, 'dynamic', 'host.js'), dynHost)
 writeFileSync(join(dist, 'dynamic', 'client.js'), dynClient)
 const hostBytes = Buffer.byteLength(dynHost)
 const clientBytes = Buffer.byteLength(dynClient)
-if (hostBytes > HOST_LIMIT || clientBytes > CLIENT_LIMIT) {
-  console.warn(`⚠️ dynamic 体积超限（软上限，仅警告）：host ${hostBytes}/${HOST_LIMIT} client ${clientBytes}/${CLIENT_LIMIT}`)
+// 载荷预算属于「一次 cordis_define 的粘贴总量」（host + client 同时携带），
+// 而不是每半各自的 80KiB：两半天然失衡（client 远大于 host），固定每半上限会在
+// 总量仍有余量时先撞线（#74 UAT-02 结果条：client 84KB + host 62KB = 146KB，
+// 低于合计预算却被拒）。合计预算保持 160KiB 不变（此前即 2×80KiB）。
+const PAYLOAD_LIMIT = 160 * 1024
+if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
+  console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
+  process.exit(1)
 }
 
 console.log('built:', join(dist, 'host-entry.mjs'))

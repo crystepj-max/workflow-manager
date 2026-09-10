@@ -89,13 +89,22 @@ test('静态 bundle dist 含语言资源与内置角色正文', () => {
   assert.ok(existsSync(join(here, '..', 'dist', 'dynamic', 'client.js')), 'dist/dynamic/client.js 必须存在')
 })
 
-test('开发粘贴用 dynamic 闭包体形态检查（80KB 为软上限，超限由 build 警告）', () => {
+test('开发粘贴用 dynamic 闭包合计 ≤ 160KB（一次 cordis_define 载荷），host 自带头部常量与 Buffer 垫片', () => {
   const host = readFileSync(join(here, '..', 'dist', 'dynamic', 'host.js'))
   const client = readFileSync(join(here, '..', 'dist', 'dynamic', 'client.js'))
-  // 体积软上限（80KB）的治理在 scripts/build-bundle.mjs：超过仅警告不阻断（用户拍板），
-  // 此处只锁闭包体形态，不做字节数硬断言。
-  assert.match(host.toString('utf8'), /^return\{/, 'host 必须是 return {...} 闭包体')
-  assert.match(client.toString('utf8'), /^return\{/, 'client 必须是 return {...} 闭包体')
+  // 预算按「同一次 cordis_define 的粘贴总量」计（两半天生不等大）：
+  // host+client 合计 160KiB，与拆分前的 2×80KiB 相同。
+  const limit = 160 * 1024
+  assert.ok(host.byteLength + client.byteLength <= limit, `host ${host.byteLength} + client ${client.byteLength} > ${limit}`)
+  const hostText = host.toString('utf8')
+  const clientText = client.toString('utf8')
+  // 闭包体形态：前置语句（注入头/垫片）之后必须是 return {...}（宿主以函数体求值）
+  assert.match(hostText, /\nreturn\{name:"visual-workflow-host"/, 'host 必须以注入头 + return {...} 闭包体收尾')
+  assert.match(clientText, /^return\{/, 'client 必须是 return {...} 闭包体')
+  // 动态沙箱缺省注入：插件根常量（loadDist 内核来源）与 Buffer 垫片（validate-core 尺寸检查依赖）
+  assert.match(hostText, /const __VWF_PLUGIN_ROOT__ = "/, 'host 必须自注入 __VWF_PLUGIN_ROOT__（动态沙箱不提供）')
+  assert.match(hostText, /const __VWF_REPO_ROOT__ = "/, 'host 必须自注入 __VWF_REPO_ROOT__（generate/workspace-host 路径来源）')
+  assert.match(hostText, /globalThis\.Buffer/, 'host 必须注入 globalThis.Buffer 垫片（validate-core 尺寸检查依赖）')
 })
 
 test('静态 bundle dist 含 role-library.cjs + builtin-roles.json 且内核可加载（角色库正式安装路径）', () => {
