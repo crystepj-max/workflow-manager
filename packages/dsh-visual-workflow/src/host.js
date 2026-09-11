@@ -1945,6 +1945,8 @@ return {
       return {
         taskId: taskId || undefined, workspace_id: ws.workspace_id, workspace_path: ws.workspace_path, source_path: ws.source_path,
         records_path: ws.records_path, work_branch: ws.work_branch, source_revision: ws.source_revision, workspace_capability: cap || undefined,
+        // LOC-013：隔离模式随现场注入脚本（ISOLATED_READ 时运行上下文标注 source 只读）
+        workspace_mode: ws.workspace_mode || undefined,
       }
     }
     function injectWorkspaceDefaults(script, defaults) {

@@ -16,9 +16,9 @@
 | 施工环境组 | LOC-013 |
 | 施工环境角色 | 独立 |
 | 无人值守许可 | 允许 |
-| 任务规格位置 | 本卡三要素即基线；实施前如需细化，按 Vn→Vn+1 流程升版 |
+| 任务规格位置 | `.scratch/LOC-013-explore-template/task-spec-V1.md` |
 | 定义时间 | 2026-09-11 |
-| GitHub 同步 | 待补 issue |
+| GitHub 同步 | pending |
 
 ## 摘要（三要素速览）
 
