@@ -2290,10 +2290,6 @@ return {
               if (hbFailures > 0) trace.heartbeat_failures = hbFailures
               return { trace, rerun_failed: true, engine_error: errMsg(e) }
             }
-            if (hbFailures > 0) {
-              // 心跳刷新失败按 fail closed 处理并留痕（§11）：覆盖重跑后任一收束路径
-              return blocked('GATE_LOCK_HEARTBEAT_FAILED', '集成锁心跳刷新失败，fail closed：闸门不放行（详见运行记录）', { heartbeat_failures: hbFailures })
-            }
             const rerunCanon = rerunResult && rerunResult.stopReason === 'completed' ? canonicalStop(rerunResult) : ''
             const rerunValue = rerunResult && rerunResult.value
             if (rerunCanon) onRun(rerunRunId, (r) => { r.status = rerunCanon; applyHdValue(r, rerunValue) })
@@ -2319,6 +2315,10 @@ return {
               agents_started: rerunResult ? rerunResult.agentsStarted : null,
             })
             lastRerun = { canon: rerunCanon, stopReason: rerunResult ? rerunResult.stopReason : undefined, value: rerunValue, runId: rerunRunId }
+            if (hbFailures > 0) {
+              // 心跳刷新失败按 fail closed 处理并留痕（§11）：重跑段已完全收束，闸门不放行
+              return blocked('GATE_LOCK_HEARTBEAT_FAILED', '集成锁心跳刷新失败，fail closed：闸门不放行（详见运行记录）', { heartbeat_failures: hbFailures })
+            }
             if (rerunCanon !== 'WAITING_HUMAN') {
               // 重跑段未回到人工等待（停止/暂停/失败/继续图中流转）：按其终态收束，不放行
               trace.rerun_terminal = rerunCanon || String((rerunResult && rerunResult.stopReason) || '')
