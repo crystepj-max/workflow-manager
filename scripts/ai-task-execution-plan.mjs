@@ -21,12 +21,11 @@
  *
  * 未给 --simulate 时：仅输出快照与「将启动」顺序（dry-run 启动态）。
  */
-import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { field, TASK_FIELDS } from './task-card-parse.mjs'
 import { STATUS_WAITING_ACCEPTANCE, STATUS_EXECUTION_BLOCKED } from './local-task-registry.mjs'
+import { runPreflight } from './ai-task-preflight-check.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
@@ -52,35 +51,34 @@ if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
 
 const PRI = { P0: 0, P1: 1, P2: 2 }
 
-function assess(candidate) {
+async function assess(candidate) {
   const issuePath = path.resolve(path.dirname(batchPath), candidate.issueBasics)
   const specPath = path.resolve(path.dirname(batchPath), candidate.taskSpec)
-  const r = spawnSync(process.execPath, [preflight, issuePath, specPath, '--run-baseline', 'V1'], {
-    encoding: 'utf8',
-  })
-  const issue = fs.existsSync(issuePath) ? fs.readFileSync(issuePath, 'utf8') : ''
-  const dep = field(issue, TASK_FIELDS.DEPS)
+  // LOC-003：进程内调用结构化校验，不再 spawn 子进程、不再自行重读 issue 文件
+  const pr = await runPreflight(issuePath, specPath, { runBaseline: 'V1' })
+  const f = pr.fields || {}
+  const dep = f.dependencies ?? null
   const excluded = {
     id: candidate.id,
-    name: field(issue, TASK_FIELDS.NAME) || candidate.id,
+    name: f.name || candidate.id,
     reason: null,
   }
   if (dep && dep !== '无') {
     excluded.reason = 'V0.1 暂不支持关联任务自动执行'
     return { ok: false, excluded }
   }
-  if (r.status !== 0) {
-    excluded.reason = (r.stderr || r.stdout || '实施前检查未通过').trim().split('\n')[0]
+  if (!pr.ok) {
+    excluded.reason = pr.failures[0] || '实施前检查未通过'
     return { ok: false, excluded }
   }
   return {
     ok: true,
     task: {
       id: candidate.id,
-      name: field(issue, TASK_FIELDS.NAME) || candidate.id,
-      priority: field(issue, TASK_FIELDS.PRIORITY) || 'P2',
-      baseline: field(issue, TASK_FIELDS.BASELINE) || 'V1',
-      definedAt: field(issue, TASK_FIELDS.DEFINED_AT) || '1970-01-01T00:00:00Z',
+      name: f.name || candidate.id,
+      priority: f.priority || 'P2',
+      baseline: f.baseline || 'V1',
+      definedAt: f.defined_at || '1970-01-01T00:00:00Z',
       issueBasics: issuePath,
       taskSpec: specPath,
       uatHint: `Issue基本信息: ${issuePath}`,
@@ -90,8 +88,8 @@ function assess(candidate) {
 
 const excluded = []
 const eligible = []
-for (const c of batch.candidates || []) {
-  const a = assess(c)
+const assessments = await Promise.all((batch.candidates || []).map((c) => assess(c)))
+for (const a of assessments) {
   if (a.ok) eligible.push(a.task)
   else excluded.push(a.excluded)
 }
