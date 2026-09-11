@@ -15,7 +15,7 @@ import {
   writeSourceFile, readSourceFile, buildAttemptProvenance, assertProofBinding,
   computeIntegrationCheckpointFromRepo, observeTargetHead,
   acquireLock, releaseLock, activeLockFor, cleanupWorkspace, recoverStale,
-  resolveWorkspacePolicy,
+  resolveWorkspacePolicy, TEMPLATE_REGISTRY, LIFECYCLE,
 } from './workspace-isolation.mjs'
 import {
   mkdirSync, writeFileSync, readFileSync, existsSync,
@@ -165,6 +165,9 @@ function saveRegistry(workRoot, registry) {
 // 并发写的中途状态。
 // A1-2（Codex Round 2）：事务开始前先递归创建 workRoot——全新 DSH Home
 // 尚无 ~/.dsh*/workspaces 时，锁文件与注册表目录的父目录必须存在。
+// LOC-009：事务落盘后按 #79 目录组织把每 Run 事件切片写入
+// records/<logical_run_id>/events.json（cleanup 保留 records，事件因此
+// 在 workspace 清理后仍可追溯；state.json 仍是恢复用的注册表索引）。
 function withRegistryTx(workRoot, fn) {
   const lp = lockPath(workRoot)
   mkdirSync(workRoot, { recursive: true })
@@ -173,9 +176,41 @@ function withRegistryTx(workRoot, fn) {
     const registry = loadRegistry(workRoot)
     const result = fn(registry)
     saveRegistry(workRoot, registry)
+    persistRunEvents(registry)
     return result
   } finally {
     releaseFileLock(lp, token)
+  }
+}
+
+// 每 Run 事件切片：timeline 按 logical_run_id 归属；lock_released /
+// lock_refreshed 不带 logical_run_id，用 lock_acquired 建立的 lock_id → Run
+// 归属补齐。逐 Run best-effort 写入，不使注册表事务失败。
+function persistRunEvents(registry) {
+  const lockOwner = new Map()
+  for (const e of registry.timeline) {
+    if (e && e.type === 'lock_acquired' && e.lock_id && e.logical_run_id) lockOwner.set(e.lock_id, e.logical_run_id)
+  }
+  const byRun = new Map()
+  for (const e of registry.timeline) {
+    if (!e) continue
+    const run = e.logical_run_id || (e.lock_id && lockOwner.get(e.lock_id)) || null
+    if (!run) continue
+    if (!byRun.has(run)) byRun.set(run, [])
+    byRun.get(run).push(e)
+  }
+  const roots = new Map()
+  for (const ws of registry.workspaces.values()) roots.set(ws.logical_run_id, ws.records_path)
+  for (const [run, rec] of registry.archived.entries()) {
+    const p = rec && rec.identity && rec.identity.records_path
+    if (p && !roots.has(run)) roots.set(run, p)
+  }
+  for (const [run, path] of roots.entries()) {
+    try {
+      mkdirSync(path, { recursive: true })
+      const data = { schema: 1, logical_run_id: run, events: byRun.get(run) || [] }
+      writeFileSync(path + '/events.json', JSON.stringify(data, null, 2) + '\n')
+    } catch { /* 事件切片落盘失败不阻塞注册表事务（state.json 仍含全量 timeline） */ }
   }
 }
 
@@ -361,6 +396,54 @@ try {
       if (!template_id) err('缺少 template_id')
       const policy = resolveWorkspacePolicy(template_id, input || {})
       out({ ok: true, policy })
+      break
+    }
+    case 'templateRegistry': {
+      // LOC-009：四类正式模板的策略声明权威（Core 导出），host 侧模板映射
+      // 以本表键为权威，不再按 id 名字猜测。
+      out({ ok: true, registry: TEMPLATE_REGISTRY })
+      break
+    }
+    case 'recoverStale': {
+      // LOC-009：恢复扫描（产品 DSH 重启后调用）。过期锁先释放；输出可识别恢复的
+      // workspace 清单（含 WAITING_HUMAN/PAUSED/BLOCKED 保留态）与未释放的活动锁。
+      const { work_root } = INPUT
+      if (!work_root) err('缺少 work_root')
+      const scan = withRegistryTx(work_root, (registry) => {
+        const result = recoverStale(registry)
+        const retained = []
+        const workspaces = []
+        const active_locks = []
+        for (const ws of registry.workspaces.values()) {
+          workspaces.push({ logical_run_id: ws.logical_run_id, workspace_id: ws.workspace_id, lifecycle: ws.lifecycle, workspace_path: ws.workspace_path, source_path: ws.source_path, abandoned: ws.abandoned === true })
+          if ([LIFECYCLE.WAITING_HUMAN, LIFECYCLE.PAUSED, LIFECYCLE.BLOCKED].includes(ws.lifecycle)) {
+            retained.push({ logical_run_id: ws.logical_run_id, workspace_id: ws.workspace_id, lifecycle: ws.lifecycle })
+          }
+        }
+        for (const lock of registry.locks.values()) {
+          if (!lock.released_at) active_locks.push({ lock_id: lock.lock_id, logical_run_id: lock.logical_run_id, resource_key: lock.resource_key, owner: lock.owner, acquired_at: lock.acquired_at, expires_at: lock.expires_at })
+        }
+        return { ...result, workspaces, retained_workspaces: retained, active_locks }
+      })
+      out({ ok: true, scan })
+      break
+    }
+    case 'context': {
+      // LOC-009：Run 工作区上下文（host refreshWorkspaceContext / #79 摘要入档）。
+      // workspace 已清理时回落 archived 身份 + 清理审计；事件沿 timeline 归属切片。
+      const { work_root, logical_run_id } = INPUT
+      if (!work_root || !logical_run_id) err('缺少 work_root 或 logical_run_id')
+      const ctx = withRegistryRead(work_root, (registry) => {
+        const ws = registry.workspaces.get(logical_run_id) || null
+        const archived = registry.archived.get(logical_run_id) || null
+        const lockOwner = new Map()
+        for (const e of registry.timeline) {
+          if (e && e.type === 'lock_acquired' && e.lock_id && e.logical_run_id === logical_run_id) lockOwner.set(e.lock_id, true)
+        }
+        const events = registry.timeline.filter((e) => e && (e.logical_run_id === logical_run_id || (e.lock_id && lockOwner.has(e.lock_id))))
+        return { workspace: ws, cleanup: archived ? archived.audit : null, events }
+      })
+      out({ ok: true, ...ctx })
       break
     }
     default:

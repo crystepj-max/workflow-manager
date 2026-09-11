@@ -53,6 +53,7 @@ function projectToVwf(bp) {
   if (bp.heteroCheck) out.heteroCheck = true
   if (bp.bundleRoles) out.bundleRoles = true
   if (isDefined(bp.humanDecision)) out.humanDecision = cloneValue(bp.humanDecision)
+  if (isDefined(bp.workspace)) out.workspace = cloneValue(bp.workspace)
   return out
 }
 
@@ -98,6 +99,7 @@ function projectToBlueprint(dsl) {
   if (dsl.heteroCheck) bp.heteroCheck = true
   if (dsl.bundleRoles) bp.bundleRoles = true
   if (isDefined(dsl.humanDecision)) bp.humanDecision = cloneValue(dsl.humanDecision)
+  if (isDefined(dsl.workspace)) bp.workspace = cloneValue(dsl.workspace)
   if (Object.keys(models).length) bp.bindings = { models }
   return bp
 }

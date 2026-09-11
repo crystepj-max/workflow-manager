@@ -114,3 +114,13 @@ cleanup 必须写审计（worktree / branch / artifacts 处理结果）。删除
 | `cwf-checkpoint.computeCheckpoint` | `computeIntegrationCheckpoint` |
 | #78 `coverageStatus` / `staleProofsFor` | `assertIntegrationAllowed` |
 | 建设契约 §7.2 `ISOLATED_WRITE` | 本内核 Mode 枚举；字段以本契约为权威 |
+
+## 11. 注册表持久化与恢复扫描（宿主包装层，LOC-009）
+
+Core 保持 Registry 默认内存、语义不变；持久化由宿主包装脚本 `scripts/workspace-isolation-host.mjs` 承担：
+
+- **注册表索引**：`<work_root>/.vwf-registry/state.json` 全量快照（跨进程文件锁 + 原子换入），产品 DSH 重启后 allocate 过的 workspace、未释放锁、事件 timeline 均可从索引识别恢复。
+- **每 Run 事件切片（#79 目录组织）**：每次注册表事务把 timeline 按归属写入 `<work_root>/records/<logical_run_id>/events.json`（`lock_released`/`lock_refreshed` 等不带 `logical_run_id` 的事件按 `lock_acquired` 建立的 lock 归属补齐）。`records/` 是 cleanup 不得删除的记录根，事件因此在 workspace 清理后仍可追溯。
+- **恢复扫描**：包装脚本命令 `recoverStale`——先释放过期锁，输出全部在册 workspace（含 `WAITING_HUMAN`/`PAUSED`/`BLOCKED` 保留态清单）与未释放活动锁；保留态 workspace 的清理请求被 Core 拒绝（§8）。
+- **Run 上下文**：包装脚本命令 `context` 返回 workspace 身份视图、事件切片与清理审计（已清理 Run 回落 archived 身份 + 审计），供 DSH host 逻辑运行摘要入档与重启恢复。
+- **模板策略注册表**：Core 导出 `TEMPLATE_REGISTRY`（§2 四类身份的策略声明权威），包装脚本命令 `templateRegistry` 对外暴露；`resolveWorkspacePolicy` 只消费该表，DSH host 的模板映射以其键为权威，不按模板 id 名字猜测。

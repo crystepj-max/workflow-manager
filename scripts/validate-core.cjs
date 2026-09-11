@@ -25,6 +25,10 @@ const FRAMEWORK_FROM = [HUMAN_DECISION_ID]
 // 与 scripts/formal-artifacts.cjs FILE_KINDS 保持同步（#69）
 const FILES_KINDS = ['json', 'markdown', 'text', 'html', 'canvas', 'flowchart', 'diagram']
 const ON_MAX_ROUNDS = ['return', 'auto-reschedule']
+// LOC-009 模板策略声明：与 scripts/workspace-isolation.mjs TEMPLATE_REGISTRY 键
+// 及 optimize 的 resource_kind 枚举保持一致（权威在 Core 注册表）。
+const WORKSPACE_TEMPLATE_IDS = ['construction', 'optimize', 'diagnose', 'explore']
+const WORKSPACE_RESOURCE_KINDS = ['git', 'files', 'document', 'config', 'other']
 const MAX_ROUNDS_CAP = 9 // 系统约定上限：编辑器最大可设 9 轮（用户意见 Q7）
 const FANOUT_ITEMS_ARGS_RE = /^\$\.args(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
 const FANOUT_ITEMS_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
@@ -165,6 +169,8 @@ function fieldKeyOf(at) {
   if (at === '$.approved') return 'approved'
   if (at === '$.humanDecision') return 'humanDecision'
   if (at.startsWith('$.humanDecision.')) return 'humanDecision:' + at.slice('$.humanDecision.'.length)
+  if (at === '$.workspace') return 'workspace'
+  if (at.startsWith('$.workspace.')) return 'workspace:' + at.slice('$.workspace.'.length)
   return undefined
 }
 
@@ -525,6 +531,17 @@ function validateBlueprint(bp, opts) {
   if (typeof bp.displayName !== 'string' || !bp.displayName.trim()) err('$.displayName', 'displayName（中文展示名）必填非空 —— 生成 skill 的触发词之一（FR-6）')
   if (bp.name !== undefined && bp.name !== bp.id) err('$.name', 'name 与 id 必须一致（单标识方案，D1），或删除 name')
   if (bp.onMaxRounds !== undefined && !ON_MAX_ROUNDS.includes(bp.onMaxRounds)) err('$.onMaxRounds', 'onMaxRounds ∈ { return, auto-reschedule }')
+  // LOC-009：workspace 隔离策略声明（可选）。声明后 host 不再按模板 id 名字猜测；
+  // template_id 权威集合 = workspace-isolation.mjs TEMPLATE_REGISTRY 的键。
+  if (bp.workspace !== undefined) {
+    const w = bp.workspace
+    if (!w || typeof w !== 'object' || Array.isArray(w)) {
+      err('$.workspace', 'workspace 必须是对象 { template_id, resource_kind? }')
+    } else {
+      if (!WORKSPACE_TEMPLATE_IDS.includes(w.template_id)) err('$.workspace.template_id', 'workspace.template_id 必填且 ∈ ' + WORKSPACE_TEMPLATE_IDS.join(' | '))
+      if (w.resource_kind !== undefined && !WORKSPACE_RESOURCE_KINDS.includes(w.resource_kind)) err('$.workspace.resource_kind', 'workspace.resource_kind ∈ ' + WORKSPACE_RESOURCE_KINDS.join(' | ') + '（仅 optimize 类声明需要）')
+    }
+  }
 
   if (!Array.isArray(bp.nodes) || bp.nodes.length === 0) { err('$.nodes', 'nodes 至少一个节点'); return { ok: false, errors, warnings: [] } }
   if (!Array.isArray(bp.edges)) { err('$.edges', 'edges 必填（数组）'); return { ok: false, errors, warnings: [] } }

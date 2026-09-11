@@ -1541,7 +1541,7 @@ return {
       let workspaceArgs = null
       if (a.allocate === true || a.taskId) {
         const taskId = String(a.taskId || (v.sanitized.id + '-' + Date.now()))
-        const prepared = await prepareRunWorkspace({ taskId: taskId, templateId: a.templateId || v.sanitized.id, baseBranch: a.baseBranch || 'main' })
+        const prepared = await prepareRunWorkspace({ taskId: taskId, templateId: a.templateId || v.sanitized.id, baseBranch: a.baseBranch || 'main', declaredWorkspace: v.sanitized.workspace, resourceKind: a.resource_kind })
         if (!prepared.ok) return fail('Run Workspace 分配失败，隔离保证无法建立：' + prepared.error)
         if (prepared.workspace) {
           workspaceArgs = scriptArgsFromWorkspace(prepared.workspace, prepared.capability, taskId)
@@ -1889,13 +1889,45 @@ return {
         return parsed.ok ? parsed : { ok: false, error: parsed.error || 'workspace host 业务错误', detail: parsed.detail }
       } catch (e) { return { ok: false, error: 'workspace host 输出不可解析：' + errMsg(e), raw: r.stdout } }
     }
-    // 模板 id → 隔离策略模板类型
-    function mapTemplateId(id) {
-      const lower = String(id || '').toLowerCase()
-      if (/optim/.test(lower)) return 'optimize'
-      if (/diagnose|debug/.test(lower)) return 'diagnose'
-      if (/explore|research/.test(lower)) return 'explore'
+    // 模板 → 隔离策略类型（LOC-009）：以 Core TEMPLATE_REGISTRY 为权威，不再按
+    // 模板 id 名字猜测。解析顺序：① templateId 精确等于注册表键；
+    // ② 模板声明的 workspace.template_id（蓝图 meta 字段，投影双向同步）；
+    // ③ 保守默认 construction（ISOLATED_WRITE git worktree）。
+    let templateRegistryPromise = null
+    function templateRegistry() {
+      if (!templateRegistryPromise) {
+        templateRegistryPromise = wsHostCall('templateRegistry', {})
+          .then((r) => (r && r.ok && r.registry && typeof r.registry === 'object' ? r.registry : null))
+          .catch(() => null)
+          .then((reg) => {
+            // 失败不缓存：瞬时故障不得把本进程后续 allocate 永久钉死在保守默认
+            if (!reg) templateRegistryPromise = null
+            return reg
+          })
+      }
+      return templateRegistryPromise
+    }
+    function declaredWorkspaceTemplate(declared) {
+      return (declared && typeof declared === 'object' && !Array.isArray(declared)) ? declared : null
+    }
+    async function resolveTemplateKind(templateId, declared) {
+      const reg = await templateRegistry()
+      const id = String(templateId || '')
+      if (reg) {
+        if (Object.prototype.hasOwnProperty.call(reg, id)) return id
+        const decl = declaredWorkspaceTemplate(declared)
+        const declaredKind = decl ? String(decl.template_id || '') : ''
+        if (declaredKind && Object.prototype.hasOwnProperty.call(reg, declaredKind)) return declaredKind
+      }
+      // 注册表不可得（包装脚本未部署等）时同样保守默认：allocate 路径本就会
+      // notFound 回退旧行为，此处不做 id 猜测。
       return 'construction'
+    }
+    // optimize 的 resource_kind：运行参数显式传入优先，其次模板声明；都不给则
+    // 缺省交给 Core 策略解析 fail closed（optimize 必须提供 resource_kind）。
+    function resolveResourceKind(explicit, declared) {
+      const decl = declaredWorkspaceTemplate(declared)
+      return String(explicit || (decl && decl.resource_kind) || '') || undefined
     }
     // 能力令牌：allocate 时由宿主生成，注入脚本 args；workspace RPC 必须携带匹配令牌，
     // 防止猜测另一个 Run 的 taskId 越权读写对方现场（vm 沙箱无 crypto，用高熵拼接）
@@ -1930,7 +1962,9 @@ return {
     async function prepareRunWorkspace(opts) {
       const taskId = String(opts.taskId || '')
       if (!taskId) return { ok: false, error: '缺少 taskId' }
-      const alloc = await wsHostCall('allocate', { logical_run_id: taskId, template_id: mapTemplateId(opts.templateId), repository_path: projectRoot() || null, base_ref: opts.baseBranch || 'main', task_identity: taskId })
+      const templateId = await resolveTemplateKind(opts.templateId, opts.declaredWorkspace)
+      const resourceKind = resolveResourceKind(opts.resourceKind, opts.declaredWorkspace)
+      const alloc = await wsHostCall('allocate', { logical_run_id: taskId, template_id: templateId, resource_kind: resourceKind, repository_path: projectRoot() || null, base_ref: opts.baseBranch || 'main', task_identity: taskId })
       if (alloc.notFound) return { ok: true, notFound: true }
       if (!alloc.ok || !alloc.workspace) return { ok: false, error: alloc.error || 'workspace 分配失败（未知原因）' }
       return { ok: true, workspace: alloc.workspace, capability: capabilityFor(taskId) }
@@ -1942,8 +1976,10 @@ return {
     // workspace RPC 表：[包装脚本命令, 是否校验能力令牌, 载荷映射]。供编译后的 workflow 脚本在节点内调用。
     const str = (v) => String(v || '')
     const WS_OPS = {
-      allocate: ['allocate', false, (a) => ({
-        logical_run_id: str(a.taskId), template_id: mapTemplateId(a.templateId), repository_path: a.repository_path || null, repository: a.repository || null,
+      // allocate 的模板解析要查注册表（异步）：build 为 async，模板 id 与
+      // resource_kind 在进入包装脚本前已解析为最终值
+      allocate: ['allocate', false, async (a) => ({
+        logical_run_id: str(a.taskId), template_id: await resolveTemplateKind(a.templateId, a.declared_workspace), resource_kind: resolveResourceKind(a.resource_kind, a.declared_workspace), repository_path: a.repository_path || null, repository: a.repository || null,
         base_ref: a.baseBranch || 'main', base_commit: a.base_commit || null, work_branch: a.work_branch || null, task_identity: str(a.taskId), allow_parallel: !!a.allow_parallel,
       })],
       get: ['get', true, (a, id) => ({ logical_run_id: id })],
@@ -1970,7 +2006,8 @@ return {
           if (!expected) return { ok: false, error: '该 Run 未登记 workspace capability（可能未经 wf_run 分配或已释放）' }
           if (a.capability !== expected) return { ok: false, error: 'workspace capability 不匹配，拒绝越权访问' }
         }
-        const result = await wsHostCall(cmd, build(a, id))
+        // allocate 的模板解析要查注册表（异步），载荷构建统一按可 await 处理
+        const result = await wsHostCall(cmd, await build(a, id))
         if (op === 'allocate' && result.ok && result.workspace && id) result.capability = capabilityFor(id)
         // #79：清理审计沿真实调用时序入档——终态收尾刷新早于清理（#93 cleanup 要求
         // workspace 已终态），cleanup 审计只能在本钩子落摘要；最新逻辑运行承接该
@@ -2128,6 +2165,7 @@ return {
         taskId: { type: 'string', required: true, description: '任务标识，如 issue-12' },
         runDir: { type: 'string', description: 'run 产物目录，缺省 .agent-runs/<taskId>' },
         baseBranch: { type: 'string', description: 'base 分支，缺省 main' },
+        resource_kind: { type: 'string', description: 'LOC-009：输入资源类型（git | files | document | config | other）。optimize 类工作流必传（git/files→ISOLATED_WRITE git 工作区；document/config/other→SANDBOX），由模板声明或运行参数正式传入' },
         roleDir: { type: 'string', description: '角色目录，缺省 dsh/roles' },
         issueRef: { type: 'string', description: 'issue 引用，如 #12' },
         issueTitle: { type: 'string', description: 'issue 标题' },
@@ -2345,7 +2383,7 @@ return {
         // #93 注册表把前任（仍注册）的 workspace 复用给派生运行，或在清理后把溯源记到
         // 旧身份下。markWorkspaceLifecycle/refreshWorkspaceContext 同步用该 ID。
         const wsIdentity = logicalRec.logical_run_id
-        const prepared = await prepareRunWorkspace({ taskId: wsIdentity, templateId: args.templateId || v.sanitized.id, baseBranch: args.baseBranch || 'main' })
+        const prepared = await prepareRunWorkspace({ taskId: wsIdentity, templateId: args.templateId || v.sanitized.id, baseBranch: args.baseBranch || 'main', declaredWorkspace: v.sanitized.workspace, resourceKind: args.resource_kind })
         if (!prepared.ok) {
           // Codex R2 ⑥：分配失败不得留下 READY 悬挂记录（否则下次重试被误判为崩溃残留）
           logicalSetState(logicalRec, 'FAILED', logicalReason('WORKSPACE_ALLOCATE_FAILED', String(prepared.error || '')))
