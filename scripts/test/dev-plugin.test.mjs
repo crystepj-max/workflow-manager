@@ -360,6 +360,47 @@ test('status 重建开发态动态产物（内核只信插件 dist，不再向�
   }
 })
 
+test('status 提示 Run 登记的独占开发 Home（#185）：不一致时告警，一致时标注已采用，损坏 run.json 不阻断', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-run-home-'))
+  try {
+    const sharedHome = join(root, 'dev-home')
+    const productHome = join(root, 'product-home')
+    const runHome = join(root, 'tasks', 'cwf-185-01')
+    const runsDir = join(root, 'agent-runs')
+    mkdirSync(join(runsDir, 'cwf-185-01'), { recursive: true })
+    writeFileSync(
+      join(runsDir, 'cwf-185-01', 'run.json'),
+      JSON.stringify({ run_id: 'cwf-185-01', env_resources: { dev_dsh_home: { path: runHome } } }),
+    )
+    mkdirSync(join(runsDir, 'broken'))
+    writeFileSync(join(runsDir, 'broken', 'run.json'), '{not json')
+    const run = (home) =>
+      spawnSync(process.execPath, [scriptPath, 'status'], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          VWF_DEV_DSH_HOME: home,
+          VWF_PRODUCT_DSH_HOME: productHome,
+          VWF_RUNS_DIR: runsDir,
+          DSH_HOME: undefined,
+        },
+      })
+
+    const mismatch = run(sharedHome)
+    assert.equal(mismatch.status, 0, mismatch.stderr)
+    assert.match(mismatch.stdout, /⚠️ 本工作区有 Run 登记了独占开发 Home/)
+    assert.match(mismatch.stdout, /cwf-185-01 → .*cwf-185-01/)
+    assert.match(mismatch.stdout, /VWF_DEV_DSH_HOME=/)
+
+    const adopted = run(runHome)
+    assert.equal(adopted.status, 0, adopted.stderr)
+    assert.match(adopted.stdout, /独占开发 Home：已按 Run cwf-185-01 的登记使用/)
+    assert.doesNotMatch(adopted.stdout, /⚠️ 本工作区有 Run 登记了独占开发 Home/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 function readArgs(path) {
   return readFileSync(path, 'utf8').trim().split('\n')
 }

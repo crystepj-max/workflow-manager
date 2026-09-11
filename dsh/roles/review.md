@@ -71,6 +71,7 @@ APPROVE / REQUEST_CHANGES / COMMENT_ONLY
 
 ## 硬规则
 
+- 审查前先锚定检出（与验收角色同口径，#185 任务环境隔离）：读代码、跑对比命令一律 `git -C <worktree>`（或先 `cd <worktree>`），并核对 `git -C <worktree> rev-parse --abbrev-ref HEAD` = 工作分支（运行上下文或 run.json 登记的 `work_branch`）且 HEAD 为待审交付；不一致即停止并报告，不得对主工作区或别的 worktree 下结论。
 - 你与开发阶段异源异模型，独立审查不护短。
 - 每发现一个问题，追问"本地验证为何没抓到"，并建议补充对应门禁。
 - 存在阻塞问题不得进入下一阶段；结论含糊（"基本能用"）视为无效。

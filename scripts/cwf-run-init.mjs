@@ -3,13 +3,55 @@
 // 用法（在仓库主检出根目录执行）：
 //   node scripts/cwf-run-init.mjs <issue_id> <run_id> [--base <ref>] [--budget <n>]
 // 产物：.scratch/worktrees/<branch>/ 与 <worktree>/.agent-runs/<run_id>/run.json
+//       以及本 Run 独占的开发 DSH Home（默认 ~/.dsh-workflow-dev/tasks/<run_id>，含归属 marker task-env.json）
 
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const DEFAULT_BUDGET = 3
+export const DEV_DSH_HOME_MARKER = 'task-env.json'
+
+export function devDshTasksRoot(env = process.env) {
+  // 所有 Run 独占开发 Home 的公共父目录；测试与特殊部署可用 VWF_DEV_DSH_TASKS_ROOT 改道
+  return env.VWF_DEV_DSH_TASKS_ROOT || join(homedir(), '.dsh-workflow-dev', 'tasks')
+}
+
+export function allocateDevDshHome({ tasksRoot, identity, now = () => new Date() }) {
+  // 每 Run 独占开发 DSH Home（#185 切片 1）：目录 + 归属 marker 双证。
+  // 幂等：同 run_id 复用；目录已存在但 marker 缺失或属于其他 run_id → 拒绝接管（不静默覆盖他人现场）
+  const path = join(tasksRoot, identity.run_id)
+  const marker = join(path, DEV_DSH_HOME_MARKER)
+  if (existsSync(path)) {
+    if (!existsSync(marker)) {
+      throw new Error(`开发 DSH Home 已存在但无归属 marker：${path}（拒绝静默接管；请人工确认归属后清理，或换用其他 run_id）`)
+    }
+    const owner = JSON.parse(readFileSync(marker, 'utf-8'))
+    if (owner.run_id !== identity.run_id) {
+      throw new Error(`开发 DSH Home ${path} 属于其他 Run（${owner.run_id}），拒绝接管`)
+    }
+    return { path, marker, registered_at: owner.registered_at, reused: true }
+  }
+  mkdirSync(path, { recursive: true })
+  const registered_at = now().toISOString()
+  writeFileSync(marker, JSON.stringify({
+    kind: 'dev-dsh-home',
+    run_id: identity.run_id,
+    issue_or_task_identity: identity.issue_or_task_identity,
+    work_branch: identity.work_branch,
+    workspace_id: identity.workspace_id,
+    repository: identity.repository,
+    registered_at,
+  }, null, 2) + '\n')
+  return { path, marker, registered_at, reused: false }
+}
+
+export function envResourcesFor(home) {
+  // run.json 统一资源字段：按资源类型分层命名，后续新增资源类型（#187）在同一字段下扩展
+  return { dev_dsh_home: { path: home.path, marker: home.marker, registered_at: home.registered_at } }
+}
 
 export function branchName(runId) {
   // run_id 已被 assertRunIdSafe 限定为净化形态，分支名直接拼接——单射，无归一化碰撞
@@ -146,7 +188,20 @@ function main() {
           mismatches.push(`worktree 当前分支(${actualBranch}≠${existing.work_branch})`)
         }
         if (mismatches.length === 0) {
-          console.log(JSON.stringify({ worktree: worktreePath, runDir: join(worktreePath, runDirRel), identity: existing, reused: true }, null, 2))
+          // 复用时同样核对开发 Home 归属；老 run.json 缺资源字段则补登（不改变 Run 身份）
+          let home
+          try {
+            home = allocateDevDshHome({ tasksRoot: devDshTasksRoot(), identity: existing })
+          } catch (e) {
+            console.error(e.message)
+            process.exit(1)
+          }
+          if (!existing.env_resources) {
+            existing.task_id_namespace = existing.task_id_namespace || existing.run_id
+            existing.env_resources = envResourcesFor(home)
+            writeFileSync(existingRunJson, JSON.stringify(existing, null, 2) + '\n')
+          }
+          console.log(JSON.stringify({ worktree: worktreePath, runDir: join(worktreePath, runDirRel), identity: existing, dev_dsh_home: home.path, reused: true }, null, 2))
           return
         }
         console.error(`run_id 相同但状态不一致，拒绝静默复用: ${mismatches.join('；')}`)
@@ -156,6 +211,29 @@ function main() {
     console.error(`分支已存在且不属于本 Run: ${branch}（换用不同 run_id 或先清理旧 workspace）`)
     process.exit(1)
   }
+
+  const identity = {
+    run_id: runId,
+    issue_or_task_identity: `#${issue}`,
+    workspace_id: `wt-${branch}`,
+    repository: repoSlugFromUrl(git(['remote', 'get-url', 'origin'], repo)),
+    base_ref: base,
+    base_ref_kind: baseRefKind,
+    base_commit: baseCommit,
+    work_branch: branch,
+    current_head: baseCommit,
+    stage: 'requirements',
+    attempt: 1,
+  }
+  // 先占开发 Home 再动 Git：归属冲突时不留下半成品分支/worktree
+  let home
+  try {
+    home = allocateDevDshHome({ tasksRoot: devDshTasksRoot(), identity })
+  } catch (e) {
+    console.error(e.message)
+    process.exit(1)
+  }
+
   git(['branch', branch, baseRef], repo)
   git(['worktree', 'add', worktreeDir, branch], repo)
 
@@ -175,29 +253,18 @@ function main() {
   mkdirSync(join(worktreePath, '.agent-runs', 'schema'), { recursive: true })
   writeFileSync(join(worktreePath, '.agent-runs', 'schema', 'handoff.schema.json'), readFileSync(schemaSrc))
 
-  const identity = {
-    run_id: runId,
-    issue_or_task_identity: `#${issue}`,
-    workspace_id: `wt-${branch}`,
-    repository: repoSlugFromUrl(git(['remote', 'get-url', 'origin'], repo)),
-    base_ref: base,
-    base_ref_kind: baseRefKind,
-    base_commit: baseCommit,
-    work_branch: branch,
-    current_head: baseCommit,
-    stage: 'requirements',
-    attempt: 1,
-  }
   const runState = {
     ...identity,
     rollback_budget: budget,
     rollback_used: 0,
     rollback_history: [],
+    task_id_namespace: runId,
+    env_resources: envResourcesFor(home),
     created_at: new Date().toISOString(),
   }
   writeFileSync(join(runDir, 'run.json'), JSON.stringify(runState, null, 2) + '\n')
 
-  console.log(JSON.stringify({ worktree: worktreePath, runDir, identity }, null, 2))
+  console.log(JSON.stringify({ worktree: worktreePath, runDir, identity, dev_dsh_home: home.path, task_id_namespace: runId }, null, 2))
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

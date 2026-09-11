@@ -17,7 +17,8 @@
 2. **一致性收口**：用知识收口流程做代码 / 文档 / 路线图 / 规则对齐——消除文档与实现的不一致，确认无遗留死代码与格式漂移，保留仓库整洁。
 3. **交接产物汇总**：整理本轮全部报告与产物清单，产出 `cleanup-report.md`，说明归档位置与后续事项。
 4. **推送、合并与关闭**：主工作区（编排区）承担推送/合并/关闭——把工作分支推送到远端（`git push -u origin <工作分支>`），基于 base 分支创建 Draft PR（`gh pr create --draft`，已存在则复用），PR 正文汇总本轮目标、验收结论与报告清单；然后将 PR 标记 ready 并合并（`gh pr merge --squash --delete-branch`），最后关闭对应 issue（`gh issue close`，评论说明验收结论与合并 commit）。**禁止绕过 PR 直接推送 base 分支**；无远端时记录本地 commit 清单即可。合并依据是「人工验收已通过」这一前置决策，本节点只执行，不重新判定。
-5. **原子清理 worktree**：确认边界后收束——只处理本轮需求相关变更，不触碰用户已有改动或无关文件；合并后用 `git worktree remove <runDir>/worktree` 原子清理（worktree 内残留本任务未提交/未跟踪文件时，先确认归属再用 `git worktree remove --force`），残留本地工作分支用 `git branch -D <工作分支>`；主工作区始终停在 base 分支，需要时 `git pull` 同步最新。
+5. **环境回收（#185 任务环境隔离）**：清理 worktree 之前，先回收本 Run 独占的开发 DSH 资源——若开发 DSH 会话仍在，先用公开的 `cordis_stop` / `cordis_undefine` 停用并清理本 Run 定义的动态 Package；随后执行 `node scripts/cwf-env-recycle.mjs recycle <runDir> --stop --report <runDir>/cleanup-report.md`（按 `run.json.env_resources.dev_dsh_home` 与 Home 内 marker **双证归属一致**才删除；`--stop` 只终止本 Home 登记的开发 DSH 进程；仍有进程占用、归属不符或 marker 缺失时脚本拒绝删除并 exit 1）。**回收失败不阻塞合并主路径**，但必须把脚本 JSON 输出原样写入 `cleanup-report.md` 的「后续事项」，不得谎报已回收；只回收本 Run 登记的资源，不碰其他任务的 Home、进程、端口或共享指针；早于 #185 的 Run 无登记资源时脚本返回 `nothing_registered`，如实记录即可。
+6. **原子清理 worktree**：确认边界后收束——只处理本轮需求相关变更，不触碰用户已有改动或无关文件；合并后用 `git worktree remove <runDir>/worktree` 原子清理（worktree 内残留本任务未提交/未跟踪文件时，先确认归属再用 `git worktree remove --force`），残留本地工作分支用 `git branch -D <工作分支>`；主工作区始终停在 base 分支，需要时 `git pull` 同步最新。
 
 ## 产出（`cleanup-report.md`）
 
@@ -44,6 +45,10 @@
 - 提交状态：已提交 / 待提交清单（列出）
 - 合并请求：PR 链接（已合并，merge commit）/ 无远端（本地 commit 清单）
 - issue 状态：已关闭 / 无
+- 环境回收：已回收 <Home 路径>（recycled_at）/ 未回收（原因，已列入后续事项）/ 无登记资源
+
+## 环境回收（#185 任务环境隔离）
+<!-- 由 cwf-env-recycle.mjs recycle --report 自动追加：Home 路径、归属核对、进程处理、结果与时间 -->
 ```
 
 ## 约束
