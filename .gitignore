@@ -20,3 +20,4 @@ node_modules/
 
 # 本地 Agent 工作台（automation 产物、会话记忆等，不入库）
 .workbuddy/
+.npm-cache/

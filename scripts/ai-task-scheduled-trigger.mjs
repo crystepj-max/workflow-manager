@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
-const planScript = path.join(root, 'scripts/ai-task-execution-plan.mjs')
+const planScript = path.join(__dirname, 'ai-task-execution-plan.mjs')
 
 const argv = process.argv.slice(2)
 if (argv.length < 1 || argv[0].startsWith('-')) {

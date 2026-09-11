@@ -62,33 +62,52 @@ export function validateDef(defName, data) {
   return validateRecord({ $ref: `#/definitions/${defName}`, definitions: root.definitions }, data)
 }
 
+// 模板策略注册表（LOC-009）：四类正式模板的隔离策略声明权威。
+// resolveWorkspacePolicy 只消费本表；DSH host 的模板映射与本表键对齐，
+// 不再按模板 id 名字猜测。表结构见 docs/design/workspace-isolation.md §2。
+export const TEMPLATE_REGISTRY = {
+  [TEMPLATE_ID.CONSTRUCTION]: {
+    mode: WORKSPACE_MODE.ISOLATED_WRITE,
+    shared_source: false,
+    per_worker_scratch: false,
+  },
+  [TEMPLATE_ID.OPTIMIZE]: {
+    resource_kinds: {
+      git: WORKSPACE_MODE.ISOLATED_WRITE,
+      files: WORKSPACE_MODE.ISOLATED_WRITE,
+      document: WORKSPACE_MODE.SANDBOX,
+      config: WORKSPACE_MODE.SANDBOX,
+      other: WORKSPACE_MODE.SANDBOX,
+    },
+    shared_source: false,
+    per_worker_scratch: false,
+  },
+  [TEMPLATE_ID.DIAGNOSE]: {
+    mode: WORKSPACE_MODE.ISOLATED_WRITE,
+    freeze_from: 'diagnose',
+    shared_source: false,
+    per_worker_scratch: false,
+  },
+  [TEMPLATE_ID.EXPLORE]: {
+    mode: WORKSPACE_MODE.ISOLATED_READ,
+    shared_source: true,
+    per_worker_scratch: true,
+  },
+}
+
 export function resolveWorkspacePolicy(templateId, input = {}) {
-  switch (templateId) {
-    case TEMPLATE_ID.CONSTRUCTION:
-      return { mode: WORKSPACE_MODE.ISOLATED_WRITE, shared_source: false, per_worker_scratch: false }
-    case TEMPLATE_ID.OPTIMIZE: {
-      const kind = input.resource_kind
-      if (!kind) throw new Error('optimize 必须提供 resource_kind')
-      if (kind === 'git' || kind === 'files') {
-        return { mode: WORKSPACE_MODE.ISOLATED_WRITE, shared_source: false, per_worker_scratch: false }
-      }
-      if (kind === 'document' || kind === 'config' || kind === 'other') {
-        return { mode: WORKSPACE_MODE.SANDBOX, shared_source: false, per_worker_scratch: false }
-      }
-      throw new Error(`未知 resource_kind: ${kind}`)
-    }
-    case TEMPLATE_ID.DIAGNOSE:
-      return {
-        mode: WORKSPACE_MODE.ISOLATED_WRITE,
-        freeze_from: 'diagnose',
-        shared_source: false,
-        per_worker_scratch: false,
-      }
-    case TEMPLATE_ID.EXPLORE:
-      return { mode: WORKSPACE_MODE.ISOLATED_READ, shared_source: true, per_worker_scratch: true }
-    default:
-      throw new Error(`未知 template_id: ${templateId}`)
+  // hasOwnProperty 守卫：注册表键必须是自有属性，'toString' 等原型链名不得冒充模板身份
+  if (!Object.prototype.hasOwnProperty.call(TEMPLATE_REGISTRY, templateId)) throw new Error(`未知 template_id: ${templateId}`)
+  const decl = TEMPLATE_REGISTRY[templateId]
+  if (decl.resource_kinds) {
+    const kind = input.resource_kind
+    if (!kind) throw new Error('optimize 必须提供 resource_kind')
+    if (!Object.prototype.hasOwnProperty.call(decl.resource_kinds, kind)) throw new Error(`未知 resource_kind: ${kind}`)
+    return { mode: decl.resource_kinds[kind], shared_source: decl.shared_source, per_worker_scratch: decl.per_worker_scratch }
   }
+  const policy = { mode: decl.mode, shared_source: decl.shared_source, per_worker_scratch: decl.per_worker_scratch }
+  if (decl.freeze_from) policy.freeze_from = decl.freeze_from
+  return policy
 }
 
 export function concurrencyKey({ repository, task_identity }) {

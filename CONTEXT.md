@@ -24,7 +24,8 @@
   临时图与编辑器实时查看走 CLI `generate.mjs compile` 兜底（DSL 逆投影回蓝图后编译，
   行为由蓝图内容决定）。磁盘产物有「改蓝图未重生成 → 跑旧产物」的 staleness 特性（与 DSH 入口一致，
   validate 步骤②兜底）。
-- **校验器（校验内核）**：唯一规则集 = `scripts/validate-core.cjs`（候选二 T-IMP-13，CJS 单文件）。
+- **校验器（校验内核）**：唯一规则集 = `scripts/validate-core.cjs`（候选二 T-IMP-13，规则集
+  CJS 单文件；蓝图 ↔ DSL 投影不在其中——委托「投影内核」只转发导出）。
   双层：**结构层** `validateStructure`（走通性 / 节点边定义 / 入口唯一 / 环 / 条件与 schema 路径 /
   保留 id / maxRounds ∈ [1,9] 系统上限——框架保证，与业务无关）与**业务规则层** `validateBlueprint`
   （蓝图声明的规则：异源硬规则、verifyBranch 联动、onMaxRounds 枚举、output.files、单标识、
@@ -32,6 +33,10 @@
   原 `validate-blueprint.mjs` 与宿主 `validateDsl`/`heteroCheck`/拓扑推导/COND_RE 已删除。
   错误统一带坐标键 fieldKey（node:<id>:<field> / edge:<i>:<field> / control:<field> / heteroCheck /
   onMaxRounds）；**前端文案翻译 = 优化任务**（MAP Not yet specified）。
+- **投影内核（projection core）**：蓝图 ↔ 编辑器 DSL 形态映射的唯一实现 =
+  `scripts/projection-core.cjs`（纯函数、深拷贝、无副作用）。生成器直接 import；
+  校验内核只转发导出（禁止再内嵌第二份投影——历史上双实现曾各自漂移）；宿主经插件
+  dist 加载，加载器预解析校验内核声明的内核引用。往返无损（round-trip）的权威实现在这里。
 - **布局拓扑（client）**：client 的 `successTopologyOrder`/`deriveEntryCandidates` 服务于画布分层、
   入口徽标与保存前归一——UI 关注点，插件无法 import 共享文件（vm 沙箱），保留为独立实现；
   入口唯一性的**权威判定**在校验内核（保存时宿主 sanitize 依内核拓扑重新归一）。

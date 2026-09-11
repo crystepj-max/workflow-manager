@@ -89,14 +89,23 @@ test('静态 bundle dist 含语言资源与内置角色正文', () => {
   assert.ok(existsSync(join(here, '..', 'dist', 'dynamic', 'client.js')), 'dist/dynamic/client.js 必须存在')
 })
 
-test('开发粘贴用 dynamic 闭包双半均 ≤ 80KB', () => {
+test('开发粘贴用 dynamic 闭包合计 ≤ 176KB（一次 cordis_define 载荷），host 自带头部常量与 Buffer 垫片', () => {
   const host = readFileSync(join(here, '..', 'dist', 'dynamic', 'host.js'))
   const client = readFileSync(join(here, '..', 'dist', 'dynamic', 'client.js'))
-  const limit = 80 * 1024
-  assert.ok(host.byteLength <= limit, `host ${host.byteLength} > ${limit}`)
-  assert.ok(client.byteLength <= limit, `client ${client.byteLength} > ${limit}`)
-  assert.match(host.toString('utf8'), /^return\{/, 'host 必须是 return {...} 闭包体')
-  assert.match(client.toString('utf8'), /^return\{/, 'client 必须是 return {...} 闭包体')
+  // 预算按「同一次 cordis_define 的粘贴总量」计（两半天生不等大）。
+  // 160KiB 为瘦身高水位（build-bundle 软上限：超出仅警告）；#80 运行控制 UI 与
+  // LOC-001 编辑器 V2 并入后硬顶上调至 176KiB，持续超出仍应回做面板瘦身。
+  const limit = 176 * 1024
+  assert.ok(host.byteLength + client.byteLength <= limit, `host ${host.byteLength} + client ${client.byteLength} > ${limit}`)
+  const hostText = host.toString('utf8')
+  const clientText = client.toString('utf8')
+  // 闭包体形态：前置语句（注入头/垫片）之后必须是 return {...}（宿主以函数体求值）
+  assert.match(hostText, /\nreturn\{name:"visual-workflow-host"/, 'host 必须以注入头 + return {...} 闭包体收尾')
+  assert.match(clientText, /^return\{/, 'client 必须是 return {...} 闭包体')
+  // 动态沙箱缺省注入：插件根常量（loadDist 内核来源）与 Buffer 垫片（validate-core 尺寸检查依赖）
+  assert.match(hostText, /const __VWF_PLUGIN_ROOT__ = "/, 'host 必须自注入 __VWF_PLUGIN_ROOT__（动态沙箱不提供）')
+  assert.match(hostText, /const __VWF_REPO_ROOT__ = "/, 'host 必须自注入 __VWF_REPO_ROOT__（generate/workspace-host 路径来源）')
+  assert.match(hostText, /globalThis\.Buffer/, 'host 必须注入 globalThis.Buffer 垫片（validate-core 尺寸检查依赖）')
 })
 
 test('静态 bundle dist 含 role-library.cjs + builtin-roles.json 且内核可加载（角色库正式安装路径）', () => {
@@ -298,9 +307,9 @@ test('Issue #37：消费者先进入 Cordis，webServer/tools 后出现时才一
   await fiber
   assert.deepEqual(mod.inject, ['webServer', 'tools', 'subprocess'], '静态 bundle 必须声明三个宿主依赖')
   assert.deepEqual([...activeRoutes.keys()], ['/dsh-visual-workflow'])
-  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_run'])
+  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_control', 'wf_run'])
   assert.equal(routeCalls.length, 1, 'RPC 路由首次只注册一次')
-  assert.equal(toolCalls.length, 3, '三个工具首次各注册一次')
+  assert.equal(toolCalls.length, 4, '四个工具首次各注册一次')
 
   await disposeTools()
   assert.equal(activeRoutes.size, 0, 'tools 卸载时静态 Host 的 RPC 路由应随插件卸载')
@@ -309,9 +318,9 @@ test('Issue #37：消费者先进入 Cordis，webServer/tools 后出现时才一
   const disposeToolsAgain = ctx.provide('tools', tools)
   await fiber
   assert.equal(activeRoutes.size, 1, 'tools 重现后只能保留一条活动 RPC 路由')
-  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_run'], 'tools 重现后只能保留三个活动工具')
+  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_control', 'wf_run'], 'tools 重现后只能保留四个活动工具')
   assert.equal(routeCalls.length, 2, '重载后是先卸载再重新注册，不发生重复占用')
-  assert.equal(toolCalls.length, 6, '重载后是先卸载再重新注册，不发生重复占用')
+  assert.equal(toolCalls.length, 8, '重载后是先卸载再重新注册，不发生重复占用')
 
   await disposeToolsAgain()
   await disposeWebServer()

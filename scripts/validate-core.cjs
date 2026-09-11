@@ -7,10 +7,15 @@
 //     onMaxRounds 枚举、bindings 引用、heteroCheck 关联、verifyBranch 联动、
 //     output.files 契约、异源硬规则 7、requireModels 选项（宿主编辑器产品收紧）。
 // 消费形态：引擎 ESM `import`（Node CJS 互操作）；宿主 vwf 插件经 fs 服务读源码、
-//   vm 内 `new Function('module','exports', src)` 求值并缓存（热路径内存执行，零子进程）。
+//   vm 内 `new Function('module','exports','require', src)` 求值并缓存（热路径内存执行，
+//   零子进程；源码声明的 `./name.cjs` 相对引用由宿主加载器预解析后同步供给）。
 // 错误结构：{ at, message, fieldKey? }——fieldKey 为编辑器逐字段标红坐标
 //   （node:<id>:<field> / edge:<i>:<field> / control:<field>）；前端文案翻译为优化任务。
 'use strict'
+
+// 蓝图 ↔ DSL 形态投影：唯一实现 = ./projection-core.cjs（生成器直接 import，宿主经 dist 加载）。
+// 本文件只转发导出——两份投影实现曾各自漂移（克隆 vs 共享引用），禁止再内嵌副本。
+const { projectToVwf, projectToBlueprint } = require('./projection-core.cjs')
 
 const COND_RE = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
 const HUMAN_DECISION_ID = '$human-decision'
@@ -20,6 +25,10 @@ const FRAMEWORK_FROM = [HUMAN_DECISION_ID]
 // 与 scripts/formal-artifacts.cjs FILE_KINDS 保持同步（#69）
 const FILES_KINDS = ['json', 'markdown', 'text', 'html', 'canvas', 'flowchart', 'diagram']
 const ON_MAX_ROUNDS = ['return', 'auto-reschedule']
+// LOC-009 模板策略声明：与 scripts/workspace-isolation.mjs TEMPLATE_REGISTRY 键
+// 及 optimize 的 resource_kind 枚举保持一致（权威在 Core 注册表）。
+const WORKSPACE_TEMPLATE_IDS = ['construction', 'optimize', 'diagnose', 'explore']
+const WORKSPACE_RESOURCE_KINDS = ['git', 'files', 'document', 'config', 'other']
 const MAX_ROUNDS_CAP = 9 // 系统约定上限：编辑器最大可设 9 轮（用户意见 Q7）
 const FANOUT_ITEMS_ARGS_RE = /^\$\.args(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
 const FANOUT_ITEMS_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
@@ -160,6 +169,8 @@ function fieldKeyOf(at) {
   if (at === '$.approved') return 'approved'
   if (at === '$.humanDecision') return 'humanDecision'
   if (at.startsWith('$.humanDecision.')) return 'humanDecision:' + at.slice('$.humanDecision.'.length)
+  if (at === '$.workspace') return 'workspace'
+  if (at.startsWith('$.workspace.')) return 'workspace:' + at.slice('$.workspace.'.length)
   return undefined
 }
 
@@ -237,69 +248,6 @@ function nodeIdMap(nodes) {
   const ids = {}
   nodes.forEach((n) => { if (n && n.id) ids[n.id] = true })
   return ids
-}
-
-// ---------- 蓝图 ↔ 编辑器 DSL 投影（唯一实现：生成器与宿主共用） ----------
-// 逐键条件装配：DSL 经 lossless-JSON RPC 传输，undefined 键会被拒绝；两侧投影必须互逆，
-// 否则内置模板在编辑器另存后会丢字段（verifyBranch 曾因此在生成器侧被丢掉）。
-const NODE_PASSTHROUGH = ['kind', 'items', 'failOn']
-function projectNode(n, models, blueprintSide) {
-  const o = { id: n.id, profile: n.profile, label: n.label || n.id }
-  if (blueprintSide) o.goal = n.goal || ''
-  else if (n.goal !== undefined && n.goal !== null) o.goal = n.goal
-  for (const k of NODE_PASSTHROUGH) if (n[k] !== undefined) o[k] = n[k]
-  if (n.output) o.output = n.output
-  if (n.manualCheck) o.manualCheck = true
-  if (n.verifyBranch) o.verifyBranch = true
-  if (models && models[n.id]) o.model = models[n.id]
-  return o
-}
-function projectEdge(e) {
-  const o = { from: e.from, to: e.to }
-  for (const k of ['on', 'when', 'result', 'outcome', 'countRound']) if (e[k] !== undefined) o[k] = e[k]
-  return o
-}
-function projectRules(src, dst) {
-  if (src.onMaxRounds !== undefined) dst.onMaxRounds = src.onMaxRounds
-  if (src.heteroCheck) dst.heteroCheck = true
-  if (src.bundleRoles) dst.bundleRoles = true
-  if (src.humanDecision !== undefined) dst.humanDecision = src.humanDecision
-  return dst
-}
-function projectToVwf(bp) {
-  const models = (bp.bindings && bp.bindings.models) || {}
-  return projectRules(bp, {
-    id: bp.id,
-    name: bp.displayName,
-    description: bp.description || '',
-    entry: bp.entry,
-    control: { maxRounds: (bp.control && bp.control.maxRounds) || 9 },
-    nodes: bp.nodes.map((n) => projectNode(n, models)),
-    edges: bp.edges.map(projectEdge),
-  })
-}
-function projectToBlueprint(dsl) {
-  const models = {}
-  const nodes = (dsl.nodes || []).map((n) => {
-    const o = projectNode(n, null, true)
-    if (n.model && typeof n.model === 'object' && n.model.provider && n.model.model) {
-      models[n.id] = { provider: n.model.provider, model: n.model.model }
-    }
-    return o
-  })
-  const bp = {
-    id: dsl.id,
-    // 空/空白名称原样保留（displayName 必填校验会拒绝），仅缺省（undefined）兜底 id
-    displayName: typeof dsl.name === 'string' ? dsl.name : (dsl.id || ''),
-    entry: dsl.entry,
-    nodes: nodes,
-    edges: (dsl.edges || []).map(projectEdge),
-  }
-  if (dsl.description) bp.description = dsl.description
-  if (dsl.control && dsl.control.maxRounds != null) bp.control = { maxRounds: dsl.control.maxRounds }
-  projectRules(dsl, bp)
-  if (Object.keys(models).length) bp.bindings = { models: models }
-  return bp
 }
 
 function reachable(entry, nodes, edges) {
@@ -583,6 +531,17 @@ function validateBlueprint(bp, opts) {
   if (typeof bp.displayName !== 'string' || !bp.displayName.trim()) err('$.displayName', 'displayName（中文展示名）必填非空 —— 生成 skill 的触发词之一（FR-6）')
   if (bp.name !== undefined && bp.name !== bp.id) err('$.name', 'name 与 id 必须一致（单标识方案，D1），或删除 name')
   if (bp.onMaxRounds !== undefined && !ON_MAX_ROUNDS.includes(bp.onMaxRounds)) err('$.onMaxRounds', 'onMaxRounds ∈ { return, auto-reschedule }')
+  // LOC-009：workspace 隔离策略声明（可选）。声明后 host 不再按模板 id 名字猜测；
+  // template_id 权威集合 = workspace-isolation.mjs TEMPLATE_REGISTRY 的键。
+  if (bp.workspace !== undefined) {
+    const w = bp.workspace
+    if (!w || typeof w !== 'object' || Array.isArray(w)) {
+      err('$.workspace', 'workspace 必须是对象 { template_id, resource_kind? }')
+    } else {
+      if (!WORKSPACE_TEMPLATE_IDS.includes(w.template_id)) err('$.workspace.template_id', 'workspace.template_id 必填且 ∈ ' + WORKSPACE_TEMPLATE_IDS.join(' | '))
+      if (w.resource_kind !== undefined && !WORKSPACE_RESOURCE_KINDS.includes(w.resource_kind)) err('$.workspace.resource_kind', 'workspace.resource_kind ∈ ' + WORKSPACE_RESOURCE_KINDS.join(' | ') + '（仅 optimize 类声明需要）')
+    }
+  }
 
   if (!Array.isArray(bp.nodes) || bp.nodes.length === 0) { err('$.nodes', 'nodes 至少一个节点'); return { ok: false, errors, warnings: [] } }
   if (!Array.isArray(bp.edges)) { err('$.edges', 'edges 必填（数组）'); return { ok: false, errors, warnings: [] } }
@@ -964,6 +923,9 @@ module.exports = {
   validateStructure,
   validateBlueprint,
   deriveEntryCandidates,
+  // LOC-005 parity 门禁：补导出图语义判定，供 client 副本对拍（行为不变，仅导出）。
+  isStructuralEdge,
+  isRollbackEdge,
   projectToVwf,
   projectToBlueprint,
   extractFileTokens,

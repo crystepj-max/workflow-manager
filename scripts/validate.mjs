@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import validatorCore from './validate-core.cjs';
 const { validateBlueprint } = validatorCore;
-import { generateAll, listBlueprintJsonFiles } from './generate.mjs';
+import { generateAll, listBlueprintJsonFiles, compareGeneratedFiles } from './generate.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -38,20 +38,16 @@ for (const abs of tplAbs) {
   // 真实执行生成脚本断言返回体状态机——替代原字符串嗅探断言）
 }
 
-// ② 幂等重生成比对（T-04 Q2：generateAll 内存产物 vs .generated/ 磁盘逐文件比对，无需临时目录）
+// ② 幂等重生成比对（T-04 Q2；LOC-006 起比对逻辑单一权威 = generate.mjs compareGeneratedFiles）
 console.log('—— ② 重生成一致性（内存生成 vs .generated/）——');
 if (!fs.existsSync(GEN_DIR)) {
   fail('缺少 .generated/（生成物不存在）：请先运行 npm run generate');
 } else {
   const { files } = generateAll(TPL_DIR);
-  const genFiles = fs.readdirSync(GEN_DIR, { recursive: true }).filter((f) => fs.statSync(path.join(GEN_DIR, f)).isFile());
-  const mismatch = [];
-  for (const f of new Set([...genFiles, ...files.keys()])) {
-    const disk = path.join(GEN_DIR, f);
-    if (!fs.existsSync(disk) || !files.has(f) || fs.readFileSync(disk, 'utf8') !== files.get(f)) mismatch.push(f);
-  }
+  const { missing, extra, changed } = compareGeneratedFiles(files, GEN_DIR);
+  const mismatch = [...missing, ...extra, ...changed];
   if (mismatch.length) fail('生成物与重生成不一致（' + mismatch.length + ' 个文件，可能手改或过期）：' + mismatch.slice(0, 5).join('、') + '——请重跑 npm run generate');
-  else pass('生成物与重生成一致（' + genFiles.length + ' 个文件）');
+  else pass('生成物与重生成一致（' + files.size + ' 个文件）');
 }
 
 // ③ 引擎层测试 + 包测试

@@ -8,8 +8,9 @@
 //   - 自动分层布局（success 主链最长路分层，LR），节点保持安全间距且不可手拖；
 //     回退边与跨节点边统一走上方外围车道，标签随车道路径避让节点内容
 //   - 节点卡片 220x66（圆角 14、label + 类型小字、入口徽标）、$end 虚线圆形
-//     终止节点、左右连接把手；边带流动虚线动画 + 箭头；成功边/标签为蓝色、
-//     失败为红色、选中为主文字色加粗
+//     终止节点、左右连接把手；边带流动虚线动画 + 箭头；成功/业务 outcome 边
+//     标签为蓝色（outcome 边标签显示 outcome 名）、失败为红色、技术重试为
+//     中性灰、选中为主文字色加粗
 //   - 交互：首次打开/重置时纵横居中；点选节点/边；从源把手拖出连线落到目标
 //     节点建边；右键画布弹出「添加结束节点」菜单；滚轮缩放（指针锚定）+
 //     空白区域四向拖动 + 缩放控件
@@ -21,7 +22,9 @@
 //     Agent 重置模型）、节点目标、结果判定方式三态（不启用 / AI 输出验证 /
 //     人工 check，互斥切换同 Gold-Band）、JSON 输出约束（2s 防抖 + 失焦提交 +
 //     美化按钮 + 非法 JSON 不写入）、成功表达式
-//   - 边表单：边类型 / 目标 / when 条件（仅 success 边）/ 删除边
+//   - 边表单：边类型四态（成功 / 失败 / 技术重试 / 业务 outcome + countRound）、
+//     目标 / when 条件（仅 success 边）/ 删除边；on 与 outcome 互斥清理与
+//     validate-core 边规则同构
 //   - 保存校验：校验失败弹窗列问题 → 关闭后逐字段标红 + 画布红圈 + 定位首个
 //     问题节点；画布/JSON 双 tab 实时互同步；变更后防抖实时校验状态行
 //
@@ -33,8 +36,8 @@
 //    → 点编辑弹抽屉」的原始形态
 //  - 纵向滚动条定位到画布内部（canvas-wrap overflow + 常显滚动条样式），
 //    取消页面级滚动容器
-//  - 保留：画布工具栏文档流一行（不遮挡入口节点）、边标签统一成功/失败
-//    （when 悬停 title 可见）
+//  - 保留：画布工具栏文档流一行（不遮挡入口节点）、边标签按类型与 outcome 名
+//    如实显示（when 悬停 title 可见）
 //
 //  运行约束：动态客户端闭包（plain JS、无 JSX/import；React/host/styles 为
 //  注入符号；计时器走 ctx.timeout/ctx.interval——inject: ['slots','timer']）。
@@ -45,6 +48,23 @@ return {
   inject: ['slots', 'timer'],
   buildSchemaTemplate: buildSchemaTemplate,
   COND_RE: conditionRegex(),
+  edgeKind: edgeKind,
+  applyEdgeKind: applyEdgeKind,
+  edgeLabelText: edgeLabelText,
+  routingNameOf: routingNameOf,
+  normalizeRoutingName: normalizeRoutingName,
+  routingPathOf: routingPathOf,
+  enumerableValues: enumerableValues,
+  routingCandidates: routingCandidates,
+  routingValuesOf: routingValuesOf,
+  applyRoutingWrite: applyRoutingWrite,
+  routingEdgeStatus: routingEdgeStatus,
+  // 校验内核副本的最小导出（LOC-005 parity 门禁）：纯函数、零运行时行为变更，
+  // 仅暴露给 tests/graph-semantics-parity 与内核权威侧同输入对拍。
+  isStructuralEdge: isStructuralEdge,
+  isRollbackEdge: isRollbackEdge,
+  deriveEntryCandidates: deriveEntryCandidates,
+  ingestEditorJson: ingestEditorJson,
   apply(ctx) {
     const slots = ctx.get('slots')
     if (slots === undefined) return
@@ -69,6 +89,12 @@ return {
     styles.insert(`
 .vwf-root { display:flex; flex-direction:column; gap:12px; font-size:13px; color:var(--dsw-alias-label-primary, inherit); }
 .vwf-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+/* 业务结果取值行（LOC-001 V2）：取值 / 状态图标 / 操作必须在同一行。
+   .vwf-input 默认 width:100%，在 flex 行里会把后两者挤到下一行，这里改为可伸缩宽度。 */
+.vwf-routing-row { flex-wrap:nowrap; gap:6px; }
+.vwf-routing-row .vwf-input { flex:1 1 auto; min-width:0; width:auto; }
+.vwf-routing-row .vwf-btn, .vwf-routing-badge { flex:0 0 auto; white-space:nowrap; }
+.vwf-routing-badge { cursor:help; font-size:12px; line-height:1; }
 .vwf-spacer { flex:1; }
 .vwf-muted { color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:12px; }
 .vwf-muted-sm { color:var(--dsw-alias-label-tertiary, #8a8a8a); font-size:11px; }
@@ -114,6 +140,15 @@ return {
 .vwf-editor-dialog[open] { display:flex; flex-direction:column; }
 .vwf-editor-dialog::backdrop { background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.56)); backdrop-filter:blur(2px); }
 .vwf-editor-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); flex:0 0 auto; }
+.vwf-editor-msg { flex:0 0 auto; max-height:min(320px, 38vh); margin:10px 16px 0; white-space:pre-wrap; }
+/* 结果条分级呈现（UAT-02 反馈）：## 一级=整体结论，### 二级=逐节点一行；✅/❌/⚠️/➖ 决定色调 */
+.vwf-msg-line.l1 { font-weight:600; font-size:13px; margin:2px 0 3px; }
+.vwf-msg-line.l2 { padding-left:10px; }
+.vwf-msg-line.l3 { padding-left:26px; }
+.vwf-msg-line.ok { color:var(--dsw-alias-state-success-primary, #3fb950); }
+.vwf-msg-line.bad { color:var(--dsw-alias-state-error-primary, #f85149); }
+.vwf-msg-line.warn { color:var(--dsw-alias-state-warn-primary, #f59e0b); }
+.vwf-msg-line.muted { color:var(--dsw-alias-label-tertiary, #8a8a8a); }
 .vwf-editor-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; overscroll-behavior:contain; }
 .vwf-editor { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:12px; align-items:stretch; height:100%; min-height:0; }
 @media (max-width: 900px) { .vwf-editor { grid-template-columns:minmax(0,1fr); height:auto; } .vwf-inspector { position:static; height:auto; } }
@@ -220,7 +255,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     const EDGE_LANE_GAP = 82
     const EDGE_LANE_SEP = 38
     const EDGE_ROUTE_STUB = 34
-    const EDGE_LABEL_W = 36
     const EDGE_LABEL_H = 18
     const MARGIN_X = 56
     const MARGIN_Y = 64
@@ -230,6 +264,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     const STATUS_COLOR = { running: 'var(--dsw-alias-brand-primary, #60a5fa)', pass: 'var(--dsw-alias-state-success-primary, #22c55e)', fail: 'var(--dsw-alias-state-error-primary, #ef4444)', human: 'var(--dsw-alias-state-warn-primary, #f59e0b)' }
     const EDGE_OK = '#2563eb'
     const EDGE_FAIL = 'var(--dsw-alias-state-error-primary, #f87171)'
+    const EDGE_TECH = 'var(--dsw-alias-label-tertiary, #8a8a8a)'
     const EDGE_SELECTED = '#111827'
     const ACCENT = 'var(--dsw-alias-brand-primary, #60a5fa)'
     const SCHEMA_DEBOUNCE_MS = 2000
@@ -237,52 +272,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     function clone(x) { return JSON.parse(JSON.stringify(x)) }
 
-    // 编辑器 JSON tab 同时接受蓝图落盘格式（displayName / bindings.models）与 DSL。
-    // 投影规则必须与 scripts/validate-core.cjs 的 projectToVwf 对齐——勿在此分叉。
-    function ingestEditorJson(raw) {
-      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return raw
-      const models = (raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object')
-        ? raw.bindings.models : {}
-      const hasBindings = Object.keys(models).length > 0
-      if (typeof raw.displayName !== 'string' && !hasBindings) return raw
-      const displayName = typeof raw.displayName === 'string' ? raw.displayName : (raw.name || raw.id || '')
-      const nodes = raw.nodes.map((n) => {
-        if (!n || typeof n !== 'object') return n
-        if (n.model || !models[n.id]) return n
-        return { ...n, model: models[n.id] }
-      })
-      const next = {
-        id: raw.id,
-        name: displayName,
-        description: raw.description || '',
-        entry: raw.entry,
-        control: raw.control || { maxRounds: 9 },
-        nodes,
-        edges: raw.edges.map((e) => e),
-      }
-      if (raw.onMaxRounds !== undefined) next.onMaxRounds = raw.onMaxRounds
-      if (raw.heteroCheck) next.heteroCheck = true
-      if (raw.bundleRoles) next.bundleRoles = true
-      if (raw.humanDecision !== undefined) next.humanDecision = raw.humanDecision
-      return next
-    }
-
     // ── 拓扑与布局（对应 workflowGraph.ts 的 successTopologyOrder /
     //    deriveEntryCandidateIds / computeBackwardLanes / layoutSuccessPath）──
     // 两级序号：主序号 = 前向最长路列（横轴 0…n）；同列多节点 = m.1…m.k（纵轴）。
     // `$human-decision` 为透明跳板：A→HD→B 在排版上等价于前向边 A→B（回退旁路除外）。
-    function hasOutcomeField(e) {
-      return !!(e && e.outcome !== undefined && e.outcome !== null && e.outcome !== '')
-    }
-    function isStructuralEdge(e) {
-      return !!(e && (e.on === 'success' || hasOutcomeField(e)))
-    }
-    // 与校验内核同构：countRound 声明 / 自环 = 回退边，不参与入口入边与主链分层。
-    function isRollbackEdge(e) {
-      if (!isStructuralEdge(e)) return false
-      if (e.from === e.to) return true
-      return e.countRound !== undefined
-    }
     // 基图邻接（不含 HD）：用于判断 HD 出边是否回指上游（如验收退回→开发）。
     function buildBaseForwardAdj(dsl, idSet) {
       const adj = new Map()
@@ -376,18 +369,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const s = order.get(from)
       const tt = order.get(to)
       return s !== undefined && tt !== undefined && tt < s
-    }
-
-    function deriveEntryCandidates(dsl) {
-      const ids = new Set((dsl.nodes || []).map(n => n && n.id).filter(Boolean))
-      const incoming = new Set()
-      ;(dsl.edges || []).forEach(e => {
-        if (!isStructuralEdge(e) || isRollbackEdge(e)) return
-        if (!e.to || e.to === END_NODE || e.to === HUMAN_DECISION_ID || !ids.has(e.to)) return
-        if (!(ids.has(e.from) || e.from === HUMAN_DECISION_ID)) return
-        incoming.add(e.to)
-      })
-      return (dsl.nodes || []).map(n => n && n.id).filter(id => Boolean(id) && !incoming.has(id))
     }
 
     function normalizeEntry(dsl) {
@@ -845,7 +826,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         const y2 = b.y + b.h / 2
         const route = lay.routes.get(idx) || { kind: 'direct', yStart: y1, yEnd: y2, routed: false }
         const isFail = e.on === 'failure'
-        const color = isFail ? EDGE_FAIL : EDGE_OK
+        const isTech = e.on === 'technical'
+        const color = isFail ? EDGE_FAIL : isTech ? EDGE_TECH : EDGE_OK
         const selected = props.selectedEdge === idx
         let d
         let labelX
@@ -869,25 +851,27 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           labelX = mx
           labelY = (sy + ey) / 2
         }
-        // 标签按实际短文案（成功/失败）估算为固定小矩形；若与节点或已有标签相碰，
-        // 沿垂直方向持续让位。节点/既有标签都是有限集合，不设固定次数上限。
-        let labelBox = { x: labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
+        // 标签按实际短文案估算宽度（11px 字号：CJK 约 11px/字，拉丁约 7px/字，取 9 折中）；
+        // 若与节点或已有标签相碰，沿垂直方向持续让位。节点/既有标签都是有限集合，不设固定次数上限。
+        const lbl = edgeLabelText(e, { success: t('edgeSuccess'), failure: t('edgeFailure'), technical: t('edgeTechnical') })
+        const lblW = Math.max(12, lbl.length * 9)
+        let labelBox = { x: labelX - lblW / 2, y: labelY - EDGE_LABEL_H, w: lblW, h: EDGE_LABEL_H }
         const boxesOverlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
         while (true) {
           const hitsNode = Object.keys(pos).some(id => boxesOverlap(labelBox, pos[id]))
           const hitsLabel = labelRects.some(rect => boxesOverlap(labelBox, rect))
           if (!hitsNode && !hitsLabel) break
           labelY += EDGE_LABEL_H
-          labelBox = { x: labelX - EDGE_LABEL_W / 2, y: labelY - EDGE_LABEL_H, w: EDGE_LABEL_W, h: EDGE_LABEL_H }
+          labelBox = { x: labelX - lblW / 2, y: labelY - EDGE_LABEL_H, w: lblW, h: EDGE_LABEL_H }
         }
         labelRects.push(labelBox)
         edgeEls.push(h('path', {
           key: 'e' + idx, d, fill: 'none',
           className: 'vwf-edge-flow',
           stroke: selected ? EDGE_SELECTED : color,
-          strokeWidth: selected ? 4.2 : (isFail ? 2 : 2.2),
-          opacity: isFail || route.routed ? 0.92 : 1,
-          markerEnd: 'url(#vwf-arrow' + (selected ? '-sel' : isFail ? '-fail' : '') + ')',
+          strokeWidth: selected ? 4.2 : (isFail || isTech ? 2 : 2.2),
+          opacity: isFail || isTech || route.routed ? 0.92 : 1,
+          markerEnd: 'url(#vwf-arrow' + (selected ? '-sel' : isFail ? '-fail' : isTech ? '-tech' : '') + ')',
         }))
         edgeEls.push(h('path', {
           key: 'eh' + idx, d, className: 'vwf-edge-hit',
@@ -900,8 +884,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           fill: selected ? EDGE_SELECTED : color,
           stroke: selected ? EDGE_SELECTED : color, strokeWidth: 1,
         }))
-        // 边标签统一显示 成功/失败；when 条件悬停可见（title），表单/JSON 面板可编辑
-        const lbl = isFail ? t('edgeFailure') : t('edgeSuccess')
+        // 边标签按类型与 outcome 名如实显示；when 条件悬停可见（title），表单/JSON 面板可编辑
         labelEls.push(h('text', {
           key: 'lb' + idx, x: labelX, y: labelY - 6, textAnchor: 'middle', fontSize: 11, fontWeight: selected ? 700 : 600,
           fill: selected ? EDGE_SELECTED : color,
@@ -1002,6 +985,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                   h('circle', { cx: 1, cy: 1, r: 1, fill: 'var(--dsw-alias-border-l2, #333)' })),
                 h('marker', { id: 'vwf-arrow', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_OK })),
                 h('marker', { id: 'vwf-arrow-fail', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_FAIL })),
+                h('marker', { id: 'vwf-arrow-tech', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_TECH })),
                 h('marker', { id: 'vwf-arrow-sel', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_SELECTED }))
               ),
               h('rect', { width: W, height: H, fill: 'url(#vwf-dots)', 'data-vwf-pane': 'true' }),
@@ -1113,6 +1097,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const [schemaError, setSchemaError] = React.useState(null)
       const [schemaNotice, setSchemaNotice] = React.useState(null)
       const [schemaDirty, setSchemaDirty] = React.useState(false)
+      // V2：业务结果字段名与取值列表的本地草稿（提交时用 applyRoutingWrite 合并写回 schema）
+      const [routingNameDraft, setRoutingNameDraft] = React.useState(() => routingNameOf(node.output && node.output.outcomePath))
+      const [routingValuesDraft, setRoutingValuesDraft] = React.useState(() => routingValuesOf(node))
+      const [routingValuesDirty, setRoutingValuesDirty] = React.useState(false)
+      const [routingNotice, setRoutingNotice] = React.useState(null)
       const debounceRef = React.useRef(null)
 
       React.useEffect(() => { setIdDraft(node.id) }, [node.id])
@@ -1121,15 +1110,41 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setSchemaError(null)
         setSchemaNotice(null)
         setSchemaDirty(false)
+        setRoutingNameDraft(routingNameOf(node.output && node.output.outcomePath))
+        setRoutingValuesDraft(routingValuesOf(node))
+        setRoutingValuesDirty(false)
+        setRoutingNotice(null)
       }, [node.id])
       React.useEffect(() => () => { if (debounceRef.current) debounceRef.current() }, [])
 
       const validationEnabled = !!node.output
       const manualEnabled = !!node.manualCheck
-      const resultMode = validationEnabled ? 'ai' : manualEnabled ? 'manual' : 'none'
+      // 业务结果路由（outcomePath）节点：output.outcomePath 存在即视为该模式，
+      // 空串（编辑中）不跳回其他模式
+      const routingEnabled = !!node.output && node.output.outcomePath != null
+      const resultMode = routingEnabled ? 'routing' : validationEnabled ? 'ai' : manualEnabled ? 'manual' : 'none'
       const isFanout = node.kind === 'fanout'
       const failOnValue = node.failOn === undefined ? 'all' : node.failOn
       const failOnMode = Number.isInteger(failOnValue) ? 'number' : failOnValue
+
+      // V2 业务结果路由：取值列表的权威是 schema，边存在性每次渲染实时算（R7）
+      const routingName = routingNameOf(node.output && node.output.outcomePath)
+      const routingSchema = (node.output && node.output.schema) || null
+      const routingProp = (routingSchema && routingSchema.properties && routingSchema.properties[routingName]) || null
+      const routingEnumerable = enumerableValues(routingProp)
+      const routingIsBoolean = !!(routingProp && routingProp.type === 'boolean')
+      const routingCandidateList = routingCandidates(routingSchema)
+      const routingStatus = routingEdgeStatus(props.dsl || { nodes: [], edges: [] }, node.id)
+      const commitRouting = (name, values) => {
+        const out = applyRoutingWrite(node, name, values)
+        props.onUpdate(node.id, { output: out })
+        // 与 JSON 编辑器保持同源：写回后同步草稿，避免旧草稿回写覆盖（D2）
+        if (out.schema) setSchemaDraft(JSON.stringify(out.schema, null, 2))
+      }
+      const commitRoutingValues = (values) => {
+        setRoutingValuesDraft(values)
+        commitRouting(routingName, values)
+      }
 
       const commitSchema = (value) => {
         if (!value.trim()) {
@@ -1188,6 +1203,27 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         }
       }
 
+      // schema 编辑块（textarea + ✨ 美化 + 错误/提示行）：fanout / ai / routing 三处共用
+      const schemaField = (opts) => h(Field, { label: opts.label, required: opts.required, help: opts.help, errors: errorsFor('output.schema') },
+        h('div', { style: { position: 'relative' } },
+          h('textarea', {
+            className: 'vwf-textarea vwf-mono' + (errorsFor('output.schema').length ? ' err' : ''),
+            rows: 6, value: schemaDraft, placeholder: t('outputSchemaPlaceholder'),
+            onChange: (ev) => onSchemaChange(ev.target.value),
+            onBlur: () => { if (schemaDirty) { commitSchema(schemaDraft); setSchemaDirty(false) } },
+          }),
+          h('button', {
+            className: 'vwf-btn sm', title: t('outputSchemaBeautify'),
+            style: { position: 'absolute', right: 6, top: 6 },
+            onMouseDown: (ev) => ev.preventDefault(),
+            onClick: beautifySchema,
+          }, '✨')
+        ),
+        schemaError
+          ? h('div', { className: 'vwf-err-line' }, schemaError)
+          : (schemaNotice ? h('div', { className: 'vwf-ok-line' }, schemaNotice) : null)
+      )
+
       const commitNodeId = (value) => {
         if (value === node.id) { setIdDraft(node.id); return }
         props.onUpdate(node.id, { id: value })
@@ -1197,6 +1233,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         if (kind === 'fanout') {
           const output = { ...(node.output || {}), schema: (node.output && node.output.schema) || null }
           delete output.successCondition
+          // fanout 节点禁止 outcomePath（不参与 Business Outcome Routing）
+          delete output.outcomePath
           setSchemaDraft(output.schema ? JSON.stringify(output.schema, null, 2) : '')
           props.onUpdate(node.id, {
             kind: 'fanout',
@@ -1319,25 +1357,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               onChange: (ev) => props.onUpdate(node.id, { failOn: Math.max(0, Math.trunc(Number(ev.target.value) || 0)) }),
             }) : null
           ),
-          h(Field, { label: t('outputSchema'), help: t('perItemSchemaHelp'), errors: errorsFor('output.schema') },
-            h('div', { style: { position: 'relative' } },
-              h('textarea', {
-                className: 'vwf-textarea vwf-mono' + (errorsFor('output.schema').length ? ' err' : ''),
-                rows: 6, value: schemaDraft, placeholder: t('outputSchemaPlaceholder'),
-                onChange: (ev) => onSchemaChange(ev.target.value),
-                onBlur: () => { if (schemaDirty) { commitSchema(schemaDraft); setSchemaDirty(false) } },
-              }),
-              h('button', {
-                className: 'vwf-btn sm', title: t('outputSchemaBeautify'),
-                style: { position: 'absolute', right: 6, top: 6 },
-                onMouseDown: (ev) => ev.preventDefault(),
-                onClick: beautifySchema,
-              }, '✨')
-            ),
-            schemaError
-              ? h('div', { className: 'vwf-err-line' }, schemaError)
-              : (schemaNotice ? h('div', { className: 'vwf-ok-line' }, schemaNotice) : null)
-          )
+          schemaField({ label: t('outputSchema'), help: t('perItemSchemaHelp') })
         ) : h('div', { className: 'vwf-subsection' },
           h('div', { style: { fontSize: 13, fontWeight: 500 } }, t('resultMode')),
           h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('resultModeDescription')),
@@ -1348,39 +1368,35 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 { value: 'none', label: t('resultModeNone') },
                 { value: 'ai', label: t('outputValidation') },
                 { value: 'manual', label: t('manualCheck') },
+                { value: 'routing', label: t('resultModeRouting') },
               ],
               onChange: (mode) => {
-                setSchemaDraft('')
                 setSchemaError(null)
                 setSchemaDirty(false)
-                if (mode === 'ai') props.onUpdate(node.id, { output: { schema: (node.output && node.output.schema) || null, successCondition: (node.output && node.output.successCondition) || '', files: (node.output && node.output.files) || undefined }, manualCheck: null })
-                else if (mode === 'manual') props.onUpdate(node.id, { output: (node.output && node.output.files) ? { files: node.output.files } : null, manualCheck: true })
-                else props.onUpdate(node.id, { output: (node.output && node.output.files) ? { files: node.output.files } : null, manualCheck: null })
+                setSchemaNotice(null)
+                const out = node.output || {}
+                // 切档只允许清掉档位专属字段（successCondition / outcomePath / manualCheck），
+                // 不得丢 output.schema：内核契约是「output 非空 ⇒ output.schema 必填」，
+                // 丢 schema 会让节点变成自己校验不过、且本档没有 schema 输入框可改的死状态。
+                setSchemaDraft(out.schema ? JSON.stringify(out.schema, null, 2) : '')
+                const kept = (extra) => {
+                  const next = { ...(extra || {}) }
+                  if (out.schema) next.schema = out.schema
+                  if (out.files) next.files = out.files
+                  return Object.keys(next).length ? next : null
+                }
+                if (mode === 'routing') props.onUpdate(node.id, { output: kept({ schema: out.schema || null, outcomePath: out.outcomePath || '' }), manualCheck: null })
+                else if (mode === 'ai') props.onUpdate(node.id, { output: kept({ schema: out.schema || null, successCondition: out.successCondition || '' }), manualCheck: null })
+                else if (mode === 'manual') props.onUpdate(node.id, { output: kept(), manualCheck: true })
+                else props.onUpdate(node.id, { output: kept(), manualCheck: null })
               },
             })
           ),
           resultMode === 'ai' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('outputValidationDescription')) : null,
           resultMode === 'manual' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('manualCheckDescription')) : null,
+          resultMode === 'routing' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('resultModeRoutingDescription')) : null,
           resultMode === 'ai' ? h('div', null,
-            h(Field, { label: t('outputSchema'), required: true, help: t('outputSchemaHelp'), errors: errorsFor('output.schema') },
-              h('div', { style: { position: 'relative' } },
-                h('textarea', {
-                  className: 'vwf-textarea vwf-mono' + (errorsFor('output.schema').length ? ' err' : ''),
-                  rows: 6, value: schemaDraft, placeholder: t('outputSchemaPlaceholder'),
-                  onChange: (ev) => onSchemaChange(ev.target.value),
-                  onBlur: () => { if (schemaDirty) { commitSchema(schemaDraft); setSchemaDirty(false) } },
-                }),
-                h('button', {
-                  className: 'vwf-btn sm', title: t('outputSchemaBeautify'),
-                  style: { position: 'absolute', right: 6, top: 6 },
-                  onMouseDown: (ev) => ev.preventDefault(),
-                  onClick: beautifySchema,
-                }, '✨')
-              ),
-              schemaError
-                ? h('div', { className: 'vwf-err-line' }, schemaError)
-                : (schemaNotice ? h('div', { className: 'vwf-ok-line' }, schemaNotice) : null)
-            ),
+            schemaField({ label: t('outputSchema'), required: true, help: t('outputSchemaHelp') }),
             h(Field, { label: t('successCondition'), required: true, help: t('successConditionHelp'), errors: errorsFor('output.successCondition') },
               h('input', {
                 className: 'vwf-input vwf-mono' + (errorsFor('output.successCondition').length ? ' err' : ''),
@@ -1389,18 +1405,130 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               })
             )
           ) : null,
+          resultMode === 'routing' ? h('div', null,
+            // F1：只填参数名（`$.` 前缀属于实现细节，对用户不可见）；粘贴 `$.route` 会自动归一
+            h(Field, { label: t('routingFieldName'), required: true, help: t('routingFieldNameHelp'), errors: errorsFor('output.outcomePath') },
+              h('input', {
+                className: 'vwf-input vwf-mono' + (errorsFor('output.outcomePath').length ? ' err' : ''),
+                value: routingNameDraft, placeholder: 'route', list: 'vwf-routing-candidates',
+                onChange: (ev) => {
+                  setRoutingNotice(null)
+                  setRoutingNameDraft(ev.target.value)
+                  const name = normalizeRoutingName(ev.target.value)
+                  if (name) commitRouting(name, routingValuesDraft)
+                },
+                onBlur: () => {
+                  const name = normalizeRoutingName(routingNameDraft)
+                  if (routingNameDraft !== name) setRoutingNameDraft(name)
+                  if (!name && routingNameDraft.trim()) setRoutingNotice(t('routingNameInvalid'))
+                },
+              })
+            ),
+            // 该字段的作用用可见文字说明（不只放在 ? tooltip 里）
+            h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('routingFieldNameHint')),
+            // 候选：schema 中已有的可穷举字段（R6/E2）
+            h('datalist', { id: 'vwf-routing-candidates' },
+              routingCandidateList.map((c) => h('option', { key: c, value: c }))
+            ),
+            !routingName
+              ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('routingNeedFieldName'))
+              : h('div', { className: 'vwf-field', style: { marginTop: 6 } },
+                h('div', { className: 'vwf-field-label' }, t('routingValues'), h('span', { className: 'req' }, '*'),
+                  h('span', { className: 'vwf-help', title: t('routingValuesHelp') }, '?')),
+                // F2：取值参数项（+/-），写入 schema enum；F3：每行边存在性图标 + 一键补边
+                routingValuesDraft.map((v, i) => {
+                  const st = routingStatus.values.find((x) => x.value === v)
+                  const state = st ? st.state : 'missing'
+                  return h('div', { key: i, className: 'vwf-row vwf-routing-row', style: { marginTop: 4 } },
+                    h('input', {
+                      className: 'vwf-input vwf-mono', value: v, placeholder: 'pass',
+                      onChange: (ev) => {
+                        const next = routingValuesDraft.slice()
+                        next[i] = ev.target.value
+                        setRoutingValuesDraft(next)
+                        setRoutingValuesDirty(true)
+                      },
+                      onBlur: () => { if (routingValuesDirty) { commitRoutingValues(routingValuesDraft); setRoutingValuesDirty(false) } },
+                    }),
+                    h('span', {
+                      className: 'vwf-routing-badge',
+                      title: state === 'ok' ? t('routingEdgeExists') : state === 'duplicated' ? t('routingEdgeDuplicated') : t('routingEdgeMissing'),
+                    }, state === 'ok' ? '✅' : state === 'duplicated' ? '❗' : '⚠️'),
+                    state !== 'ok' && props.onAddOutcomeEdge
+                      ? h('button', {
+                        className: 'vwf-btn sm',
+                        onClick: () => props.onAddOutcomeEdge(node.id, normalizeRoutingName(v)),
+                      }, t('routingAddEdge'))
+                      : null,
+                    h('button', {
+                      className: 'vwf-btn sm ghost', title: t('routingRemoveValue'),
+                      onClick: () => {
+                        if (st && st.state !== 'missing') { setRoutingNotice(t('routingRemoveBlocked')); return }
+                        const next = routingValuesDraft.filter((_, j) => j !== i)
+                        setRoutingValuesDraft(next)
+                        setRoutingValuesDirty(false)
+                        commitRoutingValues(next)
+                      },
+                    }, '−')
+                  )
+                }),
+                h('button', {
+                  className: 'vwf-btn sm', style: { marginTop: 6 },
+                  onClick: () => { setRoutingValuesDraft(routingValuesDraft.concat([''])); setRoutingNotice(null) },
+                }, '＋ ' + t('routingAddValue')),
+                // E3/E4：不可穷举或 boolean 型路由字段
+                !routingEnumerable && routingValuesDraft.filter((v) => String(v).trim()).length === 0
+                  ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('routingValuesEmpty'))
+                  : null,
+                routingIsBoolean
+                  ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('routingBooleanUnsupported'))
+                  : (!routingEnumerable && routingValuesDraft.filter((v) => String(v).trim()).length > 0
+                    ? h('div', { className: 'vwf-err-line' }, t('routingNotEnumerable'))
+                    : null),
+                // F4：反向告警——图中存在未声明的 outcome 取值
+                routingStatus.undeclared.length
+                  ? h('div', { className: 'vwf-err-line' }, t('routingUndeclaredEdges') + routingStatus.undeclared.map((x) => x.value + ' → ' + x.to).join('、'))
+                  : null,
+                routingNotice ? h('div', { className: 'vwf-err-line' }, routingNotice) : null
+              ),
+            schemaField({ label: t('outputSchema'), required: true, help: t('outputSchemaHelp') })
+          ) : null,
+          // 「人工验收 / 无」两档不渲染 outcomePath/successCondition，但只要节点仍持有 output
+          // （典型场景：只声明了交付文件 files），内核就要求 output.schema —— 必须给出可编辑入口，
+          // 否则保存被拦却无处可改。
+          (resultMode === 'manual' || resultMode === 'none') && node.output
+            ? schemaField({ label: t('outputSchema'), required: true, help: t('outputSchemaHelp') })
+            : null,
           !isFanout ? h(ArtifactFilesEditor, { node, onUpdate: props.onUpdate, errorsFor }) : null
         )
       )
     }
 
     // ── 边配置表单（对应 EdgeInspector）──────────────────────────────────────
+    // 边类型四态与 validate-core 同构：成功（可带 when）/ 失败 / 技术重试（自环）/
+    // 业务 outcome（名称 + countRound 回退记账）。类型切换经 updateEdge({kind})
+    // 走 applyEdgeKind 互斥清理，保证 on 与 outcome 不并存。
     function EdgeInspector(props) {
       const edge = props.edge
       const dsl = props.dsl
       const index = props.index
       const errorsFor = (field) => (props.fieldErrors || {})['edge:' + index + ':' + field] || []
+      const kind = edgeKind(edge)
       const targetOpts = (dsl.nodes || []).map(n => ({ value: n.id, label: (n.label ? n.label + ' · ' : '') + n.id })).concat([{ value: END_NODE, label: END_NODE + ' · ' + t('endNode') }])
+      // HD 的 result 边沿原字段编辑；业务 outcome 边编辑 outcome 字段
+      const outField = hasOutcomeField(edge) ? 'outcome' : (edge && edge.result !== undefined ? 'result' : 'outcome')
+      const outValue = edge[outField] == null ? '' : String(edge[outField])
+      // V2（F5）：源节点处于业务结果路由档时，outcome 名称改为「从节点声明取值中选」；
+      // 非路由档保持文本输入（兼容手写图）；未被声明的历史/手写取值仍可见并标注。
+      const srcValues = routingValuesOf((dsl.nodes || []).find(n => n && n.id === edge.from))
+      const usedByOthers = {}
+      if (srcValues.length) {
+        ;(dsl.edges || []).forEach((e2, i2) => {
+          if (i2 === index || !e2 || e2.from !== edge.from) return
+          if (e2.outcome === undefined || e2.outcome === null || e2.outcome === '') return
+          usedByOthers[String(e2.outcome)] = true
+        })
+      }
       return h('div', { className: 'vwf-section' },
         h('div', { className: 'vwf-row' },
           h('strong', null, t('edgeConfig')),
@@ -1409,11 +1537,38 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         ),
         h(Field, { label: t('edgeOutcome'), required: true, errors: errorsFor('on') },
           h(VwfSelect, {
-            value: edge.on,
-            options: [{ value: 'success', label: 'success' }, { value: 'failure', label: 'failure' }],
-            onChange: (v) => props.onUpdate(index, { on: v }),
+            value: kind,
+            options: ['success', 'failure', 'technical', 'outcome'].map(v => ({ value: v, label: t('edgeType_' + v) })),
+            onChange: (v) => props.onUpdate(index, { kind: v }),
           })
         ),
+        kind === 'outcome' ? h(Field, { label: t('edgeOutcomeName'), required: true, help: srcValues.length ? t('edgeOutcomeNameSelectHelp') : t('edgeOutcomeNameHelp'), errors: errorsFor('outcome') },
+          srcValues.length
+            ? h(VwfSelect, {
+              value: outValue,
+              invalid: errorsFor('outcome').length > 0,
+              options: [{ value: '', label: t('edgeOutcomePlaceholder') }].concat(srcValues.map((v) => ({
+                value: v,
+                label: v + (usedByOthers[v] ? '（' + t('edgeOutcomeUsed') + '）' : ''),
+              }))).concat(
+                outValue && !srcValues.includes(outValue)
+                  ? [{ value: outValue, label: outValue + '（' + t('edgeOutcomeUndeclared') + '）' }]
+                  : []
+              ),
+              onChange: (v) => props.onUpdate(index, { [outField]: v }),
+            })
+            : h('input', {
+              className: 'vwf-input vwf-mono' + (errorsFor('outcome').length ? ' err' : ''),
+              value: outValue, placeholder: 'PASS',
+              onChange: (ev) => props.onUpdate(index, { [outField]: ev.target.value }),
+            })
+        ) : null,
+        kind === 'outcome' ? h('label', { className: 'vwf-field-label', style: { cursor: 'pointer' } },
+          h('input', { type: 'checkbox', checked: !!edge.countRound, style: { margin: 0 }, onChange: (ev) => props.onUpdate(index, { countRound: ev.target.checked }) }),
+          t('edgeCountRound'),
+          h('span', { className: 'vwf-help', title: t('edgeCountRoundHelp') }, '?')
+        ) : null,
+        kind === 'technical' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('edgeTechnicalHelp')) : null,
         h(Field, { label: t('edgeTarget'), required: true, errors: errorsFor('to') },
           h(VwfSelect, {
             value: edge.to,
@@ -1421,7 +1576,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             onChange: (v) => props.onUpdate(index, { to: v }),
           })
         ),
-        edge.on === 'success' ? h(Field, { label: t('edgeWhen'), help: t('edgeWhenHelp'), errors: errorsFor('when') },
+        kind === 'success' ? h(Field, { label: t('edgeWhen'), help: t('edgeWhenHelp'), errors: errorsFor('when') },
           h('input', {
             className: 'vwf-input vwf-mono' + (errorsFor('when').length ? ' err' : ''),
             value: edge.when || '', placeholder: '$.need_integration_test == true',
@@ -1750,7 +1905,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           host.call('vwf.validate', { dsl: snapshot }).then(r => {
             if (seq !== validateSeqRef.current) return
             setLiveErrors(r.ok ? [] : (r.errors || []))
-          }).catch(() => {})
+          }).catch((e) => {
+            // 实时校验失败也必须可见：否则状态行会一直停在旧结论上
+            if (seq !== validateSeqRef.current) return
+            setLiveErrors([{ message: t('validateUnavailable') + String((e && e.message) || e) }])
+          })
         }, VALIDATE_DEBOUNCE_MS)
       }
       const [historyVersion, setHistoryVersion] = React.useState(0)
@@ -1889,6 +2048,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setSelectedNodeId(null)
       }
 
+      // V2 F3：取值行缺失对应边时的一键补边（默认落 $end，建后选中可改目标）
+      const addOutcomeEdge = (from, outcome) => {
+        if (!from || !outcome) return
+        const edge = { from, to: END_NODE, outcome }
+        const next = { ...wf, edges: [...(wf.edges || []), edge] }
+        syncWorkflow(next, { history: 'now' })
+        setSelectedEdgeIndex(next.edges.length - 1)
+        setSelectedNodeId(null)
+      }
+
       const addNode = () => {
         const id = uniqueNodeId(wf, 'node-' + (wf.nodes.length + 1))
         const node = { id, label: t('defaultNodeLabel', { n: id.replace(/\D+/g, '') || String(wf.nodes.length + 1) }), profile: '' }
@@ -1923,12 +2092,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         if (nextId) setSelectedNodeId(nextId)
       }
 
+      // patch.kind 触发边类型切换（applyEdgeKind 互斥清理）；其余 patch 后做与
+      // validate-core 一致的兜底清理：when 仅 success、countRound 仅业务边。
       const updateEdge = (index, patch) => {
         const current = wf.edges[index]
         if (!current) return
-        const updated = { ...current, ...patch }
+        let updated
+        if (patch && patch.kind !== undefined) {
+          const rest = { ...patch }
+          delete rest.kind
+          updated = applyEdgeKind({ ...current, ...rest }, patch.kind)
+        } else {
+          updated = { ...current, ...patch }
+        }
         if (updated.on !== 'success') delete updated.when
         else if (patch.when !== undefined && !String(patch.when).trim()) delete updated.when
+        if (edgeKind(updated) !== 'outcome' || !updated.countRound) delete updated.countRound
         const next = { ...wf, edges: wf.edges.map((e, i) => i === index ? updated : e) }
         syncWorkflow(next)
         setSelectedEdgeIndex(index)
@@ -1962,7 +2141,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           toSave = normalizeEntry(ingestEditorJson(parsed))
           setWf(toSave)
         }
-        const v = await host.call('vwf.validate', { dsl: toSave }).catch(() => null)
+        // RPC 异常（宿主 handler 抛错 / 校验服务不可用）必须走进校验弹窗：
+        // 静默 return 会表现为「点保存没反应」且 dirty 不清、退出时才提示未保存
+        const v = await host.call('vwf.validate', { dsl: toSave }).catch((e) => ({
+          ok: false,
+          errors: [{ at: '$', message: t('validateUnavailable') + String((e && e.message) || e) }],
+        }))
         if (!v) return
         if (!v.ok) {
           setPendingValidation(v)
@@ -2073,6 +2257,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     title: t('oneClickCheckHelp'),
                     onClick: () => { void props.onOneClickCheck() },
                   }, props.probing ? t('oneClickCheckRunning') : t('oneClickCheck')),
+                  h('button', {
+                    className: 'vwf-btn sm ghost',
+                    disabled: !!props.probing || !(wf.nodes || []).length,
+                    title: t('probeForceRerunHint'),
+                    onClick: () => { void props.onOneClickCheck(true) },
+                  }, props.probing ? t('oneClickCheckRunning') : t('probeForceRerun')),
                   idChanged ? h('button', { className: 'vwf-btn sm', onClick: () => { void handleSave() } }, t('saveAs')) : null,
                   h('button', { className: 'vwf-btn sm primary', disabled: props.saving || !(wf.nodes || []).length || idChanged, onClick: () => { void handleSave() } }, t('saveWorkflow'))
                 )
@@ -2167,7 +2357,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 )
               )
             ),
-            selectedNode ? h(NodeInspector, { node: selectedNode, dsl: wf, fieldErrors, providers: props.providers, roles: props.roles, onUpdate: updateNode }) : null,
+            selectedNode ? h(NodeInspector, { node: selectedNode, dsl: wf, fieldErrors, providers: props.providers, roles: props.roles, onUpdate: updateNode, onAddOutcomeEdge: addOutcomeEdge }) : null,
             selectedEdge ? h(EdgeInspector, { edge: selectedEdge, index: selectedEdgeIndex, dsl: wf, fieldErrors, onUpdate: updateEdge, onDelete: deleteSelectedEdge }) : null,
             !selectedNode && !selectedEdge ? h('div', { className: 'vwf-empty', style: { marginTop: 10 } }, t('selectHint')) : null
           )
@@ -2243,13 +2433,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     function statusBadge(status) {
       const s = String(status || '')
-      const color = s === 'DONE' ? STATUS_COLOR.pass : s === 'running' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0) ? STATUS_COLOR.human : STATUS_COLOR.fail
+      // #80：PAUSED 用人工关注色（可恢复等待态），不落 fail 色
+      const color = s === 'DONE' ? STATUS_COLOR.pass : s === 'running' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED') ? STATUS_COLOR.human : STATUS_COLOR.fail
       const label = s === 'WAITING_HUMAN' ? t('dashWaitHuman') : s.indexOf('AWAITING_HUMAN_') === 0 ? t('dashHumanGate') : (s || '—')
       return h('span', { className: 'vwf-badge', style: { color: color } }, label)
     }
     function isActiveRunStatus(status) {
       const s = String(status || '')
-      return s === 'running' || s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0
+      return s === 'running' || s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED'
     }
 
     // 运行看板（#19 多 run 并行）：运行清单 + 切换、门禁卡片队列（一次裁决一张）、
@@ -2305,6 +2496,19 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const snapState = snap && snap.found ? snap.state : null
       const dsl = snapState ? (tplMap[snapState.workflowId] || null) : null
       const st = snapState && dsl ? mapStatus(snapState, dsl) : {}
+      // #80 运行控制面：暂停/中断经看板下发（运行中 Chat 被 wf_run 阻塞，看板 RPC 是唯一
+      // 实时通道）；恢复与指导保持命令式入口（与 Human Decision 续跑同模式），最终 UI 归 #75。
+      // 状态与待生效标志取 runs.list join（host 权威）；PAUSED 详情卡轮询逻辑运行摘要。
+      const selRow = snapState ? (allRuns.find((r) => r.id === snapState.id) || null) : null
+      const lrunId = selRow ? String(selRow.logical_run_id || '') : ''
+      const lrState = selRow ? String(selRow.logical_state || '') : ''
+      const [lrun, setLrun] = React.useState(null)
+      React.useEffect(() => { if (lrunId && lrState === 'PAUSED') host.call('vwf.logicalRuns.get', { logical_run_id: lrunId }).then((r) => { if (r && r.found) setLrun(r.record) }).catch(() => {}) }, [lrunId, lrState, snapState ? snapState.updatedAt : 0])
+      const sendControl = (action) => {
+        if (!lrunId) return
+        if (action === 'interrupt' && !window.confirm(t('ctlConfirmInterrupt'))) return
+        host.call('vwf.run.control', { action, logical_run_id: lrunId }).then((r) => { if (r && r.ok) fetchState(runId) }).catch(() => {})
+      }
       return h('div', { className: 'vwf-root' },
         activeCount >= 2 ? h('div', { className: 'vwf-code', style: { borderColor: STATUS_COLOR.human, marginBottom: 8 } },
           t('dashParallel', { n: activeCount })) : null,
@@ -2386,7 +2590,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, 'pass'),
                     h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.fail } }, 'fail'),
                     h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('dashHumanGate'))
-                  )
+                  ),
+                  lrState ? h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 6, flexWrap: 'wrap' } },
+                    lrState === 'RUNNING' ? h('button', { className: 'vwf-btn sm', onClick: () => sendControl('pause') }, t('ctlPause')) : null,
+                    lrState === 'RUNNING' ? h('button', { className: 'vwf-btn sm', onClick: () => sendControl('interrupt') }, t('ctlInterrupt')) : null,
+                    selRow.pause_pending ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('ctlPending')) : null) : null,
+                  lrState === 'PAUSED' && lrun ? h('div', { className: 'vwf-card', style: { marginTop: 8, padding: '10px 14px' } },
+                    h('div', { className: 'vwf-card-title' }, t('pausedTitle', { id: lrun.logical_run_id, code: (lrun.lifecycle && lrun.lifecycle.reason && lrun.lifecycle.reason.code) || 'PAUSED' })),
+                    h('div', { className: 'vwf-code', style: { marginTop: 6 } }, t('pausedResumeCmd', { taskId: snapState.taskId, tpl: snapState.workflowId }) + '\n' + t('pausedGuidanceCmd', { id: lrun.logical_run_id })),
+                    (lrun.guidance && lrun.guidance.length) ? h('div', { className: 'vwf-code', style: { marginTop: 8 } },
+                      t('guidanceTimeline') + '\n' + lrun.guidance.map((g) => '#' + g.seq + ' · ' + t(g.mode === 'baseline' ? 'guidanceBaseline' : 'guidanceCoach') + ' · ' + new Date(g.at).toLocaleString() + ' · ' + (g.mode === 'baseline' ? t('baselineNewText') + (g.new_baseline || '') : (g.text || ''))).join('\n')) : null) : null,
                 ),
                 dsl ? h('div', { className: 'vwf-card', style: { marginTop: 8 } }, h(Canvas, { dsl, readOnly: true, statusMap: st })) : null,
                 h('table', { className: 'vwf-table', style: { marginTop: 8 } },
@@ -2505,10 +2718,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         refresh()
       }
       const [probing, setProbing] = React.useState(false)
-      const onOneClickCheck = () => {
+      // #74 探针结论 → 用户文案（host 侧已做错误清洗，此处只做呈现映射）
+      const probeStatusText = (r) => {
+        const map = {
+          available: t('probeStatusAvailable'), auth_failed: t('probeStatusAuthFailed'), quota: t('probeStatusQuota'),
+          rate_limit: t('probeStatusRateLimit'), model_unavailable: t('probeStatusModelUnavailable'), permission_denied: t('probeStatusPermissionDenied'),
+          provider_unreachable: t('probeStatusUnreachable'), timeout: t('probeStatusTimeout'), provider_error: t('probeStatusOther'),
+          provider_not_configured: t('probeStatusProviderNotConfigured'), model_not_configured: t('probeStatusModelNotConfigured'),
+          probe_internal_error: t('probeStatusInternalError'),
+          probe_degraded: t('probeStatusDegraded'), unknown: t('probeStatusUnknown'),
+        }
+        return map[r.status] || r.status || t('probeStatusUnknown')
+      }
+      const onOneClickCheck = (force) => {
         if (!wf || probing) return
         setProbing(true)
-        host.call('vwf.probe', { dsl: wf }).then((r) => {
+        host.call('vwf.probe', { dsl: wf, force: force === true }).then((r) => {
           if (!r) { setMsg(t('oneClickCheckFailed')); return }
           if (r.stage === 'static' && !r.ok) {
             const first = (r.errors && r.errors[0] && r.errors[0].message) || t('oneClickCheckFailed')
@@ -2519,12 +2744,117 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             setMsg(t('oneClickCheckProbePending'))
             return
           }
+          if (r.code === 'LLM_SERVICE_UNAVAILABLE') { setMsg(t('probeLlmUnavailable')); return }
+          if (Array.isArray(r.results)) {
+            if (!r.results.length) { setMsg(t('probeNoBindings')); return }
+            setMsg(probeReport(r))
+            return
+          }
           if (r.ok) setMsg(t('oneClickCheckOk'))
           else setMsg(t('oneClickCheckFailed') + ((r.errors && r.errors[0] && r.errors[0].message) || ''))
         }).catch((e) => setMsg(t('oneClickCheckFailed') + String(e))).finally(() => setProbing(false))
       }
+      // #74 UAT-02 反馈：探针结论按「节点序号」逐节点呈现，三级层级用视觉区分（不写 markdown 标记）：
+      //   一级 = 整体结论；二级 = 一级节点（单列序号 0/1/2…）；三级 = 二级节点（同列并行 1.1/1.2…，如有）。
+      // 序号直接复用画布的两级序号（layoutGraph().seqLabels），与节点卡片角标一一对应。
+      // 图标：✅ 可用 / ❌ 不可用（带 host 侧清洗过的原因）/ ⚠️ 未定论（探针降级、探针内部错误、
+      // 未返回结论）/ ➖ 未指定模型（继承会话模型）。同一绑定被多个节点引用时逐节点展开。
+      const probeReport = (r) => {
+        const all = Array.isArray(r.results) ? r.results : []
+        const byNode = new Map()
+        for (const x of all) for (const id of (x.nodes || [])) byNode.set(String(id), x)
+        const nodes = (wf && Array.isArray(wf.nodes)) ? wf.nodes : []
+        const blueprintModels = (wf && wf.bindings && wf.bindings.models) || null
+        const modelOf = (n) => {
+          if (n && n.model && (n.model.provider || n.model.model)) return n.model
+          return (blueprintModels && blueprintModels[String(n && n.id)]) || null
+        }
+        // 画布两级序号：单列 "m"，同列并行 "m.1"/"m.2"；布局拿不到时退化为数组顺序
+        let labels = {}
+        try { labels = layoutGraph(wf || {}, []).seqLabels || {} } catch (e) { labels = {} }
+        const seqOf = (n) => (labels[n.id] === undefined ? '' : String(labels[n.id]))
+        const keyOf = (n) => {
+          const parts = seqOf(n).split('.')
+          const main = parts[0] === '' ? 1e6 : Number(parts[0])
+          return [isFinite(main) ? main : 1e6, parts.length > 1 ? Number(parts[1]) || 0 : 0]
+        }
+        const ordered = nodes.slice().sort((a, b) => { const ka = keyOf(a); const kb = keyOf(b); return (ka[0] - kb[0]) || (ka[1] - kb[1]) })
+        const rows = []
+        const covered = new Set()
+        let ok = 0
+        let bad = 0
+        let soft = 0
+        let unbound = 0
+        ordered.forEach((n) => {
+          const seq = seqOf(n)
+          // 二级节点（同列并行）进第三级缩进；一级节点（单列）进第二级
+          const level = seq.indexOf('.') >= 0 ? 3 : 2
+          const label = (seq ? seq + ' ' : '') + (n.label || n.id) + '（' + n.id + '）'
+          const m = modelOf(n)
+          const x = byNode.get(String(n.id)) || null
+          if (!x) {
+            if (!m) {
+              unbound += 1
+              rows.push({ level: level, tone: 'muted', text: '➖ ' + label + ' · ' + t('probeNodeInherit') })
+              return
+            }
+            soft += 1
+            rows.push({ level: level, tone: 'warn', text: '⚠️ ' + label + ' · ' + String(m.provider || 'default') + '/' + String(m.model || 'default') + ' · ' + t('probeNodeNotProbed') })
+            return
+          }
+          covered.add(String(n.id))
+          if (x.status === 'available') {
+            ok += 1
+            rows.push({ level: level, tone: 'ok', text: '✅ ' + label + ' · ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) + (x.cached ? t('probeCachedSuffix') : '') })
+            return
+          }
+          const undecided = x.status === 'probe_degraded' || x.status === 'probe_internal_error'
+          if (undecided) soft += 1
+          else bad += 1
+          rows.push({
+            level: level, tone: undecided ? 'warn' : 'bad',
+            text: (undecided ? '⚠️ ' : '❌ ') + label + ' · ' + x.provider + '/' + x.model + ' · ' + probeStatusText(x) +
+              (x.message ? '：' + x.message : '') + (x.cached ? t('probeCachedSuffix') : ''),
+          })
+        })
+        // 防御：结果里出现当前节点表未覆盖的绑定（DSL 与结果不同步）时也要如实呈现
+        for (const x of all) {
+          const rest = (x.nodes || []).filter((id) => !covered.has(String(id)) && !nodes.some((n) => String(n.id) === String(id)))
+          if (!rest.length) continue
+          if (x.status === 'available') ok += rest.length
+          else if (x.status === 'probe_degraded' || x.status === 'probe_internal_error') soft += rest.length
+          else bad += rest.length
+          rows.push({
+            level: 2, tone: x.status === 'available' ? 'ok' : 'bad',
+            text: (x.status === 'available' ? '✅ ' : '❌ ') + x.provider + '/' + x.model + ' · ' + probeStatusText(x) +
+              (x.message ? '：' + x.message : '') + t('probeBindingNodes', { nodes: rest.join('、') }),
+          })
+        }
+        const total = ok + bad + soft + unbound
+        const notes = []
+        if (soft) notes.push(t('probeNoteSoft', { n: soft }))
+        if (unbound) notes.push(t('probeNoteUnbound', { n: unbound }))
+        const head = (bad === 0 ? '✅ ' + t('probeReportOk', { ok: ok, total: total }) : '❌ ' + t('probeReportFail', { total: total, bad: bad })) +
+          (notes.length ? t('probeReportNotes', { notes: notes.join('，') }) : '')
+        return { lines: [{ level: 1, tone: bad === 0 ? 'ok' : 'bad', text: head }].concat(rows) }
+      }
 
       const editingBuiltin = !!(list || []).find(x => x.id === editId && x.builtin)
+      // 结果条按行分级渲染：一级加粗放大、二级缩进、三级再缩进一层；✅/❌/⚠️/➖ 决定色调。
+      // 纯文本消息（保存/删除回执等）按单级普通行渲染。
+      const renderMsg = (m) => {
+        const rows = (m && Array.isArray(m.lines)) ? m.lines : String(m == null ? '' : m).split('\n').map((line) => ({ text: line }))
+        return h('div', { className: 'vwf-code' },
+          rows.map((row, i) => {
+            const text = String(row.text == null ? '' : row.text)
+            const tone = row.tone || (text.indexOf('❌') >= 0 ? 'bad'
+              : text.indexOf('⚠️') >= 0 ? 'warn'
+                : text.indexOf('✅') >= 0 ? 'ok'
+                  : text.indexOf('➖') >= 0 ? 'muted' : '')
+            return h('div', { key: 'msg-line-' + i, className: 'vwf-msg-line l' + (row.level || 0) + (tone ? ' ' + tone : '') }, text)
+          })
+        )
+      }
       if (!i18nReady) return h('div', { className: 'vwf-muted' }, t('i18nLoading'))
 
       return h('div', { className: 'vwf-root' },
@@ -2555,7 +2885,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           )
         ) : null,
         tab === 'dashboard' ? h(Dashboard, { wf }) : null,
-        msg ? h('div', { className: 'vwf-code' }, msg) : null,
+        msg ? renderMsg(msg) : null,
         wf ? h('dialog', {
           className: 'vwf-editor-dialog',
           ref: editorDialogRef,
@@ -2572,6 +2902,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             h('span', { className: 'vwf-spacer' }),
             h('button', { className: 'vwf-btn sm', onClick: requestCloseEditor }, t('close'))
           ),
+          // 检测/探针结果同时显示在编辑器内：结果条若只渲染在外层主面板，
+          // 会被全屏编辑器 dialog 完全遮挡（#74 UAT 反馈）
+          msg ? h('div', { className: 'vwf-editor-msg' }, renderMsg(msg)) : null,
           h('div', { className: 'vwf-editor-body' },
             h(Editor, {
               key: editId || 'new',
@@ -2613,6 +2946,65 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 // （防漂移门禁）。buildSchemaTemplate 一律经本函数取用，避免同一正则散落多处。
 function conditionRegex() {
   return /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
+}
+
+// ── 图语义副本（LOC-005 parity 门禁导出）：从 apply() 提升至闭包顶层 ─────────
+// 与校验内核 scripts/validate-core.cjs 同名函数同构；字面漂移由
+// tests/graph-semantics-parity.test.mjs 以内核权威侧同输入对拍锁定。
+// 提升到顶层的唯一原因是可测试性（顶层导出），函数体逐字未动，行为不变。
+function hasOutcomeField(e) {
+  return !!(e && e.outcome !== undefined && e.outcome !== null && e.outcome !== '')
+}
+function isStructuralEdge(e) {
+  return !!(e && (e.on === 'success' || hasOutcomeField(e)))
+}
+// 与校验内核同构：countRound 声明 / 自环 = 回退边，不参与入口入边与主链分层。
+function isRollbackEdge(e) {
+  if (!isStructuralEdge(e)) return false
+  if (e.from === e.to) return true
+  return e.countRound !== undefined
+}
+function deriveEntryCandidates(dsl) {
+  // END_NODE / HUMAN_DECISION_ID 字面量内联：与 apply() 内同名常量一致，
+  // 提升顶层后保持闭包「以 return{ 开头」形态，不引入 TDZ 引用。
+  const ids = new Set((dsl.nodes || []).map(n => n && n.id).filter(Boolean))
+  const incoming = new Set()
+  ;(dsl.edges || []).forEach(e => {
+    if (!isStructuralEdge(e) || isRollbackEdge(e)) return
+    if (!e.to || e.to === '$end' || e.to === '$human-decision' || !ids.has(e.to)) return
+    if (!(ids.has(e.from) || e.from === '$human-decision')) return
+    incoming.add(e.to)
+  })
+  return (dsl.nodes || []).map(n => n && n.id).filter(id => Boolean(id) && !incoming.has(id))
+}
+// 编辑器 JSON tab 同时接受蓝图落盘格式（displayName / bindings.models）与 DSL。
+// 投影规则必须与 scripts/validate-core.cjs 的 projectToVwf 对齐——勿在此分叉。
+function ingestEditorJson(raw) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return raw
+  const models = (raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object')
+    ? raw.bindings.models : {}
+  const hasBindings = Object.keys(models).length > 0
+  if (typeof raw.displayName !== 'string' && !hasBindings) return raw
+  const displayName = typeof raw.displayName === 'string' ? raw.displayName : (raw.name || raw.id || '')
+  const nodes = raw.nodes.map((n) => {
+    if (!n || typeof n !== 'object') return n
+    if (n.model || !models[n.id]) return n
+    return { ...n, model: models[n.id] }
+  })
+  const next = {
+    id: raw.id,
+    name: displayName,
+    description: raw.description || '',
+    entry: raw.entry,
+    control: raw.control || { maxRounds: 9 },
+    nodes,
+    edges: raw.edges.map((e) => e),
+  }
+  if (raw.onMaxRounds !== undefined) next.onMaxRounds = raw.onMaxRounds
+  if (raw.heteroCheck) next.heteroCheck = true
+  if (raw.bundleRoles) next.bundleRoles = true
+  if (raw.humanDecision !== undefined) next.humanDecision = raw.humanDecision
+  return next
 }
 
 // ── 基础 Schema 模板生成（独立纯函数，供 beautifySchema 空字段分支与单测复用）──
@@ -2664,4 +3056,150 @@ function buildSchemaTemplate(input) {
   }
 
   return schema
+}
+
+// ── 边类型模型（与 validate-core 边规则同构）────────────────────────────────
+// 引擎边定义 = on ∈ { success, failure, technical } ∪ 业务 outcome 边（与节点
+// output.outcomePath 配套，可带 countRound）。UI 类型语义：
+//   'success'/'failure' → on 同名边（when 仅 success）；'technical' → 技术重试自环；
+//   'outcome' → 业务 outcome 边（HD 的 result 边沿 result 字段展示/编辑）。
+// 编辑中 outcome 置空串仍按 outcome 类型呈现（表单不跳变）；空值由保存校验拦截。
+function edgeKind(e) {
+  if (!e || typeof e !== 'object') return 'success'
+  if (e.outcome != null || (e.result != null && e.result !== '')) return 'outcome'
+  if (e.on === 'technical' || e.on === 'failure') return e.on
+  return 'success'
+}
+
+// 类型切换的字段互斥清理，与内核校验一一对应：
+//   outcome 与 on 互斥；when 仅 success；countRound 仅业务边；technical 禁 when/countRound。
+// 返回新对象，不改入参。
+function applyEdgeKind(e, k) {
+  const n = { ...(e || {}) }
+  if (k === 'outcome') {
+    delete n.on
+    delete n.when
+    if (!n.countRound) delete n.countRound
+    if (n.outcome === undefined && n.result === undefined) n.outcome = ''
+  } else {
+    delete n.outcome
+    delete n.result
+    delete n.countRound
+    n.on = k === 'technical' || k === 'failure' ? k : 'success'
+    if (n.on !== 'success') delete n.when
+  }
+  return n
+}
+
+// 画布短标签：业务边显示 outcome 名（HD result 边同），其余按类型取文案。
+// labels = { success, failure, technical }，由调用方传入 i18n 文案。
+function edgeLabelText(e, l) {
+  l = l || {}
+  const v = e.outcome != null && e.outcome !== '' ? e.outcome : e.result != null && e.result !== '' ? e.result : null
+  if (v != null) return String(v)
+  if (e.on === 'technical') return l.technical || 'technical'
+  if (e.on === 'failure') return l.failure || 'failure'
+  return l.success || 'success'
+}
+
+// ── 业务结果路由模型（LOC-001 V2：录入体验改造）──────────────────────────────
+// 契约不变原则：界面只让用户填「参数名 + 取值列表」，写入仍是内核既有形态
+//   output.outcomePath = '$.<name>'
+//   output.schema.properties.<name> = { type: 'string', enum: [...values] }
+// schema 是取值列表的唯一真源（D2）：列表只是它的编辑器，改动即合并写回。
+
+/** `$.route` → `route`；非单段路径返回 '' */
+function routingNameOf(outcomePath) {
+  if (typeof outcomePath !== 'string') return ''
+  const m = /^\$\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(outcomePath.trim())
+  return m ? m[1] : ''
+}
+
+/** 友好录入归一：接受 `route` / `$.route` / 含空白；非法返回 '' */
+function normalizeRoutingName(input) {
+  const raw = String(input == null ? '' : input).trim().replace(/^\$\./, '')
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(raw) ? raw : ''
+}
+
+function routingPathOf(name) {
+  return name ? '$.' + name : ''
+}
+
+/** 与内核一致的「可穷举」判定：enum / oneOf 全常量 / const / boolean */
+function enumerableValues(prop) {
+  if (!prop || typeof prop !== 'object') return null
+  if (Array.isArray(prop.enum) && prop.enum.length) return prop.enum.map(String)
+  if (Array.isArray(prop.oneOf) && prop.oneOf.length) {
+    const vals = prop.oneOf.filter((x) => x && x.const !== undefined).map((x) => String(x.const))
+    if (vals.length === prop.oneOf.length) return vals
+  }
+  if (prop.const !== undefined) return [String(prop.const)]
+  if (prop.type === 'boolean') return ['true', 'false']
+  return null
+}
+
+/** schema 中可作路由字段的属性名候选（进档恢复 R6 用） */
+function routingCandidates(schema) {
+  const props = (schema && schema.properties) || {}
+  return Object.keys(props).filter((k) => enumerableValues(props[k]))
+}
+
+/** 节点当前声明的取值列表（schema 权威） */
+function routingValuesOf(node) {
+  const out = (node && node.output) || null
+  if (!out) return []
+  const name = routingNameOf(out.outcomePath)
+  if (!name) return []
+  return enumerableValues(out.schema && out.schema.properties && out.schema.properties[name]) || []
+}
+
+/**
+ * 写入：参数名 + 取值 → 新的 output（保留 schema 其它属性、required 与 files）。
+ * 改名时清掉旧属性键，避免 schema 里留下孤儿枚举。
+ */
+function applyRoutingWrite(node, name, values) {
+  const out = (node && node.output) || {}
+  const baseSchema = (out.schema && typeof out.schema === 'object') ? out.schema : { type: 'object' }
+  const properties = { ...(baseSchema.properties || {}) }
+  const clean = (values || []).map((v) => String(v == null ? '' : v).trim()).filter((v) => v !== '')
+  const prev = routingNameOf(out.outcomePath)
+  if (name) {
+    const prop = clean.length
+      ? { type: 'string', enum: clean }
+      : { type: 'string' }
+    properties[name] = prop
+    if (prev && prev !== name && properties[prev] !== undefined) delete properties[prev]
+    const required = Array.isArray(baseSchema.required) ? baseSchema.required.slice() : []
+    if (!required.includes(name)) required.push(name)
+    return { ...out, schema: { ...baseSchema, properties, required }, outcomePath: routingPathOf(name) }
+  }
+  if (prev && properties[prev] !== undefined) delete properties[prev]
+  return { ...out, schema: { ...baseSchema, properties }, outcomePath: routingPathOf('') }
+}
+
+/**
+ * 边存在性（F3/F4）：对每个声明取值给出 { value, state, edgeIndexes }，
+ * 并回出「用了未声明取值」的边。state ∈ ok | missing | duplicated。
+ */
+function routingEdgeStatus(dsl, nodeId) {
+  const nodes = (dsl && dsl.nodes) || []
+  const edges = (dsl && dsl.edges) || []
+  const values = routingValuesOf(nodes.find((n) => n && n.id === nodeId))
+  const rows = values.map((v) => {
+    const hits = []
+    edges.forEach((e, i) => {
+      if (e && e.from === nodeId && e.outcome !== undefined && e.outcome !== null && String(e.outcome) === v) hits.push(i)
+    })
+    return { value: v, edgeIndexes: hits, state: hits.length === 0 ? 'missing' : (hits.length > 1 ? 'duplicated' : 'ok') }
+  })
+  const declared = {}
+  values.forEach((v) => { declared[v] = true })
+  const undeclared = []
+  edges.forEach((e, i) => {
+    if (!e || e.from !== nodeId) return
+    if (e.outcome === undefined || e.outcome === null || e.outcome === '') return
+    const v = String(e.outcome)
+    if (!declared[v]) undeclared.push({ edgeIndex: i, value: v, to: e.to })
+  })
+  return { values: rows, undeclared }
 }

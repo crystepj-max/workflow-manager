@@ -3,6 +3,14 @@
 # 真源：本仓库 dsh/skills/execution-plan/ + 调度/到点脚本
 # 用法：dsh/install-execution-plan.sh [目标技能根]   默认 ~/.agents/skills
 set -euo pipefail
+# 默认公共池安装交由统一治理，避免独立副本覆盖正式来源。
+TASK_WORKFLOW_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ "$#" -eq 0 ] || [ "${1:-}" = "$HOME/.agents/skills" ]; then
+  TASK_SKILL_REPO="$(dirname "$TASK_WORKFLOW_ROOT")/my-agent-skills"
+  node "$TASK_WORKFLOW_ROOT/scripts/sync-ai-task-skill-set.mjs" "$TASK_SKILL_REPO"
+  exec python3 "$TASK_SKILL_REPO/scripts/manage-skills.py" apply
+fi
+
 
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${1:-$HOME/.agents/skills}"

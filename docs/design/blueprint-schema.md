@@ -25,6 +25,8 @@
 | `heteroCheck` | 可选 | 布尔，默认 false | DSH 增强：注入 dev↔review 异源运行日志（T-06 定稿后：v2 起异源由 save/validate 全局强制，本字段退化为运行时日志开关）；置 true 时须存在 dev 与 review 节点；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
 | `bindings.models` | 可选 | 对象：`{ <nodeId>: {provider?, model?} }` | 模型绑定（D2 节点粒度）；键必须都是节点 id；缺省 = 宿主默认 |
 | `humanDecision.maxRoundsReachedOptions` | 可选 | 非空数组，元素 ∈ `USER_ACCEPTED` \| `ADD_BUDGET` \| `STOP` | 额度耗尽时展示的控制类 Result；**缺省 = 三项全开**；可覆盖为非空子集，**删到零则拒**（#116 校验；#119 运行时同样 fail-closed，不得挂起空目录） |
+| `workspace.template_id` | 可选（整个 `workspace` 字段）；**`workspace` 给出时必填** | `construction` \| `optimize` \| `diagnose` \| `explore` | LOC-009：模板对隔离策略类型的**正式声明**。运行时 workspace 分配不再按模板 id 名字猜测：先查 Core `TEMPLATE_REGISTRY` 精确身份，其次读本声明，缺省按 `construction`（ISOLATED_WRITE git 工作区）。权威集合 = `scripts/workspace-isolation.mjs` 的 `TEMPLATE_REGISTRY` 键 |
+| `workspace.resource_kind` | 可选 | `git` \| `files` \| `document` \| `config` \| `other` | LOC-009：optimize 类模板的输入资源类型声明；`git`/`files` → `ISOLATED_WRITE`（git 工作区），`document`/`config`/`other` → `SANDBOX`。运行参数显式传入的 `resource_kind` 优先于本声明；两者都缺省时 optimize 分配 fail closed（拒启动） |
 | `nodes` | ✅ | 数组，≥1 | 见 2.2 |
 | `edges` | ✅ | 数组 | 见 2.3 |
 
@@ -121,6 +123,7 @@
 12. **完整性（#91）**：新模式 `outcomePath` 叶子必须可穷举；每个枚举值恰好一条 `outcome` 出边（JSON 等值），边取值必须落在枚举内。自由 `string` 拒绝。
 13. **Completion Mapping（#92）**：`completionPath` 须为 `$.field`、在 schema 内、叶子 `string`；该节点须有结构边到 `$end`。
 14. **fanout 禁区（#89）**：禁止 `outcomePath` / `completionPath` / `outcome` 边 / `on: technical`；`failOn` 仍走旧 failure。
+15. **workspace 声明（LOC-009）**：`workspace`（若给）必须是对象；`template_id` 必填且 ∈ `construction|optimize|diagnose|explore`；`resource_kind`（若给）∈ `git|files|document|config|other`（坐标键 `workspace:<field>`）。该字段经投影双向同步（蓝图 ↔ vwf DSL）。
 
 ### 3.2 DSL 结构规则（与校验内核结构层对齐；原 host `validateDsl` 已删除）
 
