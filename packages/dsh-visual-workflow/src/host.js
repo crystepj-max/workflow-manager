@@ -2156,7 +2156,8 @@ return {
       try {
         const verifyNodes = ((dsl && dsl.nodes) || []).filter((n) => n && n.verifyBranch).map((n) => n.id)
         if (ws.workspace_mode !== 'ISOLATED_WRITE') return { trace: Object.assign(trace, { decision: 'skipped', reason: 'non_isolated_write' }) }
-        if (!verifyNodes.length) return blocked('GATE_NO_VERIFY_NODES', '运行图没有 verifyBranch 审核/测试节点，闸门无法验证集成覆盖')
+        // B1 适用面：无审核/测试节点的图不是建设类流程，闸门不适用（保持旧行为，不回归）
+        if (!verifyNodes.length) return { trace: Object.assign(trace, { decision: 'skipped', reason: 'no_verify_nodes' }) }
         // 最近一次闸门重跑段的收束现场：放行时 wf_run 返回它（人工拿到的是重跑后的 decision_id）
         let lastRerun = null
         for (let iteration = 1; iteration <= GATE_MAX_ITERATIONS; iteration++) {
@@ -2171,8 +2172,10 @@ return {
           // 观测放行基线 = 上次同步头（有同步史）|| 分配基线；比较由内核 computeCheckpoint 完成。
           // 注意：内核在「目标已前进」时返回 ok:false + hint（业务判定），不是观测失败；
           // 观测失败（B13）= 拿不到 target_advanced 布尔值。
-          const cp = await wsHostCall('computeIntegrationCheckpointFromRepo', { base_ref: ws.base_ref, base_commit: lastSyncedHead || ws.base_commit, repository_path: ws.repository_path, target_ref: ws.base_ref })
-          if (!cp || typeof cp.target_advanced !== 'boolean') return blocked('GATE_OBSERVE_FAILED', '目标 HEAD 观测失败，fail closed（B13）：' + ((cp && cp.error) || '未知'))
+          const cpRes = await wsHostCall('computeIntegrationCheckpointFromRepo', { base_ref: ws.base_ref, base_commit: lastSyncedHead || ws.base_commit, repository_path: ws.repository_path, target_ref: ws.base_ref })
+          // 真实 wrapper 契约：{ ok, checkpoint: {target_advanced,...} }（checkpoint 嵌套一层）
+          const cp = cpRes && cpRes.ok ? cpRes.checkpoint : null
+          if (!cp || typeof cp.target_advanced !== 'boolean') return blocked('GATE_OBSERVE_FAILED', '目标 HEAD 观测失败，fail closed（B13）：' + ((cpRes && cpRes.error) || '未知'))
           if (!cp.target_advanced && !lastSync) {
             // B3：目标未前进且从未同步——直接放行，不重跑、不额外耗时
             trace.decision = 'pass'
@@ -2215,7 +2218,8 @@ return {
           if (typeof setInterval === 'function') {
             try {
               hbTimer = setInterval(() => {
-                wsHostCall('acquireLock', { logical_run_id: wsIdentity, capability: cap, resource_key: plan.resource_key, owner: GATE_LOCK_OWNER, ttl_ms: GATE_LOCK_TTL_MS }).catch(() => { hbFailures++ })
+                // 业务失败（ok:false，如续期被拒/锁丢失）与传输故障一并计数（§11 fail closed）
+                wsHostCall('acquireLock', { logical_run_id: wsIdentity, capability: cap, resource_key: plan.resource_key, owner: GATE_LOCK_OWNER, ttl_ms: GATE_LOCK_TTL_MS }).then((res) => { if (!res || res.ok === false) hbFailures++ }).catch(() => { hbFailures++ })
               }, GATE_HEARTBEAT_MS)
               if (hbTimer && typeof hbTimer.unref === 'function') hbTimer.unref()
             } catch (e) { hbTimer = null /* 无定时器环境：TTL 兜底（R2） */ }
@@ -2286,6 +2290,10 @@ return {
               if (hbFailures > 0) trace.heartbeat_failures = hbFailures
               return { trace, rerun_failed: true, engine_error: errMsg(e) }
             }
+            if (hbFailures > 0) {
+              // 心跳刷新失败按 fail closed 处理并留痕（§11）：覆盖重跑后任一收束路径
+              return blocked('GATE_LOCK_HEARTBEAT_FAILED', '集成锁心跳刷新失败，fail closed：闸门不放行（详见运行记录）', { heartbeat_failures: hbFailures })
+            }
             const rerunCanon = rerunResult && rerunResult.stopReason === 'completed' ? canonicalStop(rerunResult) : ''
             const rerunValue = rerunResult && rerunResult.value
             if (rerunCanon) onRun(rerunRunId, (r) => { r.status = rerunCanon; applyHdValue(r, rerunValue) })
@@ -2322,10 +2330,6 @@ return {
                 finalValue: rerunValue,
                 finalRunId: rerunRunId,
               }
-            }
-            if (hbFailures > 0) {
-              // 心跳刷新失败按 fail closed 处理并留痕（§11）
-              return blocked('GATE_LOCK_HEARTBEAT_FAILED', '集成锁心跳刷新失败，fail closed：闸门不放行（详见运行记录）', { heartbeat_failures: hbFailures })
             }
             // 回到循环顶部重新观测：目标可能再次前进（R3）；重跑 Proof 已入 Store
           } finally {
@@ -2498,6 +2502,12 @@ return {
           const latest = latestLogicalRunForTask(logicalTaskId)
           if (latest && latest.terminal) {
             return '错误：任务 ' + logicalTaskId + ' 的逻辑运行 ' + latest.logical_run_id + ' 已终态（' + latest.lifecycle.state + '），同一运行不能继续。请直接重新发起（将派生新运行并保留来源关系）。'
+          }
+          // LOC-017 fail-open 封堵：闸门拦截（BLOCKED）后人工决策续跑会从 $human-decision
+          // 直接走到收口（DONE 不再触发闸门），以旧 Proof 背书已前进目标——一律拒绝，
+          // 唯一恢复路径 = entry=uat 重过闸门（B10 恢复语义）。
+          if (latest && !latest.terminal && isHdResume && latest.lifecycle.state === 'BLOCKED') {
+            return '错误：逻辑运行 ' + latest.logical_run_id + ' 被集成闸门拦截（' + ((latest.lifecycle.reason && latest.lifecycle.reason.code) || 'BLOCKED') + '）：人工决策续跑不可用，否则将绕过闸门放行。请从 uat 节点续跑同一逻辑运行（wf_run entry=uat），重新通过集成闸门后再进入人工验收。'
           }
           logicalTrigger = isHdResume ? 'human_decision' : (isPauseResume ? 'pause_resume' : 'legacy_resume')
           // #80 暂停恢复：检查点现场 + 适用 Guidance（Run 级）+ 最新基线修订回填执行载荷
@@ -2791,7 +2801,7 @@ return {
             if (gateOutcome && gateOutcome.blocked) {
               logicalSetState(logicalRec, 'BLOCKED', logicalReason(gateOutcome.code, gateOutcome.message))
               controlEvent(logicalRec, 'integration_gate', { decision: 'blocked', code: gateOutcome.code, message: gateOutcome.message, iterations: gateOutcome.trace ? gateOutcome.trace.iterations : 0, observed_head: gateOutcome.trace ? gateOutcome.trace.observed_head : null })
-              onRun(runId, (r) => { r.status = 'BLOCKED'; r.reason = gateOutcome.code })
+              onRun(runId, (r) => { r.status = 'BLOCKED'; r.reason = gateOutcome.code; r.decision_id = ''; r.decision_package = null; r.results = null })
             } else if (gateOutcome && gateOutcome.trace) {
               controlEvent(logicalRec, 'integration_gate', {
                 decision: gateOutcome.trace.decision,
@@ -2816,7 +2826,10 @@ return {
         }
         const outRunId = gateOutcome && gateOutcome.finalRunId ? gateOutcome.finalRunId : runId
         const outStop = gateOutcome && gateOutcome.finalStop !== undefined ? gateOutcome.finalStop : result.stopReason
-        const outValue = gateOutcome && gateOutcome.finalValue !== undefined ? gateOutcome.finalValue : result.value
+        // 闸门拦截：返回 BLOCKED 现场（不携带原 decision_package，杜绝 HD 续跑绕过闸门，fail-open 封堵）
+        const outValue = gateOutcome && gateOutcome.blocked
+          ? { status: 'BLOCKED', code: gateOutcome.code, message: gateOutcome.message, recovery_hint: '从 uat 节点续跑同一逻辑运行（wf_run entry=uat）以重新通过集成闸门；人工决策续跑已被拒绝', integration_gate: gateOutcome.trace }
+          : (gateOutcome && gateOutcome.finalValue !== undefined ? gateOutcome.finalValue : result.value)
         const outAgents = (result.agentsStarted || 0) + (gateOutcome && gateOutcome.trace ? gateOutcome.trace.reruns.reduce((n, r) => n + (r.agents_started || 0), 0) : 0)
         return JSON.stringify({ runId: outRunId, stopReason: outStop, value: outValue, agentsStarted: outAgents, integration_gate: gateOutcome ? gateOutcome.trace : undefined })
       },

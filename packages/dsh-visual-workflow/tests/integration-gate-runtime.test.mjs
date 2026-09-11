@@ -149,7 +149,8 @@ function makeRealWsHost({ repo, sandboxMode = false } = {}) {
         case 'activeLockFor':
           return wrap(() => ({ ok: true, lock: activeLockFor(registry, input.resource_key) || null }))
         case 'computeIntegrationCheckpointFromRepo':
-          return wrap(() => computeIntegrationCheckpointFromRepo(input))
+          // 与真实 wrapper 同形状：checkpoint 嵌套一层（防 fake 与真实契约脱节）
+          return wrap(() => ({ ok: true, checkpoint: computeIntegrationCheckpointFromRepo(input) }))
         default:
           return { ok: false, error: '未知 ws 命令: ' + cmd }
       }
@@ -494,4 +495,54 @@ test('W7 重跑段非人工等待收束（B8 不放行面）：闸门不放行�
   const key = integrationResourceKey({ repository: ws.repository, target_ref: 'main' })
   assert.equal(activeLockFor(realWs.registry, key), undefined, '锁已释放')
   assert.equal(recordsList({ records_dir: recordsHostDir, logical_run_id: 'task-1' }).records.some((r) => r.record_id === integrationSyncRecordId('task-1')), true, '同步证据仍在（不放行≠回滚同步事实）')
+})
+
+test('W8 fail-open 封堵：闸门 BLOCKED 后人工决策续跑被拒，唯一恢复路径 entry=uat', async () => {
+  const repo = initRepo()
+  const recordsHostDir = mkdtempSync(join(tmpdir(), 'vwf-gate-records-'))
+  after(() => { try { rmSync(recordsHostDir, { recursive: true, force: true }) } catch { /* ignore */ } })
+  const realWs = makeRealWsHost({ repo })
+  const { tool, fs } = env({
+    wsHost: realWs, recordsHostDir,
+    value: (n) => {
+      const ws = getRunWorkspace(realWs.registry, 'task-1')
+      if (n === 1) {
+        commitInWorktree(ws, 'feat.txt', 'work\n', 'branch work')
+        commitFile(repo, 'main.txt', 'main advance\n', 'advance main')
+        return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-1', decision_package: hdPackage('hd-1'), results: { impl: { verdict: 'READY' }, review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: ws.base_commit }, test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: ws.base_commit }, uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
+      }
+      if (n === 2) {
+        // entry=uat 续跑段：重过闸门（锁已释放）→ 闸门同步后再次进入重跑
+        return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-2', decision_package: hdPackage('hd-2'), results: { uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
+      }
+      // n===3：闸门重跑段（review/test 基于同步后分支重新完成）
+      return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-3', decision_package: hdPackage('hd-3'), results: { impl: { verdict: 'READY' }, review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: 'post-sync' }, test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: 'post-sync' }, uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
+    },
+  })
+  // 第一段：闸门因锁被占用而 BLOCKED
+  const ws = allocateWorkspace(realWs.registry, { logical_run_id: 'run-other', workspace_id: 'ws-other', mode: 'ISOLATED_WRITE', work_root: realWs.workRoot, repository_path: repo, base_ref: 'main', task_identity: 'run-other', allow_parallel: true })
+  const key = integrationResourceKey({ repository: ws.repository, target_ref: 'main' })
+  acquireLock(realWs.registry, { logical_run_id: 'run-other', resource_key: key, owner: 'other-gate', ttl_ms: 60000 })
+  const out1 = JSON.parse(await tool.execute({ templateId: 'gate-spec', taskId: 'task-1' }))
+  await drain()
+  assert.equal(out1.integration_gate.blocked.code, 'GATE_LOCK_BUSY')
+  // 返回值不得携带原 decision_package（fail-open 的源头封堵）
+  assert.equal(out1.value.status, 'BLOCKED')
+  assert.equal(out1.value.decision_id, undefined)
+  assert.equal(out1.value.decision_package, undefined)
+  assert.equal(out1.value.recovery_hint.includes('entry=uat'), true)
+  // run 记录的 HD 字段已清空
+  const outer = readRun(fs, 'run-1')
+  assert.equal(outer.decision_id, '')
+  assert.equal(outer.decision_package, null)
+  // 携带 hd-1 + ACCEPT 的人工决策续跑必须被拒绝（不得绕过闸门走到收口）
+  const hd = await tool.execute({ taskId: 'task-1', templateId: 'gate-spec', decision_id: 'hd-1', user_choice: 'ACCEPT' })
+  assert.equal(hd.includes('集成闸门拦截'), true, 'HD 续跑被明确拒绝')
+  assert.equal(hd.includes('entry=uat'), true, '指引唯一恢复路径')
+  // 锁释放后，entry=uat 的 legacy 续跑仍可用（B10 恢复语义保留）
+  releaseLock(realWs.registry, { lock_id: activeLockFor(realWs.registry, key).lock_id, owner: 'other-gate', logical_run_id: 'run-other', reason: 'done' })
+  const legacy = await tool.execute({ taskId: 'task-1', templateId: 'gate-spec', entry: 'uat', results: {} })
+  const legacyOut = JSON.parse(legacy)
+  assert.equal(legacyOut.stopReason, 'completed', 'entry=uat 续跑放行（重过闸门）')
+  assert.equal(legacyOut.integration_gate.decision, 'pass', '续跑段重新通过闸门')
 })
