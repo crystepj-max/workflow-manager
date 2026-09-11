@@ -17,7 +17,7 @@ import {
   acquireLock, releaseLock, activeLockFor, cleanupWorkspace, recoverStale,
   resolveWorkspacePolicy, TEMPLATE_REGISTRY, LIFECYCLE,
 } from './workspace-isolation.mjs'
-import { planTargetSync, mergeTarget } from './integration-gate.mjs'
+import { planTargetSync, mergeTarget, buildSyncRecordEntry } from './integration-gate.mjs'
 import {
   mkdirSync, writeFileSync, readFileSync, existsSync,
   unlinkSync, renameSync, linkSync,
@@ -346,6 +346,13 @@ try {
       const { work_root, logical_run_id, target_ref } = INPUT
       if (!work_root || !logical_run_id) err('缺少参数')
       out(withRegistryRead(work_root, (registry) => planTargetSync(registry, logical_run_id, target_ref)))
+      break
+    }
+    case 'gateSyncEntry': {
+      // LOC-017：同步证据 entry 构造（宿主只传事实，provenance 拼装委托内核助手）
+      const { work_root, logical_run_id, target_head, previous_synced_head, integrated_before, merge_result, attempt, snapshot_revision } = INPUT
+      if (!work_root || !logical_run_id) err('缺少参数')
+      out({ ok: true, entry: buildSyncRecordEntry({ logicalRunId: logical_run_id, target_head, previous_synced_head, integrated_before, merge_result, attempt, snapshot_revision }) })
       break
     }
     case 'syncTarget': {

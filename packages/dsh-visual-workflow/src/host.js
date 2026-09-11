@@ -1999,6 +1999,7 @@ return {
       // LOC-017 集成闸门：gatePlan（只读观测 + 锁键）/ syncTarget（真 merge + 实况登记）
       gatePlan: ['gatePlan', true, (a, id) => ({ logical_run_id: id, target_ref: a.target_ref || undefined })],
       syncTarget: ['syncTarget', true, (a, id) => ({ logical_run_id: id, target_ref: a.target_ref || undefined })],
+      gateSyncEntry: ['gateSyncEntry', true, (a, id) => ({ logical_run_id: id, target_head: str(a.target_head), previous_synced_head: a.previous_synced_head || undefined, integrated_before: a.integrated_before === true, merge_result: str(a.merge_result), attempt: Number(a.attempt || 1), snapshot_revision: str(a.snapshot_revision) })],
       activeLock: ['activeLockFor', true, (a) => ({ resource_key: str(a.resource_key) })],
     }
     for (const op of Object.keys(WS_OPS)) {
@@ -2225,27 +2226,9 @@ return {
               // 真同步：merge（沿用仓库策略）→ recordSourceSync 只信实况 → 同步证据新 Revision（B4）
               const sync = await wsHostCall('syncTarget', { logical_run_id: wsIdentity, capability: cap, target_ref: ws.base_ref })
               if (!sync.ok) return blocked(sync.code || 'GATE_SYNC_FAILED', sync.error || '目标同步失败，fail closed', sync.conflicts ? { conflicts: sync.conflicts } : undefined)
-              const syncEntry = {
-                type: 'artifact',
-                record_id: plan.sync_record_id,
-                kind: 'json',
-                body_value: {
-                  synced_head: String(sync.target_head || plan.target_head || ''),
-                  previous_synced_head: lastSyncedHead,
-                  integrated_before: sync.integrated_before === true,
-                  merge_result: String(sync.merge_result || ''),
-                },
-                provenance: {
-                  logical_run_id: wsIdentity,
-                  node: 'integration-gate',
-                  attempt: logicalRec.segments.length,
-                  snapshot_revision: String((activeSnapshot(logicalRec) ? activeSnapshot(logicalRec).revision : 'unspecified')),
-                  provider: 'default',
-                  model: 'default',
-                  produced_by: 'vwf:integration-gate',
-                },
-              }
-              const commit = await recordsHostCall('commit', { logical_run_id: wsIdentity, entries: [syncEntry] })
+              const entryBuild = await wsHostCall('gateSyncEntry', { logical_run_id: wsIdentity, capability: cap, target_head: sync.target_head || plan.target_head || '', previous_synced_head: lastSyncedHead, integrated_before: sync.integrated_before === true, merge_result: sync.merge_result || '', attempt: logicalRec.segments.length, snapshot_revision: activeSnapshot(logicalRec) ? activeSnapshot(logicalRec).revision : 'unspecified' })
+              if (!entryBuild.ok || !entryBuild.entry) return blocked('GATE_SYNC_RECORD_FAILED', '同步证据 entry 构造失败：' + (entryBuild.error || '未知'))
+              const commit = await recordsHostCall('commit', { logical_run_id: wsIdentity, entries: [entryBuild.entry] })
               const committed = commit.ok && Array.isArray(commit.committed) ? commit.committed.find((c) => c.record_id === plan.sync_record_id) : null
               if (!commit.ok || !committed || !(committed.record_revision > (lastSync ? lastSync.record_revision : 0))) {
                 return blocked('GATE_SYNC_NO_NEW_VERSION', '同步未产生新产物版本：拒绝放行且不得报告 rerun_completed（B4）', { records_error: commit.error || null })

@@ -216,7 +216,9 @@ const clientBytes = Buffer.byteLength(dynClient)
 // 总量仍有余量时先撞线（#74 UAT-02 结果条：client 84KB + host 62KB = 146KB，
 // 低于合计预算却被拒）。#80-r2 + LOC-001 V2 合并后实测合计 168.5KB，由 160KiB
 // 上调至 176KiB（实证 ~184KB 一次转写可行；超限后应优先瘦身，不要继续推高）。
-const PAYLOAD_LIMIT = 176 * 1024
+// LOC-017 集成闸门宿主编排并入后上调至 184KiB（决策 1：载体=产品运行时宿主编排，
+// 宿主半不可省；client 瘦身仍应优先于继续推高）。
+const PAYLOAD_LIMIT = 184 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)

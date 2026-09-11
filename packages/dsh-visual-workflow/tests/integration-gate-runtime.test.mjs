@@ -22,7 +22,7 @@ import {
   recordSourceSync, computeIntegrationCheckpointFromRepo,
   acquireLock, releaseLock, activeLockFor, integrationResourceKey,
 } from '../../../scripts/workspace-isolation.mjs'
-import { planTargetSync, mergeTarget, integrationSyncRecordId } from '../../../scripts/integration-gate.mjs'
+import { planTargetSync, mergeTarget, buildSyncRecordEntry, integrationSyncRecordId } from '../../../scripts/integration-gate.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const LOGICAL_DIR = DSH_HOME + '/visual-workflow/logical-runs'
@@ -131,6 +131,8 @@ function makeRealWsHost({ repo, sandboxMode = false } = {}) {
           return wrap(() => ({ ok: true, workspace: setLifecycle(registry, input.logical_run_id, input.lifecycle, input.extra || {}) }))
         case 'gatePlan':
           return wrap(() => planTargetSync(registry, input.logical_run_id, input.target_ref))
+        case 'gateSyncEntry':
+          return wrap(() => ({ ok: true, entry: buildSyncRecordEntry({ logicalRunId: input.logical_run_id, target_head: input.target_head, previous_synced_head: input.previous_synced_head, integrated_before: input.integrated_before, merge_result: input.merge_result, attempt: input.attempt, snapshot_revision: input.snapshot_revision }) }))
         case 'syncTarget':
           return wrap(() => {
             const plan = planTargetSync(registry, input.logical_run_id, input.target_ref)
