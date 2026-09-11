@@ -17,6 +17,7 @@ import {
   acquireLock, releaseLock, activeLockFor, cleanupWorkspace, recoverStale,
   resolveWorkspacePolicy, TEMPLATE_REGISTRY, LIFECYCLE,
 } from './workspace-isolation.mjs'
+import { planTargetSync, mergeTarget } from './integration-gate.mjs'
 import {
   mkdirSync, writeFileSync, readFileSync, existsSync,
   unlinkSync, renameSync, linkSync,
@@ -338,6 +339,26 @@ try {
       if (!work_root || !logical_run_id) err('缺少参数')
       const audit = withRegistryTx(work_root, (registry) => cleanupWorkspace(registry, logical_run_id, opts || {}))
       out({ ok: true, audit })
+      break
+    }
+    case 'gatePlan': {
+      // LOC-017 集成闸门只读观测：workspace 解析 / 脏检查 / 目标观测 / 锁键 / 同步记录 id。
+      const { work_root, logical_run_id, target_ref } = INPUT
+      if (!work_root || !logical_run_id) err('缺少参数')
+      out(withRegistryRead(work_root, (registry) => planTargetSync(registry, logical_run_id, target_ref)))
+      break
+    }
+    case 'syncTarget': {
+      // LOC-017 集成闸门：目标同步编排（效果执行委托 integration-gate.mjs 内核助手）。
+      // 三段式：plan（读）→ merge（无登记簿文件锁）→ recordSourceSync（写，只信实况）。
+      const { work_root, logical_run_id, target_ref } = INPUT
+      if (!work_root || !logical_run_id) err('缺少参数')
+      const plan = withRegistryRead(work_root, (registry) => planTargetSync(registry, logical_run_id, target_ref))
+      if (!plan.ok) { out(plan); break }
+      const merged = mergeTarget(plan)
+      if (!merged.ok) { out(merged); break }
+      const ws = withRegistryTx(work_root, (registry) => recordSourceSync(registry, logical_run_id, {}))
+      out({ ok: true, target_head: merged.target_head, integrated_before: merged.integrated_before, merge_result: merged.merge_result, current_head: ws.current_head, source_revision: ws.source_revision, resource_key: plan.resource_key })
       break
     }
     case 'writeSourceFile': {

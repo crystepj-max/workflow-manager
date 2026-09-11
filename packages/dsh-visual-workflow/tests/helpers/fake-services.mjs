@@ -60,9 +60,15 @@ export function makeSubprocess({ failPattern = null, fs = null, compileScript = 
     const cmd = spec.argv[spec.argv.length - 2]
     let input = {}
     try { input = JSON.parse(spec.argv[spec.argv.length - 1]) } catch (e) { /* 空输入 */ }
-    const out = fn(cmd, input, spec)
-    if (out === undefined) return { stdout: '', exitCode: 0 }
-    return { stdout: JSON.stringify(out), exitCode: (out && out.ok === false) ? 1 : 0 }
+    // 真实 wrapper 契约：业务结果（含 ok:false）一律 exit 0 + stdout 整包；只有
+    // 命令内部抛异常才是 exit 1（stderr 承载错误）。宿主侧按 parsed.ok 分流。
+    try {
+      const out = fn(cmd, input, spec)
+      if (out === undefined) return { stdout: '', exitCode: 0 }
+      return { stdout: JSON.stringify(out), exitCode: 0 }
+    } catch (e) {
+      return { stdout: '', exitCode: 1, stderr: String((e && e.message) || e) }
+    }
   }
   const sub = {
     async resolveExecutable(command) { return '/usr/bin/node' },
