@@ -18,7 +18,7 @@
 | 无人值守许可 | 允许 |
 | 任务规格位置 | `docs/tasks/specs/LOC-015-skill-invocation-runtime/task-spec-V2.md`（详细规格）；本卡「三要素速览」为同源摘要 |
 | 定义时间 | 2026-09-11 |
-| GitHub 同步 | 待补 issue |
+| GitHub 同步 | pending |
 
 ## 摘要（三要素速览）
 
