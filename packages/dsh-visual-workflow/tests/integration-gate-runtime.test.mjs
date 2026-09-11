@@ -164,7 +164,7 @@ const realRecordsHost = (dir) => (cmd, input) => {
   return fn({ ...input, records_dir: dir })
 }
 
-function env({ value, wsHost, recordsHostDir, engineCapture = null } = {}) {
+function env({ value, wsHost, recordsHostDir, engineCapture = null, recordsWrap = null } = {}) {
   const base = {
     [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
     [REPO + '/scripts/workspace-isolation-host.mjs']: WS_HOST_STUB,
@@ -173,7 +173,10 @@ function env({ value, wsHost, recordsHostDir, engineCapture = null } = {}) {
     [SKILL_ROOT + '/gate-spec/script.mjs']: '//MOCK-SCRIPT',
   }
   const fs = makeFs(base)
-  const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost: realRecordsHost(recordsHostDir), wsHost: wsHost.wsHost })
+  const recordSvc = recordsWrap
+    ? (cmd, input) => recordsWrap(cmd, input, realRecordsHost(recordsHostDir)(cmd, input))
+    : realRecordsHost(recordsHostDir)
+  const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost: recordSvc, wsHost: wsHost.wsHost })
   const engine = {
     starts: [],
     start(spec) {
@@ -416,4 +419,79 @@ test('W5 非 Git ISOLATED_WRITE 不触发闸门（B1）', async () => {
   assert.equal(engineCalls, 1)
   const logical = readLogical(fs, 'task-1')
   assert.equal(logical.lifecycle.state, 'WAITING_HUMAN')
+})
+
+test('W6 同步证据未落库（B4）：拒绝放行且不得报告 rerun_completed，锁不悬挂', async () => {
+  const repo = initRepo()
+  const recordsHostDir = mkdtempSync(join(tmpdir(), 'vwf-gate-records-'))
+  after(() => { try { rmSync(recordsHostDir, { recursive: true, force: true }) } catch { /* ignore */ } })
+  const realWs = makeRealWsHost({ repo })
+  let engineCalls = 0
+  const { tool, fs } = env({
+    wsHost: realWs, recordsHostDir,
+    recordsWrap: (cmd, input, r) => {
+      // 模拟 Store 写入丢失：同步证据 commit 假成功、零落库
+      if (cmd === 'commit' && (input.entries || []).some((e) => e.record_id === integrationSyncRecordId('task-1'))) {
+        return { ok: true, logical_run_id: String(input.logical_run_id), committed: [], record_count: 0 }
+      }
+      return r
+    },
+    engineCapture: () => { engineCalls++ },
+    value: (n) => {
+      if (n === 1) {
+        const ws = getRunWorkspace(realWs.registry, 'task-1')
+        commitInWorktree(ws, 'feat.txt', 'work\n', 'branch work')
+        commitFile(repo, 'main.txt', 'main advance\n', 'advance main')
+        return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-1', decision_package: hdPackage('hd-1'), results: { impl: { verdict: 'READY' }, review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: ws.base_commit }, test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: ws.base_commit }, uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
+      }
+      throw new Error('同步证据未落库时不应重跑（B4）')
+    },
+  })
+  const out = JSON.parse(await tool.execute({ templateId: 'gate-spec', taskId: 'task-1' }))
+  await drain()
+  const gate = out.integration_gate
+  assert.equal(gate.blocked.code, 'GATE_SYNC_NO_NEW_VERSION', 'B4：同步未产生新产物版本必须拒绝放行')
+  assert.equal(gate.blocked.message.includes('不得报告 rerun_completed'), true)
+  assert.equal(gate.decision, 'blocked')
+  assert.notEqual(gate.proofs_state, 'rerun_completed', '不得谎报 rerun_completed')
+  assert.equal(engineCalls, 1, '同步证据未落库不进入重跑')
+  const logical = readLogical(fs, 'task-1')
+  assert.equal(logical.lifecycle.state, 'BLOCKED')
+  const ws = getRunWorkspace(realWs.registry, 'task-1')
+  const key = integrationResourceKey({ repository: ws.repository, target_ref: 'main' })
+  assert.equal(activeLockFor(realWs.registry, key), undefined, '锁不悬挂')
+})
+
+test('W7 重跑段非人工等待收束（B8 不放行面）：闸门不放行，按段终态收束', async () => {
+  const repo = initRepo()
+  const recordsHostDir = mkdtempSync(join(tmpdir(), 'vwf-gate-records-'))
+  after(() => { try { rmSync(recordsHostDir, { recursive: true, force: true }) } catch { /* ignore */ } })
+  const realWs = makeRealWsHost({ repo })
+  const { tool, fs } = env({
+    wsHost: realWs, recordsHostDir,
+    value: (n) => {
+      if (n === 1) {
+        const ws = getRunWorkspace(realWs.registry, 'task-1')
+        commitInWorktree(ws, 'feat.txt', 'work\n', 'branch work')
+        commitFile(repo, 'main.txt', 'main advance\n', 'advance main')
+        return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-1', decision_package: hdPackage('hd-1'), results: { impl: { verdict: 'READY' }, review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: ws.base_commit }, test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: ws.base_commit }, uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
+      }
+      // 重跑段以非人工等待终态收束（额度耗尽形态）——闸门不得放行
+      return { status: 'FAILED_MAX_ROUNDS', stage: 'review', round: 3, results: { impl: { verdict: 'READY' }, review: { verdict: 'RETURN_DEV', verified_branch: 'vwf/run/task-1', verified_head: 'post-sync' } }, history: [{ round: 2, stage: 'review', verdict: 'RETURN_DEV' }] }
+    },
+  })
+  const out = JSON.parse(await tool.execute({ templateId: 'gate-spec', taskId: 'task-1' }))
+  await drain()
+  const gate = out.integration_gate
+  assert.equal(gate.decision, null, '重跑未通过不放行')
+  assert.notEqual(gate.decision, 'pass')
+  assert.equal(gate.reruns.filter((r) => r.run_id).length, 1)
+  assert.equal(gate.rerun_terminal, 'FAILED_MAX_ROUNDS', '按重跑段终态收束（B8：不进人工验收）')
+  assert.equal(out.value.status, 'FAILED_MAX_ROUNDS', '返回重跑段现场（回开发/失败由既有语义承接）')
+  const logical = readLogical(fs, 'task-1')
+  assert.equal(logical.lifecycle.state, 'FAILED')
+  const ws = getRunWorkspace(realWs.registry, 'task-1')
+  const key = integrationResourceKey({ repository: ws.repository, target_ref: 'main' })
+  assert.equal(activeLockFor(realWs.registry, key), undefined, '锁已释放')
+  assert.equal(recordsList({ records_dir: recordsHostDir, logical_run_id: 'task-1' }).records.some((r) => r.record_id === integrationSyncRecordId('task-1')), true, '同步证据仍在（不放行≠回滚同步事实）')
 })
