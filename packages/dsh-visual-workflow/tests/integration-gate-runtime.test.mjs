@@ -546,3 +546,51 @@ test('W8 fail-open 封堵：闸门 BLOCKED 后人工决策续跑被拒，唯一�
   assert.equal(legacyOut.stopReason, 'completed', 'entry=uat 续跑放行（重过闸门）')
   assert.equal(legacyOut.integration_gate.decision, 'pass', '续跑段重新通过闸门')
 })
+
+test('W9 探针恢复不误伤：PROBE_FAILED 的 BLOCKED 不触发闸门拒绝（GATE_ 前缀收窄）', async () => {
+  const repo = initRepo()
+  const recordsHostDir = mkdtempSync(join(tmpdir(), 'vwf-gate-records-'))
+  after(() => { try { rmSync(recordsHostDir, { recursive: true, force: true }) } catch { /* ignore */ } })
+  const realWs = makeRealWsHost({ repo })
+  // BP 绑定 p1/m1（探针失败）；恢复用 model_overrides 切到 p2/m2（探针通过）
+  const bp = JSON.parse(JSON.stringify(BP))
+  const base = {
+    [REPO + '/scripts/validate-core.cjs']: readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8'),
+    [REPO + '/scripts/workspace-isolation-host.mjs']: WS_HOST_STUB,
+    [REPO + '/scripts/records-host.mjs']: RECORDS_HOST_SRC,
+    [USER_DIR + '/gate-spec.json']: JSON.stringify(bp, null, 2) + '\n',
+    [SKILL_ROOT + '/gate-spec/script.mjs']: '//MOCK-SCRIPT',
+  }
+  const fs = makeFs(base)
+  const llm = {
+    listProviders() { return [{ id: 'p1', name: 'p1' }, { id: 'p2', name: 'p2' }] },
+    async listModels(id) { return (id === 'p1' ? ['m1'] : ['m2']).map((m) => ({ id: m, name: m })) },
+    stream(opts) {
+      if (opts.provider === 'p1') {
+        return (async function* () { yield { type: 'finish', reason: { kind: 'error', failure: { message: 'probe fail', code: 'PROBE' } } } })()
+      }
+      return (async function* () { yield { type: 'text-delta', index: 0, text: 'ok' }; yield { type: 'finish', reason: { kind: 'stop' } } })()
+    },
+  }
+  let engineCalls = 0
+  const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost: realRecordsHost(recordsHostDir), wsHost: realWs.wsHost })
+  const { definedTools } = loadHost({
+    fs, subprocess: sub, sandboxPolicy, llm,
+    workflowEngine: { start() { engineCalls++; return { id: 'run-' + engineCalls, result: Promise.resolve({ stopReason: 'completed', value: { status: 'DONE', user_choice: 'USER_ACCEPTED', results: {}, history: [] }, agentsStarted: 0 }) } } },
+    agents: { requireInitiator: () => ({}) },
+  })
+  const tool = definedTools.find((t) => t.name === 'wf_run')
+  // ① 新启动：探针失败 → BLOCKED（PROBE_FAILED），逻辑运行非终态
+  const out1 = JSON.parse(await tool.execute({ templateId: 'gate-spec', taskId: 'task-1' }))
+  assert.equal(out1.blocked, true)
+  assert.equal(out1.stage, 'preflight_probe')
+  // ② HD 续跑形态 + model_overrides：不得被闸门拒绝分支误伤（PROBE_FAILED ≠ GATE_*），
+  //    应走既有恢复：新 Snapshot Revision → 重探通过 → 引擎启动
+  const out2 = await tool.execute({ templateId: 'gate-spec', taskId: 'task-1', decision_id: 'hd-x', user_choice: 'USER_ACCEPTED', model_overrides: { $default: { provider: 'p2', model: 'm2' } } })
+  assert.equal(out2.includes('集成闸门拦截'), false, '探针 BLOCKED 不得触发闸门拒绝')
+  const out2j = JSON.parse(out2)
+  assert.equal(out2j.value.status, 'DONE', '探针恢复后原地续跑完成')
+  const logical = readLogical(fs, 'task-1')
+  assert.equal(logical.lifecycle.state, 'COMPLETED')
+  assert.equal(logical.snapshots.length, 2, '恢复产生新 Snapshot Revision')
+})

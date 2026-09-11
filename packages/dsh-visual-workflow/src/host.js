@@ -2504,10 +2504,14 @@ return {
             return '错误：任务 ' + logicalTaskId + ' 的逻辑运行 ' + latest.logical_run_id + ' 已终态（' + latest.lifecycle.state + '），同一运行不能继续。请直接重新发起（将派生新运行并保留来源关系）。'
           }
           // LOC-017 fail-open 封堵：闸门拦截（BLOCKED）后人工决策续跑会从 $human-decision
-          // 直接走到收口（DONE 不再触发闸门），以旧 Proof 背书已前进目标——一律拒绝，
-          // 唯一恢复路径 = entry=uat 重过闸门（B10 恢复语义）。
-          if (latest && !latest.terminal && isHdResume && latest.lifecycle.state === 'BLOCKED') {
-            return '错误：逻辑运行 ' + latest.logical_run_id + ' 被集成闸门拦截（' + ((latest.lifecycle.reason && latest.lifecycle.reason.code) || 'BLOCKED') + '）：人工决策续跑不可用，否则将绕过闸门放行。请从 uat 节点续跑同一逻辑运行（wf_run entry=uat），重新通过集成闸门后再进入人工验收。'
+          // 直接走到收口（DONE 不再触发闸门），以旧 Proof 背书已前进目标——闸门拦截
+          // 一律拒绝，唯一恢复路径 = entry=uat 重过闸门（B10 恢复语义）。
+          // 只认 GATE_ 前缀错误码：探针失败（PROBE_FAILED）的 BLOCKED 走既有
+          // model_overrides 原地恢复路径，不得误伤。
+          if (latest && !latest.terminal && isHdResume && latest.lifecycle.state === 'BLOCKED'
+              && latest.lifecycle.reason && typeof latest.lifecycle.reason.code === 'string'
+              && latest.lifecycle.reason.code.indexOf('GATE_') === 0) {
+            return '错误：逻辑运行 ' + latest.logical_run_id + ' 被集成闸门拦截（' + latest.lifecycle.reason.code + '）：人工决策续跑不可用，否则将绕过闸门放行。请从 uat 节点续跑同一逻辑运行（wf_run entry=uat），重新通过集成闸门后再进入人工验收。'
           }
           logicalTrigger = isHdResume ? 'human_decision' : (isPauseResume ? 'pause_resume' : 'legacy_resume')
           // #80 暂停恢复：检查点现场 + 适用 Guidance（Run 级）+ 最新基线修订回填执行载荷
