@@ -7,6 +7,10 @@ import path from 'node:path'
 import { compileBlueprint } from '../generate.mjs'
 import { runGeneratedScript, makeAgentScript } from './helpers/runtime-harness.mjs'
 import { readWorkerFile, writeWorkerFile } from '../workspace-isolation.mjs'
+import {
+  createStore, appendRecord, toRef, dependsOnStaleInputs, coverageStatus, staleProofsFor,
+  COVERING, NOT_COVERING_CURRENT, KIND, MEDIA,
+} from '../formal-records.mjs'
 import validatorCore from '../validate-core.cjs'
 
 const { validateBlueprint } = validatorCore
@@ -266,4 +270,109 @@ test('LOC-013 内核级隔离反例：readWorkerFile 拒绝 ../ 逃逸到兄弟 
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }
+})
+
+test('LOC-013 E2：worker 提示不下发 Run 级 capability（RPC 面无凭据可冒用）', async () => {
+  const { result, agentCalls } = await runEngine(exploreBp, {
+    探索统筹: plan(3),
+    '/^专家研究 #/': (label) => researchItem(Number(label.slice(-1))),
+    综合分析: synthesis,
+    结论评估: evalVerdict('PASS', { completion_type: 'EVALUATION_PASSED' }),
+  }, {
+    taskId: 'explore-cap',
+    workspace_path: '/ws/explore-cap',
+    source_path: '/ws/explore-cap/source',
+    workspace_mode: 'ISOLATED_READ',
+    workspace_capability: 'cap-run-level-secret',
+  })
+  assert.equal(result.status, 'DONE')
+  for (const c of agentCalls.filter((x) => /^专家研究 #/.test(x.label))) {
+    assert.ok(!c.prompt.includes('cap-run-level-secret'), c.label + ' 的 prompt 不得携带 Run 级 capability')
+    assert.ok(!c.prompt.includes('workspace RPC 能力令牌'), c.label + ' 的 prompt 不得出现 capability 指引')
+  }
+  // 非 fanout 节点（统筹/综合/评估）保留 capability 行（本模板虽不消费，其他工作流节点可能需要）
+  const orch = agentCalls.find((c) => c.label === '探索统筹')
+  assert.ok(orch.prompt.includes('cap-run-level-secret'), '非 fanout 节点的 capability 行不应受影响')
+})
+
+test('LOC-013 E4：fanout 部分失败不伪装业务结果，默认 failOn=all 继续聚合', async () => {
+  const { result } = await runEngine(exploreBp, {
+    探索统筹: plan(3),
+    '/^专家研究 #/': (label) => label === '专家研究 #2' ? { bad: 'schema 不合规' } : researchItem(Number(label.slice(-1))),
+    综合分析: synthesis,
+    结论评估: evalVerdict('PASS', { completion_type: 'EVALUATION_PASSED' }),
+  })
+  assert.equal(result.status, 'DONE')
+  const agg = result.results.research
+  assert.equal(agg.total, 3)
+  assert.equal(agg.okCount, 2)
+  assert.equal(agg.failedCount, 1)
+  assert.equal(agg.items[1], null)
+  // 失败项为 null，不进入 results 伪装成业务 verdict；下游照常评估
+  assert.equal(result.results.evaluate.verdict, 'PASS')
+})
+
+test('LOC-013 E4：fanout 全部失败走 failure 边，FAILED_AT_research 而非业务路由', async () => {
+  const { result, agentCalls } = await runEngine(exploreBp, {
+    探索统筹: plan(2),
+    '/^专家研究 #/': { bad: '全部不合规' },
+    综合分析: synthesis,
+    结论评估: evalVerdict('PASS', { completion_type: 'EVALUATION_PASSED' }),
+  })
+  assert.equal(result.status, 'FAILED_AT_research')
+  // 技术聚合失败不得触发综合/评估，也不得伪装成 NEEDS_RESEARCH
+  assert.ok(!agentCalls.some((c) => c.label === '综合分析'))
+  assert.ok(!agentCalls.some((c) => c.label === '结论评估'))
+  assert.equal(result.results.evaluate, undefined)
+  assert.equal(result.results.research.failedCount, 2)
+})
+
+test('LOC-013 B7 targeted 重算：新证据只让依赖它的 Synthesis/Evaluation 标 stale（真实 #78 通道）', () => {
+  const store = createStore()
+  const prov = (node, attempt = 1) => ({
+    logical_run_id: 'loc-013-r1', node, attempt,
+    snapshot_revision: 'snap-1', provider: 'deepseek-official', model: 'deepseek-v4-flash',
+    produced_by: 'loc013-test', node_business_outcome: null,
+  })
+  const jsonBody = (value) => ({ media_type: MEDIA.JSON, value })
+  // 第一轮 BROAD：三位专家证据 + 依赖证据集合的 Synthesis / Evaluation
+  const a1 = appendRecord(store, { record_id: 'expert-a', kind: KIND.RESULT, body: jsonBody({ expert: 'a', round: 1 }), provenance: prov('research') })
+  const b1 = appendRecord(store, { record_id: 'expert-b', kind: KIND.RESULT, body: jsonBody({ expert: 'b', round: 1 }), provenance: prov('research') })
+  const c1 = appendRecord(store, { record_id: 'expert-c', kind: KIND.RESULT, body: jsonBody({ expert: 'c', round: 1 }), provenance: prov('research') })
+  const synth1 = appendRecord(store, {
+    record_id: 'synthesis', kind: KIND.RESULT, body: jsonBody({ round: 1 }),
+    dependencies: [toRef(a1), toRef(b1), toRef(c1)], provenance: prov('synthesize'),
+  })
+  const eval1 = appendRecord(store, {
+    record_id: 'evaluation', kind: KIND.PROOF_DECISION, body: jsonBody({ verdict: 'NEEDS_RESEARCH' }),
+    dependencies: [toRef(synth1)], provenance: prov('evaluate'),
+  })
+  assert.equal(dependsOnStaleInputs(store, synth1), false)
+  assert.equal(dependsOnStaleInputs(store, eval1), false)
+
+  // TARGETED 轮：只补 expert-a（新证据 Revision）
+  const a2 = appendRecord(store, { record_id: 'expert-a', kind: KIND.RESULT, body: jsonBody({ expert: 'a', round: 2 }), provenance: prov('research', 2) })
+  assert.equal(a2.record_revision, 2)
+
+  // 依赖旧证据集合的 Synthesis 标 stale；兄弟专家结果不失效、不前进
+  assert.equal(dependsOnStaleInputs(store, synth1), true)
+  assert.equal(coverageStatus(store, synth1, 'expert-a').status, NOT_COVERING_CURRENT)
+  assert.equal(coverageStatus(store, synth1, 'expert-b').status, COVERING)
+  assert.deepEqual(staleProofsFor(store, 'expert-b'), [])
+
+  // 重算 Synthesis（依赖 a2 的新 Revision）后，依赖旧 Synthesis 的 Evaluation 才标 stale
+  const synth2 = appendRecord(store, {
+    record_id: 'synthesis', kind: KIND.RESULT, body: jsonBody({ round: 2 }),
+    dependencies: [toRef(a2), toRef(b1), toRef(c1)], provenance: prov('synthesize', 2),
+  })
+  assert.equal(dependsOnStaleInputs(store, eval1), true)
+  assert.equal(coverageStatus(store, eval1, 'synthesis').status, NOT_COVERING_CURRENT)
+
+  // 重算 Evaluation 覆盖当前 Revision；旧 Proof 保留为历史（不删不改写）
+  const eval2 = appendRecord(store, {
+    record_id: 'evaluation', kind: KIND.PROOF_DECISION, body: jsonBody({ verdict: 'PASS' }),
+    dependencies: [toRef(synth2)], provenance: prov('evaluate', 2),
+  })
+  assert.equal(coverageStatus(store, eval2, 'synthesis').status, COVERING)
+  assert.equal(dependsOnStaleInputs(store, eval2), false)
 })
