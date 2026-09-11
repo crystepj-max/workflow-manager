@@ -11,12 +11,12 @@
 | 任务类型 | 完整功能开发 |
 | 优先级 | P1 |
 | 当前状态 | 本地已定义 |
-| 需求基线版本 | V1 |
+| 需求基线版本 | V2 |
 | 前置依赖 | 无本地卡依赖；#80（外部）落地形态为本卡输入 |
 | 施工环境组 | LOC-015 |
 | 施工环境角色 | 独立 |
 | 无人值守许可 | 允许 |
-| 任务规格位置 | 本卡三要素即基线；实施前如需细化，按 Vn→Vn+1 流程升版 |
+| 任务规格位置 | `docs/tasks/specs/LOC-015-skill-invocation-runtime/task-spec-V2.md`（详细规格）；本卡「三要素速览」为同源摘要 |
 | 定义时间 | 2026-09-11 |
 | GitHub 同步 | 待补 issue |
 
@@ -24,26 +24,34 @@
 
 ### 任务目标
 
-消除调用入口双轨：当前 `wf_run`（插件工具）路径已完整接入 Logical Run Runtime，但主会话拿编译脚本直起平台 `workflow` 工具的 Skill 路径绕过 wf_run 边界，只产生"退化"逻辑运行摘要（单段、completion=null、人工决策记录只回到主会话文本、看板不可续跑）。目标：Skill / Chat 发起的运行与插件入口共享同一 Runtime（规格 §2.3：新入口只能是 Invocation Adapter，禁止第二套运行体系）。
+消除调用入口双轨：让 DSH 内由 Skill / Chat 发起的工作流运行，与插件入口共享同一 Logical Run Runtime（规格 §2.3：新入口只能是 Invocation Adapter，禁止第二套运行体系）。落点是**口径统一**——能力已在插件侧（`wf_run` 已完整接入 Runtime），缺口是两条 runbook 与 Current 侧文档都还指引走 DSH 内置 `workflow` 工具，导致插件旁观、记录残缺。
 
 ### 涉及范围
 
-- 做：首选方案 = 生成 SKILL.md runbook 引导主会话改经 `wf_run` 运行（模板产物四件套调整 + runbook 驱动说明）；备选/补充 = 最小"结果回灌"通道（脚本终态回写插件，使退化摘要升级为完整记录）；平台 `workflow` 工具直起的 run 至少补全 completion 与 HD 可续跑路径。方案取舍在实施 Definition Check 时按 #80 落地形态定，走 V1 基线内决策记录。
-- 不做：新建第二套 Runtime；改变 `wf_run` 既有语义；非 DSH 执行器接入（那是 v0.4 边界）。
+- 做：① `scripts/generate.mjs` `skillWrap`（模板产物 SKILL.md）执行与续跑步骤改为首选 `wf_run`；② `dsh/skill/SKILL.md` 第 3、5 步同口径改造；③ 两份 runbook 写入回退规则——`wf_run` 不可用时才用内置 `workflow` 工具执行编译脚本，且必须显式提示「记录将退化」；④ args 装配保留 `resource_kind` 说明（optimize 类模板需要）；⑤ Current 侧口径修正：`CONTEXT.md`（D5 执行路径段）、`dsh/README.md`（wf_run 增强路径节）、`packages/dsh-visual-workflow/README.md` 对应段落，并修正「编辑器点『获取脚本』」这一界面已不存在的入口表述；⑥ 真实验证：DSH 内 Skill 触发一次模板运行，确认走 `wf_run`、记录完整。
+- 不做：新建第二套 Runtime；改 `wf_run` 语义与数据契约；新增插件工具面（备选「结果回灌通道」不采纳）；为内置 `workflow` 工具直起的运行补全记录；客户端 UI（LOC-016）；产品规格（Target 文档）正文；非 DSH 执行器接入（v0.4 边界）。
 
 ### 验收标准
 
-- [ ] Skill 发起的一次任务跨多段执行（人工决策/恢复）仍是一个 Logical Run，看板可见完整分段与摘要
+- [ ] 真实验证：DSH 内由 Skill 触发一次模板运行，实际调用 `wf_run`（记录 `task_id` 非空、`trigger=start`），看板显示为同一次运行而非退化单段记录
+- [ ] Skill 发起的一次任务跨多段执行（人工决策/恢复）仍是一个 Logical Run，看板可见完整分段与摘要（判定基准：现有运行看板）
 - [ ] Skill 路径的人工决策可按 `decision_id + user_choice` 续跑，Decision/Control Record 落档
 - [ ] `DONE` 的完成类型（completion）不再为 null
-- [ ] 既有 `wf_run` 路径回归不变（`runtime-logical-run` / `human-decision-e2e` 不改断言全绿）；`npm test`、`npm run validate` 全绿
+- [ ] 回退不静默：走内置 `workflow` 工具时，会话输出含明确的「记录将退化」提示
+- [ ] 既有 `wf_run` 路径回归不变（`runtime-logical-run` / `human-decision-e2e` 不改断言全绿）；`npm test`、`npm run validate` 全绿；`npm run generate` 后无差异
 
 ## 详细规格
 
-产品语义：`docs/design/workflow-manager-v0.1-final-product-spec.md` §2.3 / §11（Invocation 与 Runtime 分离；Chat/Skill/插件入口共享同一 Runtime）；现状事实：`CONTEXT.md`「执行路径（D5 正式化）」与「回灌（未实现）」；退化摘要逻辑见 `host.js` `recordDegenerateLogicalRun`。
+产品语义：`docs/design/workflow-manager-v0.1-final-product-spec.md` §2.3 / §11（Invocation 与 Runtime 分离；Chat/Skill/插件入口共享同一 Runtime）、§12 Phase C `#83`。现状事实：`CONTEXT.md`「执行路径（D5 正式化）」与「回灌（未实现）」；退化摘要逻辑见 `host.js:1207` `recordDegenerateLogicalRun`（触发点 `host.js:1416`）；`wf_run` 注册与 Logical Run 归属见 `host.js:2160`、`host.js:2255+`；`wf_control` 控制面见 `host.js:2584`。回退约束见 `host.js:2155` / `host.js:2241`。
+
+需求分析与 Definition Check：`docs/tasks/specs/LOC-015-skill-invocation-runtime/{requirements-analysis.md,definition-check.md}`。
 
 ## 变更记录
 
 | 时间 | 状态 | 说明 |
 |---|---|---|
 | 2026-09-11 | 本地已定义 | 基线 V1 经用户会话指令确认（开发计划表 v2 落卡） |
+| 2026-09-11 | 定义中（待决策） | 需求分析发现未决产品事项 1 项：Skill 入口接入机制未定，与「无人值守许可 = 允许」互斥；Definition Check 未通过（9.3 / 9.6）。 |
+| 2026-09-11 | 定义中（待决策，前提待定） | 用户澄清：近几天真实工作在 ZCode 侧（需求分析 skill + 配套单任务工作流，SKILL.md 文本控流程），DSH 内近期模板运行均为 #79/#80 UAT 测试数据；据此作废「实际运行已走 `wf_run`」的推断。本卡问题面（Skill 路径产生退化记录）仅在 DSH 内成立。 |
+| 2026-09-11 | 待确认（基线 V2） | 用户确认「DSH 的 skill 入口后面会调用」→ 决策落地：发起权归插件（方案 A），备选回灌方案（B）不采纳，内置 `workflow` 工具降为应急回退；范围收缩为「口径统一 + 真实验证」。规格升 V2，Definition Check 全部通过、未决产品事项 0，呈递基线确认。 |
+| 2026-09-11 | 本地已定义 | 基线 V2 经用户会话确认（「确认」）；版本一致：任务卡 = 规格 = V2。可开工（无人值守许可 允许）；施工第一步为真实验证（DSH 内 Skill 触发一次运行，确认走 `wf_run`），不通过则停下呈报。 |
