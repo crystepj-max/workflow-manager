@@ -157,12 +157,12 @@
       "worktree": null,
       "runs": [],
       "merge": {
-        "commit": "PENDING",
-        "merged_at": "2026-09-11T03:44:46.489Z"
+        "commit": "03e8b4dcc6079a6addcd0c0ed1bc9fa35edd9bf8",
+        "merged_at": "2026-09-11T03:44:46.532Z"
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.644Z",
-      "updated_at": "2026-09-11T03:44:46.490Z"
+      "updated_at": "2026-09-11T03:44:46.541Z"
     },
     {
       "task_id": "LOC-009",
