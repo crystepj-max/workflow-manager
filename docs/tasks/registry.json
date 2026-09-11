@@ -88,7 +88,7 @@
       "source": "会话录入",
       "source_ref": "架构评审候选",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "已合并",
       "priority": null,
       "env_group": null,
       "env_role": null,
@@ -99,7 +99,7 @@
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-09T15:51:49.673Z",
-      "updated_at": "2026-09-09T15:56:46.528Z"
+      "updated_at": "2026-09-11T05:02:19.134Z"
     },
     {
       "task_id": "LOC-006",
@@ -254,20 +254,20 @@
       "source": "会话录入",
       "source_ref": "2026-09-11 开发计划表 v2（W2，#82 探索）",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "等待验收",
       "priority": null,
       "env_group": null,
       "env_role": null,
       "deps": [
         "LOC-008"
       ],
-      "branch": null,
+      "branch": "dev-loc-013-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.905Z",
-      "updated_at": "2026-09-10T16:32:54.397Z"
+      "updated_at": "2026-09-11T09:25:53.703Z"
     },
     {
       "task_id": "LOC-014",
@@ -297,7 +297,7 @@
       "slug": "skill-logical-run-runtime",
       "source": "会话录入",
       "source_ref": "2026-09-11 开发计划表 v2（W4，#83，输入=#80 落地形态）",
-      "baseline": "V1",
+      "baseline": "V2",
       "status": "本地已定义",
       "priority": null,
       "env_group": null,
@@ -309,7 +309,7 @@
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.001Z",
-      "updated_at": "2026-09-10T16:32:54.487Z"
+      "updated_at": "2026-09-11T11:48:51.778Z"
     },
     {
       "task_id": "LOC-016",
