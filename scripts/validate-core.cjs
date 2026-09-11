@@ -906,6 +906,9 @@ module.exports = {
   validateStructure,
   validateBlueprint,
   deriveEntryCandidates,
+  // LOC-005 parity 门禁：补导出图语义判定，供 client 副本对拍（行为不变，仅导出）。
+  isStructuralEdge,
+  isRollbackEdge,
   projectToVwf,
   projectToBlueprint,
   extractFileTokens,

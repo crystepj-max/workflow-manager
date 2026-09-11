@@ -59,6 +59,12 @@ return {
   routingValuesOf: routingValuesOf,
   applyRoutingWrite: applyRoutingWrite,
   routingEdgeStatus: routingEdgeStatus,
+  // 校验内核副本的最小导出（LOC-005 parity 门禁）：纯函数、零运行时行为变更，
+  // 仅暴露给 tests/graph-semantics-parity 与内核权威侧同输入对拍。
+  isStructuralEdge: isStructuralEdge,
+  isRollbackEdge: isRollbackEdge,
+  deriveEntryCandidates: deriveEntryCandidates,
+  ingestEditorJson: ingestEditorJson,
   apply(ctx) {
     const slots = ctx.get('slots')
     if (slots === undefined) return
@@ -266,52 +272,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     function clone(x) { return JSON.parse(JSON.stringify(x)) }
 
-    // 编辑器 JSON tab 同时接受蓝图落盘格式（displayName / bindings.models）与 DSL。
-    // 投影规则必须与 scripts/validate-core.cjs 的 projectToVwf 对齐——勿在此分叉。
-    function ingestEditorJson(raw) {
-      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return raw
-      const models = (raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object')
-        ? raw.bindings.models : {}
-      const hasBindings = Object.keys(models).length > 0
-      if (typeof raw.displayName !== 'string' && !hasBindings) return raw
-      const displayName = typeof raw.displayName === 'string' ? raw.displayName : (raw.name || raw.id || '')
-      const nodes = raw.nodes.map((n) => {
-        if (!n || typeof n !== 'object') return n
-        if (n.model || !models[n.id]) return n
-        return { ...n, model: models[n.id] }
-      })
-      const next = {
-        id: raw.id,
-        name: displayName,
-        description: raw.description || '',
-        entry: raw.entry,
-        control: raw.control || { maxRounds: 9 },
-        nodes,
-        edges: raw.edges.map((e) => e),
-      }
-      if (raw.onMaxRounds !== undefined) next.onMaxRounds = raw.onMaxRounds
-      if (raw.heteroCheck) next.heteroCheck = true
-      if (raw.bundleRoles) next.bundleRoles = true
-      if (raw.humanDecision !== undefined) next.humanDecision = raw.humanDecision
-      return next
-    }
-
     // ── 拓扑与布局（对应 workflowGraph.ts 的 successTopologyOrder /
     //    deriveEntryCandidateIds / computeBackwardLanes / layoutSuccessPath）──
     // 两级序号：主序号 = 前向最长路列（横轴 0…n）；同列多节点 = m.1…m.k（纵轴）。
     // `$human-decision` 为透明跳板：A→HD→B 在排版上等价于前向边 A→B（回退旁路除外）。
-    function hasOutcomeField(e) {
-      return !!(e && e.outcome !== undefined && e.outcome !== null && e.outcome !== '')
-    }
-    function isStructuralEdge(e) {
-      return !!(e && (e.on === 'success' || hasOutcomeField(e)))
-    }
-    // 与校验内核同构：countRound 声明 / 自环 = 回退边，不参与入口入边与主链分层。
-    function isRollbackEdge(e) {
-      if (!isStructuralEdge(e)) return false
-      if (e.from === e.to) return true
-      return e.countRound !== undefined
-    }
     // 基图邻接（不含 HD）：用于判断 HD 出边是否回指上游（如验收退回→开发）。
     function buildBaseForwardAdj(dsl, idSet) {
       const adj = new Map()
@@ -405,18 +369,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const s = order.get(from)
       const tt = order.get(to)
       return s !== undefined && tt !== undefined && tt < s
-    }
-
-    function deriveEntryCandidates(dsl) {
-      const ids = new Set((dsl.nodes || []).map(n => n && n.id).filter(Boolean))
-      const incoming = new Set()
-      ;(dsl.edges || []).forEach(e => {
-        if (!isStructuralEdge(e) || isRollbackEdge(e)) return
-        if (!e.to || e.to === END_NODE || e.to === HUMAN_DECISION_ID || !ids.has(e.to)) return
-        if (!(ids.has(e.from) || e.from === HUMAN_DECISION_ID)) return
-        incoming.add(e.to)
-      })
-      return (dsl.nodes || []).map(n => n && n.id).filter(id => Boolean(id) && !incoming.has(id))
     }
 
     function normalizeEntry(dsl) {
@@ -2994,6 +2946,65 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 // （防漂移门禁）。buildSchemaTemplate 一律经本函数取用，避免同一正则散落多处。
 function conditionRegex() {
   return /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
+}
+
+// ── 图语义副本（LOC-005 parity 门禁导出）：从 apply() 提升至闭包顶层 ─────────
+// 与校验内核 scripts/validate-core.cjs 同名函数同构；字面漂移由
+// tests/graph-semantics-parity.test.mjs 以内核权威侧同输入对拍锁定。
+// 提升到顶层的唯一原因是可测试性（顶层导出），函数体逐字未动，行为不变。
+function hasOutcomeField(e) {
+  return !!(e && e.outcome !== undefined && e.outcome !== null && e.outcome !== '')
+}
+function isStructuralEdge(e) {
+  return !!(e && (e.on === 'success' || hasOutcomeField(e)))
+}
+// 与校验内核同构：countRound 声明 / 自环 = 回退边，不参与入口入边与主链分层。
+function isRollbackEdge(e) {
+  if (!isStructuralEdge(e)) return false
+  if (e.from === e.to) return true
+  return e.countRound !== undefined
+}
+function deriveEntryCandidates(dsl) {
+  // END_NODE / HUMAN_DECISION_ID 字面量内联：与 apply() 内同名常量一致，
+  // 提升顶层后保持闭包「以 return{ 开头」形态，不引入 TDZ 引用。
+  const ids = new Set((dsl.nodes || []).map(n => n && n.id).filter(Boolean))
+  const incoming = new Set()
+  ;(dsl.edges || []).forEach(e => {
+    if (!isStructuralEdge(e) || isRollbackEdge(e)) return
+    if (!e.to || e.to === '$end' || e.to === '$human-decision' || !ids.has(e.to)) return
+    if (!(ids.has(e.from) || e.from === '$human-decision')) return
+    incoming.add(e.to)
+  })
+  return (dsl.nodes || []).map(n => n && n.id).filter(id => Boolean(id) && !incoming.has(id))
+}
+// 编辑器 JSON tab 同时接受蓝图落盘格式（displayName / bindings.models）与 DSL。
+// 投影规则必须与 scripts/validate-core.cjs 的 projectToVwf 对齐——勿在此分叉。
+function ingestEditorJson(raw) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return raw
+  const models = (raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object')
+    ? raw.bindings.models : {}
+  const hasBindings = Object.keys(models).length > 0
+  if (typeof raw.displayName !== 'string' && !hasBindings) return raw
+  const displayName = typeof raw.displayName === 'string' ? raw.displayName : (raw.name || raw.id || '')
+  const nodes = raw.nodes.map((n) => {
+    if (!n || typeof n !== 'object') return n
+    if (n.model || !models[n.id]) return n
+    return { ...n, model: models[n.id] }
+  })
+  const next = {
+    id: raw.id,
+    name: displayName,
+    description: raw.description || '',
+    entry: raw.entry,
+    control: raw.control || { maxRounds: 9 },
+    nodes,
+    edges: raw.edges.map((e) => e),
+  }
+  if (raw.onMaxRounds !== undefined) next.onMaxRounds = raw.onMaxRounds
+  if (raw.heteroCheck) next.heteroCheck = true
+  if (raw.bundleRoles) next.bundleRoles = true
+  if (raw.humanDecision !== undefined) next.humanDecision = raw.humanDecision
+  return next
 }
 
 // ── 基础 Schema 模板生成（独立纯函数，供 beautifySchema 空字段分支与单测复用）──
