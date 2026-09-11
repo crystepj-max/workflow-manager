@@ -50,10 +50,20 @@ export function makeFs(seed = {}) {
 // failPattern：argv 字符串匹配则模拟生成器失败（exit 1 + 蓝图校验错误）
 // fs：传入时模拟 rmSync 真实删除（remove/回滚/临时蓝图清理路径）
 // compileScript：generate.mjs compile 子命令的模拟输出（统一编译器管道）
-export function makeSubprocess({ failPattern = null, fs = null, compileScript = '//MOCK-SCRIPT' } = {}) {
+// recordsHost / wsHost：records-host.mjs / workspace-isolation-host.mjs 的进程边界
+// 替身——宿主侧接线测试可借此驱动真实包装脚本逻辑（仅伪造进程边界，不伪造内核）。
+export function makeSubprocess({ failPattern = null, fs = null, compileScript = '//MOCK-SCRIPT', recordsHost = null, wsHost = null } = {}) {
   const calls = []
   const specs = []
   const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
+  const hostCall = (fn, spec) => {
+    const cmd = spec.argv[spec.argv.length - 2]
+    let input = {}
+    try { input = JSON.parse(spec.argv[spec.argv.length - 1]) } catch (e) { /* 空输入 */ }
+    const out = fn(cmd, input, spec)
+    if (out === undefined) return { stdout: '', exitCode: 0 }
+    return { stdout: JSON.stringify(out), exitCode: (out && out.ok === false) ? 1 : 0 }
+  }
   const sub = {
     async resolveExecutable(command) { return '/usr/bin/node' },
     spawn(spec) {
@@ -71,6 +81,10 @@ export function makeSubprocess({ failPattern = null, fs = null, compileScript = 
         stdout = DSH_HOME
       } else if (argvStr.includes('generate.mjs') && argvStr.includes(' compile ')) {
         stdout = JSON.stringify({ ok: true, script: compileScript, meta: { name: 'mock', description: 'mock', phases: [] } })
+      } else if (argvStr.includes('records-host.mjs') && recordsHost) {
+        ;({ stdout, exitCode } = hostCall(recordsHost, spec))
+      } else if (argvStr.includes('workspace-isolation-host.mjs') && wsHost) {
+        ;({ stdout, exitCode } = hostCall(wsHost, spec))
       } else if (argvStr.includes('rmSync')) {
         if (fs) fs._files.delete(spec.argv[spec.argv.length - 1])
       } else if (failPattern && failPattern.test(argvStr)) {

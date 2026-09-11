@@ -71,6 +71,7 @@ return {
     const DIST = PLUGIN_ROOT ? PLUGIN_ROOT + '/dist' : null
     const GENERATOR = CODE_ROOT ? CODE_ROOT + '/scripts/generate.mjs' : null
     const WS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/workspace-isolation-host.mjs' : null
+    const RECORDS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/records-host.mjs' : null
 
     // 项目根：会话 cwd 只在模型发起的调用中存在（浏览器 RPC / 审批激活都没有），
     // 因此每次实时探测，记住最近一次有效值，最后兜底 sandboxPolicy.workspaceRoot。
@@ -158,6 +159,8 @@ return {
           runsDir: home + '/visual-workflow/runs',
           // 逻辑运行摘要目录（#79）：<logical_run_id>.json 一任务一文件
           logicalRunsDir: home + '/visual-workflow/logical-runs',
+          // Formal Records Store 目录（LOC-008）：与 logical-runs 同组织，一逻辑运行一文件
+          recordsDir: home + '/visual-workflow/records',
           skillRoot: home + '/skills',
           workspaces: home + '/workspaces',
         } : null))
@@ -661,6 +664,8 @@ return {
         baseline_applied_upto: 0,
         pause_state: null,     // { action: 'pause'|'interrupt', requested_at } 段取消后翻译为 PAUSED
         pause_resume: null,    // PAUSED 后的恢复现场（检查点重建）{ entry, results, history, round, feedback, budgetUsed, maxRounds, decisionSeq, degraded }
+        // Formal Records Store 互相引用（LOC-008）：提交成功后由宿主刷新（count + 时间）
+        formal_records: null,
         workspace: null,
       }
       // Rev 1 冻结：工作流定义 + 角色（编译产物内联角色正文与路由）+ Provider/Model
@@ -790,6 +795,15 @@ return {
       const node = ((dsl && dsl.nodes) || []).find((n) => n && n.id === nodeId) || null
       return (node && node.output && (node.output.outcomePath || node.output.completionPath)) || null
     }
+    // node_attempts 入档与 Formal Record 提交共用同一业务结果事实源。
+    function businessOutcomeOf(dsl, nodeId, r, controlEvent) {
+      const path = outcomePathOf(dsl, nodeId)
+      let outcome = path !== null ? readOutcomePath(r, path) : undefined
+      if (outcome === undefined && controlEvent && controlEvent.node_id === nodeId && controlEvent.triggering_node_outcome !== undefined) {
+        outcome = controlEvent.triggering_node_outcome
+      }
+      return outcome
+    }
     // 段内新完成节点（段末 results − 段首 results）→ node_attempts 记录当时实际
     // Snapshot Revision / Provider / Model（段内修订冻结，逐节点准确）+ 声明了业务
     // 结果路径的节点入 business_outcomes（与 Lifecycle 分别持久化）。
@@ -803,10 +817,7 @@ return {
         if (r == null || typeof r !== 'object') continue
         const eff = effectiveProviderModel(rec, nodeId)
         const path = outcomePathOf(dsl, nodeId)
-        let outcome = path !== null ? readOutcomePath(r, path) : undefined
-        if (outcome === undefined && controlEvent && controlEvent.node_id === nodeId && controlEvent.triggering_node_outcome !== undefined) {
-          outcome = controlEvent.triggering_node_outcome
-        }
+        const outcome = businessOutcomeOf(dsl, nodeId, r, controlEvent)
         const attempt = {
           node: String(nodeId),
           segment: segNo,
@@ -859,6 +870,7 @@ return {
         last_engine_error: rec.last_engine_error || null,
         pause_state: rec.pause_state || null,
         pause_resume: rec.pause_resume || null,
+        formal_records: rec.formal_records || null,
         workspace: rec.workspace || null,
       }
     }
@@ -894,6 +906,7 @@ return {
         last_engine_error: typeof data.last_engine_error === 'string' ? data.last_engine_error : null,
         pause_state: data.pause_state && typeof data.pause_state === 'object' ? data.pause_state : null,
         pause_resume: data.pause_resume && typeof data.pause_resume === 'object' ? data.pause_resume : null,
+        formal_records: data.formal_records && typeof data.formal_records === 'object' && !Array.isArray(data.formal_records) ? data.formal_records : null,
         workspace: data.workspace && typeof data.workspace === 'object' ? data.workspace : null,
       }
       logicalRuns.set(id, rec)
@@ -1215,6 +1228,8 @@ return {
         snapshots: [],
         node_attempts: [],
         business_outcomes: {},
+        // Formal Records Store 互相引用（LOC-008）：提交成功后由宿主刷新（count + 时间）
+        formal_records: null,
         workspace: null,
       }
       logicalRuns.set(id, rec)
@@ -1572,6 +1587,24 @@ return {
       if (!rec) return { found: false, record: null }
       return { found: true, record: logicalRunPayload(rec) }
     })
+    // LOC-008：Formal Records 单一提交/查询通道（commit 同时供 wf_run 收尾与
+    // 显式调用；list/get 按 logical_run_id 查询，重启后直读磁盘 Store）。
+    registerRpc('vwf.records.commit', async (a) => {
+      const id = String((a && a.logical_run_id) || '')
+      if (!id || !Array.isArray(a.entries) || !a.entries.length) return fail('缺少 logical_run_id / entries')
+      return recordsHostCall('commit', { logical_run_id: id, logical_run_ref: a.logical_run_ref, entries: a.entries })
+    })
+    registerRpc('vwf.records.list', async (a) => {
+      const id = String((a && a.logical_run_id) || '')
+      if (!id) return fail('缺少 logical_run_id')
+      return recordsHostCall('list', { logical_run_id: id })
+    })
+    registerRpc('vwf.records.get', async (a) => {
+      const id = String((a && a.logical_run_id) || '')
+      const recordId = String((a && a.record_id) || '')
+      if (!id || !recordId) return fail('缺少 logical_run_id / record_id')
+      return recordsHostCall('get', { logical_run_id: id, record_id: recordId })
+    })
     registerRpc('vwf.artifacts.ingest', async (a) => {
       const { runId, nodeId, artifacts } = a
       if (!runId || !nodeId || !Array.isArray(artifacts) || !artifacts.length) return fail('缺少 runId / nodeId / artifacts')
@@ -1579,18 +1612,36 @@ return {
       if (!rec) return fail('运行记录不存在：' + runId, '$.runId')
       let core
       try { core = await loadDist('formal-artifacts.cjs') } catch (e) { return fail('Formal Artifact 内核不可用：' + errMsg(e)) }
+      const provenance = {
+        logical_run_id: String(runId), node: String(nodeId), attempt: a.attempt || 1,
+        snapshot_revision: a.snapshot_revision || 'unspecified', provider: a.provider || 'unknown', model: a.model || 'unknown',
+        produced_by: a.produced_by || 'vwf:artifacts.ingest', node_business_outcome: a.outcome !== undefined ? a.outcome : null,
+      }
       try {
         rec.formalRecords = core.ingestArtifacts(rec.formalRecords, {
           runId: String(runId), nodeId: String(nodeId), artifacts: artifacts, outcome: a.outcome !== undefined ? a.outcome : null,
-          provenance: {
-            logical_run_id: String(runId), node: String(nodeId), attempt: a.attempt || 1,
-            snapshot_revision: a.snapshot_revision || 'unspecified', provider: a.provider || 'unknown', model: a.model || 'unknown',
-            produced_by: a.produced_by || 'vwf:artifacts.ingest', node_business_outcome: a.outcome !== undefined ? a.outcome : null,
-          },
+          provenance,
         })
-        persist(rec.id)
-        return { ok: true, formalRecords: rec.formalRecords, produced: artifacts.length, taskId: rec.taskId }
       } catch (e) { return fail(errMsg(e)) }
+      // LOC-008 升级：legacy formalRecords 字段保留兼容，同时经单一通道写入正式
+      // Store（artifact:<runId>:<node>:<path>，#69 record_id 约定不变）。提交失败
+      // 不回滚 legacy 行为（非阻断，与既有 ingest 语义一致）。
+      let storeCommitted = null
+      const lrId = logicalRunByEngineRun.get(String(runId)) || String(runId)
+      const store = await recordsHostCall('commit', {
+        logical_run_id: lrId,
+        entries: artifacts.map((art) => ({
+          type: 'artifact',
+          record_id: core.artifactRecordId(String(runId), String(nodeId), art.path),
+          provenance: { ...provenance, logical_run_id: lrId, node_business_outcome: a.outcome !== undefined ? a.outcome : null },
+          kind: art.kind,
+          body_value: art.content,
+        })),
+      })
+      if (store.ok) storeCommitted = { logical_run_id: lrId, committed: store.committed, record_count: store.record_count }
+      else if (!store.notFound) log('Formal Records 产物入库失败（legacy 记录不受影响）：' + store.error)
+      persist(rec.id)
+      return { ok: true, formalRecords: rec.formalRecords, produced: artifacts.length, taskId: rec.taskId, store_committed: storeCommitted }
     })
     // #80 运行控制面：pause / interrupt（RUNNING 专属）与 guidance（PAUSED 专属）。
     // 状态语义不混用：WAITING_HUMAN 归 Human Decision 流程、BLOCKED 归外部条件恢复。
@@ -1933,6 +1984,89 @@ return {
         }
         return result
       })
+    }
+
+    // ── Formal Records 运行时（LOC-008）：核心实现 = scripts/records-host.mjs，经包装脚本子进程调用 ──
+    // 与 workspace 同模式：内核 formal-records.mjs 是 ESM + fs（vm 沙箱无法求值），
+    // 只在真实 Node 子进程中加载；本侧只做事实采集与效果执行。每次调用独立进程、
+    // 权威状态在磁盘（<DSH Home>/visual-workflow/records/<logical_run_id>.json），
+    // 重启后按 logical_run_id 查询天然生效。
+    async function recordsHostCall(cmd, input, opts) {
+      if (!RECORDS_HOST || (await readTextIfExists(RECORDS_HOST)) === null) return { ok: false, notFound: true, error: 'records-host.mjs 未找到（LOC-008 运行时集成未部署）' }
+      const d = await homeDirs()
+      if (!d) return { ok: false, error: '无法解析 DSH Home：records 目录不可用' }
+      const payload = { ...input, records_dir: input.records_dir || d.recordsDir }
+      const r = await runNode([RECORDS_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 1024 * 1024 })
+      if (!r.ok) return { ok: false, error: 'records host 调用失败：' + r.detail }
+      try {
+        const parsed = JSON.parse(r.stdout)
+        return parsed.ok ? parsed : { ok: false, error: parsed.error || 'records host 业务错误' }
+      } catch (e) { return { ok: false, error: 'records host 输出不可解析：' + errMsg(e), raw: r.stdout } }
+    }
+    // 节点收尾产物 → commit 条目（单一提交通道的宿主侧采集）：
+    //  - 每个本段新完成节点 → node:<logical_run_id>:<nodeId> 的追加 Revision；
+    //  - verifyBranch 节点（审核/测试）强制加发 proof：<logical_run_id>:<nodeId> 的
+    //    proof_decision，body 绑定 verified_branch / verified_head / workspace；
+    //    依赖（覆盖的 Record Revision）由 Store 端在签发时刻按当时全部节点/产物
+    //    记录结链——之后目标 Revision 前进，旧 Proof 即 not_covering_current（stale）。
+    // verified_* 以节点结论为准（编译脚本 claimError 已强制校验其存在）。
+    function nodeRecordEntries(logicalRunId, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
+      const entries = []
+      for (const nodeId of newKeys) {
+        const res = results[nodeId]
+        if (res == null || typeof res !== 'object') continue
+        const node = ((dsl && dsl.nodes) || []).find((n) => n && n.id === nodeId) || null
+        const outcome = businessOutcomeOf(dsl, nodeId, res, controlEvent)
+        const provenance = {
+          logical_run_id: logicalRunId,
+          node: String(nodeId),
+          attempt: segNo,
+          snapshot_revision: snap ? String(snap.revision) : 'unspecified',
+          provider: String((snap && snap.provider_model && snap.provider_model[nodeId] && snap.provider_model[nodeId].provider) || 'default'),
+          model: String((snap && snap.provider_model && snap.provider_model[nodeId] && snap.provider_model[nodeId].model) || 'default'),
+          produced_by: 'vwf:runtime',
+          node_business_outcome: outcome === undefined ? null : outcome,
+        }
+        entries.push({
+          type: 'node_result',
+          record_id: 'node:' + logicalRunId + ':' + nodeId,
+          provenance,
+          body_value: res,
+        })
+        if (node && node.verifyBranch) {
+          entries.push({
+            type: 'proof',
+            record_id: 'proof:' + logicalRunId + ':' + nodeId,
+            provenance,
+            body_value: {
+              node: String(nodeId),
+              verified_branch: res.verified_branch === undefined ? null : res.verified_branch,
+              verified_head: res.verified_head === undefined ? null : res.verified_head,
+              workspace: ws ? { workspace_id: ws.workspace_id || null, source_path: ws.source_path || null, work_branch: ws.work_branch || null } : null,
+            },
+          })
+        }
+      }
+      return entries
+    }
+    // 提交并刷新摘要互相引用（非阻断：证据记录失败不推翻专业结果，与落盘失败同待遇）
+    async function commitNodeRecords(logicalRec, entries) {
+      const r = await recordsHostCall('commit', {
+        logical_run_id: logicalRec.logical_run_id,
+        logical_run_ref: {
+          state: logicalRec.lifecycle.state,
+          title: logicalRec.title,
+          template_id: logicalRec.template_id,
+          task_id: logicalRec.task_id,
+        },
+        entries,
+      })
+      if (r.ok) {
+        logicalRec.formal_records = { record_count: r.record_count, last_commit_at: Date.now() }
+        requestLogicalPersist(logicalRec.logical_run_id)
+      } else if (r.notFound) log('records-host.mjs 未部署：本轮节点产物未入 Formal Records Store')
+      else log('Formal Records 提交失败（不影响运行）：' + r.error)
+      return r
     }
 
     // ── 静态组合包：webServer 前缀路由（POST /dsh-visual-workflow/<method>，信封 {rpcId,method,payload}→{rpcId,result}）──
@@ -2366,6 +2500,16 @@ return {
               controlEvent(logicalRec, 'baseline_rebase', { revision: lastApplied.revision, entry: args.entry })
             }
           }
+          // LOC-008：节点收尾产物经 vwf.records.commit 单一通道入 Formal Records
+          // Store（非阻断）。段号与 recordNodeAttempts 同源；摘要互相引用随之刷新。
+          const resultsNow = value && typeof value.results === 'object' && value.results ? value.results : null
+          if (resultsNow) {
+            const newKeys = Object.keys(resultsNow).filter((k) => !beforeResultKeys.has(k))
+            if (newKeys.length) {
+              const entries = nodeRecordEntries(logicalRec.logical_run_id, v.sanitized, resultsNow, newKeys, logicalRec.segments.length, ws, activeSnapshot(logicalRec), value.control_event)
+              if (entries.length) await commitNodeRecords(logicalRec, entries)
+            }
+          }
           await refreshWorkspaceContext(logicalRec, wsIdentity)
           requestLogicalPersist(logicalRec.logical_run_id)
         }
@@ -2424,8 +2568,8 @@ return {
         refreshServices()
         const d = await homeDirs()
         return JSON.stringify({
-          pluginRoot: PLUGIN_ROOT, codeRoot: CODE_ROOT, dist: DIST, generator: GENERATOR, workspaceHost: WS_HOST,
-          projectRoot: projectRoot(), dshHome: await dshHome(), generatedRoots: generatedRoots(), userDir: d && d.userDir, skillRoot: d && d.skillRoot, runsDir: d && d.runsDir,
+          pluginRoot: PLUGIN_ROOT, codeRoot: CODE_ROOT, dist: DIST, generator: GENERATOR, workspaceHost: WS_HOST, recordsHost: RECORDS_HOST,
+          projectRoot: projectRoot(), dshHome: await dshHome(), generatedRoots: generatedRoots(), userDir: d && d.userDir, skillRoot: d && d.skillRoot, runsDir: d && d.runsDir, recordsDir: d && d.recordsDir,
           fsAvailable: fs !== undefined, subprocessAvailable: subprocess !== undefined, nodePath: await resolveNode(),
         }, null, 2)
       },

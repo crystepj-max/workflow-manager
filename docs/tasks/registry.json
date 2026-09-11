@@ -148,7 +148,7 @@
       "source": "会话录入",
       "source_ref": "2026-09-11 v0.1 规格差距分析会话：开发计划表 v2（W1）",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": null,
       "env_group": null,
       "env_role": null,
@@ -156,10 +156,13 @@
       "branch": "dev-loc-008-r1",
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "PENDING",
+        "merged_at": "2026-09-11T03:44:46.489Z"
+      },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.644Z",
-      "updated_at": "2026-09-11T03:39:40.178Z"
+      "updated_at": "2026-09-11T03:44:46.490Z"
     },
     {
       "task_id": "LOC-009",
