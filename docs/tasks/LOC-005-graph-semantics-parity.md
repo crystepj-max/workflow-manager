@@ -16,7 +16,7 @@
 | 施工环境组 | LOC-001 |
 | 施工环境角色 | 成员 |
 | 无人值守许可 | 允许 |
-| 任务规格位置 | `.scratch/worktrees/dev-projection-converge-01/.scratch/LOC-005-graph-semantics-parity/task-spec-V1.md` |
+| 任务规格位置 | `docs/tasks/specs/LOC-005-graph-semantics-parity/task-spec-V1.md` |
 | 定义时间 | 2026-09-09T16:05:00Z |
 | GitHub 同步 | pending |
 
