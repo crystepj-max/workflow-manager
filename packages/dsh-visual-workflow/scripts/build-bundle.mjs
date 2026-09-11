@@ -178,6 +178,8 @@ writeFileSync(
 
 writeFileSync(join(dist, '.src-stamp.json'), JSON.stringify(stamp, null, 2) + '\n')
 copyFileSync(formalArtifactsSrc, join(dist, 'formal-artifacts.cjs'))
+// 校验内核与其引用的投影内核必须同时随 dist 分发：validate-core 声明
+// require('./projection-core.cjs')，宿主加载器求值前按源码预解析同目录引用。
 copyFileSync(validateCoreSrc, join(dist, 'validate-core.cjs'))
 copyFileSync(projectionCoreSrc, join(dist, 'projection-core.cjs'))
 // 角色库内核 + 内置角色清单：静态安装的可信加载源（host.js 只从 pluginRoot/dist 加载）

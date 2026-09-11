@@ -23,11 +23,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { loadRegistry, update, writeBoard } from './local-task-registry.mjs'
+import { loadRegistry, update, writeBoard, STATUS_LOCAL_DEFINED, STATUS_WAITING_ACCEPTANCE, STATUS_MERGED } from './local-task-registry.mjs'
+import { field, parseSpecVersion, TASK_FIELDS } from './task-card-parse.mjs'
 
 export const MERGEABLE_DECISIONS = new Set(['accept', 'conditional_pass'])
-export const PRE_MERGE_STATUS = '等待验收'
-export const MERGED_STATUS = '已合并'
+export const PRE_MERGE_STATUS = STATUS_WAITING_ACCEPTANCE
+export const MERGED_STATUS = STATUS_MERGED
 
 function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
@@ -40,20 +41,9 @@ function worktreeStatus(cwd) {
   return git(['status', '--porcelain', '--', ...STATUS_PATHSPEC], cwd)
 }
 
-function field(md, name) {
-  const re = new RegExp(`\\|\\s*${name}\\s*\\|\\s*([^|]+)\\|`)
-  const m = md.match(re)
-  return m ? m[1].trim() : null
-}
-
 function specVersionOf(specPath) {
-  const md = fs.readFileSync(specPath, 'utf-8')
-  return (
-    field(md, '需求基线版本') ||
-    (md.match(/\*\*版本\*\*[：:]\s*(V\d+)/i) || [])[1] ||
-    (path.basename(specPath).match(/(V\d+)/i) || [])[1] ||
-    null
-  )
+  // 版本解析唯一实现 = task-card-parse（LOC-002）；此处只负责读文件。
+  return parseSpecVersion(fs.readFileSync(specPath, 'utf-8'), specPath)
 }
 
 export function buildCommitMessage({
@@ -129,7 +119,7 @@ export function checkMerge({ repo, taskId, branch, main = 'main', decision, work
   }
 
   if (card) {
-    const cardVersion = field(card, '需求基线版本')
+    const cardVersion = field(card, TASK_FIELDS.BASELINE)
     const base = record?.baseline
     if (base && cardVersion && cardVersion.toUpperCase() !== base.toUpperCase()) {
       failures.push(`版本不一致：任务卡=${cardVersion} 登记册=${base}`)

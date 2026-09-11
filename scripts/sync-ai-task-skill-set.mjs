@@ -40,7 +40,7 @@ function copyDir(src, dst) {
 
 // 安装态配套资产：技能脱离本仓库后仍需执行的脚本与文档
 const assetScripts = {
-  'requirements-analysis': ['local-task-registry.mjs'],
+  'requirements-analysis': ['local-task-registry.mjs', 'task-card-parse.mjs'],
   'construction-bootstrap': [
     ...fs.readdirSync(path.join(wmRoot, 'scripts')).filter(n => /^cwf-.*\.mjs$/.test(n)),
     'ai-task-preflight-check.mjs',
@@ -50,8 +50,9 @@ const assetScripts = {
     'formal-artifacts.cjs',
     'local-task-registry.mjs',
     'local-task-merge.mjs',
+    'task-card-parse.mjs',
   ],
-  'execution-plan': ['ai-task-execution-plan.mjs', 'ai-task-preflight-check.mjs', 'ai-task-scheduled-trigger.mjs'],
+  'execution-plan': ['ai-task-execution-plan.mjs', 'ai-task-preflight-check.mjs', 'ai-task-scheduled-trigger.mjs', 'task-card-parse.mjs'],
 }
 const assetDocs = {
   'construction-bootstrap': ['single-task-delivery-m2', 'public-task-contract', 'preflight-check', 'uat-card-template', 'task-workspace-env'],
