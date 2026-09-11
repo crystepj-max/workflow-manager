@@ -25,6 +25,8 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { field, TASK_FIELDS } from './task-card-parse.mjs'
+import { STATUS_WAITING_ACCEPTANCE, STATUS_EXECUTION_BLOCKED } from './local-task-registry.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
@@ -50,12 +52,6 @@ if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
 
 const PRI = { P0: 0, P1: 1, P2: 2 }
 
-function field(md, name) {
-  const re = new RegExp(`\\|\\s*${name}\\s*\\|\\s*([^|]+)\\|`)
-  const m = md.match(re)
-  return m ? m[1].trim() : null
-}
-
 function assess(candidate) {
   const issuePath = path.resolve(path.dirname(batchPath), candidate.issueBasics)
   const specPath = path.resolve(path.dirname(batchPath), candidate.taskSpec)
@@ -63,10 +59,10 @@ function assess(candidate) {
     encoding: 'utf8',
   })
   const issue = fs.existsSync(issuePath) ? fs.readFileSync(issuePath, 'utf8') : ''
-  const dep = field(issue, '前置依赖')
+  const dep = field(issue, TASK_FIELDS.DEPS)
   const excluded = {
     id: candidate.id,
-    name: field(issue, '任务名称') || candidate.id,
+    name: field(issue, TASK_FIELDS.NAME) || candidate.id,
     reason: null,
   }
   if (dep && dep !== '无') {
@@ -81,10 +77,10 @@ function assess(candidate) {
     ok: true,
     task: {
       id: candidate.id,
-      name: field(issue, '任务名称') || candidate.id,
-      priority: field(issue, '优先级') || 'P2',
-      baseline: field(issue, '需求基线版本') || 'V1',
-      definedAt: field(issue, '定义时间') || '1970-01-01T00:00:00Z',
+      name: field(issue, TASK_FIELDS.NAME) || candidate.id,
+      priority: field(issue, TASK_FIELDS.PRIORITY) || 'P2',
+      baseline: field(issue, TASK_FIELDS.BASELINE) || 'V1',
+      definedAt: field(issue, TASK_FIELDS.DEFINED_AT) || '1970-01-01T00:00:00Z',
       issueBasics: issuePath,
       taskSpec: specPath,
       uatHint: `Issue基本信息: ${issuePath}`,
@@ -177,10 +173,10 @@ const summaryLines = [
   `快照任务总数：${snapshot.length}`,
   `最大并发：${maxConcurrency}`,
   '',
-  '等待验收：',
+  `${STATUS_WAITING_ACCEPTANCE}：`,
   ...(state.waiting.length ? state.waiting.map((t) => `- ${t.id} ${t.name}（${t.uatHint}）`) : ['- （无）']),
   '',
-  '执行受阻：',
+  `${STATUS_EXECUTION_BLOCKED}：`,
   ...(state.blocked.length
     ? state.blocked.map((t) => `- ${t.id} ${t.name}｜节点=${t.blockedNode || '?'}｜原因=${t.reason || '?'}｜返工=${t.reworkCount ?? '?'}｜下一步=${t.nextStep || '人工查看'}`)
     : ['- （无）']),

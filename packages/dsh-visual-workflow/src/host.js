@@ -199,7 +199,8 @@ return {
 
     // ── 内核与资产加载：唯一来源 = 插件 dist/ ────────────────────────────────
     // 静态 bundle 可直接注入已加载模块（__VWF_KERNELS__，真 import，零 eval）；动态闭包
-    // 无 import，经 fs 读源码求值。缺失即明确报错，不降级、不去别处找。
+    // 无 import，经 fs 读源码求值。.cjs 内核可 require('./name.cjs') 引用同目录内核，
+    // 求值前由本函数按源码预解析（见下）。缺失即明确报错，不降级、不去别处找。
     const assetCache = new Map()
     function loadDist(file) {
       if (!assetCache.has(file)) {
@@ -210,8 +211,19 @@ return {
           if (fs === undefined) throw new Error('宿主文件能力不可用')
           const src = await fs.readText(await fs.resolve(DIST + '/' + file))
           if (/\.cjs$/.test(file)) {
+            // 内核可声明 `require('./name.cjs')` 引用同目录内核（validate-core →
+            // projection-core）：求值前按源码预解析这些引用，求值时同步供给；其余引用拒绝。
+            const declared = new Map()
+            for (const m of src.matchAll(/require\((['"])\.\/([\w.-]+\.cjs)\1\)/g)) {
+              declared.set(m[2], await loadDist(m[2]))
+            }
             const module = { exports: {} }
-            new Function('module', 'exports', src)(module, module.exports)
+            const requireKernel = (id) => {
+              const key = String(id).replace(/^\.\//, '')
+              if (declared.has(key)) return declared.get(key)
+              throw new Error('内核只允许预先声明的 ./name.cjs 引用：' + id)
+            }
+            new Function('module', 'exports', 'require', src)(module, module.exports, requireKernel)
             return module.exports
           }
           return /\.json$/.test(file) ? JSON.parse(src) : src

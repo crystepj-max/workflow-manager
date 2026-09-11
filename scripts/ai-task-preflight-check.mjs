@@ -9,8 +9,10 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { field, parseSpecVersion, TASK_FIELDS } from './task-card-parse.mjs'
+import { STATUS_LOCAL_DEFINED } from './local-task-registry.mjs'
 
-export const DEFINED_STATUSES = new Set(['已定义', '本地已定义'])
+export const DEFINED_STATUSES = new Set(['已定义', STATUS_LOCAL_DEFINED])
 export const GITHUB_SYNC_VALUES = /^(not-applicable|pending|synced\s*#?\d+)$/i
 
 const args = process.argv.slice(2)
@@ -36,27 +38,20 @@ function read(p) {
   return fs.readFileSync(p, 'utf8')
 }
 
-function field(md, name) {
-  // 表格行：| 字段 | 值 |
-  const re = new RegExp(`\\|\\s*${name}\\s*\\|\\s*([^|]+)\\|`)
-  const m = md.match(re)
-  return m ? m[1].trim() : null
-}
-
 const issue = read(issuePath)
 const spec = read(specPath)
 
-const status = field(issue, '当前状态')
-const unattended = field(issue, '无人值守许可')
-const baseline = field(issue, '需求基线版本')
-const deps = field(issue, '前置依赖')
-const specLoc = field(issue, '任务规格位置')
-const priority = field(issue, '优先级')
-const definedAt = field(issue, '定义时间')
-const envGroup = field(issue, '施工环境组')
-const envRole = field(issue, '施工环境角色')
-const taskId = field(issue, '任务标识')
-const githubSync = field(issue, 'GitHub 同步')
+const status = field(issue, TASK_FIELDS.STATUS)
+const unattended = field(issue, TASK_FIELDS.UNATTENDED)
+const baseline = field(issue, TASK_FIELDS.BASELINE)
+const deps = field(issue, TASK_FIELDS.DEPS)
+const specLoc = field(issue, TASK_FIELDS.SPEC_LOC)
+const priority = field(issue, TASK_FIELDS.PRIORITY)
+const definedAt = field(issue, TASK_FIELDS.DEFINED_AT)
+const envGroup = field(issue, TASK_FIELDS.ENV_GROUP)
+const envRole = field(issue, TASK_FIELDS.ENV_ROLE)
+const taskId = field(issue, TASK_FIELDS.TASK_ID)
+const githubSync = field(issue, TASK_FIELDS.GITHUB_SYNC)
 
 let envStore = null
 const esIdx = args.indexOf('--env-store')
@@ -64,7 +59,7 @@ if (esIdx >= 0) envStore = args[esIdx + 1]
 
 if (!status) fail('当前状态缺失')
 else if (!DEFINED_STATUSES.has(status)) {
-  fail(`当前状态必须为「已定义」或「本地已定义」，实际：${status}`)
+  fail(`当前状态必须为「已定义」或「${STATUS_LOCAL_DEFINED}」，实际：${status}`)
 }
 if (unattended !== '允许') fail(`无人值守许可必须为「允许」，实际：${unattended ?? '（缺失）'}`)
 if (!baseline || !/^V\d+$/i.test(baseline)) fail(`需求基线版本缺失或非法：${baseline ?? '（缺失）'}`)
@@ -79,7 +74,7 @@ if (!definedAt) fail('定义时间缺失')
 if (!specLoc) fail('任务规格位置缺失')
 
 // 本地轨道附加校验：任务标识 + GitHub 同步状态
-if (status === '本地已定义') {
+if (status === STATUS_LOCAL_DEFINED) {
   if (!taskId) fail('本地轨道任务必须填写「任务标识」（LOC-<序号>）')
   if (!githubSync) fail('本地轨道任务必须填写「GitHub 同步」（pending / synced#N）')
   else if (!GITHUB_SYNC_VALUES.test(githubSync.trim())) {
@@ -111,13 +106,7 @@ if (envStore && failures.length === 0) {
   }
 }
 
-const specVersion =
-  field(spec, '需求基线版本') ||
-  (spec.match(/\*\*版本\*\*[：:]\s*(V\d+)/i) || [])[1] ||
-  (spec.match(/版本[：:]\s*(V\d+)/i) || [])[1] ||
-  (spec.match(/^#\s*.*\b(V\d+)\b/m) || [])[1] ||
-  (spec.match(/task-spec-(V\d+)/i) || [])[1] ||
-  (path.basename(specPath).match(/(V\d+)/i) || [])[1]
+const specVersion = parseSpecVersion(spec, specPath)
 
 if (!specVersion) fail('本地任务规格无法解析版本号')
 else if (specVersion.toUpperCase() !== baseline.toUpperCase()) {
@@ -161,7 +150,7 @@ if (failures.length) {
 
 const result = {
   ok: true,
-  track: status === '本地已定义' ? 'local' : 'github',
+  track: status === STATUS_LOCAL_DEFINED ? 'local' : 'github',
   task_id: taskId ?? null,
   github_sync: githubSync ?? null,
   status,
