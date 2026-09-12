@@ -10,13 +10,13 @@
 | 任务名称 | Skill 调用入口接入 Logical Run Runtime |
 | 任务类型 | 完整功能开发 |
 | 优先级 | P1 |
-| 当前状态 | 本地已定义 |
-| 需求基线版本 | V2 |
+| 当前状态 | 等待验收 |
+| 需求基线版本 | V3 |
 | 前置依赖 | 无本地卡依赖；#80（外部）落地形态为本卡输入 |
 | 施工环境组 | LOC-015 |
 | 施工环境角色 | 独立 |
 | 无人值守许可 | 允许 |
-| 任务规格位置 | `docs/tasks/specs/LOC-015-skill-invocation-runtime/task-spec-V2.md`（详细规格）；本卡「三要素速览」为同源摘要 |
+| 任务规格位置 | `docs/tasks/specs/LOC-015-skill-invocation-runtime/task-spec-V3.md`（详细规格）；本卡「三要素速览」为同源摘要 |
 | 定义时间 | 2026-09-11 |
 | GitHub 同步 | pending |
 
@@ -33,7 +33,7 @@
 
 ### 验收标准
 
-- [ ] 真实验证：DSH 内由 Skill 触发一次模板运行，实际调用 `wf_run`（记录 `task_id` 非空、`trigger=start`），看板显示为同一次运行而非退化单段记录
+- [ ] 起跑口径经仓库内验证：两份 runbook（生成器产物 + `dsh/skill/SKILL.md`）要求首选 `wf_run`、不需要传递脚本，`wf_run` 不可用时才回退内置 `workflow` 工具且如实提示记录退化；`wf_run` 起跑即产生完整 Logical Run（`task_id` 非空、`trigger=start`、分段齐全）由仓库内运行时测试覆盖。真实 DSH 内由 Skill 触发一次模板运行、会话实际走 `wf_run`、看板显示为同一次运行，由人工按 UAT-01 在验收环节实测确认。
 - [ ] Skill 发起的一次任务跨多段执行（人工决策/恢复）仍是一个 Logical Run，看板可见完整分段与摘要（判定基准：现有运行看板）
 - [ ] Skill 路径的人工决策可按 `decision_id + user_choice` 续跑，Decision/Control Record 落档
 - [ ] `DONE` 的完成类型（completion）不再为 null
@@ -55,3 +55,5 @@
 | 2026-09-11 | 定义中（待决策，前提待定） | 用户澄清：近几天真实工作在 ZCode 侧（需求分析 skill + 配套单任务工作流，SKILL.md 文本控流程），DSH 内近期模板运行均为 #79/#80 UAT 测试数据；据此作废「实际运行已走 `wf_run`」的推断。本卡问题面（Skill 路径产生退化记录）仅在 DSH 内成立。 |
 | 2026-09-11 | 待确认（基线 V2） | 用户确认「DSH 的 skill 入口后面会调用」→ 决策落地：发起权归插件（方案 A），备选回灌方案（B）不采纳，内置 `workflow` 工具降为应急回退；范围收缩为「口径统一 + 真实验证」。规格升 V2，Definition Check 全部通过、未决产品事项 0，呈递基线确认。 |
 | 2026-09-11 | 本地已定义 | 基线 V2 经用户会话确认（「确认」）；版本一致：任务卡 = 规格 = V2。可开工（无人值守许可 允许）；施工第一步为真实验证（DSH 内 Skill 触发一次运行，确认走 `wf_run`），不通过则停下呈报。 |
+| 2026-09-11 | 交付中（基线 V3） | 开发完成后、呈递验收前，用户就验收第 1 条取证方式拍板：方案 A——按验证归属改写（仓库内可验证部分由施工/测试出证，真实 DSH 实测交人工 UAT-01；UAT-01 前置条件改为用户指定开发 DSH http://127.0.0.1:55191/），并指示部署该开发 DSH 完成验收流程。任务目标、范围、方案（A）不变；规格升 V3（task-spec-V3.md），Run 以 reverify 推进 attempt 重写基线载荷。 |
+| 2026-09-12 | 等待验收 | 真机 UAT 完成（开发 DSH 55191）。UAT-01 全绿：Skill 触发 default-workflow，会话实际走 `wf_run`（task_id 非空、trigger=start），看板呈「同一次运行·第 1 段（人工验收）/第 2/2 段（DONE）」，人工裁决后按 entry=accept+approved=true 续跑至 COMPLETED，DONE.completion={type:done,node:closeout,path:$.completion_type} 非空。UAT-02 全绿：无插件会话回退内置 `workflow` 工具时输出显式「记录将退化」警示卡。UAT 过程发现并修复两处真机缺陷：① vm 沙箱未注入 structuredClone 致人工决策续跑 ReferenceError（54d0c9d，deepCloneData 守卫 + sandbox-clone-guard 回归测试）；② default-workflow 收口节点未声明 completionPath 致 DONE.completion 恒为 null（2c27856）；另有 dsh/README.md 引言旧口径残留返修（808a1c4）。收敛审查 approve（review_proof.a6）、独立测试 pass（test_proof.a7）均绑定最终 HEAD 2c27856；cwf 证据链校验 9/9 通过，acceptance_package.a8 呈 awaiting_decision。证据目录：`.scratch/uat-loc015-demo/evidence/`。待人工三态裁决（通过 / 退回 / 有条件通过），AI 不代签。 |

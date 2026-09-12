@@ -10,7 +10,7 @@
 | 未决产品事项数 | **0** |
 | 结论 | **全部通过** → 状态改为「待确认」，呈递人工确认基线 V2 |
 
-> 规格：`docs/tasks/specs/LOC-015-skill-invocation-runtime/task-spec-V2.md`
+> 规格：`docs/tasks/specs/LOC-015-skill-invocation-runtime/task-spec-V3.md`（V3 仅改写验收第 1 条验证归属，定义结论不变）
 > V1 检查结论（未通过：9.3 / 9.6）见本文件「附录 · V1 未通过记录」。
 
 ---
