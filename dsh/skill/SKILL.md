@@ -1,13 +1,13 @@
 ---
 name: dev-workflow-2-0
-description: "在 DeepSeek Harness（DSH）会话中驱动「开发工作流 2.0」：以 GitHub issue（须含任务目标/涉及范围/验收标准三要素）为唯一需求来源，自动完成 调度 → 开发 →（可选）测试 → 审核 → 人工验收 → 收口（推送/合并 PR/关闭 issue） 全流程；打回上限 9 轮、超限自动归因、全程结构化报告留痕、开发与审核异源异模型。当用户说「用开发工作流跑 issue」「开发工作流 2.0」「dev-workflow」「issue 驱动开发」「跑开发流程」「按工作流开发这个需求」「自动开发这个 issue」，或贴出 issue 链接/编号要求走「分析→开发→测试→审核→验收→交付」的多 agent 流程时，必须主动使用本 skill。本 skill 仅适用于具备 workflow 工具的 DSH 会话。"
+description: "在 DeepSeek Harness（DSH）会话中驱动「开发工作流 2.0」：以 GitHub issue（须含任务目标/涉及范围/验收标准三要素）为唯一需求来源，自动完成 调度 → 开发 →（可选）测试 → 审核 → 人工验收 → 收口（推送/合并 PR/关闭 issue） 全流程；打回上限 9 轮、超限自动归因、全程结构化报告留痕、开发与审核异源异模型。当用户说「用开发工作流跑 issue」「开发工作流 2.0」「dev-workflow」「issue 驱动开发」「跑开发流程」「按工作流开发这个需求」「自动开发这个 issue」，或贴出 issue 链接/编号要求走「分析→开发→测试→审核→验收→交付」的多 agent 流程时，必须主动使用本 skill。本 skill 仅适用于具备 wf_run（可视化工作流插件）或 workflow 工具的 DSH 会话。"
 ---
 
 # 开发工作流 2.0 · DSH 运行技能
 
 在任意项目的 DSH 会话中运行「开发工作流 2.0」。本 skill 目录自包含：
 
-- `script.mjs` / `meta.json` —— workflow 工具的编排脚本与 meta（**由单一编译器从蓝图生成**，安装时产出；脚本语义由运行时排练厅套件持续验证）
+- `script.mjs` / `meta.json` —— 编译产物（**由单一编译器从蓝图生成**，安装时产出；脚本语义由运行时排练厅套件持续验证）。**仅作回退路径使用**：首选起跑通道是插件工具 `wf_run`（见运行步骤 3）
 - `SKILL.md` —— 本 runbook（真源 `dsh/skill/SKILL.md`）
 - `roles/` —— 六个节点角色提示词：dispatcher / dev / test / review / accept / closeout
 
@@ -18,7 +18,7 @@ description: "在 DeepSeek Harness（DSH）会话中驱动「开发工作流 2.0
 
 ## 前置条件
 
-- 当前会话具备 workflow 工具、bash（`git`、`gh`）、工作区写权限。
+- 当前会话具备 `wf_run`（可视化工作流插件，首选）或 `workflow` 工具（回退）、bash（`git`、`gh`）、工作区写权限。**两者都没有时停下说明，不要进入 args 装配与起跑步骤**。
 - 目标仓库 = 当前会话工作区根；有 GitHub 远端且 `gh` 已登录（无远端也能跑，收口退化为本地 commit 清单）。
 - 宿主模型路由（推荐，异源硬规则依赖）：`kimi-coding/k3`、`deepseek-official/deepseek-v4-pro`、`deepseek-official/deepseek-v4-flash`。
 - `.gitignore` 建议含 `.agent-runs/`（run 产物不入库）。
@@ -55,13 +55,14 @@ diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
 
 比对不一致（尤其 roles 或 workflow 有差异）说明安装副本已过时——**先重装再快照**：执行 `<仓库>/dsh/install-skill.sh`；重装后仍不一致则**改源**，直接以仓库 `dsh/roles/` 作为快照源，并记录漂移原因。切忌把旧模板静默带进 run。
 
-### 3. 调用 workflow 工具
+### 3. 调用 `wf_run` 工具起跑（首选）
 
-读取 `<SKILL_DIR>/script.mjs` 全文，原样作为 `script` 参数；`meta` 使用 `<SKILL_DIR>/meta.json`
-（`name` / `phases` 已由生成器按蓝图组装，直接引用，不手写）。`args` 模板：
+用插件工具 `wf_run` 直接起跑，**不需要读取或传递脚本全文**：`templateId` 用 `dev-workflow-2-0`
+（或本次目标的模板 id），其余照 `args` 模板：
 
 ```json
 {
+  "templateId": "dev-workflow-2-0",
   "taskId": "issue-<N>",
   "runDir": ".agent-runs/issue-<N>",
   "roleDir": ".agent-runs/issue-<N>/roles",
@@ -73,6 +74,15 @@ diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
 - 无 issue 时改用 `"requirement": "<原始需求文本>"`。
 - 续跑（`AWAITING_HUMAN_<节点id>` 后）：按第 5 步回传 `entry` / `approved` / `feedback` / `startRound` / `history`。
 - **不传 `models`**（编译时固化于蓝图 `bindings.models`）；节点模型路由缺 provider 时退化为宿主默认（流程仍可跑，异源警告由运行日志提示）。
+
+**为什么首选 `wf_run`**：由插件自身发起，本次运行就是同一条 Logical Run——执行分段、任务归属、
+完成类型齐全，看板上可续跑 / 暂停 / 指导。走内置 `workflow` 工具时脚本返回值只回到会话，
+插件只能旁观事件流，看板记录会退化为单段且无完成类型。
+
+**回退（仅当 `wf_run` 不可用）**：工具报错提示无法访问 workflowEngine 时，才改用内置 `workflow`
+工具执行编译产物——`script` = `<SKILL_DIR>/script.mjs` 全文，`meta` = `<SKILL_DIR>/meta.json`。
+此时**必须在会话输出中显式提示「本次运行记录将退化为单段、无完成类型，且不可从看板续跑」**，
+不得让用户以为记录完整。
 
 开发/审核不同 provider 即满足「异源异模型」硬规则（蓝图当前分配：dev=`deepseek-official/deepseek-v4-pro`、review=`kimi-coding/k3`）。
 
@@ -103,8 +113,9 @@ diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
    恢复后核对 `git -C <runDir>/worktree rev-parse --abbrev-ref HEAD` = dev2/<taskId> 再动手复现。
 1. 向用户呈现 `<runDir>/acceptance-summary.md` 的核心内容（逐条 ✅/⚠️/❌ + 确认方式）；
 2. 用 ask_user_question 发起裁决：通过 / 不通过（附意见）；
-3. **通过** → 以当前门禁节点为续跑入口、`approved=true`（引擎只走该节点 success 出边；下游是否收口由蓝图决定，手册不得指定下一跳）；
+3. **通过** → 以当前门禁节点为续跑入口、`approved=true` 调 `wf_run`（引擎只走该节点 success 出边；下游是否收口由蓝图决定，手册不得指定下一跳）；
 4. **不通过** → 仍以同一门禁节点续跑并带上意见；引擎对非 true（含 false）会再挂起，**不走 failure 边**。不要手写跳到开发或收口节点。
+5. 返回体为 `WAITING_HUMAN`（Human Decision 而非节点门禁）时：按 `decision_id` + `user_choice` 调 `wf_run` 续跑（同为 `wf_run` 入参）；**禁止**用 `approved` 冒充 Decision Result。
 
 ## 硬规则提醒（约束主会话自己）
 

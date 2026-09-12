@@ -33,6 +33,11 @@ return {
     const fail = (message, at) => ({ ok: false, errors: [{ at: at || '$', message: message }] })
     const isMissingErr = (e) => /ENOENT|no such file|not exist|不存在/i.test(errMsg(e))
     const byId = (a, b) => (a < b ? -1 : a > b ? 1 : 0)
+    // vm 沙箱不保证注入 structuredClone（动态 Cordis 宿主实测缺失）：数据深拷贝走守卫回退。
+    const deepCloneData = (value) => {
+      if (value === null || value === undefined) return value
+      return typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value))
+    }
 
     // ── 双模式注册：动态会话 = harness.handle；静态组合包 = webServer 前缀路由 ──
     // 必须用 typeof 探测未声明标识符：静态 IIFE 无 harness 全局，直接读会 ReferenceError。
@@ -1366,8 +1371,8 @@ return {
       if (!pr) return null
       const args = {
         entry: pr.entry || undefined,
-        results: pr.results && typeof pr.results === 'object' ? structuredClone(pr.results) : {},
-        history: Array.isArray(pr.history) ? structuredClone(pr.history) : [],
+        results: pr.results && typeof pr.results === 'object' ? deepCloneData(pr.results) : {},
+        history: Array.isArray(pr.history) ? deepCloneData(pr.history) : [],
         startRound: Number(pr.round) || 0,
         feedback: typeof pr.feedback === 'string' ? pr.feedback : '',
         budgetUsed: Number(pr.budgetUsed) || 0,
@@ -2343,7 +2348,7 @@ return {
         // 时，A 必须仍用 Rev2 的覆盖值执行；合并语义与编译脚本一致（显式覆盖优先，
         // $default 兜底未显式覆盖节点）。
         const activeSnap = activeSnapshot(logicalRec)
-        const modelOverridesForExec = (isHdResume || isLegacyResume || isPauseResume || probeResume) ? structuredClone(activeSnap ? activeSnap.provider_model : null) : undefined
+        const modelOverridesForExec = (isHdResume || isLegacyResume || isPauseResume || probeResume) ? deepCloneData(activeSnap ? activeSnap.provider_model : null) : undefined
 
         // #74 Preflight Probe：业务节点执行前对本次将使用的 active 快照去重探测。
         // 探针明确失败 → BLOCKED（可恢复，不改写 Workflow Outcome）；探针降级

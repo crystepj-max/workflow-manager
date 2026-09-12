@@ -94,14 +94,18 @@ dsh --profile web --dump-config | grep visual-workflow   # 可见 patch 层
 
 ## 运行方式
 
-正式执行路径适用于所有部署：
+**正式起跑通道（LOC-015）：插件工具 `wf_run`。** 给 `templateId` + `taskId` 即可，插件自行编译
+并交给引擎，不需要传递脚本全文；由插件自身发起，本次运行即同一条 Logical Run（执行分段 /
+任务归属 / 完成类型齐全，看板可续跑、暂停、指导）。
 
-1. 在编辑器中打开或保存工作流，点「获取脚本」，由 `vwf.script` 把 DSL 图编译成脚本。
+`wf_run` 为条件注册：宿主 `agents` 可用时注册；`workflowEngine` 推迟到 execute 阶段解析，
+解析失败时工具明确报错。此时才回退到内置 `workflow` 工具：
+
+1. 由 `vwf.script` 把 DSL 图编译成脚本（CLI 兜底：`scripts/generate.mjs compileBlueprint`）。
 2. 把脚本交给平台内置 `workflow` 工具执行；运行回执中的 runId 可用于运行看板轮询状态。
 
-`wf_run` 是条件注册的增强路径：仅在宿主 `agents` 可用时注册，可直接完成 DSL 编译与执行。
-`workflowEngine` 推迟到 execute 阶段解析；若解析失败，工具会明确报错，此时改用上述
-「获取脚本 → 平台 `workflow` 工具」路径即可。
+⚠️ 回退路径下脚本返回值只回到会话、插件拿不到，看板上该运行会是**退化记录**（单段、
+`completion=null`、不可从看板续跑）；回退时必须如实提示用户。
 
 ## RPC 面（host 半）
 

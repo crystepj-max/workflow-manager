@@ -11,7 +11,7 @@
    │
    ▼
 主会话（调度台 + 人工门禁）
-   │  ① gh issue view 拉取 issue  ② 装配 args 调 workflow 工具（角色文件由节点 agent 自读）
+   │  ① gh issue view 拉取 issue  ② 装配 args 调 wf_run（插件起跑；角色文件由节点 agent 自读）
    ▼
 workflow 编排脚本（.generated/dev-workflow-2-0/script.mjs——单一编译器产物，含折叠/闸门/归因）
    │
@@ -74,11 +74,15 @@ gh issue view <N> --json title,body,comments
 六个角色提示词不进 args：各节点 agent 开工时按 `args.roleDir`（缺省 `dsh/roles`）
 自行读取对应 `<role>.md` 并严格遵循——单一事实源，改角色只改文件。
 
-### 3. 调用 workflow 工具
+### 3. 调用 wf_run 工具起跑
 
-- `script`：`.generated/dev-workflow-2-0/script.mjs` 全文（生成物，勿手改；改蓝图后 `npm run generate` 重建）；
-- `meta`：`.generated/dev-workflow-2-0/meta.json`（name/phases 已由生成器按蓝图组装，直接引用）；
+- `templateId`：`dev-workflow-2-0`（插件自行编译并交给引擎，**不需要传脚本全文**）；
 - `args`：见下表。**不传 `models`**（模型绑定编译时固化于蓝图 `bindings.models`）。
+
+回退（仅当 `wf_run` 不可用、报错无法访问 workflowEngine）：才改用内置 `workflow` 工具——
+`script` = `.generated/dev-workflow-2-0/script.mjs` 全文（生成物，勿手改；改蓝图后 `npm run generate` 重建）、
+`meta` = `.generated/dev-workflow-2-0/meta.json`（name/phases 已由生成器按蓝图组装，直接引用）；
+并须如实提示用户本次运行记录将退化（单段、无完成类型、不可从看板续跑）。
 
 ```jsonc
 {
@@ -298,8 +302,8 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
 ## 可视化插件（vwf）使用说明
 
 「可视化工作流」（Visual Workflow，下文 vwf）把同一套「开发工作流 2.0」状态机做成图形化
-入口：在 Web UI 里选内置/用户模板 → 图形化编辑或直接查看流程图 → 点「获取脚本」，
-再把插件由 DSL 图编译出的脚本交给平台 `workflow` 工具执行。这是所有部署均可用的正式执行路径。
+入口：Skill / Chat 入口首选 `wf_run` 工具直接起跑——由插件自身发起，不需要传递脚本；
+`wf_run` 不可用时才回退内置 `workflow` 工具执行编译产物，并如实提示运行记录将退化。
 需求基线见
 `.scratch/dsh-visual-workflow-p0/requirements-analysis.md`；实现说明见 `docs/design/plugin-layer.md`。
 
@@ -317,12 +321,17 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
   DSL→script 编译器、双根模板库与运行状态；Client 半在 settings.section 注册「工作流」页
   （模板库 + 大抽屉可视化编辑器 + 运行看板）。
 
-### wf_run 增强路径：调用方式与参数表
+### wf_run：正式起跑通道（调用方式与参数表）
 
-宿主 `agents` 可用时，Host 半才会把 `wf_run` 条件注册为模型工具，主会话可直接用工具调用完成
-「DSL 图编译 + 执行」。`workflowEngine` 推迟到 execute 阶段解析；若解析失败，工具会明确报错，
-此时仍可回到正式路径：点「获取脚本」，再用平台 `workflow` 工具执行。首次运行从
-`entry=dispatch` 起，跑到人工门禁节点即返回，裁决后再以对应 `entry` 续跑。
+宿主 `agents` 可用时，Host 半把 `wf_run` 注册为模型工具，主会话可直接用工具调用完成
+「DSL 图编译 + 执行」——**这是 Skill / Chat 入口的正式起跑通道**（LOC-015）：由插件自身发起，
+本次运行即同一条 Logical Run（执行分段 / 任务归属 / 完成类型齐全，看板可续跑、暂停、指导）。
+
+`workflowEngine` 推迟到 execute 阶段解析；若解析失败（工具明确报错，无法访问 workflowEngine），
+才回退到内置 `workflow` 工具执行编译产物——该路径下脚本返回值只回到会话，插件只能旁观事件流，
+运行记录会退化为单段且无完成类型，**回退时必须如实提示用户记录将退化**（见
+`dsh/skill/SKILL.md` 运行步骤 3）。首次运行从 `entry=dispatch` 起，跑到人工门禁节点即返回，
+裁决后再以对应 `entry` 续跑。
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
