@@ -204,6 +204,11 @@ const DYN_HOST_PRELUDE = [
   `const __VWF_PLUGIN_ROOT__ = ${JSON.stringify(root)};`,
   `const __VWF_REPO_ROOT__ = ${JSON.stringify(dirname(dirname(root)))};`,
   'if (typeof globalThis.Buffer === "undefined") { const enc = new TextEncoder(); globalThis.Buffer = { from(s, e) { if (e === "base64" && typeof atob === "function") { const bin = atob(s); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; } return enc.encode(String(s)); }, byteLength(s) { return enc.encode(String(s)).length; }, isBuffer() { return false; }, alloc(n) { return new Uint8Array(n); }, concat(list) { const out = []; for (const a of list) out.push(...a); return new Uint8Array(out); } }; }',
+  // cordis 动态沙箱同样没有 structuredClone（续跑路径 host.js 会对快照 provider_model
+  // 做深拷贝）；被拷贝对象均为 JSON 安全结构，用 JSON 往返兜底即可。产品 Node 运行时
+  // 有原生实现，此垫片不会生效（UAT-loc017 真机实证：HD/entry 续跑在沙箱内报
+  // structuredClone is not defined，与 LOC-015 交付中的沙箱守卫同一问题域）。
+  'if (typeof globalThis.structuredClone === "undefined") { globalThis.structuredClone = function structuredClone(value) { return value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }; }',
 ].join('\n') + '\n'
 const dynHost = DYN_HOST_PRELUDE + minifyDynamicClosure(hostBody)
 const dynClient = minifyDynamicClosure(clientBody)
@@ -216,7 +221,9 @@ const clientBytes = Buffer.byteLength(dynClient)
 // 总量仍有余量时先撞线（#74 UAT-02 结果条：client 84KB + host 62KB = 146KB，
 // 低于合计预算却被拒）。#80-r2 + LOC-001 V2 合并后实测合计 168.5KB，由 160KiB
 // 上调至 176KiB（实证 ~184KB 一次转写可行；超限后应优先瘦身，不要继续推高）。
-const PAYLOAD_LIMIT = 176 * 1024
+// LOC-017 集成闸门宿主编排并入后上调至 184KiB（决策 1：载体=产品运行时宿主编排，
+// 宿主半不可省；client 瘦身仍应优先于继续推高）。
+const PAYLOAD_LIMIT = 184 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)

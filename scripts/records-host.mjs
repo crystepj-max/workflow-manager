@@ -34,8 +34,10 @@ import {
   coverageStatus,
   createStore,
   currentRevision,
+  getRecord,
   listRevisions,
 } from './formal-records.mjs'
+import { assertIntegrationAllowed } from './workspace-isolation.mjs'
 
 const FILE_SCHEMA = 1
 const DEP_PREFIX = /^(node|artifact):/
@@ -203,7 +205,39 @@ export function recordsGet(input) {
   }
 }
 
-const COMMANDS = { commit: recordsCommit, list: recordsList, get: recordsGet }
+export function recordsAssertIntegration(input) {
+  // LOC-017 集成闸门放行判定：全部业务逻辑委托内核 assertIntegrationAllowed
+  //（Proof 全覆盖当前 Revision 才放行），本命令只做 Store 装载与 Proof 解析。
+  const { records_dir, logical_run_id, target_record_id, proofs, target_advanced } = input || {}
+  if (!existsSync(fileOf(records_dir, logical_run_id))) {
+    return { ok: false, error: 'Formal Records Store 不存在: ' + String(logical_run_id), stale: [] }
+  }
+  const { store } = loadStore(records_dir, logical_run_id)
+  const refs = []
+  for (const p of Array.isArray(proofs) ? proofs : []) {
+    if (!p || typeof p.record_id !== 'string') throw new Error('proofs 项必须含 record_id')
+    const rec = getRecord(store, p.record_id, p.record_revision)
+    if (!rec) throw new Error(`Proof 不存在: ${p.record_id}@${p.record_revision}`)
+    refs.push(rec)
+  }
+  try {
+    const res = assertIntegrationAllowed({
+      checkpoint: { target_advanced: target_advanced === true },
+      formalStore: store,
+      targetRecordId: requireText(target_record_id, 'target_record_id'),
+      proofs: refs,
+    })
+    return {
+      ok: true,
+      proofs_state: res.proofs_state,
+      checked: refs.map((r) => ({ record_id: r.record_id, record_revision: r.record_revision })),
+    }
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e), stale: Array.isArray(e.stale) ? e.stale : [] }
+  }
+}
+
+const COMMANDS = { commit: recordsCommit, list: recordsList, get: recordsGet, assertIntegration: recordsAssertIntegration }
 
 // CLI 判定不比对 import.meta.url（安装位可能经符号链接，路径恒等守卫会静默跳过 main）
 if (process.argv.length >= 2 && /records-host\.mjs$/.test(String(process.argv[1] || ''))) {

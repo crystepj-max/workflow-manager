@@ -1891,7 +1891,8 @@ return {
       if (!r.ok) return { ok: false, error: 'workspace host 调用失败：' + r.detail }
       try {
         const parsed = JSON.parse(r.stdout)
-        return parsed.ok ? parsed : { ok: false, error: parsed.error || 'workspace host 业务错误', detail: parsed.detail }
+        // 业务错误对象整包透传（保留 code/conflicts 等结构化字段，LOC-017 闸门按 code 路由）
+        return parsed.ok ? parsed : Object.assign({ ok: false, error: parsed.error || 'workspace host 业务错误', detail: parsed.detail }, parsed)
       } catch (e) { return { ok: false, error: 'workspace host 输出不可解析：' + errMsg(e), raw: r.stdout } }
     }
     // 模板 → 隔离策略类型（LOC-009）：以 Core TEMPLATE_REGISTRY 为权威，不再按
@@ -2000,6 +2001,11 @@ return {
       writeWorker: ['writeWorkerFile', true, (a, id) => ({ logical_run_id: id, worker_id: str(a.worker_id), rel: str(a.rel), content: str(a.content) })],
       readWorker: ['readWorkerFile', true, (a, id) => ({ logical_run_id: id, worker_id: str(a.worker_id), rel: str(a.rel) })],
       checkpoint: ['computeIntegrationCheckpointFromRepo', false, (a) => ({ base_ref: str(a.base_ref), base_commit: str(a.base_commit), repository_path: str(a.repository_path), target_ref: a.target_ref || undefined })],
+      // LOC-017 集成闸门：gatePlan（只读观测 + 锁键）/ syncTarget（真 merge + 实况登记）
+      gatePlan: ['gatePlan', true, (a, id) => ({ logical_run_id: id, target_ref: a.target_ref || undefined })],
+      syncTarget: ['syncTarget', true, (a, id) => ({ logical_run_id: id, target_ref: a.target_ref || undefined })],
+      gateSyncEntry: ['gateSyncEntry', true, (a, id) => ({ logical_run_id: id, target_head: str(a.target_head), previous_synced_head: a.previous_synced_head || undefined, integrated_before: a.integrated_before === true, merge_result: str(a.merge_result), attempt: Number(a.attempt || 1), snapshot_revision: str(a.snapshot_revision) })],
+      activeLock: ['activeLockFor', true, (a) => ({ resource_key: str(a.resource_key) })],
     }
     for (const op of Object.keys(WS_OPS)) {
       const [cmd, needsCap, build] = WS_OPS[op]
@@ -2109,6 +2115,238 @@ return {
       } else if (r.notFound) log('records-host.mjs 未部署：本轮节点产物未入 Formal Records Store')
       else log('Formal Records 提交失败（不影响运行）：' + r.error)
       return r
+    }
+
+    // ── Integration Gate（LOC-017）：「测试通过 → 人工验收」之间的自动集成闸门 ────
+    // 编排契约（B1–B13，规格 .scratch/LOC-017-integration-gate/task-spec-V2.md）：
+    //   触发 = WAITING_HUMAN 结算 + Git ISOLATED_WRITE（B1/B2）；未前进即放行（B3）；
+    //   已前进 = 取集成锁（B9/B10/B11）→ 真 merge（沿用仓库 merge 策略）→ recordSourceSync
+    //   → 同步证据 artifact 新 Revision（B4，无新版本拒绝放行）→ 自动重跑本 Run 全部
+    //   审核/测试（B5/B6，复用既有引擎段；RETURN_DEV 按既有转移回开发，B8）→ 放行前
+    //   重新观测（B13/R3）→ assertIntegrationAllowed 全覆盖判定（旧 Proof 不背书，B7）。
+    //   全部判定与效果委托内核（workspace-isolation / formal-records / integration-gate），
+    //   宿主只做编排与落盘（control_events + 重跑段照常入 Formal Records，B12）。
+    const GATE_MAX_ITERATIONS = 3
+    const GATE_LOCK_OWNER = 'integration-gate'
+    const GATE_LOCK_TTL_MS = 60 * 60 * 1000
+    const GATE_HEARTBEAT_MS = 10 * 60 * 1000
+    // 收集 verifyBranch 节点当前最新 Proof 引用（重跑前的旧 Proof 由此参与判定）
+    async function gateLatestProofs(runId, verifyNodes) {
+      const proofs = []
+      for (const nodeId of verifyNodes) {
+        const g = await recordsHostCall('get', { logical_run_id: runId, record_id: 'proof:' + runId + ':' + nodeId })
+        if (g.ok && g.found && Array.isArray(g.revisions) && g.revisions.length) {
+          const latest = g.revisions[g.revisions.length - 1]
+          proofs.push({ record_id: String(latest.record_id || g.record_id), record_revision: Number(latest.record_revision) })
+        }
+      }
+      return proofs
+    }
+    async function runIntegrationGate(env) {
+      const { logicalRec, ws, wsIdentity, dsl, scriptArgs, meta, execScript, parent, segCtl, resultsNow, taskId, outerRunId, engine: gateEngine } = env
+      const trace = { decision: null, iterations: 0, syncs: [], reruns: [], rerun_terminal: null, blocked: null, proofs_state: null, observed_head: null }
+      const blocked = (code, message, extra) => {
+        trace.decision = 'blocked'
+        trace.blocked = Object.assign({ code, message: String(message || '') }, extra || {})
+        return { trace, blocked: true, code, message }
+      }
+      const cap = capabilityFor(wsIdentity)
+      let heldLockId = null
+      const releaseGateLock = async (reason) => {
+        if (!heldLockId) return
+        const id = heldLockId
+        heldLockId = null
+        try { await wsHostCall('releaseLock', { logical_run_id: wsIdentity, capability: cap, lock_id: id, owner: GATE_LOCK_OWNER, reason: reason || 'integration gate window closed' }) } catch (e) { trace.release_error = errMsg(e) }
+      }
+      try {
+        const verifyNodes = ((dsl && dsl.nodes) || []).filter((n) => n && n.verifyBranch).map((n) => n.id)
+        if (ws.workspace_mode !== 'ISOLATED_WRITE') return { trace: Object.assign(trace, { decision: 'skipped', reason: 'non_isolated_write' }) }
+        // B1 适用面：无审核/测试节点的图不是建设类流程，闸门不适用（保持旧行为，不回归）
+        if (!verifyNodes.length) return { trace: Object.assign(trace, { decision: 'skipped', reason: 'no_verify_nodes' }) }
+        // 最近一次闸门重跑段的收束现场：放行时 wf_run 返回它（人工拿到的是重跑后的 decision_id）
+        let lastRerun = null
+        for (let iteration = 1; iteration <= GATE_MAX_ITERATIONS; iteration++) {
+          trace.iterations = iteration
+          const plan = await wsHostCall('gatePlan', { logical_run_id: wsIdentity, capability: cap, target_ref: ws.base_ref })
+          if (!plan.ok) return blocked(plan.code || 'GATE_PLAN_FAILED', '闸门观测/计划失败，fail closed（B13）：' + (plan.error || '未知'))
+          trace.observed_head = plan.target_head
+          const syncGet = await recordsHostCall('get', { logical_run_id: wsIdentity, record_id: plan.sync_record_id })
+          const syncRevs = syncGet.ok && syncGet.found && Array.isArray(syncGet.revisions) ? syncGet.revisions : []
+          const lastSync = syncRevs.length ? syncRevs[syncRevs.length - 1] : null
+          const lastSyncedHead = lastSync && lastSync.body && lastSync.body.value ? (lastSync.body.value.synced_head || null) : null
+          // 观测放行基线 = 上次同步头（有同步史）|| 分配基线；比较由内核 computeCheckpoint 完成。
+          // 注意：内核在「目标已前进」时返回 ok:false + hint（业务判定），不是观测失败；
+          // 观测失败（B13）= 拿不到 target_advanced 布尔值。
+          const cpRes = await wsHostCall('computeIntegrationCheckpointFromRepo', { base_ref: ws.base_ref, base_commit: lastSyncedHead || ws.base_commit, repository_path: ws.repository_path, target_ref: ws.base_ref })
+          // 真实 wrapper 契约：{ ok, checkpoint: {target_advanced,...} }（checkpoint 嵌套一层）
+          const cp = cpRes && cpRes.ok ? cpRes.checkpoint : null
+          if (!cp || typeof cp.target_advanced !== 'boolean') return blocked('GATE_OBSERVE_FAILED', '目标 HEAD 观测失败，fail closed（B13）：' + ((cpRes && cpRes.error) || '未知'))
+          if (!cp.target_advanced && !lastSync) {
+            // B3：目标未前进且从未同步——直接放行，不重跑、不额外耗时
+            trace.decision = 'pass'
+            trace.proofs_state = 'still_valid'
+            return { trace }
+          }
+          let needRerun = false
+          if (cp.target_advanced) trace.syncs.push({ at: iteration, observed_head: plan.target_head, integrated_before: plan.integrated_before === true })
+          else {
+            // 有同步史但目标未再前进：已有 Proof 覆盖上次同步 Revision 即放行（重跑中断后的续判定）
+            const assertion = await recordsHostCall('assertIntegration', {
+              logical_run_id: wsIdentity,
+              target_record_id: plan.sync_record_id,
+              proofs: await gateLatestProofs(wsIdentity, verifyNodes),
+              target_advanced: false,
+            })
+            if (assertion.ok) {
+              trace.decision = 'pass'
+              trace.proofs_state = assertion.proofs_state || 'rerun_completed'
+              return lastRerun
+                ? { trace, finalCanon: lastRerun.canon, finalStopReason: lastRerun.stopReason, finalStop: lastRerun.stopReason, finalValue: lastRerun.value, finalRunId: lastRerun.runId }
+                : { trace }
+            }
+            needRerun = true
+            trace.reruns.push({ at: iteration, reason: 'PROOFS_NOT_COVERING', stale: assertion.stale || [] })
+          }
+          // —— 同步 + 重跑窗口：全程持锁 + 心跳（B9）；抢不到锁 → BLOCKED 提示占用方（B10）——
+          const lock = await wsHostCall('acquireLock', { logical_run_id: wsIdentity, capability: cap, resource_key: plan.resource_key, owner: GATE_LOCK_OWNER, ttl_ms: GATE_LOCK_TTL_MS }).catch((e) => ({ ok: false, error: errMsg(e) }))
+          if (!lock.ok || !lock.lock) {
+            let holder = null
+            try {
+              const al = await wsHostCall('activeLockFor', { logical_run_id: wsIdentity, capability: cap, resource_key: plan.resource_key })
+              if (al.ok && al.lock) holder = al.lock.logical_run_id
+            } catch (e) { /* 查询失败不掩盖占用事实 */ }
+            return blocked('GATE_LOCK_BUSY', '集成锁被占用' + (holder ? '：' + holder : '') + '；锁释放后可从 uat 节点续跑同一逻辑运行（wf_run entry=uat）', { holder, resource_key: plan.resource_key })
+          }
+          heldLockId = lock.lock.lock_id
+          let hbFailures = 0
+          let hbTimer = null
+          if (typeof setInterval === 'function') {
+            try {
+              hbTimer = setInterval(() => {
+                // 业务失败（ok:false，如续期被拒/锁丢失）与传输故障一并计数（§11 fail closed）
+                wsHostCall('acquireLock', { logical_run_id: wsIdentity, capability: cap, resource_key: plan.resource_key, owner: GATE_LOCK_OWNER, ttl_ms: GATE_LOCK_TTL_MS }).then((res) => { if (!res || res.ok === false) hbFailures++ }).catch(() => { hbFailures++ })
+              }, GATE_HEARTBEAT_MS)
+              if (hbTimer && typeof hbTimer.unref === 'function') hbTimer.unref()
+            } catch (e) { hbTimer = null /* 无定时器环境：TTL 兜底（R2） */ }
+          }
+          try {
+            wsHostCall('setLifecycle', { logical_run_id: wsIdentity, capability: cap, lifecycle: 'RUNNING', extra: { hold_integration: true } }).catch(() => {})
+            if (cp.target_advanced) {
+              // 真同步：merge（沿用仓库策略）→ recordSourceSync 只信实况 → 同步证据新 Revision（B4）
+              const sync = await wsHostCall('syncTarget', { logical_run_id: wsIdentity, capability: cap, target_ref: ws.base_ref })
+              if (!sync.ok) return blocked(sync.code || 'GATE_SYNC_FAILED', sync.error || '目标同步失败，fail closed', sync.conflicts ? { conflicts: sync.conflicts } : undefined)
+              const entryBuild = await wsHostCall('gateSyncEntry', { logical_run_id: wsIdentity, capability: cap, target_head: sync.target_head || plan.target_head || '', previous_synced_head: lastSyncedHead, integrated_before: sync.integrated_before === true, merge_result: sync.merge_result || '', attempt: logicalRec.segments.length, snapshot_revision: activeSnapshot(logicalRec) ? activeSnapshot(logicalRec).revision : 'unspecified' })
+              if (!entryBuild.ok || !entryBuild.entry) return blocked('GATE_SYNC_RECORD_FAILED', '同步证据 entry 构造失败：' + (entryBuild.error || '未知'))
+              const commit = await recordsHostCall('commit', { logical_run_id: wsIdentity, entries: [entryBuild.entry] })
+              const committed = commit.ok && Array.isArray(commit.committed) ? commit.committed.find((c) => c.record_id === plan.sync_record_id) : null
+              if (!commit.ok || !committed || !(committed.record_revision > (lastSync ? lastSync.record_revision : 0))) {
+                return blocked('GATE_SYNC_NO_NEW_VERSION', '同步未产生新产物版本：拒绝放行且不得报告 rerun_completed（B4）', { records_error: commit.error || null })
+              }
+              const last = trace.syncs[trace.syncs.length - 1]
+              last.record_revision = committed.record_revision
+              last.current_head = sync.current_head
+              last.merge_result = sync.merge_result
+              await markWorkspaceLifecycle(wsIdentity, 'RUNNING')
+            } else if (!needRerun) {
+              // 理论不可达（advanced 或 needRerun 必有一）：保守放行判定交给下一轮
+            }
+            // B5/B6：自动重跑本 Run 全部审核/测试——从第一个 verifyBranch 节点再起一段
+            //（继承既有脚本冻结、Provider/Model 快照与轮次历史；剥掉人工决策字段）。
+            // 种子结果剔除将重新执行的节点（verify 节点 + 人工等待源节点），保证段收尾
+            // 按新完成节点重签 node/Proof Record（B6：新 Proof 只能来自真实重跑）。
+            const haltSources = new Set(((dsl && dsl.edges) || []).filter((e) => e && e.to === '$human-decision' && e.from).map((e) => e.from))
+            const rerunSeed = {}
+            if (resultsNow && typeof resultsNow === 'object') {
+              for (const k of Object.keys(resultsNow)) {
+                if (verifyNodes.indexOf(k) >= 0 || haltSources.has(k)) continue
+                rerunSeed[k] = resultsNow[k]
+              }
+            }
+            const rerunArgs = Object.assign({}, scriptArgs, {
+              entry: verifyNodes[0],
+              results: rerunSeed,
+              feedback: '',
+            })
+            delete rerunArgs.decision_id
+            delete rerunArgs.user_choice
+            delete rerunArgs.approved
+            const fresh = await wsHostCall('get', { logical_run_id: wsIdentity, capability: cap })
+            if (fresh.ok && fresh.workspace) Object.assign(rerunArgs, scriptArgsFromWorkspace(fresh.workspace, cap))
+            const rerunReq = { script: execScript, meta, args: rerunArgs, parent }
+            if (segCtl) rerunReq.signal = segCtl.signal
+            if (ws.source_path) { rerunReq.cwd = ws.source_path; rerunReq.workspaceRoot = ws.source_path }
+            const rerun = gateEngine.start(rerunReq)
+            const rerunRunId = String(rerun.id)
+            const rerunRec = ensureRun(rerunRunId)
+            rerunRec.taskId = taskId
+            rerunRec.workflowId = logicalRec.template_id
+            live.add(rerunRunId)
+            persist(rerunRunId)
+            onRun(outerRunId, (r) => { r.supersededBy = rerunRunId })
+            appendLogicalSegment(logicalRec, rerunRunId, 'integration_gate_rerun')
+            logicalSetState(logicalRec, 'RUNNING', null)
+            requestLogicalPersist(logicalRec.logical_run_id)
+            let rerunResult
+            try { rerunResult = await rerun.result } catch (e) {
+              endLogicalSegment(logicalRec, rerunRunId, 'ENGINE_ERROR')
+              logicalRec.last_engine_error = errMsg(e)
+              logicalSetState(logicalRec, 'FAILED', logicalReason('ENGINE_ERROR', errMsg(e)))
+              requestLogicalPersist(logicalRec.logical_run_id)
+              if (hbFailures > 0) trace.heartbeat_failures = hbFailures
+              return { trace, rerun_failed: true, engine_error: errMsg(e) }
+            }
+            const rerunCanon = rerunResult && rerunResult.stopReason === 'completed' ? canonicalStop(rerunResult) : ''
+            const rerunValue = rerunResult && rerunResult.value
+            if (rerunCanon) onRun(rerunRunId, (r) => { r.status = rerunCanon; applyHdValue(r, rerunValue) })
+            if (rerunResult && rerunResult.error) onRun(rerunRunId, (r) => { r.error_detail = String(rerunResult.error).slice(0, 500) })
+            endLogicalSegment(logicalRec, rerunRunId, rerunCanon || String((rerunResult && rerunResult.stopReason) || ''))
+            const rerunResults = rerunValue && typeof rerunValue.results === 'object' && rerunValue.results ? rerunValue.results : null
+            const beforeKeys = new Set(Object.keys(rerunSeed))
+            recordNodeAttempts(logicalRec, dsl, beforeKeys, rerunResults, rerunValue && rerunValue.control_event)
+            const trans2 = logicalTransitionFor(rerunCanon, rerunResult && rerunResult.stopReason, rerunValue)
+            if (trans2) logicalSetState(logicalRec, trans2.state, trans2.reason)
+            if (rerunResults) {
+              const newKeys = Object.keys(rerunResults).filter((k) => !beforeKeys.has(k))
+              if (newKeys.length) {
+                const entries = nodeRecordEntries(wsIdentity, dsl, rerunResults, newKeys, logicalRec.segments.length, fresh.ok && fresh.workspace ? fresh.workspace : ws, activeSnapshot(logicalRec), rerunValue && rerunValue.control_event)
+                if (entries.length) await commitNodeRecords(logicalRec, entries)
+              }
+            }
+            await refreshWorkspaceContext(logicalRec, wsIdentity)
+            requestLogicalPersist(logicalRec.logical_run_id)
+            trace.reruns.push({
+              at: iteration, entry: verifyNodes[0], run_id: rerunRunId,
+              canon: rerunCanon || String((rerunResult && rerunResult.stopReason) || ''),
+              agents_started: rerunResult ? rerunResult.agentsStarted : null,
+            })
+            lastRerun = { canon: rerunCanon, stopReason: rerunResult ? rerunResult.stopReason : undefined, value: rerunValue, runId: rerunRunId }
+            if (hbFailures > 0) {
+              // 心跳刷新失败按 fail closed 处理并留痕（§11）：重跑段已完全收束，闸门不放行
+              return blocked('GATE_LOCK_HEARTBEAT_FAILED', '集成锁心跳刷新失败，fail closed：闸门不放行（详见运行记录）', { heartbeat_failures: hbFailures })
+            }
+            if (rerunCanon !== 'WAITING_HUMAN') {
+              // 重跑段未回到人工等待（停止/暂停/失败/继续图中流转）：按其终态收束，不放行
+              trace.rerun_terminal = rerunCanon || String((rerunResult && rerunResult.stopReason) || '')
+              return {
+                trace,
+                finalCanon: rerunCanon,
+                finalStopReason: rerunResult && rerunResult.stopReason,
+                finalStop: rerunResult ? rerunResult.stopReason : undefined,
+                finalValue: rerunValue,
+                finalRunId: rerunRunId,
+              }
+            }
+            // 回到循环顶部重新观测：目标可能再次前进（R3）；重跑 Proof 已入 Store
+          } finally {
+            if (hbTimer) { try { clearInterval(hbTimer) } catch (e) { /* 忽略 */ } }
+            await releaseGateLock()
+            wsHostCall('setLifecycle', { logical_run_id: wsIdentity, capability: cap, lifecycle: 'RUNNING', extra: { hold_integration: false } }).catch(() => {})
+          }
+        }
+        return blocked('GATE_ITERATION_CAP', '闸门迭代上限：目标在闸门窗口内反复前进，fail closed 交人工')
+      } catch (e) {
+        return blocked('GATE_INTERNAL_ERROR', '集成闸门内部错误：' + errMsg(e))
+      }
     }
 
     // ── 静态组合包：webServer 前缀路由（POST /dsh-visual-workflow/<method>，信封 {rpcId,method,payload}→{rpcId,result}）──
@@ -2269,6 +2507,16 @@ return {
           const latest = latestLogicalRunForTask(logicalTaskId)
           if (latest && latest.terminal) {
             return '错误：任务 ' + logicalTaskId + ' 的逻辑运行 ' + latest.logical_run_id + ' 已终态（' + latest.lifecycle.state + '），同一运行不能继续。请直接重新发起（将派生新运行并保留来源关系）。'
+          }
+          // LOC-017 fail-open 封堵：闸门拦截（BLOCKED）后人工决策续跑会从 $human-decision
+          // 直接走到收口（DONE 不再触发闸门），以旧 Proof 背书已前进目标——闸门拦截
+          // 一律拒绝，唯一恢复路径 = entry=uat 重过闸门（B10 恢复语义）。
+          // 只认 GATE_ 前缀错误码：探针失败（PROBE_FAILED）的 BLOCKED 走既有
+          // model_overrides 原地恢复路径，不得误伤。
+          if (latest && !latest.terminal && isHdResume && latest.lifecycle.state === 'BLOCKED'
+              && latest.lifecycle.reason && typeof latest.lifecycle.reason.code === 'string'
+              && latest.lifecycle.reason.code.indexOf('GATE_') === 0) {
+            return '错误：逻辑运行 ' + latest.logical_run_id + ' 被集成闸门拦截（' + latest.lifecycle.reason.code + '）：人工决策续跑不可用，否则将绕过闸门放行。请从 uat 节点续跑同一逻辑运行（wf_run entry=uat），重新通过集成闸门后再进入人工验收。'
           }
           logicalTrigger = isHdResume ? 'human_decision' : (isPauseResume ? 'pause_resume' : 'legacy_resume')
           // #80 暂停恢复：检查点现场 + 适用 Guidance（Run 级）+ 最新基线修订回填执行载荷
@@ -2514,6 +2762,7 @@ return {
         }
         // #79 逻辑运行收尾：八态映射 + 完成类型镜像 + 节点实际修订/模型/业务结果
         // 记录 + 工作区上下文入档。Lifecycle 闸门不改写专业结果（R7）。
+        let gateOutcome = null
         if (logicalRec) {
           const value = result && result.value
           endLogicalSegment(logicalRec, runId, canon || String((result && result.stopReason) || ''))
@@ -2554,13 +2803,44 @@ return {
             }
           }
           await refreshWorkspaceContext(logicalRec, wsIdentity)
+          // LOC-017 集成闸门（B2）：Git ISOLATED_WRITE 运行在人工等待结算前自动执行。
+          // 放行 → 维持人工等待；目标前进 → 同一逻辑运行内自动同步+重跑；失败 → BLOCKED。
+          if (canon === 'WAITING_HUMAN' && ws && ws.workspace_mode === 'ISOLATED_WRITE') {
+            gateOutcome = await runIntegrationGate({ logicalRec, ws, wsIdentity, dsl: v.sanitized, scriptArgs, meta: c.meta, execScript, parent, segCtl, resultsNow, taskId, outerRunId: runId, engine: engineNow })
+            if (gateOutcome && gateOutcome.blocked) {
+              logicalSetState(logicalRec, 'BLOCKED', logicalReason(gateOutcome.code, gateOutcome.message))
+              controlEvent(logicalRec, 'integration_gate', { decision: 'blocked', code: gateOutcome.code, message: gateOutcome.message, iterations: gateOutcome.trace ? gateOutcome.trace.iterations : 0, observed_head: gateOutcome.trace ? gateOutcome.trace.observed_head : null })
+              onRun(runId, (r) => { r.status = 'BLOCKED'; r.reason = gateOutcome.code; r.decision_id = ''; r.decision_package = null; r.results = null })
+            } else if (gateOutcome && gateOutcome.trace) {
+              controlEvent(logicalRec, 'integration_gate', {
+                decision: gateOutcome.trace.decision,
+                iterations: gateOutcome.trace.iterations,
+                proofs_state: gateOutcome.trace.proofs_state || null,
+                observed_head: gateOutcome.trace.observed_head || null,
+                syncs: gateOutcome.trace.syncs.length,
+                reruns: gateOutcome.trace.reruns.length,
+                rerun_terminal: gateOutcome.trace.rerun_terminal || null,
+              })
+            }
+            // 闸门窗口内发生过锁获取/释放与同步：收尾再刷一次工作区上下文留痕（B12）
+            await refreshWorkspaceContext(logicalRec, wsIdentity)
+          }
           requestLogicalPersist(logicalRec.logical_run_id)
         }
         if (ws) {
-          const lc = lifecycleFor(canon, result && result.stopReason)
+          const blockedGate = !!(gateOutcome && gateOutcome.blocked)
+          const finalCanon = gateOutcome && gateOutcome.finalCanon !== undefined ? gateOutcome.finalCanon : canon
+          const lc = blockedGate ? 'BLOCKED' : lifecycleFor(finalCanon, (gateOutcome && gateOutcome.finalStopReason) || (result && result.stopReason))
           if (lc) await markWorkspaceLifecycle(wsIdentity, lc)
         }
-        return JSON.stringify({ runId: runId, stopReason: result.stopReason, value: result.value, agentsStarted: result.agentsStarted })
+        const outRunId = gateOutcome && gateOutcome.finalRunId ? gateOutcome.finalRunId : runId
+        const outStop = gateOutcome && gateOutcome.finalStop !== undefined ? gateOutcome.finalStop : result.stopReason
+        // 闸门拦截：返回 BLOCKED 现场（不携带原 decision_package，杜绝 HD 续跑绕过闸门，fail-open 封堵）
+        const outValue = gateOutcome && gateOutcome.blocked
+          ? { status: 'BLOCKED', code: gateOutcome.code, message: gateOutcome.message, recovery_hint: '从 uat 节点续跑同一逻辑运行（wf_run entry=uat）以重新通过集成闸门；人工决策续跑已被拒绝', integration_gate: gateOutcome.trace }
+          : (gateOutcome && gateOutcome.finalValue !== undefined ? gateOutcome.finalValue : result.value)
+        const outAgents = (result.agentsStarted || 0) + (gateOutcome && gateOutcome.trace ? gateOutcome.trace.reruns.reduce((n, r) => n + (r.agents_started || 0), 0) : 0)
+        return JSON.stringify({ runId: outRunId, stopReason: outStop, value: outValue, agentsStarted: outAgents, integration_gate: gateOutcome ? gateOutcome.trace : undefined })
       },
     }))
     dtools.register(textTool({
