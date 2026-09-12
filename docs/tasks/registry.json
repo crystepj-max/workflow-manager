@@ -321,7 +321,8 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.001Z",
-      "updated_at": "2026-09-12T10:28:56.668Z"
+      "updated_at": "2026-09-12T10:28:56.668Z",
+      "spec_path": "docs/tasks/specs/LOC-015-skill-invocation-runtime/task-spec-V3.md"
     },
     {
       "task_id": "LOC-016",
