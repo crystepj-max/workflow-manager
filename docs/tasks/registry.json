@@ -194,7 +194,7 @@
       "source": "会话录入",
       "source_ref": "2026-09-11 开发计划表 v2（W2，#82 建设，决策①：M2 版升级正式版）",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已取消",
       "priority": null,
       "env_group": null,
       "env_role": null,
@@ -205,7 +205,7 @@
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.750Z",
-      "updated_at": "2026-09-11T01:06:27.228Z"
+      "updated_at": "2026-09-12T03:11:46.414Z"
     },
     {
       "task_id": "LOC-011",
@@ -304,18 +304,18 @@
       "source": "会话录入",
       "source_ref": "2026-09-11 开发计划表 v2（W4，#83，输入=#80 落地形态）",
       "baseline": "V2",
-      "status": "本地已定义",
+      "status": "交付中",
       "priority": null,
       "env_group": null,
       "env_role": null,
       "deps": [],
-      "branch": null,
+      "branch": "dev-loc-015-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.001Z",
-      "updated_at": "2026-09-11T11:48:51.778Z"
+      "updated_at": "2026-09-11T11:53:46.491Z"
     },
     {
       "task_id": "LOC-016",
@@ -347,21 +347,21 @@
       "slug": "integration-gate",
       "source": "会话录入",
       "source_ref": "2026-09-11 开发计划表 v2（W5，决策③：自动重跑）",
-      "baseline": "V1",
-      "status": "本地已定义",
+      "baseline": "V2",
+      "status": "等待验收",
       "priority": null,
       "env_group": null,
       "env_role": null,
       "deps": [
         "LOC-008"
       ],
-      "branch": null,
+      "branch": "dev-loc-017-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.094Z",
-      "updated_at": "2026-09-10T16:32:54.581Z"
+      "updated_at": "2026-09-11T18:52:55.249Z"
     },
     {
       "task_id": "LOC-018",
