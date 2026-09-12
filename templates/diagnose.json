@@ -1,0 +1,166 @@
+{
+  "id": "diagnose",
+  "displayName": "诊断 · 缺陷修复",
+  "description": "诊断缺陷修复正式模板：缺陷诊断 → 修复 → 审核 → 回归验证 → 收口；先诊断后修复，原始 feedback signal 贯穿全程；修复问题回修复、证据推翻根因回诊断（均消耗自动回退额度，默认 3）；证据不足且不可复现时受阻，不猜根因；默认无独立人工验收节点。",
+  "entry": "diagnose",
+  "control": {
+    "maxRounds": 3
+  },
+  "heteroCheck": true,
+  "nodes": [
+    {
+      "id": "diagnose",
+      "profile": "diagnose",
+      "label": "缺陷诊断",
+      "goal": "从冻结 Source 开始诊断缺陷：以原始 feedback signal 为线索，先复现、再定位根因，产出根因结论与证据链（含 verified_head 锚定的复现输入与观察输出），写入 `diagnosis-report.md`。证据不足且不可复现时输出 BLOCKED（不猜根因，如实写明缺失的证据与复现尝试）；根因明确则输出 DIAGNOSED。最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["DIAGNOSED", "BLOCKED"]
+            },
+            "root_cause": { "type": "string" },
+            "evidence": { "type": "string" },
+            "verified_head": { "type": "string" }
+          },
+          "required": ["route", "root_cause", "evidence", "verified_head"],
+          "additionalProperties": false
+        },
+        "files": {
+          "diagnosis-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "fix",
+      "profile": "dev",
+      "label": "修复",
+      "goal": "只针对诊断结论（`diagnosis-report.md`）的根因修复，以原始 feedback signal 为验收基准做最小必要修改，不得顺手扩大范围；修复必须可被证据链解释（修改点与根因对应）。外部条件无法安全继续时输出 BLOCKED；否则输出 FIXED。将修复交接写入 `fix-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["FIXED", "BLOCKED"]
+            },
+            "summary": { "type": "string" },
+            "changed": { "type": "string" }
+          },
+          "required": ["route", "summary", "changed"],
+          "additionalProperties": false
+        },
+        "files": {
+          "fix-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "review",
+      "profile": "review",
+      "label": "审核",
+      "goal": "对照 `diagnosis-report.md` 与 `fix-report.md` 审核修复：修改是否与根因对应、是否最小、原始 feedback signal 场景是否被覆盖、是否引入新问题。结论四选一：APPROVE（通过，交回归验证）/ FIX_ISSUES（修复本身有问题，退修复）/ ROOT_CAUSE_REFUTED（审核证据推翻根因结论，回缺陷诊断）/ BLOCKED。不得代行修复。最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["APPROVE", "FIX_ISSUES", "ROOT_CAUSE_REFUTED", "BLOCKED"]
+            },
+            "verdict_reason": { "type": "string" }
+          },
+          "required": ["route", "verdict_reason"],
+          "additionalProperties": false
+        },
+        "files": {
+          "review-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "regression",
+      "profile": "test",
+      "label": "回归验证",
+      "goal": "以原始 feedback signal 为第一回归输入验证修复：缺陷场景不再复现，且既有行为无回归（运行与修改相关的既有测试）。结论四选一：PASS（回归通过，交收口）/ FIX_ISSUES（修复未生效或引入新问题，退修复）/ ROOT_CAUSE_REFUTED（回归证据推翻根因结论，回缺陷诊断）/ BLOCKED。不得修改被测代码。最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["PASS", "FIX_ISSUES", "ROOT_CAUSE_REFUTED", "BLOCKED"]
+            },
+            "verdict_reason": { "type": "string" },
+            "regression_evidence": { "type": "string" }
+          },
+          "required": ["route", "verdict_reason", "regression_evidence"],
+          "additionalProperties": false
+        },
+        "files": {
+          "regression-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "closeout",
+      "profile": "closeout",
+      "label": "收口",
+      "goal": "仅对回归验证通过的同一修复成果收口：保留诊断、修复、审核、回归四类记录，不得重新开发或改写结论；遗留观察项写入 followups 供后续定义摄入。完成后写 `cleanup-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.status",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["DELIVERED"]
+            },
+            "summary": { "type": "string" },
+            "followups": { "type": "string" }
+          },
+          "required": ["status", "summary", "followups"],
+          "additionalProperties": false
+        },
+        "files": {
+          "cleanup-report.md": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "diagnose", "to": "fix", "outcome": "DIAGNOSED" },
+    { "from": "diagnose", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "diagnose", "to": "diagnose", "on": "technical" },
+    { "from": "fix", "to": "review", "outcome": "FIXED" },
+    { "from": "fix", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "fix", "to": "fix", "on": "technical" },
+    { "from": "review", "to": "regression", "outcome": "APPROVE" },
+    { "from": "review", "to": "fix", "outcome": "FIX_ISSUES", "countRound": true },
+    { "from": "review", "to": "diagnose", "outcome": "ROOT_CAUSE_REFUTED", "countRound": true },
+    { "from": "review", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "review", "to": "review", "on": "technical" },
+    { "from": "regression", "to": "closeout", "outcome": "PASS" },
+    { "from": "regression", "to": "fix", "outcome": "FIX_ISSUES", "countRound": true },
+    { "from": "regression", "to": "diagnose", "outcome": "ROOT_CAUSE_REFUTED", "countRound": true },
+    { "from": "regression", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "regression", "to": "regression", "on": "technical" },
+    { "from": "closeout", "to": "$end", "outcome": "DELIVERED" },
+    { "from": "closeout", "to": "closeout", "on": "technical" }
+  ],
+  "bindings": {
+    "models": {
+      "diagnose": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+      "fix": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+      "review": { "provider": "openai-codex", "model": "gpt-5.6-luna" },
+      "regression": { "provider": "openai-codex", "model": "gpt-5.6-luna" },
+      "closeout": { "provider": "deepseek-official", "model": "deepseek-v4-flash" }
+    }
+  }
+}
