@@ -204,6 +204,11 @@ const DYN_HOST_PRELUDE = [
   `const __VWF_PLUGIN_ROOT__ = ${JSON.stringify(root)};`,
   `const __VWF_REPO_ROOT__ = ${JSON.stringify(dirname(dirname(root)))};`,
   'if (typeof globalThis.Buffer === "undefined") { const enc = new TextEncoder(); globalThis.Buffer = { from(s, e) { if (e === "base64" && typeof atob === "function") { const bin = atob(s); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; } return enc.encode(String(s)); }, byteLength(s) { return enc.encode(String(s)).length; }, isBuffer() { return false; }, alloc(n) { return new Uint8Array(n); }, concat(list) { const out = []; for (const a of list) out.push(...a); return new Uint8Array(out); } }; }',
+  // cordis 动态沙箱同样没有 structuredClone（续跑路径 host.js 会对快照 provider_model
+  // 做深拷贝）；被拷贝对象均为 JSON 安全结构，用 JSON 往返兜底即可。产品 Node 运行时
+  // 有原生实现，此垫片不会生效（UAT-loc017 真机实证：HD/entry 续跑在沙箱内报
+  // structuredClone is not defined，与 LOC-015 交付中的沙箱守卫同一问题域）。
+  'if (typeof globalThis.structuredClone === "undefined") { globalThis.structuredClone = function structuredClone(value) { return value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }; }',
 ].join('\n') + '\n'
 const dynHost = DYN_HOST_PRELUDE + minifyDynamicClosure(hostBody)
 const dynClient = minifyDynamicClosure(clientBody)
