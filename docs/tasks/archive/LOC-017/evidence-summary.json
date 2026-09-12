@@ -73,8 +73,8 @@
   ],
   "evidence": {
     "archive_path": ".agent-runs/loc-017-r1",
-    "file_count": 11,
-    "total_bytes": 38662
+    "file_count": 12,
+    "total_bytes": 38754
   },
-  "generated_at": "2026-09-12T15:37:18.952Z"
+  "generated_at": "2026-09-12T15:48:19.891Z"
 }

@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 // 建设工作流 Run 引导：从 target 创建分支 + worktree + run 目录 + portable run identity
-// 用法（在仓库主检出根目录执行）：
+// 用法（可在任意工作树内执行——路径一律由主检出派生，不依赖当前目录）：
 //   node scripts/cwf-run-init.mjs <issue_id> <run_id> [--base <ref>] [--budget <n>]
-// 产物：.scratch/worktrees/<branch>/ 与 <worktree>/.agent-runs/<run_id>/run.json
-//       以及本 Run 独占的开发 DSH Home（默认 ~/.dsh-workflow-dev/tasks/<run_id>，含归属 marker task-env.json）
+// 产物（见 docs/design/workspace-directory-convention.md §1.4 / §1.6）：
+//   worktree：<主检出父目录>/<仓库名>-worktrees/<分支名>/   ← 相邻容器，禁止位于仓库内
+//   run 目录：<主检出>/.agent-runs/<run_id>/run.json          ← 锚定主检出，不写进工作树
+//   以及本 Run 独占的开发 DSH Home（默认 ~/.dsh-workflow-dev/tasks/<run_id>，含归属 marker task-env.json）
 
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { mainCheckout, worktreePathFor, runDirFor, runsRoot } from './workspace-paths.mjs'
 
 const DEFAULT_BUDGET = 3
 export const DEV_DSH_HOME_MARKER = 'task-env.json'
@@ -161,18 +164,19 @@ function parseArgs(argv) {
 
 function main() {
   const { issue, runId, base, budget, localBase } = parseArgs(process.argv.slice(2))
-  const repo = git(['rev-parse', '--show-toplevel'])
+  // 路径一律由**主检出**派生（§1.6 锚定机制）：在任意工作树内执行结果都一致，
+  // 且工作树建在仓库之外，嵌套在结构上不可能发生。
+  const main = mainCheckout(process.cwd())
   const branch = branchName(runId)
-  const runDirRel = join('.agent-runs', runId)
+  const runDir = runDirFor(main, runId)
+  const worktreePath = worktreePathFor(main, branch)
 
-  const { baseRef, kind: baseRefKind } = resolveBase({ base, localBase, git: (a) => git(a, repo) })
-  const baseCommit = git(['rev-parse', baseRef], repo)
-  const worktreeDir = `.scratch/worktrees/${branch}`
-  const worktreePath = join(repo, worktreeDir)
+  const { baseRef, kind: baseRefKind } = resolveBase({ base, localBase, git: (a) => git(a, main) })
+  const baseCommit = git(['rev-parse', baseRef], main)
 
   // 幂等：同 run_id 的既有 worktree/run 目录直接复用，不重复建分支
-  const existingRunJson = join(worktreePath, runDirRel, 'run.json')
-  if (git(['branch', '--list', branch], repo)) {
+  const existingRunJson = join(runDir, 'run.json')
+  if (git(['branch', '--list', branch], main)) {
     if (existsSync(existingRunJson)) {
       const existing = JSON.parse(readFileSync(existingRunJson, 'utf-8'))
       if (existing.run_id === runId) {
@@ -216,7 +220,7 @@ function main() {
     run_id: runId,
     issue_or_task_identity: `#${issue}`,
     workspace_id: `wt-${branch}`,
-    repository: repoSlugFromUrl(git(['remote', 'get-url', 'origin'], repo)),
+    repository: repoSlugFromUrl(git(['remote', 'get-url', 'origin'], main)),
     base_ref: base,
     base_ref_kind: baseRefKind,
     base_commit: baseCommit,
@@ -234,24 +238,27 @@ function main() {
     process.exit(1)
   }
 
-  git(['branch', branch, baseRef], repo)
-  git(['worktree', 'add', worktreeDir, branch], repo)
+  git(['branch', branch, baseRef], main)
+  // 绝对路径 + 仓库外目标：无论从哪个工作树执行，都不会把新工作树建到别人内部
+  git(['worktree', 'add', worktreePath, branch], main)
 
-  // run 产物不得入库（仓库安全规则）：目标仓库可能未 ignore .scratch/ 与 .agent-runs/，
+  // run 产物不得入库（仓库安全规则）：目标仓库可能未 ignore .agent-runs/，
   // 写 git 本地 info/exclude（不改动仓库跟踪的 .gitignore）
   // info/exclude 是仓库级公共文件；linked worktree 需经 --git-path 解析（--git-dir 是 per-worktree 目录）
-  ensureGitExclude(git(['rev-parse', '--git-path', 'info/exclude'], repo), ['.scratch/', '.agent-runs/'])
+  ensureGitExclude(git(['rev-parse', '--git-path', 'info/exclude'], main), ['.agent-runs/', '.scratch/'])
   ensureGitExclude(git(['rev-parse', '--git-path', 'info/exclude'], worktreePath), ['.agent-runs/', '.scratch/'])
 
-  const runDir = join(worktreePath, runDirRel)
+  // 产物锚定主检出（§1.6）：工作树只用于干活，不作为产物落点，
+  // 工作树因此成为真正可丢弃的目录。
   mkdirSync(runDir, { recursive: true })
-  // 提供 handoff schema 到目标 workspace（外仓库无本仓库 docs 路径；资产随 skill 分发）
+  // 提供 handoff schema 到主检出的产物根（外仓库无本仓库 docs 路径；资产随 skill 分发）
   const scriptDir = dirname(fileURLToPath(import.meta.url))
   const schemaSrcLocal = join(scriptDir, 'handoff.schema.json')
   const schemaSrcRepo = join(scriptDir, '..', 'docs', 'design', 'construction-workflow', 'handoff.schema.json')
   const schemaSrc = existsSync(schemaSrcLocal) ? schemaSrcLocal : schemaSrcRepo
-  mkdirSync(join(worktreePath, '.agent-runs', 'schema'), { recursive: true })
-  writeFileSync(join(worktreePath, '.agent-runs', 'schema', 'handoff.schema.json'), readFileSync(schemaSrc))
+  const schemaDir = join(runsRoot(main), 'schema')
+  mkdirSync(schemaDir, { recursive: true })
+  writeFileSync(join(schemaDir, 'handoff.schema.json'), readFileSync(schemaSrc))
 
   const runState = {
     ...identity,
