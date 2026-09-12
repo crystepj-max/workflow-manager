@@ -31,7 +31,16 @@ node "$CWF_ASSETS/cwf-run-init.mjs" <任务标识> <run_id> --local-base
 
 - 产出独立分支 / worktree / `.agent-runs/<run_id>/run.json`。
 - 在 run.json 记录绑定的**需求基线版本**（与 Issue 当前版本一致）；之后不得静默换版。
-- **之后全部工作在该 worktree 内进行**。
+- **之后全部工作在该 worktree 内进行**；任何 git / npm 命令一律 `git -C <worktree>` 或先 `cd <worktree>` 并核对 `git rev-parse --abbrev-ref HEAD` = `run.json.work_branch`，不一致即停（不得在主检出或别的 worktree 里"顺手"执行）。
+- 同时分配本 Run **独占的开发 DSH Home**（默认 `~/.dsh-workflow-dev/tasks/<run_id>`，可用 `VWF_DEV_DSH_TASKS_ROOT` 改道）：登记进 `run.json.env_resources.dev_dsh_home`，Home 内写归属 marker `task-env.json`；目录已被其他 Run 占用或无 marker 时 run-init 直接报错，不静默接管。
+- **运行期一切 DSH 开发操作只用本 Run 的 Home**（进程 / 端口 / 插件 / 工具名 / 工作区注册表随之隔离）：
+
+```bash
+export VWF_DEV_DSH_HOME="$(node -e 'console.log(require(process.argv[1]).env_resources.dev_dsh_home.path)' <runDir>/run.json)"
+npm run dev:plugin            # 未采用登记 Home 时会打印 ⚠️ 告警
+```
+
+- **taskId / workspace 键必须带 Run 命名空间**：以 `run.json.task_id_namespace`（= run_id）为前缀，如 `cwf-185-01-uat-01`；不得使用无前缀裸名，避免与其他任务撞名。
 
 ---
 
@@ -148,7 +157,24 @@ node "$CWF_ASSETS/cwf-record.mjs" rollback .agent-runs/<run_id> dev \
 
 1. 仅 `accept` / `conditional_pass` 可收口；`reject` 禁止。
 2. `closeout_summary`：`acceptance_outcome` 与验收包 `decision` 一致；`conditional_pass` 时 `leftovers` 收录优化意见。
-3. 本任务标记环境组完成，并仅在**同组全部完成**时清理工作区：
+3. **环境回收**（#185；在清理 worktree 之前）：若开发 DSH 会话仍在，先用公开的 `cordis_stop` / `cordis_undefine` 清理本 Run 的动态 Package，再回收本 Run 独占开发 Home：
+
+```bash
+node "$CWF_ASSETS/cwf-env-recycle.mjs" recycle .agent-runs/<run_id> --stop \
+  --report .agent-runs/<run_id>/cleanup-report.md
+```
+
+   - 只在 `run.json.env_resources.dev_dsh_home` 与 Home 内 marker 归属一致时删除；`--stop` 只终止本 Home 登记的开发 DSH 进程；仍有进程占用、归属不符或 marker 缺失 → exit 1 且不删除。
+   - **回收失败不阻塞合并主路径**，但脚本输出必须原样进入 `closeout_summary.leftovers` / `cleanup-report.md` 后续事项，不得谎报已回收。
+   - 兜底 GC（任何时间可跑，默认 dry-run 只列清单）：
+
+```bash
+node "$CWF_ASSETS/cwf-env-recycle.mjs" gc                     # 列出 ~/.dsh-workflow-dev/tasks 下残留 Home 及是否合格
+node "$CWF_ASSETS/cwf-env-recycle.mjs" gc --force             # 只删「已过期（默认 14 天）且无占用且有 marker」的项
+node "$CWF_ASSETS/cwf-env-recycle.mjs" gc --max-age-days 3    # 调整过期阈值；无 marker 的项永远只列出、标注请人工确认
+```
+
+4. 本任务标记环境组完成，并仅在**同组全部完成**时清理工作区：
 
 ```bash
 node "$CWF_ASSETS/ai-task-workspace-env.mjs" mark-completed \
@@ -156,8 +182,7 @@ node "$CWF_ASSETS/ai-task-workspace-env.mjs" mark-completed \
 node "$CWF_ASSETS/ai-task-workspace-env.mjs" maybe-cleanup \
   --store <环境组登记目录> --env <施工环境组>
 ```
-
-4. **合并成果**（务必先跑一遍门禁，冲突时脚本会中止且不改动主干）：
+5. **合并成果**（务必先跑一遍门禁，冲突时脚本会中止且不改动主干）：
 
    - **GitHub 轨道**：按仓库规则开 PR 并合并；Issue → 已完成。
    - **本地轨道**（GitHub 不可用）：合并回本地主干，一任务一提交：
@@ -174,13 +199,13 @@ node scripts/local-task-merge.mjs --task <任务标识> --branch <工作分支> 
 
    🔴 工作区与分支**暂不删除**，保留供 GitHub 恢复后补 PR；`GitHub 同步` 保持 `pending`。
 
-5. 归档：
+6. 归档：
 
 ```bash
 node "$CWF_ASSETS/cwf-record.mjs" archive .agent-runs/<run_id>
 ```
 
-6. **本地轨道收尾**：把「有条件通过」的优化意见登记为新的候选任务（分配新的 `LOC-` 号），不改已合并基线：
+7. **本地轨道收尾**：把「有条件通过」的优化意见登记为新的候选任务（分配新的 `LOC-` 号），不改已合并基线：
 
 ```bash
 node scripts/local-task-registry.mjs allocate --name "<优化任务名>" --source 会话录入
