@@ -236,29 +236,31 @@ if (registry) {
   record('D-7', `终态任务（已合并/已取消，${terminal.length} 个）工作区已清理`, bad.length === 0, bad.length ? bad : ['无终态残留']);
 }
 
-// —— D-8 归档完整性 ——
+// —— D-8 归档完整性（三件套：任务卡 + 规格终版 + 证据摘要）——
 if (registry) {
   const merged = (registry.tasks || []).filter((t) => t.status === '已合并');
   const missing = [];
-  const inSpecsOnly = [];
   for (const t of merged) {
     const archiveDir = path.join(root, ARCHIVE_ROOT, t.task_id);
     if (!fs.existsSync(archiveDir)) {
-      const specsDir = path.join(root, SPECS_ROOT);
-      const inSpecs = fs.existsSync(specsDir) && fs.readdirSync(specsDir).some((d) => d.startsWith(t.task_id));
-      if (inSpecs) inSpecsOnly.push(`${t.task_id} 仅在 ${SPECS_ROOT}/（决策五：应统一到 ${ARCHIVE_ROOT}/）`);
-      else missing.push(`${t.task_id} 既不在 ${ARCHIVE_ROOT}/ 也不在 ${SPECS_ROOT}/`);
+      missing.push(`${t.task_id} 无归档目录（${ARCHIVE_ROOT}/${t.task_id}/）`);
       continue;
     }
     const files = fs.readdirSync(archiveDir);
     const hasCard = files.some((f) => f.startsWith(t.task_id) && f.endsWith('.md'));
     const hasSpec = files.some((f) => /^task-spec-V\d+\.md$/.test(f));
+    const hasSummary = files.includes('evidence-summary.json');
     if (!hasCard) missing.push(`${t.task_id} 缺任务卡（${ARCHIVE_ROOT}/${t.task_id}/）`);
     if (!hasSpec) missing.push(`${t.task_id} 缺规格终版（${ARCHIVE_ROOT}/${t.task_id}/）`);
+    if (!hasSummary) missing.push(`${t.task_id} 缺证据摘要（${ARCHIVE_ROOT}/${t.task_id}/evidence-summary.json）`);
   }
-  if (missing.length) record('D-8', `已合并任务（${merged.length} 个）归档完整性`, false, missing);
-  else record('D-8', `已合并任务（${merged.length} 个）归档完整性`, true, ['全部齐备']);
-  if (inSpecsOnly.length) warn('D-8', `归档位置未统一（${inSpecsOnly.length} 个，决策五方案甲待执行）`, inSpecsOnly);
+  if (missing.length) record('D-8', `已合并任务（${merged.length} 个）归档三件套完整性`, false, missing);
+  else record('D-8', `已合并任务（${merged.length} 个）归档三件套完整性`, true, ['全部齐备（任务卡 + 规格终版 + 证据摘要）']);
+  // 已废弃目录不得残留（决策五方案甲：统一到 archive/）
+  const specsDir = path.join(root, SPECS_ROOT);
+  if (fs.existsSync(specsDir) && fs.readdirSync(specsDir).length) {
+    warn('D-8', `已废弃的 ${SPECS_ROOT}/ 仍存在（决策五：归档位置统一到 ${ARCHIVE_ROOT}/）`, fs.readdirSync(specsDir));
+  }
 }
 
 // —— D-9 无超期证据残留（依赖登记册字段，未启用时提示）——
