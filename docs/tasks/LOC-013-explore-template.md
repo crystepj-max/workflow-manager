@@ -16,9 +16,9 @@
 | 施工环境组 | LOC-013 |
 | 施工环境角色 | 独立 |
 | 无人值守许可 | 允许 |
-| 任务规格位置 | 本卡三要素即基线；实施前如需细化，按 Vn→Vn+1 流程升版 |
+| 任务规格位置 | `.scratch/LOC-013-explore-template/task-spec-V1.md` |
 | 定义时间 | 2026-09-11 |
-| GitHub 同步 | 待补 issue |
+| GitHub 同步 | pending |
 
 ## 摘要（三要素速览）
 
@@ -48,3 +48,10 @@
 | 时间 | 状态 | 说明 |
 |---|---|---|
 | 2026-09-11 | 本地已定义 | 基线 V1 经用户会话指令确认（开发计划表 v2 落卡） |
+| 2026-09-11 | 交付中 | Run loc-013-r1（分支 dev-loc-013-r1）；preflight 通过，施工环境组 LOC-013 登记 |
+
+## 实施记录（2026-09-11，Run loc-013-r1）
+
+- 已实施：`templates/explore.json`（四角色链 + NEEDS_RESEARCH 回退边 countRound:true + maxRounds=2 + 完成类型映射 + workspace.template_id=explore）；`scripts/generate.mjs`（fanout 子代理注入专属 scratch 路径与兄弟隔离禁令；ISOLATED_READ 时 source 标注只读；worker 提示不下发 Run 级 capability）；`packages/dsh-visual-workflow/src/host.js`（scriptArgsFromWorkspace 增注 workspace_mode）；`scripts/test/explore-template.test.mjs`（14 项行为测试）。
+- **取舍留痕（审查 minor 项）**：规格 §7.2 字面写"经宿主 RPC 使用 assembleWorkerContext"——实际实现为编译期 prompt 注入 scratch 路径，因为编译产物运行在引擎 vm 沙箱，只有 agent/parallel/pipeline/phase/log 五件钩子，无法发起 RPC；RPC 面的越权防线改为"worker 提示不下发 Run 级 capability"（无凭据即被宿主 capability 校验拒绝），文件级硬隔离仍由 #93 内核 `readWorkerFile`/`writeWorkerFile` 路径限域承担（内核级反例已测）。功能效果与规格意图一致。
+- 收敛审查 R1（独立会话 zcode-loc013-review）：RETURN_DEV，2 阻断（stale 断言缺失、RPC 跨 worker 读无强制拒绝）+ 1 major（E4 剧本缺失）+ 1 minor（上述取舍），全部返修完毕。

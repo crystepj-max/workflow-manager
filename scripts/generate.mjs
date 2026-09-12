@@ -137,6 +137,8 @@ export function compileBlueprint(bp, opts = {}) {
     'const RECORDS = A.records_path || null',
     'const WORK_BRANCH = A.work_branch || WORK',
     'const SOURCE_REVISION = A.source_revision || null',
+    // LOC-013：宿主经 args.workspace_mode 注入 #93 隔离模式（ISOLATED_READ 时 source 只读）
+    'const WS_MODE = A.workspace_mode || null',
     'const NODES = ' + JSON.stringify(bp.nodes),
     'const EDGES = ' + JSON.stringify(bp.edges),
     // #79：续跑快照修订仅允许更换 Provider/Model——宿主经 args.model_overrides 注入
@@ -255,13 +257,14 @@ export function compileBlueprint(bp, opts = {}) {
     '  const _uniq = _order.filter((p, i) => _order.indexOf(p) === i)',
     '  return \'【角色定义】开工前先用读文件工具依次尝试读取以下路径中的角色文件（前者优先，读不到再读后者）：\' + _uniq.join(\'、\') + \'。严格遵循其中的定位、工作流程、产出模板、判定标准与硬规则——首个读到的文件是你在本节点的唯一角色依据。\\n\'',
     '}',
-    'function runtimeCtx(nodeId, extra, goalOverride) {',
+    'function runtimeCtx(nodeId, extra, goalOverride, opts) {',
     '  const n = BYID[nodeId]',
     '  let s = \'\\n\\n---\\n\\n## 运行上下文（编排注入，以此为准）\\n\\n\' + \'【节点目标】\\n\' + (goalOverride === undefined ? (n.goal || \'\') : goalOverride) + \'\\n\\n【任务输入】\\n\' + issueBlock() + \'\\n\\n- 任务标识：\' + TASK + \'\\n- run 产物目录：\' + RUNDIR + \'/（记录、报告、STATE.md 等 run 产物写这里；不存在则创建）\'',
-    '  if (SOURCE) s += \'\\n- **业务源码读写目录（本节点唯一允许写业务文件的位置）：\' + SOURCE + \'（#93 Git worktree 现场，分支 \' + (WORK_BRANCH || WORK) + \'）**——所有源码/业务文件改动必须发生在该目录内，禁止写主仓库或共享 cwd\'',
+    '  if (SOURCE && WS_MODE === \'ISOLATED_READ\') s += \'\\n- **共享 source（只读现场，禁止写入任何文件）：\' + SOURCE + \'**——本工作流为只读研究现场，产出只能写入 run 产物目录或你的专属 scratch\'',
+    '  else if (SOURCE) s += \'\\n- **业务源码读写目录（本节点唯一允许写业务文件的位置）：\' + SOURCE + \'（#93 Git worktree 现场，分支 \' + (WORK_BRANCH || WORK) + \'）**——所有源码/业务文件改动必须发生在该目录内，禁止写主仓库或共享 cwd\'',
     '  if (WS) s += \'\\n- workspace 路径：\' + WS + \'（#93 隔离工作区，其下 source=业务源码、records=Formal Records、tmp/build/cache=按 Run 隔离资源）\'',
     '  if (RECORDS) s += \'\\n- records 路径：\' + RECORDS + \'（Formal Records 证据记录目录，业务证据写入此目录）\'',
-    '  if (A.workspace_capability) s += \'\\n- workspace RPC 能力令牌（调用 vwf.workspace.* / vwf_workspace 时必须原样携带）：\' + A.workspace_capability + \'（仅限本 Run 使用，禁止用于其他 Run 的 taskId）\'',
+    '  if (A.workspace_capability && !(opts && opts.hideCapability)) s += \'\\n- workspace RPC 能力令牌（调用 vwf.workspace.* / vwf_workspace 时必须原样携带）：\' + A.workspace_capability + \'（仅限本 Run 使用，禁止用于其他 Run 的 taskId）\'',
     '  if (A.guidance_text) s += \'\\n【用户指导（用户暂停期间补充的执行指导，必须遵循）】\\n\' + A.guidance_text + \'\\n\'',
     '  s += \'\\n- 当前节点：\' + (n.label || nodeId) + \'\\n- 完成本节点后更新 \' + RUNDIR + \'/STATE.md（stage / round / status / updated，时间用 date -u +%FT%TZ）\\n\'',
     '  if (n.output && n.output.files) {',
@@ -630,9 +633,19 @@ export function compileBlueprint(bp, opts = {}) {
     '      if (model.provider) itemOpts.provider = model.provider',
     '      if (model.model) itemOpts.model = model.model',
     '      if (n.output && n.output.schema) itemOpts.schema = n.output.schema',
-    '      // 工作区 cwd 同 callNode：由引擎 run 级 startReq.cwd 扅载，不再逐节点传',
+    '      // 工作区 cwd 同 callNode：由引擎 run 级 startReq.cwd 承载，不再逐节点传',
     '      const renderedGoal = (n.goal || \'\').split(\'{{item}}\').join(itemText(entry.item))',
-    '      const prompt = roleRef(n.profile) + runtimeCtx(current, feedback ? \'【上轮打回反馈——必须逐条修复】\\n\' + feedback : \'\', renderedGoal)',
+    '      let itemExtra = feedback ? \'【上轮打回反馈——必须逐条修复】\\n\' + feedback : \'\'',
+    // LOC-013：fanout 子代理独立 scratch 接线——有 workspace 现场时为每个 item 注入
+    // 专属 scratch 路径与兄弟隔离禁令（#93 §5/§6.4 探索语义）；无现场时行为不变。
+    '      if (WS) {',
+    '        const __wid = current + \'-\' + (entry.index + 1)',
+    '        itemExtra += \'\\n【并行子任务工作区（编排注入，必须遵守）】\\n- 你的专属 scratch 目录（工作笔记与中间产出只能写这里）：\' + WS + \'/workers/\' + __wid + \'/\\n- 禁止读取或写入其他并行子任务的 scratch 目录（workers/ 下其他子目录），也不得参考其他子任务的结论\\n- 正式交付物写入 run 产物目录：\' + RUNDIR + \'/\' + (SOURCE && WS_MODE === \'ISOLATED_READ\' ? \'\\n- 共享 source 为只读现场，禁止写入：\' + SOURCE : \'\') + \'\\n\'',
+    '      }',
+    // LOC-013 R2 修复：worker 提示不下发 Run 级 capability——fanout worker 无需调用
+    // workspace RPC（文件直写专属 scratch / run 目录）；无凭据则任何 RPC 调用被宿主拒绝，
+    // 从 RPC 面杜绝「持 Run 令牌冒用可预测 worker_id 读兄弟 scratch」（规格 E2 严格口径）。
+    '      const prompt = roleRef(n.profile) + runtimeCtx(current, itemExtra, renderedGoal, { hideCapability: true })',
     '      return coerceStructured(await agent(prompt, itemOpts), n.output && n.output.schema)',
     '    })',
     '    const failedCount = itemResults.filter(function (item) { return item === null }).length',
