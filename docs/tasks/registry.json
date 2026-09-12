@@ -158,7 +158,9 @@
       "runs": [],
       "merge": {
         "commit": "03e8b4dcc6079a6addcd0c0ed1bc9fa35edd9bf8",
-        "merged_at": "2026-09-11T03:44:46.532Z"
+        "merged_at": "2026-09-11T03:44:46.532Z",
+        "issue": "12",
+        "issue_url": "https://cnb.cool/chris.ai/workflow-manager/-/issues/12"
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.644Z",
@@ -181,7 +183,9 @@
       "runs": [],
       "merge": {
         "commit": "c94acf9ee0e8968d2ad4c599c89099c0cb0d9305",
-        "merged_at": "2026-09-11T04:06:10.099Z"
+        "merged_at": "2026-09-11T04:06:10.099Z",
+        "issue": "13",
+        "issue_url": "https://cnb.cool/chris.ai/workflow-manager/-/issues/13"
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.693Z",
@@ -224,7 +228,9 @@
       "runs": [],
       "merge": {
         "commit": "f08e9aed29f1572826f4212151d9a040387bdd49",
-        "merged_at": "2026-09-12T03:22:44.741Z"
+        "merged_at": "2026-09-12T03:22:44.741Z",
+        "issue": "14",
+        "issue_url": "https://cnb.cool/chris.ai/workflow-manager/-/issues/14"
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.805Z",
@@ -247,7 +253,9 @@
       "runs": [],
       "merge": {
         "commit": "ee3b04c619d779b5e80e4231f1ab7b69e1e75a32",
-        "merged_at": "2026-09-12T03:23:44.133Z"
+        "merged_at": "2026-09-12T03:23:44.133Z",
+        "issue": "15",
+        "issue_url": "https://cnb.cool/chris.ai/workflow-manager/-/issues/15"
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.861Z",
@@ -319,7 +327,9 @@
         "target": "main",
         "status": "pending_user_acceptance",
         "commit": "6e8bd5f5aea20bf57526e6eac7bf07fc6fd24845",
-        "merged_at": "2026-09-12T10:33:45.453Z"
+        "merged_at": "2026-09-12T10:33:45.453Z",
+        "issue": "11",
+        "issue_url": "https://cnb.cool/chris.ai/workflow-manager/-/issues/11"
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.001Z",
