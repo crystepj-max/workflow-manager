@@ -55,6 +55,16 @@ export function slugify(name, fallback = 'task') {
   return s || fallback
 }
 
+// 证据明细保留期（天）。起算点是**合并时间**，不是创建时间。
+// 依据：docs/design/workspace-directory-convention.md §1.8。
+export const DEFAULT_EVIDENCE_RETENTION_DAYS = 7
+
+export function evidenceExpiry(mergedAt, retentionDays = DEFAULT_EVIDENCE_RETENTION_DAYS) {
+  const t = Date.parse(mergedAt)
+  if (Number.isNaN(t)) return null
+  return new Date(t + retentionDays * 24 * 60 * 60 * 1000).toISOString()
+}
+
 export function newRecord({
   seq,
   name,
@@ -81,6 +91,10 @@ export function newRecord({
     runs: [],
     merge: null,
     github_sync: 'pending',
+    // 生命周期三字段（约定 §1.8）：到期时间、实际清理时间、分支是否按暂停期保留
+    evidence_expires_at: null,
+    evidence_cleared_at: null,
+    branch_retained: null,
     created_at: now,
     updated_at: now,
   }
@@ -109,7 +123,17 @@ export function applyUpdate(record, patch = {}) {
     if (patch[k] !== undefined && patch[k] !== null) next[k] = patch[k]
   }
   if (patch.merge_commit) {
-    next.merge = { ...(next.merge || {}), commit: patch.merge_commit, merged_at: patch.merged_at || new Date().toISOString() }
+    const mergedAt = patch.merged_at || new Date().toISOString()
+    next.merge = { ...(next.merge || {}), commit: patch.merge_commit, merged_at: mergedAt }
+    // 合并即自动起算证据保留期（约定 §1.8：起算点 = 合并时间 + 保留期）
+    if (patch.evidence_expires_at === undefined) {
+      next.evidence_expires_at = evidenceExpiry(mergedAt, patch.retention_days ?? DEFAULT_EVIDENCE_RETENTION_DAYS)
+    }
+  }
+  // 生命周期三字段允许 null（null = 未清理 / 未保留），故不走上面的白名单
+  for (const k of ['evidence_expires_at', 'evidence_cleared_at', 'branch_retained']) {
+    if (k in patch && patch[k] !== undefined) next[k] = patch[k]
+    if (k in patch && patch[k] === null) next[k] = null
   }
   next.updated_at = patch.updated_at || new Date().toISOString()
   return next
@@ -144,6 +168,17 @@ export function renderBoard(records) {
 
 function registryPath(repo) {
   return path.join(repo, 'docs', 'tasks', 'registry.json')
+}
+
+// CLI 值转换：字符串 'none' / 'null' 表示显式置 null（区别于「未提供参数」）
+function nullable(v) {
+  if (v === undefined) return undefined
+  return v === 'none' || v === 'null' ? null : v
+}
+
+function toBool(v) {
+  if (v === undefined) return undefined
+  return v === 'true' || v === '1' || v === 'yes'
 }
 
 export function loadRegistry(repo) {
@@ -214,17 +249,26 @@ function main(argv) {
   if (cmd === 'set') {
     const taskId = get('--task')
     if (!taskId) {
-      console.error('用法: set --task LOC-001 [--status <状态>] [--baseline V1] [--branch <b>] [--merge-commit <sha>] [--github-sync <x>]')
+      console.error(
+        '用法: set --task LOC-001 [--status <状态>] [--baseline V1] [--branch <b>] [--merge-commit <sha>] [--github-sync <x>]\n' +
+          '        [--worktree <路径|none>] [--evidence-expires-at <iso|none>] [--evidence-cleared-at <iso|none>]\n' +
+          '        [--branch-retained <true|false>] [--retention-days <n>]',
+      )
       process.exit(2)
     }
     const deps = get('--deps')
+    const retention = get('--retention-days')
     const rec = update(repo, taskId, {
       status: get('--status'),
       baseline: get('--baseline'),
       branch: get('--branch'),
-      worktree: get('--worktree'),
+      worktree: nullable(get('--worktree')),
       github_sync: get('--github-sync'),
       merge_commit: get('--merge-commit'),
+      evidence_expires_at: nullable(get('--evidence-expires-at')),
+      evidence_cleared_at: nullable(get('--evidence-cleared-at')),
+      branch_retained: toBool(get('--branch-retained')),
+      retention_days: retention ? Number(retention) : undefined,
       deps: deps ? deps.split(/[,，]/).map((s) => s.trim()).filter(Boolean) : undefined,
     })
     writeBoard(repo)
