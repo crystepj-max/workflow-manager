@@ -223,12 +223,12 @@
       "worktree": null,
       "runs": [],
       "merge": {
-        "commit": "PENDING",
-        "merged_at": "2026-09-12T03:22:44.705Z"
+        "commit": "f08e9aed29f1572826f4212151d9a040387bdd49",
+        "merged_at": "2026-09-12T03:22:44.741Z"
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.805Z",
-      "updated_at": "2026-09-12T03:22:44.705Z"
+      "updated_at": "2026-09-12T03:22:44.747Z"
     },
     {
       "task_id": "LOC-012",
