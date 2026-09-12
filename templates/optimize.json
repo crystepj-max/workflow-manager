@@ -1,0 +1,141 @@
+{
+  "id": "optimize",
+  "displayName": "优化 · 快速迭代",
+  "description": "优化快速迭代正式模板：目标确认（生成并冻结 evaluation contract）→ 执行（最小必要修改，保护已满足部分）→ 评估（只输出 PASS / OPTIMIZE / CONFIRM）→ 收口；OPTIMIZE 回执行消耗自动回退额度（默认 3）；完成类型区分 EVALUATION_PASSED / USER_ACCEPTED。",
+  "entry": "confirm",
+  "control": {
+    "maxRounds": 3
+  },
+  "nodes": [
+    {
+      "id": "confirm",
+      "profile": "requirements",
+      "label": "目标确认",
+      "goal": "与当前优化目标对齐，生成并冻结 evaluation contract（评估契约：优化目标、范围、已满足部分基线、可验证的评估标准与通过判据），写入 `evaluation-contract.md`。契约一经本节点输出即冻结，执行与评估节点只读引用，不得由执行或评估改写。目标缺失或不可验证时如实写入契约的未决节并输出 BLOCKED。最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["READY", "BLOCKED"]
+            },
+            "summary": { "type": "string" },
+            "contract_digest": { "type": "string" }
+          },
+          "required": ["route", "summary", "contract_digest"],
+          "additionalProperties": false
+        },
+        "files": {
+          "evaluation-contract.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "execute",
+      "profile": "dev",
+      "label": "执行",
+      "goal": "只依据冻结的 evaluation contract（`evaluation-contract.md`）施工：采用最小必要修改达成未满足目标，显式保护已满足部分不被回归。发现冻结的 evaluation contract 因新事实、约束或环境变化已不再可执行时，输出 RECONFIRM_REQUIRED（这不是评估裁决，返回目标确认重新确认或修订契约）；外部条件无法安全继续时输出 BLOCKED；否则输出 READY。将执行交接写入 `execute-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["READY", "RECONFIRM_REQUIRED", "BLOCKED"]
+            },
+            "summary": { "type": "string" },
+            "changed": { "type": "string" }
+          },
+          "required": ["route", "summary", "changed"],
+          "additionalProperties": false
+        },
+        "files": {
+          "execute-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "evaluate",
+      "profile": "evaluator",
+      "label": "评估",
+      "goal": "只依据冻结的 evaluation contract（`evaluation-contract.md`）评估执行结果，评估结论只允许三选一：PASS（已满足契约判据）/ OPTIMIZE（未满足，给出差距清单）/ CONFIRM（契约判据无法自动判定，升人工确认）。不改写执行节点的原结果，也不改写冻结契约。将评估报告（含 PASS/OPTIMIZE/CONFIRM 判据引用）写入 `evaluation-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["PASS", "OPTIMIZE", "CONFIRM"]
+            },
+            "summary": { "type": "string" },
+            "contract_digest": { "type": "string" },
+            "gaps": { "type": "string" }
+          },
+          "required": ["route", "summary", "contract_digest", "gaps"],
+          "additionalProperties": false
+        },
+        "files": {
+          "evaluation-report.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "closeout",
+      "profile": "closeout",
+      "label": "收口",
+      "goal": "区分完成类型并收口：本轮经评估 PASS 自动进入时 completion_type=EVALUATION_PASSED；经人工决策 ACCEPT 进入时 completion_type=USER_ACCEPTED。保留评估报告与执行交接，不得重新开发或改写评估结论。完成后写 `cleanup-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "output": {
+        "outcomePath": "$.status",
+        "completionPath": "$.completion_type",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["DELIVERED"]
+            },
+            "completion_type": {
+              "type": "string",
+              "enum": ["EVALUATION_PASSED", "USER_ACCEPTED"]
+            },
+            "summary": { "type": "string" },
+            "followups": { "type": "string" }
+          },
+          "required": ["status", "completion_type", "summary", "followups"],
+          "additionalProperties": false
+        },
+        "files": {
+          "cleanup-report.md": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "confirm", "to": "execute", "outcome": "READY" },
+    { "from": "confirm", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "confirm", "to": "confirm", "on": "technical" },
+    { "from": "execute", "to": "evaluate", "outcome": "READY" },
+    { "from": "execute", "to": "confirm", "outcome": "RECONFIRM_REQUIRED", "countRound": false },
+    { "from": "execute", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "execute", "to": "execute", "on": "technical" },
+    { "from": "evaluate", "to": "closeout", "outcome": "PASS" },
+    { "from": "evaluate", "to": "execute", "outcome": "OPTIMIZE", "countRound": true },
+    { "from": "evaluate", "to": "$human-decision", "outcome": "CONFIRM" },
+    { "from": "evaluate", "to": "evaluate", "on": "technical" },
+    { "from": "$human-decision", "to": "closeout", "outcome": "ACCEPT", "subsequent_effect": "人工确认：按 USER_ACCEPTED 完成类型收口，决策材料含冻结 evaluation contract 摘要" },
+    { "from": "closeout", "to": "$end", "outcome": "DELIVERED" },
+    { "from": "closeout", "to": "closeout", "on": "technical" }
+  ],
+  "bindings": {
+    "models": {
+      "confirm": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+      "execute": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+      "evaluate": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+      "closeout": { "provider": "deepseek-official", "model": "deepseek-v4-flash" }
+    }
+  }
+}

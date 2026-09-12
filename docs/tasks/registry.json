@@ -214,7 +214,7 @@
       "source": "会话录入",
       "source_ref": "2026-09-11 开发计划表 v2（W2，#82 优化）",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": null,
       "env_group": null,
       "env_role": null,
@@ -222,10 +222,13 @@
       "branch": "dev-loc-011-r1",
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "PENDING",
+        "merged_at": "2026-09-12T03:22:44.705Z"
+      },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.805Z",
-      "updated_at": "2026-09-11T01:18:00.484Z"
+      "updated_at": "2026-09-12T03:22:44.705Z"
     },
     {
       "task_id": "LOC-012",
