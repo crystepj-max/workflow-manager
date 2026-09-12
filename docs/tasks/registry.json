@@ -318,8 +318,8 @@
         "mode": "local-task-merge",
         "target": "main",
         "status": "pending_user_acceptance",
-        "commit": "PENDING",
-        "merged_at": "2026-09-12T10:33:45.409Z"
+        "commit": "6e8bd5f5aea20bf57526e6eac7bf07fc6fd24845",
+        "merged_at": "2026-09-12T10:33:45.453Z"
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.001Z",
