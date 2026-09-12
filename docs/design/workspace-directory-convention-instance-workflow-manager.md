@@ -193,22 +193,37 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 
 | 任务 | 现状 | 处置 |
 |---|---|---|
-| **LOC-001** | 规格**仅存在**于 `.scratch/LOC-001-edge-outcome-ui/`：`task-spec-V1.md`、`task-spec-V2.md`、`definition-check.md`、`definition-check-V2.md`（共 32 KB） | **补归档**到 `docs/tasks/archive/LOC-001/`（任务卡 + 规格终版 V2 + 定义检查），入库后删 `.scratch` 副本 |
+| **LOC-001** | 规格**仅存在**于 `.scratch/LOC-001-edge-outcome-ui/`：`task-spec-V1.md`、`task-spec-V2.md`、`definition-check.md`、`definition-check-V2.md`（共 32 KB） | ✅ **已解决（2026-09-12）**：已补归档到 `docs/tasks/archive/LOC-001/`（任务卡 + 规格 V1/V2 全版本 + 定义检查 + 证据摘要），逐文件校验一致 |
 | LOC-011 / LOC-012 | 已于 09-12 由并发会话收口归档（`archive/LOC-011/`、`archive/LOC-012/` 已存在） | ✅ 已解决 |
-| LOC-010 | 已取消，无规格归档 | 可接受 |
+| LOC-010 | 状态「已取消」，但**有完整 Run 证据链**（21 文件，a1–a3 三轮）与规格 V1 | ✅ **已解决（2026-09-12）**：补归档任务卡 + 规格 + 证据摘要。摘要记录的是一次**唯一的人工 `reject` 裁决**（审查 approve / 测试 pass，但产品经理驳回 → 任务取消）——这类「为什么没做」的记录与「做了什么」同等重要 |
+
+> 🔴 **规格生成源位于临时区**：夜批产物 `.scratch/night-batches/<批次>/<TASK_ID>/task-spec-V*.md` 是任务规格的**生成源**，而 `.scratch/` 属过程产物（收口即删）。已核实 LOC-011/012 的夜批版与归档版内容一致（说明收口归档正确），但 LOC-010 的规格此前**仅存在于夜批目录**。该结构意味着「规格唯一副本躺在临时区」的风险持续存在 → 治理项见 §11.4。
 
 > 🔴 注意：LOC-001 是最早期任务，从未纳入归档流程——印证通用模板 Part 3 §3.4 的提醒：**不能假定「已合并 = 已归档」**，必须逐个核对。
 
 ### 7.2 归档位置统一（决策五 = 方案甲）
 
-现状两处并存：
+✅ **已执行（2026-09-12）**。
 
-| 位置 | 内容 |
+执行前两处并存：
+
+| 位置 | 内容（执行前） |
 |---|---|
-| `docs/tasks/specs/<TASK_ID>-<slug>/` | LOC-002、003、004、005、006、007、015 |
-| `docs/tasks/archive/<TASK_ID>/` | LOC-008、009、011、012、015 |
+| `docs/tasks/specs/<TASK_ID>-<slug>/` | LOC-002、003、004、005、006、007、013、015 |
+| `docs/tasks/archive/<TASK_ID>/` | LOC-008、009、011、012、013、015 |
 
-**执行**：`specs/` 内容并入 `archive/<TASK_ID>/`，随后删除 `specs/`；`local-task-merge.mjs` 的归档目标统一为 `archive/`（三件套）。
+**执行结果**：
+
+| 动作 | 结果 |
+|---|---|
+| `specs/` 内容并入 `archive/<TASK_ID>/` | 17 个文件迁移，逐文件校验一致 |
+| 补齐早期任务任务卡 | LOC-002..007 各补任务卡（PR #8 当年只迁了 specs，未迁任务卡） |
+| 补齐归档三件套第三件 | 13 个已合并任务全部生成 `evidence-summary.json` |
+| 删除 `docs/tasks/specs/` | ✅ 已移除（删除前守卫：0 缺失） |
+| 登记册 `spec_path` 改指 `archive/` | LOC-013、LOC-015 已更新 |
+| 校验器 D-8 升级 | 从「2 件」升为「三件套」，并新增「`specs/` 不得残留」告警 |
+
+统一后的唯一归档位置为 `docs/tasks/archive/<TASK_ID>/`，`docs/tasks/specs/` **废弃**。当前 archive 覆盖 LOC-001..009、011..013、015（LOC-010 为已取消任务，无规格，可接受）。
 
 ---
 
@@ -236,10 +251,12 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 | `scripts/cwf-run-init.mjs` | 第 122 行锚点改为 `--git-common-dir` 推导主检出；第 128–129 行工作区路径改为 `../workflow-manager-worktrees/`；第 168 行产物目录改为 `.task-runs/<TASK_ID>/<RUN_ID>/`；抽出**单一路径解析函数** |
 | `scripts/ai-task-workspace-env.mjs` | `resolve` 改为调用上述解析函数，不再自行拼接 |
 | `scripts/cwf-record.mjs` | 归档目标改为 `.task-runs/.../evidence/` 单一写入 |
-| `scripts/local-task-merge.mjs` | 归档从 2 件扩展为 3 件（增证据摘要）；归档目标统一 `docs/tasks/archive/`；末尾追加 `git worktree prune` |
+| `scripts/local-task-merge.mjs` | 归档从 2 件扩展为 3 件（第三件可**直接调用**已落地的 `workspace-evidence-summary.mjs`，见下）；归档目标统一 `docs/tasks/archive/`；末尾追加 `git worktree prune` |
 | `scripts/local-task-registry.mjs` | 支持 `evidence_expires_at` / `evidence_cleared_at` / `branch_retained` |
 | 新增 `scripts/task-runs-cleanup.mjs` | 到期清理：扫登记册 → 校验摘要存在 → 删明细 |
-| 新增 `scripts/validate-workspace.mjs` | D-1~D-10 校验（可并入 `validate.mjs`） |
+| 新增 `scripts/validate-workspace.mjs` | ✅ **已落地（2026-09-12）**：D-1~D-10 校验（尚未并入 `validate.mjs` 阻断路径） |
+| 新增 `scripts/workspace-convention-core.cjs` | ✅ **已落地**：命名规则 / porcelain 解析 / 路径判定 / 范围分类（纯逻辑，可单测） |
+| 新增 `scripts/workspace-evidence-summary.mjs` | ✅ **已落地**：生成归档三件套之第三件 `evidence-summary.json`；支持 `--no-run-evidence` 降级早期任务 |
 | `dsh/roles/closeout.md` | 第 6 条补 `git worktree prune`（级联注销嵌套子登记） |
 | `docs/tasks/README.md` | 硬规则 3 补注适用期（阶段一口径）；新字段说明 |
 | `AGENTS.md`、`CONTEXT.md` | 写入 §1.4 / §1.6 / §1.7 / §1.12 条款 |
@@ -270,6 +287,7 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 | `scripts/workspace-convention-core.cjs` | 纯逻辑核心（命名规则、porcelain 解析、路径包含、范围分类），无副作用、可单测 |
 | `scripts/validate-workspace.mjs` | D-1~D-10 只读校验器；支持 `--json` / `--warn-only` / `--repo <path>` |
 | `scripts/test/workspace-convention-core.test.mjs` | core 单测 12 例（含「同级目录不算嵌套」「相邻容器不算嵌套」「旧式 `-01` 结尾非法」等边界） |
+| `scripts/workspace-evidence-summary.mjs` | 归档三件套之第三件生成器；从 `.agent-runs/<run-id>/` 抽裁决与各阶段结论写入 `archive/<TASK_ID>/evidence-summary.json`；早期无证据任务走 `--no-run-evidence` 降级（标注 `no_run_evidence`，不伪造证据） |
 | `CHANGELOG.md` | 变更日志（交付事件唯一存放位置） |
 | `docs/design/decisions/README.md` + `0001-workspace-directory-convention.md` | 决策记录骨架 + 首条 ADR（记录本约定 8 项决定与 6 项被否决备选） |
 | `package.json` | 新增 `npm run validate:workspace` |
@@ -278,33 +296,57 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 
 范围分类：**治理区**（人工/脚本创建，强制）与**例外区**（外部运行时/编辑器创建，计警告不计失败），对应模板 §1.10。
 
-### 11.2 实时违规基线（首次运行，2026-09-12）
+### 11.2 实时违规基线
 
-工作区登记 31 条（含主检出）／链接工作区 30 个；**失败 7 项 + 警告 2 项**，退出码 1。
+**首次运行（P1 落地时）**：工作区登记 31 条（含主检出）／链接工作区 30 个；失败 7 项 + 警告 2 项。
 
-| 编号 | 结果 | 违规 |
+**最新基线（存量收敛批次 A 之后，2026-09-12 晚）**：工作区 **24 条**；**失败 5 项 + 警告 1 项**。
+
+| 编号 | 首次 | 最新 | 说明 |
+|---|---|---|---|
+| D-1a 禁止嵌套 | ✅ 通过 | ✅ 通过 | 清掉孤儿登记后未复发 |
+| D-1b 不得位于仓库内 | ❌ 8 项 | ❌ 4 项 | `.scratch/worktrees/` 剩余 4 个 → 待 P2/B5 迁移到相邻容器 |
+| D-2 目录名 = 分支名 | ⚠️ 例外区 22 项 | ⚠️ 例外区 | 例外区目录名多为 `source`（运行时约定），属接口约定待治理 |
+| D-3 分支名派生规则 | ❌ 3 项 | ❌ 3 项 | `dev-cwf-131-01`、`dev-cwf-80-01`（旧式 `-01` 结尾）、`dev-night-w2-01-verify` |
+| D-4 工作区内无过程产物目录 | ❌ 8 项 | ❌ 3 项 | 剩余 3 个（LOC-017 在制 + 两个待判定工作树） |
+| D-5 运行目录命名 | ❌ 14 项 | ❌ 16 项 | `cwf-*`（旧式）、`uat-*`（无任务归属）、`task`、`env-store`、`schema`、`loc-013-r1-*`（收口期拆分目录） |
+| D-6 无漏网入库 | ❌ 5 项 | ❌ 5 项 | 决策三的 5 个文件（`.scratch/dsh-visual-workflow-p0/`、`p2/`） |
+| D-7 终态任务已清理 | ❌ 3 项 | ✅ **通过** | LOC-011/012/015 已收口（B8） |
+| D-8 归档完整性 | ❌ 1 项 + ⚠️ 6 项 | ✅ **通过** | 13 个已合并任务三件套齐备（决策五 + LOC-001 补归档） |
+| D-9 无超期证据残留 | ➖ 未启用 | ➖ 未启用 | 登记册尚无 `evidence_expires_at` 字段 |
+| D-10 收口口径一致 | ➖ 未启用 | ➖ 未启用 | 登记册尚无 `branch_retained` 字段 |
+
+**该基线就是存量收敛的待办清单**：D-1b/D-3/D-4/D-5 → P2 与 B5（含三个待判定工作树）；D-6 → 决策三（P5）；D-9/D-10 字段 → P1 ③。
+
+### 11.3 已完成批次（存量收敛，2026-09-12）
+
+| 批次 | 内容 | 结果 |
 |---|---|---|
-| D-1a 禁止嵌套 | ✅ 通过 | 无嵌套（09-12 清掉孤儿登记后未复发） |
-| D-1b 不得位于仓库内 | ❌ 8 项 | `.scratch/worktrees/` 下全部 8 个工作区 → 待 P2/B5 迁移到相邻容器 |
-| D-2 目录名 = 分支名 | ✅ 治理区通过／⚠️ 例外区 22 项 | 例外区目录名多为 `source`（运行时约定），属接口约定待治理 |
-| D-3 分支名派生规则 | ❌ 3 项 | `dev-cwf-131-01`、`dev-cwf-80-01`（旧式 `-01` 结尾）、`dev-night-w2-01-verify` |
-| D-4 工作区内无过程产物目录 | ❌ 8 项 | 8 个工作区内部各有一份 `.agent-runs/` |
-| D-5 运行目录命名 | ❌ 14 项 | `cwf-*`（旧式）、`uat-*`（无任务归属）、`task`、`env-store`、`schema` |
-| D-6 无漏网入库 | ❌ 5 项 | 决策三的 5 个文件（`.scratch/dsh-visual-workflow-p0/`、`p2/`） |
-| D-7 终态任务已清理 | ❌ 3 项 | LOC-011、LOC-012、LOC-015 已合并但工作区仍在 → 待 B8 |
-| D-8 归档完整性 | ❌ 1 项 + ⚠️ 6 项 | 🔴 **LOC-001 规格既不在 `archive/` 也不在 `specs/`**；另 6 个仅在 `specs/`（决策五方案甲待执行） |
-| D-9 无超期证据残留 | ➖ 未启用 | 登记册尚无 `evidence_expires_at` 字段 |
-| D-10 收口口径一致 | ➖ 未启用 | 登记册尚无 `branch_retained` 字段 |
+| B0 | `git worktree prune` 清孤儿登记 | ✅ 清掉 `dev-itest-a-01` |
+| B0.5 | 补归档 `dev-loc-010-r1` 证据（21 文件，此前未归档） | ✅ 源计数 = 归档计数 |
+| B1 | 删 5 个终态工作树 | ✅ 回收 177 MB；5 个分支全部保留 |
+| B3 | 删 `.scratch/ws-isolation-tests` 等 | ✅ 回收 11 MB；另 4 个目标已被并发会话清除（非本次） |
+| B6 | 登记册悬空引用修正 | ✅ LOC-002 置 `null`（首次修改曾被并发脚本覆盖，本次重做） |
+| **B8** | **收口 LOC-011/012/015 三个已合并任务** | ✅ 归档 Run 证据（9+9+25 文件）→ 生成证据摘要 → 删工作树 → `prune` 兜底；分支保留 |
+| **决策五** | **归档位置统一到 `archive/<TASK_ID>/`** | ✅ 17 文件迁移、补 6 个任务卡、13 个摘要、删除 `specs/` |
+| **LOC-001** | **归档缺口补救** | ✅ 5 文件入库（任务卡 + 规格全版本 + 定义检查 + 摘要） |
+| **LOC-010** | **归档缺口补救（已取消任务）** | ✅ 补任务卡 + 规格 V1 + 证据摘要（记录唯一一次 `reject` 裁决） |
 
-**该基线就是存量收敛的待办清单**：D-1b/D-3/D-4/D-5 → P2 与 B5；D-6/D-8 及 P5；D-7 → B8；D-9/D-10 字段 → P1 ③。
+累计效果：工作区 **31 → 24 条**；`.scratch/` **1.7 GB → 98 MB**（其中 B9 的 LOC-013 工作树占 2.1 GB 于收口时回收）。
 
-### 11.3 仍待做
+### 11.4 仍待做
 
 | 项 | 内容 | 阻塞 |
 |---|---|---|
-| P1 ③ | 登记册加 `evidence_expires_at` / `evidence_cleared_at` / `branch_retained` 三字段，并让 `local-task-registry.mjs` 支持读写 | 🟡 改共享文件，需无并发写入窗口（B6 曾被并发脚本覆盖） |
-| P2 | 脚本改造：锚定主检出、切相邻容器、创建入口收敛、收口命令补齐、到期清理函数 | 🟡 触及在制工作流依赖的脚本 |
-| 校验接入 | 待存量收敛后，把 `validate:workspace` 接入 `npm run validate` 阻断路径 | 依赖 D-1b~D-8 清零 |
+| P1 ③ | 登记册加 `evidence_expires_at` / `evidence_cleared_at` / `branch_retained` 三字段，并让 `local-task-registry.mjs` 支持读写 | 🟡 改共享文件，需无并发写入窗口 |
+| P2 | 脚本改造：锚定主检出、切相邻容器、创建入口收敛、收口命令补齐（含调用摘要生成器与 `prune`）、到期清理函数 | 🟡 触及在制工作流依赖的脚本 |
+| 决策三 | 移除 3 个误入库文件、迁入 2 个决策文件到 `docs/design/vwf-p2/` | 无（可直接做） |
+| 夜批规格生成源位置 | `.scratch/night-batches/<批次>/<TASK_ID>/task-spec-V*.md` 是规格生成源却位于临时区 → 应改写到主检出（`.task-runs/` 或直接落 `docs/tasks/archive/`） | 触及夜批脚本，宜与 P2 合并做 |
+| B5 | 剩余 4 个在制工作树迁到相邻容器 | 依赖 P2 |
+| B2 | `ws-cwf-159-01` 指针错乱目录 | 🟡 需先确认其 `artifacts/` 无独有产出 |
+| 三个待判定工作树 | `dev-cwf-131-01`（领先 4 提交、无登记册归属）、`dev-cwf-80-01`、`dev-night-w2-01-verify`（领先 9 提交） | 🟡 需人工判定归属与去留 |
+| B7 | 分支治理（仓库约 40 个分支） | 独立议题 |
+| 校验接入 | 待 D-1b~D-6 清零后，把 `validate:workspace` 接入 `npm run validate` 阻断路径 | 依赖存量收敛 |
 
 ---
 
@@ -314,3 +356,4 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 |---|---|---|
 | 2026-09-12 | 实例化说明 v1.0 | 从原合并文档中拆出 workflow-manager 特有内容：占位符取值、实际创建/回收链路（含 runbook 出处）、五项决策（新增归档位置决策五=方案甲）、四次盘点基线、体量异常定位、逐项处置表、B0–B9 批次、归档缺口、命名修正映射、待改造文件、开放项 |
 | 2026-09-12 | 实例化说明 v1.1 | 新增 §11：P1 已落地产物（core + 校验器 + 单测 + 变更日志 + 决策记录）、首次运行的实时违规基线（7 失败 / 2 警告）、仍待做项与阻塞原因 |
+| 2026-09-12 | 实例化说明 v1.2 | 存量收敛批次 A 完成：B8 收口 LOC-011/012/015、决策五归档统一（删除 `specs/`）、LOC-001 归档缺口补救、新增证据摘要生成器。§7.1/§7.2 标为已解决并记录执行结果；§9 更新已落地脚本；§11.1 补新脚本；§11.2 更新基线（失败 7→5，D-7/D-8 转通过）；§11.3 改为已完成批次，§11.4 为仍待做 |

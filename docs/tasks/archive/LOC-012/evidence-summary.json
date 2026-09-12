@@ -1,0 +1,80 @@
+{
+  "task_id": "LOC-012",
+  "run_id": "loc-012-r1",
+  "task_name": "诊断缺陷修复正式模板",
+  "branch": "dev-loc-012-r1",
+  "status": "已合并",
+  "decision": "accept",
+  "decided_by": "产品经理（用户本人）",
+  "decided_at": "2026-09-12T03:30:00Z",
+  "merge": {
+    "commit": "ee3b04c619d779b5e80e4231f1ab7b69e1e75a32",
+    "merged_at": "2026-09-12T03:23:44.133Z",
+    "issue": "15"
+  },
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-11T01:23:03.543Z",
+      "produced_by": "zcode-nightbatch-loc012",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-11T01:23:03.641Z",
+      "produced_by": "zcode-nightbatch-loc012"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": "2026-09-11T01:23:03.725Z",
+      "produced_by": "zcode-nightbatch-loc012",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a1.json",
+      "created_at": "2026-09-11T01:23:03.808Z",
+      "produced_by": "zcode-nightbatch-loc012-review",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a1.json",
+      "created_at": "2026-09-11T01:23:03.891Z",
+      "produced_by": "zcode-nightbatch-loc012-test",
+      "summary": {
+        "verdict": "pass",
+        "environment": "Node v24.14.1；worktree dev-loc-012-r1 @ f7e0359a9adf31cfc407b73c9d4963b2886f1ca4（工作区干净）；macOS（darwin 25.5.0 arm64）"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a1.json",
+      "created_at": "2026-09-12T03:21:22.832Z",
+      "produced_by": "用户本人裁决",
+      "summary": {
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "产品经理（用户本人）",
+        "decided_at": "2026-09-12T03:30:00Z",
+        "verified_branch": "dev-loc-012-r1",
+        "verified_head": "f7e0359a9adf31cfc407b73c9d4963b2886f1ca4"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-012-r1",
+    "file_count": 9,
+    "total_bytes": 16374
+  },
+  "generated_at": "2026-09-12T15:08:21.650Z"
+}

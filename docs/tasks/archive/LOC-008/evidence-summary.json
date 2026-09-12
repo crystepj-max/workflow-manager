@@ -1,0 +1,80 @@
+{
+  "task_id": "LOC-008",
+  "run_id": "loc-008-r1",
+  "task_name": "Formal Records 运行时集成与证据链落地",
+  "branch": "dev-loc-008-r1",
+  "status": "已合并",
+  "decision": "accept",
+  "decided_by": "用户（会话指令：验收通过，2026-09-11）",
+  "decided_at": "2026-09-11T03:06:59Z",
+  "merge": {
+    "commit": "03e8b4dcc6079a6addcd0c0ed1bc9fa35edd9bf8",
+    "merged_at": "2026-09-11T03:44:46.532Z",
+    "issue": "12"
+  },
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-10T16:48:55.490Z",
+      "produced_by": "zcode:construction-bootstrap:controller",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-10T16:48:55.574Z",
+      "produced_by": "zcode:construction-bootstrap:controller"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": "2026-09-10T23:58:32.171Z",
+      "produced_by": "zcode:loc-008-r1:dev",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a6.json",
+      "created_at": "2026-09-11T03:44:02.256Z",
+      "produced_by": "agent:loc-008-review:independent",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a6.json",
+      "created_at": "2026-09-11T03:44:02.338Z",
+      "produced_by": "agent:loc-008-test:independent",
+      "summary": {
+        "verdict": "pass",
+        "environment": "attempt 6（合并 main@9c8f50e 后 349cf4e，再并入主干登记 bookkeeping e3ecb08——仅 docs/tasks，代码树不变）：macOS darwin 25.5.0 arm64 / Node v24.14.1。映射条目为基线 V1 验收原文。逐条证据：①交叉复核直读磁盘 Store + CLI get 实测 not_covering_current/stale=true，I@2 based_on=I@1，records-host.test 8/8；②W3 接线 pass（verifyBranch 强制 Proof + workspace 绑定）+ 交叉复核 head-A proof 不覆盖 I@2，另一 HEAD（head-B）proof 才为 I@2 背书；③机器级 pass（一运行一文件落盘 <records_dir>/<encoded_id>.json，每次 list/get 独立新进程直读磁盘，本次 get 即新进程冷读成功），产品 DSH 真机重启复验列入 UAT 卡验证步骤待人工确认；④分支侧对 formal-records/runtime-host/runtime-logical-run 三个测试文件与 formal-records.mjs 的 diff 为空，npm test 403/403、validate 全绿（29 文件重生成一致）、插件套件 249/249（含 #80 run-control 与 LOC-002/003/004/006/007 新增测试同套件全绿无相互破坏）、records-runtime 6/6、static-bundle 硬闸 176KiB 15/15"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a6.json",
+      "created_at": "2026-09-11T03:44:02.417Z",
+      "produced_by": "agent:loc-008-acceptance",
+      "summary": {
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "用户（会话指令：验收通过，2026-09-11）",
+        "decided_at": "2026-09-11T03:06:59Z",
+        "verified_branch": "dev-loc-008-r1",
+        "verified_head": "e3ecb08dac0cebf60f3f23848ca5be822ca16a6f"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-008-r1",
+    "file_count": 36,
+    "total_bytes": 76643
+  },
+  "generated_at": "2026-09-12T15:08:21.442Z"
+}

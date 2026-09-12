@@ -34,7 +34,7 @@
       "env_role": null,
       "deps": [],
       "branch": "loc-002-task-card-parse",
-      "worktree": "dev-projection-converge-01",
+      "worktree": null,
       "runs": [],
       "merge": null,
       "github_sync": "pending",
@@ -285,7 +285,7 @@
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.905Z",
       "updated_at": "2026-09-12T15:01:54.057Z",
-      "spec_path": "docs/tasks/specs/LOC-013-explore-template/task-spec-V1.md"
+      "spec_path": "docs/tasks/archive/LOC-013/task-spec-V1.md"
     },
     {
       "task_id": "LOC-014",
@@ -322,7 +322,7 @@
       "env_role": null,
       "deps": [],
       "branch": "dev-loc-015-r1",
-      "worktree": ".scratch/worktrees/dev-loc-015-r1",
+      "worktree": null,
       "runs": [
         "loc-015-r1"
       ],
@@ -338,7 +338,7 @@
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.001Z",
       "updated_at": "2026-09-12T10:33:45.412Z",
-      "spec_path": "docs/tasks/specs/LOC-015-skill-invocation-runtime/task-spec-V3.md"
+      "spec_path": "docs/tasks/archive/LOC-015/task-spec-V3.md"
     },
     {
       "task_id": "LOC-016",

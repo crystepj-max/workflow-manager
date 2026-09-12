@@ -1,0 +1,80 @@
+{
+  "task_id": "LOC-013",
+  "run_id": "loc-013-r1",
+  "task_name": "探索多视角正式模板与专家 scratch 隔离",
+  "branch": "dev-loc-013-r1",
+  "status": "已合并",
+  "decision": "accept",
+  "decided_by": "chris（产品经理，UAT 四场景亲验后口头「通过」）",
+  "decided_at": "2026-09-12T13:30:00Z",
+  "merge": {
+    "commit": "426ff8ea841087ae5cf88c9a92fcdf3cd69d280a",
+    "merged_at": "2026-09-12T15:01:54.049Z",
+    "issue": null
+  },
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-11T07:25:29.396Z",
+      "produced_by": "zcode-loc013-main",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-11T07:25:29.483Z",
+      "produced_by": "zcode-loc013-main"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a2.json",
+      "created_at": "2026-09-11T08:52:47.522Z",
+      "produced_by": "zcode-loc013-main",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a2.json",
+      "created_at": "2026-09-11T08:58:26.085Z",
+      "produced_by": "zcode-loc013-review",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a3.json",
+      "created_at": "2026-09-11T09:25:04.522Z",
+      "produced_by": "zcode-loc013-test",
+      "summary": {
+        "verdict": "pass",
+        "environment": "worktree dev-loc-013-r1（本地基线 main@53b4803）；Node 24；node:test + runtime harness 剧本。补充回归证据：既有模板在新旧生成器下 prompt 逐字节一致；3 项定向变异（关 scratch 注入/去 hideCapability/关只读标注）被对应断言精准捕获；npm test 417/417。"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a3.json",
+      "created_at": "2026-09-12T14:49:18.852Z",
+      "produced_by": "zcode-loc013-main",
+      "summary": {
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "chris（产品经理，UAT 四场景亲验后口头「通过」）",
+        "decided_at": "2026-09-12T13:30:00Z",
+        "verified_branch": "dev-loc-013-r1",
+        "verified_head": "b1d63984e711e64fe2d4d8768f399379ba7e94f5"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-013-r1",
+    "file_count": 44,
+    "total_bytes": 4816575
+  },
+  "generated_at": "2026-09-12T15:08:21.723Z"
+}
