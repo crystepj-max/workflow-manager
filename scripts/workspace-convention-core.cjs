@@ -12,12 +12,14 @@ const TASK_ID_RE = /^(?:LOC|CWF)-\d+$/;
 const RUN_ID_RE = /^(?:loc|cwf)-\d+(?:-s\d+)?-r\d+$/;
 const BRANCH_RE = /^dev-.+-r\d+$/;
 
-// 约定元数据目录名：不属运行标识，应迁至 docs/design/
-const METADATA_DIR_NAMES = ['schema'];
+// 机制目录（非运行标识，由脚本按约定在产物根内生成，不算违规）：
+//   schema      — handoff schema 的分发副本（cwf-run-init 写入，供外仓库使用）
+//   env-store   — 任务环境组登记存储（ai-task-workspace-env 的 store）
+const MECHANISM_DIR_NAMES = ['schema', 'env-store'];
 
 const isTaskId = (name) => TASK_ID_RE.test(name);
 const isRunId = (name) => RUN_ID_RE.test(name);
-const isMetadataDir = (name) => METADATA_DIR_NAMES.includes(name);
+const isMechanismDir = (name) => MECHANISM_DIR_NAMES.includes(name);
 const isResolvableRunDir = (name) => isTaskId(name) || isRunId(name);
 
 // 子路径是否严格位于父路径内部（同级不算）
@@ -91,10 +93,10 @@ module.exports = {
   TASK_ID_RE,
   RUN_ID_RE,
   BRANCH_RE,
-  METADATA_DIR_NAMES,
+  MECHANISM_DIR_NAMES,
   isTaskId,
   isRunId,
-  isMetadataDir,
+  isMechanismDir,
   isResolvableRunDir,
   isInside,
   parsePorcelain,

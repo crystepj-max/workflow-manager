@@ -10,7 +10,7 @@ const core = require('../../scripts/workspace-convention-core.cjs');
 const {
   isTaskId,
   isRunId,
-  isMetadataDir,
+  isMechanismDir,
   isResolvableRunDir,
   isInside,
   parsePorcelain,
@@ -38,11 +38,13 @@ test('RUN_ID：<task_id 小写>-r<n>，允许切片后缀', () => {
   assert.equal(isRunId('env-store'), false);
 });
 
-test('约定元数据目录名不得当作运行标识', () => {
-  assert.equal(isMetadataDir('schema'), true);
-  assert.equal(isMetadataDir('loc-018-r1'), false);
-  // 元数据名虽不是运行标识，但也不应被误报为「未启用字段」类噪音
+test('机制目录由脚本按约定生成，不算运行标识违规', () => {
+  assert.equal(isMechanismDir('schema'), true, 'handoff schema 分发副本');
+  assert.equal(isMechanismDir('env-store'), true, '环境组登记存储');
+  assert.equal(isMechanismDir('loc-018-r1'), false);
+  // 机制名虽不是运行标识，但也不应被误报为「未启用字段」类噪音
   assert.equal(isResolvableRunDir('schema'), false);
+  assert.equal(isResolvableRunDir('env-store'), false);
   assert.equal(isResolvableRunDir('LOC-018'), true);
   assert.equal(isResolvableRunDir('loc-018-r1'), true);
 });

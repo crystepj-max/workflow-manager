@@ -29,7 +29,7 @@ const TERMINAL_STATUSES = ['已合并', '已取消'];
 import conventionCore from './workspace-convention-core.cjs';
 const {
   BRANCH_RE,
-  isMetadataDir,
+  isMechanismDir,
   isResolvableRunDir,
   parsePorcelain,
   scopeOfPath,
@@ -191,7 +191,7 @@ if (!asJson) {
       if (name.startsWith('.')) continue;
       if (!fs.statSync(path.join(abs, name)).isDirectory()) continue;
       scanned++;
-      if (isMetadataDir(name)) { bad.push(`${dir}/${name}  ← 约定元数据，应迁至 docs/design/`); continue; }
+      if (isMechanismDir(name)) continue; // 机制目录（schema / env-store），由脚本按约定生成，非运行标识
       if (!isResolvableRunDir(name)) bad.push(`${dir}/${name}  ← 非 TASK_ID / RUN_ID`);
     }
   }
