@@ -14,7 +14,7 @@
 
 前序产物读取前提：当运行时上下文、当前任务说明或用户明确给出前序节点，或给出对应产物/附件/路径时，应先尝试获取并读取该节点对应的最新产物或指定内容。若只给出前序节点链而未给文件列表，不要因此跳过读取；应通过当前可用的节点产物/附件查看能力按节点定位。不要主动扫描 run 目录寻找未声明产物；如果仍无法定位，则记录为缺失证据或缺失产物。
 
-1. **worktree 隔离**：开工前用 `git worktree add <runDir>/worktree -b <工作分支> <base分支>` 建立本任务独立 worktree（worktree 路径与工作分支名由编排脚本在运行上下文中给出；续跑时复用已存在的 worktree），全程只在 worktree 内读写与提交；禁止切换主工作区分支、禁止改动其他任务/其他分支的工作区，确保多任务并行物理隔离互不冲突。
+1. **worktree 隔离**：worktree 路径与工作分支名由编排脚本在运行上下文 / `run.json` 中给出（标准布局：worktree 在**相邻容器** `../<仓库名>-worktrees/<工作分支>/`，分支 `dev-<runId>`；开工由 `cwf-run-init` 统一创建，续跑时复用已存在的 worktree；**禁止在 `<runDir>`/`.agent-runs` 内自行建树**），全程只在 worktree 内读写与提交；禁止切换主工作区分支、禁止改动其他任务/其他分支的工作区，确保多任务并行物理隔离互不冲突。
 2. **读取输入**：读取调度节点产出的 dispatch-result（任务目标/涉及范围/验收标准），以及上一阶段交接（STATE.md 与 run 目录内的前序报告）。
 3. **测试驱动施工**：按运行上下文给出的调度结论与任务范围施工，先写会失败的测试再写代码（tdd 方式），逐项完成实现。
 4. **质量闸门**：满足项目质量闸门——知识/API 来源可追溯、本地化检查通过、构建通过。
@@ -50,7 +50,7 @@
 
 ## 硬规则
 
-- 动手前先锚定检出（与验收角色同口径，#185 任务环境隔离）：所有 git / npm / 测试命令一律 `git -C <worktree>`（或先 `cd <worktree>`），并核对 `git -C <worktree> rev-parse --abbrev-ref HEAD` = 工作分支（运行上下文或 run.json 登记的 `work_branch`，如 dev2/<taskId>）且 HEAD 与登记一致；不一致即停止并报告，不得在主工作区或别的 worktree 里"顺手"执行。
+- 动手前先锚定检出（与验收角色同口径，#185 任务环境隔离）：所有 git / npm / 测试命令一律 `git -C <worktree>`（或先 `cd <worktree>`），并核对 `git -C <worktree> rev-parse --abbrev-ref HEAD` = 工作分支（运行上下文或 run.json 登记的 `work_branch`，即 `dev-<runId>`）且 HEAD 与登记一致；不一致即停止并报告，不得在主工作区或别的 worktree 里"顺手"执行。
 - 开发 DSH 只用本 Run 独占 Home：动态插件部署、`npm run dev:plugin`、wf_run 调试前先 `export VWF_DEV_DSH_HOME=<run.json.env_resources.dev_dsh_home.path>`；taskId / workspace 键以 `run.json.task_id_namespace` 为前缀，不用裸名（详见 construction-bootstrap runbook §0）。
 - 先本地验证全绿再提交；不得在验证失败时声称完成。
 - 开发与审核/验收角色分离，不自审自批。

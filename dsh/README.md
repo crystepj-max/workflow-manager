@@ -142,19 +142,19 @@ gh issue view <N> --json title,body,comments
 
 | 节点 | 工作区 |
 |------|--------|
-| 开发 / 测试 / 审核 | `<runDir>/worktree`（分支 `dev2/<taskId>`），只读写该 worktree |
+| 开发 / 测试 / 审核 | 相邻容器 worktree `../<仓库名>-worktrees/<分支名>/`（分支 `dev-<runId>`），只读写该 worktree |
 | 收口（push/pr/merge/close） | 主工作区（编排区，始终停在 base 分支） |
 
-- 开发节点用 `git worktree add <runDir>/worktree -b dev2/<taskId> <base>` 建立
-  （续跑时复用已有 worktree），施工与提交都在 worktree 内完成；
-- 收口节点合并后用 `git worktree remove <runDir>/worktree` 原子清理，残留本地分支
-  用 `git branch -D dev2/<taskId>` 删除；
-- 主工作区全程不切换分支、保持干净，只承担 `git push` / `gh pr create` /
-  `gh pr merge` / `gh issue close`。
+- worktree 由 `cwf-run-init` 开工时统一建立（产物锚定主检出 `.agent-runs/<runId>/`，
+  续跑时复用已有 worktree），施工与提交都在 worktree 内完成；
+- 收口按**两阶段口径**清理（`docs/design/workspace-directory-convention.md` §1.7）：
+  阶段一（托管不可用）删工作区、留分支；阶段二（远端已有完整记录）才 `git branch -D dev-<runId>`；
+  删工作区后追加 `git worktree prune` 兜底；
+- 主工作区全程不切换分支、保持干净，只承担 push / PR / issue 操作。
 - 验证结论可信度闸门：test/review/accept 三节点开工先自检 worktree 分支 =
-  `dev2/<taskId>`、不在则先恢复，且三节点 schema 必填 `verified_branch`（实际验证分支）
-  与 `verified_head`（实际 HEAD commit），杜绝「验证跑在错误分支 → 结论不可信、
-  验收指引复现相反结果」。
+  `run.json.work_branch`（`dev-<runId>`）、不在则先恢复，且三节点 schema 必填
+  `verified_branch`（实际验证分支）与 `verified_head`（实际 HEAD commit），
+  杜绝「验证跑在错误分支 → 结论不可信、验收指引复现相反结果」。
 
 ## 与 gold-band DSL 概念对照
 
@@ -245,7 +245,8 @@ kimi 额度恢复后改回上面的推荐分配（跨 provider 真异源）。
 
 1. 改真源文件（如 `dsh/skills/requirements-analysis/SKILL.md`）；
 2. 跑安装脚本部署公共池（`./dsh/install-requirements-analysis.sh`），并 diff 校验真源与线上生效版逐字节一致；
-3. 开分支 `dev2/<issue>` 提交推送 → PR → 合并 main（对齐本仓库历史约定，见「试跑发现与修复记录」第 5 条）。
+3. 开分支 `dev-<runId>` 提交推送 → PR → 合并 main（分支命名派生规则见
+   `docs/design/workspace-directory-convention.md` §1.3）。
 
 **requirements-analysis 为何是自洽（内联）版**：其编排依赖的 `triage` / `grill-with-docs` / `wayfinder` /
 `to-tickets` 是「仅限用户调用」的命令型 skill（frontmatter `disable-model-invocation: true`，刻意设计），
@@ -258,8 +259,9 @@ issue #22 的持久修复，真源即内联自洽版。
 
 注意事项：目标仓库需 `gh` 已登录（无远端可跑，收口退化为本地 commit 清单）；
 模型分配宿主级共享（kimi 额度不足时用 DeepSeek 双模型兜底，见「异源配置」节）；
-多任务并行 = 每个 issue 一个会话 + 一个独立 git worktree（分支 `dev2/<taskId>` + 作业目录
-`.agent-runs/<taskId>/worktree`），物理隔离互不阻塞。
+多任务并行 = 每个 issue 一个会话 + 一个独立 git worktree（`cwf-run-init` 自动创建：
+分支 `dev-<runId>` + worktree 在相邻容器 `../<仓库名>-worktrees/<分支名>/`，
+产物锚定主检出 `.agent-runs/<runId>/`），物理隔离互不阻塞。
 
 ## 已知缺口（P0 基线）
 
