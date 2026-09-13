@@ -2673,7 +2673,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const [ovW, setOvW] = React.useState(null)
       const [ovDraft, setOvDraft] = React.useState({})
       const [ovBusy, setOvBusy] = React.useState(false)
+      const [ovSaved, setOvSaved] = React.useState('{}')
+      const [ovConfirm, setOvConfirm] = React.useState(null)
       const ovDialogRef = React.useRef(null)
+      // 未保存判定的归一化：仅保留 provider/model 均非空的行（与保存口径一致）
+      const ovNorm = (d) => JSON.stringify(Object.keys(d || {}).sort().reduce((a, k) => {
+        const v = d[k]
+        const provider = String((v && v.provider) || '').trim()
+        const model = String((v && v.model) || '').trim()
+        if (provider && model) a[k] = { provider, model }
+        return a
+      }, {}))
       React.useEffect(() => {
         if (!ovId) return undefined
         const dialog = ovDialogRef.current
@@ -2690,11 +2700,24 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           const draft = {}
           if (saved['$default']) draft['$default'] = { provider: saved['$default'].provider, model: saved['$default'].model }
           for (const n of ((w.dsl && w.dsl.nodes) || [])) if (saved[n.id]) draft[n.id] = { provider: saved[n.id].provider, model: saved[n.id].model }
-          setOvW(w); setOvDraft(draft); setOvId(w.id)
+          setOvW(w); setOvDraft(draft); setOvSaved(ovNorm(draft)); setOvConfirm(null); setOvId(w.id)
         }).catch((e) => setMsg(t('modelOverrideLoadFailed') + String(e)))
       }
-      const closeOv = () => { setOvId(null); setOvW(null); setOvDraft({}) }
+      const closeOv = () => { setOvConfirm(null); setOvId(null); setOvW(null); setOvDraft({}); setOvSaved('{}') }
+      const requestCloseOv = () => {
+        // 未保存退出 → 与编辑器同款确认弹窗（UAT 反馈 #4）
+        if (ovNorm(ovDraft) !== ovSaved) { setOvConfirm('close'); return }
+        closeOv()
+      }
       const ovSet = (k, field, v) => setOvDraft((d) => ({ ...d, [k]: { ...(d[k] || {}), [field]: v } }))
+      const reloadOvView = () => {
+        // 清除后留在覆盖窗口（UAT 反馈 #5）：刷新清单并就地更新当前查看的模板数据
+        return host.call('vwf.workflows.list').then((l) => {
+          setList(l || [])
+          const w = (l || []).find(x => x.id === ovId)
+          if (w) setOvW(w)
+        }).catch(() => {})
+      }
       const saveOv = () => {
         if (!ovId || ovBusy) return
         const overrides = {}
@@ -2707,19 +2730,23 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setOvBusy(true)
         host.call('vwf.workflows.modelOverride.save', { id: ovId, overrides }).then((r) => {
           setOvBusy(false)
-          if (r && r.ok) { setMsg(t('modelOverrideSaved') + ovId); closeOv(); refresh() }
+          if (r && r.ok) { setOvSaved(ovNorm(ovDraft)); setMsg(t('modelOverrideSaved') + ovId); closeOv(); refresh() }
           else setMsg(t('modelOverrideFailed') + ((r && r.errors && r.errors[0] && r.errors[0].message) || ''))
         }).catch((e) => { setOvBusy(false); setMsg(t('modelOverrideFailed') + String(e)) })
       }
-      const clearOv = () => {
+      const doClearOv = () => {
         if (!ovId || ovBusy) return
-        if (!window.confirm(t('modelOverrideConfirmClear'))) return
         setOvBusy(true)
         host.call('vwf.workflows.modelOverride.clear', { id: ovId }).then((r) => {
           setOvBusy(false)
-          if (r && r.ok) { setMsg(t('modelOverrideCleared') + ovId); closeOv(); refresh() }
-          else setMsg(t('modelOverrideFailed') + ((r && r.errors && r.errors[0] && r.errors[0].message) || ''))
-        }).catch((e) => { setOvBusy(false); setMsg(t('modelOverrideFailed') + String(e)) })
+          if (r && r.ok) {
+            setOvDraft({}); setOvSaved('{}'); setOvConfirm(null)
+            setMsg(t('modelOverrideCleared') + ovId)
+            reloadOvView()
+            refresh()
+          }
+          else { setOvConfirm(null); setMsg(t('modelOverrideFailed') + ((r && r.errors && r.errors[0] && r.errors[0].message) || '')) }
+        }).catch((e) => { setOvBusy(false); setOvConfirm(null); setMsg(t('modelOverrideFailed') + String(e)) })
       }
       // 角色数据源独立抓手：角色库变更后立即刷新，让新建/编辑的角色马上进入节点选择器
       const refetchRoles = React.useCallback(() => {
@@ -2908,7 +2935,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           const d = (ovDraft && ovDraft[row.key]) || {}
           const overridden = !!(String(d.provider || '').trim() && String(d.model || '').trim())
           const curText = row.eff ? ((row.eff.provider || '') + ' / ' + (row.eff.model || '')) : t('modelOverrideInherit')
-          const keepOpt = [{ value: '', label: t('modelOverrideKeepDefault') }]
+          // 沿用默认选项带出实际值（UAT 反馈 #1）
+          const keepOpt = [{ value: '', label: t('modelOverrideKeepDefault') + '（' + curText + '）' }]
           const provCtl = provList.length
             ? h(VwfSelect, { value: d.provider || '', options: keepOpt.concat(provList.map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(row.key, 'provider', v) })
             : h('input', { className: 'vwf-input vwf-mono', style: { width: 150 }, value: d.provider || '', placeholder: curText, onChange: (ev) => ovSet(row.key, 'provider', ev.target.value) })
@@ -3024,24 +3052,35 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           className: 'vwf-editor-dialog',
           ref: ovDialogRef,
           'aria-label': t('modelOverride'),
-          onClick: (ev) => { if (ev.target === ev.currentTarget) closeOv() },
-          onCancel: (ev) => { ev.preventDefault(); closeOv() },
+          onClick: (ev) => { if (ev.target === ev.currentTarget) requestCloseOv() },
+          onCancel: (ev) => { ev.preventDefault(); requestCloseOv() },
           onClose: closeOv,
         },
           h('div', { className: 'vwf-editor-head' },
             h('strong', null, t('modelOverride') + ' · ' + (ovW.name || ovW.id)),
             h('span', { className: 'vwf-badge' }, ovW.id),
             h('span', { className: 'vwf-spacer' }),
-            h('button', { className: 'vwf-btn sm', onClick: closeOv }, t('close'))
+            h('button', { className: 'vwf-btn sm', onClick: requestCloseOv }, t('close'))
           ),
           h('div', { className: 'vwf-editor-body' },
             h('div', { className: 'vwf-muted-sm', style: { marginBottom: 8 } }, t('modelOverrideHelp')),
             h('div', { className: 'vwf-list' }, ovRows())
           ),
           h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8, padding: '8px 0' } },
-            h('button', { className: 'vwf-btn sm danger', disabled: ovBusy, onClick: clearOv }, t('modelOverrideClear')),
+            h('button', { className: 'vwf-btn sm danger', disabled: ovBusy, onClick: () => setOvConfirm('clear') }, t('modelOverrideClear')),
             h('button', { className: 'vwf-btn sm', disabled: ovBusy, onClick: saveOv }, t('modelOverrideSave'))
-          )
+          ),
+          ovConfirm ? h('div', { className: 'vwf-confirm-mask', onClick: () => setOvConfirm(null) },
+            h('div', { className: 'vwf-confirm', onClick: (ev) => ev.stopPropagation() },
+              h('div', { className: 'vwf-confirm-title' }, ovConfirm === 'close' ? t('modelOverrideConfirmDiscard') : t('modelOverrideConfirmClear')),
+              h('div', { className: 'vwf-confirm-actions' },
+                h('button', { className: 'vwf-btn', onClick: () => setOvConfirm(null) }, t('discardCancel')),
+                ovConfirm === 'close'
+                  ? h('button', { className: 'vwf-btn danger', onClick: () => { setOvConfirm(null); closeOv() } }, t('discardConfirm'))
+                  : h('button', { className: 'vwf-btn danger', disabled: ovBusy, onClick: doClearOv }, t('modelOverrideClear'))
+              )
+            )
+          ) : null
         ) : null
       )
     }

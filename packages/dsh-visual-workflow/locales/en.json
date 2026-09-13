@@ -286,5 +286,6 @@
   "probeStatusUnknown": "unknown",
   "modelOverrideDefaultBadge": "default",
   "modelOverrideCurrent": "current: ",
-  "modelOverrideKeepDefault": "keep default"
+  "modelOverrideKeepDefault": "keep default",
+  "modelOverrideConfirmDiscard": "Unsaved override changes — discard and close?"
 }

@@ -286,5 +286,6 @@
   "probeStatusUnknown": "未知",
   "modelOverrideDefaultBadge": "默认",
   "modelOverrideCurrent": "当前：",
-  "modelOverrideKeepDefault": "沿用默认"
+  "modelOverrideKeepDefault": "沿用默认",
+  "modelOverrideConfirmDiscard": "覆盖修改尚未保存，确认放弃并关闭？"
 }
