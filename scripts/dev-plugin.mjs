@@ -490,7 +490,7 @@ if (command === 'status') {
 // —— stop ——
 if (command === 'stop') {
   if (argv.includes('--all')) {
-    const result = stopDevDsh()
+    const result = await stopDevDsh()
     writeActiveTask(devHome, { current: null, releases: activeTask.releases })
     console.log(
       result.stopped

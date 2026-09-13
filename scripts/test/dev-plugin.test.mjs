@@ -328,6 +328,62 @@ test('开发 DSH 在非固定端口上运行 → 拒绝启动，避免出现第�
   }
 })
 
+test('stop --all：停掉开发实例、清理 pid 登记与激活登记（等待真正退出）', {
+  skip: process.platform === 'win32' ? 'Windows 不适用' : false,
+}, async (t) => {
+  if (!(await signalsSupported())) {
+    return t.skip('本环境禁止跨进程信号（kill 不生效），无法验证真实停机')
+  }
+  const root = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-stopall-'))
+  const devHome = join(root, 'dev-home')
+  mkdirSync(devHome)
+  const canonical = realpathSync(devHome)
+  const fakePidPath = join(root, 'fake.pid')
+  const holder = spawn('/bin/sh', ['-c', `echo $$ > '${fakePidPath}'; exec /bin/sleep 30`], { detached: true })
+  try {
+    await waitForFile(fakePidPath)
+    const fakePid = Number(readFileSync(fakePidPath, 'utf8').trim())
+    const lsofPath = fakeLsof(root, {
+      listenLines: `p${fakePid}\\ncnode\\nf19\\nn127.0.0.1:${TEST_PORT}\\n`,
+      homeFiles: `p${fakePid}\\ncnode\\nf20\\nn${canonical}/profiles/web/cordis.yml\\nf21\\nn${canonical}/profiles/web/package.json\\n`,
+    })
+    writeFileSync(join(devHome, '.vwf-dev-dsh.pid'), `${fakePid}\n`)
+    writeFileSync(
+      join(devHome, '.vwf-active-task.json'),
+      JSON.stringify({
+        current: { namespace: 'loc-020-r1', plugin_name: 'loc-020-r1-vwf-deadbeef0000', pid: fakePid, port: Number(TEST_PORT), activated_at: '2026-09-13T11:00:00.000Z' },
+        releases: [],
+      }, null, 2),
+    )
+
+    const result = await new Promise((resolveResult) => {
+      const child = spawn(process.execPath, [scriptPath, 'stop', '--all'], {
+        env: baseEnv({
+          VWF_DEV_DSH_BIN: fakeDsh(root),
+          VWF_DEV_LSOF_BIN: lsofPath,
+          VWF_DEV_DSH_HOME: devHome,
+          VWF_PRODUCT_DSH_HOME: join(root, 'product-home'),
+        }),
+      })
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (d) => { stdout += d })
+      child.stderr.on('data', (d) => { stderr += d })
+      child.once('exit', (code) => resolveResult({ status: code ?? 1, stdout, stderr }))
+      child.once('error', (error) => resolveResult({ status: 1, stdout, stderr: String(error) }))
+    })
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /开发 DSH 已停止/)
+    assert.equal(isRunning(fakePid), false, '开发实例应已被停掉')
+    assert.equal(existsSync(join(devHome, '.vwf-dev-dsh.pid')), false, 'pid 登记应被清理')
+    const ledger = JSON.parse(readFileSync(join(devHome, '.vwf-active-task.json'), 'utf8'))
+    assert.equal(ledger.current, null, '激活登记应清空')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('stop --task：登记「已停用注销」；--unresolved 如实记录停用未完成', () => {
   const root = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-stop-'))
   try {
