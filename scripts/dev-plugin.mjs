@@ -351,7 +351,14 @@ function resolvePortState() {
   return { reuse: null }
 }
 
-function stopDevDsh({ signal = 'SIGTERM', waitMs = 5000 } = {}) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * 停掉开发 DSH 并确认其真正退出。
+ * 必须用**异步**轮询：同步忙等（Atomics.wait）会阻塞事件循环，导致子进程退出后无法被
+ * 回收（僵尸态），`kill(pid,0)` 仍返回成功 → 误判为「未退出」。
+ */
+async function stopDevDsh({ signal = 'SIGTERM', waitMs = 5000 } = {}) {
   const target = readPid()
   if (!target || !isRunning(target)) {
     return { stopped: false, pid: target, reason: target ? 'pid 已不存活' : '无 pid 登记' }
@@ -363,7 +370,7 @@ function stopDevDsh({ signal = 'SIGTERM', waitMs = 5000 } = {}) {
   }
   const deadline = Date.now() + waitMs
   while (isRunning(target) && Date.now() < deadline) {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
+    await sleep(50)
   }
   const stopped = !isRunning(target)
   if (stopped && readPid() === target) rmSync(pidFile, { force: true })
@@ -549,7 +556,7 @@ if (portState.reuse) {
     // 单激活纪律的实现：DSH 重启会清空全部动态插件（官方行为），
     // 故「停掉上一个任务的插件」= 重启这唯一的开发实例。这是 shell 侧唯一可靠手段
     // ——动态包绑定定义它的会话，本脚本无权停用他人会话的包。
-    const stopped = stopDevDsh()
+    const stopped = await stopDevDsh()
     if (!stopped.stopped) {
       fail(
         `无法停掉上一个任务（${currentNamespace}）的插件：开发 DSH（PID ${stopped.pid}）未能在超时内退出（${stopped.reason || '仍在运行'}）。` +

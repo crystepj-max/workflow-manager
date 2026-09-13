@@ -245,7 +245,7 @@ test('单激活纪律：不在旧插件可能仍激活的情况下启动新任�
 }, async () => {
   const ctx = await setupSwitchScene('vwf-dev-plugin-switch-')
   try {
-    const result = spawnSwitch(ctx, 'loc-020-r1')
+    const result = await spawnSwitch(ctx, 'loc-020-r1')
     const ledger = JSON.parse(readFileSync(join(ctx.devHome, '.vwf-active-task.json'), 'utf8'))
     if (result.status === 0) {
       // 成功切换：必须明确提示停掉了谁、现在跑的是谁，且登记已换成本任务
@@ -264,13 +264,16 @@ test('单激活纪律：不在旧插件可能仍激活的情况下启动新任�
 })
 
 test('单激活纪律：切换成功路径（需平台允许跨进程信号）', {
-  skip: process.platform === 'win32'
-    ? 'Windows 不适用'
-    : (signalsSupported() ? false : '本环境禁止跨进程信号（kill 不生效），切换成功路径改由人工 UAT 覆盖'),
-}, async () => {
+  skip: process.platform === 'win32' ? 'Windows 不适用' : false,
+}, async (t) => {
+  // 能力探测须在测试体内做（skip 选项只能同步求值，而探测必须异步轮询：
+  // 同步忙等会阻塞事件循环导致子进程无法被回收，探针永远误判「信号不可用」）
+  if (!(await signalsSupported())) {
+    return t.skip('本环境禁止跨进程信号（kill 不生效），切换成功路径改由人工 UAT 覆盖')
+  }
   const ctx = await setupSwitchScene('vwf-dev-plugin-switch-ok-')
   try {
-    const result = spawnSwitch(ctx, 'loc-020-r1')
+    const result = await spawnSwitch(ctx, 'loc-020-r1')
     assert.equal(result.status, 0, result.stderr)
     assert.match(result.stdout, /已停掉上一个任务（loc-022-r1）的插件，并切换到 loc-020-r1/)
     assert.equal(isRunning(ctx.fakePid), false, '上一个任务的开发环境进程应已被停掉')
@@ -528,15 +531,26 @@ async function setupSwitchScene(prefix) {
   }
 }
 
-function spawnSwitch(ctx, namespace) {
-  return spawnSync(process.execPath, [scriptPath, 'start', '--task', namespace], {
-    encoding: 'utf8',
-    env: baseEnv({
-      VWF_DEV_DSH_BIN: fakeDsh(ctx.root),
-      VWF_DEV_LSOF_BIN: ctx.lsofPath,
-      VWF_DEV_DSH_HOME: ctx.devHome,
-      VWF_PRODUCT_DSH_HOME: join(ctx.root, 'product-home'),
-    }),
+/** 异步启动 dev-plugin 并收集输出。
+ *  必须用异步 spawn 而非 spawnSync：spawnSync 会阻塞本进程事件循环，导致「上一个任务的
+ *  开发实例」（本测试的子进程）退出后无法被回收成僵尸态，dev-plugin 的 isRunning 永远为真，
+ *  从而误判「未能退出」。 */
+async function spawnSwitch(ctx, namespace) {
+  return new Promise((resolveResult) => {
+    const child = spawn(process.execPath, [scriptPath, 'start', '--task', namespace], {
+      env: baseEnv({
+        VWF_DEV_DSH_BIN: fakeDsh(ctx.root),
+        VWF_DEV_LSOF_BIN: ctx.lsofPath,
+        VWF_DEV_DSH_HOME: ctx.devHome,
+        VWF_PRODUCT_DSH_HOME: join(ctx.root, 'product-home'),
+      }),
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (d) => { stdout += d })
+    child.stderr.on('data', (d) => { stderr += d })
+    child.once('exit', (code) => resolveResult({ status: code ?? 1, stdout, stderr }))
+    child.once('error', (error) => resolveResult({ status: 1, stdout, stderr: String(error) }))
   })
 }
 
@@ -544,8 +558,9 @@ function spawnSwitch(ctx, namespace) {
  * 本平台是否真的能终止另一个进程。
  * 某些受沙箱约束的环境里 `process.kill` 不报错但信号被丢弃——此时「切换成功路径」不可自动验证，
  * 用例应显式跳过而不是给出假绿。
+ * 必须异步轮询：同步忙等会阻塞事件循环，导致子进程退出后无法被回收（僵尸态），探针永远误判。
  */
-function signalsSupported() {
+async function signalsSupported() {
   const p = spawn('/bin/sh', ['-c', 'exec /bin/sleep 5'], { detached: true, stdio: 'ignore' })
   try {
     try { process.kill(-p.pid, 'SIGTERM') } catch { process.kill(p.pid, 'SIGTERM') }
@@ -555,7 +570,7 @@ function signalsSupported() {
   const deadline = Date.now() + 1000
   while (Date.now() < deadline) {
     if (!isRunning(p.pid)) return true
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
+    await new Promise((r) => setTimeout(r, 50))
   }
   try { process.kill(-p.pid, 'SIGKILL') } catch { /* 已退出 */ }
   return false
