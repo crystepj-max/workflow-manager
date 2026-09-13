@@ -186,7 +186,7 @@
   "builtinReadonly": "内置模板不可删除",
   "modelOverride": "模型覆盖",
   "modelOverrideBadge": "已覆盖",
-  "modelOverrideHelp": "为内置模板保存持久化 Provider/Model 覆盖：⚪ 默认 / 🔵 已覆盖；每行显式列出当前有效绑定，下拉选择后保存即生效。结构不可改，改结构请另存为自定义。",
+  "modelOverrideHelp": "为内置模板保存持久化 Provider/Model 覆盖：⚪ 默认 / 🔵 已覆盖；两列下拉的「沿用默认」括号内即本列实际值，留空即沿用；只改 model 时 provider 自动取当前默认。结构不可改，改结构请另存为自定义。",
   "modelOverrideDefault": "$default（默认兜底）",
   "modelOverrideInherit": "未覆盖（沿用内置默认）",
   "modelOverrideSave": "保存覆盖",

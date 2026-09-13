@@ -2700,7 +2700,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           const draft = {}
           if (saved['$default']) draft['$default'] = { provider: saved['$default'].provider, model: saved['$default'].model }
           for (const n of ((w.dsl && w.dsl.nodes) || [])) if (saved[n.id]) draft[n.id] = { provider: saved[n.id].provider, model: saved[n.id].model }
-          setOvW(w); setOvDraft(draft); setOvSaved(ovNorm(draft)); setOvConfirm(null); setOvId(w.id)
+          setOvW(w); setOvDraft(draft); setOvSaved(ovNorm(ovResolvedOf(w, draft))); setOvConfirm(null); setOvId(w.id)
         }).catch((e) => setMsg(t('modelOverrideLoadFailed') + String(e)))
       }
       const closeOv = () => { setOvConfirm(null); setOvId(null); setOvW(null); setOvDraft({}); setOvSaved('{}') }
@@ -2718,19 +2718,28 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           if (w) setOvW(w)
         }).catch(() => {})
       }
+      // 解析草稿为最终覆盖（留空列 = 沿用该行当前默认，UAT 反馈：只切 model 不动 provider）
+      const ovResolvedOf = (w, draft) => {
+        const models = (w && w.dsl && w.dsl.bindings && w.dsl.bindings.models && typeof w.dsl.bindings.models === 'object') ? w.dsl.bindings.models : {}
+        const out = {}
+        for (const n of ((w && w.dsl && w.dsl.nodes) || [])) {
+          const d = (draft || {})[n.id]
+          if (!d) continue
+          const eff = (n.model && (n.model.provider || n.model.model)) ? n.model : (models[n.id] || null)
+          const provider = String(d.provider || '').trim() || (eff ? String(eff.provider || '') : '')
+          const model = String(d.model || '').trim() || (eff ? String(eff.model || '') : '')
+          if (provider && model) out[n.id] = { provider, model }
+        }
+        return out
+      }
       const saveOv = () => {
         if (!ovId || ovBusy) return
-        const overrides = {}
-        for (const [k, v] of Object.entries(ovDraft || {})) {
-          const provider = String((v && v.provider) || '').trim()
-          const model = String((v && v.model) || '').trim()
-          if (provider && model) overrides[k] = { provider, model }
-        }
+        const overrides = ovResolvedOf(ovW, ovDraft)
         if (!Object.keys(overrides).length) { setMsg(t('modelOverrideEmpty')); return }
         setOvBusy(true)
         host.call('vwf.workflows.modelOverride.save', { id: ovId, overrides }).then((r) => {
           setOvBusy(false)
-          if (r && r.ok) { setOvSaved(ovNorm(ovDraft)); setMsg(t('modelOverrideSaved') + ovId); closeOv(); refresh() }
+          if (r && r.ok) { setOvSaved(ovNorm(overrides)); setMsg(t('modelOverrideSaved') + ovId); closeOv(); refresh() }
           else setMsg(t('modelOverrideFailed') + ((r && r.errors && r.errors[0] && r.errors[0].message) || ''))
         }).catch((e) => { setOvBusy(false); setMsg(t('modelOverrideFailed') + String(e)) })
       }
@@ -2921,44 +2930,40 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
 
       const editingBuiltin = !!(list || []).find(x => x.id === editId && x.builtin)
-      // LOC-014 覆盖对话框行：$default + 全部节点；显式列出当前有效绑定，
-      // 图标区分默认（⚪）/已覆盖（🔵）；provider/model 用 vwf.models 下拉（与编辑器同源），无 providers 时回退文本输入
+      // LOC-014 覆盖对话框行：每节点一行；两列下拉的"沿用默认"各自带出本列实际值
+      // （provider 列显示默认 provider，model 列显示默认 model）；无 providers 回退文本输入
       const ovRows = () => {
         const models = (ovW && ovW.dsl && ovW.dsl.bindings && ovW.dsl.bindings.models && typeof ovW.dsl.bindings.models === 'object') ? ovW.dsl.bindings.models : {}
         const provList = (providers || []).map(p => p.id)
         const modelsOfProv = (pid) => (((providers || []).find(p => p.id === pid) || {}).models || [])
-        const rows = [{ key: '$default', label: t('modelOverrideDefault'), eff: null }]
-        for (const n of ((ovW && ovW.dsl && ovW.dsl.nodes) || [])) {
-          // 权威形态：node.model 内联（.generated 生成物无 bindings）；蓝图形态回退 bindings.models
-          const inline = (n.model && (n.model.provider || n.model.model)) ? n.model : null
-          rows.push({ key: n.id, label: (n.label || n.id) + '（' + n.id + '）', eff: inline || models[n.id] || null })
-        }
-        return rows.map((row) => {
-          const d = (ovDraft && ovDraft[row.key]) || {}
-          const overridden = !!(String(d.provider || '').trim() && String(d.model || '').trim())
-          const curText = row.eff ? ((row.eff.provider || '') + ' / ' + (row.eff.model || '')) : t('modelOverrideInherit')
-          // 沿用默认选项带出实际值（UAT 反馈 #1）
-          const keepOpt = [{ value: '', label: t('modelOverrideKeepDefault') + '（' + curText + '）' }]
+        const resolved = ovResolvedOf(ovW, ovDraft)
+        return ((ovW && ovW.dsl && ovW.dsl.nodes) || []).map((n) => {
+          const eff = (n.model && (n.model.provider || n.model.model)) ? n.model : (models[n.id] || null)
+          const d = (ovDraft || {})[n.id] || {}
+          const provKeep = t('modelOverrideKeepDefault') + '（' + (eff ? eff.provider : t('modelOverrideInherit')) + '）'
+          const modelKeep = t('modelOverrideKeepDefault') + '（' + (eff ? eff.model : t('modelOverrideInherit')) + '）'
+          const isOver = !!resolved[n.id]
+          const curProv = String(d.provider || '').trim() || (eff ? String(eff.provider || '') : '')
           const provCtl = provList.length
-            ? h(VwfSelect, { value: d.provider || '', options: keepOpt.concat(provList.map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(row.key, 'provider', v) })
-            : h('input', { className: 'vwf-input vwf-mono', style: { width: 150 }, value: d.provider || '', placeholder: curText, onChange: (ev) => ovSet(row.key, 'provider', ev.target.value) })
+            ? h(VwfSelect, { value: d.provider || '', options: [{ value: '', label: provKeep }].concat(provList.map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(n.id, 'provider', v) })
+            : h('input', { className: 'vwf-input vwf-mono', style: { width: 150 }, value: d.provider || '', placeholder: provKeep, onChange: (ev) => ovSet(n.id, 'provider', ev.target.value) })
           const modelCtl = provList.length
-            ? h(VwfSelect, { value: d.model || '', options: keepOpt.concat(modelsOfProv(String(d.provider || '')).map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(row.key, 'model', v) })
-            : h('input', { className: 'vwf-input vwf-mono', style: { width: 170 }, value: d.model || '', placeholder: curText, onChange: (ev) => ovSet(row.key, 'model', ev.target.value) })
-          return h('div', { key: 'ov-row-' + row.key, className: 'vwf-list-item' },
+            ? h(VwfSelect, { value: d.model || '', options: [{ value: '', label: modelKeep }].concat(modelsOfProv(curProv).map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(n.id, 'model', v) })
+            : h('input', { className: 'vwf-input vwf-mono', style: { width: 170 }, value: d.model || '', placeholder: modelKeep, onChange: (ev) => ovSet(n.id, 'model', ev.target.value) })
+          return h('div', { key: 'ov-row-' + n.id, className: 'vwf-list-item' },
             h('div', { style: { minWidth: 0, flex: 1 } },
               h('div', { className: 'vwf-row', style: { gap: 6 } },
-                h('span', null, overridden ? '🔵' : '⚪'),
-                h('span', { className: 'vwf-list-name' }, row.label),
-                overridden
+                h('span', null, isOver ? '🔵' : '⚪'),
+                h('span', { className: 'vwf-list-name' }, (n.label || n.id) + '（' + n.id + '）'),
+                isOver
                   ? h('span', { className: 'vwf-badge', style: { color: 'var(--dsw-alias-state-info-primary, #3b82f6)' } }, t('modelOverrideBadge'))
                   : h('span', { className: 'vwf-badge' }, t('modelOverrideDefaultBadge')),
-                h('span', { className: 'vwf-muted-sm vwf-mono' }, t('modelOverrideCurrent') + curText)
+                h('span', { className: 'vwf-muted-sm vwf-mono' }, t('modelOverrideCurrent') + (eff ? eff.provider + ' / ' + eff.model : t('modelOverrideInherit')))
               )
             ),
             h('div', { style: { width: 150 } }, provCtl),
             h('div', { style: { width: 170 } }, modelCtl),
-            h('button', { className: 'vwf-btn sm', disabled: ovBusy || !overridden, onClick: () => ovSet(row.key, 'provider', '') || ovSet(row.key, 'model', '') }, t('modelOverrideResetRow'))
+            h('button', { className: 'vwf-btn sm', disabled: ovBusy || !isOver, onClick: () => ovSet(n.id, 'provider', '') || ovSet(n.id, 'model', '') }, t('modelOverrideResetRow'))
           )
         })
       }

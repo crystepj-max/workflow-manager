@@ -186,7 +186,7 @@
   "builtinReadonly": "The built-in template cannot be deleted",
   "modelOverride": "Model override",
   "modelOverrideBadge": "overridden",
-  "modelOverrideHelp": "Save a persistent Provider/Model override for a built-in template: ⚪ default / 🔵 overridden; each row lists the current effective binding. Pick from dropdowns and save — structure is never modified (use save-as-custom for that).",
+  "modelOverrideHelp": "Save a persistent Provider/Model override for a built-in template: ⚪ default / 🔵 overridden. Each dropdown's keep-default option shows its actual value; leaving a column empty keeps the default. Changing only the model auto-fills the current default provider. Structure is never modified.",
   "modelOverrideDefault": "$default (fallback)",
   "modelOverrideInherit": "not overridden (built-in default)",
   "modelOverrideSave": "Save override",
