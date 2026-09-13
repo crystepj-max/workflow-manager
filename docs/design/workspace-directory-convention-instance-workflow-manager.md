@@ -90,6 +90,46 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 | 三 | `.scratch` 下 5 个已入库文件 | **3 个移除跟踪**（`dsh-visual-workflow-p0/` 的 `compile-test.mjs`、`compiled/dev-workflow-2-0.gen.mjs`、`compiled/meta.json`）；**2 个迁入** `docs/design/vwf-p2/`（`decision-map.md`、`requirements-analysis.md`） | `compile-test.mjs` 自述「从插件 pkg-3 原样提取」= 原型一次性脚本；蓝图权威源已迁 `templates/custom-seeds/dev-workflow-2-0.json`；产物现由 `npm run generate` 出到 `.generated/` |
 | 四 | 收口清理程度 | **分两阶段**：暂停期删工作区留分支；托管恢复后全清 | 工作区可再生、分支不可再生；`dev-cwf-185-01`（需求分两阶段）与 `dev-loc-008/009-r1`（squash 已入 main 待补 PR）两案例吻合 |
 | **五** | **归档位置（2026-09-12 新增）** | **方案甲：统一到 `docs/tasks/archive/<TASK_ID>/`**，作为唯一收口归档位置（任务卡 + 规格终版 + 证据摘要三件）；`docs/tasks/specs/` 内容并入后废弃 | 现状两处并存且 LOC-015 同时在两处 |
+| **六** | **运行时实例布局（2026-09-13 新增，LOC-020）** | **方案甲：单实例 + 任务命名隔离**——开发 DSH 唯一、端口固定 **9527**；任务间隔离改由「插件注册名带任务命名空间前缀」+「同一时刻只允许一个任务激活插件」纪律承担；**取代 `#185` 的「每 Run 独占 Home」**。归属双证校验与 14 天兜底 GC 退役；收口语义从「按双证删 Home」简化为「确认本任务插件已停用注销 + 清本任务工作区记录（`cwf-env-recycle.mjs plan/recycle`）」 | 见下方 §3.1：`#185` 机制在真实 Run 上「分配了不用、用完不收」，复杂度是纯成本；且该机制赖以成立的前提（工作空间级插件隔离）在 DSH 侧经代码判定为**不存在** |
+
+### 3.1 决策六的依据（LOC-020 需求分析，2026-09-13）
+
+#### (a) `#185` 多 Home 机制的失效：一手实测
+
+对刚完成的 LOC-014（2026-09-13 11:01 合并、19:03 完成收口）核查：
+
+| 核查项 | 实测结果 | 判定 |
+|---|---|---|
+| 分配的独占 Home 是否被使用 | `~/.dsh-workflow-dev/tasks/loc-014-r1/` 内**只有一个归属标记 `task-env.json`**，无 profile / 无凭据 / 无任何 DSH 状态 | ❌ 分配了但从未使用 |
+| 实际在跑的开发 DSH 用哪个 Home | PID 99501、端口 49248，加载的是**共享默认 Home** | ❌ 隔离意图未落实 |
+| 收口是否回收 | run 目录内**无 `cleanup-report.md`**，环境回收步骤被跳过，空目录残留至今 | ❌ 未回收 |
+
+结论：**不是「用得不规范」，是「分配了不用、用完也不收」**——为该机制付出的全部复杂度是纯成本。
+
+#### (b) 提案前提已被代码判定为不成立
+
+原提案假设「多个工作空间各自注册动态插件、互不干扰」。在 DSH（`dsh-v0.1.5-rc.1`）源码层判定为**不成立**：
+
+| 事实 | 证据 |
+|---|---|
+| 动态插件注册表是**进程级全局**，归属字段只有发起它的会话 | `packages/extensions/cordis-host-runner/src/registry.ts:142`、`:54-55` |
+| DSH 的 `workspace` 实体只是「目录 → 会话」展示分组，与动态插件/槽位**零耦合** | `packages/workspace/workspace/src/index.ts`；四个 cordis 包内无 workspace 维度引用 |
+| 宿主半边（工具 / RPC 服务）挂在进程根上下文的唯一 `cordis-dynamic` group → **进程全局** | `cordis-host-runner/src/index.ts:1237-1240`、`lifecycle.ts:22-28` |
+| 浏览器半边在**单个浏览器页面内共享一个客户端运行时**（不同标签页各自独立） | `cordis-client-runner/src/client/runtime.ts:178`、`ui-cordis/src/client/slots.ts:31-35` |
+| 激活与清理**绑定会话**，别的任务无权停用他人会话定义的包 | `cordis-host-runner/src/index.ts:1232-1235`（`owned()`） |
+
+因此：**「插件注册名带 Run 命名空间」只能覆盖 cordis 的 pluginId，覆盖不到插件内部注册的工具名与 RPC 路由名**。本插件宿主半边注册的是固定名——`wf_run`、`vwf_workspace`、`wf_control`、`vwf_debug`（`packages/dsh-visual-workflow/src/host.js:2517/2961/2984/3000`）与一批 `vwf.*` 路由——两者进程级全局，**并发激活必然撞名（报错或相互覆盖，即「串版本」）**。
+
+#### (c) 由此产生的两条硬约束
+
+1. **接受能力回归**：「同一时刻只允许一个任务激活插件」是结果，不是策略选择。切换任务时由 `dev-plugin.mjs start --task <ns>` **重启开发环境**清空上一个任务的动态插件（DSH 重启即清空全部动态包，这是 shell 侧唯一可靠手段）。
+2. **已知限制**：同一浏览器标签页内不同任务的界面半边理论上可并存，**不同任务请用不同标签页**。
+
+#### (d) P0 实机确认状态 🔴
+
+上述 (b) 为**代码级确定**（静态读源码，非推断）。原提案要求的「实机确认两个任务同时激活时的撞名表现（报错 or 覆盖）」**尚未执行**，原因：cordis 动态包只能由 DSH 会话内的模型工具（`cordis_define` / `cordis_run`）操作，`dsh` CLI 无对应子命令，外部脚本无法驱动。
+
+**已移交人工执行**（步骤见 UAT 卡）：在开发 DSH 中开两个会话，各 `cordis_define` + `cordis_run` 一个注册同名工具/RPC 的插件，观察第二个的结果是 `host-half-failed` 还是静默覆盖。**在完成前，本项不得记为已确认。**
 
 ---
 
