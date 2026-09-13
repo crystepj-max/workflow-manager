@@ -470,6 +470,29 @@
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null
+    },
+    {
+      "task_id": "LOC-019",
+      "name": "内置模板默认模型 DeepSeek 化与异源强弱要求",
+      "slug": "deepseek",
+      "source": "会话录入",
+      "source_ref": "2026-09-13 LOC-014 产品 UAT 反馈",
+      "baseline": "V1",
+      "status": "定义中",
+      "priority": null,
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-13T10:29:51.556Z",
+      "updated_at": "2026-09-13T10:29:51.556Z"
     }
   ],
   "updated_at": "2026-09-13T05:27:24.591Z"
