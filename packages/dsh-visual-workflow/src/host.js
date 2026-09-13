@@ -330,9 +330,11 @@ return {
     // 对齐：节点 id 精确覆盖优先，"$default" 兜底未显式覆盖的节点（单一来源常量）。
     const MODEL_OVERRIDE_DEFAULT_KEY = '$default'
     // 覆盖清洗：剔除非法键值（非对象 / 缺 provider 或 model）；无效节点键在合成时忽略。
+    // 键禁路径分隔符与 '..'（防覆盖文件出现怪键；id 侧另有 safeTemplateId 双重防线）
     function sanitizeOverride(ov) {
       const out = {}
       for (const k of Object.keys(ov || {})) {
+        if (!safeTemplateId(k)) continue
         const v = ov[k]
         if (!v || typeof v !== 'object' || Array.isArray(v)) continue
         const provider = typeof v.provider === 'string' ? v.provider.trim() : ''
@@ -341,6 +343,10 @@ return {
         out[k] = { provider, model }
       }
       return out
+    }
+    // 模板 id 字符集白名单（RPC 三端点共用）：禁路径分隔符 / '..'（防 model-overrides/<id>.json 拼接穿越）
+    function safeTemplateId(id) {
+      return typeof id === 'string' && id !== '' && !id.includes('/') && !id.includes('\\') && !id.includes('..') && /^[A-Za-z0-9._$-]+$/.test(id)
     }
     // 读取覆盖层：坏 JSON / 非法结构忽略并留痕，绝不阻断模板加载（规格 §11）
     async function loadModelOverrides() {
@@ -1563,6 +1569,7 @@ return {
     registerRpc('vwf.workflows.modelOverride.get', async (a) => {
       const id = a && a.id
       if (!id || typeof id !== 'string') return fail('缺少模板 id', '$.id')
+      if (!safeTemplateId(id)) return fail('非法模板 id：' + id, '$.id')
       if (fs === undefined) return fail('宿主文件能力不可用：无法读取模型覆盖')
       const d = await homeDirs()
       if (!d) return fail('无法解析 DSH Home：无法读取模型覆盖')
@@ -1571,6 +1578,7 @@ return {
     registerRpc('vwf.workflows.modelOverride.save', async (a) => {
       const id = a && a.id
       if (!id || typeof id !== 'string') return fail('缺少模板 id', '$.id')
+      if (!safeTemplateId(id)) return fail('非法模板 id：' + id, '$.id')
       if (fs === undefined) return fail('宿主文件能力不可用：无法保存模型覆盖')
       const d = await homeDirs()
       if (!d) return fail('无法解析 DSH Home：无法保存模型覆盖')
@@ -1583,9 +1591,12 @@ return {
     registerRpc('vwf.workflows.modelOverride.clear', async (a) => {
       const id = a && a.id
       if (!id || typeof id !== 'string') return fail('缺少模板 id', '$.id')
+      if (!safeTemplateId(id)) return fail('非法模板 id：' + id, '$.id')
       if (fs === undefined) return fail('宿主文件能力不可用：无法清除模型覆盖')
       const d = await homeDirs()
       if (!d) return fail('无法解析 DSH Home：无法清除模型覆盖')
+      // 仅正式内置才有本机制写出的覆盖文件：非内置 id 直接幂等成功（不触碰文件系统）
+      if (!(await splitGenerated()).builtins.has(id)) return { ok: true, id }
       const r = await rm(d.modelOverridesDir + '/' + id + '.json')
       if (r && r.ok === false) return fail('模型覆盖清除失败：' + (r.detail || ''))
       return { ok: true, id }

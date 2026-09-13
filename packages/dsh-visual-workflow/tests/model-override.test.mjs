@@ -162,3 +162,36 @@ test('LOC-014 RPC clear：删除覆盖文件即恢复默认（幂等）', async 
   assert.equal(entry.modelOverridden, undefined, '清除后回到内置默认绑定')
   assert.equal(modelsOf(entry).a.provider, 'p1')
 })
+
+test('LOC-014 安全：路径穿越 / 非法字符 id 三端点拒绝，clear 非内置幂等成功', async () => {
+  const { handlers } = env()
+  const badIds = ['../../evil', 'a/b', '..\\x', '..', 'x..y']
+  for (const id of badIds) {
+    for (const method of ['vwf.workflows.modelOverride.get', 'vwf.workflows.modelOverride.save', 'vwf.workflows.modelOverride.clear']) {
+      const args = method.endsWith('save') ? { id, overrides: { a: { provider: 'p', model: 'm' } } } : { id }
+      const r = await call(handlers, method, args)
+      assert.equal(r.ok, false, method + ' 应拒绝非法 id：' + id)
+    }
+  }
+  // clear 对非内置合法 id 幂等成功（本机制不会为其写文件，不触碰文件系统）
+  const legacy = await call(handlers, 'vwf.workflows.modelOverride.clear', { id: 'dev-workflow-2-0' })
+  assert.equal(legacy.ok, true)
+})
+
+test('LOC-014 安全：save 清洗怪键（含路径分隔符）不入盘', async () => {
+  const { handlers, fs } = env()
+  const r = await call(handlers, 'vwf.workflows.modelOverride.save', { id: BUILTIN_ID, overrides: { a: { provider: 'p2', model: 'm2' }, 'x/y': { provider: 'p', model: 'm' }, '..': { provider: 'p', model: 'm' } } })
+  assert.equal(r.ok, true)
+  const saved = JSON.parse(fs._files.get(OV_DIR + '/' + BUILTIN_ID + '.json'))
+  assert.deepEqual(Object.keys(saved).sort(), ['a'], '怪键被清洗，仅合法键落盘')
+})
+
+test('LOC-014 集成：RPC save 落盘后 workflowEntries 经文件回读合成（写读闭环）', async () => {
+  const { handlers } = env()
+  const save = await call(handlers, 'vwf.workflows.modelOverride.save', { id: BUILTIN_ID, overrides: { a: { provider: 'p2', model: 'm2' } } })
+  assert.equal(save.ok, true)
+  const list = await call(handlers, 'vwf.workflows.list', {})
+  const entry = list.find((w) => w.id === BUILTIN_ID)
+  assert.equal(entry.modelOverridden, true)
+  assert.equal(modelsOf(entry).a.model, 'm2', '清单绑定来自落盘覆盖文件回读')
+})
