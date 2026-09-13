@@ -368,8 +368,11 @@ return {
       }
       return out
     }
-    // 单一合成函数（规格 §9）：深拷贝内置 DSL，仅替换 bindings.models 对应键；
-    // findWorkflow 与 workflowEntries 一律经此合成，禁止第二套实现（§17 风险消解）。
+    // 单一合成函数（规格 §9）：深拷贝 DSL，按覆盖替换模型绑定。
+    // 🔴 权威形态 = node.model 内联（.generated 生成物无 bindings，运行时读节点内联模型——
+    // loc-014-r1 产品 UAT 实测纠正：只写 bindings 对运行时无效）；蓝图落盘形态
+    // （bindings.models）存在时双写保持一致。键语义与 #79 运行时对齐（generate.mjs
+    // 编译脚本同源）：节点 id 精确覆盖优先，"$default" 作用于所有未被精确覆盖的节点。
     function composeModelBindings(dsl, ov) {
       if (!ov || typeof ov !== 'object' || !Object.keys(ov).length) return dsl
       if (!dsl || typeof dsl !== 'object') return dsl
@@ -377,14 +380,14 @@ return {
       if (!next.bindings || typeof next.bindings !== 'object') next.bindings = {}
       if (!next.bindings.models || typeof next.bindings.models !== 'object') next.bindings.models = {}
       const models = next.bindings.models
-      const nodeIds = (Array.isArray(next.nodes) ? next.nodes : []).map((n) => n && n.id).filter((x) => typeof x === 'string' && x)
-      for (const [k, v] of Object.entries(ov)) {
-        if (k === MODEL_OVERRIDE_DEFAULT_KEY) continue
-        if (!nodeIds.includes(k)) continue // 引用不存在节点：合成时忽略该键（§9）
-        models[k] = { ...(typeof models[k] === 'object' && models[k] ? models[k] : {}), provider: v.provider, model: v.model }
+      const nodes = (Array.isArray(next.nodes) ? next.nodes : []).filter((n) => n && typeof n.id === 'string' && n.id)
+      for (const n of nodes) {
+        const v = ov[n.id] || ov[MODEL_OVERRIDE_DEFAULT_KEY]
+        if (!v || typeof v !== 'object') continue
+        const patch = { provider: v.provider, model: v.model }
+        n.model = { ...(typeof n.model === 'object' && n.model ? n.model : {}), ...patch }
+        models[n.id] = { ...(typeof models[n.id] === 'object' && models[n.id] ? models[n.id] : {}), ...patch }
       }
-      const dflt = ov[MODEL_OVERRIDE_DEFAULT_KEY]
-      if (dflt) for (const n of nodeIds) if (!models[n]) models[n] = { provider: dflt.provider, model: dflt.model }
       return next
     }
     // 查找：用户覆盖（整份）→ 未删除的历史生成物 → 正式内置（⊕ 模型覆盖层）

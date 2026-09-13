@@ -2929,7 +2929,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         const modelsOfProv = (pid) => (((providers || []).find(p => p.id === pid) || {}).models || [])
         const rows = [{ key: '$default', label: t('modelOverrideDefault'), eff: null }]
         for (const n of ((ovW && ovW.dsl && ovW.dsl.nodes) || [])) {
-          rows.push({ key: n.id, label: (n.label || n.id) + '（' + n.id + '）', eff: models[n.id] || null })
+          // 权威形态：node.model 内联（.generated 生成物无 bindings）；蓝图形态回退 bindings.models
+          const inline = (n.model && (n.model.provider || n.model.model)) ? n.model : null
+          rows.push({ key: n.id, label: (n.label || n.id) + '（' + n.id + '）', eff: inline || models[n.id] || null })
         }
         return rows.map((row) => {
           const d = (ovDraft && ovDraft[row.key]) || {}

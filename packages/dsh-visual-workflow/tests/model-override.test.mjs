@@ -32,7 +32,6 @@ const BUILTIN_DSL = JSON.stringify({
     { from: 'a', to: 'b', on: 'success' },
     { from: 'b', to: '$end', on: 'success' },
   ],
-  bindings: { models: { a: { provider: 'p1', model: 'm1' } } },
 }, null, 2) + '\n'
 
 const OV_DIR = DSH_HOME + '/visual-workflow/model-overrides'
@@ -49,6 +48,11 @@ function env(seedExtra = {}) {
   return { handlers, definedTools, events, ctx, fs, sub }
 }
 
+// 权威断言：node.model 内联（.generated 生成物无 bindings，运行时读内联）
+const nodeModelOf = (entry, nodeId) => {
+  const n = ((entry.dsl && entry.dsl.nodes) || []).find((x) => x.id === nodeId)
+  return (n && n.model) || null
+}
 const modelsOf = (entry) => (entry.dsl && entry.dsl.bindings && entry.dsl.bindings.models) || null
 
 test('LOC-014 合成：显式节点覆盖 + $default 兜底（builtin 条目所见即所跑）', async () => {
@@ -59,11 +63,12 @@ test('LOC-014 合成：显式节点覆盖 + $default 兜底（builtin 条目所�
   const entry = list.find((w) => w.id === BUILTIN_ID)
   assert.ok(entry, '内置条目存在')
   assert.equal(entry.modelOverridden, true, '携带已覆盖标记')
-  const models = modelsOf(entry)
-  assert.equal(models.a.provider, 'p2')
-  assert.equal(models.a.model, 'm2')
-  assert.equal(models.b.provider, 'p3', '$default 兜底未显式覆盖的节点 b')
-  assert.equal(models.b.model, 'm3')
+  assert.equal(nodeModelOf(entry, 'a').provider, 'p2', '精确覆盖写节点内联模型')
+  assert.equal(nodeModelOf(entry, 'a').model, 'm2')
+  assert.equal(nodeModelOf(entry, 'b').provider, 'p3', '$default 兜底未被精确覆盖的节点 b（与 #79 运行时语义对齐）')
+  assert.equal(nodeModelOf(entry, 'b').model, 'm3')
+  const bm = modelsOf(entry)
+  assert.equal(bm.b.model, 'm3', '蓝图形态 bindings.models 双写一致（如存在）')
 })
 
 test('LOC-014 合成：引用不存在节点的键被忽略', async () => {
@@ -72,9 +77,8 @@ test('LOC-014 合成：引用不存在节点的键被忽略', async () => {
   })
   const list = await call(handlers, 'vwf.workflows.list', {})
   const entry = list.find((w) => w.id === BUILTIN_ID)
-  const models = modelsOf(entry)
-  assert.equal(models.a.model, 'm2')
-  assert.equal(models.ghost, undefined, '无效节点键不进入有效绑定')
+  assert.equal(nodeModelOf(entry, 'a').model, 'm2')
+  assert.equal(nodeModelOf(entry, 'ghost'), null, '无效节点键不产生任何效果')
 })
 
 test('LOC-014 无覆盖：内置条目原样且不携带覆盖标记', async () => {
@@ -82,7 +86,7 @@ test('LOC-014 无覆盖：内置条目原样且不携带覆盖标记', async () 
   const list = await call(handlers, 'vwf.workflows.list', {})
   const entry = list.find((w) => w.id === BUILTIN_ID)
   assert.equal(entry.modelOverridden, undefined)
-  assert.equal(modelsOf(entry).a.provider, 'p1')
+  assert.equal(nodeModelOf(entry, 'a').provider, 'p1', '内置内联模型原样')
 })
 
 test('LOC-014 容错：坏 JSON 覆盖文件忽略留痕，不阻断模板加载', async () => {
@@ -94,7 +98,7 @@ test('LOC-014 容错：坏 JSON 覆盖文件忽略留痕，不阻断模板加载
   const entry = list.find((w) => w.id === BUILTIN_ID)
   assert.ok(entry, '模板仍可加载')
   assert.equal(entry.modelOverridden, undefined, '坏覆盖未生效')
-  assert.equal(modelsOf(entry).a.provider, 'p1')
+  assert.equal(nodeModelOf(entry, 'a').provider, 'p1')
 })
 
 test('LOC-014 优先级：用户整份覆盖优先于历史生成物，且覆盖层仅对正式内置生效', async () => {
@@ -160,7 +164,7 @@ test('LOC-014 RPC clear：删除覆盖文件即恢复默认（幂等）', async 
   const list = await call(handlers, 'vwf.workflows.list', {})
   const entry = list.find((w) => w.id === BUILTIN_ID)
   assert.equal(entry.modelOverridden, undefined, '清除后回到内置默认绑定')
-  assert.equal(modelsOf(entry).a.provider, 'p1')
+  assert.equal(nodeModelOf(entry, 'a').provider, 'p1', '内联模型恢复内置值')
 })
 
 test('LOC-014 安全：路径穿越 / 非法字符 id 三端点拒绝，clear 非内置幂等成功', async () => {
@@ -193,5 +197,17 @@ test('LOC-014 集成：RPC save 落盘后 workflowEntries 经文件回读合成�
   const list = await call(handlers, 'vwf.workflows.list', {})
   const entry = list.find((w) => w.id === BUILTIN_ID)
   assert.equal(entry.modelOverridden, true)
-  assert.equal(modelsOf(entry).a.model, 'm2', '清单绑定来自落盘覆盖文件回读')
+  assert.equal(nodeModelOf(entry, 'a').model, 'm2', '清单节点内联模型来自落盘覆盖文件回读（运行时权威形态）')
+})
+
+test('LOC-014 双写兼容：蓝图形态 DSL（含 bindings.models）合成时双写一致', async () => {
+  const dualDsl = BUILTIN_DSL.replace('}, null, 2)', ",  bindings: { models: { b: { provider: 'p1', model: 'm1' } } } }, null, 2)")
+  const { handlers } = env({
+    [REPO + '/.generated/' + BUILTIN_ID + '/vwf-dsl.json']: dualDsl,
+    [OV_DIR + '/' + BUILTIN_ID + '.json']: JSON.stringify({ b: { provider: 'p9', model: 'm9' } }),
+  })
+  const list = await call(handlers, 'vwf.workflows.list', {})
+  const entry = list.find((w) => w.id === BUILTIN_ID)
+  assert.equal(nodeModelOf(entry, 'b').model, 'm9', '内联模型已合成')
+  assert.equal(modelsOf(entry).b.model, 'm9', 'bindings.models 双写一致')
 })
