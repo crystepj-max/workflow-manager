@@ -284,8 +284,9 @@ export function runMerge({
     summaryError = String(e.message).split('\n')[0]
   }
 
-  // 4. 更新登记册与看板
-  update(repo, taskId, { status: MERGED_STATUS, branch, merge_commit: 'PENDING' })
+  // 4. 更新登记册与看板（spec_path 同步改指归档位置——否则收口后登记册仍指向
+  //    .scratch 临时区的旧路径，成为悬空引用）
+  update(repo, taskId, { status: MERGED_STATUS, branch, merge_commit: 'PENDING', spec_path: specArchiveRel })
   if (feedback) update(repo, taskId, { leftovers: feedback })
   writeBoard(repo)
 

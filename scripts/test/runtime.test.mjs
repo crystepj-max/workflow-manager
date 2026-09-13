@@ -474,8 +474,10 @@ test('fanout ITEM_CAP 与 AGENT_CAP 均在任何 agent() 前返回可读终态',
 })
 
 // ---------- 候选五 C5 规则 B：角色文件文件名 ⊆ 模板声明（契约一致性，repo 级） ----------
-test('T8 契约一致性：dsh/roles/*.md 反引号文件名 ⊆ 模板 output.files ∪ {STATE.md}', () => {
-  const declared = new Set(['STATE.md'])
+test('T8 契约一致性：dsh/roles/*.md 反引号文件名 ⊆ 模板 output.files ∪ 运行时公共文件', () => {
+  // 运行时公共文件：由 run 引导脚本（cwf-run-init）产出、所有角色按 run.json 引用，
+  // 不属于任何节点的产物契约，与 STATE.md 同类豁免。
+  const declared = new Set(['STATE.md', 'run.json'])
   tpl.nodes.forEach((n) => {
     if (n.output && n.output.files && typeof n.output.files === 'object') Object.keys(n.output.files).forEach((p) => declared.add(p))
   })

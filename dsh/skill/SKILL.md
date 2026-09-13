@@ -104,13 +104,15 @@ diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
 `AWAITING_HUMAN_<节点id>`（如 `AWAITING_HUMAN_accept`）时：
 
 0. 先确认验证分支：核对 `<runDir>/acceptance-summary.md`（或 accept-report.md）记录的
-   verified_branch = dev2/<taskId>（worktree 分支）、verified_head 与 worktree HEAD 一致；
-   验收人若要亲手复现，先 `git -C <runDir>/worktree checkout dev2/<taskId>` 切到工作分支再动手，
+   verified_branch = run.json 的 `work_branch`（即 `dev-<runId>`，worktree 分支）、verified_head 与 worktree HEAD 一致；
+   worktree 在相邻容器 `../<仓库名>-worktrees/<work_branch>/`。验收人若要亲手复现，
+   先 `git -C <worktree> checkout <work_branch>` 切到工作分支再动手，
    避免在主工作区（停在 base 分支）上复现出相反结论。
-   **worktree 缺失兜底**：若 `<runDir>/worktree` 已不存在（worktree 缺失），先恢复再继续，不要裸报错——
-   · 分支 dev2/<taskId> 也不存在时：`git worktree add <runDir>/worktree -b dev2/<taskId> <base分支>`；
-   · 分支仍在、仅 worktree 缺失时：`git worktree add <runDir>/worktree dev2/<taskId>`。
-   恢复后核对 `git -C <runDir>/worktree rev-parse --abbrev-ref HEAD` = dev2/<taskId> 再动手复现。
+   **worktree 缺失兜底**：若 worktree 已不存在，先恢复再继续，不要裸报错——
+   · 分支也不存在时：`git worktree add <worktree路径> -b <work_branch> <base分支>`；
+   · 分支仍在、仅 worktree 缺失时：`git worktree add <worktree路径> <work_branch>`。
+   （路径由 `scripts/workspace-paths.mjs` 派生；**禁止在 `<runDir>`/`.agent-runs` 内建树**。）
+   恢复后核对 `git -C <worktree> rev-parse --abbrev-ref HEAD` = work_branch 再动手复现。
 1. 向用户呈现 `<runDir>/acceptance-summary.md` 的核心内容（逐条 ✅/⚠️/❌ + 确认方式）；
 2. 用 ask_user_question 发起裁决：通过 / 不通过（附意见）；
 3. **通过** → 以当前门禁节点为续跑入口、`approved=true` 调 `wf_run`（引擎只走该节点 success 出边；下游是否收口由蓝图决定，手册不得指定下一跳）；
@@ -122,7 +124,7 @@ diff    <SKILL_DIR>/SKILL.md <仓库>/dsh/skill/SKILL.md
 - 未获人工「通过」裁决前，不得把 `approved` 设为 true 续跑。
 - 续跑必须回传前次 `history` / `startRound`，否则 9 轮上限计数会断。
 - 目标仓库必须在当前会话工作区内；不要跨工作区读写别的项目。
-- 每个 issue 独立会话 + 独立 git worktree（脚本自动建 `.agent-runs/<taskId>/worktree` + 分支 `dev2/<taskId>`）；多任务并行 = 多会话 + 多 worktree 物理隔离。
+- 每个 issue 独立会话 + 独立 git worktree（`cwf-run-init` 自动建：worktree 在相邻容器 `../<仓库名>-worktrees/<分支名>/` + 分支 `dev-<runId>`，产物锚定主检出 `.agent-runs/<runId>/`）；多任务并行 = 多会话 + 多 worktree 物理隔离。
 
 ## 参考
 

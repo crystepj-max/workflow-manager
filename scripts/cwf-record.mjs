@@ -14,6 +14,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateRecord, deepEqual } from './cwf-validate.mjs'
 import { parseBudget } from './cwf-run-init.mjs'
+import { mainCheckout, worktreePathFor } from './workspace-paths.mjs'
 
 const RECORD_TYPES = [
   'requirements_baseline',
@@ -72,9 +73,11 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
     }
     run.attempt = flags.attempt
   }
-  // 必须 fail closed：取不到真实 HEAD 即中止，不得静默复用旧值伪造 Proof 绑定（§2 不变量 3）
+  // lineage 不变量（§7.2）：每次写入都要求 work_branch 存在一致的实际检出，并从该
+  // 检出取真实 HEAD（P2 主检出锚定配套口径，见 deliveryWorkspace）；不得静默复用旧值伪造 Proof 绑定
+  const ws = assertRunBranch(runDir, run)
   try {
-    run.current_head = currentHead(runDir)
+    run.current_head = currentHeadAt(ws)
   } catch (e) {
     console.error(`无法读取当前工作区真实 HEAD（${e.message}）：write 中止，Proof 不得绑定未观察的修订`)
     process.exit(1)
@@ -107,13 +110,8 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
     process.exit(1)
   }
 
-  // lineage 不变量（§7.2）：每次写入都要求实际分支与 run.work_branch 一致；
   // Proof 绑定校验（§7.3）：payload 的 verified_* 必须与真实工作区一致，而非仅非空
-  const actualBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot(runDir), encoding: 'utf-8' }).trim()
-  if (actualBranch !== run.work_branch) {
-    console.error(`当前分支(${actualBranch}) 与 run.work_branch(${run.work_branch}) 不一致，拒绝写入（契约 §7.2 lineage）`)
-    process.exit(1)
-  }
+  const actualBranch = run.work_branch
   if (record.payload && (record.payload.verified_head !== undefined || record.payload.verified_branch !== undefined)) {
     const mismatches = []
     if (record.payload.verified_head !== run.current_head) {
@@ -187,24 +185,43 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
   console.log(`${out} valid（stage=${run.stage} attempt=${run.attempt}）`)
 }
 
-function assertRunBranch(runDir, run) {
-  // lineage 不变量（§7.2）：任何 run 状态变更前都要求实际分支与 run.work_branch 一致
-  let actual
+// 交付工作区解析（P2「产物锚定主检出」的配套口径，loc-014-r1 实测补齐）：
+// run 目录锚定主检出，而交付分支检出在相邻容器 worktree —— lineage/HEAD 一律从
+// run.work_branch 的实际检出解析，禁止把主检出（main）的分支/HEAD 误绑进 Proof：
+//   ① repoRoot(runDir) 本身就在交付分支上（run 目录内联 worktree 的 DSH 场景）→ 直接用；
+//   ② 否则按 workspace-paths 派生 work_branch 的 worktree 并核验分支一致；
+//   ③ 都取不到 → null（fail closed，调用方中止）。
+function deliveryWorkspace(runDir, run) {
+  const root = repoRoot(runDir)
+  const branchOf = (dir) => {
+    try { return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir, encoding: 'utf-8' }).trim() } catch (e) { return null }
+  }
+  if (branchOf(root) === run.work_branch) return root
   try {
-    actual = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot(runDir), encoding: 'utf-8' }).trim()
-  } catch (e) {
-    console.error(`无法读取当前工作区分支（${e.message}）：变更中止`)
+    const wt = worktreePathFor(mainCheckout(root), run.work_branch)
+    if (wt && wt !== root && branchOf(wt) === run.work_branch) return wt
+  } catch (e) { /* 派生失败走 fail closed */ }
+  return null
+}
+
+function assertRunBranch(runDir, run) {
+  // lineage 不变量（§7.2）：任何 run 状态变更前都要求 work_branch 存在一致的实际检出
+  const ws = deliveryWorkspace(runDir, run)
+  if (!ws) {
+    console.error(`无法解析 run.work_branch(${run.work_branch}) 的实际检出（主检出与相邻容器 worktree 均不一致）：拒绝变更 run 状态（契约 §7.2 lineage）`)
     process.exit(1)
   }
+  const actual = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: ws, encoding: 'utf-8' }).trim()
   if (actual !== run.work_branch) {
     console.error(`当前分支(${actual}) 与 run.work_branch(${run.work_branch}) 不一致，拒绝变更 run 状态（契约 §7.2 lineage）`)
     process.exit(1)
   }
+  return ws
 }
 
-function currentHead(runDir) {
-  // runDir 所在 git 工作区的 HEAD（worktree 场景 = 该 worktree 分支 HEAD）；失败即抛错（fail closed）
-  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot(runDir), encoding: 'utf-8' }).trim()
+function currentHeadAt(dir) {
+  // 指定 git 工作区的 HEAD（交付 worktree 场景 = 该 worktree 分支 HEAD）；失败即抛错（fail closed）
+  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf-8' }).trim()
 }
 
 function isFinalized(existing) {
@@ -359,9 +376,9 @@ function cmdReverify(runDir, flags) {
   // Integration Checkpoint sync 后的 Proof 重跑（§7.3）：推进 attempt 产生新修订文件，
   // 保留原 HEAD 绑定的旧 proof（§8.5）；不是回退，不耗额度
   const run = loadRun(runDir)
-  assertRunBranch(runDir, run)
+  const ws = assertRunBranch(runDir, run)
   // 同步刷新身份锚点：sync 后 run.current_head 必须反映实际工作区（§7.1）
-  run.current_head = currentHead(runDir)
+  run.current_head = currentHeadAt(ws)
   run.attempt += 1
   run.rollback_history = [...(run.rollback_history || []), {
     at: new Date().toISOString(),

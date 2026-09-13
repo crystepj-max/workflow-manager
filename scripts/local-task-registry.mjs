@@ -117,6 +117,7 @@ export function applyUpdate(record, patch = {}) {
     'merge',
     'github_sync',
     'leftovers',
+    'spec_path',
   ]
   const next = { ...record }
   for (const k of allowed) {
