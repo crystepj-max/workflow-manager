@@ -166,10 +166,15 @@ function main() {
           mismatches.push(`worktree 当前分支(${actualBranch}≠${existing.work_branch})`)
         }
         if (mismatches.length === 0) {
-          // 复用时补齐资源登记；老 run.json 缺资源字段则按新语义补登（不改变 Run 身份）
-          if (!existing.env_resources) {
+          // 复用时补齐/迁移资源登记（不改变 Run 身份）：
+          //  - 旧 run.json（决策六之前）没有 plugin_namespace → 按新语义补登；
+          //  - 已有 plugin_namespace 则不动（保留 recycled_at 等回收痕迹）。
+          if (!existing.env_resources?.plugin_namespace) {
             existing.task_id_namespace = existing.task_id_namespace || existing.run_id
-            existing.env_resources = envResourcesFor(existing.run_id)
+            existing.env_resources = {
+              ...envResourcesFor(existing.run_id),
+              ...(existing.env_resources?.recycled_at ? { recycled_at: existing.env_resources.recycled_at } : {}),
+            }
             writeFileSync(existingRunJson, JSON.stringify(existing, null, 2) + '\n')
           }
           console.log(JSON.stringify({ worktree: worktreePath, runDir, identity: existing, plugin_namespace: existing.env_resources.plugin_namespace, dev_dsh_port: existing.env_resources.dev_dsh_port, reused: true }, null, 2))

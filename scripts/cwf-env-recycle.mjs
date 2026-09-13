@@ -151,6 +151,27 @@ export function recycleRun(run, devHome, {
   }
 
   const recycled_at = now().toISOString()
+
+  // 停用未完成：登记与工作区记录虽已清，但本任务的插件并未真正停用——按业务规则
+  // 「未完成『已停用并注销』不得视为收口完成」，此处必须判定为未回收（exit 1），
+  // 否则收口会把残留插件谎报成已回收。
+  if (release.unresolved) {
+    return {
+      ok: false,
+      status: 'recycled_unresolved',
+      namespace,
+      removed,
+      skipped,
+      reported: plan.reported,
+      release,
+      recycled_at,
+      reason:
+        `本任务插件停用未完成：${release.unresolved}。` +
+        '需人工在 DSH 插件面板中清理该动态包后，重新执行 ' +
+        `npm run dev:plugin -- stop --task ${namespace}（去掉 --unresolved）并再次回收。`,
+    }
+  }
+
   return {
     ok: true,
     status: 'recycled',
@@ -167,6 +188,7 @@ export function renderRecycleReport(result) {
   const lines = ['', '## 环境回收（决策六：单实例 + 任务命名隔离）', '']
   const label = {
     recycled: '✅ 已回收',
+    recycled_unresolved: '❌ 未回收（插件停用未完成，需人工在插件面板清理）',
     planned: 'ℹ️ 预演（未改动）',
     nothing_registered: 'ℹ️ 无登记资源',
     already_recycled: 'ℹ️ 此前已回收',
@@ -224,6 +246,10 @@ function main(argv) {
 
   if (cmd === 'recycle' && result.status === 'recycled') {
     run.env_resources.recycled_at = result.recycled_at
+    writeFileSync(runPath, JSON.stringify(run, null, 2) + '\n')
+  } else if (cmd === 'recycle' && result.status === 'recycled_unresolved') {
+    // 未回收：不写 recycled_at（重复执行仍会重试）；残留原因写进 run.json 供收口遗留事项引用
+    run.env_resources.recycle_unresolved = result.release.unresolved
     writeFileSync(runPath, JSON.stringify(run, null, 2) + '\n')
   }
   if (cmd === 'recycle') {

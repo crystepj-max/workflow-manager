@@ -40,7 +40,7 @@ description: "在 DSH 会话中驱动「建设 · 完整功能开发」单任务
 | `scripts/cwf-checkpoint.mjs` | Integration Checkpoint |
 | `scripts/cwf-validate.mjs` | 交接包 schema 校验 |
 | `scripts/cwf-evidence-verify.mjs` | 呈递/签收前证据链校验 |
-| `scripts/cwf-env-recycle.mjs` | 任务环境回收：`recycle` 按双证归属回收本 Run 独占开发 DSH Home；`gc` 兜底扫描残留（默认 dry-run） |
+| `scripts/cwf-env-recycle.mjs` | 任务环境回收（决策六：单实例 + 任务命名隔离）：`plan` 只读预演；`recycle` 以「激活登记里已有本任务的注销记录」为门禁，只清本任务命名空间精确匹配项。**不再有 Home / 双证 / 兜底 GC** |
 | `scripts/local-task-registry.mjs` | 本地轨道：分配任务标识、跟踪状态、重写看板、列待同步清单 |
 | `scripts/local-task-merge.mjs` | 本地轨道：一任务一提交合并回本地主干（含门禁、标签、归档） |
 

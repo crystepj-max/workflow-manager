@@ -87,7 +87,7 @@ test('recycle：已登记注销 → 清本任务项，他人条目与运行记�
   assert.match(renderRecycleReport(result), /仅列出未处理/)
 })
 
-test('recycle：停用未完成（unresolved）照旧放行，但原因进入报告——不得谎报', () => {
+test('recycle：停用未完成（unresolved）→ 判定为未回收（exit 1），原因进报告——不得谎报', () => {
   const ns = 'loc-020-r2'
   const devHome = setupDevHome(ns)
   writeActiveTask(devHome, {
@@ -95,8 +95,12 @@ test('recycle：停用未完成（unresolved）照旧放行，但原因进入报
     releases: [{ namespace: ns, released_at: '2026-09-13T12:00:00.000Z', unresolved: '归属会话已消失，插件面板里仍可见' }],
   })
   const result = recycleRun(runFor(ns), devHome)
-  assert.equal(result.status, 'recycled')
+  assert.equal(result.ok, false, '未完成「已停用并注销」不得视为收口完成')
+  assert.equal(result.status, 'recycled_unresolved')
+  assert.match(result.reason, /停用未完成：归属会话已消失/)
+  assert.match(result.reason, /需人工在 DSH 插件面板中清理/)
   const report = renderRecycleReport(result)
+  assert.match(report, /❌ 未回收（插件停用未完成，需人工在插件面板清理）/)
   assert.match(report, /插件停用注销：未完成（归属会话已消失/)
 })
 
@@ -156,6 +160,38 @@ test('CLI recycle：回收后写回 recycled_at 并追加报告；plan 只读且
   const second = spawnSync(process.execPath, [scriptPath, 'recycle', runDir], { encoding: 'utf-8', env })
   assert.equal(second.status, 0)
   assert.equal(JSON.parse(second.stdout).status, 'already_recycled')
+})
+
+test('CLI recycle：停用未完成 exit 1、残留原因写进 run.json，人工清理后再次回收才成功', () => {
+  const ns = 'loc-020-r7'
+  const devHome = setupDevHome(ns)
+  writeActiveTask(devHome, {
+    current: null,
+    releases: [{ namespace: ns, released_at: '2026-09-13T12:00:00.000Z', unresolved: '归属会话已消失' }],
+  })
+  const runDir = join(devHome, 'run')
+  mkdirSync(runDir, { recursive: true })
+  writeFileSync(join(runDir, 'run.json'), JSON.stringify(runFor(ns), null, 2))
+  const env = { ...process.env, VWF_DEV_DSH_HOME: devHome }
+
+  const first = spawnSync(process.execPath, [scriptPath, 'recycle', runDir], { encoding: 'utf-8', env })
+  assert.equal(first.status, 1, first.stderr)
+  const refused = JSON.parse(first.stdout)
+  assert.equal(refused.status, 'recycled_unresolved')
+  const saved = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(saved.env_resources.recycle_unresolved, '归属会话已消失')
+  assert.equal(saved.env_resources.recycled_at, undefined)
+
+  // 人工在面板清理后重新登记（去掉 --unresolved），再次回收放行
+  writeActiveTask(devHome, {
+    current: null,
+    releases: [{ namespace: ns, released_at: '2026-09-13T12:30:00.000Z', unresolved: null }],
+  })
+  const second = spawnSync(process.execPath, [scriptPath, 'recycle', runDir], { encoding: 'utf-8', env })
+  assert.equal(second.status, 0, second.stderr)
+  assert.equal(JSON.parse(second.stdout).status, 'recycled')
+  const final = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.ok(final.env_resources.recycled_at)
 })
 
 test('CLI recycle：未登记注销 exit 1 且不动任何目录；参数非法 exit 2', () => {

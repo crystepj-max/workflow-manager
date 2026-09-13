@@ -126,6 +126,12 @@ function readPid() {
   return Number.isSafeInteger(pid) && pid > 0 ? pid : null
 }
 
+/** 登记「这个实例属于本开发 Home」——发现接管与 spawn 后都要写，收口停机依赖它。 */
+function writePidFile(pid) {
+  mkdirSync(devHome, { recursive: true })
+  writeFileSync(pidFile, `${pid}\n`)
+}
+
 function isRunning(pid) {
   if (!pid) return false
   try {
@@ -324,14 +330,25 @@ function printSyncGuide(namespace, pluginName) {
 function resolvePortState() {
   const occupants = portOccupants(port)
   if (occupants === null) fail(`无法核验端口 ${port} 占用情况；已停止，避免误判。`)
-  if (occupants.length === 0) return { reuse: null }
-  if (active && occupants.some((o) => o.pid === active.pid)) return { reuse: active }
-  fail(
-    `端口 ${port} 已被占用：${occupants
-      .map((o) => `PID ${o.pid}（${o.command || '未知'}）`)
-      .join('、')}。` +
-      '固定端口是「地址可预测」的前提，脚本不会自动改用其他端口；请人工处置占用进程后重试。',
-  )
+  if (occupants.length > 0) {
+    if (active && occupants.some((o) => o.pid === active.pid)) return { reuse: active }
+    fail(
+      `端口 ${port} 已被占用：${occupants
+        .map((o) => `PID ${o.pid}（${o.command || '未知'}）`)
+        .join('、')}。` +
+        '固定端口是「地址可预测」的前提，脚本不会自动改用其他端口；请人工处置占用进程后重试。',
+    )
+  }
+  // 端口空着但已存在开发 Home 的实例 → 它不在固定端口上（如本改造前启动的实例）。
+  // 此时若继续启动就会出现第二个实例，直接破坏单实例与单激活纪律，故拒绝并给出处置命令。
+  if (active) {
+    fail(
+        `检测到开发 DSH 未运行在固定端口 ${port}（PID ${active.pid} 监听 ${active.urls.join(', ')}）。` +
+        `单实例布局要求开发 DSH 固定在 127.0.0.1:${port}；请先执行 ` +
+        'npm run dev:plugin -- stop --all（或人工停掉该进程）后重试。',
+    )
+  }
+  return { reuse: null }
 }
 
 function stopDevDsh({ signal = 'SIGTERM', waitMs = 5000 } = {}) {
@@ -365,7 +382,7 @@ function spawnDevDsh() {
     fail('开发 DSH 进程未能创建。')
   }
   try {
-    writeFileSync(pidFile, `${child.pid}\n`)
+    writePidFile(child.pid)
   } catch (error) {
     try {
       process.kill(-child.pid, 'SIGTERM')
@@ -549,6 +566,13 @@ if (portState.reuse) {
     printSyncGuide(namespace, pluginName)
     attachToChild(child)
   } else {
+    // 复用：原「PID 缺失时发现并接管同一开发 Home 的实例」语义——pidFile 是收口停机
+    // 与单激活切换（stopDevDsh）的唯一寻址依据，缺了会导致 stop --all 失效。
+    try {
+      writePidFile(portState.reuse.pid)
+    } catch (error) {
+      fail(`无法登记开发 DSH PID：${error.message}；已停止，避免后续无法停机。`)
+    }
     recordActivation(portState.reuse.pid)
     console.log(`✅ 开发 DSH 已在 127.0.0.1:${port} 运行（PID ${portState.reuse.pid}），无需重复启动。`)
     console.log(`   本任务（${namespace}）已登记为当前激活任务。`)

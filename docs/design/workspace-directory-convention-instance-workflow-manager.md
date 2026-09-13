@@ -61,15 +61,17 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 
 > 🟡 **缺口**：上述纪律只约束了「在哪里干活」，**没有约束「产物写到哪里」**。这正是通用模板 §1.6 锚定机制要补的后半句。
 
-### 2.2 回收侧（现状：四个入口）
+### 2.2 回收侧（现状：决策六后为三个入口）
 
 | 入口 | 命令 / 位置 | 覆盖范围 |
 |---|---|---|
-| 环境回收 | `scripts/cwf-env-recycle.mjs recycle <runDir> --stop --report ...`（收口角色第 5 条） | 本 Run 独占的开发 DSH Home |
+| 环境回收 | `npm run dev:plugin -- stop --task <run_id>`（登记注销）→ `scripts/cwf-env-recycle.mjs recycle <runDir> --report ...`（收口角色第 5 条） | 本任务命名空间精确匹配项（旧独占 Home 遗留 + 工作区记录 + 登记册条目） |
 | 环境组清理 | `scripts/ai-task-workspace-env.mjs mark-completed` + `maybe-cleanup`（runbook 第 177–184 行） | 同组全部完成时清理工作区 |
-| 兜底 GC | `scripts/cwf-env-recycle.mjs gc [--force] [--max-age-days N]`（runbook 第 169–175 行） | 残留 Home（默认 dry-run 只列清单） |
 | 任务合并 | `scripts/local-task-merge.mjs --task ... --branch ... --decision accept --run-id ...`（本地轨道） | 合并 + 归档 2 件 |
 | 收口角色 | `dsh/roles/closeout.md` 第 6 条 `git worktree remove` + `git branch -D` | 工作区与分支（阶段二口径） |
+
+> 历史条目「兜底 GC `cwf-env-recycle.mjs gc`」随决策六退役（旧「每 Run 独占 Home」机制的兜底，
+> 对象已不存在）；见 §3.1。
 
 ### 2.3 本地结论：创建与回收各收敛为单一入口
 

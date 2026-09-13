@@ -216,8 +216,7 @@ case "$*" in
 esac
 `,
     )
-    writeFileSync(join(devHome, '.vwf-dev-dsh.pid'), `${fakePid}\n`)
-
+    // 不写 pidFile：实例已在跑但没登记 → start 应「发现并接管」，补写 pidFile（收口停机依赖它）
     const result = spawnSync(process.execPath, [scriptPath, 'start', '--task', 'loc-020-r1'], {
       encoding: 'utf8',
       env: baseEnv({
@@ -229,6 +228,7 @@ esac
     })
     assert.equal(result.status, 0, result.stderr)
     assert.match(result.stdout, /无需重复启动/)
+    assert.equal(Number(readFileSync(join(devHome, '.vwf-dev-dsh.pid'), 'utf8').trim()), fakePid, '发现接管必须补写 pidFile')
     const ledger = JSON.parse(readFileSync(join(devHome, '.vwf-active-task.json'), 'utf8'))
     assert.equal(ledger.current.namespace, 'loc-020-r1')
     assert.equal(ledger.current.pid, fakePid)
@@ -278,6 +278,50 @@ test('单激活纪律：切换成功路径（需平台允许跨进程信号）',
     assert.equal(ledger.current.namespace, 'loc-020-r1')
   } finally {
     ctx.cleanup()
+  }
+})
+
+test('开发 DSH 在非固定端口上运行 → 拒绝启动，避免出现第二个实例', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-wrongport-'))
+  let fakePid = null
+  try {
+    const devHome = join(root, 'dev-home')
+    mkdirSync(devHome)
+    const canonical = realpathSync(devHome)
+    const fakePidPath = join(root, 'fake.pid')
+    const holder = spawn('/bin/sh', ['-c', `echo $$ > '${fakePidPath}'; exec /bin/sleep 30`], { detached: true })
+    return waitForFile(fakePidPath).then(() => {
+      fakePid = Number(readFileSync(fakePidPath, 'utf8').trim())
+      // 实例在别的端口（49248）上，而固定端口 19527 空闲
+      const lsofPath = fakeLsof(root, {
+        listenLines: `p${fakePid}\\ncnode\\nf19\\nn127.0.0.1:49248\\n`,
+        homeFiles: `p${fakePid}\\ncnode\\nf20\\nn${canonical}/profiles/web/cordis.yml\\nf21\\nn${canonical}/profiles/web/package.json\\n`,
+      })
+      const result = spawnSync(process.execPath, [scriptPath, 'start', '--task', 'loc-020-r1'], {
+        encoding: 'utf8',
+        env: baseEnv({
+          VWF_DEV_DSH_BIN: fakeDsh(root, { marker: join(root, 'spawned') }),
+          VWF_DEV_LSOF_BIN: lsofPath,
+          VWF_DEV_DSH_HOME: devHome,
+          VWF_PRODUCT_DSH_HOME: join(root, 'product-home'),
+        }),
+      })
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /未运行在固定端口 19527/)
+      assert.match(result.stderr, /stop --all/)
+      assert.equal(existsSync(join(root, 'spawned')), false, '不得再起第二个实例')
+    }).finally(() => {
+      if (fakePid && isRunning(fakePid)) {
+        try { process.kill(-fakePid, 'SIGKILL') } catch { try { process.kill(fakePid, 'SIGKILL') } catch { /* 已退出 */ } }
+      }
+      rmSync(root, { recursive: true, force: true })
+    })
+  } catch (error) {
+    if (fakePid && isRunning(fakePid)) {
+      try { process.kill(-fakePid, 'SIGKILL') } catch { /* 已退出 */ }
+    }
+    rmSync(root, { recursive: true, force: true })
+    throw error
   }
 })
 
