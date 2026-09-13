@@ -160,6 +160,8 @@ return {
         homeDirsPromise = dshHome().then((home) => (home ? {
           home: home,
           userDir: home + '/visual-workflow/templates',
+          // LOC-014 模型覆盖层：一内置模板一文件，键 = 节点id | "$default"，值 = { provider, model }
+          modelOverridesDir: home + '/visual-workflow/model-overrides',
           removedDir: home + '/visual-workflow/removed',
           runsDir: home + '/visual-workflow/runs',
           // 逻辑运行摘要目录（#79）：<logical_run_id>.json 一任务一文件
@@ -323,22 +325,96 @@ return {
       }
       return out
     }
-    // 查找：用户覆盖 → 未删除的历史生成物 → 正式内置
+    // ── LOC-014 模型覆盖层 ────────────────────────────────────────────────────
+    // 覆盖只作用于 bindings.models 的 provider/model；键语义与 #79 model_overrides
+    // 对齐：节点 id 精确覆盖优先，"$default" 兜底未显式覆盖的节点（单一来源常量）。
+    const MODEL_OVERRIDE_DEFAULT_KEY = '$default'
+    // 覆盖清洗：剔除非法键值（非对象 / 缺 provider 或 model）；无效节点键在合成时忽略。
+    // 键禁路径分隔符与 '..'（防覆盖文件出现怪键；id 侧另有 safeTemplateId 双重防线）
+    function sanitizeOverride(ov) {
+      const out = {}
+      for (const k of Object.keys(ov || {})) {
+        if (!safeTemplateId(k)) continue
+        const v = ov[k]
+        if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+        const provider = typeof v.provider === 'string' ? v.provider.trim() : ''
+        const model = typeof v.model === 'string' ? v.model.trim() : ''
+        if (!provider || !model) continue
+        out[k] = { provider, model }
+      }
+      return out
+    }
+    // 模板 id 字符集白名单（RPC 三端点共用）：禁路径分隔符 / '..'（防 model-overrides/<id>.json 拼接穿越）
+    function safeTemplateId(id) {
+      return typeof id === 'string' && id !== '' && !id.includes('/') && !id.includes('\\') && !id.includes('..') && /^[A-Za-z0-9._$-]+$/.test(id)
+    }
+    // 读取覆盖层：坏 JSON / 非法结构忽略并留痕，绝不阻断模板加载（规格 §11）
+    async function loadModelOverrides() {
+      const out = new Map()
+      if (fs === undefined) return out
+      const d = await homeDirs()
+      if (!d) return out
+      let entries = null
+      try { entries = await fs.listDir(await fs.resolve(d.modelOverridesDir)) } catch (e) { return out }
+      for (const ent of entries || []) {
+        if (!ent || typeof ent.name !== 'string' || !/\.json$/i.test(ent.name)) continue
+        const id = ent.name.replace(/\.json$/i, '')
+        try {
+          const ov = sanitizeOverride(JSON.parse(await fs.readText(ent.target)))
+          if (Object.keys(ov).length) out.set(id, ov)
+        } catch (e) {
+          log('模型覆盖文件忽略（解析失败）：' + ent.name + '：' + errMsg(e))
+        }
+      }
+      return out
+    }
+    // 单一合成函数（规格 §9）：深拷贝 DSL，按覆盖替换模型绑定。
+    // 🔴 权威形态 = node.model 内联（.generated 生成物无 bindings，运行时读节点内联模型——
+    // loc-014-r1 产品 UAT 实测纠正：只写 bindings 对运行时无效）；蓝图落盘形态
+    // （bindings.models）存在时双写保持一致。键语义与 #79 运行时对齐（generate.mjs
+    // 编译脚本同源）：节点 id 精确覆盖优先，"$default" 作用于所有未被精确覆盖的节点。
+    function composeModelBindings(dsl, ov) {
+      if (!ov || typeof ov !== 'object' || !Object.keys(ov).length) return dsl
+      if (!dsl || typeof dsl !== 'object') return dsl
+      const next = JSON.parse(JSON.stringify(dsl))
+      if (!next.bindings || typeof next.bindings !== 'object') next.bindings = {}
+      if (!next.bindings.models || typeof next.bindings.models !== 'object') next.bindings.models = {}
+      const models = next.bindings.models
+      const nodes = (Array.isArray(next.nodes) ? next.nodes : []).filter((n) => n && typeof n.id === 'string' && n.id)
+      for (const n of nodes) {
+        const v = ov[n.id] || ov[MODEL_OVERRIDE_DEFAULT_KEY]
+        if (!v || typeof v !== 'object') continue
+        const patch = { provider: v.provider, model: v.model }
+        n.model = { ...(typeof n.model === 'object' && n.model ? n.model : {}), ...patch }
+        models[n.id] = { ...(typeof models[n.id] === 'object' && models[n.id] ? models[n.id] : {}), ...patch }
+      }
+      return next
+    }
+    // 查找：用户覆盖（整份）→ 未删除的历史生成物 → 正式内置（⊕ 模型覆盖层）
+    // userDir 整份覆盖优先（已是用户自定义资产，D3-2）：模型覆盖层对其忽略。
     async function findWorkflow(id) {
       if (!id || typeof id !== 'string') return null
       const bp = (await loadUserTemplates()).get(id)
       if (bp) return (await kernel()).projectToVwf(bp)
       if ((await loadRemovedIds()).has(id)) return null
       const { builtins, shipped } = await splitGenerated()
-      return shipped.get(id) || builtins.get(id) || null
+      const dsl = shipped.get(id) || builtins.get(id) || null
+      if (!dsl) return null
+      const ov = (await loadModelOverrides()).get(id)
+      return ov ? composeModelBindings(dsl, ov) : dsl
     }
-    // 合并三源为清单条目；同 id 用户覆盖优先，已删除标记的历史 id 不再列出
+    // 合并三源为清单条目；同 id 用户整份覆盖优先，已删除标记的历史 id 不再列出；
+    // 内置条目合成模型覆盖层并携带 modelOverridden 标记（模板库"已覆盖"最小展示，D2）
     async function workflowEntries(strict) {
-      const [{ builtins, shipped }, users, removed, core] = await Promise.all([splitGenerated(strict), loadUserTemplates(strict), loadRemovedIds(), kernel()])
+      const [{ builtins, shipped }, users, removed, core, overrides] = await Promise.all([splitGenerated(strict), loadUserTemplates(strict), loadRemovedIds(), kernel(), loadModelOverrides()])
       const out = []
       const seen = new Set()
-      const push = (dsl, name, builtin) => { seen.add(dsl.id); out.push({ id: dsl.id, name: name, description: dsl.description || '', builtin: builtin, dsl: dsl }) }
-      for (const dsl of builtins.values()) push(dsl, dsl.name, true)
+      const push = (dsl, name, builtin, extra) => { seen.add(dsl.id); out.push({ id: dsl.id, name: name, description: dsl.description || '', builtin: builtin, dsl: dsl, ...(extra || {}) }) }
+      for (const dsl of builtins.values()) {
+        const ov = overrides.get(dsl.id)
+        const eff = ov ? composeModelBindings(dsl, ov) : dsl
+        push(eff, eff.name || dsl.name, true, ov ? { modelOverridden: true } : null)
+      }
       for (const bp of users.values()) if (!seen.has(bp.id)) push(core.projectToVwf(bp), bp.displayName, false)
       for (const dsl of shipped.values()) if (!seen.has(dsl.id) && !removed.has(dsl.id)) push(dsl, dsl.name, false)
       return out
@@ -1491,6 +1567,42 @@ return {
       // 历史模板删除后写删除标记，避免生成物再次出现在模板库
       if (isLegacyCustomId(id)) { try { await writeText(d.removedDir + '/' + id, '') } catch (e) { /* 标记失败不阻断删除 */ } }
       return { ok: true, id: id }
+    })
+    // ── LOC-014 模型覆盖 RPC：仅内置模板可保存/清除（结构改动仍须另存为自定义）──
+    registerRpc('vwf.workflows.modelOverride.get', async (a) => {
+      const id = a && a.id
+      if (!id || typeof id !== 'string') return fail('缺少模板 id', '$.id')
+      if (!safeTemplateId(id)) return fail('非法模板 id：' + id, '$.id')
+      if (fs === undefined) return fail('宿主文件能力不可用：无法读取模型覆盖')
+      const d = await homeDirs()
+      if (!d) return fail('无法解析 DSH Home：无法读取模型覆盖')
+      return { ok: true, id, overrides: (await loadModelOverrides()).get(id) || {} }
+    })
+    registerRpc('vwf.workflows.modelOverride.save', async (a) => {
+      const id = a && a.id
+      if (!id || typeof id !== 'string') return fail('缺少模板 id', '$.id')
+      if (!safeTemplateId(id)) return fail('非法模板 id：' + id, '$.id')
+      if (fs === undefined) return fail('宿主文件能力不可用：无法保存模型覆盖')
+      const d = await homeDirs()
+      if (!d) return fail('无法解析 DSH Home：无法保存模型覆盖')
+      if (!(await splitGenerated()).builtins.has(id)) return fail('仅内置模板支持模型覆盖：' + id + ' 不是内置模板（自定义模板请直接编辑其绑定）', '$.id')
+      const ov = sanitizeOverride(a.overrides && typeof a.overrides === 'object' && !Array.isArray(a.overrides) ? a.overrides : {})
+      if (!Object.keys(ov).length) return fail('覆盖内容为空：请至少填写一个节点（或默认）的 Provider 与 Model；如需恢复默认请使用清除覆盖', '$.overrides')
+      try { await writeText(d.modelOverridesDir + '/' + id + '.json', JSON.stringify(ov, null, 2) + '\n') } catch (e) { return fail('模型覆盖落盘失败：' + errMsg(e)) }
+      return { ok: true, id, overrides: ov }
+    })
+    registerRpc('vwf.workflows.modelOverride.clear', async (a) => {
+      const id = a && a.id
+      if (!id || typeof id !== 'string') return fail('缺少模板 id', '$.id')
+      if (!safeTemplateId(id)) return fail('非法模板 id：' + id, '$.id')
+      if (fs === undefined) return fail('宿主文件能力不可用：无法清除模型覆盖')
+      const d = await homeDirs()
+      if (!d) return fail('无法解析 DSH Home：无法清除模型覆盖')
+      // 仅正式内置才有本机制写出的覆盖文件：非内置 id 直接幂等成功（不触碰文件系统）
+      if (!(await splitGenerated()).builtins.has(id)) return { ok: true, id }
+      const r = await rm(d.modelOverridesDir + '/' + id + '.json')
+      if (r && r.ok === false) return fail('模型覆盖清除失败：' + (r.detail || ''))
+      return { ok: true, id }
     })
     registerRpc('vwf.validate', async (a) => {
       const v = await validatePipeline(a.dsl)

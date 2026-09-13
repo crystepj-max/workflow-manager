@@ -1,0 +1,66 @@
+{
+  "task_id": "LOC-014",
+  "run_id": "loc-014-r1",
+  "task_name": "内置模板模型覆盖 Model Override",
+  "branch": "dev-loc-014-r1",
+  "status": "等待验收",
+  "decision": "accept",
+  "decided_by": "松哥（产品 DSH 现场验证后裁决，2026-09-13 会话「通过」）",
+  "decided_at": "2026-09-13T10:55:00.000Z",
+  "stages": [
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-13T07:52:44.071Z",
+      "produced_by": "workbuddy-loc014-design"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a2.json",
+      "created_at": "2026-09-13T08:05:32.434Z",
+      "produced_by": "workbuddy-loc014-dev",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a10.json",
+      "created_at": "2026-09-13T10:55:23.786Z",
+      "produced_by": "verify-agent-3cbf59a4",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a10.json",
+      "created_at": "2026-09-13T10:55:23.852Z",
+      "produced_by": "verify-agent-3cbf59a4",
+      "summary": {
+        "verdict": "pass",
+        "environment": "worktree dev-loc-014-r1 @ d6d141d25dcedd3921302da21af1c96d6cf13071; env -u NODE_OPTIONS"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a10.json",
+      "created_at": "2026-09-13T11:00:45.117Z",
+      "produced_by": "workbuddy-loc014-accept",
+      "summary": {
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "松哥（产品 DSH 现场验证后裁决，2026-09-13 会话「通过」）",
+        "decided_at": "2026-09-13T10:55:00.000Z",
+        "verified_branch": "dev-loc-014-r1",
+        "verified_head": "d6d141d25dcedd3921302da21af1c96d6cf13071"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-014-r1",
+    "file_count": 31,
+    "total_bytes": 58801
+  },
+  "generated_at": "2026-09-13T11:01:12.038Z"
+}
