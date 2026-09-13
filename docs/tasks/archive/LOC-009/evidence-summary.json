@@ -1,0 +1,80 @@
+{
+  "task_id": "LOC-009",
+  "run_id": "loc-009-r1",
+  "task_name": "Workspace 注册表落盘与模板策略解析收口",
+  "branch": "dev-loc-009-r1",
+  "status": "已合并",
+  "decision": "accept",
+  "decided_by": "产品经理（用户本人）",
+  "decided_at": "2026-09-11T04:40:00.000Z",
+  "merge": {
+    "commit": "c94acf9ee0e8968d2ad4c599c89099c0cb0d9305",
+    "merged_at": "2026-09-11T04:06:10.099Z",
+    "issue": "13"
+  },
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-10T16:49:24.755Z",
+      "produced_by": "zcode-session-loc009-dev",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-10T16:49:24.978Z",
+      "produced_by": "zcode-session-loc009-dev"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": "2026-09-10T17:17:37.360Z",
+      "produced_by": "zcode-session-loc009-dev",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a5.json",
+      "created_at": "2026-09-11T04:01:25.172Z",
+      "produced_by": "zcode-session-loc009-review-r3",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a5.json",
+      "created_at": "2026-09-11T04:01:25.258Z",
+      "produced_by": "zcode-session-loc009-test-r3",
+      "summary": {
+        "verdict": "pass",
+        "environment": "Node v24.14.1；worktree dev-loc-009-r1 @ 6dfcb65（连续两次并入 main：投影内核收口 9c8f50e + LOC-008 Formal Records 5eea177；工作区干净）；attempt 5 = Integration Checkpoint（main 第三次前进）触发的 Proof 重跑"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a5.json",
+      "created_at": "2026-09-11T04:01:58.171Z",
+      "produced_by": "zcode-session-loc009-dev",
+      "summary": {
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "产品经理（用户本人）",
+        "decided_at": "2026-09-11T04:40:00.000Z",
+        "verified_branch": "dev-loc-009-r1",
+        "verified_head": "6dfcb6526f249002540ca3c04020dea04997ad44"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-009-r1",
+    "file_count": 30,
+    "total_bytes": 63694
+  },
+  "generated_at": "2026-09-12T15:08:21.510Z"
+}

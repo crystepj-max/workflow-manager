@@ -30,8 +30,14 @@ node "$CWF_ASSETS/cwf-run-init.mjs" <任务标识> <run_id> --local-base
 - 同一 run_id 复用时，若上次是远程基线、这次请求本地基线（或反之），脚本拒绝静默复用。
 
 - 产出独立分支 / worktree / `.agent-runs/<run_id>/run.json`。
+  **路径一律由 `scripts/workspace-paths.mjs` 派生，不得自行拼接**（约定 §1.4/§1.6）：
+  · worktree = `<主检出父目录>/<仓库名>-worktrees/<分支名>/`（相邻容器，**不在仓库内**）；
+  · 运行目录 = **主检出**的 `.agent-runs/<run_id>/`（产物锚定主检出，不写进工作树——
+    这样工作树才是可随时丢弃的目录）。
+  任一工作树内执行 `cwf-run-init.mjs` 都得到同一套路径：锚点是主检出（`--git-common-dir`），
+  不是当前目录。
 - 在 run.json 记录绑定的**需求基线版本**（与 Issue 当前版本一致）；之后不得静默换版。
-- **之后全部工作在该 worktree 内进行**；任何 git / npm 命令一律 `git -C <worktree>` 或先 `cd <worktree>` 并核对 `git rev-parse --abbrev-ref HEAD` = `run.json.work_branch`，不一致即停（不得在主检出或别的 worktree 里"顺手"执行）。
+- **之后全部工作在该 worktree 内进行**；任何 git / npm 命令一律 `git -C <worktree>` 或先 `cd <worktree>` 并核对 `git rev-parse --abbrev-ref HEAD` = `run.json.work_branch`，不一致即停（不得在主检出或别的 worktree 里"顺手"执行）。**这条只约束「在哪里干活」；「产物写到哪里」由上一条锚定规则约束（写主检出）。**
 - 同时分配本 Run **独占的开发 DSH Home**（默认 `~/.dsh-workflow-dev/tasks/<run_id>`，可用 `VWF_DEV_DSH_TASKS_ROOT` 改道）：登记进 `run.json.env_resources.dev_dsh_home`，Home 内写归属 marker `task-env.json`；目录已被其他 Run 占用或无 marker 时 run-init 直接报错，不静默接管。
 - **运行期一切 DSH 开发操作只用本 Run 的 Home**（进程 / 端口 / 插件 / 工具名 / 工作区注册表随之隔离）：
 
@@ -195,14 +201,21 @@ node scripts/local-task-merge.mjs --task <任务标识> --branch <工作分支> 
 
    门禁（任一不满足即中止）：验收结果为 `accept`/`conditional_pass`；登记册状态为「等待验收」；任务卡与规格版本一致；任务分支确有新增提交；主干与任务工作区均无未提交改动；任务分支并入主干无冲突。
 
-   通过后自动完成：一任务一提交 → 打标签 `task/<loc-001>/<v1>` → 任务卡与规格归档至 `docs/tasks/archive/<任务标识>/` 并**随同一提交入库** → 登记册状态改「已合并」、记录合并提交 → 重写看板 → 可选推送镜像仓库。
+   通过后自动完成：一任务一提交 → 打标签 `task/<loc-001>/<v1>` → **归档三件套**（任务卡 + 规格终版 + 证据摘要）至 `docs/tasks/archive/<任务标识>/` 并**随同一提交入库**（证据明细若仍在工作树内，脚本会先按锚定规则复制到主检出再生成摘要）→ 登记册状态改「已合并」、记录合并提交与证据保留期 → 重写看板 → `git worktree prune` 兜底注销失效登记 → 可选推送镜像仓库。
 
-   🔴 工作区与分支**暂不删除**，保留供 GitHub 恢复后补 PR；`GitHub 同步` 保持 `pending`。
+   🔴 工作区与分支**暂不删除**（阶段一口径），保留供 GitHub 恢复后补 PR；`GitHub 同步` 保持 `pending`。**再强调一次这个不对称**：工作区可再生（`git worktree add` 从分支重建），分支不可再生（补登 PR 的唯一载体），所以暂停期只留分支不保留工作区。删除工作区时用 `scripts/workspace-paths.mjs` 派生的路径，并在删除后追加 `git worktree prune`。
 
-6. 归档：
+6. 归档（**`local-task-merge` 已自动完成，此步仅用于未走合并脚本或需要单独重跑时**）：
 
 ```bash
 node "$CWF_ASSETS/cwf-record.mjs" archive .agent-runs/<run_id>
+```
+
+   证据明细按登记册 `evidence_expires_at`（合并时间 + 7 天）保留，到期后由清理动作删除：
+
+```bash
+node scripts/task-runs-cleanup.mjs            # 只读预演（默认）
+node scripts/task-runs-cleanup.mjs --apply    # 执行清理（摘要缺失的项会被拒绝）
 ```
 
 7. **本地轨道收尾**：把「有条件通过」的优化意见登记为新的候选任务（分配新的 `LOC-` 号），不改已合并基线：

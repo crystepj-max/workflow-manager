@@ -1,0 +1,80 @@
+{
+  "task_id": "LOC-017",
+  "run_id": "loc-017-r1",
+  "task_name": "Integration Gate 自动重跑闸门",
+  "branch": "dev-loc-017-r1",
+  "status": "已合并",
+  "decision": "accept",
+  "decided_by": "用户",
+  "decided_at": "2026-09-12T14:00:55Z",
+  "merge": {
+    "commit": "f592902bda1dc28d243498bfdc45055ab6f803c1",
+    "merged_at": "2026-09-12T15:37:04.712Z",
+    "issue": null
+  },
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-11T18:07:00.216Z",
+      "produced_by": "zcode-night-loc017:orchestrator",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-11T18:07:00.292Z",
+      "produced_by": "zcode-night-loc017:orchestrator"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": "2026-09-11T18:07:12.966Z",
+      "produced_by": "zcode-night-loc017:dev",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a1.json",
+      "created_at": "2026-09-11T18:51:22.558Z",
+      "produced_by": "zcode-night-loc017:review-agent",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a1.json",
+      "created_at": "2026-09-11T18:51:22.642Z",
+      "produced_by": "zcode-night-loc017:test-agent",
+      "summary": {
+        "verdict": "pass",
+        "environment": "Node v24.14.1 / git 2.54.0 / macOS arm64（darwin 25.5.0）；worktree .scratch/worktrees/dev-loc-017-r1 @ 880a8d0；闸门专项：内核级 7/7（真 git 临时仓）+ 宿主级 9/9（假引擎+真内核）；独立测试会话两轮（4d73ccf、880a8d0）均实跑核验"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a1.json",
+      "created_at": "2026-09-11T18:52:37.077Z",
+      "produced_by": "zcode-night-loc017:orchestrator",
+      "summary": {
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "用户",
+        "decided_at": "2026-09-12T14:00:55Z",
+        "verified_branch": "dev-loc-017-r1",
+        "verified_head": "880a8d0cf0b5c37705cbfb1a70207f47adbc6be5"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-017-r1",
+    "file_count": 12,
+    "total_bytes": 38754
+  },
+  "generated_at": "2026-09-12T15:48:19.891Z"
+}

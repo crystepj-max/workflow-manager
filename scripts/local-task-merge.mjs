@@ -10,8 +10,12 @@
  *   5. 任务工作区无未提交改动；主干工作区无未提交改动
  *   6. 先在主干并入任务分支试运行，冲突则中止（需人工解决）
  *
- * 执行：任务分支并入主干最新 → 归档任务卡与规格 → squash 成一提交 → 打标签
- *      → 更新登记册与看板 → 可选推送镜像仓库（失败仅告警）
+ * 执行：任务分支并入主干最新 → 归档三件套（任务卡 + 规格 + 证据摘要）→ squash 成一提交
+ *      → 打标签 → 更新登记册与看板 → `git worktree prune` 兜底 → 可选推送镜像仓库（失败仅告警）
+ *
+ * 收口四件事中的第 1、2 件由本脚本完成（归档三件套、兜底 prune）；
+ * 删工作区与删分支属阶段一（托管暂停期）的人工确认动作，见
+ * docs/design/workspace-directory-convention.md §1.7。
  *
  * CLI:
  *   node scripts/local-task-merge.mjs --task LOC-001 --branch dev-loc-001-r1 --decision accept|conditional_pass
@@ -25,6 +29,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadRegistry, update, writeBoard, STATUS_LOCAL_DEFINED, STATUS_WAITING_ACCEPTANCE, STATUS_MERGED } from './local-task-registry.mjs'
 import { field, parseSpecVersion, TASK_FIELDS } from './task-card-parse.mjs'
+import { mainCheckout, worktreePathFor, runDirFor } from './workspace-paths.mjs'
+import { generateEvidenceSummary } from './workspace-evidence-summary.mjs'
 
 export const MERGEABLE_DECISIONS = new Set(['accept', 'conditional_pass'])
 export const PRE_MERGE_STATUS = STATUS_WAITING_ACCEPTANCE
@@ -133,7 +139,8 @@ export function checkMerge({ repo, taskId, branch, main = 'main', decision, work
   }
 
   // git 侧检查
-  const wt = worktree || path.join(repo, '.scratch', 'worktrees', branch)
+  // 工作树路径由主检出派生（相邻容器），不再依赖 `.scratch/worktrees/` 这一旧布局
+  const wt = worktree || worktreePathFor(mainCheckout(repo), branch)
   if (!fs.existsSync(wt)) failures.push(`任务工作区不存在：${wt}`)
   else {
     const dirty = worktreeStatus(wt)
@@ -255,6 +262,28 @@ export function runMerge({
   // 3. 归档任务卡与规格（必须在提交前，才能随同一提交入库）
   const archive = copyIntoArchive(repo, taskId, [plan.cardPath, plan.specPath])
 
+  // 3b. 归档三件套之第三件：证据摘要（§1.7.3）
+  //     证据明细若仍在工作树内（收口时常见的状态），先按 §1.6 锚定规则复制到主检出，
+  //     再生成摘要——摘要本身也要随这次提交入库。
+  const mainRoot = mainCheckout(repo)
+  const effectiveRunId = runId || branch.replace(/^dev-/, '')
+  const mainRunDir = runDirFor(mainRoot, effectiveRunId)
+  const wtRunDir = path.join(wt, '.agent-runs', effectiveRunId)
+  let evidenceArchivedFrom = null
+  if (!fs.existsSync(mainRunDir) && fs.existsSync(wtRunDir)) {
+    fs.mkdirSync(path.dirname(mainRunDir), { recursive: true })
+    fs.cpSync(wtRunDir, mainRunDir, { recursive: true })
+    evidenceArchivedFrom = wtRunDir
+  }
+  let summaryPath = null
+  let summaryError = null
+  try {
+    const res = generateEvidenceSummary({ root: mainRoot, taskId, runId: effectiveRunId, noRunEvidence: !fs.existsSync(mainRunDir) })
+    summaryPath = res.outPath
+  } catch (e) {
+    summaryError = String(e.message).split('\n')[0]
+  }
+
   // 4. 更新登记册与看板
   update(repo, taskId, { status: MERGED_STATUS, branch, merge_commit: 'PENDING' })
   if (feedback) update(repo, taskId, { leftovers: feedback })
@@ -276,6 +305,15 @@ export function runMerge({
     git(['tag', '-f', tag, commit], repo)
   } catch { /* 标签已存在时强制覆盖 */ }
 
+  // 7. 兜底注销失效的工作区登记：删父工作区不会级联注销其内部嵌套的子登记
+  //    （约定 §1.7.4；该缺口已三次复现：dev-itest-a-01、ws-cwf-159-01、LOC-013 的三个 UAT 工作区）
+  //    prune 失败不阻塞合并——它只是清理，不是交付条件。
+  let pruned = false
+  try {
+    git(['worktree', 'prune'], repo)
+    pruned = true
+  } catch { /* 交人工处理 */ }
+
   let mirrorResult = 'skipped'
   if (mirror) {
     try {
@@ -296,8 +334,17 @@ export function runMerge({
     commit,
     tag,
     archive: archive.copied,
+    evidence: {
+      run_id: effectiveRunId,
+      archived_from: evidenceArchivedFrom,
+      summary_path: summaryPath ? path.relative(repo, summaryPath) : null,
+      ...(summaryError ? { error: summaryError } : {}),
+    },
+    pruned,
     mirror: mirrorResult,
-    cleanup_hint: '工作区与分支暂保留，供 GitHub 恢复后补 PR；确认不再需要时再清理。',
+    cleanup_hint:
+      '三件套（任务卡 + 规格 + 证据摘要）已入库，失效登记已 prune。' +
+      '工作区与分支按托管暂停期口径保留：工作区可在确认无未归档内容后删除，分支待托管恢复补 PR 后再删。',
   }
 }
 

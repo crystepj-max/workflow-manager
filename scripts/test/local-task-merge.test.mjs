@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { allocate, update, loadRegistry } from '../local-task-registry.mjs'
 import { buildCommitMessage, checkMerge, runMerge } from '../local-task-merge.mjs'
+import { worktreePathFor } from '../workspace-paths.mjs'
 
 const GIT_ENV = {
   ...process.env,
@@ -50,7 +51,8 @@ function seedTask(repo, { name = 'Fix Login', status = '等待验收', baseline 
 
 function makeBranch(repo, branch, fileName, content) {
   g(['branch', branch, 'main'], repo)
-  const wt = path.join(repo, '.scratch', 'worktrees', branch)
+  // 相邻容器布局（约定 §1.4）：工作树不得位于仓库目录内部
+  const wt = worktreePathFor(repo, branch)
   fs.mkdirSync(path.dirname(wt), { recursive: true })
   g(['worktree', 'add', wt, branch], repo)
   fs.writeFileSync(path.join(wt, fileName), content)
@@ -174,7 +176,7 @@ test('端到端：一任务一提交合并回本地主干，标签与归档齐�
 
   // 分支与工作区保留（供后续补 PR）
   assert.ok(g(['branch', '--list', 'dev-loc-001-r1'], repo))
-  assert.ok(fs.existsSync(path.join(repo, '.scratch', 'worktrees', 'dev-loc-001-r1')))
+  assert.ok(fs.existsSync(worktreePathFor(repo, 'dev-loc-001-r1')))
 })
 
 test('端到端：冲突时中止，主干不受影响', () => {
