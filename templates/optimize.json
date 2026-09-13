@@ -132,10 +132,10 @@
   ],
   "bindings": {
     "models": {
-      "confirm": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "execute": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+      "confirm": { "provider": "deepseek-official", "model": "deepseek-flash" },
+      "execute": { "provider": "deepseek-official", "model": "deepseek-flash" },
       "evaluate": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "closeout": { "provider": "deepseek-official", "model": "deepseek-v4-flash" }
+      "closeout": { "provider": "deepseek-official", "model": "deepseek-flash" }
     }
   }
 }
