@@ -11,6 +11,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { mainCheckout, worktreePathFor } from './workspace-paths.mjs'
 
 export function verifyRerunEvidence({ synced, currentHead, attempt, proofs }) {
   // 不信 --proofs-rerun 自报（§7.3）：工作分支必须已 sync（含 targetHead），
@@ -64,27 +65,43 @@ export function computeCheckpoint(run, gitState) {
 function main() {
   const [runDir, ...rest] = process.argv.slice(2)
   if (!runDir) {
-    console.error('用法: node scripts/cwf-checkpoint.mjs <runDir> [--proofs-rerun]')
+    console.error('用法: node scripts/cwf-checkpoint.mjs <runDir> [--proofs-rerun] [--local-base]')
     process.exit(2)
   }
   const proofsRerun = rest.includes('--proofs-rerun')
+  // --local-base：本地轨道（GitHub 不可用/账号暂停，与 cwf-run-init --local-base 同词汇）——
+  // 跳过 fetch，target 直接取本地 base_ref；缺省仍走远程 fetch 口径
+  const localBase = rest.includes('--local-base')
   const repo = resolve(runDir, '..', '..')
   const run = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
 
-  git(['fetch', 'origin', run.base_ref], repo)
-  const targetHead = git(['rev-parse', `origin/${run.base_ref}`], repo)
+  let targetHead
+  if (localBase) {
+    targetHead = git(['rev-parse', run.base_ref], repo)
+  } else {
+    git(['fetch', 'origin', run.base_ref], repo)
+    targetHead = git(['rev-parse', `origin/${run.base_ref}`], repo)
+  }
 
   const ckpt = computeCheckpoint(run, { targetHead })
   if (!ckpt.ok) {
     if (proofsRerun) {
-      // 不信自报：派生验证 sync 与当前 attempt 的 review/test 证据
+      // 不信自报：派生验证 sync 与当前 attempt 的 review/test 证据。
+      // P2 主检出锚定配套（loc-014-r1 实测补齐）：交付分支实际检出 = repoRoot（若恰在其上）
+      // 或相邻容器 worktree（run.work_branch 派生）；synced/currentHead 一律从交付检出取，
+      // 不得把主检出（main）的 HEAD 误当工作分支 HEAD。
       const wt = resolve(runDir, '..', '..')
+      let delivery = wt
+      try {
+        const repoBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: wt, encoding: 'utf-8' }).trim()
+        if (repoBranch !== run.work_branch) delivery = worktreePathFor(mainCheckout(wt), run.work_branch)
+      } catch { delivery = wt }
       let synced = false
       try {
-        execFileSync('git', ['merge-base', '--is-ancestor', targetHead, 'HEAD'], { cwd: wt })
+        execFileSync('git', ['merge-base', '--is-ancestor', targetHead, 'HEAD'], { cwd: delivery })
         synced = true
       } catch { synced = false }
-      const currentHead = git(['rev-parse', 'HEAD'], wt)
+      const currentHead = git(['rev-parse', 'HEAD'], delivery)
       const indexPath = join(runDir, 'index.json')
       const index = existsSync(indexPath) ? JSON.parse(readFileSync(indexPath, 'utf-8')) : {}
       const proofs = {}
