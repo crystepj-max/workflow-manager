@@ -25,7 +25,7 @@
 | 无人值守许可 | 允许 / 不允许 |
 | 任务规格位置 | `.scratch/LOC-001-<slug>/task-spec-V1.md` |
 | 定义时间 | （确认「本地已定义」时写入 ISO 8601） |
-| GitHub 同步 | 不适用 / 待补 issue / 已同步 #N |
+| GitHub 同步 | pending / synced#N / not-applicable（**取值受实施前检查校验，不得写「待补 issue」等自然语言**） |
 
 ## 摘要（三要素速览）
 
