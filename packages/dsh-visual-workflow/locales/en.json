@@ -186,7 +186,7 @@
   "builtinReadonly": "The built-in template cannot be deleted",
   "modelOverride": "Model override",
   "modelOverrideBadge": "overridden",
-  "modelOverrideHelp": "Save a persistent Provider/Model override for a built-in template: only model bindings change, never structure; blank rows keep built-in defaults. The run snapshot freezes the effective bindings.",
+  "modelOverrideHelp": "Save a persistent Provider/Model override for a built-in template: ⚪ default / 🔵 overridden; each row lists the current effective binding. Pick from dropdowns and save — structure is never modified (use save-as-custom for that).",
   "modelOverrideDefault": "$default (fallback)",
   "modelOverrideInherit": "not overridden (built-in default)",
   "modelOverrideSave": "Save override",
@@ -283,5 +283,8 @@
   "probeStatusInternalError": "probe internal error (not a provider verdict)",
   "probeBindingNodes": " (nodes: {nodes})",
   "probeStatusDegraded": "probe degraded (no real call)",
-  "probeStatusUnknown": "unknown"
+  "probeStatusUnknown": "unknown",
+  "modelOverrideDefaultBadge": "default",
+  "modelOverrideCurrent": "current: ",
+  "modelOverrideKeepDefault": "keep default"
 }

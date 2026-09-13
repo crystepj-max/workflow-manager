@@ -186,7 +186,7 @@
   "builtinReadonly": "内置模板不可删除",
   "modelOverride": "模型覆盖",
   "modelOverrideBadge": "已覆盖",
-  "modelOverrideHelp": "为内置模板保存持久化 Provider/Model 覆盖：仅替换模型绑定，不改结构；留空的行沿用内置默认。运行快照将冻结覆盖后的有效绑定。",
+  "modelOverrideHelp": "为内置模板保存持久化 Provider/Model 覆盖：⚪ 默认 / 🔵 已覆盖；每行显式列出当前有效绑定，下拉选择后保存即生效。结构不可改，改结构请另存为自定义。",
   "modelOverrideDefault": "$default（默认兜底）",
   "modelOverrideInherit": "未覆盖（沿用内置默认）",
   "modelOverrideSave": "保存覆盖",
@@ -283,5 +283,8 @@
   "probeStatusInternalError": "探针内部错误（非 Provider 结论）",
   "probeBindingNodes": "（节点：{nodes}）",
   "probeStatusDegraded": "探针降级（无法真实调用）",
-  "probeStatusUnknown": "未知"
+  "probeStatusUnknown": "未知",
+  "modelOverrideDefaultBadge": "默认",
+  "modelOverrideCurrent": "当前：",
+  "modelOverrideKeepDefault": "沿用默认"
 }

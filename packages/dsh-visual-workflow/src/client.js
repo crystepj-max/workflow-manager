@@ -2894,26 +2894,40 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
 
       const editingBuiltin = !!(list || []).find(x => x.id === editId && x.builtin)
-      // LOC-014 覆盖对话框行：$default + 全部节点；placeholder 展示当前有效绑定（所见即所跑）
+      // LOC-014 覆盖对话框行：$default + 全部节点；显式列出当前有效绑定，
+      // 图标区分默认（⚪）/已覆盖（🔵）；provider/model 用 vwf.models 下拉（与编辑器同源），无 providers 时回退文本输入
       const ovRows = () => {
         const models = (ovW && ovW.dsl && ovW.dsl.bindings && ovW.dsl.bindings.models && typeof ovW.dsl.bindings.models === 'object') ? ovW.dsl.bindings.models : {}
+        const provList = (providers || []).map(p => p.id)
+        const modelsOfProv = (pid) => (((providers || []).find(p => p.id === pid) || {}).models || [])
         const rows = [{ key: '$default', label: t('modelOverrideDefault'), eff: null }]
         for (const n of ((ovW && ovW.dsl && ovW.dsl.nodes) || [])) {
           rows.push({ key: n.id, label: (n.label || n.id) + '（' + n.id + '）', eff: models[n.id] || null })
         }
-        return rows.map((row, i) => {
+        return rows.map((row) => {
           const d = (ovDraft && ovDraft[row.key]) || {}
-          const ph = row.eff ? ((row.eff.provider || '') + ' / ' + (row.eff.model || '')) : t('modelOverrideInherit')
-          const overridden = !!(ovDraft && ovDraft[row.key] && String(d.provider || '').trim() && String(d.model || '').trim())
+          const overridden = !!(String(d.provider || '').trim() && String(d.model || '').trim())
+          const curText = row.eff ? ((row.eff.provider || '') + ' / ' + (row.eff.model || '')) : t('modelOverrideInherit')
+          const keepOpt = [{ value: '', label: t('modelOverrideKeepDefault') }]
+          const provCtl = provList.length
+            ? h(VwfSelect, { value: d.provider || '', options: keepOpt.concat(provList.map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(row.key, 'provider', v) })
+            : h('input', { className: 'vwf-input vwf-mono', style: { width: 150 }, value: d.provider || '', placeholder: curText, onChange: (ev) => ovSet(row.key, 'provider', ev.target.value) })
+          const modelCtl = provList.length
+            ? h(VwfSelect, { value: d.model || '', options: keepOpt.concat(modelsOfProv(String(d.provider || '')).map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(row.key, 'model', v) })
+            : h('input', { className: 'vwf-input vwf-mono', style: { width: 170 }, value: d.model || '', placeholder: curText, onChange: (ev) => ovSet(row.key, 'model', ev.target.value) })
           return h('div', { key: 'ov-row-' + row.key, className: 'vwf-list-item' },
             h('div', { style: { minWidth: 0, flex: 1 } },
               h('div', { className: 'vwf-row', style: { gap: 6 } },
+                h('span', null, overridden ? '🔵' : '⚪'),
                 h('span', { className: 'vwf-list-name' }, row.label),
-                overridden ? h('span', { className: 'vwf-badge', style: { color: 'var(--dsw-alias-state-info-primary, #3b82f6)' } }, t('modelOverrideBadge')) : null
+                overridden
+                  ? h('span', { className: 'vwf-badge', style: { color: 'var(--dsw-alias-state-info-primary, #3b82f6)' } }, t('modelOverrideBadge'))
+                  : h('span', { className: 'vwf-badge' }, t('modelOverrideDefaultBadge')),
+                h('span', { className: 'vwf-muted-sm vwf-mono' }, t('modelOverrideCurrent') + curText)
               )
             ),
-            h('input', { className: 'vwf-input vwf-mono', style: { width: 150 }, value: d.provider || '', placeholder: ph, onChange: (ev) => ovSet(row.key, 'provider', ev.target.value) }),
-            h('input', { className: 'vwf-input vwf-mono', style: { width: 170 }, value: d.model || '', placeholder: ph, onChange: (ev) => ovSet(row.key, 'model', ev.target.value) }),
+            h('div', { style: { width: 150 } }, provCtl),
+            h('div', { style: { width: 170 } }, modelCtl),
             h('button', { className: 'vwf-btn sm', disabled: ovBusy || !overridden, onClick: () => ovSet(row.key, 'provider', '') || ovSet(row.key, 'model', '') }, t('modelOverrideResetRow'))
           )
         })
