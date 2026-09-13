@@ -164,7 +164,6 @@ export function recycleRun(run, devHome, {
       skipped,
       reported: plan.reported,
       release,
-      recycled_at,
       reason:
         `本任务插件停用未完成：${release.unresolved}。` +
         '需人工在 DSH 插件面板中清理该动态包后，重新执行 ' +
