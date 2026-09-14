@@ -127,11 +127,27 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 1. **接受能力回归**：「同一时刻只允许一个任务激活插件」是结果，不是策略选择。切换任务时由 `dev-plugin.mjs start --task <ns>` **重启开发环境**清空上一个任务的动态插件（DSH 重启即清空全部动态包，这是 shell 侧唯一可靠手段）。
 2. **已知限制**：同一浏览器标签页内不同任务的界面半边理论上可并存，**不同任务请用不同标签页**。
 
-#### (d) P0 实机确认状态 🔴
+#### (d) P0 实机确认结果 ✅（2026-09-13 23:30 实测）
 
-上述 (b) 为**代码级确定**（静态读源码，非推断）。原提案要求的「实机确认两个任务同时激活时的撞名表现（报错 or 覆盖）」**尚未执行**，原因：cordis 动态包只能由 DSH 会话内的模型工具（`cordis_define` / `cordis_run`）操作，`dsh` CLI 无对应子命令，外部脚本无法驱动。
+实验：在开发 DSH（唯一实例，127.0.0.1:9527）的**两个独立会话**中，各自 `cordis_define` +
+`cordis_run` 一个注册**同名工具** `uat04_probe` 的动态插件（会话 A：`uatp-1` / `pkg-1`；
+会话 B：`uatq-2` / `pkg-2`；`idPrefix` 不同以免 pluginId 混淆，唯一撞的是工具名）。
 
-**已移交人工执行**（步骤见 UAT 卡）：在开发 DSH 中开两个会话，各 `cordis_define` + `cordis_run` 一个注册同名工具/RPC 的插件，观察第二个的结果是 `host-half-failed` 还是静默覆盖。**在完成前，本项不得记为已确认。**
+| 观察点 | 会话 A | 会话 B |
+|---|---|---|
+| `cordis_define` | 成功 | 成功 |
+| `cordis_run` | 成功 | **失败**（`self_state: failed`） |
+| 调用 `uat04_probe` | 返回 `uat04_probe alive (A)` | 返回 `uat04_probe alive (A)` —— **仍是 A 的版本，B 的注册未生效** |
+| 错误原文 | — | `tool "uat04_probe" is already registered … to REPLACE something an earlier dynamic package registered, first cordis_stop that package's id … then run the new version.` |
+
+**结论：撞名表现为「报错 + 新注册不生效」，不是静默覆盖。** 实测与 §3.1(b) 的代码级判定一致：
+
+1. DSH **不存在工作空间作用域**——两个会话分属不同工作区/目录，插件注册仍然撞在同一个进程级注册域上；
+2. 宿主半边注册的工具名是**进程级全局**，并发激活必然冲突；
+3. 因此「同一时刻只允许一个任务激活插件」不是策略选择，而是**技术约束**——本改造（决策六）的前提成立。
+
+附带印证：错误提示本身要求的补救路径（先 `cordis_stop` 旧包 → 再运行新版本），正是本改造
+`dev-plugin start --task <ns>` 自动化的动作（切换任务时重启开发环境清空上一个任务的动态插件）。
 
 ---
 
