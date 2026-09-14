@@ -1357,7 +1357,7 @@ test('角色库删除 fail-closed：usage 返回 ok:false 时不弹出删除确�
 
 test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链从左到右', async () => {
   const blueprint = {
-    id: 'construction-full-feature',
+    id: 'wf-construction-full-feature',
     displayName: '完整功能开发',
     entry: 'requirements',
     bindings: {

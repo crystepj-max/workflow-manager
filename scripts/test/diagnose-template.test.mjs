@@ -1,4 +1,4 @@
-// LOC-012 诊断缺陷修复正式模板（templates/diagnose.json）行为测试
+// LOC-012 诊断缺陷修复正式模板（templates/wf-diagnose.json）行为测试
 // 剧本驱动真实蓝图：正常 / 修复问题回修复 / 根因被推翻回诊断 / 额度耗尽 / 回归失败 / 诊断受阻
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -11,7 +11,7 @@ import validatorCore from '../validate-core.cjs'
 
 const { validateBlueprint } = validatorCore
 const here = path.dirname(fileURLToPath(import.meta.url))
-const diagnoseBp = JSON.parse(readFileSync(path.join(here, '../../templates/diagnose.json'), 'utf8'))
+const diagnoseBp = JSON.parse(readFileSync(path.join(here, '../../templates/wf-diagnose.json'), 'utf8'))
 
 const runEngine = (bp, table, args = {}) => {
   const { script } = compileBlueprint(bp)
@@ -139,7 +139,7 @@ test('诊断受阻：证据不足直接结束，不猜根因不进入修复', as
 
 test('workspace 策略：diagnose 默认 ISOLATED_WRITE 且 freeze_from=diagnose（同一 lineage 兜底）', async () => {
   const { resolveWorkspacePolicy, WORKSPACE_MODE } = await import('../workspace-isolation.mjs')
-  const policy = resolveWorkspacePolicy('diagnose', {})
+  const policy = resolveWorkspacePolicy('wf-diagnose', {})
   assert.equal(policy.mode, WORKSPACE_MODE.ISOLATED_WRITE)
   assert.equal(policy.freeze_from, 'diagnose')
   const n = diagnoseBp.nodes.find((x) => x.id === 'diagnose')

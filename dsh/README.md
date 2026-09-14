@@ -316,7 +316,12 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
   Client 半在 settings.section 注册「工作流」页（模板库 + 大抽屉可视化编辑器 + 运行看板）。
   **模板数据已持久化**：内置模板只读（`.generated/<id>/`），用户模板落盘
   `~/.dsh/visual-workflow/templates/<id>.json`，保存即同步编译
-  `~/.dsh/skills/<id>/` 技能（save 即闭环）。
+  `~/.dsh/skills/<id>/` 技能（save 即闭环）。**内置模板不走保存闭环**：改模板或换机后须执行
+  `npm run install:builtin-skills`，把四套正式内置的自包含技能包装到 `~/.dsh/skills/<id>/`，
+  否则会话里按触发词调不到内置工作流（幂等，可重复执行）。
+  要同时分发到跨 agent 共享技能池用 `npm run install:builtin-skills:pool`
+  （即在上述命令后加 `--pool`，默认池 `~/.agents/skills`，可用 `--pool=<目录>` 指定）；
+  池内新增后需补建各 agent 软链（kimi / opencode 原生读池，无需软链）。
 - **动态插件（开发迭代形态）**：动态 Cordis 插件，host + client 两半、plain JS
   （无打包器/JSX/import）。
   运行时用 `cordis_define` / `cordis_run` 定义并激活（重启需重新激活）。Host 半承载 DSL 校验器、
@@ -393,4 +398,6 @@ vwf 插件走图形触发（模板 → DSL 校验 → 磁盘产物或 CLI 编译
 技能包读生成产物（`.generated/` 或安装时的技能目录），vwf 内置模板读 `.generated/`、
 用户模板读 save 闭环产物、临时图走 CLI 编译。vwf 编辑器保存用户模板时会同步生成
 自包含技能到 `~/.dsh/skills/<id>/`，该技能即可像 `dev-workflow-2-0` 一样按触发词调用
-（save 即闭环）。
+（save 即闭环）；**内置模板的同一份技能包由 `npm run install:builtin-skills` 安装**
+（`scripts/install-builtin-skills.mjs`，与 save 闭环共用 `writeUserSkill`，产物形态一致，
+含 SKILL.md / script.mjs / meta.json / 蓝图引用的角色）。两类技能包都首选 `wf_run` 起跑。

@@ -1,5 +1,5 @@
 {
-  "id": "construction-full-feature",
+  "id": "wf-construction-full-feature",
   "displayName": "完整功能开发",
   "description": "M2 单任务交付：定义外置（从已定义开工）；自动返工上限 3；人工验收严格三态（通过 / 退回 / 有条件通过）。主链不含需求分析与方案设计门。",
   "entry": "preflight",
@@ -20,13 +20,27 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["PASS", "BLOCKED"]
+              "enum": [
+                "PASS",
+                "BLOCKED"
+              ]
             },
-            "summary": { "type": "string" },
-            "blockers": { "type": "string" },
-            "baseline_version": { "type": "string" }
+            "summary": {
+              "type": "string"
+            },
+            "blockers": {
+              "type": "string"
+            },
+            "baseline_version": {
+              "type": "string"
+            }
           },
-          "required": ["route", "summary", "blockers", "baseline_version"],
+          "required": [
+            "route",
+            "summary",
+            "blockers",
+            "baseline_version"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -46,12 +60,24 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["READY", "NEED_REDEFINE", "BLOCKED"]
+              "enum": [
+                "READY",
+                "NEED_REDEFINE",
+                "BLOCKED"
+              ]
             },
-            "summary": { "type": "string" },
-            "self_check": { "type": "string" }
+            "summary": {
+              "type": "string"
+            },
+            "self_check": {
+              "type": "string"
+            }
           },
-          "required": ["route", "summary", "self_check"],
+          "required": [
+            "route",
+            "summary",
+            "self_check"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -72,18 +98,41 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["APPROVE", "RETURN_DEV", "BLOCKED"]
+              "enum": [
+                "APPROVE",
+                "RETURN_DEV",
+                "BLOCKED"
+              ]
             },
             "verdict": {
               "type": "string",
-              "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT_ONLY"]
+              "enum": [
+                "APPROVE",
+                "REQUEST_CHANGES",
+                "COMMENT_ONLY"
+              ]
             },
-            "summary": { "type": "string" },
-            "blockers": { "type": "string" },
-            "verified_branch": { "type": "string" },
-            "verified_head": { "type": "string" }
+            "summary": {
+              "type": "string"
+            },
+            "blockers": {
+              "type": "string"
+            },
+            "verified_branch": {
+              "type": "string"
+            },
+            "verified_head": {
+              "type": "string"
+            }
           },
-          "required": ["route", "verdict", "summary", "blockers", "verified_branch", "verified_head"],
+          "required": [
+            "route",
+            "verdict",
+            "summary",
+            "blockers",
+            "verified_branch",
+            "verified_head"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -104,18 +153,41 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["PASS", "RETURN_DEV", "BLOCKED"]
+              "enum": [
+                "PASS",
+                "RETURN_DEV",
+                "BLOCKED"
+              ]
             },
             "result": {
               "type": "string",
-              "enum": ["PASSED", "FAILED", "BLOCKED"]
+              "enum": [
+                "PASSED",
+                "FAILED",
+                "BLOCKED"
+              ]
             },
-            "reason": { "type": "string" },
-            "evidence": { "type": "string" },
-            "verified_branch": { "type": "string" },
-            "verified_head": { "type": "string" }
+            "reason": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "verified_branch": {
+              "type": "string"
+            },
+            "verified_head": {
+              "type": "string"
+            }
           },
-          "required": ["route", "result", "reason", "evidence", "verified_branch", "verified_head"],
+          "required": [
+            "route",
+            "result",
+            "reason",
+            "evidence",
+            "verified_branch",
+            "verified_head"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -135,14 +207,30 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["READY_FOR_HUMAN"]
+              "enum": [
+                "READY_FOR_HUMAN"
+              ]
             },
-            "summary_for_human": { "type": "string" },
-            "why": { "type": "string" },
-            "current_state": { "type": "string" },
-            "details": { "type": "string" }
+            "summary_for_human": {
+              "type": "string"
+            },
+            "why": {
+              "type": "string"
+            },
+            "current_state": {
+              "type": "string"
+            },
+            "details": {
+              "type": "string"
+            }
           },
-          "required": ["route", "summary_for_human", "why", "current_state", "details"],
+          "required": [
+            "route",
+            "summary_for_human",
+            "why",
+            "current_state",
+            "details"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -164,16 +252,27 @@
           "properties": {
             "status": {
               "type": "string",
-              "enum": ["DELIVERED"]
+              "enum": [
+                "DELIVERED"
+              ]
             },
             "completion_type": {
               "type": "string",
               "const": "DELIVERED"
             },
-            "summary": { "type": "string" },
-            "followups": { "type": "string" }
+            "summary": {
+              "type": "string"
+            },
+            "followups": {
+              "type": "string"
+            }
           },
-          "required": ["status", "completion_type", "summary", "followups"],
+          "required": [
+            "status",
+            "completion_type",
+            "summary",
+            "followups"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -183,43 +282,149 @@
     }
   ],
   "edges": [
-    { "from": "preflight", "to": "dev", "outcome": "PASS" },
-    { "from": "preflight", "to": "$end", "outcome": "BLOCKED" },
-    { "from": "preflight", "to": "preflight", "on": "technical" },
-
-    { "from": "dev", "to": "review", "outcome": "READY" },
-    { "from": "dev", "to": "$end", "outcome": "NEED_REDEFINE", "countRound": false },
-    { "from": "dev", "to": "$end", "outcome": "BLOCKED" },
-    { "from": "dev", "to": "dev", "on": "technical" },
-
-    { "from": "review", "to": "test", "outcome": "APPROVE" },
-    { "from": "review", "to": "dev", "outcome": "RETURN_DEV", "countRound": true },
-    { "from": "review", "to": "$end", "outcome": "BLOCKED" },
-    { "from": "review", "to": "review", "on": "technical" },
-
-    { "from": "test", "to": "uat", "outcome": "PASS" },
-    { "from": "test", "to": "dev", "outcome": "RETURN_DEV", "countRound": true },
-    { "from": "test", "to": "$end", "outcome": "BLOCKED" },
-    { "from": "test", "to": "test", "on": "technical" },
-
-    { "from": "uat", "to": "$human-decision", "outcome": "READY_FOR_HUMAN" },
-    { "from": "uat", "to": "uat", "on": "technical" },
-
-    { "from": "$human-decision", "to": "closeout", "outcome": "ACCEPT", "subsequent_effect": "验收通过：进入收口，任务标记完成" },
-    { "from": "$human-decision", "to": "dev", "outcome": "REJECT", "subsequent_effect": "验收退回：保持当前基线，返回开发再走审查与测试" },
-    { "from": "$human-decision", "to": "closeout", "outcome": "CONDITIONAL_PASS", "subsequent_effect": "有条件通过：本任务收口，优化意见作为下一轮定义输入，不改当前基线" },
-
-    { "from": "closeout", "to": "$end", "outcome": "DELIVERED" },
-    { "from": "closeout", "to": "closeout", "on": "technical" }
+    {
+      "from": "preflight",
+      "to": "dev",
+      "outcome": "PASS"
+    },
+    {
+      "from": "preflight",
+      "to": "$end",
+      "outcome": "BLOCKED"
+    },
+    {
+      "from": "preflight",
+      "to": "preflight",
+      "on": "technical"
+    },
+    {
+      "from": "dev",
+      "to": "review",
+      "outcome": "READY"
+    },
+    {
+      "from": "dev",
+      "to": "$end",
+      "outcome": "NEED_REDEFINE",
+      "countRound": false
+    },
+    {
+      "from": "dev",
+      "to": "$end",
+      "outcome": "BLOCKED"
+    },
+    {
+      "from": "dev",
+      "to": "dev",
+      "on": "technical"
+    },
+    {
+      "from": "review",
+      "to": "test",
+      "outcome": "APPROVE"
+    },
+    {
+      "from": "review",
+      "to": "dev",
+      "outcome": "RETURN_DEV",
+      "countRound": true
+    },
+    {
+      "from": "review",
+      "to": "$end",
+      "outcome": "BLOCKED"
+    },
+    {
+      "from": "review",
+      "to": "review",
+      "on": "technical"
+    },
+    {
+      "from": "test",
+      "to": "uat",
+      "outcome": "PASS"
+    },
+    {
+      "from": "test",
+      "to": "dev",
+      "outcome": "RETURN_DEV",
+      "countRound": true
+    },
+    {
+      "from": "test",
+      "to": "$end",
+      "outcome": "BLOCKED"
+    },
+    {
+      "from": "test",
+      "to": "test",
+      "on": "technical"
+    },
+    {
+      "from": "uat",
+      "to": "$human-decision",
+      "outcome": "READY_FOR_HUMAN"
+    },
+    {
+      "from": "uat",
+      "to": "uat",
+      "on": "technical"
+    },
+    {
+      "from": "$human-decision",
+      "to": "closeout",
+      "outcome": "ACCEPT",
+      "subsequent_effect": "验收通过：进入收口，任务标记完成"
+    },
+    {
+      "from": "$human-decision",
+      "to": "dev",
+      "outcome": "REJECT",
+      "subsequent_effect": "验收退回：保持当前基线，返回开发再走审查与测试"
+    },
+    {
+      "from": "$human-decision",
+      "to": "closeout",
+      "outcome": "CONDITIONAL_PASS",
+      "subsequent_effect": "有条件通过：本任务收口，优化意见作为下一轮定义输入，不改当前基线"
+    },
+    {
+      "from": "closeout",
+      "to": "$end",
+      "outcome": "DELIVERED"
+    },
+    {
+      "from": "closeout",
+      "to": "closeout",
+      "on": "technical"
+    }
   ],
   "bindings": {
     "models": {
-      "preflight": { "provider": "deepseek-official", "model": "deepseek-flash" },
-      "dev": { "provider": "deepseek-official", "model": "deepseek-flash" },
-      "review": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "test": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "uat": { "provider": "deepseek-official", "model": "deepseek-flash" },
-      "closeout": { "provider": "deepseek-official", "model": "deepseek-flash" }
+      "preflight": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "dev": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "review": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash"
+      },
+      "test": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash"
+      },
+      "uat": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "closeout": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      }
     }
   }
 }

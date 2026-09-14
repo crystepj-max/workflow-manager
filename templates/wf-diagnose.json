@@ -1,5 +1,5 @@
 {
-  "id": "diagnose",
+  "id": "wf-diagnose",
   "displayName": "诊断 · 缺陷修复",
   "description": "诊断缺陷修复正式模板：缺陷诊断 → 修复 → 审核 → 回归验证 → 收口；先诊断后修复，原始 feedback signal 贯穿全程；修复问题回修复、证据推翻根因回诊断（均消耗自动回退额度，默认 3）；证据不足且不可复现时受阻，不猜根因；默认无独立人工验收节点。",
   "entry": "diagnose",
@@ -20,13 +20,27 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["DIAGNOSED", "BLOCKED"]
+              "enum": [
+                "DIAGNOSED",
+                "BLOCKED"
+              ]
             },
-            "root_cause": { "type": "string" },
-            "evidence": { "type": "string" },
-            "verified_head": { "type": "string" }
+            "root_cause": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "verified_head": {
+              "type": "string"
+            }
           },
-          "required": ["route", "root_cause", "evidence", "verified_head"],
+          "required": [
+            "route",
+            "root_cause",
+            "evidence",
+            "verified_head"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -46,12 +60,23 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["FIXED", "BLOCKED"]
+              "enum": [
+                "FIXED",
+                "BLOCKED"
+              ]
             },
-            "summary": { "type": "string" },
-            "changed": { "type": "string" }
+            "summary": {
+              "type": "string"
+            },
+            "changed": {
+              "type": "string"
+            }
           },
-          "required": ["route", "summary", "changed"],
+          "required": [
+            "route",
+            "summary",
+            "changed"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -71,11 +96,21 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["APPROVE", "FIX_ISSUES", "ROOT_CAUSE_REFUTED", "BLOCKED"]
+              "enum": [
+                "APPROVE",
+                "FIX_ISSUES",
+                "ROOT_CAUSE_REFUTED",
+                "BLOCKED"
+              ]
             },
-            "verdict_reason": { "type": "string" }
+            "verdict_reason": {
+              "type": "string"
+            }
           },
-          "required": ["route", "verdict_reason"],
+          "required": [
+            "route",
+            "verdict_reason"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -95,12 +130,25 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["PASS", "FIX_ISSUES", "ROOT_CAUSE_REFUTED", "BLOCKED"]
+              "enum": [
+                "PASS",
+                "FIX_ISSUES",
+                "ROOT_CAUSE_REFUTED",
+                "BLOCKED"
+              ]
             },
-            "verdict_reason": { "type": "string" },
-            "regression_evidence": { "type": "string" }
+            "verdict_reason": {
+              "type": "string"
+            },
+            "regression_evidence": {
+              "type": "string"
+            }
           },
-          "required": ["route", "verdict_reason", "regression_evidence"],
+          "required": [
+            "route",
+            "verdict_reason",
+            "regression_evidence"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -120,12 +168,22 @@
           "properties": {
             "status": {
               "type": "string",
-              "enum": ["DELIVERED"]
+              "enum": [
+                "DELIVERED"
+              ]
             },
-            "summary": { "type": "string" },
-            "followups": { "type": "string" }
+            "summary": {
+              "type": "string"
+            },
+            "followups": {
+              "type": "string"
+            }
           },
-          "required": ["status", "summary", "followups"],
+          "required": [
+            "status",
+            "summary",
+            "followups"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -135,32 +193,123 @@
     }
   ],
   "edges": [
-    { "from": "diagnose", "to": "fix", "outcome": "DIAGNOSED" },
-    { "from": "diagnose", "to": "$end", "outcome": "BLOCKED" },
-    { "from": "diagnose", "to": "diagnose", "on": "technical" },
-    { "from": "fix", "to": "review", "outcome": "FIXED" },
-    { "from": "fix", "to": "$end", "outcome": "BLOCKED" },
-    { "from": "fix", "to": "fix", "on": "technical" },
-    { "from": "review", "to": "regression", "outcome": "APPROVE" },
-    { "from": "review", "to": "fix", "outcome": "FIX_ISSUES", "countRound": true },
-    { "from": "review", "to": "diagnose", "outcome": "ROOT_CAUSE_REFUTED", "countRound": true },
-    { "from": "review", "to": "$end", "outcome": "BLOCKED" },
-    { "from": "review", "to": "review", "on": "technical" },
-    { "from": "regression", "to": "closeout", "outcome": "PASS" },
-    { "from": "regression", "to": "fix", "outcome": "FIX_ISSUES", "countRound": true },
-    { "from": "regression", "to": "diagnose", "outcome": "ROOT_CAUSE_REFUTED", "countRound": true },
-    { "from": "regression", "to": "$end", "outcome": "BLOCKED" },
-    { "from": "regression", "to": "regression", "on": "technical" },
-    { "from": "closeout", "to": "$end", "outcome": "DELIVERED" },
-    { "from": "closeout", "to": "closeout", "on": "technical" }
+    {
+      "from": "diagnose",
+      "to": "fix",
+      "outcome": "DIAGNOSED"
+    },
+    {
+      "from": "diagnose",
+      "to": "$end",
+      "outcome": "BLOCKED"
+    },
+    {
+      "from": "diagnose",
+      "to": "diagnose",
+      "on": "technical"
+    },
+    {
+      "from": "fix",
+      "to": "review",
+      "outcome": "FIXED"
+    },
+    {
+      "from": "fix",
+      "to": "$end",
+      "outcome": "BLOCKED"
+    },
+    {
+      "from": "fix",
+      "to": "fix",
+      "on": "technical"
+    },
+    {
+      "from": "review",
+      "to": "regression",
+      "outcome": "APPROVE"
+    },
+    {
+      "from": "review",
+      "to": "fix",
+      "outcome": "FIX_ISSUES",
+      "countRound": true
+    },
+    {
+      "from": "review",
+      "to": "diagnose",
+      "outcome": "ROOT_CAUSE_REFUTED",
+      "countRound": true
+    },
+    {
+      "from": "review",
+      "to": "$end",
+      "outcome": "BLOCKED"
+    },
+    {
+      "from": "review",
+      "to": "review",
+      "on": "technical"
+    },
+    {
+      "from": "regression",
+      "to": "closeout",
+      "outcome": "PASS"
+    },
+    {
+      "from": "regression",
+      "to": "fix",
+      "outcome": "FIX_ISSUES",
+      "countRound": true
+    },
+    {
+      "from": "regression",
+      "to": "diagnose",
+      "outcome": "ROOT_CAUSE_REFUTED",
+      "countRound": true
+    },
+    {
+      "from": "regression",
+      "to": "$end",
+      "outcome": "BLOCKED"
+    },
+    {
+      "from": "regression",
+      "to": "regression",
+      "on": "technical"
+    },
+    {
+      "from": "closeout",
+      "to": "$end",
+      "outcome": "DELIVERED"
+    },
+    {
+      "from": "closeout",
+      "to": "closeout",
+      "on": "technical"
+    }
   ],
   "bindings": {
     "models": {
-      "diagnose": { "provider": "deepseek-official", "model": "deepseek-flash" },
-      "fix": { "provider": "deepseek-official", "model": "deepseek-flash" },
-      "review": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "regression": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "closeout": { "provider": "deepseek-official", "model": "deepseek-flash" }
+      "diagnose": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "fix": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "review": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash"
+      },
+      "regression": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash"
+      },
+      "closeout": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      }
     }
   }
 }

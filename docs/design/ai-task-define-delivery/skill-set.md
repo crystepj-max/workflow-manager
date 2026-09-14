@@ -33,7 +33,7 @@ node scripts/sync-ai-task-skill-set.mjs /path/to/my-agent-skills
 | 件 | 路径 |
 |---|---|
 | M1 Skill | `dsh/skills/requirements-analysis/` |
-| M2 内置模板 | `templates/construction-full-feature.json` → 生成 `.generated/construction-full-feature/` |
+| M2 内置模板 | `templates/wf-construction-full-feature.json` → 生成 `.generated/wf-construction-full-feature/` |
 | M2 启动 Skill | `dsh/skills/construction-bootstrap/` |
 | M3 Skill | `dsh/skills/execution-plan/` |
 | M4 到点启动 | `scripts/ai-task-scheduled-trigger.mjs` |

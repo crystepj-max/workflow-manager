@@ -27,7 +27,7 @@ const FILES_KINDS = ['json', 'markdown', 'text', 'html', 'canvas', 'flowchart', 
 const ON_MAX_ROUNDS = ['return', 'auto-reschedule']
 // LOC-009 模板策略声明：与 scripts/workspace-isolation.mjs TEMPLATE_REGISTRY 键
 // 及 optimize 的 resource_kind 枚举保持一致（权威在 Core 注册表）。
-const WORKSPACE_TEMPLATE_IDS = ['construction', 'optimize', 'diagnose', 'explore']
+const WORKSPACE_TEMPLATE_IDS = ['construction', 'wf-optimize', 'wf-diagnose', 'wf-explore']
 const WORKSPACE_RESOURCE_KINDS = ['git', 'files', 'document', 'config', 'other']
 const MAX_ROUNDS_CAP = 9 // 系统约定上限：编辑器最大可设 9 轮（用户意见 Q7）
 const FANOUT_ITEMS_ARGS_RE = /^\$\.args(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/

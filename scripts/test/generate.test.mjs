@@ -21,7 +21,7 @@ test('S2 生成器：产物四件套齐全', () => {
     assert.ok(files.has(id + '/' + rel), '缺产物：' + rel);
   }
   const ids = report.map((r) => r.id).sort();
-  assert.ok(ids.includes('construction-full-feature'), '正式内置建设模板应产出');
+  assert.ok(ids.includes('wf-construction-full-feature'), '正式内置建设模板应产出');
   assert.ok(ids.includes('dev-workflow-2-0') && ids.includes('default-workflow'), '历史自定义种子应产出');
   assert.ok(report.every((r) => r.ok), '全部蓝图生成成功');
 });

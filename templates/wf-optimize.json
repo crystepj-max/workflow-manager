@@ -1,5 +1,5 @@
 {
-  "id": "optimize",
+  "id": "wf-optimize",
   "displayName": "优化 · 快速迭代",
   "description": "优化快速迭代正式模板：目标确认（生成并冻结 evaluation contract）→ 执行（最小必要修改，保护已满足部分）→ 评估（只输出 PASS / OPTIMIZE / CONFIRM）→ 收口；OPTIMIZE 回执行消耗自动回退额度（默认 3）；完成类型区分 EVALUATION_PASSED / USER_ACCEPTED。",
   "entry": "confirm",
@@ -19,12 +19,23 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["READY", "BLOCKED"]
+              "enum": [
+                "READY",
+                "BLOCKED"
+              ]
             },
-            "summary": { "type": "string" },
-            "contract_digest": { "type": "string" }
+            "summary": {
+              "type": "string"
+            },
+            "contract_digest": {
+              "type": "string"
+            }
           },
-          "required": ["route", "summary", "contract_digest"],
+          "required": [
+            "route",
+            "summary",
+            "contract_digest"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -44,12 +55,24 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["READY", "RECONFIRM_REQUIRED", "BLOCKED"]
+              "enum": [
+                "READY",
+                "RECONFIRM_REQUIRED",
+                "BLOCKED"
+              ]
             },
-            "summary": { "type": "string" },
-            "changed": { "type": "string" }
+            "summary": {
+              "type": "string"
+            },
+            "changed": {
+              "type": "string"
+            }
           },
-          "required": ["route", "summary", "changed"],
+          "required": [
+            "route",
+            "summary",
+            "changed"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -69,13 +92,28 @@
           "properties": {
             "route": {
               "type": "string",
-              "enum": ["PASS", "OPTIMIZE", "CONFIRM"]
+              "enum": [
+                "PASS",
+                "OPTIMIZE",
+                "CONFIRM"
+              ]
             },
-            "summary": { "type": "string" },
-            "contract_digest": { "type": "string" },
-            "gaps": { "type": "string" }
+            "summary": {
+              "type": "string"
+            },
+            "contract_digest": {
+              "type": "string"
+            },
+            "gaps": {
+              "type": "string"
+            }
           },
-          "required": ["route", "summary", "contract_digest", "gaps"],
+          "required": [
+            "route",
+            "summary",
+            "contract_digest",
+            "gaps"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -96,16 +134,30 @@
           "properties": {
             "status": {
               "type": "string",
-              "enum": ["DELIVERED"]
+              "enum": [
+                "DELIVERED"
+              ]
             },
             "completion_type": {
               "type": "string",
-              "enum": ["EVALUATION_PASSED", "USER_ACCEPTED"]
+              "enum": [
+                "EVALUATION_PASSED",
+                "USER_ACCEPTED"
+              ]
             },
-            "summary": { "type": "string" },
-            "followups": { "type": "string" }
+            "summary": {
+              "type": "string"
+            },
+            "followups": {
+              "type": "string"
+            }
           },
-          "required": ["status", "completion_type", "summary", "followups"],
+          "required": [
+            "status",
+            "completion_type",
+            "summary",
+            "followups"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -115,27 +167,98 @@
     }
   ],
   "edges": [
-    { "from": "confirm", "to": "execute", "outcome": "READY" },
-    { "from": "confirm", "to": "$end", "outcome": "BLOCKED" },
-    { "from": "confirm", "to": "confirm", "on": "technical" },
-    { "from": "execute", "to": "evaluate", "outcome": "READY" },
-    { "from": "execute", "to": "confirm", "outcome": "RECONFIRM_REQUIRED", "countRound": false },
-    { "from": "execute", "to": "$end", "outcome": "BLOCKED" },
-    { "from": "execute", "to": "execute", "on": "technical" },
-    { "from": "evaluate", "to": "closeout", "outcome": "PASS" },
-    { "from": "evaluate", "to": "execute", "outcome": "OPTIMIZE", "countRound": true },
-    { "from": "evaluate", "to": "$human-decision", "outcome": "CONFIRM" },
-    { "from": "evaluate", "to": "evaluate", "on": "technical" },
-    { "from": "$human-decision", "to": "closeout", "outcome": "ACCEPT", "subsequent_effect": "人工确认：按 USER_ACCEPTED 完成类型收口，决策材料含冻结 evaluation contract 摘要" },
-    { "from": "closeout", "to": "$end", "outcome": "DELIVERED" },
-    { "from": "closeout", "to": "closeout", "on": "technical" }
+    {
+      "from": "confirm",
+      "to": "execute",
+      "outcome": "READY"
+    },
+    {
+      "from": "confirm",
+      "to": "$end",
+      "outcome": "BLOCKED"
+    },
+    {
+      "from": "confirm",
+      "to": "confirm",
+      "on": "technical"
+    },
+    {
+      "from": "execute",
+      "to": "evaluate",
+      "outcome": "READY"
+    },
+    {
+      "from": "execute",
+      "to": "confirm",
+      "outcome": "RECONFIRM_REQUIRED",
+      "countRound": false
+    },
+    {
+      "from": "execute",
+      "to": "$end",
+      "outcome": "BLOCKED"
+    },
+    {
+      "from": "execute",
+      "to": "execute",
+      "on": "technical"
+    },
+    {
+      "from": "evaluate",
+      "to": "closeout",
+      "outcome": "PASS"
+    },
+    {
+      "from": "evaluate",
+      "to": "execute",
+      "outcome": "OPTIMIZE",
+      "countRound": true
+    },
+    {
+      "from": "evaluate",
+      "to": "$human-decision",
+      "outcome": "CONFIRM"
+    },
+    {
+      "from": "evaluate",
+      "to": "evaluate",
+      "on": "technical"
+    },
+    {
+      "from": "$human-decision",
+      "to": "closeout",
+      "outcome": "ACCEPT",
+      "subsequent_effect": "人工确认：按 USER_ACCEPTED 完成类型收口，决策材料含冻结 evaluation contract 摘要"
+    },
+    {
+      "from": "closeout",
+      "to": "$end",
+      "outcome": "DELIVERED"
+    },
+    {
+      "from": "closeout",
+      "to": "closeout",
+      "on": "technical"
+    }
   ],
   "bindings": {
     "models": {
-      "confirm": { "provider": "deepseek-official", "model": "deepseek-flash" },
-      "execute": { "provider": "deepseek-official", "model": "deepseek-flash" },
-      "evaluate": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "closeout": { "provider": "deepseek-official", "model": "deepseek-flash" }
+      "confirm": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "execute": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "evaluate": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash"
+      },
+      "closeout": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      }
     }
   }
 }
