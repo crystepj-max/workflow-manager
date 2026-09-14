@@ -40,7 +40,7 @@ vwf 插件是 **Cordis 动态双半插件**（plain JS、无 import/JSX，`cordi
   （node:<id>:<field> / edge:<i>:<field> / control:<field>）——编辑器逐字段标红契约保真。
 - 校验入口统一：`vwf.validate` / `vwf.workflows.save` / `vwf.script` / `wf_run` 共用 `validatePipeline`。
 - 编辑器业务规则字段（Q7）：`heteroCheck` / `onMaxRounds` / `control.maxRounds`（1-9 系统上限）
-  经 DSL 双向投影落盘蓝图；异源硬规则全局强制（与开关无关），开关注入运行日志。
+  经 DSL 双向投影落盘蓝图；异源档位（关/弱/强，默认弱）随蓝图保存并同时驱动校验强度与运行日志（LOC-021 修订 T-06 的「全局强制」口径）。
 - 测试：host.test.mjs 34+3 用例（含 Q7 闭环：开关/上限往返、上限 10 拒、坐标保真）+ 内核侧
   maxRounds 边界 + COND_RE 一致性断言（内核 vs 生成脚本内嵌）。
 

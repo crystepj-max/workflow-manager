@@ -28,7 +28,7 @@
   CJS 单文件；蓝图 ↔ DSL 投影不在其中——委托「投影内核」只转发导出）。
   双层：**结构层** `validateStructure`（走通性 / 节点边定义 / 入口唯一 / 环 / 条件与 schema 路径 /
   保留 id / maxRounds ∈ [1,9] 系统上限——框架保证，与业务无关）与**业务规则层** `validateBlueprint`
-  （蓝图声明的规则：异源硬规则、verifyBranch 联动、onMaxRounds 枚举、output.files、单标识、
+  （蓝图声明的规则：异源档位、verifyBranch 联动、onMaxRounds 枚举、output.files、单标识、
   requireModels 产品收紧选项）。引擎 ESM import；宿主经 fs 读源码、vm 内求值缓存（热路径内存执行）。
   原 `validate-blueprint.mjs` 与宿主 `validateDsl`/`heteroCheck`/拓扑推导/COND_RE 已删除。
   错误统一带坐标键 fieldKey（node:<id>:<field> / edge:<i>:<field> / control:<field> / heteroCheck /

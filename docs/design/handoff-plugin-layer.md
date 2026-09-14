@@ -81,7 +81,7 @@ node <repo>/scripts/generate.mjs user ~/.dsh/visual-workflow/templates/<id>.json
 ### 2.1 引擎侧（已完成 ✅）
 
 `scripts/validate-blueprint.mjs` 规则 7（T-06 契约）：
-- 含 dev+review 节点的蓝图一律校验（全局强制）；无则跳过（T5）。
+- 按蓝图 `heteroCheck` 档位判定（LOC-021）：弱档（默认）= 含 dev+review 节点即校验、缺绑定拒；强档另要求 provider 必须不同；关档不校验；无 dev+review 节点跳过（T5）。
 - dev/review 任一缺 `bindings.models` → 拒（「无法证明异源，请显式配置」）（T4）。
 - 完全同模型（provider+model 相同）→ 拒（消息含实际值与修复指引）（T1）。
 - 同 provider 不同 model → 通过 + `warnings`（弱异源）（T2）。
