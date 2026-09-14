@@ -105,14 +105,14 @@
       "env_group": null,
       "env_role": null,
       "deps": [],
-      "branch": null,
+      "branch": "dev-loc-005-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-09T15:51:49.673Z",
-      "updated_at": "2026-09-12T15:40:06.223Z",
-      "branch_retained": null,
+      "updated_at": "2026-09-14T07:17:38.280Z",
+      "branch_retained": false,
       "evidence_expires_at": null,
       "evidence_cleared_at": null
     },
@@ -347,10 +347,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.952Z",
-      "updated_at": "2026-09-13T11:01:12.094Z",
+      "updated_at": "2026-09-14T07:17:38.271Z",
       "evidence_expires_at": "2026-09-20T11:01:12.081Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "spec_path": "docs/tasks/archive/LOC-014/task-spec-V2.md"
     },
     {
@@ -497,9 +497,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-20T14:28:29.328Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-13T10:29:51.556Z",
-      "updated_at": "2026-09-13T14:28:29.673Z",
+      "updated_at": "2026-09-14T07:17:38.279Z",
       "spec_path": "docs/tasks/archive/LOC-019/task-spec-V1.md"
     },
     {
@@ -518,15 +518,15 @@
       "worktree": null,
       "runs": [],
       "merge": {
-        "commit": "PENDING",
-        "merged_at": "2026-09-14T07:14:42.716Z"
+        "commit": "f77f2c489c05ad7ff69a87307a669a41028a33eb",
+        "merged_at": "2026-09-14T07:14:42.767Z"
       },
       "github_sync": "pending",
-      "evidence_expires_at": "2026-09-21T07:14:42.716Z",
+      "evidence_expires_at": "2026-09-21T07:14:42.767Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-13T11:41:20.330Z",
-      "updated_at": "2026-09-14T07:14:42.716Z",
+      "updated_at": "2026-09-14T07:55:21.910Z",
       "spec_path": "docs/tasks/archive/LOC-020/task-spec-V1.md"
     },
     {
@@ -585,8 +585,8 @@
       "slug": "workspace-gate",
       "source": "会话录入",
       "source_ref": "2026-09-13 LOC-019 收口发现：runbook §7.4 与 validate-workspace D-7 规则冲突（松哥指令立票）",
-      "baseline": "V1",
-      "status": "定义中",
+      "baseline": "V2",
+      "status": "交付中",
       "priority": null,
       "env_group": null,
       "env_role": null,
@@ -600,7 +600,8 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T02:31:54.017Z",
-      "updated_at": "2026-09-14T02:31:54.017Z"
+      "updated_at": "2026-09-14T07:18:30.549Z",
+      "spec_path": ".scratch/LOC-023-workspace-gate/task-spec-V2.md"
     }
   ],
   "updated_at": "2026-09-13T05:27:24.591Z"
