@@ -112,7 +112,7 @@
 1. `id` 匹配 kebab-case；`displayName` 非空；无 `name` 字段（单标识，D1）。
 2. `onMaxRounds ∈ {return, auto-reschedule}`。
 3. `bindings.models` 的每个键都必须是已声明节点 id。
-4. `heteroCheck` 为 `"strong"`（或旧布尔 `true`，归一为 `"strong"` 语义前的强档显式声明）时须存在 `dev` 与 `review` 节点；`"weak"` 是默认档，允许显式声明但无配对（不拦）；`"off"` 不校验。
+4. `heteroCheck` 为 `"strong"` 时须存在 `dev` 与 `review` 节点；`"weak"` 是默认档，允许显式声明但无配对（不拦）；`"off"` 不校验。旧布尔兼容读入：`true` → `"weak"`、`false` → `"off"`（均不触发本条配对要求）。
 5. `verifyBranch=true` 节点：`output.schema.required` 含 `verified_branch`/`verified_head`。
 6. `output.files`（若给）：键为合法相对路径（非空、不以 `/` 开头或结尾、不含 `..`、不覆盖保留文件 `STATE.md`）；值为 `json|markdown|text|html|canvas|flowchart|diagram` 枚举。
 7. **异源规则（v1.2 起按档位生效，LOC-021 修订 T-06 的「全局强制」口径）**：凡含 `dev` 与 `review` 节点的蓝图（按节点 `id` 或 `profile` 识别——编辑器新建节点默认 id 为 node-N，以角色表达 dev/review 时同样纳入），save/update/validate 按蓝图 `heteroCheck` 档位校验其 `bindings.models`——**关（`"off"`）**：不校验（完全同模型属用户显式选择，不提示）；**弱（`"weak"`，默认）**：任一缺失 → 拒（「无法证明异源」）；完全同模型（provider+model 相同）→ 拒；同 provider 不同 model → 通过 + warning；不同 provider → 通过；**强（`"strong"`）**：provider 必须不同，同 provider（即使 model 不同）→ 拒。无 dev/review 节点的蓝图三档均跳过。档位缺失或旧布尔 `true` → 弱档（旧蓝图行为不变）；旧布尔 `false` → 关档；非法值按弱档处理并报错。错误消息沿用 `errors[]` 结构（at=`bindings.models`，含档位、实际 provider/model 与修复指引）。配对范围仅 `dev↔review` 一对——`dev↔test`、`execute↔evaluate` 不纳入。
