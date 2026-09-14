@@ -380,6 +380,11 @@ test('stop --all：停掉开发实例、清理 pid 登记与激活登记（等�
     const ledger = JSON.parse(readFileSync(join(devHome, '.vwf-active-task.json'), 'utf8'))
     assert.equal(ledger.current, null, '激活登记应清空')
   } finally {
+    // 与 setupSwitchScene.cleanup 同口径：失败路径也要兜底杀掉 holder，
+    // 否则残留的 `sleep 30` 会拖住 node 退出（默认 stdio 为 pipe 时更明显）
+    if (isRunning(fakePid)) {
+      try { process.kill(-fakePid, 'SIGKILL') } catch { try { process.kill(fakePid, 'SIGKILL') } catch { /* 已退出 */ } }
+    }
     rmSync(root, { recursive: true, force: true })
   }
 })
