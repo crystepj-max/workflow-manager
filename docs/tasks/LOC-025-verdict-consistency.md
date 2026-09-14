@@ -18,7 +18,7 @@
 | 施工环境组 | LOC-025 |
 | 施工环境角色 | 独立 |
 | 无人值守许可 | 允许 |
-| 任务规格位置 | .scratch/LOC-025-verdict-consistency/task-spec-V1.md |
+| 任务规格位置 | docs/tasks/specs/verdict-consistency/task-spec-V1.md |
 | 定义时间 | 2026-09-14T10:05:31Z |
 | GitHub 同步 | pending |
 
@@ -39,8 +39,8 @@
 
 ## 开工材料与状态
 
-- [详细任务规格 V1](/Users/chris/.codex/worktrees/77ea/workflow-manager/.scratch/LOC-025-verdict-consistency/task-spec-V1.md) 是确认后实施事实源；[Definition Check](/Users/chris/.codex/worktrees/77ea/workflow-manager/.scratch/LOC-025-verdict-consistency/definition-check.md) 记录定义完成情况。
-- [本批确认单](/Users/chris/.codex/worktrees/77ea/workflow-manager/.scratch/p0-definition-2026-09-14/confirmation.md) 包含 10 条明确对象、关键默认值与执行许可；确认已完成，当前任务已标为“本地已定义”。
+- [详细任务规格 V1](/Users/chris/.codex/worktrees/77ea/workflow-manager/docs/tasks/specs/verdict-consistency/task-spec-V1.md) 是确认后实施事实源；[Definition Check](specs/verdict-consistency/definition-check.md) 记录定义完成情况。
+- [本批确认单](p0-definition-confirmation-2026-09-14.md) 包含 10 条明确对象、关键默认值与执行许可；确认已完成，当前任务已标为“本地已定义”。
 - 本任务无业务硬前置；与其他任务修改同文件只构成合并风险，不新增串行门禁。
 - 现已从现有 `construction-bootstrap` 进入交付；本次不创建 Run、不自动开始开发。
 
