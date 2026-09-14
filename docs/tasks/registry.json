@@ -347,10 +347,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.952Z",
-      "updated_at": "2026-09-13T11:01:12.094Z",
+      "updated_at": "2026-09-14T06:19:09.216Z",
       "evidence_expires_at": "2026-09-20T11:01:12.081Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "spec_path": "docs/tasks/archive/LOC-014/task-spec-V2.md"
     },
     {
@@ -497,9 +497,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-20T14:28:29.328Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-13T10:29:51.556Z",
-      "updated_at": "2026-09-13T14:28:29.673Z",
+      "updated_at": "2026-09-14T06:19:09.221Z",
       "spec_path": "docs/tasks/archive/LOC-019/task-spec-V1.md"
     },
     {
@@ -533,7 +533,7 @@
       "source": "会话录入",
       "source_ref": "2026-09-13 LOC-019 需求分析会话：D1/D1-b/D2/D3/D6 决策（LOC-014 UAT 反馈衍生切片 2）",
       "baseline": "V1",
-      "status": "执行受阻",
+      "status": "等待验收",
       "priority": "P1",
       "env_group": "LOC-021",
       "env_role": "独立",
@@ -549,7 +549,7 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-13T11:42:54.384Z",
-      "updated_at": "2026-09-14T03:17:58.821Z",
+      "updated_at": "2026-09-14T06:09:02.211Z",
       "spec_path": ".scratch/LOC-021-hetero-mode/task-spec-V1.md"
     },
     {
@@ -581,14 +581,14 @@
       "name": "工作区治理口径统一（workspace-gate）",
       "slug": "workspace-gate",
       "source": "会话录入",
-      "source_ref": "2026-09-13 LOC-019 收口发现：runbook §7.4 与 validate-workspace D-7 规则冲突（松哥指令立票）",
+      "source_ref": "2026-09-13 LOC-019 收口实测发现（松哥指令「仓库里规则矛盾立个票」）；2026-09-14 需求分析会话：决策卡四项全选 A",
       "baseline": "V1",
-      "status": "定义中",
-      "priority": null,
-      "env_group": null,
-      "env_role": null,
+      "status": "执行受阻",
+      "priority": "P2",
+      "env_group": "LOC-023",
+      "env_role": "独立",
       "deps": [],
-      "branch": null,
+      "branch": "dev-loc-023-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
@@ -597,7 +597,9 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T02:31:54.017Z",
-      "updated_at": "2026-09-14T02:31:54.017Z"
+      "updated_at": "2026-09-14T06:54:29.447Z",
+      "spec_path": ".scratch/LOC-023-workspace-gate/task-spec-V1.md",
+      "leftovers": "收敛审查 A 类阻断（root_cause=requirements）：验收 V-8「D-10 覆盖条目数 = 已合并任务总数」结构上不可达——LOC-001 从未有分支记录（归档摘要明确记载），LOC-005 分支 dev-loc-005-r1 已不存在。修复前 12/16，补齐 LOC-014/019 后 14/16。等待人工裁定 V-8 措辞（A/B/C）。"
     }
   ],
   "updated_at": "2026-09-13T05:27:24.591Z"
