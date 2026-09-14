@@ -240,12 +240,14 @@ test('S1 name 与 id 不一致拒绝（单标识）', () => {
   expectReject(b, '单标识', 'nameMismatch');
 });
 
-test('S1 heteroCheck 强档但缺 dev/review 节点拒绝（旧布尔 true 归一为弱档，不再拦结构；LOC-021）', () => {
+test('S1 heteroCheck 强档但缺 dev/review 节点仅警示不拦（LOC-021 修订：无配对时警示即可）', () => {
   const b = clone();
   b.nodes = b.nodes.filter((n) => n.id !== 'review');
   b.edges = b.edges.filter((e) => e.from !== 'review' && e.to !== 'review');
   b.heteroCheck = 'strong';
-  expectReject(b, 'dev 与 review', 'heteroNodes');
+  const r = validateBlueprint(b);
+  assert.ok(!r.errors.some((e) => e.at === '$.heteroCheck'), '强档缺配对不得报错：' + JSON.stringify(r.errors));
+  assert.ok(r.warnings.some((w) => w.includes('强档') && w.includes('无从执行')), '应给强档无从执行的警示：' + JSON.stringify(r.warnings));
 });
 
 // —— 打回上限系统约束（候选二 Q7：maxRounds ∈ [1,9]，系统约定上限 9）——
@@ -469,18 +471,28 @@ test('LOC-021 旧数据兼容：缺失 / true → 弱档；非法值 → 按弱�
   assert.ok(msgs.includes('模型相同'), '非法值按弱档继续校验：' + msgs);
 });
 
-test('LOC-021 强档显式声明但缺 dev/review 配对拒绝；弱档显式声明无配对不拦（explore/optimize 形态）', () => {
-  const b = clone();
-  b.nodes = b.nodes.filter((n) => n.id !== 'review');
-  b.edges = b.edges.filter((e) => e.from !== 'review' && e.to !== 'review');
-  b.heteroCheck = 'strong';
-  expectReject(b, 'dev 与 review', 'heteroStrongNoPair');
+test('LOC-021 无 dev/review 配对：强档给警示不拦，弱档与关档不提示（explore/optimize 形态）', () => {
+  const strong = clone();
+  strong.nodes = strong.nodes.filter((n) => n.id !== 'review');
+  strong.edges = strong.edges.filter((e) => e.from !== 'review' && e.to !== 'review');
+  strong.heteroCheck = 'strong';
+  const rs = validateBlueprint(strong);
+  assert.ok(!rs.errors.some((e) => e.at === '$.heteroCheck'), '强档无配对不得报错：' + JSON.stringify(rs.errors));
+  assert.ok(rs.warnings.some((w) => w.includes('无从执行')), '强档无配对应给警示：' + JSON.stringify(rs.warnings));
   const weak = clone();
   weak.nodes = weak.nodes.filter((n) => n.id !== 'review');
   weak.edges = weak.edges.filter((e) => e.from !== 'review' && e.to !== 'review');
   weak.heteroCheck = 'weak';
-  const r = validateBlueprint(weak);
-  assert.ok(!r.errors.some((e) => e.at === '$.heteroCheck'), '弱档显式声明无配对不再拦：' + JSON.stringify(r.errors));
+  const rw = validateBlueprint(weak);
+  assert.ok(!rw.errors.some((e) => e.at === '$.heteroCheck'), '弱档显式声明无配对不拦：' + JSON.stringify(rw.errors));
+  assert.equal(rw.warnings.length, 0, '弱档无配对本就是现状默认，不提示：' + JSON.stringify(rw.warnings));
+  const off = clone();
+  off.nodes = off.nodes.filter((n) => n.id !== 'review');
+  off.edges = off.edges.filter((e) => e.from !== 'review' && e.to !== 'review');
+  off.heteroCheck = 'off';
+  const ro = validateBlueprint(off);
+  assert.ok(!ro.errors.some((e) => e.at === '$.heteroCheck'), '关档无配对不拦');
+  assert.equal(ro.warnings.length, 0, '关档无配对不提示');
 });
 
 test('LOC-021 未扩大配对范围：dev↔test、execute↔evaluate 同模型不被拦截', () => {

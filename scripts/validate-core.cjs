@@ -661,17 +661,16 @@ function validateBlueprint(bp, opts) {
     err('$.heteroCheck', 'heteroCheck 档位值非法（' + JSON.stringify(bp.heteroCheck) + '）：仅支持 "off" / "weak" / "strong"（旧布尔值 true=弱、false=关 仍兼容）；已按弱档继续校验，请修正后保存')
   }
   const heteroMode = heteroValueInvalid ? 'weak' : effectiveHeteroMode(bp.heteroCheck)
-  // 「显式声明异源但缺开发/审核配对」的结构性报错仅在强档（旧布尔 true）生效——
-  // 弱档是现状默认，模板可为表达意图显式声明弱档而无配对（不拦）；关档下不校验，旧值 false 遗留不再拦。
-  if (heteroMode === 'strong' && bp.heteroCheck !== undefined && bp.heteroCheck !== null && bp.heteroCheck !== false
-      && !(bp.nodes.some((n) => n && (n.id === 'dev' || n.profile === 'dev')) && bp.nodes.some((n) => n && (n.id === 'review' || n.profile === 'review')))) {
-    err('$.heteroCheck', 'heteroCheck 已声明异源档位（' + heteroMode + '）需要存在 dev 与 review 节点（按节点 id 或 profile 识别，异源检查对象）')
-  }
-
   // 异源规则（规则 7，T-06 修订：按档位判定，仅 dev↔review 一对；关档跳过，旧数据兼容优先级高于新语义）
   const warnings = []
   const devNode = bp.nodes.find((n) => n && (n.id === 'dev' || n.profile === 'dev'))
   const reviewNode = bp.nodes.find((n) => n && (n.id === 'review' || n.profile === 'review'))
+  // 显式声明强档但缺开发/审核配对 → 警示（不拦）：强档要求无从执行，提示用户档位不会生效。
+  // 弱档是现状默认，模板可为表达意图显式声明弱档而无配对（不提示）；关档不校验，旧值 false 遗留不提示。
+  if (heteroMode === 'strong' && bp.heteroCheck !== undefined && bp.heteroCheck !== null && bp.heteroCheck !== false
+      && !(devNode && reviewNode)) {
+    warnings.push('异源档位 strong 已声明，但该蓝图没有开发与审核节点（按节点 id 或 profile 识别），强档要求无从执行——请补充配对节点，或将 heteroCheck 降为 "weak" / "off"')
+  }
   if (heteroMode !== 'off' && devNode && reviewNode) {
     const bm = (bp.bindings && bp.bindings.models) || {}
     const dm = bm[devNode.id]

@@ -100,7 +100,7 @@ test('fanout 编译使用 pipeline、白名单 agent opts，并保持投影字�
 
 // —— LOC-021 异源档位三态：运行时日志口径 ——
 test('LOC-021 运行时日志：诊断模板按角色识别（开发节点 id=fix、profile=dev）日志恢复触发', () => {
-  const diagnose = JSON.parse(readFileSync(path.join(tplDir, 'diagnose.json'), 'utf8'));
+  const diagnose = JSON.parse(readFileSync(path.join(tplDir, 'wf-diagnose.json'), 'utf8'));
   assert.equal(diagnose.nodes.find((n) => n.profile === 'dev').id, 'fix', '诊断模板开发节点 id 应为 fix');
   const { script } = compileBlueprint(diagnose);
   assert.ok(script.includes('异源'), '弱档应注入异源日志');
@@ -112,7 +112,7 @@ test('LOC-021 运行时日志：诊断模板按角色识别（开发节点 id=fi
 });
 
 test('LOC-021 运行时日志：关档不注入异源日志；缺失/旧值 true 按弱档注入', () => {
-  const diagnose = JSON.parse(readFileSync(path.join(tplDir, 'diagnose.json'), 'utf8'));
+  const diagnose = JSON.parse(readFileSync(path.join(tplDir, 'wf-diagnose.json'), 'utf8'));
   const off = compileBlueprint({ ...diagnose, heteroCheck: 'off' }).script;
   assert.ok(!off.includes('异源检查通过') && !off.includes('弱异源'), '关档不得注入异源日志');
   const legacyFalse = compileBlueprint({ ...diagnose, heteroCheck: false }).script;
@@ -124,7 +124,7 @@ test('LOC-021 运行时日志：关档不注入异源日志；缺失/旧值 true
 });
 
 test('LOC-021 运行时日志：强档弱异源提示带档位与强档说明', () => {
-  const diagnose = JSON.parse(readFileSync(path.join(tplDir, 'diagnose.json'), 'utf8'));
+  const diagnose = JSON.parse(readFileSync(path.join(tplDir, 'wf-diagnose.json'), 'utf8'));
   const strong = compileBlueprint({ ...diagnose, heteroCheck: 'strong' }).script;
   assert.ok(strong.includes('const MODE = "strong"'), '强档日志应输出 strong');
   assert.ok(strong.includes('强档要求不同 provider'), '强档弱异源提示需说明强档语义');
