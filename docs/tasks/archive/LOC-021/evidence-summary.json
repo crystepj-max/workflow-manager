@@ -1,0 +1,75 @@
+{
+  "task_id": "LOC-021",
+  "run_id": "loc-021-r1",
+  "task_name": "异源档位三态可配置（hetero-mode）",
+  "branch": "dev-loc-021-r1",
+  "status": "等待验收",
+  "decision": "accept",
+  "decided_by": "松哥（2026-09-14 会话确认「验收通过」）",
+  "decided_at": "2026-09-14T06:40:00.000Z",
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-14T00:49:08.359Z",
+      "produced_by": "zcode-loc021-requirements",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-14T00:50:17.916Z",
+      "produced_by": "zcode-loc021-requirements"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a5.json",
+      "created_at": "2026-09-14T06:00:15.348Z",
+      "produced_by": "zcode-loc021-dev",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a5.json",
+      "created_at": "2026-09-14T06:02:49.803Z",
+      "produced_by": "zcode-loc021-review",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a5.json",
+      "created_at": "2026-09-14T06:08:00.601Z",
+      "produced_by": "zcode-loc021-test",
+      "summary": {
+        "verdict": "pass",
+        "environment": "独立测试会话 attempt 5（produced_by=zcode-loc021-test，异于 dev=zcode-loc021-dev / review=zcode-loc021-review）；worktree=/Users/chris/workspace/workflow-manager-worktrees/dev-loc-021-r1；branch=dev-loc-021-r1；HEAD=2cce1c4257e6b6927b4c1eef19ac6aa768e665db（= review_proof.a5 approve 的 HEAD）；Node v24.14.1；工作区无被跟踪文件改动（仅预先存在的未跟踪 package-lock.json）；本轮相对上次测试（attempt 3, 7ed47bc..bb3e0e2 之后）的变化 = 合并 main（6a7c727，模板改名 wf-* 全链路 + 内置模板技能包分发）+ 人工定案（54e198b：强档缺配对由报错改警示不拦）+ A-1 修复（2cce1c4：内核 warnings 接入编辑器可见通道）；质量门实测：根测试 npm test 496/496 全绿（fail 0，与 dev/review 声明一致）；插件包 npm test 285/285 全绿（fail 0）；npm run generate 连跑两次输出「幂等：生成物与上次一致」，.generated 全量指纹前后一致（958c0fc7…），且 git status 无新增改动（模板未被重写）；插件包 npm run check:dist ✅「dist 与 src 一致（builtAt 2026-09-14T05:02:32.332Z）」；npm run validate 任务相关项全绿（6 份蓝图= wf-construction-full-feature / wf-diagnose / wf-explore / wf-optimize + 2 自定义种子，生成物与重生成一致 37 文件，引擎层测试全绿，dsh-llm-account-auth + dsh-visual-workflow 包测试全绿）；独立实测脚本（均在 /tmp，脚手架装在 /tmp/loc021-render/，未改动被跟踪文件）：/tmp/loc021-a5-focused.mjs 32/32 全绿（有配对三档语义、无配对六态、旧数据兼容、四套 wf-* 模板与三态往返、诊断模板运行时日志、契约文档）；/tmp/loc021-host-e2e.mjs 20/20 全绿（真实宿主 RPC：vwf.workflows.save / vwf.validate / wf_run）；/tmp/loc021-render/render-a5.mjs 6/6 全绿（自建 jsdom 渲染实证，未复用开发者冒烟 harness）；验收条件 11 的 release:verify 段：已获人工环境豁免（2026-09-14，松哥）——豁免口径为「本任务相关项全绿；环境项已获人工豁免，另行跟踪」（见 .agent-runs/loc-021-r1/uat-card.md「人工已裁决事项」#2 与 dev_handoff.a5 self_check「人工已裁决按环境豁免→not_applicable」）。本会话未执行 release:verify；其前四段（generate / 插件 build / check:dist / 根 npm test）与末段的 validate.mjs 已分别实测全绿，唯一红项是 validate-workspace 的 D-2/D-3/D-4/D-7（环境与校验器运行位置视角事项，本分支未触及 scripts/validate-workspace.mjs）。因此条件 11 的 pass 是**据人工豁免口径成立**，不是无条件通过；该环境项另行跟踪（LOC-023）；渲染层实证口径：自建 jsdom 脚手架直接挂载 src/client.js 导出组件，经真实防抖（700ms 等待）触发 vwf.validate 后断言 DOM：仅警示 → 渲染 .vwf-status.warn「⚠️ 1 条校验提示：<正文>」且状态行仍为「✓ 校验通过」；2 条警示 → 「⚠️ 2 条校验提示：<首条> …」；警示+错误并存 → 警示行不渲染（让位给「N 条校验问题」行）；无警示 → 不渲染"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a5.json",
+      "created_at": "2026-09-14T10:14:13.836Z",
+      "produced_by": "zcode-loc021-dev",
+      "summary": {
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "松哥（2026-09-14 会话确认「验收通过」）",
+        "decided_at": "2026-09-14T06:40:00.000Z",
+        "verified_branch": "dev-loc-021-r1",
+        "verified_head": "9d93f84cca95152c06e8a2fdc42bc0ebabfaf306"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-021-r1",
+    "file_count": 20,
+    "total_bytes": 116380
+  },
+  "generated_at": "2026-09-14T10:14:43.484Z"
+}
