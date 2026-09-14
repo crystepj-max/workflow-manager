@@ -847,6 +847,29 @@
       "created_at": "2026-09-14T09:27:22.434Z",
       "updated_at": "2026-09-14T10:05:27.479Z",
       "spec_path": "docs/tasks/specs/role-boundaries/task-spec-V1.md"
+    },
+    {
+      "task_id": "LOC-034",
+      "name": "生成 skill 描述句号重复修复",
+      "slug": "skill",
+      "source": "会话录入",
+      "source_ref": "",
+      "baseline": "V1",
+      "status": "交付中",
+      "priority": null,
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "dev-loc-034-r1",
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-14T14:22:13.252Z",
+      "updated_at": "2026-09-14T14:25:39.098Z"
     }
   ],
   "updated_at": "2026-09-13T05:27:24.591Z"
