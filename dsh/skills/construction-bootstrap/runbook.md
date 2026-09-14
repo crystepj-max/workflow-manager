@@ -38,15 +38,24 @@ node "$CWF_ASSETS/cwf-run-init.mjs" <任务标识> <run_id> --local-base
   不是当前目录。
 - 在 run.json 记录绑定的**需求基线版本**（与 Issue 当前版本一致）；之后不得静默换版。
 - **之后全部工作在该 worktree 内进行**；任何 git / npm 命令一律 `git -C <worktree>` 或先 `cd <worktree>` 并核对 `git rev-parse --abbrev-ref HEAD` = `run.json.work_branch`，不一致即停（不得在主检出或别的 worktree 里"顺手"执行）。**这条只约束「在哪里干活」；「产物写到哪里」由上一条锚定规则约束（写主检出）。**
-- 同时分配本 Run **独占的开发 DSH Home**（默认 `~/.dsh-workflow-dev/tasks/<run_id>`，可用 `VWF_DEV_DSH_TASKS_ROOT` 改道）：登记进 `run.json.env_resources.dev_dsh_home`，Home 内写归属 marker `task-env.json`；目录已被其他 Run 占用或无 marker 时 run-init 直接报错，不静默接管。
-- **运行期一切 DSH 开发操作只用本 Run 的 Home**（进程 / 端口 / 插件 / 工具名 / 工作区注册表随之隔离）：
+- 同时登记本任务的**插件命名空间**（= run_id）与**开发 DSH 固定端口**（9527）：写在
+  `run.json.env_resources` 的 `plugin_namespace` 与 `dev_dsh_port` 两个字段。
+- **开发 DSH 是唯一实例，端口固定 9527**（约定 §决策六）。运行期一切 DSH 开发操作都在这一实例上，
+  不再为每个 Run 分配独占 Home；启动或切换任务：
 
 ```bash
-export VWF_DEV_DSH_HOME="$(node -e 'console.log(require(process.argv[1]).env_resources.dev_dsh_home.path)' <runDir>/run.json)"
-npm run dev:plugin            # 未采用登记 Home 时会打印 ⚠️ 告警
+npm run dev:plugin -- start --task <run_id>     # 确保 9527 在跑，并把本任务登记为当前激活任务
+npm run dev:plugin                              # status：固定地址 / 运行状态 / 当前激活任务 / 插件注册名
+npm run dev:plugin -- stop --task <run_id>      # 登记本任务插件「已停用并注销」（收口回收的前置）
 ```
 
-- **taskId / workspace 键必须带 Run 命名空间**：以 `run.json.task_id_namespace`（= run_id）为前缀，如 `cwf-185-01-uat-01`；不得使用无前缀裸名，避免与其他任务撞名。
+  - **同一时刻只允许一个任务激活插件**。若登记表里上一个任务仍是激活态，`start` 会**重启开发环境**
+    来清空它的动态插件（DSH 重启即清空全部动态插件，这是 shell 侧唯一可靠手段——动态包绑定定义它的
+    会话，脚本无权停用他人会话的包），并明确提示「停掉了谁、现在跑的是谁」。
+  - **插件注册名必须带任务命名空间前缀**（`<run_id>-vwf-<哈希>`），禁止裸名；`--task` 缺省时由
+    `.agent-runs/` 下唯一登记的 Run 推断，多于一个即报错，不猜。
+  - **固定端口被其他进程占用时报错并指名占用者，脚本不会自动改端口**（否则又回到「每次都要查地址」）。
+- **taskId / workspace 键必须带 Run 命名空间**：以 `run.json.task_id_namespace`（= run_id）为前缀，如 `cwf-185-01-uat-01`；不得使用无前缀裸名，避免与其他任务撞名。插件注册名同源遵守此规则。
 
 ---
 
@@ -163,21 +172,22 @@ node "$CWF_ASSETS/cwf-record.mjs" rollback .agent-runs/<run_id> dev \
 
 1. 仅 `accept` / `conditional_pass` 可收口；`reject` 禁止。
 2. `closeout_summary`：`acceptance_outcome` 与验收包 `decision` 一致；`conditional_pass` 时 `leftovers` 收录优化意见。
-3. **环境回收**（#185；在清理 worktree 之前）：若开发 DSH 会话仍在，先用公开的 `cordis_stop` / `cordis_undefine` 清理本 Run 的动态 Package，再回收本 Run 独占开发 Home：
+3. **环境回收**（决策六：单实例 + 任务命名隔离；在清理 worktree 之前）：先停用并注销本任务的动态 Package，再清掉本任务在开发 Home 内独占的登记与工作区记录。**不删除任何「Home」**——开发 DSH 只有唯一实例，共享 Home 必须保留：
 
 ```bash
-node "$CWF_ASSETS/cwf-env-recycle.mjs" recycle .agent-runs/<run_id> --stop \
+npm run dev:plugin -- stop --task <run_id>          # 先 cordis_stop + cordis_undefine 之后执行
+node "$CWF_ASSETS/cwf-env-recycle.mjs" recycle .agent-runs/<run_id> \
   --report .agent-runs/<run_id>/cleanup-report.md
 ```
 
-   - 只在 `run.json.env_resources.dev_dsh_home` 与 Home 内 marker 归属一致时删除；`--stop` 只终止本 Home 登记的开发 DSH 进程；仍有进程占用、归属不符或 marker 缺失 → exit 1 且不删除。
-   - **回收失败不阻塞合并主路径**，但脚本输出必须原样进入 `closeout_summary.leftovers` / `cleanup-report.md` 后续事项，不得谎报已回收。
-   - 兜底 GC（任何时间可跑，默认 dry-run 只列清单）：
+   - 回收**以「激活登记里已有本任务的『已停用注销』记录」为门禁**；没有该记录即拒绝（exit 1），并打印应执行的确切命令。
+   - 停不掉时（归属它的会话已消失）用 `npm run dev:plugin -- stop --task <run_id> --unresolved "<原因>"` 如实登记；此时回收**照旧放行**，但该原因会进入报告与遗留事项，**不得谎报为已回收**。
+   - 只清本任务命名空间精确匹配的项：`tasks/<run_id>/`（旧独占 Home 遗留）、`workspaces/records/<run_id>/`、工作区登记册中本任务的条目。同属本任务但属「运行记录」范畴的文件只列出、不删除。
+   - **回收失败不阻塞合并主路径**，但脚本输出必须原样进入 `closeout_summary.leftovers` / `cleanup-report.md` 后续事项。
+   - 需要预演时用只读命令（不改动任何文件）：
 
 ```bash
-node "$CWF_ASSETS/cwf-env-recycle.mjs" gc                     # 列出 ~/.dsh-workflow-dev/tasks 下残留 Home 及是否合格
-node "$CWF_ASSETS/cwf-env-recycle.mjs" gc --force             # 只删「已过期（默认 14 天）且无占用且有 marker」的项
-node "$CWF_ASSETS/cwf-env-recycle.mjs" gc --max-age-days 3    # 调整过期阈值；无 marker 的项永远只列出、标注请人工确认
+node "$CWF_ASSETS/cwf-env-recycle.mjs" plan .agent-runs/<run_id>
 ```
 
 4. 本任务标记环境组完成，并仅在**同组全部完成**时清理工作区：

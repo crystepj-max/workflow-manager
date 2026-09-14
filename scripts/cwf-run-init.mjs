@@ -5,55 +5,29 @@
 // 产物（见 docs/design/workspace-directory-convention.md §1.4 / §1.6）：
 //   worktree：<主检出父目录>/<仓库名>-worktrees/<分支名>/   ← 相邻容器，禁止位于仓库内
 //   run 目录：<主检出>/.agent-runs/<run_id>/run.json          ← 锚定主检出，不写进工作树
-//   以及本 Run 独占的开发 DSH Home（默认 ~/.dsh-workflow-dev/tasks/<run_id>，含归属 marker task-env.json）
+//   开发 DSH 为**单实例固定端口**（约定 §决策六）：不再分配每 Run 独占 Home，
+//   env_resources 只登记「本任务插件命名空间 + 固定端口」；隔离由「插件注册名带任务
+//   命名空间」+「同一时刻只允许一个任务激活插件」纪律承担。
 
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mainCheckout, worktreePathFor, runDirFor, runsRoot } from './workspace-paths.mjs'
+import {
+  mainCheckout, worktreePathFor, runDirFor, runsRoot,
+  DEV_DSH_PORT, pluginNamespaceFor,
+} from './workspace-paths.mjs'
 
 const DEFAULT_BUDGET = 3
-export const DEV_DSH_HOME_MARKER = 'task-env.json'
 
-export function devDshTasksRoot(env = process.env) {
-  // 所有 Run 独占开发 Home 的公共父目录；测试与特殊部署可用 VWF_DEV_DSH_TASKS_ROOT 改道
-  return env.VWF_DEV_DSH_TASKS_ROOT || join(homedir(), '.dsh-workflow-dev', 'tasks')
-}
-
-export function allocateDevDshHome({ tasksRoot, identity, now = () => new Date() }) {
-  // 每 Run 独占开发 DSH Home（#185 切片 1）：目录 + 归属 marker 双证。
-  // 幂等：同 run_id 复用；目录已存在但 marker 缺失或属于其他 run_id → 拒绝接管（不静默覆盖他人现场）
-  const path = join(tasksRoot, identity.run_id)
-  const marker = join(path, DEV_DSH_HOME_MARKER)
-  if (existsSync(path)) {
-    if (!existsSync(marker)) {
-      throw new Error(`开发 DSH Home 已存在但无归属 marker：${path}（拒绝静默接管；请人工确认归属后清理，或换用其他 run_id）`)
-    }
-    const owner = JSON.parse(readFileSync(marker, 'utf-8'))
-    if (owner.run_id !== identity.run_id) {
-      throw new Error(`开发 DSH Home ${path} 属于其他 Run（${owner.run_id}），拒绝接管`)
-    }
-    return { path, marker, registered_at: owner.registered_at, reused: true }
+export function envResourcesFor(runId) {
+  // run.json 统一资源字段：按资源类型分层命名，后续新增资源类型（#187）在同一字段下扩展。
+  // 决策六（2026-09-13）：开发 DSH 单实例化后不再有独占 Home，本任务只需登记
+  // 「插件命名空间」与「固定端口」——它们是收口核对与单激活纪律的唯一依据。
+  return {
+    plugin_namespace: pluginNamespaceFor(runId),
+    dev_dsh_port: DEV_DSH_PORT,
   }
-  mkdirSync(path, { recursive: true })
-  const registered_at = now().toISOString()
-  writeFileSync(marker, JSON.stringify({
-    kind: 'dev-dsh-home',
-    run_id: identity.run_id,
-    issue_or_task_identity: identity.issue_or_task_identity,
-    work_branch: identity.work_branch,
-    workspace_id: identity.workspace_id,
-    repository: identity.repository,
-    registered_at,
-  }, null, 2) + '\n')
-  return { path, marker, registered_at, reused: false }
-}
-
-export function envResourcesFor(home) {
-  // run.json 统一资源字段：按资源类型分层命名，后续新增资源类型（#187）在同一字段下扩展
-  return { dev_dsh_home: { path: home.path, marker: home.marker, registered_at: home.registered_at } }
 }
 
 export function branchName(runId) {
@@ -192,20 +166,18 @@ function main() {
           mismatches.push(`worktree 当前分支(${actualBranch}≠${existing.work_branch})`)
         }
         if (mismatches.length === 0) {
-          // 复用时同样核对开发 Home 归属；老 run.json 缺资源字段则补登（不改变 Run 身份）
-          let home
-          try {
-            home = allocateDevDshHome({ tasksRoot: devDshTasksRoot(), identity: existing })
-          } catch (e) {
-            console.error(e.message)
-            process.exit(1)
-          }
-          if (!existing.env_resources) {
+          // 复用时补齐/迁移资源登记（不改变 Run 身份）：
+          //  - 旧 run.json（决策六之前）没有 plugin_namespace → 按新语义补登；
+          //  - 已有 plugin_namespace 则不动（保留 recycled_at 等回收痕迹）。
+          if (!existing.env_resources?.plugin_namespace) {
             existing.task_id_namespace = existing.task_id_namespace || existing.run_id
-            existing.env_resources = envResourcesFor(home)
+            existing.env_resources = {
+              ...envResourcesFor(existing.run_id),
+              ...(existing.env_resources?.recycled_at ? { recycled_at: existing.env_resources.recycled_at } : {}),
+            }
             writeFileSync(existingRunJson, JSON.stringify(existing, null, 2) + '\n')
           }
-          console.log(JSON.stringify({ worktree: worktreePath, runDir: join(worktreePath, runDirRel), identity: existing, dev_dsh_home: home.path, reused: true }, null, 2))
+          console.log(JSON.stringify({ worktree: worktreePath, runDir, identity: existing, plugin_namespace: existing.env_resources.plugin_namespace, dev_dsh_port: existing.env_resources.dev_dsh_port, reused: true }, null, 2))
           return
         }
         console.error(`run_id 相同但状态不一致，拒绝静默复用: ${mismatches.join('；')}`)
@@ -228,14 +200,6 @@ function main() {
     current_head: baseCommit,
     stage: 'requirements',
     attempt: 1,
-  }
-  // 先占开发 Home 再动 Git：归属冲突时不留下半成品分支/worktree
-  let home
-  try {
-    home = allocateDevDshHome({ tasksRoot: devDshTasksRoot(), identity })
-  } catch (e) {
-    console.error(e.message)
-    process.exit(1)
   }
 
   git(['branch', branch, baseRef], main)
@@ -266,12 +230,19 @@ function main() {
     rollback_used: 0,
     rollback_history: [],
     task_id_namespace: runId,
-    env_resources: envResourcesFor(home),
+    env_resources: envResourcesFor(runId),
     created_at: new Date().toISOString(),
   }
   writeFileSync(join(runDir, 'run.json'), JSON.stringify(runState, null, 2) + '\n')
 
-  console.log(JSON.stringify({ worktree: worktreePath, runDir, identity, dev_dsh_home: home.path, task_id_namespace: runId }, null, 2))
+  console.log(JSON.stringify({
+    worktree: worktreePath,
+    runDir,
+    identity,
+    plugin_namespace: runState.env_resources.plugin_namespace,
+    dev_dsh_port: runState.env_resources.dev_dsh_port,
+    task_id_namespace: runId,
+  }, null, 2))
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

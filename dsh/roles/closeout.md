@@ -17,7 +17,7 @@
 2. **一致性收口**：用知识收口流程做代码 / 文档 / 路线图 / 规则对齐——消除文档与实现的不一致，确认无遗留死代码与格式漂移，保留仓库整洁。
 3. **交接产物汇总**：整理本轮全部报告与产物清单，产出 `cleanup-report.md`，说明归档位置与后续事项。
 4. **推送、合并与关闭**：主工作区（编排区）承担推送/合并/关闭——把工作分支推送到远端（`git push -u origin <工作分支>`），基于 base 分支创建 Draft PR（`gh pr create --draft`，已存在则复用），PR 正文汇总本轮目标、验收结论与报告清单；然后将 PR 标记 ready 并合并（`gh pr merge --squash --delete-branch`），最后关闭对应 issue（`gh issue close`，评论说明验收结论与合并 commit）。**禁止绕过 PR 直接推送 base 分支**；无远端时记录本地 commit 清单即可。合并依据是「人工验收已通过」这一前置决策，本节点只执行，不重新判定。
-5. **环境回收（#185 任务环境隔离）**：清理 worktree 之前，先回收本 Run 独占的开发 DSH 资源——若开发 DSH 会话仍在，先用公开的 `cordis_stop` / `cordis_undefine` 停用并清理本 Run 定义的动态 Package；随后执行 `node scripts/cwf-env-recycle.mjs recycle <runDir> --stop --report <runDir>/cleanup-report.md`（按 `run.json.env_resources.dev_dsh_home` 与 Home 内 marker **双证归属一致**才删除；`--stop` 只终止本 Home 登记的开发 DSH 进程；仍有进程占用、归属不符或 marker 缺失时脚本拒绝删除并 exit 1）。**回收失败不阻塞合并主路径**，但必须把脚本 JSON 输出原样写入 `cleanup-report.md` 的「后续事项」，不得谎报已回收；只回收本 Run 登记的资源，不碰其他任务的 Home、进程、端口或共享指针；早于 #185 的 Run 无登记资源时脚本返回 `nothing_registered`，如实记录即可。
+5. **环境回收（决策六：单实例 + 任务命名隔离）**：清理 worktree 之前，先回收本任务的开发 DSH 资源——**不删除任何「Home」**（开发 DSH 只有唯一实例，共享 Home 必须保留）。顺序：若开发 DSH 会话仍在，先用公开的 `cordis_stop` / `cordis_undefine` 停用并注销本任务定义的动态 Package；随后执行 `npm run dev:plugin -- stop --task <run_id>` 登记「已停用并注销」，再执行 `node "$CWF_ASSETS/cwf-env-recycle.mjs" recycle <runDir> --report <runDir>/cleanup-report.md`（回收**以激活登记里已有本任务的注销记录为门禁**，没有即拒绝；只清本任务命名空间精确匹配的项）。停不掉时（归属它的会话已消失）用 `npm run dev:plugin -- stop --task <run_id> --unresolved "<原因>"` 如实登记，该原因进入报告与遗留事项。**回收失败不阻塞合并主路径**，但必须把脚本 JSON 输出原样写入 `cleanup-report.md` 的「后续事项」，不得谎报已回收；只回收本任务登记的资源，不碰其他任务的登记、插件、进程或共享指针；早于本改造的 Run 无 `plugin_namespace` 登记时脚本返回 `nothing_registered`，如实记录即可。
 6. **原子清理工作区（分两阶段，口径见 `docs/design/workspace-directory-convention.md` §1.7）**：确认边界后收束——只处理本轮需求相关变更，不触碰用户已有改动或无关文件。
    - **阶段一（代码托管不可用期间，当前口径）**：**删工作区、保留分支**。判据是不对称性：工作区可再生（随时 `git worktree add <路径> <分支名>` 重建），分支不可再生（它是托管恢复后补登 PR 的唯一载体）。
      - 工作区路径由 `scripts/workspace-paths.mjs` 派生（相邻容器 `../<仓库名>-worktrees/<分支名>/`），**不得自行拼接**；
@@ -52,10 +52,10 @@
 - 提交状态：已提交 / 待提交清单（列出）
 - 合并请求：PR 链接（已合并，merge commit）/ 无远端（本地 commit 清单）
 - issue 状态：已关闭 / 无
-- 环境回收：已回收 <Home 路径>（recycled_at）/ 未回收（原因，已列入后续事项）/ 无登记资源
+- 环境回收：已回收 任务命名空间 `<run_id>`（recycled_at）/ 未回收（原因，已列入后续事项）/ 无登记资源
 
-## 环境回收（#185 任务环境隔离）
-<!-- 由 cwf-env-recycle.mjs recycle --report 自动追加：Home 路径、归属核对、进程处理、结果与时间 -->
+## 环境回收（决策六：单实例 + 任务命名隔离）
+<!-- 由 cwf-env-recycle.mjs recycle --report 自动追加：命名空间、插件注销登记、已清/未清项与时间 -->
 ```
 
 ## 约束
