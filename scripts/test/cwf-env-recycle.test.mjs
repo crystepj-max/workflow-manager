@@ -1,165 +1,212 @@
-// cwf-env-recycle.mjs：定向回收（双证归属、占用拒删）与 GC 兜底（dry-run 默认、--force 只删合格项）
+// cwf-env-recycle.mjs（决策六：单实例 + 任务命名隔离）
+// 覆盖：激活登记门禁、精确命名空间回收、未回收项如实上报、只读预演、CLI 行为
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { allocateDevDshHome, envResourcesFor, DEV_DSH_HOME_MARKER } from '../cwf-run-init.mjs'
-import { recycleRunHome, renderRecycleReport, scanTaskHomes, gcTaskHomes, DEFAULT_MAX_AGE_DAYS } from '../cwf-env-recycle.mjs'
+import { envResourcesFor } from '../cwf-run-init.mjs'
+import { writeActiveTask } from '../workspace-paths.mjs'
+import { recycleRun, recycleTargets, renderRecycleReport } from '../cwf-env-recycle.mjs'
 
 const scriptPath = fileURLToPath(new URL('../cwf-env-recycle.mjs', import.meta.url))
-const noOccupancy = () => []
-const identity = (runId) => ({ run_id: runId, issue_or_task_identity: '#185', work_branch: `dev-${runId}`, workspace_id: `wt-dev-${runId}`, repository: 'org/repo' })
 
-function setupRun(runId, { registeredAt = '2026-09-01T00:00:00.000Z' } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'cwf-recycle-'))
-  const home = allocateDevDshHome({ tasksRoot: root, identity: identity(runId), now: () => new Date(registeredAt) })
-  const run = { run_id: runId, work_branch: `dev-${runId}`, env_resources: envResourcesFor(home) }
-  return { root, home, run }
+/** 造一个开发 Home 现场：本任务的工作区记录 + 登记册条目 + 旧独占 Home 遗留 + 他人条目 */
+function setupDevHome(ns = 'loc-020-r1') {
+  const devHome = mkdtempSync(join(tmpdir(), 'cwf-recycle-'))
+  mkdirSync(join(devHome, 'tasks', ns), { recursive: true })
+  writeFileSync(join(devHome, 'tasks', ns, 'task-env.json'), JSON.stringify({ run_id: ns }))
+  mkdirSync(join(devHome, 'workspaces', 'records', ns), { recursive: true })
+  writeFileSync(join(devHome, 'workspaces', 'records', ns, 'identity.json'), '{}')
+  mkdirSync(join(devHome, 'workspaces', 'records', 'someone-else'), { recursive: true })
+  mkdirSync(join(devHome, 'workspaces', '.vwf-registry'), { recursive: true })
+  writeFileSync(
+    join(devHome, 'workspaces', '.vwf-registry', 'state.json'),
+    JSON.stringify({
+      workspaces: {
+        [ns]: { logical_run_id: ns, workspace_path: `/gone/ws-${ns}` },
+        'someone-else': { logical_run_id: 'someone-else' },
+      },
+    }, null, 2),
+  )
+  mkdirSync(join(devHome, 'visual-workflow', 'logical-runs'), { recursive: true })
+  writeFileSync(join(devHome, 'visual-workflow', 'logical-runs', `${ns}.json`), '{}')
+  return devHome
 }
 
-test('recycle：run.json 与 marker 归属一致且无占用 → 删除 Home 并给出 recycled', () => {
-  const { home, run } = setupRun('cwf-185-01')
-  const result = recycleRunHome(run, { occupancy: noOccupancy, now: () => new Date('2026-09-08T06:00:00.000Z') })
-  assert.equal(result.status, 'recycled')
-  assert.equal(result.ok, true)
-  assert.equal(result.marker_run_id, 'cwf-185-01')
-  assert.equal(result.recycled_at, '2026-09-08T06:00:00.000Z')
-  assert.equal(existsSync(home.path), false)
-  assert.match(renderRecycleReport(result), /环境回收.*\n.*\n- 独占开发 DSH Home：.*✅ 已回收/s)
+const runFor = (ns) => ({ run_id: ns, env_resources: envResourcesFor(ns) })
+
+test('recycleTargets：只按精确命名空间匹配——不误伤他人条目', () => {
+  const ns = 'loc-020-r1'
+  const devHome = setupDevHome(ns)
+  const plan = recycleTargets(runFor(ns), devHome)
+  const byKind = Object.fromEntries(plan.targets.map((t) => [t.kind, t]))
+  assert.equal(plan.namespace, ns)
+  assert.equal(byKind.legacy_home_dir.path, join(devHome, 'tasks', ns))
+  assert.equal(byKind.legacy_home_dir.exists, true)
+  assert.equal(byKind.workspace_records_dir.exists, true)
+  assert.deepEqual(byKind.workspace_registry_entries.keys, [ns])
+  // 运行记录只列入清单、不进入删除集合
+  assert.deepEqual(plan.reported, [join(devHome, 'visual-workflow', 'logical-runs', `${ns}.json`)])
+  assert.equal(plan.targets.some((t) => t.path.includes('someone-else')), false)
 })
 
-test('recycle：无登记 / 已回收 / 目录已不存在 三种非动作状态均 ok 且不删除任何东西', () => {
-  assert.equal(recycleRunHome({ run_id: 'old-run' }, { occupancy: noOccupancy }).status, 'nothing_registered')
-  const { home, run } = setupRun('cwf-185-02')
-  const already = recycleRunHome({ ...run, env_resources: { dev_dsh_home: { ...run.env_resources.dev_dsh_home, recycled_at: 'x' } } }, { occupancy: noOccupancy })
-  assert.equal(already.status, 'already_recycled')
-  assert.equal(existsSync(home.path), true, '已回收登记不得再动目录')
-  const missing = recycleRunHome({ ...run, env_resources: { dev_dsh_home: { path: join(home.path, 'nope') } } }, { occupancy: noOccupancy })
-  assert.equal(missing.status, 'missing')
-  assert.equal(missing.ok, true)
-})
-
-test('recycle：marker 归属他人 / 缺失 / 损坏 → refused 且目录原样保留', () => {
-  const { home, run } = setupRun('cwf-185-03')
+test('recycle：激活登记中无「已停用注销」记录 → refused，一个字节都不动', () => {
+  const ns = 'loc-020-r1'
+  const devHome = setupDevHome(ns)
   const removed = []
-  const remove = (p) => removed.push(p)
-  writeFileSync(home.marker, JSON.stringify({ run_id: 'cwf-999-01' }))
-  const other = recycleRunHome(run, { occupancy: noOccupancy, remove })
-  assert.equal(other.status, 'refused')
-  assert.match(other.reason, /归属 cwf-999-01 ≠ 本 Run cwf-185-03/)
-  writeFileSync(home.marker, '{broken')
-  assert.match(recycleRunHome(run, { occupancy: noOccupancy, remove }).reason, /marker 损坏/)
-  const bare = mkdtempSync(join(tmpdir(), 'cwf-recycle-bare-'))
-  const noMarker = recycleRunHome({ run_id: 'cwf-185-03', env_resources: { dev_dsh_home: { path: bare } } }, { occupancy: noOccupancy, remove })
-  assert.equal(noMarker.status, 'refused')
-  assert.match(noMarker.reason, /无归属 marker/)
-  assert.deepEqual(removed, [], '拒绝态不得调用删除')
-  assert.equal(existsSync(home.path), true)
-})
-
-test('recycle：仍有进程占用 → occupied，不删除并列出 PID', () => {
-  const { home, run } = setupRun('cwf-185-04')
-  const result = recycleRunHome(run, { occupancy: () => [4242, 4243] })
-  assert.equal(result.status, 'occupied')
+  const result = recycleRun(runFor(ns), devHome, { remove: (p) => removed.push(p) })
+  assert.equal(result.status, 'refused')
   assert.equal(result.ok, false)
-  assert.deepEqual(result.occupants, [4242, 4243])
-  assert.equal(existsSync(home.path), true)
-  assert.match(renderRecycleReport(result), /⚠️ 仍被占用，未删除[\s\S]*PID 4242, 4243/)
+  assert.match(result.reason, /无法证明本任务的插件已停用/)
+  assert.match(result.reason, /dev:plugin -- stop --task loc-020-r1/)
+  assert.deepEqual(removed, [])
+  assert.equal(existsSync(join(devHome, 'tasks', ns)), true)
 })
 
-function setupGcRoot(now) {
-  const root = mkdtempSync(join(tmpdir(), 'cwf-gc-'))
-  const days = (n) => new Date(now.getTime() - n * 24 * 60 * 60 * 1000)
-  allocateDevDshHome({ tasksRoot: root, identity: identity('cwf-1-01'), now: () => days(30) }) // 过期
-  allocateDevDshHome({ tasksRoot: root, identity: identity('cwf-2-01'), now: () => days(2) })  // 新鲜
-  allocateDevDshHome({ tasksRoot: root, identity: identity('cwf-3-01'), now: () => days(40) }) // 过期但被占用
-  mkdirSync(join(root, 'orphan-no-marker'))                                                   // 无 marker
-  const old = days(60)
-  utimesSync(join(root, 'orphan-no-marker'), old, old)
-  writeFileSync(join(root, 'stray-file.txt'), 'x')                                             // 非目录，忽略
-  return root
-}
-
-test('gc dry-run：只列清单不删除；过期无占用有 marker 才 eligible；无 marker 标注请人工确认', () => {
-  const now = new Date('2026-09-08T06:00:00.000Z')
-  const root = setupGcRoot(now)
-  const occupancy = (home) => (home.endsWith('cwf-3-01') ? [777] : [])
-  const out = gcTaskHomes(root, { occupancy, now: () => now })
-  assert.equal(out.mode, 'dry-run')
-  assert.equal(out.max_age_days, DEFAULT_MAX_AGE_DAYS)
-  assert.deepEqual(out.deleted, [])
-  const byId = Object.fromEntries(out.entries.map((e) => [e.run_id ?? e.home.split('/').pop(), e]))
-  assert.equal(byId['cwf-1-01'].eligible, true)
-  assert.equal(byId['cwf-1-01'].age_days, 30)
-  assert.equal(byId['cwf-2-01'].eligible, false)
-  assert.match(byId['cwf-2-01'].note, /未过期/)
-  assert.equal(byId['cwf-3-01'].eligible, false)
-  assert.deepEqual(byId['cwf-3-01'].occupants, [777])
-  assert.equal(byId['orphan-no-marker'].has_marker, false)
-  assert.equal(byId['orphan-no-marker'].eligible, false)
-  assert.match(byId['orphan-no-marker'].needs_human, /无 marker/)
-  assert.equal(byId['orphan-no-marker'].age_days >= 59, true, '无 marker 按目录 mtime 兜底计龄')
-  assert.equal(out.entries.length, 4, '非目录条目不计入')
-  for (const e of out.entries) assert.equal(existsSync(e.home), true)
+test('recycle：已登记注销 → 清本任务项，他人条目与运行记录原样保留', () => {
+  const ns = 'loc-020-r1'
+  const devHome = setupDevHome(ns)
+  writeActiveTask(devHome, {
+    current: null,
+    releases: [{ namespace: ns, released_at: '2026-09-13T12:00:00.000Z', unresolved: null }],
+  })
+  const result = recycleRun(runFor(ns), devHome, { now: () => new Date('2026-09-13T12:10:00.000Z') })
+  assert.equal(result.status, 'recycled')
+  assert.equal(result.recycled_at, '2026-09-13T12:10:00.000Z')
+  assert.equal(existsSync(join(devHome, 'tasks', ns)), false)
+  assert.equal(existsSync(join(devHome, 'workspaces', 'records', ns)), false)
+  const registry = JSON.parse(readFileSync(join(devHome, 'workspaces', '.vwf-registry', 'state.json'), 'utf-8'))
+  assert.deepEqual(Object.keys(registry.workspaces), ['someone-else'])
+  // 他人现场与运行记录不动
+  assert.equal(existsSync(join(devHome, 'workspaces', 'records', 'someone-else')), true)
+  assert.equal(existsSync(join(devHome, 'visual-workflow', 'logical-runs', `${ns}.json`)), true)
+  assert.match(renderRecycleReport(result), /决策六：单实例 \+ 任务命名隔离[\s\S]*✅ 已回收/)
+  assert.match(renderRecycleReport(result), /仅列出未处理/)
 })
 
-test('gc --force：只删 eligible；新鲜 / 占用 / 无 marker 一律保留；阈值可调', () => {
-  const now = new Date('2026-09-08T06:00:00.000Z')
-  const root = setupGcRoot(now)
-  const occupancy = (home) => (home.endsWith('cwf-3-01') ? [777] : [])
-  const out = gcTaskHomes(root, { force: true, occupancy, now: () => now })
-  assert.deepEqual(out.deleted, [join(root, 'cwf-1-01')])
-  assert.equal(existsSync(join(root, 'cwf-1-01')), false)
-  assert.equal(existsSync(join(root, 'cwf-2-01')), true)
-  assert.equal(existsSync(join(root, 'cwf-3-01')), true)
-  assert.equal(existsSync(join(root, 'orphan-no-marker')), true)
-  // 阈值调到 1 天：新鲜项（2 天）也过期，但仍不动占用与无 marker
-  const again = gcTaskHomes(root, { force: true, occupancy, now: () => now, maxAgeDays: 1 })
-  assert.deepEqual(again.deleted, [join(root, 'cwf-2-01')])
-  assert.equal(existsSync(join(root, 'cwf-3-01')), true)
-  assert.equal(existsSync(join(root, 'orphan-no-marker')), true)
-  assert.deepEqual(scanTaskHomes(join(root, 'not-exist')), [])
+test('recycle：停用未完成（unresolved）→ 判定为未回收（exit 1），原因进报告——不得谎报', () => {
+  const ns = 'loc-020-r2'
+  const devHome = setupDevHome(ns)
+  writeActiveTask(devHome, {
+    current: null,
+    releases: [{ namespace: ns, released_at: '2026-09-13T12:00:00.000Z', unresolved: '归属会话已消失，插件面板里仍可见' }],
+  })
+  const result = recycleRun(runFor(ns), devHome)
+  assert.equal(result.ok, false, '未完成「已停用并注销」不得视为收口完成')
+  assert.equal(result.status, 'recycled_unresolved')
+  assert.match(result.reason, /停用未完成：归属会话已消失/)
+  assert.match(result.reason, /需人工在 DSH 插件面板中清理/)
+  const report = renderRecycleReport(result)
+  assert.match(report, /❌ 未回收（插件停用未完成，需人工在插件面板清理）/)
+  assert.match(report, /插件停用注销：未完成（归属会话已消失/)
 })
 
-test('CLI recycle：回收后 run.json 登记 recycled_at，--report 追加环境回收小节；重复执行为 already_recycled', () => {
-  const { root, home, run } = setupRun('cwf-185-05')
-  const runDir = join(root, 'run')
-  mkdirSync(runDir)
-  writeFileSync(join(runDir, 'run.json'), JSON.stringify(run, null, 2))
+test('recycle：无登记（早于本改造的 Run）与已回收登记 → 幂等非动作', () => {
+  const devHome = mkdtempSync(join(tmpdir(), 'cwf-recycle-'))
+  assert.equal(recycleRun({ run_id: 'old-run' }, devHome).status, 'nothing_registered')
+  const run = runFor('loc-020-r3')
+  run.env_resources.recycled_at = '2026-09-13T12:00:00.000Z'
+  const again = recycleRun(run, devHome)
+  assert.equal(again.status, 'already_recycled')
+  assert.equal(again.ok, true)
+})
+
+test('recycle：dryRun 只预演，不调用删除', () => {
+  const ns = 'loc-020-r4'
+  const devHome = setupDevHome(ns)
+  writeActiveTask(devHome, {
+    current: null,
+    releases: [{ namespace: ns, released_at: '2026-09-13T12:00:00.000Z', unresolved: null }],
+  })
+  const removed = []
+  const result = recycleRun(runFor(ns), devHome, { dryRun: true, remove: (p) => removed.push(p) })
+  assert.equal(result.status, 'planned')
+  assert.deepEqual(removed, [])
+  assert.equal(existsSync(join(devHome, 'tasks', ns)), true)
+  assert.match(renderRecycleReport(result), /ℹ️ 预演（未改动）/)
+})
+
+test('CLI recycle：回收后写回 recycled_at 并追加报告；plan 只读且不改动', () => {
+  const ns = 'loc-020-r5'
+  const devHome = setupDevHome(ns)
+  writeActiveTask(devHome, {
+    current: null,
+    releases: [{ namespace: ns, released_at: '2026-09-13T12:00:00.000Z', unresolved: null }],
+  })
+  const runDir = join(devHome, 'run')
+  mkdirSync(runDir, { recursive: true })
+  writeFileSync(join(runDir, 'run.json'), JSON.stringify(runFor(ns), null, 2))
   const report = join(runDir, 'cleanup-report.md')
   writeFileSync(report, '# cleanup\n')
-  const first = spawnSync(process.execPath, [scriptPath, 'recycle', runDir, '--report', report], { encoding: 'utf-8', env: { ...process.env, VWF_DEV_LSOF_BIN: '/nonexistent/lsof' } })
+  const env = { ...process.env, VWF_DEV_DSH_HOME: devHome }
+
+  const planned = spawnSync(process.execPath, [scriptPath, 'plan', runDir], { encoding: 'utf-8', env })
+  assert.equal(planned.status, 0, planned.stderr)
+  assert.equal(JSON.parse(planned.stdout).status, 'planned')
+  assert.equal(existsSync(join(devHome, 'tasks', ns)), true)
+
+  const first = spawnSync(process.execPath, [scriptPath, 'recycle', runDir, '--report', report], { encoding: 'utf-8', env })
   assert.equal(first.status, 0, first.stderr)
   const result = JSON.parse(first.stdout)
   assert.equal(result.status, 'recycled')
-  assert.equal(existsSync(home.path), false)
+  assert.equal(existsSync(join(devHome, 'tasks', ns)), false)
   const saved = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
-  assert.equal(saved.env_resources.dev_dsh_home.recycled_at, result.recycled_at)
-  assert.match(readFileSync(report, 'utf-8'), /## 环境回收（#185 任务环境隔离）[\s\S]*✅ 已回收/)
-  const second = spawnSync(process.execPath, [scriptPath, 'recycle', runDir], { encoding: 'utf-8', env: { ...process.env, VWF_DEV_LSOF_BIN: '/nonexistent/lsof' } })
+  assert.equal(saved.env_resources.recycled_at, result.recycled_at)
+  assert.match(readFileSync(report, 'utf-8'), /## 环境回收（决策六：单实例 \+ 任务命名隔离）[\s\S]*✅ 已回收/)
+
+  const second = spawnSync(process.execPath, [scriptPath, 'recycle', runDir], { encoding: 'utf-8', env })
   assert.equal(second.status, 0)
   assert.equal(JSON.parse(second.stdout).status, 'already_recycled')
 })
 
-test('CLI recycle：归属不符 exit 1 且不动目录；gc CLI 默认 dry-run exit 0', () => {
-  const { root, home, run } = setupRun('cwf-185-06')
-  writeFileSync(home.marker, JSON.stringify({ run_id: 'cwf-777-01' }))
-  const runDir = join(root, 'run')
-  mkdirSync(runDir)
-  writeFileSync(join(runDir, 'run.json'), JSON.stringify(run))
-  const refused = spawnSync(process.execPath, [scriptPath, 'recycle', runDir], { encoding: 'utf-8', env: { ...process.env, VWF_DEV_LSOF_BIN: '/nonexistent/lsof' } })
+test('CLI recycle：停用未完成 exit 1、残留原因写进 run.json，人工清理后再次回收才成功', () => {
+  const ns = 'loc-020-r7'
+  const devHome = setupDevHome(ns)
+  writeActiveTask(devHome, {
+    current: null,
+    releases: [{ namespace: ns, released_at: '2026-09-13T12:00:00.000Z', unresolved: '归属会话已消失' }],
+  })
+  const runDir = join(devHome, 'run')
+  mkdirSync(runDir, { recursive: true })
+  writeFileSync(join(runDir, 'run.json'), JSON.stringify(runFor(ns), null, 2))
+  const env = { ...process.env, VWF_DEV_DSH_HOME: devHome }
+
+  const first = spawnSync(process.execPath, [scriptPath, 'recycle', runDir], { encoding: 'utf-8', env })
+  assert.equal(first.status, 1, first.stderr)
+  const refused = JSON.parse(first.stdout)
+  assert.equal(refused.status, 'recycled_unresolved')
+  const saved = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.equal(saved.env_resources.recycle_unresolved, '归属会话已消失')
+  assert.equal(saved.env_resources.recycled_at, undefined)
+
+  // 人工在面板清理后重新登记（去掉 --unresolved），再次回收放行
+  writeActiveTask(devHome, {
+    current: null,
+    releases: [{ namespace: ns, released_at: '2026-09-13T12:30:00.000Z', unresolved: null }],
+  })
+  const second = spawnSync(process.execPath, [scriptPath, 'recycle', runDir], { encoding: 'utf-8', env })
+  assert.equal(second.status, 0, second.stderr)
+  assert.equal(JSON.parse(second.stdout).status, 'recycled')
+  const final = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf-8'))
+  assert.ok(final.env_resources.recycled_at)
+})
+
+test('CLI recycle：未登记注销 exit 1 且不动任何目录；参数非法 exit 2', () => {
+  const ns = 'loc-020-r6'
+  const devHome = setupDevHome(ns)
+  const runDir = join(devHome, 'run')
+  mkdirSync(runDir, { recursive: true })
+  writeFileSync(join(runDir, 'run.json'), JSON.stringify(runFor(ns)))
+  const refused = spawnSync(process.execPath, [scriptPath, 'recycle', runDir], {
+    encoding: 'utf-8',
+    env: { ...process.env, VWF_DEV_DSH_HOME: devHome },
+  })
   assert.equal(refused.status, 1)
   assert.equal(JSON.parse(refused.stdout).status, 'refused')
-  assert.equal(existsSync(home.path), true)
-  const gc = spawnSync(process.execPath, [scriptPath, 'gc', '--root', root, '--max-age-days', '0'], { encoding: 'utf-8', env: { ...process.env, VWF_DEV_LSOF_BIN: '/nonexistent/lsof' } })
-  assert.equal(gc.status, 0, gc.stderr)
-  const out = JSON.parse(gc.stdout)
-  assert.equal(out.mode, 'dry-run')
-  assert.deepEqual(out.deleted, [])
-  assert.equal(existsSync(home.path), true)
-  const bad = spawnSync(process.execPath, [scriptPath, 'gc', '--max-age-days', '-3'], { encoding: 'utf-8' })
-  assert.equal(bad.status, 2)
+  assert.equal(existsSync(join(devHome, 'tasks', ns)), true)
+  const bad = spawnSync(process.execPath, [scriptPath, 'gc'], { encoding: 'utf-8' })
+  assert.equal(bad.status, 2, 'gc 已退役，不再是被识别的子命令')
 })

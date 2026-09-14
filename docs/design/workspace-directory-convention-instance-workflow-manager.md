@@ -61,15 +61,17 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 
 > 🟡 **缺口**：上述纪律只约束了「在哪里干活」，**没有约束「产物写到哪里」**。这正是通用模板 §1.6 锚定机制要补的后半句。
 
-### 2.2 回收侧（现状：四个入口）
+### 2.2 回收侧（现状：决策六后为三个入口）
 
 | 入口 | 命令 / 位置 | 覆盖范围 |
 |---|---|---|
-| 环境回收 | `scripts/cwf-env-recycle.mjs recycle <runDir> --stop --report ...`（收口角色第 5 条） | 本 Run 独占的开发 DSH Home |
+| 环境回收 | `npm run dev:plugin -- stop --task <run_id>`（登记注销）→ `scripts/cwf-env-recycle.mjs recycle <runDir> --report ...`（收口角色第 5 条） | 本任务命名空间精确匹配项（旧独占 Home 遗留 + 工作区记录 + 登记册条目） |
 | 环境组清理 | `scripts/ai-task-workspace-env.mjs mark-completed` + `maybe-cleanup`（runbook 第 177–184 行） | 同组全部完成时清理工作区 |
-| 兜底 GC | `scripts/cwf-env-recycle.mjs gc [--force] [--max-age-days N]`（runbook 第 169–175 行） | 残留 Home（默认 dry-run 只列清单） |
 | 任务合并 | `scripts/local-task-merge.mjs --task ... --branch ... --decision accept --run-id ...`（本地轨道） | 合并 + 归档 2 件 |
 | 收口角色 | `dsh/roles/closeout.md` 第 6 条 `git worktree remove` + `git branch -D` | 工作区与分支（阶段二口径） |
+
+> 历史条目「兜底 GC `cwf-env-recycle.mjs gc`」随决策六退役（旧「每 Run 独占 Home」机制的兜底，
+> 对象已不存在）；见 §3.1。
 
 ### 2.3 本地结论：创建与回收各收敛为单一入口
 
@@ -90,6 +92,68 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 | 三 | `.scratch` 下 5 个已入库文件 | **3 个移除跟踪**（`dsh-visual-workflow-p0/` 的 `compile-test.mjs`、`compiled/dev-workflow-2-0.gen.mjs`、`compiled/meta.json`）；**2 个迁入** `docs/design/vwf-p2/`（`decision-map.md`、`requirements-analysis.md`） | `compile-test.mjs` 自述「从插件 pkg-3 原样提取」= 原型一次性脚本；蓝图权威源已迁 `templates/custom-seeds/dev-workflow-2-0.json`；产物现由 `npm run generate` 出到 `.generated/` |
 | 四 | 收口清理程度 | **分两阶段**：暂停期删工作区留分支；托管恢复后全清 | 工作区可再生、分支不可再生；`dev-cwf-185-01`（需求分两阶段）与 `dev-loc-008/009-r1`（squash 已入 main 待补 PR）两案例吻合 |
 | **五** | **归档位置（2026-09-12 新增）** | **方案甲：统一到 `docs/tasks/archive/<TASK_ID>/`**，作为唯一收口归档位置（任务卡 + 规格终版 + 证据摘要三件）；`docs/tasks/specs/` 内容并入后废弃 | 现状两处并存且 LOC-015 同时在两处 |
+| **六** | **运行时实例布局（2026-09-13 新增，LOC-020）** | **方案甲：单实例 + 任务命名隔离**——开发 DSH 唯一、端口固定 **9527**；任务间隔离改由「插件注册名带任务命名空间前缀」+「同一时刻只允许一个任务激活插件」纪律承担；**取代 `#185` 的「每 Run 独占 Home」**。归属双证校验与 14 天兜底 GC 退役；收口语义从「按双证删 Home」简化为「确认本任务插件已停用注销 + 清本任务工作区记录（`cwf-env-recycle.mjs plan/recycle`）」 | 见下方 §3.1：`#185` 机制在真实 Run 上「分配了不用、用完不收」，复杂度是纯成本；且该机制赖以成立的前提（工作空间级插件隔离）在 DSH 侧经代码判定为**不存在** |
+
+### 3.1 决策六的依据（LOC-020 需求分析，2026-09-13）
+
+#### (a) `#185` 多 Home 机制的失效：一手实测
+
+对刚完成的 LOC-014（2026-09-13 11:01 合并、19:03 完成收口）核查：
+
+| 核查项 | 实测结果 | 判定 |
+|---|---|---|
+| 分配的独占 Home 是否被使用 | `~/.dsh-workflow-dev/tasks/loc-014-r1/` 内**只有一个归属标记 `task-env.json`**，无 profile / 无凭据 / 无任何 DSH 状态 | ❌ 分配了但从未使用 |
+| 实际在跑的开发 DSH 用哪个 Home | PID 99501、端口 49248，加载的是**共享默认 Home** | ❌ 隔离意图未落实 |
+| 收口是否回收 | run 目录内**无 `cleanup-report.md`**，环境回收步骤被跳过，空目录残留至今 | ❌ 未回收 |
+
+结论：**不是「用得不规范」，是「分配了不用、用完也不收」**——为该机制付出的全部复杂度是纯成本。
+
+#### (b) 提案前提已被代码判定为不成立
+
+原提案假设「多个工作空间各自注册动态插件、互不干扰」。在 DSH（`dsh-v0.1.5-rc.1`）源码层判定为**不成立**：
+
+| 事实 | 证据 |
+|---|---|
+| 动态插件注册表是**进程级全局**，归属字段只有发起它的会话 | `packages/extensions/cordis-host-runner/src/registry.ts:142`、`:54-55` |
+| DSH 的 `workspace` 实体只是「目录 → 会话」展示分组，与动态插件/槽位**零耦合** | `packages/workspace/workspace/src/index.ts`；四个 cordis 包内无 workspace 维度引用 |
+| 宿主半边（工具 / RPC 服务）挂在进程根上下文的唯一 `cordis-dynamic` group → **进程全局** | `cordis-host-runner/src/index.ts:1237-1240`、`lifecycle.ts:22-28` |
+| 浏览器半边在**单个浏览器页面内共享一个客户端运行时**（不同标签页各自独立） | `cordis-client-runner/src/client/runtime.ts:178`、`ui-cordis/src/client/slots.ts:31-35` |
+| 激活与清理**绑定会话**，别的任务无权停用他人会话定义的包 | `cordis-host-runner/src/index.ts:1232-1235`（`owned()`） |
+
+因此：**「插件注册名带 Run 命名空间」只能覆盖 cordis 的 pluginId，覆盖不到插件内部注册的工具名与 RPC 路由名**。本插件宿主半边注册的是固定名——`wf_run`、`vwf_workspace`、`wf_control`、`vwf_debug`（`packages/dsh-visual-workflow/src/host.js:2517/2961/2984/3000`）与一批 `vwf.*` 路由——两者进程级全局，**并发激活必然撞名（报错或相互覆盖，即「串版本」）**。
+
+#### (c) 由此产生的两条硬约束
+
+1. **接受能力回归**：「同一时刻只允许一个任务激活插件」是结果，不是策略选择。切换任务时由 `dev-plugin.mjs start --task <ns>` **重启开发环境**清空上一个任务的动态插件（DSH 重启即清空全部动态包，这是 shell 侧唯一可靠手段）。
+2. **已知限制**：同一浏览器标签页内不同任务的界面半边理论上可并存，**不同任务请用不同标签页**。
+
+#### (d) P0 实机确认结果 ✅（2026-09-13 23:30 实测）
+
+实验：在开发 DSH（唯一实例，127.0.0.1:9527）的**两个独立会话**中，各自 `cordis_define` +
+`cordis_run` 一个注册**同名工具** `uat04_probe` 的动态插件（会话 A：`uatp-1` / `pkg-1`；
+会话 B：`uatq-2` / `pkg-2`；`idPrefix` 不同以免 pluginId 混淆，唯一撞的是工具名）。
+
+| 观察点 | 会话 A | 会话 B |
+|---|---|---|
+| `cordis_define` | 成功 | 成功 |
+| `cordis_run` | 成功 | **失败**（`self_state: failed`） |
+| 调用 `uat04_probe` | 返回 `uat04_probe alive (A)` | 返回 `uat04_probe alive (A)` —— **仍是 A 的版本，B 的注册未生效** |
+| 错误原文 | — | `tool "uat04_probe" is already registered … to REPLACE something an earlier dynamic package registered, first cordis_stop that package's id … then run the new version.` |
+
+**结论：撞名表现为「报错 + 新注册不生效」，不是静默覆盖。** 实测与 §3.1(b) 的代码级判定一致：
+
+1. DSH **不存在工作空间作用域**——两个会话（本次同属 `dev-loc-020-r1` 工作区）的插件注册
+   仍然撞在同一个**进程级**注册域上，与目录 / 工作区划分无关；
+2. 宿主半边注册的**工具名**是进程级全局，并发激活必然冲突；
+3. 因此「同一时刻只允许一个任务激活插件」不是策略选择，而是**技术约束**——本改造（决策六）的前提成立。
+
+**实测范围说明**：本次只用**工具名**作为代表做实测（合成探针 `uat04_probe`，非本插件真实的
+`wf_run` / `vwf_workspace` 等）。RPC 路由名（`vwf.*`）的同类冲突**沿用 §3.1(b) 的代码级判定**，
+未单独实测——两者在 DSH 源码中是同一注册机制（`cordis-host-runner` 进程根上下文唯一 group），
+但严格说尚未经实机验证。
+
+附带印证：错误提示本身要求的补救路径（先 `cordis_stop` 旧包 → 再运行新版本），正是本改造
+`dev-plugin start --task <ns>` 自动化的动作（切换任务时重启开发环境清空上一个任务的动态插件）。
 
 ---
 

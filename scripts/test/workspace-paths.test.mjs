@@ -88,7 +88,6 @@ test('端到端：cfw-run-init 把工作树建到相邻容器、run 目录落主
     const out = execFileSync('node', [script, 'T-1', 'loc-t-01', '--local-base'], {
       cwd: repo,
       encoding: 'utf-8',
-      env: { ...process.env, VWF_DEV_DSH_TASKS_ROOT: join(base, 'dev-homes') },
     })
     const parsed = JSON.parse(out)
     const nr = (p) => p.replace(/^\/private/, '')
@@ -96,6 +95,9 @@ test('端到端：cfw-run-init 把工作树建到相邻容器、run 目录落主
     assert.equal(nr(parsed.worktree), nr(join(base, 'proj-worktrees', 'dev-loc-t-01')), '工作树应在相邻容器内')
     assert.equal(nr(parsed.runDir), nr(join(repo, '.agent-runs', 'loc-t-01')), 'run 目录应锚定主检出')
     assert.equal(isInside(parsed.worktree, repo), false, '工作树不得位于仓库内部')
+    // 决策六：run-init 只登记插件命名空间与固定端口，不再分配每 Run 独占 Home
+    assert.deepEqual(parsed.plugin_namespace, 'loc-t-01')
+    assert.deepEqual(parsed.dev_dsh_port, 9527)
 
     // 从工作树内再次执行，解析结果必须一致（证明不依赖当前目录）
     assert.equal(nr(mainCheckout(parsed.worktree)), nr(repo))

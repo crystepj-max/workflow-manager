@@ -1,0 +1,74 @@
+{
+  "task_id": "LOC-020",
+  "run_id": "loc-020-r1",
+  "task_name": "开发 DSH 单实例化：9527 固定端口 + 任务命名隔离",
+  "status": "等待验收",
+  "decision": "accept",
+  "decided_by": "松哥（2026-09-14 会话确认「验收通过」）",
+  "decided_at": "2026-09-14T04:53:24.457Z",
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-13T12:03:17.716Z",
+      "produced_by": "workbuddy-loc020-requirements",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-13T12:03:58.925Z",
+      "produced_by": "workbuddy-loc020-design"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a2.json",
+      "created_at": "2026-09-13T13:02:54.279Z",
+      "produced_by": "workbuddy-loc020-dev",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a10.json",
+      "created_at": "2026-09-14T04:53:04.442Z",
+      "produced_by": "independent-review-loc020",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a10.json",
+      "created_at": "2026-09-14T04:53:04.523Z",
+      "produced_by": "independent-test-loc020",
+      "summary": {
+        "verdict": "pass",
+        "environment": "worktree dev-loc-020-r1 @ ee6bdd74b156ae1c944d3755f9eec99506e8080b（已 sync main：模板改名 wf-* 全链路）；Node v24.14.1；npm test 489/489（0 skip/0 fail）"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a10.json",
+      "created_at": "2026-09-14T04:53:24.535Z",
+      "produced_by": "workbuddy-loc020-uat",
+      "summary": {
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "松哥（2026-09-14 会话确认「验收通过」）",
+        "decided_at": "2026-09-14T04:53:24.457Z",
+        "verified_branch": "dev-loc-020-r1",
+        "verified_head": "ee6bdd74b156ae1c944d3755f9eec99506e8080b"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-020-r1",
+    "file_count": 28,
+    "total_bytes": 93389
+  },
+  "generated_at": "2026-09-14T07:14:42.711Z"
+}

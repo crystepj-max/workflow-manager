@@ -60,8 +60,8 @@ PASSED / FAILED / BLOCKED
 
 ## 硬规则
 
-- 验证前先锚定检出（与验收角色同口径，#185 任务环境隔离）：所有 git / npm / 测试命令一律 `git -C <worktree>`（或先 `cd <worktree>`），并核对 `git -C <worktree> rev-parse --abbrev-ref HEAD` = 工作分支（运行上下文或 run.json 登记的 `work_branch`）且 HEAD 与被测交付一致；不一致即停止并记录阻塞，不得在主工作区或别的 worktree 里跑验证得出反向结论。
-- 需要运行态 DSH 验证时只用本 Run 独占 Home（`VWF_DEV_DSH_HOME=<run.json.env_resources.dev_dsh_home.path>`），taskId / workspace 键以 `run.json.task_id_namespace` 为前缀。
+- 验证前先锚定检出（与验收角色同口径，约定 §1.6 锚定机制）：所有 git / npm / 测试命令一律 `git -C <worktree>`（或先 `cd <worktree>`），并核对 `git -C <worktree> rev-parse --abbrev-ref HEAD` = 工作分支（运行上下文或 run.json 登记的 `work_branch`）且 HEAD 与被测交付一致；不一致即停止并记录阻塞，不得在主工作区或别的 worktree 里跑验证得出反向结论。
+- 需要运行态 DSH 验证时用**唯一的开发实例（固定端口 9527）**：先 `npm run dev:plugin -- start --task <runId>` 确认本任务为当前激活任务（切换任务会重启开发环境清空上一个任务的插件，需在报告中如实记录对验证的影响）；taskId / workspace 键与插件注册名以 `run.json.task_id_namespace` 为前缀。
 - 不得修改业务代码；只允许为验证目的补测试或写测试脚本。
 - 不得凭感觉宣布通过——必须有测试输出、日志或截图证据。
 - CI 绿灯不能替代真机/集成验收，涉及运行态行为时必须执行对应验证或明确记录阻塞。

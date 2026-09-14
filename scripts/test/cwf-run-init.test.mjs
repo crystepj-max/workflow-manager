@@ -1,62 +1,29 @@
-// cwf-run-init.mjs 纯逻辑测试（分支命名、run_id 安全、身份比对、独占开发 Home 分配）
+// cwf-run-init.mjs 纯逻辑测试（分支命名、run_id 安全、身份比对、资源登记）
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, readFileSync, existsSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   branchName, assertRunIdSafe, findIdentityMismatch, parseBudget, ensureGitExclude, repoSlugFromUrl,
-  resolveBase, allocateDevDshHome, envResourcesFor, devDshTasksRoot, DEV_DSH_HOME_MARKER,
+  resolveBase, envResourcesFor,
 } from '../cwf-run-init.mjs'
+import { DEV_DSH_PORT, pluginNamespaceFor, pluginNameFor } from '../workspace-paths.mjs'
 
-const identity = (runId) => ({
-  run_id: runId,
-  issue_or_task_identity: '#185',
-  work_branch: `dev-${runId}`,
-  workspace_id: `wt-dev-${runId}`,
-  repository: 'org/repo',
-})
-
-test('devDshTasksRoot：默认 ~/.dsh-workflow-dev/tasks，可用 VWF_DEV_DSH_TASKS_ROOT 改道', () => {
-  assert.match(devDshTasksRoot({}), /\.dsh-workflow-dev[\\/]tasks$/)
-  assert.equal(devDshTasksRoot({ VWF_DEV_DSH_TASKS_ROOT: '/tmp/x' }), '/tmp/x')
-})
-
-test('allocateDevDshHome：首次分配建目录 + 归属 marker，run.json 资源字段按类型分层', () => {
-  const root = mkdtempSync(join(tmpdir(), 'cwf-dev-home-'))
-  const now = () => new Date('2026-09-08T05:00:00.000Z')
-  const home = allocateDevDshHome({ tasksRoot: root, identity: identity('cwf-185-01'), now })
-  assert.equal(home.path, join(root, 'cwf-185-01'))
-  assert.equal(home.reused, false)
-  assert.equal(home.registered_at, '2026-09-08T05:00:00.000Z')
-  const marker = JSON.parse(readFileSync(join(home.path, DEV_DSH_HOME_MARKER), 'utf-8'))
-  assert.equal(marker.kind, 'dev-dsh-home')
-  assert.equal(marker.run_id, 'cwf-185-01')
-  assert.equal(marker.work_branch, 'dev-cwf-185-01')
-  assert.deepEqual(envResourcesFor(home), {
-    dev_dsh_home: { path: home.path, marker: home.marker, registered_at: '2026-09-08T05:00:00.000Z' },
+test('envResourcesFor：只登记插件命名空间与固定端口（决策六后不再有独占 Home）', () => {
+  assert.deepEqual(envResourcesFor('loc-020-r1'), {
+    plugin_namespace: 'loc-020-r1',
+    dev_dsh_port: DEV_DSH_PORT,
   })
+  assert.equal(DEV_DSH_PORT, 9527)
+  // 命名空间必须与 run_id 同形：非法形态直接拒绝，避免「裸名/穿越」进入登记
+  assert.throws(() => envResourcesFor('Loc 020'), /非法任务命名空间/)
+  assert.throws(() => envResourcesFor('../x'), /非法任务命名空间/)
+  assert.equal(pluginNamespaceFor('loc-020-r1'), 'loc-020-r1')
 })
 
-test('allocateDevDshHome：同 run_id 幂等复用，保留首次登记时间', () => {
-  const root = mkdtempSync(join(tmpdir(), 'cwf-dev-home-'))
-  const first = allocateDevDshHome({ tasksRoot: root, identity: identity('cwf-185-01'), now: () => new Date('2026-09-08T05:00:00.000Z') })
-  const again = allocateDevDshHome({ tasksRoot: root, identity: identity('cwf-185-01'), now: () => new Date('2026-09-09T05:00:00.000Z') })
-  assert.equal(again.reused, true)
-  assert.equal(again.path, first.path)
-  assert.equal(again.registered_at, '2026-09-08T05:00:00.000Z')
-})
-
-test('allocateDevDshHome：目录属于其他 Run 或无 marker 时拒绝接管', () => {
-  const root = mkdtempSync(join(tmpdir(), 'cwf-dev-home-'))
-  // 他人现场：目录名与本 run_id 相同但 marker 归属不同
-  mkdirSync(join(root, 'cwf-185-01'), { recursive: true })
-  writeFileSync(join(root, 'cwf-185-01', DEV_DSH_HOME_MARKER), JSON.stringify({ run_id: 'cwf-999-01' }))
-  assert.throws(() => allocateDevDshHome({ tasksRoot: root, identity: identity('cwf-185-01') }), /属于其他 Run（cwf-999-01）/)
-  // 无 marker 的既有目录：不静默接管
-  mkdirSync(join(root, 'cwf-185-02'), { recursive: true })
-  assert.throws(() => allocateDevDshHome({ tasksRoot: root, identity: identity('cwf-185-02') }), /无归属 marker/)
-  assert.equal(existsSync(join(root, 'cwf-185-02', DEV_DSH_HOME_MARKER)), false)
+test('pluginNameFor：插件注册名恒带任务命名空间前缀（结构上不可能出现裸名）', () => {
+  assert.equal(pluginNameFor('loc-020-r1', 'vwf-abc123'), 'loc-020-r1-vwf-abc123')
+  assert.equal(pluginNameFor('loc-020-r1', '-vwf-abc123'), 'loc-020-r1-vwf-abc123')
+  assert.throws(() => pluginNameFor('', 'vwf-abc123'), /非法任务命名空间/)
 })
 
 test('branchName：run_id 直接进分支名（单射）', () => {
