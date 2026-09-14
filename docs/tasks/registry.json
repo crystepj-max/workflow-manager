@@ -533,14 +533,14 @@
       "source": "会话录入",
       "source_ref": "2026-09-13 LOC-019 需求分析会话：D1/D1-b/D2/D3/D6 决策（LOC-014 UAT 反馈衍生切片 2）",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "执行受阻",
       "priority": "P1",
       "env_group": "LOC-021",
       "env_role": "独立",
       "deps": [
         "LOC-019"
       ],
-      "branch": null,
+      "branch": "dev-loc-021-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
@@ -549,7 +549,7 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-13T11:42:54.384Z",
-      "updated_at": "2026-09-13T11:50:10.519Z",
+      "updated_at": "2026-09-14T03:17:58.821Z",
       "spec_path": ".scratch/LOC-021-hetero-mode/task-spec-V1.md"
     },
     {
