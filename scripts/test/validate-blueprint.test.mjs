@@ -29,6 +29,8 @@ test('投影往返：蓝图 → DSL → 蓝图 与原蓝图语义等价（verify
       ...b,
       description: b.description || undefined,
       control: b.control || undefined,
+      // 异源档位三态（LOC-021）：旧布尔 true 投影后归一为 'weak'，语义等价
+      heteroCheck: b.heteroCheck === true ? 'weak' : (b.heteroCheck === false ? 'off' : b.heteroCheck),
       nodes: b.nodes.map((n) => ({ ...n, label: n.label || n.id, goal: n.goal || '' })),
     }));
     assert.deepEqual(norm(back), norm(bp), file + ' 往返后与原蓝图不一致');
@@ -238,11 +240,14 @@ test('S1 name 与 id 不一致拒绝（单标识）', () => {
   expectReject(b, '单标识', 'nameMismatch');
 });
 
-test('S1 heteroCheck=true 但缺 dev/review 节点拒绝', () => {
+test('S1 heteroCheck 强档但缺 dev/review 节点仅警示不拦（LOC-021 修订：无配对时警示即可）', () => {
   const b = clone();
   b.nodes = b.nodes.filter((n) => n.id !== 'review');
   b.edges = b.edges.filter((e) => e.from !== 'review' && e.to !== 'review');
-  expectReject(b, 'dev 与 review', 'heteroNodes');
+  b.heteroCheck = 'strong';
+  const r = validateBlueprint(b);
+  assert.ok(!r.errors.some((e) => e.at === '$.heteroCheck'), '强档缺配对不得报错：' + JSON.stringify(r.errors));
+  assert.ok(r.warnings.some((w) => w.includes('强档') && w.includes('无从执行')), '应给强档无从执行的警示：' + JSON.stringify(r.warnings));
 });
 
 // —— 打回上限系统约束（候选二 Q7：maxRounds ∈ [1,9]，系统约定上限 9）——
@@ -379,7 +384,127 @@ test('S1 异源 T8：profile 定位 + 真异源通过无警告', () => {
   assert.equal(r.warnings.length, 0);
 });
 
-// —— Human Decision 契约（#116 / #72）：键名钉死 + 非法配置拒绝；不测挂起运行时 ——
+// —— 异源档位三态（LOC-021）：关/弱/强正反例 + 旧数据兼容 + 非法值兜底 ——
+test('LOC-021 关档：完全同模型不校验、可保存（用户显式选择）', () => {
+  const b = withHetero(
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+  );
+  b.heteroCheck = 'off';
+  const r = validateBlueprint(b);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.equal(r.warnings.length, 0, JSON.stringify(r.warnings));
+});
+
+test('LOC-021 关档：旧布尔 false 归一为关档，同样不校验', () => {
+  const b = withHetero(
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+  );
+  b.heteroCheck = false;
+  const r = validateBlueprint(b);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+});
+
+test('LOC-021 弱档（默认）：同 provider 不同 model 通过 + 弱异源警告；完全相同被拒', () => {
+  const weak = withHetero(
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+  );
+  weak.heteroCheck = 'weak';
+  const r = validateBlueprint(weak);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.ok(r.warnings.some((w) => w.includes('弱异源')), JSON.stringify(r.warnings));
+  const same = withHetero(
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+  );
+  same.heteroCheck = 'weak';
+  expectReject(same, '模型相同', 'heteroWeakSame');
+});
+
+test('LOC-021 强档：同 provider 不同 model 被拒（错误含档位说明与实际值）；不同 provider 通过', () => {
+  const sameProvider = withHetero(
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+  );
+  sameProvider.heteroCheck = 'strong';
+  const r = validateBlueprint(sameProvider);
+  assert.equal(r.ok, false, '强档下同 provider 必须拒绝');
+  const msg = r.errors.map((e) => e.message).join(' | ');
+  assert.ok(msg.includes('strong'), '错误需说明档位为强：' + msg);
+  assert.ok(msg.includes('deepseek-official'), '错误需含实际 provider：' + msg);
+  const diffProvider = withHetero(
+    { provider: 'kimi-coding', model: 'k3' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+  );
+  diffProvider.heteroCheck = 'strong';
+  const ok = validateBlueprint(diffProvider);
+  assert.equal(ok.ok, true, JSON.stringify(ok.errors));
+  assert.equal(ok.warnings.length, 0, JSON.stringify(ok.warnings));
+});
+
+test('LOC-021 旧数据兼容：缺失 / true → 弱档；非法值 → 按弱档处理并报错', () => {
+  const missing = withHetero(
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+  );
+  delete missing.heteroCheck;
+  const rm = validateBlueprint(missing);
+  assert.equal(rm.ok, true, JSON.stringify(rm.errors));
+  assert.ok(rm.warnings.some((w) => w.includes('弱异源')), '缺失档位按弱档给警告');
+  const legacyTrue = withHetero(
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+  );
+  legacyTrue.heteroCheck = true;
+  expectReject(legacyTrue, '模型相同', 'heteroLegacyTrue');
+  const invalid = withHetero(
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+  );
+  invalid.heteroCheck = 'turbo';
+  const ri = validateBlueprint(invalid);
+  assert.equal(ri.ok, false);
+  const msgs = ri.errors.map((e) => e.message).join(' | ');
+  assert.ok(msgs.includes('档位值非法'), '非法值需报档位错误：' + msgs);
+  assert.ok(msgs.includes('模型相同'), '非法值按弱档继续校验：' + msgs);
+});
+
+test('LOC-021 无 dev/review 配对：强档给警示不拦，弱档与关档不提示（explore/optimize 形态）', () => {
+  const strong = clone();
+  strong.nodes = strong.nodes.filter((n) => n.id !== 'review');
+  strong.edges = strong.edges.filter((e) => e.from !== 'review' && e.to !== 'review');
+  strong.heteroCheck = 'strong';
+  const rs = validateBlueprint(strong);
+  assert.ok(!rs.errors.some((e) => e.at === '$.heteroCheck'), '强档无配对不得报错：' + JSON.stringify(rs.errors));
+  assert.ok(rs.warnings.some((w) => w.includes('无从执行')), '强档无配对应给警示：' + JSON.stringify(rs.warnings));
+  const weak = clone();
+  weak.nodes = weak.nodes.filter((n) => n.id !== 'review');
+  weak.edges = weak.edges.filter((e) => e.from !== 'review' && e.to !== 'review');
+  weak.heteroCheck = 'weak';
+  const rw = validateBlueprint(weak);
+  assert.ok(!rw.errors.some((e) => e.at === '$.heteroCheck'), '弱档显式声明无配对不拦：' + JSON.stringify(rw.errors));
+  assert.equal(rw.warnings.length, 0, '弱档无配对本就是现状默认，不提示：' + JSON.stringify(rw.warnings));
+  const off = clone();
+  off.nodes = off.nodes.filter((n) => n.id !== 'review');
+  off.edges = off.edges.filter((e) => e.from !== 'review' && e.to !== 'review');
+  off.heteroCheck = 'off';
+  const ro = validateBlueprint(off);
+  assert.ok(!ro.errors.some((e) => e.at === '$.heteroCheck'), '关档无配对不拦');
+  assert.equal(ro.warnings.length, 0, '关档无配对不提示');
+});
+
+test('LOC-021 未扩大配对范围：dev↔test、execute↔evaluate 同模型不被拦截', () => {
+  const b = clone();
+  // 夹具含 test/evaluate 节点：把 dev/review 保持异源，把 test/evaluate 绑成与 dev 完全相同
+  b.bindings.models.dev = { provider: 'kimi-coding', model: 'k3' };
+  b.bindings.models.review = { provider: 'deepseek-official', model: 'deepseek-v4-pro' };
+  if (b.bindings.models.test) b.bindings.models.test = { provider: 'kimi-coding', model: 'k3' };
+  if (b.bindings.models.evaluate) b.bindings.models.evaluate = { provider: 'kimi-coding', model: 'k3' };
+  const r = validateBlueprint(b);
+  assert.equal(r.ok, true, '开发↔测试 / 执行↔评估 同模型不得被拦：' + JSON.stringify(r.errors));
+});
 const hdGood = JSON.parse(readFileSync(path.join(here, 'fixtures/human-decision-blueprint.json'), 'utf8'));
 const hdClone = () => JSON.parse(JSON.stringify(hdGood));
 

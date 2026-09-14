@@ -14,7 +14,7 @@
 |---|---|---|
 | 生成器（内置） | `scripts/generate.mjs` | `npm run generate` → `.generated/<id>/{script.mjs, vwf-dsl.json, SKILL.md, meta.json}` |
 | 生成器（用户 skill） | `scripts/generate.mjs user <蓝图json> <skillDir>` | **已实现**：校验 + 生成自包含三件套（SKILL.md/script.mjs/meta.json）到 `<skillDir>/<id>/` |
-| 校验器 | `scripts/validate-blueprint.mjs` | 规则全集含**异源硬规则 7**（T-06 已实现，返回 `{ok, errors, warnings}`） |
+| 校验器 | `scripts/validate-blueprint.mjs` | 规则全集含**异源规则 7**（**LOC-021 修订 T-06**：按蓝图 `heteroCheck` 档位 关/弱/强 判定，不再全局强制，返回 `{ok, errors, warnings}`） |
 | 历史自定义种子蓝图 | `templates/custom-seeds/dev-workflow-2-0.json` | 已退出内置身份（#82）；7 节点/13 边，bindings 异源 |
 | 等价断言 | `scripts/equivalence.mjs` | 10 项断言（CI 用） |
 | 测试 | `scripts/test/` | 32 测试全绿（含异源 T1-T5、generateUserSkill） |
@@ -81,7 +81,7 @@ node <repo>/scripts/generate.mjs user ~/.dsh/visual-workflow/templates/<id>.json
 ### 2.1 引擎侧（已完成 ✅）
 
 `scripts/validate-blueprint.mjs` 规则 7（T-06 契约）：
-- 含 dev+review 节点的蓝图一律校验（全局强制）；无则跳过（T5）。
+- 按蓝图 `heteroCheck` 档位判定（LOC-021）：弱档（默认）= 含 dev+review 节点即校验、缺绑定拒；强档另要求 provider 必须不同；关档不校验；无 dev+review 节点跳过（T5）。
 - dev/review 任一缺 `bindings.models` → 拒（「无法证明异源，请显式配置」）（T4）。
 - 完全同模型（provider+model 相同）→ 拒（消息含实际值与修复指引）（T1）。
 - 同 provider 不同 model → 通过 + `warnings`（弱异源）（T2）。
@@ -90,7 +90,7 @@ node <repo>/scripts/generate.mjs user ~/.dsh/visual-workflow/templates/<id>.json
 
 ### 2.2 host 接入（本次会话唯一剩余）
 
-- `vwf.workflows.save`：保存前除 `validateDsl` 外，叠加异源检查（**内联轻量实现** ~10 行：读 `dsl.nodes` 是否有 dev/review → 比较 `bindings.models.dev/review`，返回 `{ok:false, errors:[{at:'bindings.models', message:...}]}` 沿用 errors 结构）。host 无法 import 引擎校验器，异源判定逻辑简单，内联即可（与引擎侧行为一致，用例以引擎测试为参照）。
+- `vwf.workflows.save`：保存前除 `validateDsl` 外，叠加异源检查。**现状（LOC-021 口径）**：异源判定已收敛进统一内核 `validate-core.cjs` 规则 7（按蓝图 `heteroCheck` 档位判定，见 `docs/design/blueprint-schema.md` §3.1 规则 7），host 经 `validateBlueprint(projectToBlueprint(sanitized), { requireModels: true })` 单点调用，不再内联。
 - `vwf.validate`（L453）：同样叠加（过渡期双保险，规格 FR-8）。
 - **T6 用例**（update 路径同 save）在 host 层补测：save 同蓝图两次（第二次=更新自身）——异源违规蓝图在两次调用均被拒。
 

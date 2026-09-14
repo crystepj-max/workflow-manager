@@ -38,8 +38,8 @@ workflow 编排脚本（.generated/dev-workflow-2-0/script.mjs——单一编译
 - **人工门禁**：脚本不等人。跑到验收点返回，主会话发人工确认卡，裁决后以对应
   `entry` 续跑。全过程状态落在 run 目录文件中，天然支持断点续跑。
 - **角色异源**：模型绑定在**编译时固化**（蓝图 `bindings.models`，见「异源配置」）；
-  开发与审核绑定不同 provider 即满足「异源异模型」硬规则（校验内核全局强制，
-  运行日志提示弱异源）。
+  开发与审核的异源强度由蓝图 `heteroCheck` 档位控制（关/弱/强，默认弱；弱档下同 provider
+  不同模型即可，强档要求 provider 必须不同，关档不校验——LOC-021；运行日志按档位输出比对结论）。
 
 ## 文件清单
 
@@ -171,6 +171,8 @@ gh issue view <N> --json title,body,comments
 | `session: new/continue` | 每个节点都是新 subagent；上下文经 run 目录文件 + args 传递 |
 
 ## 异源配置（已实测验证，2026-08-16）
+
+> 异源校验强度由蓝图 `heteroCheck` 档位控制（LOC-021）：**关 / 弱（默认）/ 强**——弱档下同 provider 不同模型即通过（给弱异源警告），强档要求 provider 必须不同，关档不校验。下列分配以「真异源（不同 provider）」为准，可满足强档要求。
 
 当前宿主实测可用路由（workflow `agent()` 的 provider/model 覆盖）：
 

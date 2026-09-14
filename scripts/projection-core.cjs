@@ -19,6 +19,31 @@ function isDefined(value) {
   return value !== undefined
 }
 
+// LOC-021 异源档位三态（关/弱/强）：heteroCheck 单一字段承载，缺失或旧布尔 true → 弱，
+// 旧布尔 false → 关，"strong" → 强；非法值按弱档对待（由校验内核单独报错，投影只透传不吞）。
+// 编辑器 client.js 的 ingestEditorJson 有同名映射逻辑——勿在此分叉。
+const HETERO_MODES = ['off', 'weak', 'strong']
+
+function effectiveHeteroMode(value) {
+  if (value === false || value === 'off') return 'off'
+  if (value === 'strong') return 'strong'
+  return 'weak'
+}
+
+function isKnownHeteroValue(value) {
+  return value === undefined || value === null || value === true || value === false
+    || HETERO_MODES.indexOf(value) >= 0
+}
+
+// 蓝图 → DSL 档位投影：旧布尔归一为三态字符串，非法值原样透传给校验报告；
+// 缺失保持缺失（未声明 = 弱，由 UI 默认显示弱档）。
+function heteroModeForEdit(value) {
+  if (value === undefined || value === null) return undefined
+  if (value === true) return 'weak'
+  if (value === false) return 'off'
+  return value
+}
+
 function projectToVwf(bp) {
   const models = (bp.bindings && bp.bindings.models) || {}
   const out = {
@@ -50,7 +75,7 @@ function projectToVwf(bp) {
     }),
   }
   if (isDefined(bp.onMaxRounds)) out.onMaxRounds = cloneValue(bp.onMaxRounds)
-  if (bp.heteroCheck) out.heteroCheck = true
+  if (bp.heteroCheck !== undefined && bp.heteroCheck !== null) out.heteroCheck = heteroModeForEdit(bp.heteroCheck)
   if (bp.bundleRoles) out.bundleRoles = true
   if (isDefined(bp.humanDecision)) out.humanDecision = cloneValue(bp.humanDecision)
   if (isDefined(bp.workspace)) out.workspace = cloneValue(bp.workspace)
@@ -96,7 +121,8 @@ function projectToBlueprint(dsl) {
     bp.control = { maxRounds: cloneValue(dsl.control.maxRounds) }
   }
   if (isDefined(dsl.onMaxRounds)) bp.onMaxRounds = cloneValue(dsl.onMaxRounds)
-  if (dsl.heteroCheck) bp.heteroCheck = true
+  // DSL 档位为三态字符串（或编辑器 JSON 直填的旧布尔/非法值）：透传落盘，非法值交给校验报告
+  if (isDefined(dsl.heteroCheck) && dsl.heteroCheck !== null) bp.heteroCheck = dsl.heteroCheck
   if (dsl.bundleRoles) bp.bundleRoles = true
   if (isDefined(dsl.humanDecision)) bp.humanDecision = cloneValue(dsl.humanDecision)
   if (isDefined(dsl.workspace)) bp.workspace = cloneValue(dsl.workspace)
@@ -104,4 +130,4 @@ function projectToBlueprint(dsl) {
   return bp
 }
 
-module.exports = { projectToVwf, projectToBlueprint }
+module.exports = { projectToVwf, projectToBlueprint, effectiveHeteroMode, isKnownHeteroValue, heteroModeForEdit, HETERO_MODES }

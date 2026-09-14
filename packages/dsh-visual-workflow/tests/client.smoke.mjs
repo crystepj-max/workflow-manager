@@ -22,6 +22,17 @@ const { createRoot } = await import('react-dom/client')
 const { act } = React
 
 const flush = () => new Promise((resolve) => setImmediate(resolve))
+// 防抖实时校验（VALIDATE_DEBOUNCE_MS=350）在默认桩下永不触发——因此内核 warnings 的
+// 编辑器出口此前完全没有测试覆盖。仅在需要验证防抖通道的用例里打开真实定时器，
+// 其余用例保持原语义（delay=0 同步执行、非零丢弃）。
+let realDebounceTimer = false
+function makeTimeout(fn, delay) {
+  if (typeof fn !== 'function') return () => {}
+  if (delay === 0) { fn(); return () => {} }
+  if (!realDebounceTimer) return () => {}
+  const t = setTimeout(fn, delay)
+  return () => clearTimeout(t)
+}
 async function mountPage(targetRoot, el) {
   await act(async () => {
     targetRoot.render(React.createElement(Page))
@@ -67,7 +78,7 @@ const ROLE_USAGE = {
 
 // ── 组装动态客户端运行环境 ─────────────────────────────────────────────────
 function makeRuntime() {
-  const state = { failSave: false, failUsage: false, saved: [] }
+  const state = { failSave: false, failUsage: false, saved: [], validateWarning: null }
   const rpc = async (method, args) => {
     switch (method) {
       case 'vwf.workflows.list':
@@ -137,6 +148,8 @@ function makeRuntime() {
             fieldErrors: { 'node:node-2:profile': ['测试错误：节点未关联角色'] },
           }
         }
+        // LOC-021：内核 warnings 必须有编辑器出口（此前零消费，警示用户完全不可见）
+        if (state.validateWarning) return { ok: true, errors: [], fieldErrors: {}, warnings: [state.validateWarning] }
         return { ok: true, errors: [], fieldErrors: {} }
       case 'vwf.workflows.save':
         state.saved.push(args.dsl)
@@ -190,7 +203,7 @@ function makeRuntime() {
   }
   const ctxFake = {
     get: (name) => (name === 'slots' ? slotsFake : undefined),
-    timeout: (fn, delay) => { if (delay === 0 && typeof fn === 'function') fn(); return () => {} },
+    timeout: (fn, delay) => makeTimeout(fn, delay),
     interval: () => () => {},
   }
   const harnessTrap = {}
@@ -202,7 +215,7 @@ function makeRuntime() {
 const { plugin, slotsFake, state, styleText } = makeRuntime()
 plugin.apply({
   get: (n) => (n === 'slots' ? slotsFake : undefined),
-  timeout: (fn, delay) => { if (delay === 0 && typeof fn === 'function') fn(); return () => {} },
+  timeout: (fn, delay) => makeTimeout(fn, delay),
   interval: () => () => {},
 })
 
@@ -626,6 +639,37 @@ test('保存成功路径：调用 save RPC', async () => {
   })
   assert.ok(state.saved.length >= 1, 'save RPC 被调用')
   assert.equal(state.saved[0].id, 'wf1')
+})
+
+test('LOC-021 校验警示在编辑器可见（内核 warnings 有用户出口）', async () => {
+  // A-1 回归：内核 warnings 此前在编辑器零消费——「无配对时警示即可」的定案会对用户不可见。
+  // 走真实防抖实时校验通道（打开编辑器即触发），断言警示渲染到状态区。
+  state.validateWarning = '异源档位 strong 已声明，但该蓝图没有开发与审核节点，强档要求无从执行'
+  realDebounceTimer = true
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  try {
+    await act(async () => {
+      freshRoot.render(React.createElement(Page))
+      await flush()
+      await flush()
+    })
+    await act(async () => {
+      const editBtn = byText(fresh, '编辑')
+      assert.ok(editBtn, '存在编辑按钮')
+      editBtn.click()
+      await flush()
+    })
+    await act(async () => { await new Promise((r) => setTimeout(r, 600)) })
+    assert.ok(byText(fresh, '异源档位 strong 已声明'), '警示文案必须渲染到编辑器（否则定案对用户不可见）')
+    assert.ok(byText(fresh, '条校验提示'), '警示以提示计数呈现')
+  } finally {
+    state.validateWarning = null
+    realDebounceTimer = false
+    await act(async () => { freshRoot.unmount() })
+    fresh.remove()
+  }
 })
 
 test('防重叠：跨节点边与回边路走外围车道，标签避开中间节点', async () => {

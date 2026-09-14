@@ -6,7 +6,7 @@
   "control": {
     "maxRounds": 3
   },
-  "heteroCheck": true,
+  "heteroCheck": "weak",
   "nodes": [
     {
       "id": "diagnose",

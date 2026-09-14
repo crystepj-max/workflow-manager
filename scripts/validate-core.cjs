@@ -15,7 +15,7 @@
 
 // 蓝图 ↔ DSL 形态投影：唯一实现 = ./projection-core.cjs（生成器直接 import，宿主经 dist 加载）。
 // 本文件只转发导出——两份投影实现曾各自漂移（克隆 vs 共享引用），禁止再内嵌副本。
-const { projectToVwf, projectToBlueprint } = require('./projection-core.cjs')
+const { projectToVwf, projectToBlueprint, effectiveHeteroMode, isKnownHeteroValue } = require('./projection-core.cjs')
 
 const COND_RE = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
 const HUMAN_DECISION_ID = '$human-decision'
@@ -655,27 +655,39 @@ function validateBlueprint(bp, opts) {
       if (!m || !m.model) err('$.nodes[' + n.id + '].model.model', '节点 ' + label + ' 未绑定模型（model.model 必填）。')
     })
   }
-  if (bp.heteroCheck && !(bp.nodes.some((n) => n && (n.id === 'dev' || n.profile === 'dev')) && bp.nodes.some((n) => n && (n.id === 'review' || n.profile === 'review')))) {
-    err('$.heteroCheck', 'heteroCheck=true 需要存在 dev 与 review 节点（按节点 id 或 profile 识别，异源检查对象）')
+  // 异源档位三态（LOC-021）：关/弱/强，缺失或旧值 true → 弱，旧值 false → 关；非法值按弱档处理并报错。
+  const heteroValueInvalid = bp.heteroCheck !== undefined && bp.heteroCheck !== null && !isKnownHeteroValue(bp.heteroCheck)
+  if (heteroValueInvalid) {
+    err('$.heteroCheck', 'heteroCheck 档位值非法（' + JSON.stringify(bp.heteroCheck) + '）：仅支持 "off" / "weak" / "strong"（旧布尔值 true=弱、false=关 仍兼容）；已按弱档继续校验，请修正后保存')
   }
-
-  // 异源硬规则（规则 7，T-06：全局强制，仅 dev↔review）
+  const heteroMode = heteroValueInvalid ? 'weak' : effectiveHeteroMode(bp.heteroCheck)
+  // 异源规则（规则 7，T-06 修订：按档位判定，仅 dev↔review 一对；关档跳过，旧数据兼容优先级高于新语义）
   const warnings = []
   const devNode = bp.nodes.find((n) => n && (n.id === 'dev' || n.profile === 'dev'))
   const reviewNode = bp.nodes.find((n) => n && (n.id === 'review' || n.profile === 'review'))
-  if (devNode && reviewNode) {
+  // 显式声明强档但缺开发/审核配对 → 警示（不拦）：强档要求无从执行，提示用户档位不会生效。
+  // 弱档是现状默认，模板可为表达意图显式声明弱档而无配对（不提示）；关档不校验，旧值 false 遗留不提示。
+  if (heteroMode === 'strong' && bp.heteroCheck !== undefined && bp.heteroCheck !== null && bp.heteroCheck !== false
+      && !(devNode && reviewNode)) {
+    warnings.push('异源档位 strong 已声明，但该蓝图没有开发与审核节点（按节点 id 或 profile 识别），强档要求无从执行——请补充配对节点，或将 heteroCheck 降为 "weak" / "off"')
+  }
+  if (heteroMode !== 'off' && devNode && reviewNode) {
     const bm = (bp.bindings && bp.bindings.models) || {}
     const dm = bm[devNode.id]
     const rm = bm[reviewNode.id]
     if (!dm || !rm) {
-      err('$.bindings.models', 'dev/review 未配置 bindings.models，无法证明异源，请显式配置')
+      err('$.bindings.models', 'dev/review 未配置 bindings.models，无法证明异源（异源档位：' + heteroMode + '），请显式配置；或将 heteroCheck 置为 "off" 关闭校验')
     } else {
       const dt = (dm.provider || 'default') + '/' + (dm.model || 'default')
       const rt = (rm.provider || 'default') + '/' + (rm.model || 'default')
       if (dt === rt) {
-        err('$.bindings.models', 'dev 与 review 模型相同（' + dt + '）：异源硬规则要求不同 provider 或不同模型，请调整 bindings.models')
+        err('$.bindings.models', 'dev 与 review 模型相同（' + dt + '）：异源档位 ' + heteroMode + ' 要求不同 provider 或不同模型，请调整 bindings.models；或将 heteroCheck 置为 "off" 关闭校验')
       } else if (dm.provider === rm.provider) {
-        warnings.push('弱异源：dev/review 同 provider（' + dm.provider + '）不同模型，建议配置不同 provider 满足真异源')
+        if (heteroMode === 'strong') {
+          err('$.bindings.models', '异源档位 strong 要求 dev 与 review 使用不同 provider（当前同为 ' + dm.provider + '：dev=' + dt + '，review=' + rt + '），请调整 bindings.models；或将 heteroCheck 降为 "weak" / "off"')
+        } else {
+          warnings.push('弱异源：dev/review 同 provider（' + dm.provider + '）不同模型，建议配置不同 provider 满足真异源')
+        }
       }
     }
   }
@@ -928,6 +940,8 @@ module.exports = {
   isRollbackEdge,
   projectToVwf,
   projectToBlueprint,
+  // LOC-021 异源档位三态：供宿主/客户端复用同一归一口径，勿复制映射逻辑。
+  effectiveHeteroMode,
   extractFileTokens,
   blueprintUsesHumanDecision,
   compileInputSizeViolation,

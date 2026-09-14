@@ -28,7 +28,7 @@
   CJS 单文件；蓝图 ↔ DSL 投影不在其中——委托「投影内核」只转发导出）。
   双层：**结构层** `validateStructure`（走通性 / 节点边定义 / 入口唯一 / 环 / 条件与 schema 路径 /
   保留 id / maxRounds ∈ [1,9] 系统上限——框架保证，与业务无关）与**业务规则层** `validateBlueprint`
-  （蓝图声明的规则：异源硬规则、verifyBranch 联动、onMaxRounds 枚举、output.files、单标识、
+  （蓝图声明的规则：异源档位、verifyBranch 联动、onMaxRounds 枚举、output.files、单标识、
   requireModels 产品收紧选项）。引擎 ESM import；宿主经 fs 读源码、vm 内求值缓存（热路径内存执行）。
   原 `validate-blueprint.mjs` 与宿主 `validateDsl`/`heteroCheck`/拓扑推导/COND_RE 已删除。
   错误统一带坐标键 fieldKey（node:<id>:<field> / edge:<i>:<field> / control:<field> / heteroCheck /
@@ -62,7 +62,7 @@
   （T-IMP-12 后 vwf 运行层同样折叠；编辑器图仍保留 route 节点展示）。折叠转发源 = when 路径的
   schema 声明节点（候选三修复：原取入边来源导致跳测试环节）。
 - **可信度闸门（verifyBranch）**：验证节点开工分支自检 + `verified_branch`/`verified_head` 硬校验。
-- **异源（heteroCheck）**：dev↔review 模型绑定必须不同（save/validate 层强制；运行时日志）。
+- **异源（heteroCheck）**：dev↔review 模型异源按蓝图档位（关/弱/强，默认弱）生效——save/validate 层按档位校验，运行时日志按节点 id 或角色识别并输出当前档位（LOC-021）。
 - **人工门禁（manualCheck）**：节点产出后挂起（`AWAITING_HUMAN_<节点id>` + resume 载荷），人工裁决后续跑。
 - **扇出（fanout）**：受限并行子任务节点。`items` 仅从 `$.args` 或 success 路径上的前序
   `$.results.<节点id>` 读取数组；`goal` 用 `{{item}}` 注入当前项，`output.schema` 是 per-item

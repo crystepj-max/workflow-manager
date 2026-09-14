@@ -1303,22 +1303,27 @@ test('Q7 闭环：heteroCheck/onMaxRounds 随 DSL 往返并在校验中生效', 
   }
   const v = await call(handlers, 'vwf.validate', { dsl })
   assert.equal(v.ok, true, JSON.stringify(v.errors))
-  assert.equal(v.sanitized.heteroCheck, true, '异源开关过 sanitize 保留')
+  // 异源档位三态（LOC-021）：DSL 三态字符串原样过 sanitize；旧布尔 true 经摄入归一为弱档
+  assert.equal(v.sanitized.heteroCheck, 'weak', '异源档位过 sanitize 保留（旧布尔 true 归一为弱档）')
   assert.equal(v.sanitized.onMaxRounds, 'auto-reschedule', '超限行为过 sanitize 保留')
   const s = await call(handlers, 'vwf.workflows.save', { dsl })
   assert.equal(s.ok, true, JSON.stringify(s.errors))
   const bp = JSON.parse(fs._files.get(USER_DIR + '/h1.json'))
-  assert.equal(bp.heteroCheck, true, '异源开关落盘蓝图')
+  assert.equal(bp.heteroCheck, 'weak', '异源档位落盘蓝图（归一为弱档）')
   assert.equal(bp.onMaxRounds, 'auto-reschedule', '超限行为落盘蓝图')
 })
 
-test('Q7 闭环：开启异源开关 + 同模型 → 保存被拒；关掉开关同模型依旧被拒（硬规则全局）', async () => {
+test('Q7 闭环：异源档位三态生效——弱档同模型被拒，关档同模型放行（LOC-021 修订 T-06 全局强制口径）', async () => {
   const { handlers } = env()
   const on = await call(handlers, 'vwf.workflows.save', { dsl: { ...heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm1' }), heteroCheck: true } })
   assert.equal(on.ok, false)
   assert.ok(on.errors.some(e => e.message.includes('模型相同')), JSON.stringify(on.errors))
-  const off = await call(handlers, 'vwf.workflows.save', { dsl: heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm1' }) })
-  assert.equal(off.ok, false, '异源硬规则全局强制（T-06），与开关无关')
+  // 关档（off）：开发与审核完全同模型不校验、可保存（用户显式选择）
+  const off = await call(handlers, 'vwf.workflows.save', { dsl: { ...heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm1' }), heteroCheck: 'off' } })
+  assert.equal(off.ok, true, '关档下完全同模型应放行：' + JSON.stringify(off.errors))
+  // 缺失档位默认弱档：完全同模型仍被拒
+  const weak = await call(handlers, 'vwf.workflows.save', { dsl: heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm1' }) })
+  assert.equal(weak.ok, false, '缺失档位按弱档判定，完全同模型仍被拒')
 })
 
 test('Q7 闭环：回合上限系统约束（10 拒并带 control:maxRounds 坐标；5 通过）', async () => {

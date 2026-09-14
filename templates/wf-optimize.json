@@ -260,5 +260,6 @@
         "model": "deepseek-flash"
       }
     }
-  }
+  },
+  "heteroCheck": "weak"
 }

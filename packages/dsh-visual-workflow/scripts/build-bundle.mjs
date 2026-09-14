@@ -225,7 +225,8 @@ const clientBytes = Buffer.byteLength(dynClient)
 // 宿主半不可省；client 瘦身仍应优先于继续推高）。
 // LOC-014 模型覆盖层（host 合成单点 + RPC 三端点 + 模板库最小覆盖对话框）并入后上调至 188KiB，
 // 与 tests/static-bundle.test.mjs 预算保持一致。UAT 反馈轮（未保存退出/清除确认弹窗 + 沿用默认带值）后上调至 189KiB。
-const PAYLOAD_LIMIT = 189 * 1024
+// LOC-021 异源档位三态（校验内核档位判定 + 运行时日志档位/角色口径 + 编辑器三档选择器与中英文案）并入后上调至 190KiB。
+const PAYLOAD_LIMIT = 190 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)

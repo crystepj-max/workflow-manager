@@ -17,7 +17,7 @@ import roleLibrary from './role-library.cjs';
 const { buildSnapshot, readRoleFileSafe, collectReferencedRoleFiles } = roleLibrary;
 const { projectToVwf } = projectionCore;
 
-const { validateBlueprint, compileInputSizeViolation, COND_RE, HUMAN_DECISION_ID, HD_CONTROL_RESULTS, HD_PACKAGE_REQUIRED, HD_UNKNOWN, HD_EVENT_RECORD_KIND, HD_EVENT_TRIGGER } = validatorCore;
+const { validateBlueprint, compileInputSizeViolation, COND_RE, HUMAN_DECISION_ID, HD_CONTROL_RESULTS, HD_PACKAGE_REQUIRED, HD_UNKNOWN, HD_EVENT_RECORD_KIND, HD_EVENT_TRIGGER, effectiveHeteroMode } = validatorCore;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TPL_DIR = path.join(__dirname, '..', 'templates');
@@ -109,7 +109,12 @@ export function compileBlueprint(bp, opts = {}) {
   const maxRounds = (bp.control && bp.control.maxRounds) || 9;
   const models = (bp.bindings && bp.bindings.models) || {};
   const folds = foldableNodes(bp);
-  const hetero = bp.heteroCheck && models.dev && models.review;
+  // LOC-021 异源档位三态：运行时日志与校验内核共用同一归一口径（关档不注入日志）；
+  // 识别口径统一为「按节点 id 或 profile」（诊断模板开发节点 id=fix、profile=dev，不再被漏判）。
+  const heteroMode = effectiveHeteroMode(bp.heteroCheck);
+  const heteroDev = bp.nodes.find((n) => n && (n.id === 'dev' || n.profile === 'dev'));
+  const heteroReview = bp.nodes.find((n) => n && (n.id === 'review' || n.profile === 'review'));
+  const hetero = heteroMode !== 'off' && heteroDev && heteroReview && models[heteroDev.id] && models[heteroReview.id];
   const autoReschedule = bp.onMaxRounds === 'auto-reschedule';
   // 内置角色清单：opts 注入优先（测试用），否则读 manifest 并缓存
   const builtinRoleIds = opts.builtinRoleIds || builtinRoleIdsCached();
@@ -186,8 +191,17 @@ export function compileBlueprint(bp, opts = {}) {
   if (hetero) {
     lines.push(
       'function modelTag(id) { const m = MODELS[id]; return m ? (m.provider || \'default\') + \'/\' + (m.model || \'default\') : \'default\' }',
-      'if (modelTag(\'dev\') === modelTag(\'review\')) log(\'⚠️ 异源警告（蓝图 heteroCheck）：dev 与 review 同模型 \' + modelTag(\'dev\') + \'，请修改 bindings.models\')',
-      'else log(\'异源检查通过：dev=\' + modelTag(\'dev\') + \' / review=\' + modelTag(\'review\'))',
+      '(function () {',
+      '  const MODE = ' + JSON.stringify(heteroMode),
+      '  const DEV = ' + JSON.stringify(heteroDev.id),
+      '  const REVIEW = ' + JSON.stringify(heteroReview.id),
+      '  const roleOf = (n) => (n && n.profile) || \'\'',
+      '  const dTag = modelTag(DEV), rTag = modelTag(REVIEW)',
+      '  const pair = DEV + \'（\' + roleOf(BYID[DEV]) + \'） / \' + REVIEW + \'（\' + roleOf(BYID[REVIEW]) + \'）\'',
+      '  if (dTag === rTag) log(\'⚠️ 异源警告（异源档位 \' + MODE + \'）：\' + pair + \' 同模型 \' + dTag + \'，请修改 bindings.models\')',
+      '  else if (MODELS[DEV].provider === MODELS[REVIEW].provider) log(\'⚠️ 弱异源（异源档位 \' + MODE + \'）：\' + pair + \' 同 provider \' + MODELS[DEV].provider + \' 不同模型（\' + dTag + \' / \' + rTag + \'）\' + (MODE === \'strong\' ? \'——强档要求不同 provider，保存校验应已拦截\' : \'，建议配置不同 provider 满足真异源\'))',
+      '  else log(\'异源检查通过（异源档位 \' + MODE + \'）：\' + pair + \'，\' + DEV + \'=\' + dTag + \' / \' + REVIEW + \'=\' + rTag)',
+      '})()',
     );
   }
   lines.push(
