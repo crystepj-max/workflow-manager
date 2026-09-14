@@ -340,9 +340,10 @@ test('stop --all：停掉开发实例、清理 pid 登记与激活登记（等�
   const canonical = realpathSync(devHome)
   const fakePidPath = join(root, 'fake.pid')
   const holder = spawn('/bin/sh', ['-c', `echo $$ > '${fakePidPath}'; exec /bin/sleep 30`], { detached: true })
+  let fakePid = null
   try {
     await waitForFile(fakePidPath)
-    const fakePid = Number(readFileSync(fakePidPath, 'utf8').trim())
+    fakePid = Number(readFileSync(fakePidPath, 'utf8').trim())
     const lsofPath = fakeLsof(root, {
       listenLines: `p${fakePid}\\ncnode\\nf19\\nn127.0.0.1:${TEST_PORT}\\n`,
       homeFiles: `p${fakePid}\\ncnode\\nf20\\nn${canonical}/profiles/web/cordis.yml\\nf21\\nn${canonical}/profiles/web/package.json\\n`,
