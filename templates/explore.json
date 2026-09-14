@@ -20,25 +20,56 @@
         "schema": {
           "type": "object",
           "properties": {
-            "route": { "type": "string", "enum": ["PLAN_READY"] },
-            "round_type": { "type": "string", "enum": ["BROAD", "TARGETED"] },
-            "research_question": { "type": "string" },
+            "route": {
+              "type": "string",
+              "enum": [
+                "PLAN_READY"
+              ]
+            },
+            "round_type": {
+              "type": "string",
+              "enum": [
+                "BROAD",
+                "TARGETED"
+              ]
+            },
+            "research_question": {
+              "type": "string"
+            },
             "expert_briefs": {
               "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
-                  "expert_id": { "type": "string" },
-                  "focus": { "type": "string" },
-                  "brief": { "type": "string" }
+                  "expert_id": {
+                    "type": "string"
+                  },
+                  "focus": {
+                    "type": "string"
+                  },
+                  "brief": {
+                    "type": "string"
+                  }
                 },
-                "required": ["expert_id", "focus", "brief"],
+                "required": [
+                  "expert_id",
+                  "focus",
+                  "brief"
+                ],
                 "additionalProperties": false
               }
             },
-            "plan_summary": { "type": "string" }
+            "plan_summary": {
+              "type": "string"
+            }
           },
-          "required": ["route", "round_type", "research_question", "expert_briefs", "plan_summary"],
+          "required": [
+            "route",
+            "round_type",
+            "research_question",
+            "expert_briefs",
+            "plan_summary"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -57,15 +88,54 @@
         "schema": {
           "type": "object",
           "properties": {
-            "expert_id": { "type": "string" },
-            "findings": { "type": "string" },
-            "evidence": { "type": "array", "items": { "type": "string" } },
-            "counter_evidence": { "type": "array", "items": { "type": "string" } },
-            "assumptions": { "type": "array", "items": { "type": "string" } },
-            "uncertainties": { "type": "array", "items": { "type": "string" } },
-            "confidence": { "type": "string", "enum": ["high", "medium", "low"] }
+            "expert_id": {
+              "type": "string"
+            },
+            "findings": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "counter_evidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assumptions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "uncertainties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "confidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            }
           },
-          "required": ["expert_id", "findings", "evidence", "counter_evidence", "assumptions", "uncertainties", "confidence"],
+          "required": [
+            "expert_id",
+            "findings",
+            "evidence",
+            "counter_evidence",
+            "assumptions",
+            "uncertainties",
+            "confidence"
+          ],
           "additionalProperties": false
         }
       }
@@ -80,14 +150,45 @@
         "schema": {
           "type": "object",
           "properties": {
-            "route": { "type": "string", "enum": ["SYNTHESIS_READY"] },
-            "consensus": { "type": "array", "items": { "type": "string" } },
-            "disagreements": { "type": "array", "items": { "type": "string" } },
-            "evidence_map": { "type": "string" },
-            "open_gaps": { "type": "array", "items": { "type": "string" } },
-            "synthesis_summary": { "type": "string" }
+            "route": {
+              "type": "string",
+              "enum": [
+                "SYNTHESIS_READY"
+              ]
+            },
+            "consensus": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "disagreements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "evidence_map": {
+              "type": "string"
+            },
+            "open_gaps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "synthesis_summary": {
+              "type": "string"
+            }
           },
-          "required": ["route", "consensus", "disagreements", "evidence_map", "open_gaps", "synthesis_summary"],
+          "required": [
+            "route",
+            "consensus",
+            "disagreements",
+            "evidence_map",
+            "open_gaps",
+            "synthesis_summary"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -106,16 +207,57 @@
         "schema": {
           "type": "object",
           "properties": {
-            "verdict": { "type": "string", "enum": ["PASS", "NEEDS_RESEARCH", "INSUFFICIENT"] },
-            "completion_type": { "type": "string", "enum": ["EVALUATION_PASSED", "INSUFFICIENT"] },
-            "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
-            "why": { "type": "string" },
-            "summary_for_human": { "type": "string" },
-            "current_state": { "type": "string" },
-            "research_targets": { "type": "array", "items": { "type": "string" } },
-            "open_gaps": { "type": "array", "items": { "type": "string" } }
+            "verdict": {
+              "type": "string",
+              "enum": [
+                "PASS",
+                "NEEDS_RESEARCH",
+                "INSUFFICIENT"
+              ]
+            },
+            "completion_type": {
+              "type": "string",
+              "enum": [
+                "EVALUATION_PASSED",
+                "INSUFFICIENT"
+              ]
+            },
+            "confidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            },
+            "why": {
+              "type": "string"
+            },
+            "summary_for_human": {
+              "type": "string"
+            },
+            "current_state": {
+              "type": "string"
+            },
+            "research_targets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "open_gaps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           },
-          "required": ["verdict", "why", "summary_for_human", "current_state"],
+          "required": [
+            "verdict",
+            "why",
+            "summary_for_human",
+            "current_state"
+          ],
           "additionalProperties": false
         },
         "files": {
@@ -125,26 +267,77 @@
     }
   ],
   "edges": [
-    { "from": "orchestrate", "to": "research", "outcome": "PLAN_READY" },
-    { "from": "orchestrate", "to": "orchestrate", "on": "technical" },
-
-    { "from": "research", "to": "synthesize", "on": "success" },
-    { "from": "research", "to": "$end", "on": "failure" },
-
-    { "from": "synthesize", "to": "evaluate", "outcome": "SYNTHESIS_READY" },
-    { "from": "synthesize", "to": "synthesize", "on": "technical" },
-
-    { "from": "evaluate", "to": "$end", "outcome": "PASS" },
-    { "from": "evaluate", "to": "$end", "outcome": "INSUFFICIENT" },
-    { "from": "evaluate", "to": "orchestrate", "outcome": "NEEDS_RESEARCH", "countRound": true },
-    { "from": "evaluate", "to": "evaluate", "on": "technical" }
+    {
+      "from": "orchestrate",
+      "to": "research",
+      "outcome": "PLAN_READY"
+    },
+    {
+      "from": "orchestrate",
+      "to": "orchestrate",
+      "on": "technical"
+    },
+    {
+      "from": "research",
+      "to": "synthesize",
+      "on": "success"
+    },
+    {
+      "from": "research",
+      "to": "$end",
+      "on": "failure"
+    },
+    {
+      "from": "synthesize",
+      "to": "evaluate",
+      "outcome": "SYNTHESIS_READY"
+    },
+    {
+      "from": "synthesize",
+      "to": "synthesize",
+      "on": "technical"
+    },
+    {
+      "from": "evaluate",
+      "to": "$end",
+      "outcome": "PASS"
+    },
+    {
+      "from": "evaluate",
+      "to": "$end",
+      "outcome": "INSUFFICIENT"
+    },
+    {
+      "from": "evaluate",
+      "to": "orchestrate",
+      "outcome": "NEEDS_RESEARCH",
+      "countRound": true
+    },
+    {
+      "from": "evaluate",
+      "to": "evaluate",
+      "on": "technical"
+    }
   ],
   "bindings": {
     "models": {
-      "orchestrate": { "provider": "deepseek-official", "model": "deepseek-flash" },
-      "research": { "provider": "deepseek-official", "model": "deepseek-flash" },
-      "synthesize": { "provider": "deepseek-official", "model": "deepseek-flash" },
-      "evaluate": { "provider": "deepseek-official", "model": "deepseek-v4-flash" }
+      "orchestrate": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "research": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "synthesize": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "evaluate": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash"
+      }
     }
-  }
+  },
+  "heteroCheck": "weak"
 }

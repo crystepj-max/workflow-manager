@@ -62,7 +62,7 @@
   （T-IMP-12 后 vwf 运行层同样折叠；编辑器图仍保留 route 节点展示）。折叠转发源 = when 路径的
   schema 声明节点（候选三修复：原取入边来源导致跳测试环节）。
 - **可信度闸门（verifyBranch）**：验证节点开工分支自检 + `verified_branch`/`verified_head` 硬校验。
-- **异源（heteroCheck）**：dev↔review 模型绑定必须不同（save/validate 层强制；运行时日志）。
+- **异源（heteroCheck）**：dev↔review 模型异源按蓝图档位（关/弱/强，默认弱）生效——save/validate 层按档位校验，运行时日志按节点 id 或角色识别并输出当前档位（LOC-021）。
 - **人工门禁（manualCheck）**：节点产出后挂起（`AWAITING_HUMAN_<节点id>` + resume 载荷），人工裁决后续跑。
 - **扇出（fanout）**：受限并行子任务节点。`items` 仅从 `$.args` 或 success 路径上的前序
   `$.results.<节点id>` 读取数组；`goal` 用 `{{item}}` 注入当前项，`output.schema` 是 per-item

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { projectToVwf, projectToBlueprint } from '../projection-core.cjs'
+import { projectToVwf, projectToBlueprint, effectiveHeteroMode, isKnownHeteroValue, heteroModeForEdit } from '../projection-core.cjs'
 
 function blueprint() {
   return {
@@ -88,4 +88,45 @@ test('投影内核：缺省控制字段使用稳定默认值', () => {
   assert.equal(dsl.control.maxRounds, 9)
   assert.equal(dsl.nodes[0].label, 'only')
   assert.equal(Object.hasOwn(dsl.nodes[0], 'goal'), false)
+})
+
+// —— LOC-021 异源档位三态：投影归一化与双向透传 ——
+test('LOC-021 档位归一化：缺失/true→weak，false→off，strong→strong，非法→weak', () => {
+  assert.equal(effectiveHeteroMode(undefined), 'weak')
+  assert.equal(effectiveHeteroMode(null), 'weak')
+  assert.equal(effectiveHeteroMode(true), 'weak')
+  assert.equal(effectiveHeteroMode('weak'), 'weak')
+  assert.equal(effectiveHeteroMode(false), 'off')
+  assert.equal(effectiveHeteroMode('off'), 'off')
+  assert.equal(effectiveHeteroMode('strong'), 'strong')
+  assert.equal(effectiveHeteroMode('turbo'), 'weak')
+  assert.equal(isKnownHeteroValue('weak'), true)
+  assert.equal(isKnownHeteroValue('strong'), true)
+  assert.equal(isKnownHeteroValue('off'), true)
+  assert.equal(isKnownHeteroValue(true), true)
+  assert.equal(isKnownHeteroValue(false), true)
+  assert.equal(isKnownHeteroValue(undefined), true)
+  assert.equal(isKnownHeteroValue('turbo'), false)
+  assert.equal(heteroModeForEdit(true), 'weak')
+  assert.equal(heteroModeForEdit(false), 'off')
+  assert.equal(heteroModeForEdit('strong'), 'strong')
+  assert.equal(heteroModeForEdit(undefined), undefined)
+})
+
+test('LOC-021 投影往返：三态档位在蓝图↔DSL 间不丢（weak/strong/off）', () => {
+  for (const mode of ['weak', 'strong', 'off']) {
+    const bp = { ...blueprint(), heteroCheck: mode }
+    const dsl = projectToVwf(bp)
+    assert.equal(dsl.heteroCheck, mode, '正向投影透传档位 ' + mode)
+    const back = projectToBlueprint(dsl)
+    assert.equal(back.heteroCheck, mode, '逆向投影透传档位 ' + mode)
+  }
+  // 旧布尔归一：true → weak、false → off（正向投影归一，逆向保持归一后字符串）
+  assert.equal(projectToVwf({ ...blueprint(), heteroCheck: true }).heteroCheck, 'weak')
+  assert.equal(projectToBlueprint(projectToVwf({ ...blueprint(), heteroCheck: true })).heteroCheck, 'weak')
+  assert.equal(projectToVwf({ ...blueprint(), heteroCheck: false }).heteroCheck, 'off')
+  // 缺失不制造字段：未声明档位的蓝图投影后不出现 heteroCheck 键
+  const noMode = blueprint()
+  delete noMode.heteroCheck
+  assert.equal(Object.hasOwn(projectToVwf(noMode), 'heteroCheck'), false)
 })

@@ -2333,13 +2333,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 })
               ),
               h(Field, { label: t('heteroCheck'), help: t('heteroCheckHelp'), errors: fieldErrors['heteroCheck'] || [] },
-                h('label', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 } },
-                  h('input', {
-                    type: 'checkbox',
-                    checked: !!wf.heteroCheck,
-                    onChange: (ev) => updateMeta({ heteroCheck: ev.target.checked }),
-                  }),
-                  h('span', null, wf.heteroCheck ? 'ON' : 'OFF')
+                h('select', {
+                  className: 'vwf-input' + ((fieldErrors['heteroCheck'] || []).length ? ' err' : ''),
+                  // 异源档位三态（LOC-021）：默认档 = 弱；关档下开发与审核同模型属用户显式选择，系统不提示
+                  value: (wf.heteroCheck === true || wf.heteroCheck === undefined || wf.heteroCheck === null || wf.heteroCheck === 'weak')
+                    ? 'weak'
+                    : (wf.heteroCheck === false ? 'off' : wf.heteroCheck),
+                  onChange: (ev) => updateMeta({ heteroCheck: ev.target.value }),
+                },
+                  h('option', { value: 'weak' }, t('heteroModeWeak')),
+                  h('option', { value: 'strong' }, t('heteroModeStrong')),
+                  h('option', { value: 'off' }, t('heteroModeOff'))
                 )
               ),
               h(Field, { label: t('onMaxRounds'), help: t('onMaxRoundsHelp'), errors: fieldErrors['onMaxRounds'] || [] },
@@ -3164,7 +3168,11 @@ function ingestEditorJson(raw) {
     edges: raw.edges.map((e) => e),
   }
   if (raw.onMaxRounds !== undefined) next.onMaxRounds = raw.onMaxRounds
-  if (raw.heteroCheck) next.heteroCheck = true
+  // 异源档位三态（LOC-021）：旧布尔 true → weak、false → off；字符串原样透传；
+  // 与 scripts/projection-core.cjs heteroModeForEdit 保持同一口径——勿在此分叉。
+  if (raw.heteroCheck !== undefined && raw.heteroCheck !== null) {
+    next.heteroCheck = raw.heteroCheck === true ? 'weak' : (raw.heteroCheck === false ? 'off' : raw.heteroCheck)
+  }
   if (raw.bundleRoles) next.bundleRoles = true
   if (raw.humanDecision !== undefined) next.humanDecision = raw.humanDecision
   return next

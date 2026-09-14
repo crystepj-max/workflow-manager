@@ -70,7 +70,7 @@
 
 ## v2 任务（T-06/T-07 决策已锁，实现另行排期）
 
-- T-IMP-13 异源 enforcement 收口（T-06 全部用例进 CI）
+- T-IMP-13 异源 enforcement 收口（T-06 全部用例进 CI）——**已由 LOC-021 落地为「异源档位三态」**：T-06 的「全局强制」口径修订为按蓝图 `heteroCheck` 档位（关/弱/强，默认弱）生效，见 `docs/design/blueprint-schema.md` §3.1 规则 7
 - T-IMP-14 对话式创作 skill（T-07：workflow-template-authoring + 门禁 3 轮 + fork + 重建覆盖断言）
 - T-IMP-15 CI 细化：多模板回归（FR-9）
 

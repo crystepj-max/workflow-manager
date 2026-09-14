@@ -19,7 +19,7 @@
 | 3 | 轮次与超限 | 9 轮上限；test FAILED / review REQUEST_CHANGES 打回；超限 → `FAILED_MAX_ROUNDS` + 归因（reschedule：归因/拆分/人工介入） | ☐ |
 | 4 | 人工门禁 | AI 核验产双报告（acceptance-summary/accept-report）；人工裁决不代签；通过 → closeout；不通过 → dev+feedback+startRound+1 | ☐ |
 | 5 | 可信度闸门 | test/review/accept 开工分支自检（worktree=dev2/<taskId>）；`verified_branch`/`verified_head` 硬校验（失败 TECHNICAL_FAILURE） | ☐ |
-| 6 | 异源 | dev↔review 模型比对（v2 起 save 层强制，运行时日志）；弱异源 warning | ☐ |
+| 6 | 异源 | dev↔review 模型比对按蓝图 `heteroCheck` 档位生效（**v1.2 起，LOC-021**：弱=默认档，同 provider 不同 model 通过+弱异源警告、完全相同拒；强=provider 必须不同；关=不校验；运行时日志按节点 id 或角色识别并输出当前档位） | ☐ |
 | 7 | 文件契约 | STATE.md 四行（stage/round/status/updated）；report 文件命名与蓝图 output.files 一致；runDir 只写约定 | ☐ |
 | 8 | 返回状态机 | 新契约状态全集可驱动：`AWAITING_HUMAN_<id>` / `FAILED_AT_<id>`（含 dispatch 三要素缺失、dev 受阻）/ `FAILED_MAX_ROUNDS` / `TECHNICAL_FAILURE` / `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` / `ERROR` / `DONE`。**run 级无 `BLOCKED`**——受阻两层语义：节点结果枚举（test `BLOCKED` / dev `blocked`）仍有效；流程层受阻 = dev 受阻 → `FAILED_AT_dev`（failure 边兜底，走通性规则）、test 受阻 → 沿 failure 边打回开发 | ☐ |
 

@@ -428,7 +428,13 @@ return {
     function ingestToDsl(raw, core) {
       if (!raw || typeof raw !== 'object') return raw
       const hasBindings = !!(raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object' && Object.keys(raw.bindings.models).length)
-      if (typeof raw.displayName !== 'string' && !hasBindings) return raw
+      if (typeof raw.displayName !== 'string' && !hasBindings) {
+        // DSL 形态直传：异源档位旧布尔经内核口径归一为三态字符串（LOC-021），
+        // 避免 sanitized/落盘残留 true/false 与「蓝图单一事实源=三态字符串」漂移。
+        if (raw.heteroCheck === true) return { ...raw, heteroCheck: 'weak' }
+        if (raw.heteroCheck === false) return { ...raw, heteroCheck: 'off' }
+        return raw
+      }
       if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return raw
       return core.projectToVwf({ ...raw, displayName: typeof raw.displayName === 'string' ? raw.displayName : (raw.name || raw.id || '') })
     }

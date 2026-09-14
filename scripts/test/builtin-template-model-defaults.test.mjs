@@ -89,3 +89,10 @@ test('LOC-019 无 dev/review 节点的内置模板不参与异源校验且仍通
     assert.equal(r.warnings.length, 0, id + ' 不应产生弱异源警告');
   }
 });
+
+test('LOC-021 四套内置模板显式声明弱档（heteroCheck = "weak"）', () => {
+  for (const id of Object.keys(EXPECTED)) {
+    const bp = loadTemplate(id);
+    assert.equal(bp.heteroCheck, 'weak', id + ' 必须显式声明弱档（LOC-021）');
+  }
+});
