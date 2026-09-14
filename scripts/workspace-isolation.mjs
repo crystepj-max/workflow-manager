@@ -20,9 +20,9 @@ export const WORKSPACE_MODE = {
 
 export const TEMPLATE_ID = {
   CONSTRUCTION: 'construction',
-  OPTIMIZE: 'optimize',
-  DIAGNOSE: 'diagnose',
-  EXPLORE: 'explore',
+  OPTIMIZE: 'wf-optimize',
+  DIAGNOSE: 'wf-diagnose',
+  EXPLORE: 'wf-explore',
 }
 
 export const LIFECYCLE = {

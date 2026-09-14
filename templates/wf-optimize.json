@@ -1,5 +1,5 @@
 {
-  "id": "optimize",
+  "id": "wf-optimize",
   "displayName": "优化 · 快速迭代",
   "description": "优化快速迭代正式模板：目标确认（生成并冻结 evaluation contract）→ 执行（最小必要修改，保护已满足部分）→ 评估（只输出 PASS / OPTIMIZE / CONFIRM）→ 收口；OPTIMIZE 回执行消耗自动回退额度（默认 3）；完成类型区分 EVALUATION_PASSED / USER_ACCEPTED。",
   "entry": "confirm",

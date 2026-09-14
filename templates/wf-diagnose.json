@@ -1,5 +1,5 @@
 {
-  "id": "diagnose",
+  "id": "wf-diagnose",
   "displayName": "诊断 · 缺陷修复",
   "description": "诊断缺陷修复正式模板：缺陷诊断 → 修复 → 审核 → 回归验证 → 收口；先诊断后修复，原始 feedback signal 贯穿全程；修复问题回修复、证据推翻根因回诊断（均消耗自动回退额度，默认 3）；证据不足且不可复现时受阻，不猜根因；默认无独立人工验收节点。",
   "entry": "diagnose",

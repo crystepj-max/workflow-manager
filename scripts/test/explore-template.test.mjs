@@ -15,7 +15,7 @@ import validatorCore from '../validate-core.cjs'
 
 const { validateBlueprint } = validatorCore
 const here = path.dirname(fileURLToPath(import.meta.url))
-const exploreBp = JSON.parse(readFileSync(path.join(here, '../../templates/explore.json'), 'utf8'))
+const exploreBp = JSON.parse(readFileSync(path.join(here, '../../templates/wf-explore.json'), 'utf8'))
 
 const runEngine = (bp, table, args = {}) => {
   const { script } = compileBlueprint(bp)
@@ -67,7 +67,7 @@ test('LOC-013 蓝图通过内核校验，轮次预算按锁定口径声明', () 
   const nr = exploreBp.edges.find((e) => e.outcome === 'NEEDS_RESEARCH')
   assert.equal(nr && nr.countRound, true)
   assert.equal(nr.to, 'orchestrate')
-  assert.equal(exploreBp.workspace && exploreBp.workspace.template_id, 'explore')
+  assert.equal(exploreBp.workspace && exploreBp.workspace.template_id, 'wf-explore')
 })
 
 test('LOC-013 正常路径：统筹→专家 fanout→综合→PASS，完成类型 EVALUATION_PASSED', async () => {

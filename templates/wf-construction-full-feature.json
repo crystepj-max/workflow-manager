@@ -1,5 +1,5 @@
 {
-  "id": "construction-full-feature",
+  "id": "wf-construction-full-feature",
   "displayName": "完整功能开发",
   "description": "M2 单任务交付：定义外置（从已定义开工）；自动返工上限 3；人工验收严格三态（通过 / 退回 / 有条件通过）。主链不含需求分析与方案设计门。",
   "entry": "preflight",

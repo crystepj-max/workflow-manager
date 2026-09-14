@@ -22,29 +22,29 @@ const WRAPPER = REPO + '/scripts/workspace-isolation-host.mjs'
 
 const DECL = {
   construction: { mode: 'ISOLATED_WRITE', shared_source: false, per_worker_scratch: false },
-  optimize: {
+  'wf-optimize': {
     resource_kinds: { git: 'ISOLATED_WRITE', files: 'ISOLATED_WRITE', document: 'SANDBOX', config: 'SANDBOX', other: 'SANDBOX' },
     shared_source: false, per_worker_scratch: false,
   },
-  diagnose: { mode: 'ISOLATED_WRITE', freeze_from: 'diagnose', shared_source: false, per_worker_scratch: false },
-  explore: { mode: 'ISOLATED_READ', shared_source: true, per_worker_scratch: true },
+  'wf-diagnose': { mode: 'ISOLATED_WRITE', freeze_from: 'diagnose', shared_source: false, per_worker_scratch: false },
+  'wf-explore': { mode: 'ISOLATED_READ', shared_source: true, per_worker_scratch: true },
 }
 
 // ── Core：TEMPLATE_REGISTRY 是策略声明的唯一权威 ─────────────────────────
 test('LOC-009：TEMPLATE_REGISTRY 键即四类正式模板身份，resolveWorkspacePolicy 只按注册表解析', () => {
-  assert.deepEqual(Object.keys(core.TEMPLATE_REGISTRY).sort(), ['construction', 'diagnose', 'explore', 'optimize'])
+  assert.deepEqual(Object.keys(core.TEMPLATE_REGISTRY).sort(), ['construction', 'wf-diagnose', 'wf-explore', 'wf-optimize'])
   assert.equal(core.resolveWorkspacePolicy('construction').mode, 'ISOLATED_WRITE')
-  assert.equal(core.resolveWorkspacePolicy('diagnose').freeze_from, 'diagnose')
-  assert.equal(core.resolveWorkspacePolicy('explore').mode, 'ISOLATED_READ')
-  assert.equal(core.resolveWorkspacePolicy('optimize', { resource_kind: 'git' }).mode, 'ISOLATED_WRITE')
-  assert.equal(core.resolveWorkspacePolicy('optimize', { resource_kind: 'document' }).mode, 'SANDBOX')
-  assert.throws(() => core.resolveWorkspacePolicy('optimize', {}), /resource_kind/)
+  assert.equal(core.resolveWorkspacePolicy('wf-diagnose').freeze_from, 'diagnose')
+  assert.equal(core.resolveWorkspacePolicy('wf-explore').mode, 'ISOLATED_READ')
+  assert.equal(core.resolveWorkspacePolicy('wf-optimize', { resource_kind: 'git' }).mode, 'ISOLATED_WRITE')
+  assert.equal(core.resolveWorkspacePolicy('wf-optimize', { resource_kind: 'document' }).mode, 'SANDBOX')
+  assert.throws(() => core.resolveWorkspacePolicy('wf-optimize', {}), /resource_kind/)
   assert.throws(() => core.resolveWorkspacePolicy('not-a-template'), /template_id/)
 })
 
 // ── 投影双向同步：蓝图 ↔ vwf DSL 的 workspace 字段不丢失 ─────────────────
 test('LOC-009：workspace 声明经 validate-core / projection-core 双向投影保真', () => {
-  const ws = { template_id: 'optimize', resource_kind: 'files' }
+  const ws = { template_id: 'wf-optimize', resource_kind: 'files' }
   const bp = { id: 'x', displayName: 'X', entry: 'a', nodes: [{ id: 'a', profile: 'p', goal: 'g' }], edges: [{ from: 'a', to: '$end', on: 'success' }], workspace: ws }
   for (const coreMod of [validateCore, projectionCore]) {
     const dsl = coreMod.projectToVwf(bp)
@@ -56,8 +56,8 @@ test('LOC-009：workspace 声明经 validate-core / projection-core 双向投影
 
 test('LOC-009：workspace 声明校验 —— 非法 template_id / resource_kind 拒绝且带 fieldKey', () => {
   const base = { id: 'x', displayName: 'X', entry: 'a', nodes: [{ id: 'a', profile: 'p', goal: 'g' }], edges: [{ from: 'a', to: '$end', on: 'success' }] }
-  assert.ok(validateCore.validateBlueprint({ ...base, workspace: { template_id: 'optimize' } }).ok)
-  const badKind = validateCore.validateBlueprint({ ...base, workspace: { template_id: 'optimize', resource_kind: 'video' } })
+  assert.ok(validateCore.validateBlueprint({ ...base, workspace: { template_id: 'wf-optimize' } }).ok)
+  const badKind = validateCore.validateBlueprint({ ...base, workspace: { template_id: 'wf-optimize', resource_kind: 'video' } })
   assert.ok(!badKind.ok)
   assert.ok(badKind.errors.some((e) => e.at === '$.workspace.resource_kind' && e.fieldKey === 'workspace:resource_kind'))
   const badId = validateCore.validateBlueprint({ ...base, workspace: { template_id: 'nope' } })
@@ -111,10 +111,10 @@ test('LOC-009：vwf.workspace.allocate 按注册表权威解析模板，resource
   assert.ok(allocate, 'vwf.workspace.allocate RPC 已注册')
 
   // ① templateId 精确等于注册表键 → 原样权威解析
-  const r1 = await allocate({ taskId: 't1', templateId: 'optimize', resource_kind: 'files' })
+  const r1 = await allocate({ taskId: 't1', templateId: 'wf-optimize', resource_kind: 'files' })
   assert.ok(r1.ok)
   // ② 非规范 id + 模板声明 → 取声明 template_id
-  const r2 = await allocate({ taskId: 't2', templateId: 'my-optimize-flow', declared_workspace: { template_id: 'diagnose' } })
+  const r2 = await allocate({ taskId: 't2', templateId: 'my-optimize-flow', declared_workspace: { template_id: 'wf-diagnose' } })
   assert.ok(r2.ok)
   // ③ 非规范 id、无声明 → 保守默认 construction（不做名字猜测）
   const r3 = await allocate({ taskId: 't3', templateId: 'totally-custom' })
@@ -122,9 +122,9 @@ test('LOC-009：vwf.workspace.allocate 按注册表权威解析模板，resource
 
   const allocs = captured.filter((c) => c.cmd === 'allocate')
   assert.equal(allocs.length, 3)
-  assert.equal(allocs[0].payload.template_id, 'optimize')
+  assert.equal(allocs[0].payload.template_id, 'wf-optimize')
   assert.equal(allocs[0].payload.resource_kind, 'files')
-  assert.equal(allocs[1].payload.template_id, 'diagnose')
+  assert.equal(allocs[1].payload.template_id, 'wf-diagnose')
   assert.equal(allocs[2].payload.template_id, 'construction')
   assert.equal(allocs[2].payload.resource_kind, undefined)
 })
@@ -136,16 +136,16 @@ test('LOC-009：vwf.script allocate 路径透传模板声明与运行参数 reso
   assert.ok(vwfScript, 'vwf.script RPC 已注册')
 
   // 模板声明携带 optimize + document → 载荷取声明
-  const r1 = await vwfScript({ taskId: 't-decl', allocate: true, dsl: MINI_DSL({ workspace: { template_id: 'optimize', resource_kind: 'document' } }) })
+  const r1 = await vwfScript({ taskId: 't-decl', allocate: true, dsl: MINI_DSL({ workspace: { template_id: 'wf-optimize', resource_kind: 'document' } }) })
   assert.ok(r1.ok, 'vwf.script（声明路径）应成功：' + JSON.stringify(r1))
 
   // 显式运行参数 resource_kind 优先于声明
-  const r2 = await vwfScript({ taskId: 't-param', allocate: true, resource_kind: 'config', dsl: MINI_DSL({ workspace: { template_id: 'optimize', resource_kind: 'document' } }) })
+  const r2 = await vwfScript({ taskId: 't-param', allocate: true, resource_kind: 'config', dsl: MINI_DSL({ workspace: { template_id: 'wf-optimize', resource_kind: 'document' } }) })
   assert.ok(r2.ok, 'vwf.script（参数路径）应成功：' + JSON.stringify(r2))
 
   const allocs = captured.filter((c) => c.cmd === 'allocate')
   assert.equal(allocs.length, 2)
-  assert.equal(allocs[0].payload.template_id, 'optimize')
+  assert.equal(allocs[0].payload.template_id, 'wf-optimize')
   assert.equal(allocs[0].payload.resource_kind, 'document')
   assert.equal(allocs[1].payload.resource_kind, 'config')
 
@@ -157,10 +157,10 @@ test('LOC-009：optimize 缺 resource_kind 时载荷不伪造缺省，由 Core �
   const captured = []
   const { handlers } = loadWithWs(wsSubprocessStub({ captured }))
   const allocate = handlers.get('vwf.workspace.allocate')
-  const r = await allocate({ taskId: 't-no-kind', templateId: 'optimize' })
+  const r = await allocate({ taskId: 't-no-kind', templateId: 'wf-optimize' })
   // host 不代填 resource_kind；载荷缺省交给包装脚本 → Core 抛「optimize 必须提供 resource_kind」
   const alloc = captured.find((c) => c.cmd === 'allocate')
-  assert.equal(alloc.payload.template_id, 'optimize')
+  assert.equal(alloc.payload.template_id, 'wf-optimize')
   assert.equal(alloc.payload.resource_kind, undefined)
   assert.ok(r.ok, 'host 层放行缺省，最终由 Core fail closed')
 })
