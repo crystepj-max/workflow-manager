@@ -1,0 +1,493 @@
+TAP version 13
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#79 创建逻辑运行：稳定 logical_run_id + 快照 Rev1 冻结 + 第 1 段
+ok 1 - \#79 创建逻辑运行：稳定 logical_run_id + 快照 Rev1 冻结 + 第 1 段
+  ---
+  duration_ms: 33.592958
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#79 跨人工决策同一逻辑运行：WAITING_HUMAN 结构化 reason → 续跑第 2 段 → COMPLETED
+ok 2 - \#79 跨人工决策同一逻辑运行：WAITING_HUMAN 结构化 reason → 续跑第 2 段 → COMPLETED
+  ---
+  duration_ms: 112.247291
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#79 model_overrides 续跑：追加 Rev2 不覆盖 Rev1，节点保留当时实际修订/模型
+ok 3 - \#79 model_overrides 续跑：追加 Rev2 不覆盖 Rev1，节点保留当时实际修订/模型
+  ---
+  duration_ms: 19.639125
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#79 额度耗尽：WAITING_HUMAN + MAX_ROUNDS_REACHED，业务结果保留不被改写
+ok 4 - \#79 额度耗尽：WAITING_HUMAN + MAX_ROUNDS_REACHED，业务结果保留不被改写
+  ---
+  duration_ms: 8.370042
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#79 终态后：恢复请求被拒；重新发起派生新运行并保留来源
+ok 5 - \#79 终态后：恢复请求被拒；重新发起派生新运行并保留来源
+  ---
+  duration_ms: 15.636542
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# Subtest: \#79 崩溃残留：同 taskId 重启后前任标 FAILED（RUNTIME_RESTARTED）并派生新运行
+ok 6 - \#79 崩溃残留：同 taskId 重启后前任标 FAILED（RUNTIME_RESTARTED）并派生新运行
+  ---
+  duration_ms: 7.119041
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#79 旧历史记录只读兼容：旧 runs 记录无逻辑字段、磁盘内容零改写；升级后续跑新逻辑运行承接
+ok 7 - \#79 旧历史记录只读兼容：旧 runs 记录无逻辑字段、磁盘内容零改写；升级后续跑新逻辑运行承接
+  ---
+  duration_ms: 9.447125
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] 跳过损坏的逻辑运行摘要：broken.json（Expected property name or '}' in JSON at position 1 (line 1 column 2)）
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# Subtest: \#79 重启回载：逻辑运行摘要全量回载，list join 与续跑索引照常工作
+ok 8 - \#79 重启回载：逻辑运行摘要全量回载，list join 与续跑索引照常工作
+  ---
+  duration_ms: 15.917333
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace allocated: ws-9 at /home/workspaces/ws-9
+# Subtest: \#79 平台 workflow 工具直起：事件可得信息落退化摘要
+ok 9 - \#79 平台 workflow 工具直起：事件可得信息落退化摘要
+  ---
+  duration_ms: 0.858625
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#79 \#93 工作区上下文入档：身份/事件/锁复制进摘要；清理审计沿真实时序经 cleanup RPC 入档
+ok 10 - \#79 \#93 工作区上下文入档：身份/事件/锁复制进摘要；清理审计沿真实时序经 cleanup RPC 入档
+  ---
+  duration_ms: 7.987416
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#79 DSH Home 探针：子进程 DSH_* 被剥离时沿祖先进程链读回真实 Home
+ok 11 - \#79 DSH Home 探针：子进程 DSH_* 被剥离时沿祖先进程链读回真实 Home
+  ---
+  duration_ms: 7.266791
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#79 Codex R2 ②：多轮修订累积——Rev3 只改 B 时，A 仍按 Rev2 合并值执行
+ok 12 - \#79 Codex R2 ②：多轮修订累积——Rev3 只改 B 时，A 仍按 Rev2 合并值执行
+  ---
+  duration_ms: 18.367125
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace allocated: ws-issue-wsid at /ws/issue-wsid
+# Subtest: \#79 Codex R2 ①：模板等待期间被修改，续跑仍执行 Rev1 冻结脚本
+ok 13 - \#79 Codex R2 ①：模板等待期间被修改，续跑仍执行 Rev1 冻结脚本
+  ---
+  duration_ms: 10.819209
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace allocated: ws-issue-wsid\#2 at /ws/issue-wsid\#2
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# Subtest: \#79 Codex R2 ③：派生运行按自身 logical_run_id 分配 workspace
+ok 14 - \#79 Codex R2 ③：派生运行按自身 logical_run_id 分配 workspace
+  ---
+  duration_ms: 10.943417
+  type: 'test'
+  ...
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# Subtest: vwf.probe：静态失败不发起探针（llm.stream 零调用）
+ok 15 - vwf.probe：静态失败不发起探针（llm.stream 零调用）
+  ---
+  duration_ms: 11.368875
+  type: 'test'
+  ...
+# Subtest: vwf.probe：全可用 + 同绑定去重（两节点只探一次）
+ok 16 - vwf.probe：全可用 + 同绑定去重（两节点只探一次）
+  ---
+  duration_ms: 21.108584
+  type: 'test'
+  ...
+# Subtest: vwf.probe：单模型失败分类 + 凭证清洗 + 失败结果不缓存（修复后立即重探生效）
+ok 17 - vwf.probe：单模型失败分类 + 凭证清洗 + 失败结果不缓存（修复后立即重探生效）
+  ---
+  duration_ms: 16.981541
+  type: 'test'
+  ...
+# Subtest: vwf.probe：全可用结果 5s 去抖窗口命中缓存，force 强制真实重探
+ok 18 - vwf.probe：全可用结果 5s 去抖窗口命中缓存，force 强制真实重探
+  ---
+  duration_ms: 8.453083
+  type: 'test'
+  ...
+# Subtest: vwf.probe：错误分类映射（quota/rate_limit/timeout/model_unavailable/permission_denied/unreachable/真实适配器码）
+ok 19 - vwf.probe：错误分类映射（quota/rate_limit/timeout/model_unavailable/permission_denied/unreachable/真实适配器码）
+  ---
+  duration_ms: 5.042792
+  type: 'test'
+  ...
+# Subtest: vwf.probe：终态 finish 误报回归（UAT-01 实测）——zai 余额不足 / codex 撞额度必须报 quota 而非 available
+ok 20 - vwf.probe：终态 finish 误报回归（UAT-01 实测）——zai 余额不足 / codex 撞额度必须报 quota 而非 available
+  ---
+  duration_ms: 1.424125
+  type: 'test'
+  ...
+# Subtest: vwf.probe：空响应（finish stop 无输出）与流提前关闭不得判可用
+ok 21 - vwf.probe：空响应（finish stop 无输出）与流提前关闭不得判可用
+  ---
+  duration_ms: 7.439166
+  type: 'test'
+  ...
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: wf_run 新启：探针失败 → BLOCKED + 引擎不启动 + reason 结构化
+ok 22 - wf_run 新启：探针失败 → BLOCKED + 引擎不启动 + reason 结构化
+  ---
+  duration_ms: 7.796
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# Subtest: wf_run BLOCKED 恢复：model_overrides → 新 Revision → 重探通过 → 同一 logical_run_id
+ok 23 - wf_run BLOCKED 恢复：model_overrides → 新 Revision → 重探通过 → 同一 logical_run_id
+  ---
+  duration_ms: 10.50475
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：探针降级（无生成流能力），结果仅作参考，不阻断启动
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: wf_run BLOCKED 恢复缺 model_overrides：提示且不启动
+ok 24 - wf_run BLOCKED 恢复缺 model_overrides：提示且不启动
+  ---
+  duration_ms: 3.092708
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: wf_run：探针降级（llm 无生成流能力）不阻断启动
+ok 25 - wf_run：探针降级（llm 无生成流能力）不阻断启动
+  ---
+  duration_ms: 5.494083
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# Subtest: wf_run 新启全可用：探针通过后正常启动
+ok 26 - wf_run 新启全可用：探针通过后正常启动
+  ---
+  duration_ms: 7.221667
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: wf_run 恢复后再失败：新 Revision 保留 + 再次 BLOCKED + 引擎零启动
+ok 27 - wf_run 恢复后再失败：新 Revision 保留 + 再次 BLOCKED + 引擎零启动
+  ---
+  duration_ms: 5.041083
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] vwf.probe(preflight)：探针请求未被宿主接受（疑似探针缺陷），结果仅作参考，不阻断启动
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: wf_run 无 llm 服务：跳过探针不阻断启动
+ok 28 - wf_run 无 llm 服务：跳过探针不阻断启动
+  ---
+  duration_ms: 6.469167
+  type: 'test'
+  ...
+# Subtest: vwf.probe：请求形态护栏——fake 按宿主形态拒绝裸字符串 content（回归护栏自证有效）
+ok 29 - vwf.probe：请求形态护栏——fake 按宿主形态拒绝裸字符串 content（回归护栏自证有效）
+  ---
+  duration_ms: 1.075792
+  type: 'test'
+  ...
+# Subtest: vwf.probe：配置判定——已删除的 Provider/Model 报未配置且不发真实调用
+ok 30 - vwf.probe：配置判定——已删除的 Provider/Model 报未配置且不发真实调用
+  ---
+  duration_ms: 1.656542
+  type: 'test'
+  ...
+# Subtest: vwf.probe：模型目录不可读（listModels 抛错）不做配置判定——退回真实探针
+ok 31 - vwf.probe：模型目录不可读（listModels 抛错）不做配置判定——退回真实探针
+  ---
+  duration_ms: 1.111292
+  type: 'test'
+  ...
+# Subtest: vwf.probe：探针内部错误单独成类，不伪装成"其他 Provider 错误"
+ok 32 - vwf.probe：探针内部错误单独成类，不伪装成"其他 Provider 错误"
+  ---
+  duration_ms: 0.920959
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# Subtest: wf_run：探针内部错误（疑似探针缺陷）不阻断启动
+ok 33 - wf_run：探针内部错误（疑似探针缺陷）不阻断启动
+  ---
+  duration_ms: 6.847959
+  type: 'test'
+  ...
+# Subtest: wf_run：绑定模型已从配置删除 → BLOCKED 且原因为模型未配置
+ok 34 - wf_run：绑定模型已从配置删除 → BLOCKED 且原因为模型未配置
+  ---
+  duration_ms: 2.556542
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace allocated: ws-1 at /tmp/ws-1
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace allocated: ws-1 at /tmp/ws-1
+# [vwf] Formal Records 提交失败（不影响运行）：records 业务故障
+# Subtest: W3 wf_run 收尾单一通道：逐节点 Record + verifyBranch 强制 Proof（workspace 绑定）+ 摘要互相引用
+ok 35 - W3 wf_run 收尾单一通道：逐节点 Record + verifyBranch 强制 Proof（workspace 绑定）+ 摘要互相引用
+  ---
+  duration_ms: 53.090208
+  type: 'test'
+  ...
+# Subtest: W1 vwf.records.list / get：重启后按 logical_run_id 查询磁盘 Store
+ok 36 - W1 vwf.records.list / get：重启后按 logical_run_id 查询磁盘 Store
+  ---
+  duration_ms: 6.010542
+  type: 'test'
+  ...
+# Subtest: W2 vwf.records.* 参数校验 fail-closed
+ok 37 - W2 vwf.records.* 参数校验 fail-closed
+  ---
+  duration_ms: 0.901834
+  type: 'test'
+  ...
+# [vwf] Formal Records 产物入库失败（legacy 记录不受影响）：boom
+# Subtest: W4 提交失败非阻断：records host 业务错误不推翻运行结果
+ok 38 - W4 提交失败非阻断：records host 业务错误不推翻运行结果
+  ---
+  duration_ms: 11.167292
+  type: 'test'
+  ...
+# Subtest: W5 vwf.artifacts.ingest 双写：legacy 保留 + 正式 Store 入库，响应兼容
+ok 39 - W5 vwf.artifacts.ingest 双写：legacy 保留 + 正式 Store 入库，响应兼容
+  ---
+  duration_ms: 1.648209
+  type: 'test'
+  ...
+# Subtest: W5b artifacts.ingest：records host 不可用时 legacy 行为不受影响
+ok 40 - W5b artifacts.ingest：records host 不可用时 legacy 行为不受影响
+  ---
+  duration_ms: 0.523125
+  type: 'test'
+  ...
+# Subtest: manifest：可解析 JSON 且 schemaVersion=1
+ok 41 - manifest：可解析 JSON 且 schemaVersion=1
+  ---
+  duration_ms: 1.181667
+  type: 'test'
+  ...
+# Subtest: manifest：12 个内置角色按规格 §8 精确顺序与文案
+ok 42 - manifest：12 个内置角色按规格 §8 精确顺序与文案
+  ---
+  duration_ms: 0.157583
+  type: 'test'
+  ...
+# Subtest: manifest：结构不变量（id 稳定英文、中文名非空、definition 不穿越、全部只读）
+ok 43 - manifest：结构不变量（id 稳定英文、中文名非空、definition 不穿越、全部只读）
+  ---
+  duration_ms: 3.192792
+  type: 'test'
+  ...
+# Subtest: manifest：12 个内置角色的定义文件全部存在
+ok 44 - manifest：12 个内置角色的定义文件全部存在
+  ---
+  duration_ms: 0.552917
+  type: 'test'
+  ...
+# Subtest: manifest：dispatcher 登记为兼容角色（builtin:false），且不与内置冲突
+ok 45 - manifest：dispatcher 登记为兼容角色（builtin:false），且不与内置冲突
+  ---
+  duration_ms: 0.388
+  type: 'test'
+  ...
+# Subtest: host 不再内嵌 EMBEDDED_BUILTIN_MANIFEST 降级清单
+ok 46 - host 不再内嵌 EMBEDDED_BUILTIN_MANIFEST 降级清单
+  ---
+  duration_ms: 0.558083
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#80 Safe Pause：RUNNING 暂停 → 段取消翻译 PAUSED + 检查点现场 + Timeline
+ok 47 - \#80 Safe Pause：RUNNING 暂停 → 段取消翻译 PAUSED + 检查点现场 + Timeline
+  ---
+  duration_ms: 52.941709
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#80 暂停升级中断：等待检查点期间的 pause 可升级为立即 interrupt
+ok 48 - \#80 暂停升级中断：等待检查点期间的 pause 可升级为立即 interrupt
+  ---
+  duration_ms: 28.1515
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#80 Interrupt：进行中 Attempt 记 INTERRUPTED，不产生正式成功结果
+ok 49 - \#80 Interrupt：进行中 Attempt 记 INTERRUPTED，不产生正式成功结果
+  ---
+  duration_ms: 16.753
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#80 Guidance：PAUSED 期间多轮 coach + baseline 配对修订（缺要点拒绝、业务结果标失效）
+ok 50 - \#80 Guidance：PAUSED 期间多轮 coach + baseline 配对修订（缺要点拒绝、业务结果标失效）
+  ---
+  duration_ms: 28.659667
+  type: 'test'
+  ...
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#80 状态语义拒绝：resume_paused 仅用于 PAUSED；缺检查点诚实降级
+ok 51 - \#80 状态语义拒绝：resume_paused 仅用于 PAUSED；缺检查点诚实降级
+  ---
+  duration_ms: 15.063416
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#80 $end 检查点防护：图走完不产生 PAUSED；中断现场跳过 $end 行
+ok 52 - \#80 $end 检查点防护：图走完不产生 PAUSED；中断现场跳过 $end 行
+  ---
+  duration_ms: 13.015125
+  type: 'test'
+  ...
+# [vwf] records-host.mjs 未部署：本轮节点产物未入 Formal Records Store
+# [vwf] vwf.probe(preflight)：llm 服务不可用，跳过运行前探针（不阻断启动）
+# [vwf] workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为
+# Subtest: \#80 回跳防护：待回跑修订时拒绝显式 entry
+ok 53 - \#80 回跳防护：待回跑修订时拒绝显式 entry
+  ---
+  duration_ms: 11.818459
+  type: 'test'
+  ...
+# Subtest: \#80 编译产物：节点检查点行 + Guidance/基线修订注入行存在
+ok 54 - \#80 编译产物：节点检查点行 + Guidance/基线修订注入行存在
+  ---
+  duration_ms: 5.379167
+  type: 'test'
+  ...
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# [vwf] agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行
+# Subtest: LOC-009：TEMPLATE_REGISTRY 键即四类正式模板身份，resolveWorkspacePolicy 只按注册表解析
+ok 55 - LOC-009：TEMPLATE_REGISTRY 键即四类正式模板身份，resolveWorkspacePolicy 只按注册表解析
+  ---
+  duration_ms: 3.894292
+  type: 'test'
+  ...
+# Subtest: LOC-009：workspace 声明经 validate-core / projection-core 双向投影保真
+ok 56 - LOC-009：workspace 声明经 validate-core / projection-core 双向投影保真
+  ---
+  duration_ms: 0.653042
+  type: 'test'
+  ...
+# Subtest: LOC-009：workspace 声明校验 —— 非法 template_id / resource_kind 拒绝且带 fieldKey
+ok 57 - LOC-009：workspace 声明校验 —— 非法 template_id / resource_kind 拒绝且带 fieldKey
+  ---
+  duration_ms: 3.5875
+  type: 'test'
+  ...
+# Subtest: LOC-009：vwf.workspace.allocate 按注册表权威解析模板，resource_kind 正式入载荷
+ok 58 - LOC-009：vwf.workspace.allocate 按注册表权威解析模板，resource_kind 正式入载荷
+  ---
+  duration_ms: 6.581833
+  type: 'test'
+  ...
+# Subtest: LOC-009：vwf.script allocate 路径透传模板声明与运行参数 resource_kind（参数优先）
+ok 59 - LOC-009：vwf.script allocate 路径透传模板声明与运行参数 resource_kind（参数优先）
+  ---
+  duration_ms: 32.95375
+  type: 'test'
+  ...
+# Subtest: LOC-009：optimize 缺 resource_kind 时载荷不伪造缺省，由 Core 策略解析 fail closed
+ok 60 - LOC-009：optimize 缺 resource_kind 时载荷不伪造缺省，由 Core 策略解析 fail closed
+  ---
+  duration_ms: 2.517291
+  type: 'test'
+  ...
+1..60
+# tests 60
+# suites 0
+# pass 60
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 434.876834
