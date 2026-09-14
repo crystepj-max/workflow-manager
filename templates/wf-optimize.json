@@ -48,6 +48,45 @@
       "profile": "dev",
       "label": "执行",
       "goal": "只依据冻结的 evaluation contract（`evaluation-contract.md`）施工：采用最小必要修改达成未满足目标，显式保护已满足部分不被回归。发现冻结的 evaluation contract 因新事实、约束或环境变化已不再可执行时，输出 RECONFIRM_REQUIRED（这不是评估裁决，返回目标确认重新确认或修订契约）；外部条件无法安全继续时输出 BLOCKED；否则输出 READY。将执行交接写入 `execute-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "inputs": [
+        {
+          "name": "evaluation_verdict",
+          "from": "$.results.evaluate.route",
+          "required": true,
+          "default": "（首轮执行：尚无评估裁决，按冻结契约执行）"
+        },
+        {
+          "name": "evaluation_summary",
+          "from": "$.results.evaluate.summary",
+          "required": true,
+          "default": "（首轮执行：尚无评估摘要）"
+        },
+        {
+          "name": "evaluation_gaps",
+          "from": "$.results.evaluate.gaps",
+          "required": true,
+          "default": "（首轮执行：尚无评估差距清单）"
+        },
+        {
+          "name": "evaluation_contract_digest",
+          "from": "$.results.evaluate.contract_digest",
+          "required": true,
+          "default": "（首轮执行：尚无评估契约引用）"
+        },
+        {
+          "name": "evaluation_contract",
+          "from": "$.results.confirm.contract_digest",
+          "artifact": "evaluation-contract.md",
+          "required": true
+        },
+        {
+          "name": "current_deliverable",
+          "from": "$.results.execute.changed",
+          "artifact": "execute-report.md",
+          "required": true,
+          "default": "（首轮执行：尚无当前成果）"
+        }
+      ],
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -126,6 +165,30 @@
       "profile": "closeout",
       "label": "收口",
       "goal": "区分完成类型并收口：本轮经评估 PASS 自动进入时 completion_type=EVALUATION_PASSED；经人工决策 ACCEPT 进入时 completion_type=USER_ACCEPTED。保留评估报告与执行交接，不得重新开发或改写评估结论。完成后写 `cleanup-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "inputs": [
+        {
+          "name": "evaluation_verdict",
+          "from": "$.results.evaluate.route",
+          "required": true
+        },
+        {
+          "name": "evaluation_summary",
+          "from": "$.results.evaluate.summary",
+          "required": true
+        },
+        {
+          "name": "evaluation_report",
+          "from": "$.results.evaluate.summary",
+          "artifact": "evaluation-report.md",
+          "required": true
+        },
+        {
+          "name": "execute_handover",
+          "from": "$.results.execute.changed",
+          "artifact": "execute-report.md",
+          "required": true
+        }
+      ],
       "output": {
         "outcomePath": "$.status",
         "completionPath": "$.completion_type",

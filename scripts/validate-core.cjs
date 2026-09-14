@@ -32,6 +32,11 @@ const WORKSPACE_RESOURCE_KINDS = ['git', 'files', 'document', 'config', 'other']
 const MAX_ROUNDS_CAP = 9 // 系统约定上限：编辑器最大可设 9 轮（用户意见 Q7）
 const FANOUT_ITEMS_ARGS_RE = /^\$\.args(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
 const FANOUT_ITEMS_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
+// LOC-024 节点输入声明：选择器只支持 $.task / $.results.<节点id> 的明确字段链；
+// 禁止 eval、路径穿越与目录扫描（V1 无任意表达式执行器）。
+const INPUT_NAME_RE = /^[a-z][a-z0-9_]*$/
+const INPUT_SELECTOR_TASK_RE = /^\$\.task(?:\.[A-Za-z0-9_-]+)*$/
+const INPUT_SELECTOR_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)*$/
 const HD_RESULT_RE = /^[A-Z][A-Z0-9_]*$/
 const HD_REASONS = ['HUMAN_ACCEPTANCE', 'ESCALATED_DECISION', 'MAX_ROUNDS_REACHED']
 const HD_CONTROL_RESULTS = ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP']
@@ -617,6 +622,70 @@ function validateBlueprint(bp, opts) {
     if (!bp.edges.some((e) => e && e.from === n.id && e.on === 'failure')) {
       err('$.nodes[' + n.id + '].kind', 'fanout 节点必须有 failure 出边')
     }
+  })
+
+  // LOC-024 节点输入声明（显式交接节点输入与返工反馈）：
+  //   - required/optional 必须显式声明；首次运行默认值以 default 显式声明
+  //   - 选择器只支持 $.task[.字段链] / $.results.<节点id>[.字段链]
+  //   - 生产节点必须沿结构边（success/outcome）先于消费节点（自引用需结构自环，如返工 outcome 自环）
+  //   - artifact 引用必须已在该生产节点 output.files 声明（引用错误在编译期拦截）
+  //   - 旧蓝图整体省略 inputs = 旧输入模式（legacy），运行时维持原行为
+  bp.nodes.forEach((n) => {
+    if (!n || !n.id) return
+    if (n.inputs === undefined) return
+    const kind = n.kind === undefined ? 'worker' : n.kind
+    if (kind === 'fanout') {
+      err('$.nodes[' + n.id + '].inputs', 'fanout 节点禁止 inputs（并行子代理不参与节点级输入交接）')
+      return
+    }
+    if (!Array.isArray(n.inputs) || n.inputs.length === 0) {
+      err('$.nodes[' + n.id + '].inputs', 'inputs 必须是非空数组（维持旧输入模式请整体省略该字段）')
+      return
+    }
+    const seenNames = {}
+    n.inputs.forEach((b, i) => {
+      const at = '$.nodes[' + n.id + '].inputs[' + i + ']'
+      if (!b || typeof b !== 'object' || Array.isArray(b)) {
+        err(at, '输入绑定必须是对象 { name, from, required, default?, artifact? }')
+        return
+      }
+      if (typeof b.name !== 'string' || !INPUT_NAME_RE.test(b.name)) {
+        err(at + '.name', '绑定名必填且为 snake_case（小写字母开头，仅小写字母/数字/下划线），当前：' + JSON.stringify(b.name))
+      } else if (seenNames[b.name]) {
+        err(at + '.name', '绑定名重复：' + b.name)
+      }
+      seenNames[b.name] = true
+      if (b.required !== true && b.required !== false) {
+        err(at + '.required', 'required 必须显式声明为布尔（true=必需，false=可选；可选未产生时按声明走 default/缺省）')
+      }
+      let producer = null
+      if (typeof b.from !== 'string' || (!INPUT_SELECTOR_TASK_RE.test(b.from) && !INPUT_SELECTOR_RESULTS_RE.test(b.from))) {
+        err(at + '.from', 'from 选择器仅支持 $.task[.字段链] 或 $.results.<节点id>[.字段链] 的明确字段链（禁止 eval、路径穿越与目录扫描），当前：' + JSON.stringify(b.from))
+      } else {
+        const rm = INPUT_SELECTOR_RESULTS_RE.exec(b.from)
+        if (rm) {
+          producer = rm[1]
+          if (!ids[producer]) {
+            err(at + '.from', 'from 引用的生产节点 ' + producer + ' 不存在')
+          } else if (!successPathExists(producer, n.id, bp.edges)) {
+            err(at + '.from', 'from 引用的生产节点 ' + producer + ' 必须沿结构边（success/outcome，含返工 outcome 环）先于消费节点 ' + n.id)
+          }
+        }
+      }
+      if (b.artifact !== undefined) {
+        if (typeof b.artifact !== 'string' || !b.artifact.trim() || b.artifact.startsWith('/') || b.artifact.includes('..')) {
+          err(at + '.artifact', 'artifact 必须是生产节点 output.files 中声明的相对文件名（禁止绝对路径与路径穿越），当前：' + JSON.stringify(b.artifact))
+        } else if (!producer) {
+          err(at + '.artifact', 'artifact 引用必须配合 $.results.<节点id> 选择器使用（任务输入没有产物文件）')
+        } else if (ids[producer]) {
+          const prod = bp.nodes.find((x) => x && x.id === producer)
+          const files = prod && prod.output && prod.output.files
+          if (!files || typeof files !== 'object' || Array.isArray(files) || !Object.keys(files).includes(b.artifact)) {
+            err(at + '.artifact', 'artifact ' + b.artifact + ' 未在生产节点 ' + producer + ' 的 output.files 中声明（引用错误须在编译期定位）')
+          }
+        }
+      }
+    })
   })
 
   // output.files 契约（蓝图级，DSL 无此字段）

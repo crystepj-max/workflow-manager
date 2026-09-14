@@ -61,6 +61,8 @@ function projectToVwf(bp) {
       if (n.output) node.output = cloneValue(n.output)
       if (n.manualCheck) node.manualCheck = true
       if (n.verifyBranch) node.verifyBranch = true
+      // LOC-024 节点输入声明：编辑器另存 / 投影往返必须保留 inputs，否则返工交接声明静默丢失
+      if (isDefined(n.inputs)) node.inputs = cloneValue(n.inputs)
       if (models[n.id]) node.model = cloneValue(models[n.id])
       return node
     }),
@@ -92,6 +94,8 @@ function projectToBlueprint(dsl) {
     if (n.output) node.output = cloneValue(n.output)
     if (n.manualCheck) node.manualCheck = true
     if (n.verifyBranch) node.verifyBranch = true
+    // LOC-024 节点输入声明：DSL → 蓝图逆投影同样保留（宿主保存落盘与校验都经此投影）
+    if (isDefined(n.inputs)) node.inputs = cloneValue(n.inputs)
     if (n.model && typeof n.model === 'object' && n.model.provider && n.model.model) {
       models[n.id] = {
         provider: cloneValue(n.model.provider),
