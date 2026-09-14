@@ -1,0 +1,51 @@
+# LOC-025｜阻止互相矛盾的裁决进入下一质量关口
+
+## 任务基本信息
+
+| 字段 | 值 |
+|---|---|
+| 任务标识 | LOC-025 |
+| 需求来源 | 本地文档 |
+| 来源定位 | docs/research/workflow-review-requirements-2026-09-14/WR-002.md |
+| 任务名称 | 阻止互相矛盾的裁决进入下一质量关口 |
+| 任务类型 | 完整功能开发 |
+| 分类 | bug |
+| 体量 | S |
+| 优先级 | P0 |
+| 当前状态 | 本地已定义 |
+| 需求基线版本 | V1 |
+| 前置依赖 | 无 |
+| 施工环境组 | LOC-025 |
+| 施工环境角色 | 独立 |
+| 无人值守许可 | 允许 |
+| 任务规格位置 | .scratch/LOC-025-verdict-consistency/task-spec-V1.md |
+| 定义时间 | 2026-09-14T10:05:31Z |
+| GitHub 同步 | pending |
+
+本版本属本地轨道。GitHub 接口 403、无法完成读写核验；恢复后需补建 Issue。CNB 不是本批的任务载具，本轮不向其发布或声称已定义。
+
+## 摘要（三要素）
+
+**目标：**每份专业结论只有一种可解释的路由，失败或矛盾结果不能被当成通过。
+
+**范围：**建设审核、测试、UAT 的放行行为，以及角色输出与错误提示。 只解决裁决一致性及所需角色文案；成果版本核对归 WR-003，通用 Schema 能力声明归 WR-016。
+
+**验收标准：**
+
+- [ ] AC-01：列出的 6 个合法组合均走预期边；其余 route/verdict 或 route/result 组合全部被拒绝。
+- [ ] AC-02：对复现中的两种矛盾分别测试，UAT、人工等待与收口调用数均为 0。
+- [ ] AC-03：拒绝原因能区分“契约矛盾”与专业判断“需要修改”；不把矛盾结果存成有效通过证明。
+- [ ] AC-04：角色、模板 Schema 和运行时校验对这 6 个组合表述一致；旧字段仍可读取。
+
+## 开工材料与状态
+
+- [详细任务规格 V1](/Users/chris/.codex/worktrees/77ea/workflow-manager/.scratch/LOC-025-verdict-consistency/task-spec-V1.md) 是确认后实施事实源；[Definition Check](/Users/chris/.codex/worktrees/77ea/workflow-manager/.scratch/LOC-025-verdict-consistency/definition-check.md) 记录定义完成情况。
+- [本批确认单](/Users/chris/.codex/worktrees/77ea/workflow-manager/.scratch/p0-definition-2026-09-14/confirmation.md) 包含 10 条明确对象、关键默认值与执行许可；确认已完成，当前任务已标为“本地已定义”。
+- 本任务无业务硬前置；与其他任务修改同文件只构成合并风险，不新增串行门禁。
+- 现已从现有 `construction-bootstrap` 进入交付；本次不创建 Run、不自动开始开发。
+
+## 变更记录
+
+| 时间 | 状态 | 说明 |
+|---|---|---|
+| 2026-09-14T10:05:31Z | 本地已定义 | 从 WR-002 分配正式本地 ID，完成规格和门禁材料准备，基线与许可已确认 |

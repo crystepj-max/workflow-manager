@@ -1,0 +1,51 @@
+# LOC-033｜收敛内置角色职责并由节点提供场景信息
+
+## 任务基本信息
+
+| 字段 | 值 |
+|---|---|
+| 任务标识 | LOC-033 |
+| 需求来源 | 本地文档 |
+| 来源定位 | docs/research/workflow-review-requirements-2026-09-14/WR-013.md |
+| 任务名称 | 收敛内置角色职责并由节点提供场景信息 |
+| 任务类型 | 完整功能开发 |
+| 分类 | bug |
+| 体量 | M |
+| 优先级 | P0 |
+| 当前状态 | 本地已定义 |
+| 需求基线版本 | V1 |
+| 前置依赖 | 无 |
+| 施工环境组 | LOC-033 |
+| 施工环境角色 | 独立 |
+| 无人值守许可 | 允许 |
+| 任务规格位置 | .scratch/LOC-033-role-boundaries/task-spec-V1.md |
+| 定义时间 | 2026-09-14T10:05:31Z |
+| GitHub 同步 | pending |
+
+本版本属本地轨道。GitHub 接口 403、无法完成读写核验；恢复后需补建 Issue。CNB 不是本批的任务载具，本轮不向其发布或声称已定义。
+
+## 摘要（三要素）
+
+**目标：**12 个角色有清晰一致的能力边界；四模板提供文件、资源和裁决等场景要求，角色不再猜旧工程流程。
+
+**范围：**12 个内置角色文本、四模板节点目标和新运行的编译提示；旧运行继续使用冻结文本。 覆盖 12 个内置角色与四模板所需文案；不删除 designer，不新增同义角色，不安装或改写用户全局角色副本。
+
+**验收标准：**
+
+- [ ] AC-01：形成全部 12 角色的职责矩阵与 4 模板节点绑定对照，无 dev 自测禁令与 TDD 要求并存。
+- [ ] AC-02：非 Git 文档优化能收到完整执行要求，不要求 dispatch-result、创建 worktree 或 PR 才能完成。
+- [ ] AC-03：建设 accept 产物与模板一致，三态不被二态指令覆盖；诊断 test 使用节点声明的回归产物。
+- [ ] AC-04：角色加载/编译快照测试验证实际注入文本，不只对 Markdown 做关键词检查；人工抽查四模板各一次代表性角色交接。
+
+## 开工材料与状态
+
+- [详细任务规格 V1](/Users/chris/.codex/worktrees/77ea/workflow-manager/.scratch/LOC-033-role-boundaries/task-spec-V1.md) 是确认后实施事实源；[Definition Check](/Users/chris/.codex/worktrees/77ea/workflow-manager/.scratch/LOC-033-role-boundaries/definition-check.md) 记录定义完成情况。
+- [本批确认单](/Users/chris/.codex/worktrees/77ea/workflow-manager/.scratch/p0-definition-2026-09-14/confirmation.md) 包含 10 条明确对象、关键默认值与执行许可；确认已完成，当前任务已标为“本地已定义”。
+- 本任务无业务硬前置；与其他任务修改同文件只构成合并风险，不新增串行门禁。
+- 现已从现有 `construction-bootstrap` 进入交付；本次不创建 Run、不自动开始开发。
+
+## 变更记录
+
+| 时间 | 状态 | 说明 |
+|---|---|---|
+| 2026-09-14T10:05:31Z | 本地已定义 | 从 WR-013 分配正式本地 ID，完成规格和门禁材料准备，基线与许可已确认 |
