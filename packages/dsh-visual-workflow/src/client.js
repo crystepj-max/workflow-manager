@@ -213,6 +213,7 @@ return {
 .vwf-status { font-size:11px; }
 .vwf-status.ok { color:var(--dsw-alias-state-success-primary, #34d399); }
 .vwf-status.err { color:var(--dsw-alias-state-error-primary, #e5484d); }
+.vwf-status.warn { color:var(--dsw-alias-state-warning-primary, #f5a524); }
 .vwf-code { white-space:pre-wrap; font-family:var(--dsw-font-family-mono, ui-monospace, monospace); font-size:11px; opacity:.9; max-height:320px; overflow:auto; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; padding:10px; background:var(--dsw-alias-bg-base, #181818); }
 .vwf-table { width:100%; border-collapse:collapse; font-size:11px; }
 .vwf-table th, .vwf-table td { text-align:left; padding:4px 8px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); }
@@ -1893,6 +1894,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const [pendingValidation, setPendingValidation] = React.useState(null)
       const [dialogOpen, setDialogOpen] = React.useState(false)
       const [liveErrors, setLiveErrors] = React.useState([])
+      // 校验警示（LOC-021）：内核 warnings 此前无编辑器出口——强档缺配对、弱异源等提示
+      // 用户在配置时完全看不到。与 errors 同源同生命周期，在状态行下方以警示色展示。
+      const [liveWarnings, setLiveWarnings] = React.useState([])
       const [roleUI, setRoleUI] = React.useState(null) // 角色管理浮层：null | 'list' | 'create'
       const validateTimerRef = React.useRef(null)
       const validateSeqRef = React.useRef(0)
@@ -1905,10 +1909,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           host.call('vwf.validate', { dsl: snapshot }).then(r => {
             if (seq !== validateSeqRef.current) return
             setLiveErrors(r.ok ? [] : (r.errors || []))
+            setLiveWarnings(r.warnings || [])
           }).catch((e) => {
             // 实时校验失败也必须可见：否则状态行会一直停在旧结论上
             if (seq !== validateSeqRef.current) return
             setLiveErrors([{ message: t('validateUnavailable') + String((e && e.message) || e) }])
+            setLiveWarnings([])
           })
         }, VALIDATE_DEBOUNCE_MS)
       }
@@ -1969,6 +1975,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setFieldErrors({})
         setInvalidNodeIds(new Set())
         setLiveErrors([])
+        setLiveWarnings([])
         let parsed
         try { parsed = JSON.parse(entry.json) } catch (e) {
           // 非法 JSON 中间态：只恢复草稿文案，图模型保持当前合法态（与编辑时一致）
@@ -2027,6 +2034,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setInvalidNodeIds(new Set())
         setJsonError(null)
         setLiveErrors([])
+        setLiveWarnings([])
         setWf(normalized)
         setJsonDraft(JSON.stringify(normalized, null, 2))
         scheduleValidate(normalized)
@@ -2310,7 +2318,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             ),
             h('div', { className: 'vwf-status ' + (liveErrors.length ? 'err' : 'ok'), style: { marginTop: 6 } },
               liveErrors.length ? liveErrors.length + ' ' + t('validIssues') + '：' + liveErrors[0].message + (liveErrors.length > 1 ? ' …' : '') : t('validOk')
-            )
+            ),
+            // 校验警示（LOC-021）：非阻断提示（如强档缺配对、弱异源）与错误同区展示，
+            // 不与错误争夺同一行——错误存在时让位给错误，避免用户误判为阻断。
+            liveWarnings.length && !liveErrors.length
+              ? h('div', { className: 'vwf-status warn', style: { marginTop: 2 } },
+                  '⚠️ ' + liveWarnings.length + ' ' + t('validWarnings') + '：' + liveWarnings[0] + (liveWarnings.length > 1 ? ' …' : ''))
+              : null
           ),
           h('div', { className: 'vwf-card vwf-inspector' },
             h('div', { className: 'vwf-card-title', style: { marginBottom: 4 } }, t('inspector')),

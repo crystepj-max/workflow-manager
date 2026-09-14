@@ -160,6 +160,7 @@
   "validationDialogClose": "Review and fix",
   "validOk": "✓ Valid",
   "validIssues": "validation issue(s)",
+  "validWarnings": "validation notice(s)",
   "unnamedNode": "Unnamed node",
   "entryBadge": "Entry",
   "endNode": "End",

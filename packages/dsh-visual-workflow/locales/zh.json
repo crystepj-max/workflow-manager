@@ -160,6 +160,7 @@
   "validationDialogClose": "查看并修正",
   "validOk": "✓ 校验通过",
   "validIssues": "条校验问题",
+  "validWarnings": "条校验提示",
   "unnamedNode": "未命名节点",
   "entryBadge": "入口",
   "endNode": "结束",
