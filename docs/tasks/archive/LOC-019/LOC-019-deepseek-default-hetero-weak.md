@@ -62,3 +62,12 @@
 | 2026-09-13 | 交付中 | Run loc-019-r1（分支 dev-loc-019-r1 @ f410900）；实施前检查通过，施工环境组 LOC-019 登记；四套模板默认绑定改造完成 + 新增回归测试 4 例；一次性清理执行并留痕 |
 | 2026-09-13 | 执行受阻 | 独立审查 approve（0 阻断）；独立测试 verdict=fail，根因=requirements：实测冲突模型覆盖为 **2 份**（规格 §5 误记 1 份）——construction-full-feature 的现存覆盖（review→deepseek-flash）与新默认 dev=deepseek-flash 撞成完全相同模型，被异源硬规则拒绝，该模板当前无法发起运行；诊断模板同因被阻（规格 §11 已预期）。按 D4-b 覆盖未自动删除，需人工裁决处置方式后复测 |
 | 2026-09-13 | 等待验收 | 松哥授权人工清除 2 份冲突覆盖（备份留痕 `.scratch/LOC-019-deepseek/user-data-cleanup/model-overrides/`，explore 覆盖保留）→ reverify 推进 attempt→2/3 复测；test_proof.a3 verdict=**pass**（8/8 验收项，按基线原文逐条映射）；evidence-verify **9/9 全绿**；checkpoint target 未前进、proofs still_valid；验收包 acceptance_package.a3 awaiting_decision。UAT 卡 `.agent-runs/loc-019-r1/uat-card.md`；UAT 前置：产品 DSH 会话工作目录指向工作树 |
+
+## 实施记录（2026-09-13，Run loc-019-r1）
+
+- **交付**：四套内置模板 `bindings.models` 全部 DeepSeek 化（验证角色 `deepseek-v4-flash`、其余 `deepseek-flash`）+ 新增回归测试 `scripts/test/builtin-template-model-defaults.test.mjs`（4 例）。分支 `dev-loc-019-r1` @ `f410900`，合并提交 `bd5dd3f`（tag `task/loc-019/v1`）。
+- **一次性清理**：`~/.dsh/visual-workflow/templates/construction-full-feature.json`（与开工基线 0b5f101 内置逐字节相同）判定冗余删除，备份 `.scratch/LOC-019-deepseek/user-data-cleanup/`。
+- **人工处置（松哥授权）**：清除 2 份冲突模型覆盖（construction-full-feature / diagnose，explore 保留），备份同目录 `model-overrides/`。根因：新默认 `dev=deepseek-flash` 与其现存覆盖撞成完全相同模型，被异源硬规则拒绝——规格 §5 原记 1 份，实为 2 份。
+- **独立会话**：审查 approve（0 阻断）；测试 attempt 1 fail（requirements）→ 人工处置后 attempt 3 **pass（8/8）**；evidence-verify 9/9 ✅；验收三态 = **accept**（松哥，2026-09-13T22:23+08:00）。
+- **UAT 环境**：主检出 `.generated/` 镜像更新为新绑定（备份 `uat-env-backup/main-generated-20260913/`），合并后 `npm run generate` 幂等且与 UAT 产物完全一致。
+- **遗留（进 LOC-021 / 后续票）**：异源档位三态（关/弱/强）与编辑器控件；运行时异源日志按节点 id 硬编码（diagnose 不触发）；runbook §7.4 与 validate-workspace D-7 规则矛盾；validate-workspace 链接工作树扫描口径。

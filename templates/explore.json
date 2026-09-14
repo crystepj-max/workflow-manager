@@ -141,10 +141,10 @@
   ],
   "bindings": {
     "models": {
-      "orchestrate": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "research": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "synthesize": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "evaluate": { "provider": "openai-codex", "model": "gpt-5.6-luna" }
+      "orchestrate": { "provider": "deepseek-official", "model": "deepseek-flash" },
+      "research": { "provider": "deepseek-official", "model": "deepseek-flash" },
+      "synthesize": { "provider": "deepseek-official", "model": "deepseek-flash" },
+      "evaluate": { "provider": "deepseek-official", "model": "deepseek-v4-flash" }
     }
   }
 }

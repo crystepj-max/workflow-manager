@@ -214,12 +214,12 @@
   ],
   "bindings": {
     "models": {
-      "preflight": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "dev": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "review": { "provider": "openai-codex", "model": "gpt-5.6-luna" },
-      "test": { "provider": "openai-codex", "model": "gpt-5.6-luna" },
-      "uat": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
-      "closeout": { "provider": "deepseek-official", "model": "deepseek-v4-flash" }
+      "preflight": { "provider": "deepseek-official", "model": "deepseek-flash" },
+      "dev": { "provider": "deepseek-official", "model": "deepseek-flash" },
+      "review": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+      "test": { "provider": "deepseek-official", "model": "deepseek-v4-flash" },
+      "uat": { "provider": "deepseek-official", "model": "deepseek-flash" },
+      "closeout": { "provider": "deepseek-official", "model": "deepseek-flash" }
     }
   }
 }
