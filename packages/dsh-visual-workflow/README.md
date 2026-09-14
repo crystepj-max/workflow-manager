@@ -111,7 +111,7 @@ dsh --profile web --dump-config | grep visual-workflow   # 可见 patch 层
 
 | RPC | 说明 |
 |---|---|
-| `vwf.workflows.list / save / remove` | 模板库 CRUD：双根加载（内置 `.generated/` 只读 + 用户 `~/.dsh/visual-workflow/templates/` 可写）；save 撞名拒绝 + 同步编译 skill（save 即闭环）；remove 仅用户 + 同步删 skill |
+| `vwf.workflows.list / save / remove` | 模板库 CRUD：双根加载（内置 `.generated/` 只读 + 用户 `~/.dsh/visual-workflow/templates/` 可写）；save 撞名拒绝 + 同步编译 skill（save 即闭环）；remove 仅用户 + 同步删 skill。内置模板不经 save，其技能包由 `npm run install:builtin-skills` 单独安装到 `~/.dsh/skills/<id>/` |
 | `vwf.validate` | 统一校验管道（T-IMP-13）：sanitize → 逆投影蓝图 → 校验内核 validateBlueprint（含业务规则层与 requireModels），返回 `{ok, errors, fieldErrors, sanitized, warnings}`（fieldErrors 键形如 `node:<id>:<field>` / `edge:<i>:<field>` / `control:<field>`） |
 | `vwf.script` | 统一编译器管道（T-IMP-12）：DSL → `scripts/generate.mjs compileBlueprint` 译文（CLI 兜底），返回脚本全文、meta 与 engineAvailable。`vwf.compile` 已随统一编译器删除 |
 | `vwf.state` | 运行状态（runId → status/phase/agents/logs） |

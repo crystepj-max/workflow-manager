@@ -18,7 +18,7 @@ const VERIFY_MODEL = 'deepseek-v4-flash';
 
 // LOC-019 需求基线 V1 §6 逐模板映射表：四套内置模板默认绑定 DeepSeek 化
 const EXPECTED = {
-  'construction-full-feature': {
+  'wf-construction-full-feature': {
     preflight: DEFAULT_MODEL,
     dev: DEFAULT_MODEL,
     review: VERIFY_MODEL,
@@ -26,20 +26,20 @@ const EXPECTED = {
     uat: DEFAULT_MODEL,
     closeout: DEFAULT_MODEL,
   },
-  diagnose: {
+  'wf-diagnose': {
     diagnose: DEFAULT_MODEL,
     fix: DEFAULT_MODEL,
     review: VERIFY_MODEL,
     regression: VERIFY_MODEL,
     closeout: DEFAULT_MODEL,
   },
-  optimize: {
+  'wf-optimize': {
     confirm: DEFAULT_MODEL,
     execute: DEFAULT_MODEL,
     evaluate: VERIFY_MODEL,
     closeout: DEFAULT_MODEL,
   },
-  explore: {
+  'wf-explore': {
     orchestrate: DEFAULT_MODEL,
     research: DEFAULT_MODEL,
     synthesize: DEFAULT_MODEL,
@@ -73,7 +73,7 @@ test('LOC-019 内置模板不再绑定非 DeepSeek provider', () => {
 });
 
 test('LOC-019 内置模板保持默认弱异源语义：同 provider 不同 model 通过并给出弱异源警告', () => {
-  for (const id of ['construction-full-feature', 'diagnose']) {
+  for (const id of ['wf-construction-full-feature', 'wf-diagnose']) {
     const bp = loadTemplate(id);
     const r = validateBlueprint(bp, { requireModels: true });
     assert.equal(r.ok, true, id + ' 必须通过校验：' + JSON.stringify(r.errors));
@@ -83,7 +83,7 @@ test('LOC-019 内置模板保持默认弱异源语义：同 provider 不同 mode
 });
 
 test('LOC-019 无 dev/review 节点的内置模板不参与异源校验且仍通过结构校验', () => {
-  for (const id of ['optimize', 'explore']) {
+  for (const id of ['wf-optimize', 'wf-explore']) {
     const r = validateBlueprint(loadTemplate(id), { requireModels: true });
     assert.equal(r.ok, true, id + ' 必须通过校验：' + JSON.stringify(r.errors));
     assert.equal(r.warnings.length, 0, id + ' 不应产生弱异源警告');

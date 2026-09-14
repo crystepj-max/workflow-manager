@@ -1,4 +1,4 @@
-// LOC-011 优化快速迭代正式模板（templates/optimize.json）行为测试
+// LOC-011 优化快速迭代正式模板（templates/wf-optimize.json）行为测试
 // 剧本驱动真实蓝图（非 mini 夹具）：正常 / OPTIMIZE 回退 / 额度耗尽 / RECONFIRM / CONFIRM 升人工 / BLOCKED
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -11,7 +11,7 @@ import validatorCore from '../validate-core.cjs'
 
 const { validateBlueprint } = validatorCore
 const here = path.dirname(fileURLToPath(import.meta.url))
-const optimizeBp = JSON.parse(readFileSync(path.join(here, '../../templates/optimize.json'), 'utf8'))
+const optimizeBp = JSON.parse(readFileSync(path.join(here, '../../templates/wf-optimize.json'), 'utf8'))
 
 const runEngine = (bp, table, args = {}) => {
   const { script } = compileBlueprint(bp)
@@ -134,11 +134,11 @@ test('目标确认 BLOCKED：直达结束，不进入执行', async () => {
 
 test('workspace 策略：Git 代码修改 → ISOLATED_WRITE；非 Git 文档/配置 → SANDBOX', async () => {
   const { resolveWorkspacePolicy, WORKSPACE_MODE } = await import('../workspace-isolation.mjs')
-  const gitPolicy = resolveWorkspacePolicy('optimize', { resource_kind: 'git' })
+  const gitPolicy = resolveWorkspacePolicy('wf-optimize', { resource_kind: 'git' })
   assert.equal(gitPolicy.mode, WORKSPACE_MODE.ISOLATED_WRITE)
-  const docPolicy = resolveWorkspacePolicy('optimize', { resource_kind: 'document' })
+  const docPolicy = resolveWorkspacePolicy('wf-optimize', { resource_kind: 'document' })
   assert.equal(docPolicy.mode, WORKSPACE_MODE.SANDBOX)
-  const configPolicy = resolveWorkspacePolicy('optimize', { resource_kind: 'config' })
+  const configPolicy = resolveWorkspacePolicy('wf-optimize', { resource_kind: 'config' })
   assert.equal(configPolicy.mode, WORKSPACE_MODE.SANDBOX)
-  assert.throws(() => resolveWorkspacePolicy('optimize', {}), /resource_kind/, '缺 resource_kind 须拒绝（fail closed）')
+  assert.throws(() => resolveWorkspacePolicy('wf-optimize', {}), /resource_kind/, '缺 resource_kind 须拒绝（fail closed）')
 })
