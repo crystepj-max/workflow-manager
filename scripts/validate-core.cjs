@@ -779,6 +779,73 @@ function validateBlueprint(bp, opts) {
     }
   })
 
+  // 裁决一致性声明（LOC-025 / WR-002）：双裁决字段节点（route + verdict / result）可在
+  // output.consistency 声明配对表 { field, pairs }——pairs 以业务路由取值为键、该路由下
+  // 结论字段必须等于的取值为值。机制全局（校验器只认蓝图声明表），语义随模板（建设
+  // review/test 的 6 个合法组合声明在 templates/wf-construction-full-feature.json，不伪装
+  // 为既有全局语义）。运行时（generate.mjs 产物）在路由选择前按同一张表做确定性检查，
+  // 表外组合以 CONTRACT_INCONSISTENT 拒绝，不作专业通过判断。未声明的节点维持原行为
+  // （旧蓝图零迁移；已启动运行的冻结快照不受影响）。
+  bp.nodes.forEach((n) => {
+    if (!n || !n.id) return
+    const decl = n.output && n.output.consistency
+    if (decl === undefined) return
+    const at = '$.nodes[' + n.id + '].output.consistency'
+    if (!hasOutcomePath(n)) {
+      err(at, 'consistency 仅支持声明了 outcomePath 的业务结果路由节点（矛盾组合须在路由选择前被确定性拒绝）')
+      return
+    }
+    if (!decl || typeof decl !== 'object' || Array.isArray(decl)) {
+      err(at, 'consistency 必须是对象 { field, pairs }')
+      return
+    }
+    if (typeof decl.field !== 'string' || !decl.field.trim()) {
+      err(at + '.field', 'consistency.field 必填（与业务路由配对的结论字段名，如 verdict / result）')
+    }
+    if (!decl.pairs || typeof decl.pairs !== 'object' || Array.isArray(decl.pairs) || Object.keys(decl.pairs).length === 0) {
+      err(at + '.pairs', 'consistency.pairs 必填（非空对象：业务路由取值 → 结论字段取值）')
+      return
+    }
+    const schema = n.output.schema
+    if (!schema || typeof schema !== 'object') return // schema 缺失由 outcomePath 规则另行报错，此处不重复
+    const outSegs = parseJsonPath(String(n.output.outcomePath).trim())
+    if (!outSegs) return // outcomePath 格式由其规则报错，此处不重复
+    if (outSegs.length === 1 && outSegs[0] === decl.field) {
+      err(at + '.field', 'consistency.field 不得与 outcomePath 字段同名（自我配对无意义）')
+    }
+    if (!pathInSchema(schema, [decl.field])) {
+      err(at + '.field', 'consistency.field 未在 output.schema 中声明：' + decl.field)
+      return
+    }
+    const fieldVals = enumerableValues(schemaLeafAt(schema, [decl.field]))
+    if (!fieldVals) {
+      err(at + '.field', 'consistency.field 必须可穷举（enum / const / oneOf 常量），当前：' + decl.field)
+      return
+    }
+    const outVals = enumerableValues(schemaLeafAt(schema, outSegs)) || []
+    const seenFieldVals = {}
+    const pairKeys = Object.keys(decl.pairs)
+    pairKeys.forEach((k) => {
+      const v = decl.pairs[k]
+      if (!outVals.some((x) => outcomeKey(x) === outcomeKey(k))) {
+        err(at + '.pairs', 'consistency.pairs 键 ' + outcomeKey(k) + ' 不在 outcomePath 枚举内（允许：' + outVals.map((x) => outcomeKey(x)).join('、') + '）')
+      }
+      if (!fieldVals.some((x) => outcomeKey(x) === outcomeKey(v))) {
+        err(at + '.pairs', 'consistency.pairs 值 ' + outcomeKey(v) + ' 不在字段 ' + decl.field + ' 枚举内（允许：' + fieldVals.map((x) => outcomeKey(x)).join('、') + '）')
+      }
+      const fk = outcomeKey(v)
+      if (seenFieldVals[fk]) {
+        err(at + '.pairs', '同一结论取值 ' + fk + ' 不得配对多个路由取值（每份专业结论只有一种可解释的路由）')
+      }
+      seenFieldVals[fk] = true
+    })
+    outVals.forEach((v) => {
+      if (!pairKeys.some((k) => outcomeKey(k) === outcomeKey(v))) {
+        err(at + '.pairs', '路由枚举取值 ' + outcomeKey(v) + ' 缺少配对（pairs 必须覆盖 outcomePath 全部取值，防止未声明组合绕过路由前检查）')
+      }
+    })
+  })
+
   // Human Decision（#116）：拓扑已在结构层允许 $human-decision；此处钉契约键与互斥。
   {
     const usesHd = blueprintUsesHumanDecision(bp)

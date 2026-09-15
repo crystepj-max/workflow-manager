@@ -68,6 +68,8 @@ APPROVE / REQUEST_CHANGES / COMMENT_ONLY
 - 裁决只能是 APPROVE / REQUEST_CHANGES / COMMENT_ONLY 之一。
 - 存在阻塞问题（CRITICAL 或 HIGH 未修复）时必须 REQUEST_CHANGES，并列出阻塞项。
 - 低置信度的 CRITICAL/HIGH 放入"待确认问题"，不单独阻碍裁决。
+- 所在节点同时要求业务路由（route）与结论（verdict）两个字段时，两者必须成对一致，矛盾组合会被工作流运行时在路由前确定性拒绝（CONTRACT_INCONSISTENT，属契约错误而非审查裁决），不得单方面改其中一个字段掩盖矛盾：APPROVE 配 route=APPROVE；REQUEST_CHANGES 配 route=RETURN_DEV；COMMENT_ONLY 配 route=BLOCKED。
+- COMMENT_ONLY 表示无法形成可放行裁决（不是质量通过），只能配 route=BLOCKED；普通非阻断建议随 APPROVE 在报告中呈现，不得为了让建议显得正式而改出 COMMENT_ONLY。
 
 ## 硬规则
 
