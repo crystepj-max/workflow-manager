@@ -12,6 +12,8 @@ import validatorCore from '../validate-core.cjs'
 const { validateBlueprint } = validatorCore
 const here = path.dirname(fileURLToPath(import.meta.url))
 const diagnoseBp = JSON.parse(readFileSync(path.join(here, '../../templates/wf-diagnose.json'), 'utf8'))
+// LOC-026：审核/回归验证声明 verifyBranch 后，结论必须通过可信度闸门（无 workspace 形态仍校验 verified_branch/verified_head；schema required 含 candidate_sha256）
+const DIAG_VERIFY = { verified_branch: 'dev2/task', verified_head: 'diag-head', candidate_sha256: 'diag-candidate' }
 
 const runEngine = (bp, table, args = {}) => {
   const { script } = compileBlueprint(bp)
@@ -41,8 +43,8 @@ test('正常路径：诊断 → 修复 → 审核 → 回归 → 收口，不耗
   const { result } = await runEngine(diagnoseBp, {
     缺陷诊断: { route: 'DIAGNOSED', root_cause: '空指针', evidence: '复现栈', verified_head: 'h1' },
     修复: { route: 'FIXED', summary: '补判空', changed: 'a.js' },
-    审核: { route: 'APPROVE', verdict_reason: '修改与根因对应' },
-    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿' },
+    审核: { route: 'APPROVE', verdict_reason: '修改与根因对应', ...DIAG_VERIFY },
+    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿', ...DIAG_VERIFY },
     收口: { status: 'DELIVERED', summary: 'done', followups: '' },
   })
   assert.equal(result.status, 'DONE')
@@ -56,10 +58,10 @@ test('修复问题回修复：消耗 1 点额度后通过', async () => {
     修复: { route: 'FIXED', summary: '补判空', changed: 'a.js' },
     审核: () => {
       reviews += 1
-      if (reviews === 1) return { route: 'FIX_ISSUES', verdict_reason: '未覆盖边界' }
-      return { route: 'APPROVE', verdict_reason: '通过' }
+      if (reviews === 1) return { route: 'FIX_ISSUES', verdict_reason: '未覆盖边界', ...DIAG_VERIFY }
+      return { route: 'APPROVE', verdict_reason: '通过', ...DIAG_VERIFY }
     },
-    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿' },
+    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿', ...DIAG_VERIFY },
     收口: { status: 'DELIVERED', summary: 'done', followups: '' },
   })
   assert.equal(result.status, 'DONE')
@@ -73,11 +75,11 @@ test('证据推翻根因回诊断：消耗 1 点额度后通过', async () => {
     缺陷诊断: { route: 'DIAGNOSED', root_cause: '初始根因', evidence: 'e0', verified_head: 'h1' },
     审核: () => {
       reviews += 1
-      if (reviews === 1) return { route: 'ROOT_CAUSE_REFUTED', verdict_reason: '证据不支持根因' }
-      return { route: 'APPROVE', verdict_reason: '通过' }
+      if (reviews === 1) return { route: 'ROOT_CAUSE_REFUTED', verdict_reason: '证据不支持根因', ...DIAG_VERIFY }
+      return { route: 'APPROVE', verdict_reason: '通过', ...DIAG_VERIFY }
     },
     修复: { route: 'FIXED', summary: '按新根因修复', changed: 'b.js' },
-    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿' },
+    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿', ...DIAG_VERIFY },
     收口: { status: 'DELIVERED', summary: 'done', followups: '' },
   })
   assert.equal(result.status, 'DONE')
@@ -91,7 +93,7 @@ test('额度耗尽：WAITING_HUMAN + MAX_ROUNDS_REACHED，审核原结果保留'
   const { result } = await runEngine(diagnoseBp, {
     缺陷诊断: { route: 'DIAGNOSED', root_cause: '空指针', evidence: '复现栈', verified_head: 'h1' },
     修复: { route: 'FIXED', summary: '补判空', changed: 'a.js' },
-    审核: { route: 'FIX_ISSUES', verdict_reason: '未覆盖边界' },
+    审核: { route: 'FIX_ISSUES', verdict_reason: '未覆盖边界', ...DIAG_VERIFY },
   })
   assert.equal(result.status, 'WAITING_HUMAN')
   assert.equal(result.reason, 'MAX_ROUNDS_REACHED')
@@ -113,12 +115,12 @@ test('回归失败退修复：消耗 1 点额度，修改后重新审核并回�
     },
     审核: () => {
       reviewCount += 1
-      return { route: 'APPROVE', verdict_reason: '通过' }
+      return { route: 'APPROVE', verdict_reason: '通过', ...DIAG_VERIFY }
     },
     回归验证: () => {
       regressions += 1
-      if (regressions === 1) return { route: 'FIX_ISSUES', verdict_reason: '引入新问题', regression_evidence: '回归红' }
-      return { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿' }
+      if (regressions === 1) return { route: 'FIX_ISSUES', verdict_reason: '引入新问题', regression_evidence: '回归红', ...DIAG_VERIFY }
+      return { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿', ...DIAG_VERIFY }
     },
     收口: { status: 'DELIVERED', summary: 'done', followups: '' },
   })

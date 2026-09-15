@@ -205,6 +205,9 @@
             },
             "verified_head": {
               "type": "string"
+            },
+            "candidate_sha256": {
+              "type": "string"
             }
           },
           "required": [
@@ -213,7 +216,8 @@
             "summary",
             "blockers",
             "verified_branch",
-            "verified_head"
+            "verified_head",
+            "candidate_sha256"
           ],
           "additionalProperties": false
         },
@@ -286,6 +290,9 @@
             },
             "verified_head": {
               "type": "string"
+            },
+            "candidate_sha256": {
+              "type": "string"
             }
           },
           "required": [
@@ -294,7 +301,8 @@
             "reason",
             "evidence",
             "verified_branch",
-            "verified_head"
+            "verified_head",
+            "candidate_sha256"
           ],
           "additionalProperties": false
         },
