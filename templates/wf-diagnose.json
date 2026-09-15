@@ -13,6 +13,20 @@
       "profile": "diagnose",
       "label": "缺陷诊断",
       "goal": "从冻结 Source 开始诊断缺陷：以原始 feedback signal 为线索，先复现、再定位根因，产出根因结论与证据链（含 verified_head 锚定的复现输入与观察输出），写入 `diagnosis-report.md`。证据不足且不可复现时输出 BLOCKED（不猜根因，如实写明缺失的证据与复现尝试）；根因明确则输出 DIAGNOSED。最终回复只输出本节点 schema 对应 JSON。",
+      "inputs": [
+        {
+          "name": "refuted_by_review",
+          "from": "$.results.review.verdict_reason",
+          "required": true,
+          "default": "（首次诊断：尚无审核反证）"
+        },
+        {
+          "name": "refuted_by_regression",
+          "from": "$.results.regression.verdict_reason",
+          "required": true,
+          "default": "（首次诊断：尚无回归反证）"
+        }
+      ],
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -53,6 +67,36 @@
       "profile": "dev",
       "label": "修复",
       "goal": "只针对诊断结论（`diagnosis-report.md`）的根因修复，以原始 feedback signal 为验收基准做最小必要修改，不得顺手扩大范围；修复必须可被证据链解释（修改点与根因对应）。外部条件无法安全继续时输出 BLOCKED；否则输出 FIXED。将修复交接写入 `fix-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "inputs": [
+        {
+          "name": "diagnosis_root_cause",
+          "from": "$.results.diagnose.root_cause",
+          "required": true
+        },
+        {
+          "name": "diagnosis_evidence",
+          "from": "$.results.diagnose.evidence",
+          "required": true
+        },
+        {
+          "name": "diagnosis_report",
+          "from": "$.results.diagnose.verified_head",
+          "artifact": "diagnosis-report.md",
+          "required": true
+        },
+        {
+          "name": "review_feedback",
+          "from": "$.results.review.verdict_reason",
+          "required": true,
+          "default": "（首次进入修复：尚无审核反馈）"
+        },
+        {
+          "name": "regression_feedback",
+          "from": "$.results.regression.verdict_reason",
+          "required": true,
+          "default": "（首次进入修复：尚无回归反馈）"
+        }
+      ],
       "output": {
         "outcomePath": "$.route",
         "schema": {
