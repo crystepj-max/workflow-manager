@@ -29,6 +29,13 @@ const runEngine = (bp, table, args = {}) => {
 }
 const callsOf = (run, label) => run.agentCalls.filter((c) => c.label === label)
 
+// LOC-026 起，verifyBranch 节点（建设 review/test、诊断 review/regression）的 output.schema.required
+// 含 verified_branch / verified_head / candidate_sha256，运行时按 expectedBranch = A.work_branch ||
+// ('dev2/' + (A.taskId || 'task')) 校验。以下夹具均是无 workspace 的旧形态：candOk 闸门不生效，
+// 但 schema 必填仍要求显式给出，故统一按默认分支 dev2/task 补齐。
+const DEV_BRANCH = 'dev2/task'
+const CAND = 'handoff-candidate'
+
 // ---------- 声明校验（编译期门） ----------
 
 test('LOC-024 三个模板 inputs 声明通过校验，wf-explore 维持旧输入模式', () => {
@@ -271,10 +278,10 @@ test('AC-02 诊断修复收到对应 diagnosis 的根因与证据；FIX_ISSUES �
     修复: () => { fixes += 1; return { route: 'FIXED', summary: '第' + fixes + '次修复', changed: 'a.js' } },
     审核: () => {
       reviews += 1
-      if (reviews === 1) return { route: 'FIX_ISSUES', verdict_reason: 'REVIEW-FIX-R1' }
-      return { route: 'APPROVE', verdict_reason: '通过' }
+      if (reviews === 1) return { route: 'FIX_ISSUES', verdict_reason: 'REVIEW-FIX-R1', verified_branch: DEV_BRANCH, verified_head: 'review-h1', candidate_sha256: CAND }
+      return { route: 'APPROVE', verdict_reason: '通过', verified_branch: DEV_BRANCH, verified_head: 'review-h2', candidate_sha256: CAND }
     },
-    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿' },
+    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿', verified_branch: DEV_BRANCH, verified_head: 'regression-h1', candidate_sha256: CAND },
     收口: { status: 'DELIVERED', summary: 'done', followups: '' },
   })
   assert.equal(run.result.status, 'DONE')
@@ -297,11 +304,11 @@ test('AC-02 证据推翻根因回诊断：重诊收到触发返工的反证；�
     },
     审核: () => {
       reviews += 1
-      if (reviews === 1) return { route: 'ROOT_CAUSE_REFUTED', verdict_reason: 'REFUTE-R1' }
-      return { route: 'APPROVE', verdict_reason: '通过' }
+      if (reviews === 1) return { route: 'ROOT_CAUSE_REFUTED', verdict_reason: 'REFUTE-R1', verified_branch: DEV_BRANCH, verified_head: 'review-h1', candidate_sha256: CAND }
+      return { route: 'APPROVE', verdict_reason: '通过', verified_branch: DEV_BRANCH, verified_head: 'review-h2', candidate_sha256: CAND }
     },
     修复: { route: 'FIXED', summary: '按新根因修复', changed: 'b.js' },
-    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿' },
+    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿', verified_branch: DEV_BRANCH, verified_head: 'regression-h1', candidate_sha256: CAND },
     收口: { status: 'DELIVERED', summary: 'done', followups: '' },
   })
   assert.equal(run.result.status, 'DONE')
@@ -321,13 +328,13 @@ test('AC-02/AC-04 建设返工：dev 收到触发本轮的 review/test 反馈；
     开发: () => { devs += 1; return { route: 'READY', summary: '实现S' + devs, self_check: '自检' + devs } },
     收敛审查: () => {
       reviews += 1
-      if (reviews === 1) return { route: 'RETURN_DEV', verdict: 'REQUEST_CHANGES', summary: '审查S1', blockers: 'REVIEW-R1-BLOCKERS', verified_branch: 'wb', verified_head: 'hh1' }
-      return { route: 'APPROVE', verdict: 'APPROVE', summary: '审查S2-APPROVE', blockers: '无', verified_branch: 'wb', verified_head: 'hh2' }
+      if (reviews === 1) return { route: 'RETURN_DEV', verdict: 'REQUEST_CHANGES', summary: '审查S1', blockers: 'REVIEW-R1-BLOCKERS', verified_branch: 'wb', verified_head: 'hh1', candidate_sha256: CAND }
+      return { route: 'APPROVE', verdict: 'APPROVE', summary: '审查S2-APPROVE', blockers: '无', verified_branch: 'wb', verified_head: 'hh2', candidate_sha256: CAND }
     },
     测试: () => {
       tests += 1
-      if (tests === 1) return { route: 'RETURN_DEV', result: 'FAILED', reason: 'TEST-R1-REASON', evidence: 'TEST-R1-EVID', verified_branch: 'wb', verified_head: 'hh3' }
-      return { route: 'PASS', result: 'PASSED', reason: '通过', evidence: 'TEST-R2-EVID', verified_branch: 'wb', verified_head: 'hh4' }
+      if (tests === 1) return { route: 'RETURN_DEV', result: 'FAILED', reason: 'TEST-R1-REASON', evidence: 'TEST-R1-EVID', verified_branch: 'wb', verified_head: 'hh3', candidate_sha256: CAND }
+      return { route: 'PASS', result: 'PASSED', reason: '通过', evidence: 'TEST-R2-EVID', verified_branch: 'wb', verified_head: 'hh4', candidate_sha256: CAND }
     },
     'UAT 准备': { route: 'READY_FOR_HUMAN', summary_for_human: 'S4H', why: 'W', current_state: 'C', details: 'D' },
   }, { work_branch: 'wb' })
