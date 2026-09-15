@@ -38,6 +38,11 @@ return {
       if (value === null || value === undefined) return value
       return typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value))
     }
+    // 磁盘回载字段守卫（LOC-029 顺带收敛 hydrate 三元链）：类型不符取默认值
+    const asStr = (v, d) => (typeof v === 'string' ? v : d)
+    const asNum = (v, d) => (typeof v === 'number' ? v : d)
+    const asObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null)
+    const asArr = (v, f) => (Array.isArray(v) ? v.filter(f || ((x) => x && typeof x === 'object')) : [])
 
     // ── 双模式注册：动态会话 = harness.handle；静态组合包 = webServer 前缀路由 ──
     // 必须用 typeof 探测未声明标识符：静态 IIFE 无 harness 全局，直接读会 ReferenceError。
@@ -972,29 +977,29 @@ return {
         : { state: 'FAILED', reason: logicalReason('RECORD_CORRUPTED', 'lifecycle 缺失或非法') }
       const rec = {
         logical_run_id: id,
-        schema: typeof data.schema === 'number' ? data.schema : LOGICAL_RUN_SCHEMA,
-        task_id: typeof data.task_id === 'string' ? data.task_id : '',
-        template_id: typeof data.template_id === 'string' ? data.template_id : '',
-        title: typeof data.title === 'string' ? data.title : '',
-        derived_from: typeof data.derived_from === 'string' ? data.derived_from : null,
-        created_at: typeof data.created_at === 'number' ? data.created_at : null,
-        updated_at: typeof data.updated_at === 'number' ? data.updated_at : null,
+        schema: asNum(data.schema, LOGICAL_RUN_SCHEMA),
+        task_id: asStr(data.task_id, ''),
+        template_id: asStr(data.template_id, ''),
+        title: asStr(data.title, ''),
+        derived_from: asStr(data.derived_from, null),
+        created_at: asNum(data.created_at, null),
+        updated_at: asNum(data.updated_at, null),
         lifecycle: lc,
         terminal: data.terminal === true || LIFECYCLE_TERMINAL.indexOf(lc.state) >= 0,
-        completion: data.completion && typeof data.completion === 'object' ? data.completion : null,
-        segments: Array.isArray(data.segments) ? data.segments.filter((s) => s && typeof s === 'object' && typeof s.run_id === 'string' && s.run_id) : [],
-        snapshots: Array.isArray(data.snapshots) ? data.snapshots.filter((s) => s && typeof s === 'object') : [],
-        node_attempts: Array.isArray(data.node_attempts) ? data.node_attempts.filter((s) => s && typeof s === 'object') : [],
-        business_outcomes: data.business_outcomes && typeof data.business_outcomes === 'object' && !Array.isArray(data.business_outcomes) ? data.business_outcomes : {},
-        guidance: Array.isArray(data.guidance) ? data.guidance.filter((g) => g && typeof g === 'object') : [],
-        control_events: Array.isArray(data.control_events) ? data.control_events.filter((e) => e && typeof e === 'object') : [],
-        baseline_revisions: Array.isArray(data.baseline_revisions) ? data.baseline_revisions.filter((r) => r && typeof r === 'object') : [],
+        completion: asObj(data.completion),
+        segments: asArr(data.segments, (s) => s && typeof s === 'object' && typeof s.run_id === 'string' && s.run_id),
+        snapshots: asArr(data.snapshots),
+        node_attempts: asArr(data.node_attempts),
+        business_outcomes: asObj(data.business_outcomes) || {},
+        guidance: asArr(data.guidance),
+        control_events: asArr(data.control_events),
+        baseline_revisions: asArr(data.baseline_revisions),
         baseline_applied_upto: Number(data.baseline_applied_upto) || 0,
-        last_engine_error: typeof data.last_engine_error === 'string' ? data.last_engine_error : null,
-        pause_state: data.pause_state && typeof data.pause_state === 'object' ? data.pause_state : null,
-        pause_resume: data.pause_resume && typeof data.pause_resume === 'object' ? data.pause_resume : null,
-        formal_records: data.formal_records && typeof data.formal_records === 'object' && !Array.isArray(data.formal_records) ? data.formal_records : null,
-        workspace: data.workspace && typeof data.workspace === 'object' ? data.workspace : null,
+        last_engine_error: asStr(data.last_engine_error, null),
+        pause_state: asObj(data.pause_state),
+        pause_resume: asObj(data.pause_resume),
+        formal_records: asObj(data.formal_records),
+        workspace: asObj(data.workspace),
       }
       logicalRuns.set(id, rec)
       for (const s of rec.segments) if (s.run_id) logicalRunByEngineRun.set(s.run_id, id)
@@ -1365,6 +1370,19 @@ return {
     // 恢复现场从 [pw-ckpt] 检查点行重建（引擎不回传 results，宿主自建）；无检查点=
     // 降级，恢复要求人工指定 entry，不猜。
     const segmentCtrls = new Map() // 引擎运行 id → AbortController（段取消）
+    // LOC-029 逐次 attempt 提交：编译脚本在每次真实调用前后输出 [vwf-attempt] 行，
+    // 宿主据此向 Records Store 逐次提交执行记录并在段收尾按「确认 → 回填节点最新索引」
+    // 固定顺序推进。编排逻辑在 scripts/attempt-ledger.cjs（dist 内核，不占 dynamic
+    // 闭包载荷预算）；内核缺失（未随 dist 部署）时回退既有段末扫描行为。
+    let attkP = null
+    const attk = () => (attkP = attkP || loadDist('attempt-ledger.cjs').then((m) => m.create({
+      call: recordsHostCall,
+      lrecOf: (id) => {
+        const lrId = logicalRunByEngineRun.get(String(id))
+        return lrId ? logicalRuns.get(lrId) : null
+      },
+      snapOf: activeSnapshot,
+    })))
     // Safe Pause 的检查点观察：仅 action=pause 等待检查点；interrupt 即时路径不经此。
     // c='$end' 的检查点代表图已走完（随后正常收束走 control_voided），不得在其上中止。
     function maybeAbortAtCheckpoint(engineRunId, message) {
@@ -1487,6 +1505,7 @@ return {
     ctx.on('workflow/log', (info, message) => {
       onRun(info.id, (rec) => pushLog(rec, message))
       maybeAbortAtCheckpoint(info.id, message)
+      attk().then((t) => t.line(info.id, message)).catch(() => { /* 内核缺失：段末扫描回退 */ })
     })
     ctx.on('workflow/agent-start', (info, agent) => onRun(info.id, (rec) => rec.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' })))
     // 按 seq 精确匹配：pipeline 并发下 agent-start/agent-end 可能交错到达
@@ -1720,7 +1739,8 @@ return {
     registerRpc('vwf.records.list', async (a) => {
       const id = String((a && a.logical_run_id) || '')
       if (!id) return fail('缺少 logical_run_id')
-      return recordsHostCall('list', { logical_run_id: id })
+      // LOC-029：可选 node / attempt_id 过滤——按 Run/Node/Attempt 获取逐次记录
+      return recordsHostCall('list', { logical_run_id: id, node: a && a.node, attempt_id: a && a.attempt_id })
     })
     registerRpc('vwf.records.get', async (a) => {
       const id = String((a && a.logical_run_id) || '')
@@ -2402,6 +2422,8 @@ return {
             rerunRec.workflowId = logicalRec.template_id
             live.add(rerunRunId)
             persist(rerunRunId)
+            const freshWs = fresh.ok && fresh.workspace ? fresh.workspace : ws
+            attk().then((t) => t.setWs(rerunRunId, freshWs)).catch(() => {})
             onRun(outerRunId, (r) => { r.supersededBy = rerunRunId })
             appendLogicalSegment(logicalRec, rerunRunId, 'integration_gate_rerun')
             logicalSetState(logicalRec, 'RUNNING', null)
@@ -2421,11 +2443,13 @@ return {
             if (rerunResult && rerunResult.error) onRun(rerunRunId, (r) => { r.error_detail = String(rerunResult.error).slice(0, 500) })
             endLogicalSegment(logicalRec, rerunRunId, rerunCanon || String((rerunResult && rerunResult.stopReason) || ''))
             const rerunResults = rerunValue && typeof rerunValue.results === 'object' && rerunValue.results ? rerunValue.results : null
+            // LOC-029：重跑段同样先结算逐次提交；无逐次事件（旧冻结脚本）走扫描回退
+            const attRerun = await attk().then((t) => t.settle(logicalRec, rerunRunId, logicalRec.segments.length)).catch(() => null)
             const beforeKeys = new Set(Object.keys(rerunSeed))
-            recordNodeAttempts(logicalRec, dsl, beforeKeys, rerunResults, rerunValue && rerunValue.control_event)
+            if (!attRerun) recordNodeAttempts(logicalRec, dsl, beforeKeys, rerunResults, rerunValue && rerunValue.control_event)
             const trans2 = logicalTransitionFor(rerunCanon, rerunResult && rerunResult.stopReason, rerunValue)
             if (trans2) logicalSetState(logicalRec, trans2.state, trans2.reason)
-            if (rerunResults) {
+            if (rerunResults && !attRerun) {
               const newKeys = Object.keys(rerunResults).filter((k) => !beforeKeys.has(k))
               if (newKeys.length) {
                 const entries = nodeRecordEntries(wsIdentity, dsl, rerunResults, newKeys, logicalRec.segments.length, fresh.ok && fresh.workspace ? fresh.workspace : ws, activeSnapshot(logicalRec), rerunValue && rerunValue.control_event)
@@ -2805,6 +2829,8 @@ return {
         // 启动边界自登记（workflow/start 事件不带 taskId）；续跑把同 taskId 前序门禁记录标记接管
         const runId = String(run.id)
         if (segCtl) segmentCtrls.set(runId, segCtl)
+        // 逐次 Proof 需要段 workspace 绑定（LOC-029）：与 workspace 生命周期同段登记
+        attk().then((t) => t.setWs(runId, ws)).catch(() => {})
         const rec = ensureRun(runId)
         rec.taskId = taskId
         rec.workflowId = String(args.templateId || v.sanitized.id || '')
@@ -2853,11 +2879,14 @@ return {
           logicalRec.pause_state = null
           endLogicalSegment(logicalRec, runId, pauseAction === 'interrupt' ? 'CANCELLED_INTERRUPT' : 'CANCELLED_PAUSE')
           // #79 逐节点语义在取消段不缺位：检查点 results（段首基线之后新完成的节点）
-          // 照常入档 node_attempts / business_outcomes（含溯源与结果提取）
-          recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, ck.results, null)
+          // 照常入档 node_attempts / business_outcomes（含溯源与结果提取）。
+          // LOC-029：新脚本段先结算逐次提交（确认 → 回填索引），旧脚本走段末扫描回退。
+          const attPause = await attk().then((t) => t.settle(logicalRec, runId, logicalRec.segments.length)).catch(() => null)
+          if (!attPause) recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, ck.results, null)
           // 中断语义：进行中/待执行的检查点节点 Attempt 记 INTERRUPTED（不产生正式成功
-          // 结果，恢复后整体重跑）；降级现场（无检查点）无法定位节点，登记为已知限制
-          if (pauseAction === 'interrupt' && ck.entry) {
+          // 结果，恢复后整体重跑）；降级现场（无检查点）无法定位节点，登记为已知限制。
+          // 逐次提交段由 Store close 已把进行中 attempt 记为 interrupted，不重复入档。
+          if (pauseAction === 'interrupt' && ck.entry && !attPause) {
             const snap = activeSnapshot(logicalRec)
             const eff = effectiveProviderModel(logicalRec, ck.entry)
             logicalRec.node_attempts.push({
@@ -2883,6 +2912,7 @@ return {
         // #79 逻辑运行收尾：八态映射 + 完成类型镜像 + 节点实际修订/模型/业务结果
         // 记录 + 工作区上下文入档。Lifecycle 闸门不改写专业结果（R7）。
         let gateOutcome = null
+        let evidenceFailed = false
         if (logicalRec) {
           const value = result && result.value
           endLogicalSegment(logicalRec, runId, canon || String((result && result.stopReason) || ''))
@@ -2900,8 +2930,16 @@ return {
               }
             }
           }
-          recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, value && value.results, value && value.control_event)
-          const trans = logicalTransitionFor(canon, result && result.stopReason, value)
+          // LOC-029 完成顺序：保存结果（脚本）→ 逐次提交确认（Store）→ 更新最新索引
+          // 与检查点 → 推进。确认失败的段 fail-closed：保留专业结论与既有证据，
+          // 但不宣布完成、不重签 Proof，恢复后重放/续跑按提交键幂等补齐。
+          const att = await attk().then((t) => t.settle(logicalRec, runId, logicalRec.segments.length)).catch(() => null)
+          evidenceFailed = !!(att && att.x.length)
+          if (!att) recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, value && value.results, value && value.control_event)
+          if (evidenceFailed) {
+            logicalSetState(logicalRec, 'FAILED', logicalReason('EVIDENCE_COMMIT_FAILED', att.x.join(';').slice(0, 300)))
+          }
+          const trans = evidenceFailed ? null : logicalTransitionFor(canon, result && result.stopReason, value)
           if (trans) logicalSetState(logicalRec, trans.state, trans.reason)
           // #80：基线修订在恢复段正常收束（脚本权威终态，含 WAITING_HUMAN）时消费——
           // ENGINE_ERROR/取消不消费，回跳会在下次恢复时重新发生
@@ -2914,8 +2952,9 @@ return {
           }
           // LOC-008：节点收尾产物经 vwf.records.commit 单一通道入 Formal Records
           // Store（非阻断）。段号与 recordNodeAttempts 同源；摘要互相引用随之刷新。
+          // LOC-029：逐次提交段已在调用时入 Store，跳过段末扫描（避免重复 Revision）。
           const resultsNow = value && typeof value.results === 'object' && value.results ? value.results : null
-          if (resultsNow) {
+          if (resultsNow && !att) {
             const newKeys = Object.keys(resultsNow).filter((k) => !beforeResultKeys.has(k))
             if (newKeys.length) {
               const entries = nodeRecordEntries(logicalRec.logical_run_id, v.sanitized, resultsNow, newKeys, logicalRec.segments.length, ws, activeSnapshot(logicalRec), value.control_event)
@@ -2925,7 +2964,8 @@ return {
           await refreshWorkspaceContext(logicalRec, wsIdentity)
           // LOC-017 集成闸门（B2）：Git ISOLATED_WRITE 运行在人工等待结算前自动执行。
           // 放行 → 维持人工等待；目标前进 → 同一逻辑运行内自动同步+重跑；失败 → BLOCKED。
-          if (canon === 'WAITING_HUMAN' && ws && ws.workspace_mode === 'ISOLATED_WRITE') {
+          // 证据提交失败的段不得重签 Proof（fail-closed），先恢复证据再过闸门。
+          if (canon === 'WAITING_HUMAN' && !evidenceFailed && ws && ws.workspace_mode === 'ISOLATED_WRITE') {
             gateOutcome = await runIntegrationGate({ logicalRec, ws, wsIdentity, dsl: v.sanitized, scriptArgs, meta: c.meta, execScript, parent, segCtl, resultsNow, taskId, outerRunId: runId, engine: engineNow })
             if (gateOutcome && gateOutcome.blocked) {
               logicalSetState(logicalRec, 'BLOCKED', logicalReason(gateOutcome.code, gateOutcome.message))
@@ -2950,7 +2990,8 @@ return {
         if (ws) {
           const blockedGate = !!(gateOutcome && gateOutcome.blocked)
           const finalCanon = gateOutcome && gateOutcome.finalCanon !== undefined ? gateOutcome.finalCanon : canon
-          const lc = blockedGate ? 'BLOCKED' : lifecycleFor(finalCanon, (gateOutcome && gateOutcome.finalStopReason) || (result && result.stopReason))
+          // LOC-029：证据提交失败的段不以完成态放行 workspace
+          const lc = blockedGate ? 'BLOCKED' : (evidenceFailed ? 'FAILED' : lifecycleFor(finalCanon, (gateOutcome && gateOutcome.finalStopReason) || (result && result.stopReason)))
           if (lc) await markWorkspaceLifecycle(wsIdentity, lc)
         }
         const outRunId = gateOutcome && gateOutcome.finalRunId ? gateOutcome.finalRunId : runId
