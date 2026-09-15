@@ -180,7 +180,7 @@
       "profile": "test",
       "label": "回归验证",
       "verifyBranch": true,
-      "goal": "以原始 feedback signal 为第一回归输入验证修复：缺陷场景不再复现，且既有行为无回归（运行与修改相关的既有测试）。结论四选一：PASS（回归通过，交收口）/ FIX_ISSUES（修复未生效或引入新问题，退修复）/ ROOT_CAUSE_REFUTED（回归证据推翻根因结论，回缺陷诊断）/ BLOCKED。不得修改被测代码。将回归证据写入 `regression-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "以原始 feedback signal 为第一回归输入验证修复：缺陷场景不再复现，且既有行为无回归（运行与修改相关的既有测试）。回归产物以本节点 output 声明的 `regression-report.md` 为准，不套用其他模板的报告名；发现业务源码合并冲突时不自行解决，记录后回修复节点。结论四选一：PASS（回归通过，交收口）/ FIX_ISSUES（修复未生效或引入新问题，退修复）/ ROOT_CAUSE_REFUTED（回归证据推翻根因结论，回缺陷诊断）/ BLOCKED。不得修改被测代码。将回归证据写入 `regression-report.md`；最终回复只输出本节点 schema 对应 JSON。",
       "output": {
         "outcomePath": "$.route",
         "schema": {
