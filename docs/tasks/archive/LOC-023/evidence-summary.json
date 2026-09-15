@@ -1,0 +1,75 @@
+{
+  "task_id": "LOC-023",
+  "run_id": "loc-023-r1",
+  "task_name": "工作区治理口径统一（workspace-gate）",
+  "branch": "dev-loc-023-r1",
+  "status": "等待验收",
+  "decision": "conditional_pass",
+  "decided_by": "松哥",
+  "decided_at": "2026-09-15T15:07:22Z",
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a2.json",
+      "created_at": "2026-09-14T07:20:28.170Z",
+      "produced_by": "workbuddy-loc023-requirements",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a2.json",
+      "created_at": "2026-09-14T07:20:28.239Z",
+      "produced_by": "workbuddy-loc023-requirements"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a3.json",
+      "created_at": "2026-09-14T08:33:35.360Z",
+      "produced_by": "workbuddy-loc023-dev",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a9.json",
+      "created_at": "2026-09-14T11:42:34.623Z",
+      "produced_by": "cursor-loc023-review",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a9.json",
+      "created_at": "2026-09-14T11:42:34.689Z",
+      "produced_by": "cursor-loc023-test",
+      "summary": {
+        "verdict": "pass",
+        "environment": "异构执行体：Cursor Agent（cursor-agent --mode plan 只读）在任务工作区独立执行；原始输出留档 .agent-runs/loc-023-r1/test-output-cursor-attempt8-raw.log。produced_by=cursor-loc023-test，独立于开发与审查会话。 映射来源：cursor-loc023-test 独立会话原产出 9 条聚合项（原文见 payloads/test_proof.v8-aggregated-9items.json 与 test-output-cursor-attempt8-raw.log），逐条确定性映射到基线 12 条：V-1←项7；V-2←项1；V-3/V-4/V-5←项2；V-6/V-7←项4；V-8←项5；V-9←项3；V-10/V-11/V-12←项8；项6（A 类可复现性复核）与项9（回归与边界）不属 V-1~V-12，作为附加证据保留在原始产出中。逐条判定均为 pass。"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a9.json",
+      "created_at": "2026-09-15T15:07:22.825Z",
+      "produced_by": "workbuddy-loc023-uat",
+      "summary": {
+        "status": "decided",
+        "decision": "conditional_pass",
+        "decided_by": "松哥",
+        "decided_at": "2026-09-15T15:07:22Z",
+        "verified_branch": "dev-loc-023-r1",
+        "verified_head": "2e7b5dd789c9ee24f79bad496ecbfc545c579c12"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-023-r1",
+    "file_count": 54,
+    "total_bytes": 297245
+  },
+  "generated_at": "2026-09-15T15:08:14.301Z"
+}

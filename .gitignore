@@ -10,6 +10,11 @@
 # 依赖
 node_modules/
 
+# 依赖安装副产物：本仓库不采用 lockfile（历史上从未入库），而 AGENTS.md 要求的首次依赖
+# 安装会在每个全新工作区留下未跟踪的 package-lock.json —— 未忽略时会让「收口自动删除
+# 工作区」在正常安装流程下被 git 以「contains modified or untracked files」拒绝（LOC-023）。
+package-lock.json
+
 # 会话脚手架与参考副本（不入库）
 .scratch/
 

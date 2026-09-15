@@ -3,11 +3,19 @@
 // 权威：docs/design/workspace-directory-convention.md（通用标准模板 v1.0）
 //       docs/design/workspace-directory-convention-instance-workflow-manager.md（本仓库实例）
 //
-// 用法（仓库根目录）：
+// 用法（主检出或任一链接工作树内均可）：
 //   node scripts/validate-workspace.mjs [--repo <path>] [--json] [--warn-only]
 //
 // 铁律：本脚本**全程只读**。只调用 git 的只读子命令与本地文件读取，
 //       不做任何删除、移动、改名、写入、prune、worktree remove。
+//
+// 两个角色必须分开（LOC-023 修正；此前二者共用同一个 root，导致在链接工作树内运行
+// 时把主检出误判为治理区工作区，并读到该分支的旧登记册快照）：
+//   · 锚点 anchor —— **数据来源**：登记册、归档目录、过程产物根只有一份，永远在主检出，
+//     由 `git rev-parse --git-common-dir` 的父目录解析（约定 §1.6；唯一入口 workspace-paths.mainCheckout）。
+//   · 上下文 repo —— **调用现场**：由 `--repo` 指定（默认脚本上两级）。仅决定「从哪个检出观察」。
+// 被校验集合 = `git worktree list` 去掉锚点本身，其余全部纳入——**含调用方自身所在的工作树**，
+// 使得「在工作树内运行」既能与主检出侧得出同一组结论，也能校验该工作树自己。
 //
 // 范围分类：约定对「人工/脚本创建」的工作区与过程产物为强制（治理区），
 //          对「外部运行时/编辑器」创建的工作区为接口约定（例外区，计警告不计失败）。
@@ -16,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { mainCheckout } from './workspace-paths.mjs';
 
 // —— 本仓库取值（对应实例化说明 §1）——
 const PROCESS_ARTIFACT_DIRS = ['.agent-runs', '.task-runs']; // 过程产物根（现行 + 目标）
@@ -44,6 +53,7 @@ const EXEMPT_PATH_SEGMENTS = [
   '.dsh-workflow-dev/workspaces',
   '.dsh-workflow-loc001/workspaces',
   '.cursor/worktrees',
+  '.codex/worktrees',
 ];
 
 const args = process.argv.slice(2);
@@ -54,7 +64,21 @@ const opt = (name) => {
 const asJson = args.includes('--json');
 const warnOnly = args.includes('--warn-only');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(opt('--repo') || path.join(__dirname, '..'));
+
+// 上下文（调用现场）：决定「从哪个检出观察」；默认脚本上两级
+const repo = path.resolve(opt('--repo') || path.join(__dirname, '..'));
+
+// 锚点（数据来源）：登记册 / 归档 / 过程产物根所在处，永远是主检出。
+// 解析失败（非 git 仓库）时才退回上下文，保证后续能给出明确报错。
+let anchor = repo;
+try {
+  anchor = mainCheckout(repo);
+} catch {
+  anchor = repo;
+}
+
+// 数据读写的唯一根 = 锚点（不是上下文）
+const root = anchor;
 
 let failures = 0;
 let warnings = 0;
@@ -94,7 +118,16 @@ const git = (a, cwd = root) => {
 };
 
 const homedir = process.env.HOME || '';
-const samePath = (a, b) => path.resolve(a) === path.resolve(b);
+// 路径相等判定：先按字面解析比较，再按 realpath 比较——macOS 上 /var 与 /private/var
+// 互为软链，锚点（realpath 规范化）与 `git worktree list` 的字面路径可能只差这一层。
+const realOr = (p) => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
+const samePath = (a, b) => path.resolve(a) === path.resolve(b) || realOr(a) === realOr(b);
 
 // 工作区范围分类：治理区（强制） / 例外区（接口约定，计警告）
 const scopeOf = (p) => scopeOfPath(p, {
@@ -103,20 +136,23 @@ const scopeOf = (p) => scopeOfPath(p, {
   exemptPathSegments: EXEMPT_PATH_SEGMENTS,
 });
 
-// —— 采集：git worktree list --porcelain ——
-const porcelain = git(['worktree', 'list', '--porcelain']);
+// —— 采集：git worktree list --porcelain（登记表是仓库级的，从锚点读）——
+const porcelain = git(['worktree', 'list', '--porcelain'], root);
 if (porcelain === null) {
-  console.error('无法执行 git worktree list（不是 git 仓库？）');
+  console.error(`无法执行 git worktree list（不是 git 仓库？）：${root}`);
   process.exit(2);
 }
 const worktrees = parsePorcelain(porcelain);
 
-const mainWorktree = worktrees.find((w) => samePath(w.path, root)) || worktrees[0];
+// 被校验集合 = 全部工作区去掉锚点本身（主检出不是「工作区」）；
+// 其余全部纳入——**包括调用方自身所在的工作树**，否则在工作树内运行永远无法校验它自己。
+const anchorEntry = worktrees.find((w) => samePath(w.path, root));
 const linked = worktrees.filter((w) => !samePath(w.path, root));
 
 if (!asJson) {
-  console.log(`工作区校验（只读）— 仓库：${root}`);
-  console.log(`工作区登记：${worktrees.length} 条（含主检出）／链接工作区 ${linked.length} 个\n`);
+  console.log(`工作区校验（只读）— 锚点（主检出）：${root}`);
+  if (!samePath(repo, root)) console.log(`　　　　　　　　　 调用上下文：${repo}`);
+  console.log(`工作区登记：${worktrees.length} 条（含主检出 ${anchorEntry ? '1' : '0'} 条）／被校验工作区 ${linked.length} 个\n`);
 }
 
 // —— D-1a 工作区位置：禁止嵌套（红线）——
@@ -200,10 +236,22 @@ if (!asJson) {
 }
 
 // —— D-6 无漏网入库 ——
+// 取「锚点（主干交付物）∪ 调用上下文（当前检出）」的并集：
+//   · 只看锚点 → 在任务分支里运行会漏掉该分支自己的漏网；
+//   · 只看上下文 → 主检出侧与工作树侧结论会漂移。
+// 并集对两侧都是同一份「主干 + 现场」的可见范围，且保留合并前的自查能力。
 {
-  const tracked = (git(['ls-files']) || '').split('\n').filter(Boolean);
-  const leaked = tracked.filter((f) => PROCESS_ARTIFACT_DIRS.some((d) => f === d || f.startsWith(`${d}/`))
-    || f.startsWith('.scratch/'));
+  const seen = new Map();
+  for (const [label, cwd] of [['锚点', root], ['上下文', repo]]) {
+    const files = (git(['ls-files'], cwd) || '').split('\n').filter(Boolean);
+    for (const f of files) {
+      if (!seen.has(f)) seen.set(f, new Set());
+      seen.get(f).add(label);
+    }
+  }
+  const leaked = [...seen.entries()]
+    .filter(([f]) => PROCESS_ARTIFACT_DIRS.some((d) => f === d || f.startsWith(`${d}/`)) || f.startsWith('.scratch/'))
+    .map(([f, labels]) => `${f}  (见于：${[...labels].join('、')})`);
   record('D-6', '过程产物未入库', leaked.length === 0, leaked.length ? leaked : ['无漏网文件']);
 }
 
@@ -292,11 +340,28 @@ if (registry) {
     }
     record('D-10', `收口口径一致（已启用 ${withField.length} 条）`, bad.length === 0, bad.length ? bad : ['全部一致']);
   }
+  // V2 / R-8：凡 D-10 **无法核验**的终态任务都必须显式列出，不得以「全部一致」掩盖。
+  // 「无法核验」的完整定义 = 不满足 D-10 的核验前提（`branch_retained` 为布尔值 **且** 有分支记录），
+  // 因此两种形态都要报：
+  //   · 无分支记录（例：LOC-001 先于 Run 证据链机制落地，从未有分支）；
+  //   · 有分支记录但 `branch_retained` 非布尔值（例：早期合并路径未写该字段的任务）。
+  // 只按「无分支记录」判定会漏掉后者——那正是本任务要消灭的「静默跳过」同类缺口。
+  // 一律**不计失败**：没有可核验的口径就没有可判定的违例。按 R-9 只陈述事实，不伪造字段值。
+  const unverifiable = (registry.tasks || []).filter(
+    (t) => TERMINAL_STATUSES.includes(t.status) && !(typeof t.branch_retained === 'boolean' && t.branch),
+  );
+  if (unverifiable.length) {
+    note('D-10', `无法核验的终态任务（${unverifiable.length} 个：无分支记录，或 branch_retained 非布尔值）`,
+      unverifiable.map((t) => {
+        const why = !t.branch ? 'branch 为空——历史上未登记分支' : `branch_retained=${JSON.stringify(t.branch_retained)}——非布尔值，无保留口径可核`;
+        return `${t.task_id}（${t.status}）${why}，按 R-9 不伪造`;
+      }));
+  }
 }
 
 // —— 汇总 ——
 if (asJson) {
-  console.log(JSON.stringify({ root, failures, warnings, results }, null, 2));
+  console.log(JSON.stringify({ root, anchor, context: repo, failures, warnings, results }, null, 2));
 } else {
   console.log(`\n${failures === 0 ? '✅' : '❌'} 工作区校验${failures === 0 ? '通过' : `失败（${failures} 项）`}${warnings ? `；另有 ${warnings} 项警告（例外区接口约定）` : ''}`);
 }

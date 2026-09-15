@@ -589,7 +589,7 @@
       "source": "会话录入",
       "source_ref": "2026-09-13 LOC-019 收口发现：runbook §7.4 与 validate-workspace D-7 规则冲突（松哥指令立票）",
       "baseline": "V2",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": null,
       "env_group": null,
       "env_role": null,
@@ -597,14 +597,18 @@
       "branch": "dev-loc-023-r1",
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "PENDING",
+        "merged_at": "2026-09-15T15:08:14.303Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-22T15:08:14.303Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T02:31:54.017Z",
-      "updated_at": "2026-09-14T11:42:52.325Z",
-      "spec_path": ".scratch/LOC-023-workspace-gate/task-spec-V2.md"
+      "updated_at": "2026-09-15T15:08:14.303Z",
+      "spec_path": "docs/tasks/archive/LOC-023/task-spec-V2.md",
+      "leftovers": "优化意见（进下一轮定义）：① UAT-01 等「只能在合并后/收口后才能观测」的验收项，必须在验收清单中显式标注前置条件与执行时机（本轮实测踩坑）；② dsh/roles/closeout.md 仍写「确认归属后可用 --force」，与本轮 R-4「禁止 --force」冲突，须收敛；③ local-task-merge 的 prune 兜底缺单测断言。详见验收包 a9 的 feedback。"
     },
     {
       "task_id": "LOC-024",
