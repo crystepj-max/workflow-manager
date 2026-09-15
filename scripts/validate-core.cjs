@@ -630,6 +630,14 @@ function validateBlueprint(bp, opts) {
   })
   errors.push(...structure.errors)
 
+  // LOC-030：M2 受阻开关（可选声明）。声明即「自动返工额度耗尽 → BLOCKED（非终态、可恢复
+  // 受阻，不再挂人工决策）」；目前仅接受 'BLOCKED' 一个值——其余取值视为拼写错误，
+  // 宁可 loud-fail 也不静默按旧语义（额度耗尽 → WAITING_HUMAN）运行。
+  const maxRoundsExhausted = bp.control && bp.control.maxRoundsExhausted
+  if (maxRoundsExhausted !== undefined && maxRoundsExhausted !== null && maxRoundsExhausted !== 'BLOCKED') {
+    err('$.control.maxRoundsExhausted', 'maxRoundsExhausted 目前仅接受 "BLOCKED"（额度耗尽 → 可恢复受阻，M2），当前：' + JSON.stringify(maxRoundsExhausted))
+  }
+
   // 蓝图级业务规则
   const ids = {}
   bp.nodes.forEach((n) => { if (n && n.id) ids[n.id] = true })

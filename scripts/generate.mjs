@@ -96,6 +96,37 @@ function foldableNodes(bp) {
   return folds;
 }
 
+// ---------- LOC-030 统一受阻/完成生命周期：显式终止描述 ----------
+// 每条 outcome → $end 边生成 termination={business_outcome,lifecycle,reason_code,
+// resumable,resume_node,completion_type?}：技术执行段结束不再自动等于业务完成。
+// 语义派生口径（模板无需逐边声明）：
+// - BLOCKED（环境/资料/权限暂缺）→ BLOCKED 生命周期，可恢复（resume_node=触发节点）
+// - NEED_REDEFINE → 基线需重定义，不可原样恢复（保留旧 Run，重定义后派生新 Run）
+// - INSUFFICIENT（探索证据不足）→ 受控完成，completion_type 显式标注证据不足
+// - 其余 outcome → COMPLETED（完成映射有效性由宿主按 value.completion 二次校验）
+function terminationDescriptors(bp) {
+  const table = {};
+  (bp.edges || []).forEach((e) => {
+    if (!e || e.to !== '$end') return
+    const outcome = e.outcome
+    if (outcome === undefined || outcome === null || outcome === '') return
+    const from = e.from
+    if (!from || from === HUMAN_DECISION_ID) return
+    let t
+    if (outcome === 'NEED_REDEFINE') {
+      t = { business_outcome: 'NEED_REDEFINE', lifecycle: 'BLOCKED', reason_code: 'NEEDS_REDEFINE', resumable: false, resume_node: from }
+    } else if (outcome === 'BLOCKED') {
+      t = { business_outcome: 'BLOCKED', lifecycle: 'BLOCKED', reason_code: 'BUSINESS_BLOCKED', resumable: true, resume_node: from }
+    } else if (outcome === 'INSUFFICIENT') {
+      t = { business_outcome: 'INSUFFICIENT', lifecycle: 'COMPLETED', reason_code: 'COMPLETED', resumable: false, resume_node: from, completion_type: 'INSUFFICIENT' }
+    } else {
+      t = { business_outcome: String(outcome), lifecycle: 'COMPLETED', reason_code: 'COMPLETED', resumable: false, resume_node: from }
+    }
+    (table[from] = table[from] || {})[String(outcome)] = t
+  })
+  return table
+}
+
 // ---------- DSH 侧编译（契约 §4.2/§4.3，移植 host.js compileDsl + 增强） ----------
 // 统一编译器（候选一 T-IMP-12）：DSH 与 vwf 双入口的唯一翻译员。
 // 宿主侧 compileDsl 经管道消费本函数产物：一律现编译优先（与引擎契约同源），
@@ -145,6 +176,10 @@ export function compileBlueprint(bp, opts = {}) {
   const heteroReview = bp.nodes.find((n) => n && (n.id === 'review' || n.profile === 'review'));
   const hetero = heteroMode !== 'off' && heteroDev && heteroReview && models[heteroDev.id] && models[heteroReview.id];
   const autoReschedule = bp.onMaxRounds === 'auto-reschedule';
+  // LOC-030：M2 受阻开关（仅声明 control.maxRoundsExhausted='BLOCKED' 的模板生效，
+  // 当前即建设模板）：自动返工额度耗尽不再挂人工决策，而是 BLOCKED（可恢复受阻）并释放并发
+  const maxRoundsExhaustedBlocked = !!(bp.control && bp.control.maxRoundsExhausted === 'BLOCKED');
+  const terminations = terminationDescriptors(bp);
   // LOC-025 裁决一致性：仅声明了 output.consistency 的蓝图才注入路由前契约校验。
   const hasConsistencyDecl = Array.isArray(bp.nodes) && bp.nodes.some((n) => n && n.output && n.output.consistency);
   // 内置角色清单：opts 注入优先（测试用），否则读 manifest 并缓存
@@ -243,6 +278,10 @@ export function compileBlueprint(bp, opts = {}) {
     '  }',
     '}',
     'const FOLDS = ' + JSON.stringify(folds),
+    // LOC-030：显式终止描述表（节点 → outcome → termination）与 M2 受阻开关。
+    // 技术执行段结束 ≠ 业务完成：BLOCKED 非终态可恢复；完成必须带有效完成映射。
+    'const TERMINATIONS = ' + JSON.stringify(terminations),
+    'const MAX_ROUNDS_EXHAUSTED_BLOCKED = ' + (maxRoundsExhaustedBlocked ? 'true' : 'false'),
     // 内置角色清单（单一事实源 = dsh/roles/builtin-roles.json）：roleRef 据此决定内置/自定义读取优先级
     'const BUILTIN_ROLE_IDS = ' + JSON.stringify(builtinRoleIds),
     // 内置角色正文（#129 遗留项 2）：编译期内联，临时编译自包含；缺失时 roleRef 走读路径回退
@@ -539,6 +578,19 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (typeof type !== \'string\' || !type.trim()) return null',
     '  return { type: type, node: nodeId, path: path }',
     '}',
+    // LOC-030：终局终止描述查找（outcome → $end 时记录，循环结束后统一收束）
+    'function endDescriptor(nodeId, outcome, res) {',
+    '  const t = TERMINATIONS[nodeId] ? TERMINATIONS[nodeId][String(outcome)] : undefined',
+    '  if (!t) return null',
+    '  return { term: t, node: nodeId, outcome: res === undefined ? null : res }',
+    '}',
+    // LOC-030：受阻返回体（status=BLOCKED 非终态）：termination 显式描述 + blocked 现场
+    //（原因码/失败节点/已耗额度/未解决问题原样保留），不冒充成功也不挂人工决策。
+    'function blockedRun(term, failedNode, lastOutcome, extra) {',
+    '  const b = { reason_code: term.reason_code, business_outcome: term.business_outcome, resumable: term.resumable === true, resume_node: term.resume_node, failed_node: failedNode || null, last_outcome: lastOutcome === undefined ? null : lastOutcome }',
+    '  if (extra && typeof extra === \'object\') Object.assign(b, extra)',
+    '  return { status: \'BLOCKED\', taskId: TASK, round: round, results: results, history: history, completion: null, budgetUsed: budgetUsed, maxRounds: maxRounds, termination: term, blocked: b }',
+    '}',
     'const HD_ID = ' + JSON.stringify(HUMAN_DECISION_ID),
     'const HD_CONTROL = ' + JSON.stringify(HD_CONTROL_RESULTS),
     'const HD_PKG_REQUIRED = ' + JSON.stringify(HD_PACKAGE_REQUIRED),
@@ -668,6 +720,13 @@ export function compileBlueprint(bp, opts = {}) {
     'function consumeOrHalt(fromId, outcome, e) {',
     '  if (countsBudget(e) && budgetUsed >= maxRounds) {',
     '    history.push({ round: round, stage: fromId, from: fromId, to: e.to, outcome: e.outcome, countRound: true, halted: true, reason: \'MAX_ROUNDS_REACHED\' })',
+    '    if (MAX_ROUNDS_EXHAUSTED_BLOCKED) {',
+    '      // M2（LOC-030）：自动返工额度耗尽 → BLOCKED（可恢复受阻，恢复入口=返工目标节点），',
+    '      // 释放并发名额；人工退回后新一轮交付重置额度。未解决问题（触发节点原结果）原样保留。',
+    '      return blockedRun(',
+    '        { business_outcome: String(e.outcome), lifecycle: \'BLOCKED\', reason_code: \'AUTO_REWORK_EXHAUSTED\', resumable: true, resume_node: e.to },',
+    '        fromId, outcome, { rounds_used: budgetUsed, max_rounds: maxRounds })',
+    '    }',
     '    return haltWaitingHuman(fromId, outcome, \'MAX_ROUNDS_REACHED\', e)',
     '  }',
     '  recordFlow(fromId, e)',
@@ -920,6 +979,8 @@ export function compileBlueprint(bp, opts = {}) {
     'let visitSeq = 0',
     'let tbAttachKey = (TB_SNAP && typeof TB_SNAP.activation_key === \'string\' && TB_SNAP.activation_key) ? TB_SNAP.activation_key : null',
     // 历史兜底重建（未带快照的旧式续跑也不至于清零已耗技术预算）
+    // LOC-030：终局命中的 outcome → $end 终止描述（循环内记录，finishRun 统一收束）
+    'let endTerm = null',
     // LOC-024：节点执行台账（seq + 最新结果）与 resolved_inputs 清单（含逐节点输入模式标注）
     'let EXEC_SEQ = 0',
     'const EXEC_OF = {}',
@@ -974,6 +1035,11 @@ export function compileBlueprint(bp, opts = {}) {
     '    }',
     '    choiceEvent = choiceControlEvent(choice, String(edge.to))',
     '    current = edge.to',
+    // LOC-030（M2）：人工 REJECT = 退回重做，新一轮交付重置自动返工额度（可追溯入 history）
+    '    if (MAX_ROUNDS_EXHAUSTED_BLOCKED && choice === \'REJECT\') {',
+    '      budgetUsed = 0',
+    '      history.push({ round: round, stage: HD_ID, from: HD_ID, to: edge.to, outcome: choice, countRound: false, via: \'REJECT_RESET\' })',
+    '    }',
     '  }',
     '}',
     // LOC-031 显式提额：增量与原因必填并写入历史，禁止通用恢复清零（AC-03）
@@ -1217,6 +1283,7 @@ export function compileBlueprint(bp, opts = {}) {
     '    if (e.to === HD_ID) {',
     '      return translateRouteHalted({ status: \'ROUTE_HALTED\', reason: \'HUMAN_DECISION\', node: current }, res)',
     '    }',
+    '    if (e.to === \'$end\') endTerm = endDescriptor(current, e.outcome, res)',
     '    current = e.to',
     '    pwCk(current)',
     '    continue',
@@ -1247,9 +1314,18 @@ export function compileBlueprint(bp, opts = {}) {
     '  current = e.to',
     '  pwCk(current)',
     '}',
-    'const done = { status: \'DONE\', taskId: TASK, round: round, results: results, history: history, completion: completionOf(lastNode), budgetUsed: budgetUsed, maxRounds: maxRounds, technical_budget: technicalBudgetSnapshot(), input_mode: INPUT_MODE, resolved_inputs: RESOLVED_INPUTS }',
-    'if (choiceEvent) { done.decision_id = A.decision_id; done.user_choice = A.user_choice; done.control_event = choiceEvent }',
-    'return done',
+    // LOC-030：终局统一收束——受阻描述 → BLOCKED 返回体；完成描述 → DONE + termination
+    //（completion_type 缺省时以实际完成映射回填）；无描述（历史形态）保持原 DONE 契约。
+    'function finishRun() {',
+    '  const completion = completionOf(lastNode)',
+    '  const t = endTerm && endTerm.term ? endTerm.term : null',
+    '  if (t && t.lifecycle === \'BLOCKED\') return blockedRun(t, endTerm.node, endTerm.outcome, null)',
+    '  const done = { status: \'DONE\', taskId: TASK, round: round, results: results, history: history, completion: completion, budgetUsed: budgetUsed, maxRounds: maxRounds, technical_budget: technicalBudgetSnapshot(), input_mode: INPUT_MODE, resolved_inputs: RESOLVED_INPUTS }',
+    '  if (t) done.termination = (!t.completion_type && completion && completion.type) ? Object.assign({}, t, { completion_type: completion.type }) : t',
+    '  if (choiceEvent) { done.decision_id = A.decision_id; done.user_choice = A.user_choice; done.control_event = choiceEvent }',
+    '  return done',
+    '}',
+    'return finishRun()',
   );
   return { script: lines.join('\n'), folds };
 }
@@ -1287,7 +1363,8 @@ export function skillWrap(bp) {
     '   - `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` / `ENDED_NO_OUTCOME_EDGE` / `TECHNICAL_FAILURE`：呈原因（图缺陷/技术失败），人工介入后按需续跑。',
     '   - `ERROR`（`reason=INPUT_RESOLUTION_FAILED`）：节点输入声明解析失败（errors 逐项含 node / binding / reason），未调用该节点代理、已有节点结果原样保留；修正蓝图 inputs 声明或补齐上游产出后再续跑。',
     '   - `ROUTE_HALTED`：#77 引擎停机信号（reason=HUMAN_DECISION）。命中 `$human-decision` 时本脚本翻译为 `WAITING_HUMAN` 并装配 Decision Package，不把 `ROUTE_HALTED` 作为对外终态返回。',
-    '   - 旧 `REJECTED_INCOMPLETE` / `BLOCKED`：已由 `FAILED_AT_<节点id>` 承接（run 级无 BLOCKED；受阻语义 = 节点结果，如 dev status=blocked → FAILED_AT_dev）。',
+    '   - `BLOCKED`（统一受阻生命周期）：环境/资料/权限暂缺或额度耗尽的**非终态受阻**，不冒充成功也不挂人工决策。`termination`={business_outcome, lifecycle, reason_code, resumable, resume_node, completion_type?}，`blocked` 携带 failed_node / rounds_used / max_rounds / last_outcome 现场。恢复同一 Run：同 taskId + `entry=<termination.resume_node>`（恢复前重检阻塞条件；不重复已完成节点）。原因码：`BUSINESS_BLOCKED`=外部条件暂缺，条件恢复后恢复；`AUTO_REWORK_EXHAUSTED`=M2 自动返工额度耗尽（人工退回后新一轮交付自动重置额度）；`NEEDS_REDEFINE`=基线需重定义，resumable=false 不可原样恢复——重新发起运行将派生新 Run 并保留旧 Run；`COMPLETION_MISSING`=脚本 DONE 但无有效完成映射，不记 COMPLETED，补证后从 resume_node 恢复。',
+    '   - `DONE`：只有完成目标且材料有效才映射 COMPLETED；探索 `INSUFFICIENT` 是受控完成（完成类型显式标注证据不足）。历史无终止描述的 DONE 保留 legacy 标记，不改写为已验证完成。',
     '   - `DONE`：呈 cleanup 报告与合并 commit，流程结束。',
     '## 生成信息',
     '- 蓝图：`' + src + '`',

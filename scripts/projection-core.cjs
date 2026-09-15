@@ -51,6 +51,11 @@ function projectToVwf(bp) {
   if (bp.control && bp.control.retryPolicy !== undefined && bp.control.retryPolicy !== null) {
     control.retryPolicy = cloneValue(bp.control.retryPolicy)
   }
+  // LOC-030：M2 受阻开关随 control 往返投影（额度耗尽 → BLOCKED）；未声明不携带，
+  // 保持既有 DSL/产物零漂移。
+  if (bp.control && bp.control.maxRoundsExhausted !== undefined && bp.control.maxRoundsExhausted !== null) {
+    control.maxRoundsExhausted = cloneValue(bp.control.maxRoundsExhausted)
+  }
   const out = {
     id: bp.id,
     name: bp.displayName,
@@ -128,8 +133,11 @@ function projectToBlueprint(dsl) {
     }),
   }
   if (dsl.description) bp.description = cloneValue(dsl.description)
-  if (dsl.control && dsl.control.maxRounds != null) {
-    bp.control = { maxRounds: cloneValue(dsl.control.maxRounds) }
+  if (dsl.control && (dsl.control.maxRounds != null || dsl.control.maxRoundsExhausted != null)) {
+    bp.control = {}
+    if (dsl.control.maxRounds != null) bp.control.maxRounds = cloneValue(dsl.control.maxRounds)
+    // LOC-030：M2 受阻开关反向投影（DSL → 蓝图），非法值交给校验报告，不在这里吞掉
+    if (dsl.control.maxRoundsExhausted != null) bp.control.maxRoundsExhausted = cloneValue(dsl.control.maxRoundsExhausted)
   }
   // LOC-031：技术预算策略回投（DSL → 蓝图），与 projectToVwf 互逆
   if (dsl.control && dsl.control.retryPolicy !== undefined && dsl.control.retryPolicy !== null) {

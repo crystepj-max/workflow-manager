@@ -223,6 +223,8 @@
   "dashWaitHuman": "等待人工",
   "dashHumanGate": "人工门禁",
   "dashHumanDecision": "Human Decision {reason}",
+  "dashBlocked": "受阻（可恢复）",
+  "dashBlockedReason": "受阻：{reason}（非终态，恢复同一 Run）",
   "dashGateNode": "门禁节点 {node}",
   "dashRunList": "运行列表",
   "dashAutoPoll": "自动轮询 3s",
