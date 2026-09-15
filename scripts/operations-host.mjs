@@ -308,11 +308,16 @@ function reconcileEntry(entry, provider, operationsDir) {
   return { recovered: false, retry_safe: false, detail: (outcome && outcome.detail) ?? null }
 }
 
-// 执行段：先落 executing（执行前登记）再调外部；异常/契约外返回一律按 unknown 记账
-function executeEntry(entry, provider, identity, operationsDir) {
+// 执行段两相：begin 只改内存（调用方先落盘），finish 调外部并记账。这样
+// 「executing（执行前登记）」在进入 provider.execute 前已持久化——进程级崩溃
+// （SIGKILL/断电）也会留下 in-flight 痕迹，恢复按 executing 先核查，不盲目重发。
+function beginExecute(entry) {
   entry.status = 'executing'
   entry.needs_reconciliation = false
   entry.events.push(eventOf('execute_start', { provider: entry.provider }))
+}
+
+function finishExecute(entry, provider, identity, operationsDir) {
   try {
     const outcome = provider.execute({
       logical_action: entry.logical_action,
@@ -428,7 +433,9 @@ export function operationsExecute(input) {
       if (!r.retry_safe) return blockedResult(entry, r.detail)
       // confirmed_not_executed：确认未执行，安全重试 → 落入下方执行段
     }
-    const r = executeEntry(entry, resolved.provider, identity, operations_dir)
+    beginExecute(entry)
+    saveLedger(file, ledger) // 执行前登记（§9）：executing 先落盘再调外部
+    const r = finishExecute(entry, resolved.provider, identity, operations_dir)
     saveLedger(file, ledger)
     if (r.blocked) return blockedResult(entry, r.detail)
     return {

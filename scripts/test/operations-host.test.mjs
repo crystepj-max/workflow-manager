@@ -234,6 +234,25 @@ test('O4b 确认未执行后可安全重试（AC-03 后半）', () => {
   } finally { unregister() }
 })
 
+test('O13 执行前登记落盘：provider 执行时磁盘账本已见 executing（§9 执行前登记）', () => {
+  const dir = opsDir()
+  let statusSeenDuringExecute = null
+  const unregister = registerProvider('snoop', {
+    execute(input) {
+      // provider 执行时刻直读磁盘账本：executing 必须已持久化（进程级崩溃也留痕）
+      const ledger = JSON.parse(readFileSync(join(input.operations_dir, encodeURIComponent('run-1') + '.json'), 'utf8'))
+      statusSeenDuringExecute = ledger.operations[0].status
+      return { status: 'confirmed_success', remote_ref: { system: 'snoop', id: 'sn-1', version: 1 }, result: {} }
+    },
+    reconcile() { return { status: 'confirmed_not_executed' } },
+  })
+  try {
+    const r = operationsExecute(REQ(dir, { provider: 'snoop' }))
+    assert.equal(r.ok, true, JSON.stringify(r))
+    assert.equal(statusSeenDuringExecute, 'executing', '外部调用发生时账本已在磁盘登记 executing')
+  } finally { unregister() }
+})
+
 test('O5b 恢复路径账本含恢复记录（recover 事件）与回读凭证（AC-04）', () => {
   const dir = opsDir()
   const crashy = makeCrashy({ queryWorks: true })
