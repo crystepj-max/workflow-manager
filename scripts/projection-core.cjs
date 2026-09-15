@@ -46,12 +46,18 @@ function heteroModeForEdit(value) {
 
 function projectToVwf(bp) {
   const models = (bp.bindings && bp.bindings.models) || {}
+  const control = { maxRounds: (bp.control && bp.control.maxRounds) || 9 }
+  // LOC-030：M2 受阻开关随 control 往返投影（额度耗尽 → BLOCKED）；未声明不携带，
+  // 保持既有 DSL/产物零漂移。
+  if (bp.control && bp.control.maxRoundsExhausted !== undefined && bp.control.maxRoundsExhausted !== null) {
+    control.maxRoundsExhausted = cloneValue(bp.control.maxRoundsExhausted)
+  }
   const out = {
     id: bp.id,
     name: bp.displayName,
     description: bp.description || '',
     entry: bp.entry,
-    control: { maxRounds: (bp.control && bp.control.maxRounds) || 9 },
+    control,
     nodes: bp.nodes.map((n) => {
       const node = { id: n.id, profile: n.profile, label: n.label || n.id }
       if (n.goal !== undefined && n.goal !== null) node.goal = cloneValue(n.goal)
@@ -123,8 +129,11 @@ function projectToBlueprint(dsl) {
     }),
   }
   if (dsl.description) bp.description = cloneValue(dsl.description)
-  if (dsl.control && dsl.control.maxRounds != null) {
-    bp.control = { maxRounds: cloneValue(dsl.control.maxRounds) }
+  if (dsl.control && (dsl.control.maxRounds != null || dsl.control.maxRoundsExhausted != null)) {
+    bp.control = {}
+    if (dsl.control.maxRounds != null) bp.control.maxRounds = cloneValue(dsl.control.maxRounds)
+    // LOC-030：M2 受阻开关反向投影（DSL → 蓝图），非法值交给校验报告，不在这里吞掉
+    if (dsl.control.maxRoundsExhausted != null) bp.control.maxRoundsExhausted = cloneValue(dsl.control.maxRoundsExhausted)
   }
   if (isDefined(dsl.onMaxRounds)) bp.onMaxRounds = cloneValue(dsl.onMaxRounds)
   // DSL 档位为三态字符串（或编辑器 JSON 直填的旧布尔/非法值）：透传落盘，非法值交给校验报告

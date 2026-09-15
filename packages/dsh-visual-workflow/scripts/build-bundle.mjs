@@ -238,6 +238,8 @@ const clientBytes = Buffer.byteLength(dynClient)
 // LOC-014 模型覆盖层（host 合成单点 + RPC 三端点 + 模板库最小覆盖对话框）并入后上调至 188KiB，
 // 与 tests/static-bundle.test.mjs 预算保持一致。UAT 反馈轮（未保存退出/清除确认弹窗 + 沿用默认带值）后上调至 189KiB。
 // LOC-021 异源档位三态（校验内核档位判定 + 运行时日志档位/角色口径 + 编辑器三档选择器与中英文案）并入后上调至 190KiB。
+// LOC-030 统一受阻生命周期（终止描述派生 + 宿主描述优先映射/恢复入口 + 看板受阻口径）原按人工裁决
+// 上调至 192KiB；与已并入的 LOC-027（190→198KiB）取较高者，避免相对已合并状态收紧闸门。
 // LOC-027 评价基线冻结闸门（宿主编排：[eb-freeze] 观察/检查点中止/恢复/核验；纯逻辑已分流
 // dist/evaluation-baseline.cjs 内核）并入后上调至 198KiB。
 const PAYLOAD_LIMIT = 198 * 1024
