@@ -134,8 +134,12 @@ test('AC-01 review 三个合法组合各走预期边', async () => {
       '收敛审查': { route, verdict, summary: 's' },
       ...downstream,
     })
-    assert.equal(result.status, route === 'APPROVE' ? 'WAITING_HUMAN' : 'DONE',
-      route + '：APPROVE 升人工验收、其余走 $end，实际 ' + result.status)
+    // LOC-030 跨任务对齐：$end 终止描述按 outcome 派生生命周期——outcome=BLOCKED 是
+    // 业务受阻（status=BLOCKED / 非终态可恢复），不再等同脚本 DONE；APPROVE 升人工验收、
+    // RETURN_DEV 走返工边后由 dev 收束为 DONE。
+    const expectStatus = route === 'APPROVE' ? 'WAITING_HUMAN' : route === 'BLOCKED' ? 'BLOCKED' : 'DONE'
+    assert.equal(result.status, expectStatus,
+      route + '：APPROVE 升人工验收、BLOCKED 为业务受阻、其余走返工边，实际 ' + result.status)
     assert.equal(result.results.review.verdict, verdict, route + '：结论字段保留')
     const edge = result.history.find((h) => h.from === 'review' && h.outcome === route)
     const expectedTo = route === 'APPROVE' ? 'test' : route === 'RETURN_DEV' ? 'dev' : '$end'
@@ -152,8 +156,11 @@ test('AC-01 test 三个合法组合各走预期边', async () => {
       'UAT 准备': { route: 'READY_FOR_HUMAN' },
       '返工开发': { route: 'READY' },
     })
-    assert.equal(result.status, route === 'PASS' ? 'WAITING_HUMAN' : 'DONE',
-      route + '：PASS 升人工验收、其余走 $end，实际 ' + result.status)
+    // 同 review 用例：PASS 升人工验收、BLOCKED 为业务受阻（status=BLOCKED）、
+    // RETURN_DEV 走返工边后由 dev 收束为 DONE（LOC-030 终止描述）。
+    const expectStatus = route === 'PASS' ? 'WAITING_HUMAN' : route === 'BLOCKED' ? 'BLOCKED' : 'DONE'
+    assert.equal(result.status, expectStatus,
+      route + '：PASS 升人工验收、BLOCKED 为业务受阻、其余走返工边，实际 ' + result.status)
     const edge = result.history.find((h) => h.from === 'test' && h.outcome === route)
     const expectedTo = route === 'PASS' ? 'uat' : route === 'RETURN_DEV' ? 'dev' : '$end'
     assert.equal(edge.to, expectedTo, route + '：应走 ' + expectedTo + ' 边，history=' + JSON.stringify(result.history))
