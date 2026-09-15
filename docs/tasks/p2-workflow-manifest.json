@@ -1,0 +1,46 @@
+{
+  "schema": "p2-definition-manifest/v1",
+  "generated_at": "2026-09-15T06:07:19.705Z",
+  "definition_baseline": "775ac84e9c37e2278c2ee32a0f2bcb75cbbb8172",
+  "authoritative_registry": "registry.json",
+  "purpose": "定义材料索引，不是开发或实验授权",
+  "development_started": false,
+  "tasks": [
+    {
+      "id": "LOC-044",
+      "source": "WR-021",
+      "card": "LOC-044-state-recovery-core.md",
+      "spec": "specs/LOC-044-state-recovery-core/task-spec-V1.md",
+      "definition_check": "specs/LOC-044-state-recovery-core/definition-check.md",
+      "supplement": "specs/LOC-044-state-recovery-core/behavior-boundary-V1.md",
+      "baseline": "V1",
+      "hard_dependencies": [],
+      "environment": {
+        "group": "LOC-044",
+        "role": "独立"
+      },
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许",
+      "open_decisions": 2,
+      "execution_kind": "完整功能开发"
+    },
+    {
+      "id": "LOC-045",
+      "source": "WR-022",
+      "card": "LOC-045-workflow-complexity-benchmark.md",
+      "spec": "specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md",
+      "definition_check": "specs/LOC-045-workflow-complexity-benchmark/definition-check.md",
+      "supplement": "specs/LOC-045-workflow-complexity-benchmark/benchmark-plan-V1.md",
+      "baseline": "V1",
+      "hard_dependencies": [],
+      "environment": {
+        "group": "LOC-045",
+        "role": "独立"
+      },
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许",
+      "open_decisions": 3,
+      "execution_kind": "研究与实验"
+    }
+  ]
+}
