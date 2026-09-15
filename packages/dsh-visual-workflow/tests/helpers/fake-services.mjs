@@ -52,7 +52,9 @@ export function makeFs(seed = {}) {
 // compileScript：generate.mjs compile 子命令的模拟输出（统一编译器管道）
 // recordsHost / wsHost：records-host.mjs / workspace-isolation-host.mjs 的进程边界
 // 替身——宿主侧接线测试可借此驱动真实包装脚本逻辑（仅伪造进程边界，不伪造内核）。
-export function makeSubprocess({ failPattern = null, fs = null, compileScript = '//MOCK-SCRIPT', recordsHost = null, wsHost = null } = {}) {
+// spawnHandler：可选自定义进程边界（spec => { stdout, exitCode, stderr } | undefined），
+// 返回 undefined 走默认分支；LOC-027 基线冻结/核验用真实 node 子进程验证字节语义。
+export function makeSubprocess({ failPattern = null, fs = null, compileScript = '//MOCK-SCRIPT', recordsHost = null, wsHost = null, spawnHandler = null } = {}) {
   const calls = []
   const specs = []
   const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
@@ -75,6 +77,16 @@ export function makeSubprocess({ failPattern = null, fs = null, compileScript = 
     spawn(spec) {
       calls.push(spec.argv)
       specs.push(spec)
+      if (spawnHandler) {
+        const handled = spawnHandler(spec)
+        if (handled) return {
+          pid: 1,
+          done: Promise.resolve({ exitCode: handled.exitCode === undefined ? 0 : handled.exitCode, signal: null }),
+          collected: { stdout: reader(handled.stdout || ''), stderr: reader(handled.stderr || '') },
+          terminate() {},
+          waitForExit: async () => true,
+        }
+      }
       const argvStr = spec.argv.join(' ')
       let exitCode = 0
       let stdout = ''

@@ -1,0 +1,132 @@
+{
+  "id": "verdict-consistency-mini",
+  "displayName": "裁决一致性微型",
+  "entry": "start",
+  "control": { "maxRounds": 3 },
+  "nodes": [
+    {
+      "id": "start",
+      "profile": "dispatcher",
+      "label": "启动",
+      "goal": "接入任务",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": { "route": { "type": "string", "enum": ["NEXT"] } },
+          "required": ["route"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "review",
+      "profile": "review",
+      "label": "收敛审查",
+      "goal": "收敛审查",
+      "output": {
+        "outcomePath": "$.route",
+        "consistency": {
+          "field": "verdict",
+          "pairs": {
+            "APPROVE": "APPROVE",
+            "RETURN_DEV": "REQUEST_CHANGES",
+            "BLOCKED": "COMMENT_ONLY"
+          }
+        },
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": { "type": "string", "enum": ["APPROVE", "RETURN_DEV", "BLOCKED"] },
+            "verdict": { "type": "string", "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT_ONLY"] },
+            "summary": { "type": "string" }
+          },
+          "required": ["route", "verdict", "summary"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "test",
+      "profile": "test",
+      "label": "独立测试",
+      "goal": "独立验证",
+      "output": {
+        "outcomePath": "$.route",
+        "consistency": {
+          "field": "result",
+          "pairs": {
+            "PASS": "PASSED",
+            "RETURN_DEV": "FAILED",
+            "BLOCKED": "BLOCKED"
+          }
+        },
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": { "type": "string", "enum": ["PASS", "RETURN_DEV", "BLOCKED"] },
+            "result": { "type": "string", "enum": ["PASSED", "FAILED", "BLOCKED"] },
+            "reason": { "type": "string" },
+            "evidence": { "type": "string" }
+          },
+          "required": ["route", "result", "reason", "evidence"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "dev",
+      "profile": "dev",
+      "label": "返工开发",
+      "goal": "按打回反馈返工",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": { "route": { "type": "string", "enum": ["READY"] } },
+          "required": ["route"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "uat",
+      "profile": "accept",
+      "label": "UAT 准备",
+      "goal": "准备验收",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": { "route": { "type": "string", "enum": ["READY_FOR_HUMAN"] } },
+          "required": ["route"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "start", "to": "review", "outcome": "NEXT" },
+    { "from": "review", "to": "test", "outcome": "APPROVE" },
+    { "from": "review", "to": "dev", "outcome": "RETURN_DEV", "countRound": true },
+    { "from": "review", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "review", "to": "review", "on": "technical" },
+    { "from": "test", "to": "uat", "outcome": "PASS" },
+    { "from": "test", "to": "dev", "outcome": "RETURN_DEV", "countRound": true },
+    { "from": "test", "to": "$end", "outcome": "BLOCKED" },
+    { "from": "test", "to": "test", "on": "technical" },
+    { "from": "dev", "to": "$end", "outcome": "READY" },
+    { "from": "uat", "to": "$human-decision", "outcome": "READY_FOR_HUMAN" },
+    { "from": "$human-decision", "to": "$end", "outcome": "ACCEPT" },
+    { "from": "$human-decision", "to": "dev", "outcome": "REJECT" }
+  ],
+  "bindings": {
+    "models": {
+      "start": { "provider": "kimi-coding", "model": "k3" },
+      "dev": { "provider": "kimi-coding", "model": "k3" },
+      "review": { "provider": "deepseek-official", "model": "deepseek-v4-pro" },
+      "test": { "provider": "deepseek-official", "model": "deepseek-v4-pro" },
+      "uat": { "provider": "deepseek-official", "model": "deepseek-v4-pro" }
+    }
+  }
+}

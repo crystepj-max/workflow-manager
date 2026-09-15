@@ -16,11 +16,12 @@ import { fileURLToPath } from 'node:url'
 
 import { loadHost } from './helpers/load-host.mjs'
 import { REPO, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
-import { recordsCommit, recordsList, recordsGet, recordsAssertIntegration } from '../../../scripts/records-host.mjs'
+import { recordsCommit, recordsList, recordsGet, recordsAssertIntegration, recordsAssertCandidates } from '../../../scripts/records-host.mjs'
 import {
   createRegistry, allocateWorkspace, getRunWorkspace, setLifecycle,
   recordSourceSync, computeIntegrationCheckpointFromRepo,
   acquireLock, releaseLock, activeLockFor, integrationResourceKey,
+  captureCandidate, compareCandidate,
 } from '../../../scripts/workspace-isolation.mjs'
 import { planTargetSync, mergeTarget, buildSyncRecordEntry, integrationSyncRecordId } from '../../../scripts/integration-gate.mjs'
 
@@ -62,6 +63,11 @@ function commitInWorktree(ws, file, content, message) {
   git(['add', '-A'], ws.source_path)
   git(['commit', '-q', '-m', message], ws.source_path)
   return git(['rev-parse', 'HEAD'], ws.source_path)
+}
+
+// LOC-026：与宿主同口径的候选捕获摘要（排除项=Run 产物目录），供 fixture 自报 candidate_sha256
+function captureSha(realWs, runId) {
+  return captureCandidate(getRunWorkspace(realWs.registry, runId), { exclude: ['.agent-runs/' + runId] }).version.content_sha256
 }
 
 // 规格图：impl → review(verifyBranch) → test(verifyBranch) → uat → $human-decision
@@ -151,6 +157,11 @@ function makeRealWsHost({ repo, sandboxMode = false } = {}) {
         case 'computeIntegrationCheckpointFromRepo':
           // 与真实 wrapper 同形状：checkpoint 嵌套一层（防 fake 与真实契约脱节）
           return wrap(() => ({ ok: true, checkpoint: computeIntegrationCheckpointFromRepo(input) }))
+        case 'captureCandidate':
+          // LOC-026：真实内核候选捕获（范围选项由宿主注入，与真实 wrapper 同契约）
+          return wrap(() => ({ ok: true, candidate: captureCandidate(getRunWorkspace(registry, input.logical_run_id), input.options || {}) }))
+        case 'compareCandidate':
+          return wrap(() => ({ ok: true, compare: compareCandidate(input.current, input.expected) }))
         default:
           return { ok: false, error: '未知 ws 命令: ' + cmd }
       }
@@ -159,13 +170,13 @@ function makeRealWsHost({ repo, sandboxMode = false } = {}) {
 }
 
 const realRecordsHost = (dir) => (cmd, input) => {
-  const fns = { commit: recordsCommit, list: recordsList, get: recordsGet, assertIntegration: recordsAssertIntegration }
+  const fns = { commit: recordsCommit, list: recordsList, get: recordsGet, assertIntegration: recordsAssertIntegration, assertCandidates: recordsAssertCandidates }
   const fn = fns[cmd]
   if (!fn) throw new Error('未知 records 命令: ' + cmd)
   return fn({ ...input, records_dir: dir })
 }
 
-function env({ value, wsHost, recordsHostDir, engineCapture = null, recordsWrap = null } = {}) {
+function env({ value, wsHost, recordsHostDir, engineCapture = null, recordsWrap = null, recordsHost: recordsHostOverride = null } = {}) {
   const base = {
     [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
     [REPO + '/scripts/workspace-isolation-host.mjs']: WS_HOST_STUB,
@@ -174,9 +185,11 @@ function env({ value, wsHost, recordsHostDir, engineCapture = null, recordsWrap 
     [SKILL_ROOT + '/gate-spec/script.mjs']: '//MOCK-SCRIPT',
   }
   const fs = makeFs(base)
-  const recordSvc = recordsWrap
-    ? (cmd, input) => recordsWrap(cmd, input, realRecordsHost(recordsHostDir)(cmd, input))
-    : realRecordsHost(recordsHostDir)
+  const recordSvc = recordsHostOverride
+    ? (cmd, input) => recordsHostOverride(cmd, input, realRecordsHost(recordsHostDir)(cmd, input))
+    : recordsWrap
+      ? (cmd, input) => recordsWrap(cmd, input, realRecordsHost(recordsHostDir)(cmd, input))
+      : realRecordsHost(recordsHostDir)
   const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost: recordSvc, wsHost: wsHost.wsHost })
   const engine = {
     starts: [],
@@ -214,13 +227,14 @@ test('W1 主场景：目标前进 → 自动锁/同步/新 Revision/重跑 → �
         const ws = getRunWorkspace(realWs.registry, 'task-1')
         const head = commitInWorktree(ws, 'feat.txt', 'work\n', 'branch work')
         commitFile(repo, 'main.txt', 'main advance\n', 'advance main')
+        const candSha = captureSha(realWs, 'task-1')
         return {
           status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-1',
           decision_package: hdPackage('hd-1'),
           results: {
             impl: { verdict: 'READY' },
-            review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: head },
-            test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: head },
+            review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: head, candidate_sha256: candSha },
+            test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: head, candidate_sha256: candSha },
             uat: { status: 'READY_FOR_HUMAN' },
           },
           history: [],
@@ -232,8 +246,8 @@ test('W1 主场景：目标前进 → 自动锁/同步/新 Revision/重跑 → �
         decision_package: hdPackage('hd-2'),
         results: {
           impl: { verdict: 'READY' },
-          review: { verdict: 'APPROVE', verified_branch: 'vwf/run/task-1', verified_head: 'post-sync' },
-          test: { verdict: 'PASS', verified_branch: 'vwf/run/task-1', verified_head: 'post-sync' },
+          review: { verdict: 'APPROVE', verified_branch: 'vwf/run/task-1', verified_head: 'post-sync', candidate_sha256: captureSha(realWs, 'task-1') },
+          test: { verdict: 'PASS', verified_branch: 'vwf/run/task-1', verified_head: 'post-sync', candidate_sha256: captureSha(realWs, 'task-1') },
           uat: { status: 'READY_FOR_HUMAN' },
         },
         history: [{ round: 1, stage: 'integration_gate' }],
@@ -354,7 +368,8 @@ test('W3 目标未前进（B3/UAT-05）：直接放行，不重跑、不产生�
     engineCapture: () => { engineCalls++ },
     value: (n) => {
       const ws = getRunWorkspace(realWs.registry, 'task-1')
-      return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-1', decision_package: hdPackage('hd-1'), results: { impl: { verdict: 'READY' }, review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: ws.base_commit }, test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: ws.base_commit }, uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
+      const candSha = captureSha(realWs, 'task-1')
+      return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-1', decision_package: hdPackage('hd-1'), results: { impl: { verdict: 'READY' }, review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: ws.base_commit, candidate_sha256: candSha }, test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: ws.base_commit, candidate_sha256: candSha }, uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
     },
   })
   const out = JSON.parse(await tool.execute({ templateId: 'gate-spec', taskId: 'task-1' }))
@@ -365,6 +380,7 @@ test('W3 目标未前进（B3/UAT-05）：直接放行，不重跑、不产生�
   assert.equal(gate.iterations, 1)
   assert.equal(engineCalls, 1, '未前进不触发重跑')
   assert.equal(gate.syncs.length, 0, '未前进不产生新产物版本')
+  assert.ok(Array.isArray(gate.candidate_checks) && gate.candidate_checks.every((c) => c.state === 'match'), '快速路径也做候选核验且全部匹配（LOC-026）')
   const logical = readLogical(fs, 'task-1')
   assert.equal(logical.lifecycle.state, 'WAITING_HUMAN')
   assert.equal(logical.segments.length, 1)
@@ -516,7 +532,7 @@ test('W8 fail-open 封堵：闸门 BLOCKED 后人工决策续跑被拒，唯一�
         return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-2', decision_package: hdPackage('hd-2'), results: { uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
       }
       // n===3：闸门重跑段（review/test 基于同步后分支重新完成）
-      return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-3', decision_package: hdPackage('hd-3'), results: { impl: { verdict: 'READY' }, review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: 'post-sync' }, test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: 'post-sync' }, uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
+      return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-3', decision_package: hdPackage('hd-3'), results: { impl: { verdict: 'READY' }, review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: 'post-sync', candidate_sha256: captureSha(realWs, 'task-1') }, test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: 'post-sync', candidate_sha256: captureSha(realWs, 'task-1') }, uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
     },
   })
   // 第一段：闸门因锁被占用而 BLOCKED
@@ -593,4 +609,115 @@ test('W9 探针恢复不误伤：PROBE_FAILED 的 BLOCKED 不触发闸门拒绝�
   const logical = readLogical(fs, 'task-1')
   assert.equal(logical.lifecycle.state, 'COMPLETED')
   assert.equal(logical.snapshots.length, 2, '恢复产生新 Snapshot Revision')
+})
+
+// ── LOC-026 候选证明：闸门候选核验（WR-003 / task-spec-V1 §9）────────────────
+
+test('W10 LOC-026 审核期间成果变化（自报 sha ≠ 宿主实况）→ BLOCKED 并指名具体 Proof', async () => {
+  const repo = initRepo()
+  const recordsHostDir = mkdtempSync(join(tmpdir(), 'vwf-gate-records-'))
+  after(() => { try { rmSync(recordsHostDir, { recursive: true, force: true }) } catch { /* ignore */ } })
+  const realWs = makeRealWsHost({ repo })
+  const { tool, fs } = env({
+    wsHost: realWs, recordsHostDir,
+    value: (n) => {
+      const ws = getRunWorkspace(realWs.registry, 'task-1')
+      // 模型自报的候选摘要是陈旧值（宿主签发时实况捕获与其不一致 → candidate_match=false）
+      return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-1', decision_package: hdPackage('hd-1'), results: { impl: { verdict: 'READY' }, review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: ws.base_commit, candidate_sha256: 'stale-declared-sha' }, test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: ws.base_commit, candidate_sha256: 'stale-declared-sha' }, uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
+    },
+  })
+  const out = JSON.parse(await tool.execute({ templateId: 'gate-spec', taskId: 'task-1' }))
+  await drain()
+  const gate = out.integration_gate
+  assert.equal(gate.blocked.code, 'GATE_CANDIDATE_MISMATCH', '候选证明不匹配必须拒绝放行')
+  assert.ok(gate.blocked.message.includes('proof:task-1:review'), '指名具体不匹配 Proof（review）')
+  assert.ok(gate.blocked.message.includes('proof:task-1:test'), '指名具体不匹配 Proof（test）')
+  assert.ok(Array.isArray(gate.candidate_checks) && gate.candidate_checks.every((c) => c.state === 'mismatch' && c.candidate_match === false))
+  const logical = readLogical(fs, 'task-1')
+  assert.equal(logical.lifecycle.state, 'BLOCKED')
+  assert.equal(logical.lifecycle.reason.code, 'GATE_CANDIDATE_MISMATCH')
+})
+
+test('W11 LOC-026 旧候选 Proof 不为新成果放行：候选前进后 entry=uat 不得进 UAT/收口（AC-01/AC-04）', async () => {
+  const repo = initRepo()
+  const recordsHostDir = mkdtempSync(join(tmpdir(), 'vwf-gate-records-'))
+  after(() => { try { rmSync(recordsHostDir, { recursive: true, force: true }) } catch { /* ignore */ } })
+  const realWs = makeRealWsHost({ repo })
+  let engineCalls = 0
+  const { tool, fs } = env({
+    wsHost: realWs, recordsHostDir,
+    engineCapture: () => { engineCalls++ },
+    value: (n) => {
+      if (n > 2) throw new Error('候选不匹配时不得重跑到 UAT 之后')
+      const ws = getRunWorkspace(realWs.registry, 'task-1')
+      if (n === 2) {
+        // entry=uat 续跑段：只有 uat 节点重跑，审核/测试 Proof 保持旧候选绑定
+        return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-2', decision_package: hdPackage('hd-2'), results: { uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
+      }
+      const head = commitInWorktree(ws, 'feat.txt', 'work ' + n + '\n', 'branch work ' + n)
+      // 自报候选摘要与宿主实况脱节（审核/测试看到的候选 ≠ 签发时实况）：闸门必须拦下
+      return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-' + n, decision_package: hdPackage('hd-' + n), results: { impl: { verdict: 'READY' }, review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: head, candidate_sha256: 'stale-declared-sha' }, test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: head, candidate_sha256: 'stale-declared-sha' }, uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
+    },
+  })
+  // 第一段：审核期间成果变化（自报 sha 过期）→ 闸门拒绝、进入可恢复的 BLOCKED 态
+  const out1 = JSON.parse(await tool.execute({ templateId: 'gate-spec', taskId: 'task-1' }))
+  await drain()
+  assert.equal(out1.integration_gate.blocked.code, 'GATE_CANDIDATE_MISMATCH', '审核期间成果变化 → 不得签发有效证明放行')
+  assert.equal(out1.value.status, 'BLOCKED')
+  // 候选前进：被审成果在 Proof 之后又变化（新 HEAD、新内容）
+  const ws = getRunWorkspace(realWs.registry, 'task-1')
+  const newHead = commitInWorktree(ws, 'late-change.txt', 'changed after review\n', 'late change')
+  assert.notEqual(newHead, ws.current_head)
+  // entry=uat 续跑（BLOCKED 态合法恢复）：旧 Proof 所指候选已不存在 → 再次拒绝并指名 Proof
+  const out2 = JSON.parse(await tool.execute({ taskId: 'task-1', templateId: 'gate-spec', entry: 'uat', results: {} }))
+  await drain()
+  assert.equal(out2.value.status, 'BLOCKED', '旧证明不得为新成果放行进入 UAT')
+  assert.equal(out2.integration_gate.blocked.code, 'GATE_CANDIDATE_MISMATCH')
+  assert.ok(out2.integration_gate.blocked.message.includes('proof:task-1:review'))
+  assert.ok(out2.integration_gate.blocked.message.includes('proof:task-1:test'))
+  const mismatches = out2.integration_gate.candidate_checks.filter((c) => c.state === 'mismatch')
+  assert.ok(mismatches.length >= 1)
+  assert.ok(mismatches.every((c) => c.mismatches.some((m) => m.field === 'version.content_sha256' || m.field === 'version.head')), 'mismatch 明细指出具体字段')
+  const logical = readLogical(fs, 'task-1')
+  assert.equal(logical.lifecycle.state, 'BLOCKED')
+})
+
+test('W12 LOC-026 兼容：无 candidate_ref 的历史 Proof 记 legacy_unverified，不伪造候选绑定（AC-04/兼容）', async () => {
+  const repo = initRepo()
+  const recordsHostDir = mkdtempSync(join(tmpdir(), 'vwf-gate-records-'))
+  after(() => { try { rmSync(recordsHostDir, { recursive: true, force: true }) } catch { /* ignore */ } })
+  const realWs = makeRealWsHost({ repo })
+  // 模拟 LOC-026 之前的运行：Proof 无候选绑定（已启动运行保持冻结快照）。
+  // 注意：recordsWrap 形态先执行真实提交再回调，改写入参必须直接包装 recordsHost。
+  const { tool, fs } = env({
+    wsHost: realWs,
+    recordsHostDir,
+    // 模拟 LOC-026 之前的运行：Proof 无候选绑定（已启动运行保持冻结快照）。
+    // 直接包装 recordsHost（改写入参必须在真实提交之前，env 的 recordsWrap 是事后回调）
+    recordsHost: (cmd, input) => {
+      if (cmd === 'commit' && Array.isArray(input.entries)) {
+        input.entries = input.entries.map((e) => {
+          if (e.type !== 'proof' || !e.body_value) return e
+          const body = { ...e.body_value }
+          delete body.candidate_ref
+          delete body.declared_candidate_sha256
+          delete body.candidate_match
+          return { ...e, body_value: body }
+        })
+      }
+      return realRecordsHost(recordsHostDir)(cmd, input)
+    },
+    value: (n) => {
+      const ws = getRunWorkspace(realWs.registry, 'task-1')
+      const candSha = captureSha(realWs, 'task-1')
+      return { status: 'WAITING_HUMAN', node: 'uat', decision_id: 'hd-1', decision_package: hdPackage('hd-1'), results: { impl: { verdict: 'READY' }, review: { verdict: 'APPROVE', verified_branch: ws.work_branch, verified_head: ws.base_commit, candidate_sha256: candSha }, test: { verdict: 'PASS', verified_branch: ws.work_branch, verified_head: ws.base_commit, candidate_sha256: candSha }, uat: { status: 'READY_FOR_HUMAN' } }, history: [] }
+    },
+  })
+  const out = JSON.parse(await tool.execute({ templateId: 'gate-spec', taskId: 'task-1' }))
+  await drain()
+  const gate = out.integration_gate
+  assert.equal(gate.decision, 'pass', '历史 Proof 由既有 Revision 覆盖判定约束，不因缺候选绑定而改写历史')
+  assert.ok(Array.isArray(gate.candidate_checks) && gate.candidate_checks.every((c) => c.state === 'legacy_unverified'), '缺绑定 Proof 明确标 legacy_unverified，不静默当作已验证')
+  const logical = readLogical(fs, 'task-1')
+  assert.equal(logical.lifecycle.state, 'WAITING_HUMAN')
 })

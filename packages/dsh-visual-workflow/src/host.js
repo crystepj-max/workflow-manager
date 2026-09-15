@@ -38,6 +38,11 @@ return {
       if (value === null || value === undefined) return value
       return typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value))
     }
+    // 磁盘回载字段守卫（LOC-029 顺带收敛 hydrate 三元链）：类型不符取默认值
+    const asStr = (v, d) => (typeof v === 'string' ? v : d)
+    const asNum = (v, d) => (typeof v === 'number' ? v : d)
+    const asObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null)
+    const asArr = (v, f) => (Array.isArray(v) ? v.filter(f || ((x) => x && typeof x === 'object')) : [])
 
     // ── 双模式注册：动态会话 = harness.handle；静态组合包 = webServer 前缀路由 ──
     // 必须用 typeof 探测未声明标识符：静态 IIFE 无 harness 全局，直接读会 ReferenceError。
@@ -606,7 +611,9 @@ return {
     const RUNS_RETAIN = 50
     // #80：PAUSED 属权威运行状态（宿主回写后不得被迟到的 workflow/end 以 'cancelled' 盖掉），
     // 但不是终态——终态判定仍以 LIFECYCLE_TERMINAL 为准。
-    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
+    // LOC-030：BLOCKED 同为权威运行状态（脚本受阻返回体不得被迟到的 end 盖成 'completed'），
+    // 且同样不是生命周期终态（可恢复受阻，terminal=false）—— holdsTask 不含它，并发名额随受阻释放。
+    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|BLOCKED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
     const HD_STRING_KEYS = ['decision_id', 'reason', 'node']
     const HD_NUMBER_KEYS = ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']
     const HD_OBJECT_KEYS = ['decision_package', 'control_event', 'blocked_edge', 'results']
@@ -659,7 +666,7 @@ return {
       for (const k of HD_OBJECT_KEYS) if (val[k] && typeof val[k] === 'object') rec[k] = val[k]
       if (Array.isArray(val.history)) rec.history = val.history
     }
-    const summary = (rec) => ({ id: rec.id, name: rec.meta.name, status: rec.status, phase: rec.phase, taskId: rec.taskId, workflowId: rec.workflowId, startedAt: rec.startedAt, supersededBy: rec.supersededBy, decision_id: rec.decision_id, reason: rec.reason })
+    const summary = (rec) => ({ id: rec.id, name: rec.meta.name, status: rec.status, phase: rec.phase, taskId: rec.taskId, workflowId: rec.workflowId, startedAt: rec.startedAt, supersededBy: rec.supersededBy, decision_id: rec.decision_id, reason: rec.reason, node: rec.node || '' })
 
     // 无定时器节流：每个 run 至多一个飞行中写入，期间变更只置 dirty，写完按最新态补一次尾写
     // （队列实现收敛于 runsStore，LOC-004；此处保留原函数名作为薄委托，19 个调用点零改动）
@@ -853,10 +860,27 @@ return {
     // 段收尾 → 八态 Lifecycle + 结构化 reason（R1/R6/R11）。引擎段状态原样保留在
     // segment.status；Lifecycle 闸门不改写专业结果（R7）——业务结果由
     // recordNodeAttempts 独立落档，不参与状态映射。
+    // LOC-030：脚本携带经校验的显式终止描述（termination={business_outcome,lifecycle,
+    // reason_code,resumable,resume_node,completion_type?}）时优先按描述映射——技术执行段
+    // 结束不再自动等于业务完成：BLOCKED 非终态可恢复；COMPLETED 描述必须有有效完成映射
+    //（value.completion.type），缺失降级 COMPLETION_MISSING 可恢复受阻；旧无描述 Run
+    // 保留 legacy 标识（不改写历史，不冒充已验证完成）。
     function logicalTransitionFor(canon, stopReason, value) {
       const v = value && typeof value === 'object' ? value : {}
+      const t = v.termination
+      const str = (x) => (typeof x === 'string' && x.trim() ? x.trim() : null)
+      const okDesc = t && typeof t === 'object' && (t.lifecycle === 'BLOCKED' || t.lifecycle === 'COMPLETED')
+        && str(t.business_outcome) && str(t.reason_code) && str(t.resume_node)
+      if (okDesc) {
+        if (t.lifecycle === 'BLOCKED') return { state: 'BLOCKED', reason: logicalReason(str(t.reason_code), str(t.business_outcome)) }
+        const comp = v.completion
+        return comp && typeof comp.type === 'string' && comp.type.trim()
+          ? { state: 'COMPLETED', reason: null }
+          : { state: 'BLOCKED', reason: logicalReason('COMPLETION_MISSING') }
+      }
       const reasonFromValue = typeof v.reason === 'string' && v.reason ? logicalReason(v.reason) : null
-      if (canon === 'DONE') return { state: 'COMPLETED', reason: null }
+      // 历史 DONE 无终止描述：无法可靠推断真实业务结果——保留 COMPLETED 终态并标记 legacy 映射
+      if (canon === 'DONE') return { state: 'COMPLETED', reason: logicalReason('LEGACY') }
       if (canon === 'STOPPED') return { state: 'STOPPED', reason: reasonFromValue || logicalReason('STOPPED') }
       if (canon === 'WAITING_HUMAN') return { state: 'WAITING_HUMAN', reason: reasonFromValue || logicalReason('ESCALATED_DECISION') }
       if (canon.indexOf('AWAITING_HUMAN_') === 0) return { state: 'WAITING_HUMAN', reason: logicalReason('LEGACY_GATE', canon) }
@@ -957,6 +981,9 @@ return {
         last_engine_error: rec.last_engine_error || null,
         pause_state: rec.pause_state || null,
         pause_resume: rec.pause_resume || null,
+        // LOC-027：活动评价基线引用与历史版本（不可变副本审计链）
+        evaluation_baseline: rec.evaluation_baseline || null,
+        evaluation_baselines: rec.evaluation_baselines || [],
         formal_records: rec.formal_records || null,
         workspace: rec.workspace || null,
       }
@@ -972,29 +999,31 @@ return {
         : { state: 'FAILED', reason: logicalReason('RECORD_CORRUPTED', 'lifecycle 缺失或非法') }
       const rec = {
         logical_run_id: id,
-        schema: typeof data.schema === 'number' ? data.schema : LOGICAL_RUN_SCHEMA,
-        task_id: typeof data.task_id === 'string' ? data.task_id : '',
-        template_id: typeof data.template_id === 'string' ? data.template_id : '',
-        title: typeof data.title === 'string' ? data.title : '',
-        derived_from: typeof data.derived_from === 'string' ? data.derived_from : null,
-        created_at: typeof data.created_at === 'number' ? data.created_at : null,
-        updated_at: typeof data.updated_at === 'number' ? data.updated_at : null,
+        schema: asNum(data.schema, LOGICAL_RUN_SCHEMA),
+        task_id: asStr(data.task_id, ''),
+        template_id: asStr(data.template_id, ''),
+        title: asStr(data.title, ''),
+        derived_from: asStr(data.derived_from, null),
+        created_at: asNum(data.created_at, null),
+        updated_at: asNum(data.updated_at, null),
         lifecycle: lc,
         terminal: data.terminal === true || LIFECYCLE_TERMINAL.indexOf(lc.state) >= 0,
-        completion: data.completion && typeof data.completion === 'object' ? data.completion : null,
-        segments: Array.isArray(data.segments) ? data.segments.filter((s) => s && typeof s === 'object' && typeof s.run_id === 'string' && s.run_id) : [],
-        snapshots: Array.isArray(data.snapshots) ? data.snapshots.filter((s) => s && typeof s === 'object') : [],
-        node_attempts: Array.isArray(data.node_attempts) ? data.node_attempts.filter((s) => s && typeof s === 'object') : [],
-        business_outcomes: data.business_outcomes && typeof data.business_outcomes === 'object' && !Array.isArray(data.business_outcomes) ? data.business_outcomes : {},
-        guidance: Array.isArray(data.guidance) ? data.guidance.filter((g) => g && typeof g === 'object') : [],
-        control_events: Array.isArray(data.control_events) ? data.control_events.filter((e) => e && typeof e === 'object') : [],
-        baseline_revisions: Array.isArray(data.baseline_revisions) ? data.baseline_revisions.filter((r) => r && typeof r === 'object') : [],
+        completion: asObj(data.completion),
+        segments: asArr(data.segments, (s) => s && typeof s === 'object' && typeof s.run_id === 'string' && s.run_id),
+        snapshots: asArr(data.snapshots),
+        node_attempts: asArr(data.node_attempts),
+        business_outcomes: asObj(data.business_outcomes) || {},
+        guidance: asArr(data.guidance),
+        control_events: asArr(data.control_events),
+        baseline_revisions: asArr(data.baseline_revisions),
         baseline_applied_upto: Number(data.baseline_applied_upto) || 0,
-        last_engine_error: typeof data.last_engine_error === 'string' ? data.last_engine_error : null,
-        pause_state: data.pause_state && typeof data.pause_state === 'object' ? data.pause_state : null,
-        pause_resume: data.pause_resume && typeof data.pause_resume === 'object' ? data.pause_resume : null,
-        formal_records: data.formal_records && typeof data.formal_records === 'object' && !Array.isArray(data.formal_records) ? data.formal_records : null,
-        workspace: data.workspace && typeof data.workspace === 'object' ? data.workspace : null,
+        last_engine_error: asStr(data.last_engine_error, null),
+        pause_state: asObj(data.pause_state),
+        pause_resume: asObj(data.pause_resume),
+        evaluation_baseline: asObj(data.evaluation_baseline),
+        evaluation_baselines: Array.isArray(data.evaluation_baselines) ? data.evaluation_baselines.filter((r) => r && typeof r === 'object') : [],
+        formal_records: asObj(data.formal_records),
+        workspace: asObj(data.workspace),
       }
       logicalRuns.set(id, rec)
       for (const s of rec.segments) if (s.run_id) logicalRunByEngineRun.set(s.run_id, id)
@@ -1365,6 +1394,19 @@ return {
     // 恢复现场从 [pw-ckpt] 检查点行重建（引擎不回传 results，宿主自建）；无检查点=
     // 降级，恢复要求人工指定 entry，不猜。
     const segmentCtrls = new Map() // 引擎运行 id → AbortController（段取消）
+    // LOC-029 逐次 attempt 提交：编译脚本在每次真实调用前后输出 [vwf-attempt] 行，
+    // 宿主据此向 Records Store 逐次提交执行记录并在段收尾按「确认 → 回填节点最新索引」
+    // 固定顺序推进。编排逻辑在 scripts/attempt-ledger.cjs（dist 内核，不占 dynamic
+    // 闭包载荷预算）；内核缺失（未随 dist 部署）时回退既有段末扫描行为。
+    let attkP = null
+    const attk = () => (attkP = attkP || loadDist('attempt-ledger.cjs').then((m) => m.create({
+      call: recordsHostCall,
+      lrecOf: (id) => {
+        const lrId = logicalRunByEngineRun.get(String(id))
+        return lrId ? logicalRuns.get(lrId) : null
+      },
+      snapOf: activeSnapshot,
+    })))
     // Safe Pause 的检查点观察：仅 action=pause 等待检查点；interrupt 即时路径不经此。
     // c='$end' 的检查点代表图已走完（随后正常收束走 control_voided），不得在其上中止。
     function maybeAbortAtCheckpoint(engineRunId, message) {
@@ -1386,6 +1428,135 @@ return {
       rec.control_events.push(ev)
       rec.updated_at = ev.at
       return ev
+    }
+
+    // ── LOC-027 评价基线冻结契约（纯逻辑内核 = dist/evaluation-baseline.cjs，进程边界留在宿主）──
+    // producer 业务放行时脚本输出 [eb-freeze] 请求行 → 子进程按原始字节算 SHA-256 并在
+    // Run 产物目录按版本隔离保存不可变副本 → 检查点边界中止本段（复用 #80 abort）→
+    // 成功=注入已核验引用自动恢复；文件缺失/不可读/摘要与模型声称值不符=BLOCKED 不进入
+    // 执行；后续段收尾核验原路径，改写/证据缺失=基线冲突 BLOCKED（副本保留）。模型摘要
+    // 不作权威值；未核验一律标 unverified。内核不可用（旧 dist）时闸门停用并留痕。
+    let ebKernelPromise = null
+    function ebKernel() {
+      if (!ebKernelPromise) ebKernelPromise = loadDist('evaluation-baseline.cjs').catch(() => { ebKernelPromise = null; return null })
+      return ebKernelPromise
+    }
+    // engineRunId → { decl, kernel, cwd, runDir, taskId, pending: Map<version, { req, promise }> }
+    const ebRuns = new Map()
+    const EB_GATE_MAX_RESUMES = 5
+    function observeBaselineRequest(engineRunId, message) {
+      const ebc = ebRuns.get(String(engineRunId || ''))
+      if (!ebc) return
+      const req = ebc.kernel.parseFreezeRequest(message)
+      if (!req || ebc.pending.has(req.version)) return
+      const payload = ebc.kernel.freezePayload({ artifact: ebc.decl.artifact, cwd: ebc.cwd, runDir: ebc.runDir, taskId: ebc.taskId, req: req })
+      const freeze = runNode(['-e', ebc.kernel.snippetSource(), JSON.stringify(payload)], { graceMs: 30000 }).then((r) => ebc.kernel.parseSubprocessJson(r))
+      ebc.pending.set(req.version, { req: payload, promise: freeze })
+      const lrId = logicalRunByEngineRun.get(String(engineRunId))
+      const lrec = lrId ? logicalRuns.get(lrId) : null
+      if (lrec) {
+        controlEvent(lrec, 'evaluation_baseline_freeze_requested', { version: req.version, source: payload.source, claimed_digest: req.claimed_digest, supersedes: req.supersedes })
+        requestLogicalPersist(lrec.logical_run_id)
+      }
+    }
+    // 冻结待决时在检查点边界中止本段（与 #80 安全暂停同机制：引擎在钩子边界抛 CANCELLED）
+    function maybeAbortAtBaselinePending(engineRunId, message) {
+      const ebc = ebRuns.get(String(engineRunId || ''))
+      if (!ebc || !ebc.pending.size) return
+      const raw = String(message || '')
+      const idx = raw.indexOf('[pw-ckpt]')
+      if (idx < 0) return
+      try {
+        const ck = JSON.parse(raw.slice(idx + '[pw-ckpt]'.length))
+        if (!ck || typeof ck !== 'object' || ck.c === '$end') return
+        const ctl = segmentCtrls.get(String(engineRunId || ''))
+        if (ctl && typeof ctl.abort === 'function') ctl.abort()
+      } catch (e) { /* 损坏行不作为中止依据 */ }
+    }
+    function ebBaselineArgs(rec) {
+      if (!rec || !rec.evaluation_baseline) return {}
+      return { evaluation_baseline: deepCloneData(rec.evaluation_baseline), evaluation_baseline_version: rec.evaluation_baseline.version }
+    }
+    // 段收尾闸门：等待本段全部冻结结果。失败（缺失/不可读/摘要不符）→ 结构化 BLOCKED；
+    // 成功且段被中止 → 从检查点注入已核验引用自动恢复（返回恢复段结果）。非取消段
+    // （无中止能力/竞速）只入档已核验引用，本段不再恢复。
+    async function runBaselineGate(env) {
+      const { logicalRec, engineRunId, result, execScript, meta, scriptArgs, parent, segCtl, taskId, ws, wsIdentity, engine: gateEngine } = env
+      const ebc = ebRuns.get(String(engineRunId || ''))
+      if (!ebc || !ebc.pending.size) return null
+      const versions = [...ebc.pending.keys()].sort((a, b) => a - b)
+      const version = versions[versions.length - 1]
+      const pending = ebc.pending.get(version)
+      const frozen = await pending.promise
+      const block = ebc.kernel.gateBlockOf(frozen, pending.req, ebc.decl.producerNode)
+      if (block) {
+        controlEvent(logicalRec, block.event, { version: version, code: String((frozen && frozen.code) || 'FREEZE_FAILED'), error: String((frozen && frozen.error) || ''), claimed: pending.req.claimed_digest, actual: frozen && frozen.digest !== undefined ? String(frozen.digest) : null })
+        requestLogicalPersist(logicalRec.logical_run_id)
+        return { handled: true, blocked: true, version: version, code: block.code, message: block.message, recovery_hint: block.recovery_hint }
+      }
+      const ref = ebc.kernel.baselineRefOf(frozen, pending.req, ebc.taskId)
+      logicalRec.evaluation_baseline = ref
+      logicalRec.evaluation_baselines = (logicalRec.evaluation_baselines || []).concat([ref])
+      controlEvent(logicalRec, 'evaluation_baseline_frozen', { version: version, digest: ref.digest, artifact_path: ref.artifact_path })
+      requestLogicalPersist(logicalRec.logical_run_id)
+      if (!result || result.stopReason !== 'cancelled') return { handled: true, blocked: false, resumed: false }
+      // 段被中止：从检查点重建现场，注入已核验基线引用自动恢复
+      const ck = extractCheckpoint(runs.get(String(engineRunId)))
+      if (!ck || ck.degraded || !ck.entry) {
+        return { handled: true, blocked: true, version: version, code: 'EVALUATION_BASELINE_RESUME_LOST', message: '评价基线 v' + version + ' 冻结成功，但该段无可用检查点现场，无法自动恢复后续节点。', recovery_hint: '人工确认续跑入口后用 wf_run entry=<节点id> 续跑；续跑参数将携带已核验基线引用' }
+      }
+      const cap = capabilityFor(wsIdentity)
+      const fresh = await wsHostCall('get', { logical_run_id: wsIdentity, capability: cap }).catch(() => ({ ok: false }))
+      const resumeArgs = ebc.kernel.resumeArgsOf(scriptArgs, ck, deepCloneData(ref))
+      if (fresh && fresh.ok && fresh.workspace) Object.assign(resumeArgs, scriptArgsFromWorkspace(fresh.workspace, cap))
+      const resumeReq = { script: execScript, meta: meta, args: resumeArgs, parent: parent }
+      if (segCtl) resumeReq.signal = segCtl.signal
+      if (ws && ws.source_path) { resumeReq.cwd = ws.source_path; resumeReq.workspaceRoot = ws.source_path }
+      const resumed = gateEngine.start(resumeReq)
+      const resumedId = String(resumed.id)
+      const resumedRec = ensureRun(resumedId)
+      resumedRec.taskId = taskId
+      resumedRec.workflowId = logicalRec.template_id
+      live.add(resumedId)
+      persist(resumedId)
+      onRun(String(engineRunId), (r) => { r.supersededBy = resumedId })
+      ebRuns.set(resumedId, { decl: ebc.decl, kernel: ebc.kernel, cwd: ebc.cwd, runDir: ebc.runDir, taskId: ebc.taskId, pending: new Map() })
+      if (segCtl) segmentCtrls.set(resumedId, segCtl)
+      appendLogicalSegment(logicalRec, resumedId, 'evaluation_baseline_resume')
+      logicalSetState(logicalRec, 'RUNNING', null)
+      requestLogicalPersist(logicalRec.logical_run_id)
+      let resumedResult
+      try { resumedResult = await resumed.result } catch (e) {
+        segmentCtrls.delete(resumedId)
+        endLogicalSegment(logicalRec, resumedId, 'ENGINE_ERROR')
+        logicalSetState(logicalRec, 'FAILED', logicalReason('ENGINE_ERROR', errMsg(e)))
+        requestLogicalPersist(logicalRec.logical_run_id)
+        return { handled: true, blocked: true, version: version, code: 'EVALUATION_BASELINE_RESUME_FAILED', message: '评价基线恢复段引擎失败：' + errMsg(e) }
+      }
+      segmentCtrls.delete(resumedId)
+      endLogicalSegment(logicalRec, String(engineRunId), 'CANCELLED_BASELINE_FREEZE')
+      const resumedCanon = resumedResult && resumedResult.stopReason === 'completed' ? canonicalStop(resumedResult) : ''
+      if (resumedCanon) onRun(resumedId, (r) => { r.status = resumedCanon; applyHdValue(r, resumedResult.value) })
+      if (resumedResult && resumedResult.error) onRun(resumedId, (r) => { r.error_detail = String(resumedResult.error).slice(0, 500) })
+      endLogicalSegment(logicalRec, resumedId, resumedCanon || String((resumedResult && resumedResult.stopReason) || ''))
+      controlEvent(logicalRec, 'evaluation_baseline_resumed', { version: version, entry: ck.entry, resume_run_id: resumedId, terminal: resumedCanon || String((resumedResult && resumedResult.stopReason) || '') })
+      requestLogicalPersist(logicalRec.logical_run_id)
+      return {
+        handled: true,
+        blocked: false,
+        resumed: true,
+        result: resumedResult,
+        canon: resumedCanon,
+        runId: resumedId,
+        seededKeys: new Set(Object.keys(ck.results || {})),
+      }
+    }
+    // 已核验基线的事后核验：原路径与冻结副本逐字节比对（改写/缺失=基线冲突）。
+    // 核验基础设施故障（清单/副本缺失、子进程失败）按 fail closed 处理，不把证据缺失包装为成功。
+    async function verifyBaselineOriginal(ebk, rec) {
+      const ref = rec && rec.evaluation_baseline
+      if (!ref || ref.status !== 'verified' || !ref.source_path || !ref.artifact_path) return null
+      return ebk.parseSubprocessJson(await runNode(['-e', ebk.snippetSource(), JSON.stringify(ebk.verifyPayloadOf(ref))], { graceMs: 30000 }))
     }
     // 从 run 记录日志提取最后一条检查点（脚本每完成一个节点路由后输出）。
     // 无检查点 = 该段无可用现场（旧脚本/解析失败）：恢复退化为人工指定 entry，不猜。
@@ -1473,6 +1644,8 @@ return {
       }
       const coach = (rec.guidance || []).filter((g) => g.mode === 'coach' && g.text)
       if (coach.length) args.guidance_text = coach.map((g) => '- ' + g.text).join('\n')
+      // LOC-027：恢复段携带活动评价基线引用（已核验/历史版本均原样传递，不迁移改写）
+      Object.assign(args, ebBaselineArgs(rec))
       return { args: args, pendingRebase: pending.length > 0, rebaseBlocked: rebaseBlocked }
     }
 
@@ -1487,12 +1660,19 @@ return {
     ctx.on('workflow/log', (info, message) => {
       onRun(info.id, (rec) => pushLog(rec, message))
       maybeAbortAtCheckpoint(info.id, message)
+      // LOC-027 评价基线：冻结请求观察 + 冻结待决时的检查点中止
+      observeBaselineRequest(info.id, message)
+      maybeAbortAtBaselinePending(info.id, message)
+      attk().then((t) => t.line(info.id, message)).catch(() => { /* 内核缺失：段末扫描回退 */ })
     })
     ctx.on('workflow/agent-start', (info, agent) => onRun(info.id, (rec) => rec.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' })))
     // 按 seq 精确匹配：pipeline 并发下 agent-start/agent-end 可能交错到达
     ctx.on('workflow/agent-end', (info, agent) => onRun(info.id, (rec) => { const a = rec.agents.find((x) => x.seq === agent.seq); if (a) a.outcome = String(agent.outcome) }))
     ctx.on('workflow/end', (info, result) => {
       live.delete(String(info.id))
+      // LOC-027：无待决冻结的基线上下文随段结束回收（待决条目等待闸门消费，不在此删）
+      const ebcEnd = ebRuns.get(String(info.id || ''))
+      if (ebcEnd && ebcEnd.pending.size === 0) ebRuns.delete(String(info.id || ''))
       onRun(info.id, (rec) => {
         // wf_run 已回写的脚本权威终态（WAITING_HUMAN / DONE / …）不得被迟到的 end 盖掉
         if (!TERMINAL_STATUS_RE.test(String(rec.status || ''))) rec.status = String(result.stopReason)
@@ -1525,10 +1705,12 @@ return {
       const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
       return TERMINAL_STATUS_RE.test(cand) ? cand : ''
     }
-    // 脚本终态 → workspace 生命周期：人工等待保留，DONE 完成，STOPPED 停止，其余失败
+    // 脚本终态 → workspace 生命周期：人工等待保留，DONE 完成，STOPPED 停止，
+    // BLOCKED 可恢复受阻（LOC-030：不落 FAILED，恢复后继续同一 Run），其余失败
     function lifecycleFor(canon, stopReason) {
       if (canon === 'DONE') return 'COMPLETED'
       if (canon === 'STOPPED') return 'STOPPED'
+      if (canon === 'BLOCKED') return 'BLOCKED'
       if (isHumanWait(canon)) return 'WAITING_HUMAN'
       if (canon || stopReason === 'cancelled' || stopReason === 'error') return 'FAILED'
       return null
@@ -1720,7 +1902,8 @@ return {
     registerRpc('vwf.records.list', async (a) => {
       const id = String((a && a.logical_run_id) || '')
       if (!id) return fail('缺少 logical_run_id')
-      return recordsHostCall('list', { logical_run_id: id })
+      // LOC-029：可选 node / attempt_id 过滤——按 Run/Node/Attempt 获取逐次记录
+      return recordsHostCall('list', { logical_run_id: id, node: a && a.node, attempt_id: a && a.attempt_id })
     })
     registerRpc('vwf.records.get', async (a) => {
       const id = String((a && a.logical_run_id) || '')
@@ -2073,6 +2256,7 @@ return {
         workspace_mode: ws.workspace_mode || undefined,
       }
     }
+    // LOC-026：候选捕获范围缺省由包装脚本侧排除 Run 产物目录（与编译脚本 RUNDIR 同源）
     function injectWorkspaceDefaults(script, defaults) {
       const payload = {}
       for (const k of Object.keys(defaults || {})) if (defaults[k] !== undefined && defaults[k] !== null) payload[k] = defaults[k]
@@ -2101,6 +2285,8 @@ return {
     }
     // workspace RPC 表：[包装脚本命令, 是否校验能力令牌, 载荷映射]。供编译后的 workflow 脚本在节点内调用。
     const str = (v) => String(v || '')
+    // 携带 Run 身份的载荷统一组装 logical_run_id（A4：包装脚本侧仍只信注册表解析）
+    const runArgs = (f) => (a, id) => ({ logical_run_id: id, ...f(a) })
     const WS_OPS = {
       // allocate 的模板解析要查注册表（异步）：build 为 async，模板 id 与
       // resource_kind 在进入包装脚本前已解析为最终值
@@ -2108,23 +2294,25 @@ return {
         logical_run_id: str(a.taskId), template_id: await resolveTemplateKind(a.templateId, a.declared_workspace), resource_kind: resolveResourceKind(a.resource_kind, a.declared_workspace), repository_path: a.repository_path || null, repository: a.repository || null,
         base_ref: a.baseBranch || 'main', base_commit: a.base_commit || null, work_branch: a.work_branch || null, task_identity: str(a.taskId), allow_parallel: !!a.allow_parallel,
       })],
-      get: ['get', true, (a, id) => ({ logical_run_id: id })],
-      setLifecycle: ['setLifecycle', true, (a, id) => ({ logical_run_id: id, lifecycle: str(a.lifecycle), extra: a.extra || {} })],
-      recordSourceSync: ['recordSourceSync', true, (a, id) => ({ logical_run_id: id, current_head: a.current_head || undefined, source_revision: a.source_revision || undefined })],
+      get: ['get', true, runArgs(() => ({}))],
+      setLifecycle: ['setLifecycle', true, runArgs((a) => ({ lifecycle: str(a.lifecycle), extra: a.extra || {} }))],
+      recordSourceSync: ['recordSourceSync', true, runArgs((a) => ({ current_head: a.current_head || undefined, source_revision: a.source_revision || undefined }))],
       // 只接收 Run 身份，权威 workspace 由包装脚本从注册表解析，不信任调用方传入的路径
-      buildProvenance: ['buildAttemptProvenance', true, (a, id) => ({ logical_run_id: id, node: str(a.node), attempt: Number(a.attempt || 1) })],
-      acquireLock: ['acquireLock', true, (a, id) => ({ logical_run_id: id, resource_key: str(a.resource_key), owner: str(a.owner), ttl_ms: a.ttl_ms || undefined })],
-      releaseLock: ['releaseLock', true, (a, id) => ({ lock_id: str(a.lock_id), owner: str(a.owner), logical_run_id: id, reason: a.reason || undefined })],
-      cleanup: ['cleanup', true, (a, id) => ({ logical_run_id: id, opts: a.opts || {} })],
-      writeSource: ['writeSourceFile', true, (a, id) => ({ logical_run_id: id, rel: str(a.rel), content: str(a.content) })],
-      readSource: ['readSourceFile', true, (a, id) => ({ logical_run_id: id, rel: str(a.rel) })],
-      writeWorker: ['writeWorkerFile', true, (a, id) => ({ logical_run_id: id, worker_id: str(a.worker_id), rel: str(a.rel), content: str(a.content) })],
-      readWorker: ['readWorkerFile', true, (a, id) => ({ logical_run_id: id, worker_id: str(a.worker_id), rel: str(a.rel) })],
+      buildProvenance: ['buildAttemptProvenance', true, runArgs((a) => ({ node: str(a.node), attempt: Number(a.attempt || 1) }))],
+      // LOC-026：候选证明（捕获范围由包装脚本缺省构造）
+      captureCandidate: ['captureCandidate', true, runArgs(() => ({}))],
+      acquireLock: ['acquireLock', true, runArgs((a) => ({ resource_key: str(a.resource_key), owner: str(a.owner), ttl_ms: a.ttl_ms || undefined }))],
+      releaseLock: ['releaseLock', true, runArgs((a) => ({ lock_id: str(a.lock_id), owner: str(a.owner), reason: a.reason || undefined }))],
+      cleanup: ['cleanup', true, runArgs((a) => ({ opts: a.opts || {} }))],
+      writeSource: ['writeSourceFile', true, runArgs((a) => ({ rel: str(a.rel), content: str(a.content) }))],
+      readSource: ['readSourceFile', true, runArgs((a) => ({ rel: str(a.rel) }))],
+      writeWorker: ['writeWorkerFile', true, runArgs((a) => ({ worker_id: str(a.worker_id), rel: str(a.rel), content: str(a.content) }))],
+      readWorker: ['readWorkerFile', true, runArgs((a) => ({ worker_id: str(a.worker_id), rel: str(a.rel) }))],
       checkpoint: ['computeIntegrationCheckpointFromRepo', false, (a) => ({ base_ref: str(a.base_ref), base_commit: str(a.base_commit), repository_path: str(a.repository_path), target_ref: a.target_ref || undefined })],
-      // LOC-017 集成闸门：gatePlan（只读观测 + 锁键）/ syncTarget（真 merge + 实况登记）
-      gatePlan: ['gatePlan', true, (a, id) => ({ logical_run_id: id, target_ref: a.target_ref || undefined })],
-      syncTarget: ['syncTarget', true, (a, id) => ({ logical_run_id: id, target_ref: a.target_ref || undefined })],
-      gateSyncEntry: ['gateSyncEntry', true, (a, id) => ({ logical_run_id: id, target_head: str(a.target_head), previous_synced_head: a.previous_synced_head || undefined, integrated_before: a.integrated_before === true, merge_result: str(a.merge_result), attempt: Number(a.attempt || 1), snapshot_revision: str(a.snapshot_revision) })],
+      // LOC-017 集成闸门：gatePlan（只读观测 + 候选捕获 + 锁键）/ syncTarget（真 merge + 实况登记）
+      gatePlan: ['gatePlan', true, runArgs((a) => ({ target_ref: a.target_ref || undefined }))],
+      syncTarget: ['syncTarget', true, runArgs((a) => ({ target_ref: a.target_ref || undefined }))],
+      gateSyncEntry: ['gateSyncEntry', true, runArgs((a) => ({ target_head: str(a.target_head), previous_synced_head: a.previous_synced_head || undefined, integrated_before: a.integrated_before === true, merge_result: str(a.merge_result), attempt: Number(a.attempt || 1), snapshot_revision: str(a.snapshot_revision) }))],
       activeLock: ['activeLockFor', true, (a) => ({ resource_key: str(a.resource_key) })],
     }
     for (const op of Object.keys(WS_OPS)) {
@@ -2178,8 +2366,12 @@ return {
     //    依赖（覆盖的 Record Revision）由 Store 端在签发时刻按当时全部节点/产物
     //    记录结链——之后目标 Revision 前进，旧 Proof 即 not_covering_current（stale）。
     // verified_* 以节点结论为准（编译脚本 claimError 已强制校验其存在）。
-    function nodeRecordEntries(logicalRunId, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
+    // LOC-026：Proof 绑定宿主签发时刻实况捕获的 candidate_ref（权威），并记录节点自报
+    // candidate_sha256 的核对结论 candidate_match；捕获失败仅记 candidate_match=false
+    //（闸门按 mismatch 拒绝，不当 legacy 放行）。
+    async function nodeRecordEntries(logicalRunId, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
       const entries = []
+      let cand = null
       for (const nodeId of newKeys) {
         const res = results[nodeId]
         if (res == null || typeof res !== 'object') continue
@@ -2202,16 +2394,23 @@ return {
           body_value: res,
         })
         if (node && node.verifyBranch) {
+          if (!cand) {
+            const c = await wsHostCall('captureCandidate', { logical_run_id: logicalRunId, capability: capabilityFor(logicalRunId) })
+            if (c.candidate) cand = c.candidate
+          }
+          const proofBody = {
+            node: String(nodeId),
+            verified_branch: res.verified_branch === undefined ? null : res.verified_branch,
+            verified_head: res.verified_head === undefined ? null : res.verified_head,
+            workspace: ws ? { workspace_id: ws.workspace_id || null, source_path: ws.source_path || null, work_branch: ws.work_branch || null } : null,
+            candidate_ref: cand,
+            candidate_match: !!(cand && res.candidate_sha256 === cand.version.content_sha256),
+          }
           entries.push({
             type: 'proof',
             record_id: 'proof:' + logicalRunId + ':' + nodeId,
             provenance,
-            body_value: {
-              node: String(nodeId),
-              verified_branch: res.verified_branch === undefined ? null : res.verified_branch,
-              verified_head: res.verified_head === undefined ? null : res.verified_head,
-              workspace: ws ? { workspace_id: ws.workspace_id || null, source_path: ws.source_path || null, work_branch: ws.work_branch || null } : null,
-            },
+            body_value: proofBody,
           })
         }
       }
@@ -2283,6 +2482,15 @@ return {
         if (ws.workspace_mode !== 'ISOLATED_WRITE') return { trace: Object.assign(trace, { decision: 'skipped', reason: 'non_isolated_write' }) }
         // B1 适用面：无审核/测试节点的图不是建设类流程，闸门不适用（保持旧行为，不回归）
         if (!verifyNodes.length) return { trace: Object.assign(trace, { decision: 'skipped', reason: 'no_verify_nodes' }) }
+        // ── LOC-026 候选核验：实况候选已随 gatePlan 捕获（内核 planTargetSync），此处
+        // 逐个 Proof 比较"所指候选 vs 实况"（委托 records-host assertCandidates / 内核
+        // compareCandidate）；捕获/比较失败 fail closed；无 candidate_ref 的历史 Proof 记
+        // legacy_unverified，不伪造绑定，仍由既有 Revision 覆盖判定约束（兼容冻结快照）。
+        const candGate = async (plan) => {
+          const C = await recordsHostCall('assertCandidates', { logical_run_id: wsIdentity, candidate: plan.candidate })
+          trace.candidate_checks = C.checks
+          return C.pass ? null : blocked(C.code || 'GATE_CANDIDATE_FAILED', C.message || C.error)
+        }
         // 最近一次闸门重跑段的收束现场：放行时 wf_run 返回它（人工拿到的是重跑后的 decision_id）
         let lastRerun = null
         for (let iteration = 1; iteration <= GATE_MAX_ITERATIONS; iteration++) {
@@ -2302,7 +2510,9 @@ return {
           const cp = cpRes && cpRes.ok ? cpRes.checkpoint : null
           if (!cp || typeof cp.target_advanced !== 'boolean') return blocked('GATE_OBSERVE_FAILED', '目标 HEAD 观测失败，fail closed（B13）：' + ((cpRes && cpRes.error) || '未知'))
           if (!cp.target_advanced && !lastSync) {
-            // B3：目标未前进且从未同步——直接放行，不重跑、不额外耗时
+            // B3：目标未前进且从未同步——候选核验通过后直接放行，不重跑、不额外耗时
+            const gateBlocked = await candGate(plan)
+            if (gateBlocked) return gateBlocked
             trace.decision = 'pass'
             trace.proofs_state = 'still_valid'
             return { trace }
@@ -2318,6 +2528,9 @@ return {
               target_advanced: false,
             })
             if (assertion.ok) {
+              // Revision 覆盖满足后仍须候选核验（LOC-026）：所指候选 = 实况候选才放行
+              const gateBlocked = await candGate(plan)
+              if (gateBlocked) return gateBlocked
               trace.decision = 'pass'
               trace.proofs_state = assertion.proofs_state || 'rerun_completed'
               return lastRerun
@@ -2390,6 +2603,8 @@ return {
             delete rerunArgs.decision_id
             delete rerunArgs.user_choice
             delete rerunArgs.approved
+            // LOC-027：重跑段同样携带活动评价基线引用（评估摘要闸门在重跑段保持有效）
+            Object.assign(rerunArgs, ebBaselineArgs(logicalRec))
             const fresh = await wsHostCall('get', { logical_run_id: wsIdentity, capability: cap })
             if (fresh.ok && fresh.workspace) Object.assign(rerunArgs, scriptArgsFromWorkspace(fresh.workspace, cap))
             const rerunReq = { script: execScript, meta, args: rerunArgs, parent }
@@ -2402,6 +2617,8 @@ return {
             rerunRec.workflowId = logicalRec.template_id
             live.add(rerunRunId)
             persist(rerunRunId)
+            const freshWs = fresh.ok && fresh.workspace ? fresh.workspace : ws
+            attk().then((t) => t.setWs(rerunRunId, freshWs)).catch(() => {})
             onRun(outerRunId, (r) => { r.supersededBy = rerunRunId })
             appendLogicalSegment(logicalRec, rerunRunId, 'integration_gate_rerun')
             logicalSetState(logicalRec, 'RUNNING', null)
@@ -2421,14 +2638,16 @@ return {
             if (rerunResult && rerunResult.error) onRun(rerunRunId, (r) => { r.error_detail = String(rerunResult.error).slice(0, 500) })
             endLogicalSegment(logicalRec, rerunRunId, rerunCanon || String((rerunResult && rerunResult.stopReason) || ''))
             const rerunResults = rerunValue && typeof rerunValue.results === 'object' && rerunValue.results ? rerunValue.results : null
+            // LOC-029：重跑段同样先结算逐次提交；无逐次事件（旧冻结脚本）走扫描回退
+            const attRerun = await attk().then((t) => t.settle(logicalRec, rerunRunId, logicalRec.segments.length)).catch(() => null)
             const beforeKeys = new Set(Object.keys(rerunSeed))
-            recordNodeAttempts(logicalRec, dsl, beforeKeys, rerunResults, rerunValue && rerunValue.control_event)
+            if (!attRerun) recordNodeAttempts(logicalRec, dsl, beforeKeys, rerunResults, rerunValue && rerunValue.control_event)
             const trans2 = logicalTransitionFor(rerunCanon, rerunResult && rerunResult.stopReason, rerunValue)
             if (trans2) logicalSetState(logicalRec, trans2.state, trans2.reason)
-            if (rerunResults) {
+            if (rerunResults && !attRerun) {
               const newKeys = Object.keys(rerunResults).filter((k) => !beforeKeys.has(k))
               if (newKeys.length) {
-                const entries = nodeRecordEntries(wsIdentity, dsl, rerunResults, newKeys, logicalRec.segments.length, fresh.ok && fresh.workspace ? fresh.workspace : ws, activeSnapshot(logicalRec), rerunValue && rerunValue.control_event)
+                const entries = await nodeRecordEntries(wsIdentity, dsl, rerunResults, newKeys, logicalRec.segments.length, fresh.ok && fresh.workspace ? fresh.workspace : ws, activeSnapshot(logicalRec), rerunValue && rerunValue.control_event)
                 if (entries.length) await commitNodeRecords(logicalRec, entries)
               }
             }
@@ -2611,7 +2830,9 @@ return {
         // runsHydration 会与 loadLogicalRuns 竞速，重启窗口内误判"无前任"）。
         try { if (typeof logicalRunsHydration !== 'undefined' && logicalRunsHydration) await logicalRunsHydration } catch (e) { /* 回载失败已留痕 */ }
         const logicalTaskId = taskId
-        const beforeResultKeys = new Set(Object.keys((args.results && typeof args.results === 'object' && !Array.isArray(args.results)) ? args.results : {}))
+        // LOC-027：基线恢复段以检查点现场为段首基线（beforeResultKeys 随恢复段更新，
+        // 保证逐节点入档只记恢复段新完成的节点）
+        let beforeResultKeys = new Set(Object.keys((args.results && typeof args.results === 'object' && !Array.isArray(args.results)) ? args.results : {}))
         const logicalRunConfig = () => {
           const cfg = { runDir: args.runDir, baseBranch: args.baseBranch, roleDir: args.roleDir || c.roleDir, issueRef: args.issueRef, issueTitle: args.issueTitle }
           for (const k of Object.keys(cfg)) { if (cfg[k] === undefined || cfg[k] === null || cfg[k] === '') delete cfg[k] }
@@ -2637,6 +2858,12 @@ return {
               && latest.lifecycle.reason && typeof latest.lifecycle.reason.code === 'string'
               && latest.lifecycle.reason.code.indexOf('GATE_') === 0) {
             return '错误：逻辑运行 ' + latest.logical_run_id + ' 被集成闸门拦截（' + latest.lifecycle.reason.code + '）：人工决策续跑不可用，否则将绕过闸门放行。请从 uat 节点续跑同一逻辑运行（wf_run entry=uat），重新通过集成闸门后再进入人工验收。'
+          }
+          // LOC-030：NEEDS_REDEFINE 受阻不可原样恢复（resumable=false）——保留旧 Run 原样，
+          // 基线重定义后重新发起（派生新运行并保留来源），不在同一 Run 静默换版续跑。
+          if (latest && !latest.terminal && isResumeLike && latest.lifecycle.state === 'BLOCKED'
+              && latest.lifecycle.reason && latest.lifecycle.reason.code === 'NEEDS_REDEFINE') {
+            return '错误：逻辑运行 ' + latest.logical_run_id + '（NEEDS_REDEFINE）：基线需重定义，不可原样恢复；请重定义后重新发起（保留旧 Run）。'
           }
           logicalTrigger = isHdResume ? 'human_decision' : (isPauseResume ? 'pause_resume' : 'legacy_resume')
           // #80 暂停恢复：检查点现场 + 适用 Guidance（Run 级）+ 最新基线修订回填执行载荷
@@ -2777,6 +3004,8 @@ return {
           // #80：暂停期间的用户指导（Run 级）与最新基线修订文本——经脚本 runtimeCtx/issueBlock
           // 注入执行上下文；普通 Guidance 不触碰基线，基线修订只经显式 mode=baseline 产生
           guidance_text: args.guidance_text, baseline_amendment: args.baseline_amendment,
+          // LOC-027：活动评价基线引用（续跑由 ebBaselineArgs 注入；新启为 undefined 并被清理）
+          evaluation_baseline: args.evaluation_baseline, evaluation_baseline_version: args.evaluation_baseline_version,
           // #79: 快照修订的 Provider/Model（Codex R2 ②：active 快照的合并绑定；仅续跑
           // 生效——新启透传会让脚本用覆盖模型执行而 Rev1 快照仍记蓝图绑定，归因失真）
           model_overrides: modelOverridesForExec,
@@ -2785,6 +3014,9 @@ return {
 
         // 启动引擎前先标 RUNNING：崩溃/start 抛错不得把 workspace 永久留在 READY
         if (ws) await markWorkspaceLifecycle(wsIdentity, 'RUNNING')
+        // LOC-027：续跑（人工决策/旧门禁/暂停恢复/模型恢复）携带活动评价基线引用（在
+        // scriptArgs 组装前注入，恢复段节点提示与摘要闸门才能拿到已核验基线）
+        if (logicalRec && (isHdResume || isLegacyResume || isPauseResume || probeResume)) Object.assign(args, ebBaselineArgs(logicalRec))
         // Codex R2 ①：续跑执行 Rev 1 冻结脚本（见上方 execScript 说明）
         const startReq = { script: execScript, meta: c.meta, args: scriptArgs, parent: parent }
         // #80：段取消信号——pause/interrupt 经 vwf.run.control 中止本段（引擎在当前钩子
@@ -2805,12 +3037,23 @@ return {
         // 启动边界自登记（workflow/start 事件不带 taskId）；续跑把同 taskId 前序门禁记录标记接管
         const runId = String(run.id)
         if (segCtl) segmentCtrls.set(runId, segCtl)
+        // 逐次 Proof 需要段 workspace 绑定（LOC-029）：与 workspace 生命周期同段登记
+        attk().then((t) => t.setWs(runId, ws)).catch(() => {})
         const rec = ensureRun(runId)
         rec.taskId = taskId
         rec.workflowId = String(args.templateId || v.sanitized.id || '')
         live.add(runId)
         persist(runId)
         if (isHdResume || isLegacyResume || isPauseResume) supersedeParked(taskId, runId)
+        // LOC-027：评价基线上下文登记（声明 evaluationBaseline 的模板才启用观察与冻结闸门）
+        const ebDecl = v.sanitized && v.sanitized.evaluationBaseline && typeof v.sanitized.evaluationBaseline === 'object'
+          ? v.sanitized.evaluationBaseline
+          : null
+        if (ebDecl && logicalRec) {
+          const ebk = await ebKernel()
+          if (ebk) ebRuns.set(runId, { decl: ebDecl, kernel: ebk, cwd: (ws && ws.source_path) || projectRoot() || '', runDir: args.runDir || null, taskId: logicalTaskId, pending: new Map() })
+          else log('评价基线内核不可用（dist/evaluation-baseline.cjs 缺失）：本运行基线保持未核验口径')
+        }
         // #79：本段执行挂到逻辑运行（READY/WAITING_HUMAN → RUNNING，清 reason）
         if (logicalRec) {
           appendLogicalSegment(logicalRec, runId, logicalTrigger, isHdResume ? String(args.decision_id || '') : '')
@@ -2831,8 +3074,20 @@ return {
         }
         segmentCtrls.delete(runId)
         // 权威终态回写：completed 时以脚本返回 value.status 为准；回执保持引擎原样不翻译
-        const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
-        if (canon) onRun(runId, (r) => { r.status = canon; applyHdValue(r, result.value) })
+        // （LOC-027：基线闸门恢复段会接管 result，canon 相应重算）
+        let canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
+        if (canon) {
+          onRun(runId, (r) => {
+            r.status = canon
+            applyHdValue(r, result.value)
+            // LOC-030：受阻回执统一解释——运行卡片带原因码与恢复入口（看板与 Skill 同口径）
+            const tv = canon === 'BLOCKED' && result.value && result.value.termination
+            if (tv && typeof tv.reason_code === 'string' && tv.reason_code) {
+              r.reason = tv.reason_code
+              if (typeof tv.resume_node === 'string' && tv.resume_node) r.node = tv.resume_node
+            }
+          })
+        }
         // 诊断可追溯：引擎 error/cancelled 的渲染错误写入运行记录（此前 result.error 被丢弃，
         // 现场只能看到 status=error 无从定位）
         if (result && result.error) {
@@ -2853,11 +3108,14 @@ return {
           logicalRec.pause_state = null
           endLogicalSegment(logicalRec, runId, pauseAction === 'interrupt' ? 'CANCELLED_INTERRUPT' : 'CANCELLED_PAUSE')
           // #79 逐节点语义在取消段不缺位：检查点 results（段首基线之后新完成的节点）
-          // 照常入档 node_attempts / business_outcomes（含溯源与结果提取）
-          recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, ck.results, null)
+          // 照常入档 node_attempts / business_outcomes（含溯源与结果提取）。
+          // LOC-029：新脚本段先结算逐次提交（确认 → 回填索引），旧脚本走段末扫描回退。
+          const attPause = await attk().then((t) => t.settle(logicalRec, runId, logicalRec.segments.length)).catch(() => null)
+          if (!attPause) recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, ck.results, null)
           // 中断语义：进行中/待执行的检查点节点 Attempt 记 INTERRUPTED（不产生正式成功
-          // 结果，恢复后整体重跑）；降级现场（无检查点）无法定位节点，登记为已知限制
-          if (pauseAction === 'interrupt' && ck.entry) {
+          // 结果，恢复后整体重跑）；降级现场（无检查点）无法定位节点，登记为已知限制。
+          // 逐次提交段由 Store close 已把进行中 attempt 记为 interrupted，不重复入档。
+          if (pauseAction === 'interrupt' && ck.entry && !attPause) {
             const snap = activeSnapshot(logicalRec)
             const eff = effectiveProviderModel(logicalRec, ck.entry)
             logicalRec.node_attempts.push({
@@ -2869,6 +3127,25 @@ return {
           }
           logicalSetState(logicalRec, 'PAUSED', logicalReason(pauseAction === 'interrupt' ? 'USER_INTERRUPT' : 'USER_PAUSE', ck.degraded ? '该段无可用检查点，恢复需人工指定 entry' : ''))
           controlEvent(logicalRec, pauseAction === 'interrupt' ? 'interrupted' : 'paused', { run_id: runId, checkpoint_entry: ck.entry || null, checkpoint_degraded: ck.degraded === true })
+          // LOC-027：暂停/中断前已发出的冻结请求照常结算（成功→入档已核验引用，
+          // 恢复段经 ebBaselineArgs 携带；失败→如实留痕，不阻断暂停收束）
+          const ebcPause = ebRuns.get(runId)
+          if (ebcPause && ebcPause.pending.size) {
+            for (const [, p] of [...ebcPause.pending]) {
+              try {
+                const fz = await p.promise
+                const ref = fz && fz.ok === true && fz.match !== false ? ebcPause.kernel.baselineRefOf(fz, p.req, ebcPause.taskId) : null
+                if (ref) {
+                  logicalRec.evaluation_baseline = ref
+                  logicalRec.evaluation_baselines = (logicalRec.evaluation_baselines || []).concat([ref])
+                  controlEvent(logicalRec, 'evaluation_baseline_frozen', { version: ref.version, digest: ref.digest, artifact_path: ref.artifact_path })
+                } else {
+                  controlEvent(logicalRec, 'evaluation_baseline_freeze_failed', { version: p.req.version, code: String((fz && fz.code) || 'FREEZE_FAILED'), error: String((fz && fz.error) || '') })
+                }
+              } catch (e) { /* 冻结结果不可得：留待后续核验定位，不伪装成功 */ }
+            }
+            ebcPause.pending.clear()
+          }
           await refreshWorkspaceContext(logicalRec, wsIdentity)
           requestLogicalPersist(logicalRec.logical_run_id)
           onRun(runId, (r) => { r.status = 'PAUSED'; r.reason = pauseAction === 'interrupt' ? 'USER_INTERRUPT' : 'USER_PAUSE' })
@@ -2880,12 +3157,57 @@ return {
           logicalRec.pause_state = null
           controlEvent(logicalRec, 'control_voided', { run_id: runId })
         }
+        // ── LOC-027 评价基线冻结闸门 ────────────────────────────────────────────
+        // 冻结失败（原评价文件缺失/不可读/摘要与模型声称值不符）→ 结构化 BLOCKED，不进入
+        // 执行/不放行；成功且段在检查点被中止 → 注入已核验基线引用自动恢复。恢复段内再次
+        // 确认（RECONFIRM→新版本）按序继续闸门循环（EB_GATE_MAX_RESUMES 防循环）。
+        let currentRunId = runId
+        let baselineGateBlocked = null
+        if (logicalRec && !pauseAction) {
+          for (let gateIter = 0; gateIter < EB_GATE_MAX_RESUMES; gateIter++) {
+            const g = await runBaselineGate({ logicalRec, engineRunId: currentRunId, result, execScript, meta: c.meta, scriptArgs, parent, segCtl, taskId: logicalTaskId, ws, wsIdentity, engine: engineNow })
+            if (!g) break
+            if (g.blocked) { baselineGateBlocked = g; break }
+            if (!g.resumed) break
+            currentRunId = g.runId
+            result = g.result
+            canon = g.canon
+            if (g.seededKeys) beforeResultKeys = g.seededKeys
+          }
+        }
+        if (baselineGateBlocked) {
+          logicalSetState(logicalRec, 'BLOCKED', logicalReason(baselineGateBlocked.code, baselineGateBlocked.message))
+          controlEvent(logicalRec, 'evaluation_baseline_gate', { decision: 'blocked', code: baselineGateBlocked.code, message: baselineGateBlocked.message, version: baselineGateBlocked.version === undefined ? null : baselineGateBlocked.version })
+          endLogicalSegment(logicalRec, currentRunId, result && result.stopReason === 'cancelled' ? 'CANCELLED_BASELINE_FREEZE' : (canon || String((result && result.stopReason) || '')))
+          await refreshWorkspaceContext(logicalRec, wsIdentity)
+          requestLogicalPersist(logicalRec.logical_run_id)
+          onRun(currentRunId, (r) => { r.status = 'BLOCKED'; r.reason = baselineGateBlocked.code })
+          if (ws) await markWorkspaceLifecycle(wsIdentity, 'BLOCKED')
+          return JSON.stringify({
+            runId: currentRunId,
+            stopReason: result && result.stopReason,
+            value: {
+              status: 'BLOCKED',
+              code: baselineGateBlocked.code,
+              message: baselineGateBlocked.message,
+              recovery_hint: baselineGateBlocked.recovery_hint || null,
+              evaluation_baseline_version: baselineGateBlocked.version === undefined ? null : baselineGateBlocked.version,
+            },
+            agentsStarted: (result && result.agentsStarted) || 0,
+            evaluation_baseline_gate: { decision: 'blocked', code: baselineGateBlocked.code },
+          })
+        }
+        if (currentRunId !== runId) {
+          // 基线恢复段接管：权威终态回写到恢复段运行记录
+          if (canon) onRun(currentRunId, (r) => { r.status = canon; applyHdValue(r, result.value) })
+        }
         // #79 逻辑运行收尾：八态映射 + 完成类型镜像 + 节点实际修订/模型/业务结果
         // 记录 + 工作区上下文入档。Lifecycle 闸门不改写专业结果（R7）。
         let gateOutcome = null
+        let evidenceFailed = false
         if (logicalRec) {
           const value = result && result.value
-          endLogicalSegment(logicalRec, runId, canon || String((result && result.stopReason) || ''))
+          endLogicalSegment(logicalRec, currentRunId, canon || String((result && result.stopReason) || ''))
           if (!canon && result && result.error) {
             // 引擎错误详情进逻辑运行摘要，看板与归档可追溯
             logicalRec.last_engine_error = String(result.error).slice(0, 500)
@@ -2900,8 +3222,16 @@ return {
               }
             }
           }
-          recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, value && value.results, value && value.control_event)
-          const trans = logicalTransitionFor(canon, result && result.stopReason, value)
+          // LOC-029 完成顺序：保存结果（脚本）→ 逐次提交确认（Store）→ 更新最新索引
+          // 与检查点 → 推进。确认失败的段 fail-closed：保留专业结论与既有证据，
+          // 但不宣布完成、不重签 Proof，恢复后重放/续跑按提交键幂等补齐。
+          const att = await attk().then((t) => t.settle(logicalRec, runId, logicalRec.segments.length)).catch(() => null)
+          evidenceFailed = !!(att && att.x.length)
+          if (!att) recordNodeAttempts(logicalRec, v.sanitized, beforeResultKeys, value && value.results, value && value.control_event)
+          if (evidenceFailed) {
+            logicalSetState(logicalRec, 'FAILED', logicalReason('EVIDENCE_COMMIT_FAILED', att.x.join(';').slice(0, 300)))
+          }
+          const trans = evidenceFailed ? null : logicalTransitionFor(canon, result && result.stopReason, value)
           if (trans) logicalSetState(logicalRec, trans.state, trans.reason)
           // #80：基线修订在恢复段正常收束（脚本权威终态，含 WAITING_HUMAN）时消费——
           // ENGINE_ERROR/取消不消费，回跳会在下次恢复时重新发生
@@ -2914,23 +3244,59 @@ return {
           }
           // LOC-008：节点收尾产物经 vwf.records.commit 单一通道入 Formal Records
           // Store（非阻断）。段号与 recordNodeAttempts 同源；摘要互相引用随之刷新。
+          // LOC-029：逐次提交段已在调用时入 Store，跳过段末扫描（避免重复 Revision）。
           const resultsNow = value && typeof value.results === 'object' && value.results ? value.results : null
-          if (resultsNow) {
+          if (resultsNow && !att) {
             const newKeys = Object.keys(resultsNow).filter((k) => !beforeResultKeys.has(k))
             if (newKeys.length) {
-              const entries = nodeRecordEntries(logicalRec.logical_run_id, v.sanitized, resultsNow, newKeys, logicalRec.segments.length, ws, activeSnapshot(logicalRec), value.control_event)
+              const entries = await nodeRecordEntries(logicalRec.logical_run_id, v.sanitized, resultsNow, newKeys, logicalRec.segments.length, ws, activeSnapshot(logicalRec), value.control_event)
               if (entries.length) await commitNodeRecords(logicalRec, entries)
             }
           }
           await refreshWorkspaceContext(logicalRec, wsIdentity)
+          // LOC-027：已核验基线的事后核验——原路径被改写/删除或核验证据缺失=基线冲突，
+          // BLOCKED 交人工（冻结副本已保留，可从确认节点重建新版本基线；不静默更新摘要）
+          if (canon && logicalRec.evaluation_baseline && logicalRec.evaluation_baseline.status === 'verified') {
+            const ebkV = await ebKernel()
+            const vb = ebkV ? await verifyBaselineOriginal(ebkV, logicalRec) : null
+            const conflict = ebkV ? ebkV.conflictOf(vb, logicalRec.evaluation_baseline, ebDecl ? ebDecl.producerNode : 'confirm') : null
+            if (conflict) {
+              const conflictCode = conflict.detail_code
+              const conflictVersion = logicalRec.evaluation_baseline.version
+              logicalRec.evaluation_baseline = Object.assign({}, logicalRec.evaluation_baseline, {
+                status: 'conflict',
+                conflict: { code: conflictCode, expected: conflict.expected, observed: conflict.observed, at: Date.now() },
+              })
+              controlEvent(logicalRec, 'evaluation_baseline_conflict', { version: conflictVersion, code: conflictCode, expected: conflict.expected, observed: conflict.observed })
+              logicalSetState(logicalRec, 'BLOCKED', logicalReason('EVALUATION_BASELINE_CONFLICT', conflict.message))
+              await refreshWorkspaceContext(logicalRec, wsIdentity)
+              requestLogicalPersist(logicalRec.logical_run_id)
+              onRun(currentRunId, (r) => { r.status = 'BLOCKED'; r.reason = 'EVALUATION_BASELINE_CONFLICT'; r.decision_id = ''; r.decision_package = null })
+              if (ws) await markWorkspaceLifecycle(wsIdentity, 'BLOCKED')
+              return JSON.stringify({
+                runId: currentRunId,
+                stopReason: result && result.stopReason,
+                value: {
+                  status: 'BLOCKED',
+                  code: conflict.code,
+                  message: conflict.message,
+                  recovery_hint: conflict.recovery_hint,
+                  evaluation_baseline: { version: conflictVersion, artifact_path: logicalRec.evaluation_baseline.artifact_path, digest: logicalRec.evaluation_baseline.digest, conflict_code: conflictCode },
+                },
+                agentsStarted: (result && result.agentsStarted) || 0,
+                evaluation_baseline_gate: { decision: 'blocked', code: conflict.code },
+              })
+            }
+          }
           // LOC-017 集成闸门（B2）：Git ISOLATED_WRITE 运行在人工等待结算前自动执行。
           // 放行 → 维持人工等待；目标前进 → 同一逻辑运行内自动同步+重跑；失败 → BLOCKED。
-          if (canon === 'WAITING_HUMAN' && ws && ws.workspace_mode === 'ISOLATED_WRITE') {
-            gateOutcome = await runIntegrationGate({ logicalRec, ws, wsIdentity, dsl: v.sanitized, scriptArgs, meta: c.meta, execScript, parent, segCtl, resultsNow, taskId, outerRunId: runId, engine: engineNow })
+          // 证据提交失败的段不得重签 Proof（fail-closed），先恢复证据再过闸门。
+          if (canon === 'WAITING_HUMAN' && !evidenceFailed && ws && ws.workspace_mode === 'ISOLATED_WRITE') {
+            gateOutcome = await runIntegrationGate({ logicalRec, ws, wsIdentity, dsl: v.sanitized, scriptArgs, meta: c.meta, execScript, parent, segCtl, resultsNow, taskId, outerRunId: currentRunId, engine: engineNow })
             if (gateOutcome && gateOutcome.blocked) {
               logicalSetState(logicalRec, 'BLOCKED', logicalReason(gateOutcome.code, gateOutcome.message))
               controlEvent(logicalRec, 'integration_gate', { decision: 'blocked', code: gateOutcome.code, message: gateOutcome.message, iterations: gateOutcome.trace ? gateOutcome.trace.iterations : 0, observed_head: gateOutcome.trace ? gateOutcome.trace.observed_head : null })
-              onRun(runId, (r) => { r.status = 'BLOCKED'; r.reason = gateOutcome.code; r.decision_id = ''; r.decision_package = null; r.results = null })
+              onRun(currentRunId, (r) => { r.status = 'BLOCKED'; r.reason = gateOutcome.code; r.decision_id = ''; r.decision_package = null; r.results = null })
             } else if (gateOutcome && gateOutcome.trace) {
               controlEvent(logicalRec, 'integration_gate', {
                 decision: gateOutcome.trace.decision,
@@ -2950,10 +3316,11 @@ return {
         if (ws) {
           const blockedGate = !!(gateOutcome && gateOutcome.blocked)
           const finalCanon = gateOutcome && gateOutcome.finalCanon !== undefined ? gateOutcome.finalCanon : canon
-          const lc = blockedGate ? 'BLOCKED' : lifecycleFor(finalCanon, (gateOutcome && gateOutcome.finalStopReason) || (result && result.stopReason))
+          // LOC-029：证据提交失败的段不以完成态放行 workspace
+          const lc = blockedGate ? 'BLOCKED' : (evidenceFailed ? 'FAILED' : lifecycleFor(finalCanon, (gateOutcome && gateOutcome.finalStopReason) || (result && result.stopReason)))
           if (lc) await markWorkspaceLifecycle(wsIdentity, lc)
         }
-        const outRunId = gateOutcome && gateOutcome.finalRunId ? gateOutcome.finalRunId : runId
+        const outRunId = gateOutcome && gateOutcome.finalRunId ? gateOutcome.finalRunId : currentRunId
         const outStop = gateOutcome && gateOutcome.finalStop !== undefined ? gateOutcome.finalStop : result.stopReason
         // 闸门拦截：返回 BLOCKED 现场（不携带原 decision_package，杜绝 HD 续跑绕过闸门，fail-open 封堵）
         const outValue = gateOutcome && gateOutcome.blocked

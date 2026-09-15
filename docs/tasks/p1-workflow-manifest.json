@@ -1,0 +1,180 @@
+{
+  "schema": "p1-definition-manifest/v1",
+  "generated_at": "2026-09-15T02:47:39.403Z",
+  "definition_baseline": "775ac84e9c37e2278c2ee32a0f2bcb75cbbb8172",
+  "main_observed": "909ae5f7aed687098045daefb8bf3d4ee8825688",
+  "authoritative_registry": "registry.json",
+  "purpose": "定义材料目录；不是调度器状态或开工授权",
+  "development_started": false,
+  "tasks": [
+    {
+      "id": "LOC-034",
+      "source": "WR-007",
+      "card": "LOC-034-revision-dependencies.md",
+      "spec": "specs/LOC-034-revision-dependencies/task-spec-V1.md",
+      "definition_check": "specs/LOC-034-revision-dependencies/definition-check.md",
+      "baseline": "V1",
+      "hard_dependencies": [
+        "LOC-024",
+        "LOC-029"
+      ],
+      "environment": {
+        "group": "LOC-034",
+        "role": "独立"
+      },
+      "candidate_mode": "staged-single-task-after-merged-dependencies",
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许"
+    },
+    {
+      "id": "LOC-035",
+      "source": "WR-008",
+      "card": "LOC-035-artifact-manifest.md",
+      "spec": "specs/LOC-035-artifact-manifest/task-spec-V1.md",
+      "definition_check": "specs/LOC-035-artifact-manifest/definition-check.md",
+      "baseline": "V1",
+      "hard_dependencies": [
+        "LOC-029"
+      ],
+      "environment": {
+        "group": "LOC-035",
+        "role": "独立"
+      },
+      "candidate_mode": "staged-single-task-after-merged-dependencies",
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许"
+    },
+    {
+      "id": "LOC-036",
+      "source": "WR-010",
+      "card": "LOC-036-exploration-coverage.md",
+      "spec": "specs/LOC-036-exploration-coverage/task-spec-V1.md",
+      "definition_check": "specs/LOC-036-exploration-coverage/definition-check.md",
+      "baseline": "V1",
+      "hard_dependencies": [],
+      "environment": {
+        "group": "LOC-036",
+        "role": "独立"
+      },
+      "candidate_mode": "independent-batch-after-confirmation",
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许"
+    },
+    {
+      "id": "LOC-037",
+      "source": "WR-014",
+      "card": "LOC-037-delivery-actions.md",
+      "spec": "specs/LOC-037-delivery-actions/task-spec-V1.md",
+      "definition_check": "specs/LOC-037-delivery-actions/definition-check.md",
+      "baseline": "V1",
+      "hard_dependencies": [
+        "LOC-032"
+      ],
+      "environment": {
+        "group": "LOC-037",
+        "role": "独立"
+      },
+      "candidate_mode": "staged-single-task-after-merged-dependencies",
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许"
+    },
+    {
+      "id": "LOC-038",
+      "source": "WR-015",
+      "card": "LOC-038-preflight-unification.md",
+      "spec": "specs/LOC-038-preflight-unification/task-spec-V1.md",
+      "definition_check": "specs/LOC-038-preflight-unification/definition-check.md",
+      "baseline": "V1",
+      "hard_dependencies": [],
+      "environment": {
+        "group": "LOC-038",
+        "role": "独立"
+      },
+      "candidate_mode": "independent-batch-after-confirmation",
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许"
+    },
+    {
+      "id": "LOC-039",
+      "source": "WR-016",
+      "card": "LOC-039-protocol-capabilities.md",
+      "spec": "specs/LOC-039-protocol-capabilities/task-spec-V1.md",
+      "definition_check": "specs/LOC-039-protocol-capabilities/definition-check.md",
+      "baseline": "V1",
+      "hard_dependencies": [],
+      "environment": {
+        "group": "LOC-039",
+        "role": "独立"
+      },
+      "candidate_mode": "independent-batch-after-confirmation",
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许"
+    },
+    {
+      "id": "LOC-040",
+      "source": "WR-017",
+      "card": "LOC-040-workflow-capability-guide.md",
+      "spec": "specs/LOC-040-workflow-capability-guide/task-spec-V1.md",
+      "definition_check": "specs/LOC-040-workflow-capability-guide/definition-check.md",
+      "baseline": "V1",
+      "hard_dependencies": [],
+      "environment": {
+        "group": "LOC-040",
+        "role": "独立"
+      },
+      "candidate_mode": "independent-batch-after-confirmation",
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许"
+    },
+    {
+      "id": "LOC-041",
+      "source": "WR-018",
+      "card": "LOC-041-node-isolation.md",
+      "spec": "specs/LOC-041-node-isolation/task-spec-V1.md",
+      "definition_check": "specs/LOC-041-node-isolation/definition-check.md",
+      "baseline": "V1",
+      "hard_dependencies": [],
+      "environment": {
+        "group": "LOC-041",
+        "role": "独立"
+      },
+      "candidate_mode": "independent-batch-after-confirmation",
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许"
+    },
+    {
+      "id": "LOC-042",
+      "source": "WR-019",
+      "card": "LOC-042-workflow-conformance.md",
+      "spec": "specs/LOC-042-workflow-conformance/task-spec-V1.md",
+      "definition_check": "specs/LOC-042-workflow-conformance/definition-check.md",
+      "baseline": "V1",
+      "hard_dependencies": [],
+      "environment": {
+        "group": "LOC-042",
+        "role": "独立"
+      },
+      "candidate_mode": "independent-batch-after-confirmation",
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许"
+    },
+    {
+      "id": "LOC-043",
+      "source": "WR-020",
+      "card": "LOC-043-run-quality-cost.md",
+      "spec": "specs/LOC-043-run-quality-cost/task-spec-V1.md",
+      "definition_check": "specs/LOC-043-run-quality-cost/definition-check.md",
+      "baseline": "V1",
+      "hard_dependencies": [
+        "LOC-029"
+      ],
+      "environment": {
+        "group": "LOC-043",
+        "role": "独立"
+      },
+      "candidate_mode": "staged-single-task-after-merged-dependencies",
+      "status_snapshot": "定义中",
+      "unattended_permission_snapshot": "不允许"
+    }
+  ]
+}

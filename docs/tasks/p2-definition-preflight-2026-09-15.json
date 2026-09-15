@@ -1,0 +1,37 @@
+{
+  "checked_at": "2026-09-15T22:41:29.910Z",
+  "expected": "未确认任务全部拒绝；不是开工通过",
+  "code_baseline": "775ac84e9c37e2278c2ee32a0f2bcb75cbbb8172",
+  "tasks": [
+    {
+      "id": "LOC-044",
+      "source": "WR-021",
+      "ok": false,
+      "failures": [
+        "当前状态必须为「已定义」或「本地已定义」，实际：定义中",
+        "无人值守许可必须为「允许」，实际：不允许",
+        "仍存在未决产品事项迹象，不得开工"
+      ],
+      "fields": null
+    },
+    {
+      "id": "LOC-045",
+      "source": "WR-022",
+      "ok": false,
+      "failures": [
+        "当前状态必须为「已定义」或「本地已定义」，实际：定义中",
+        "无人值守许可必须为「允许」，实际：不允许",
+        "仍存在未决产品事项迹象，不得开工"
+      ],
+      "fields": null
+    }
+  ],
+  "experiment_gate": {
+    "approved": false,
+    "model_config": "UNCONFIRMED",
+    "budget": "UNCONFIRMED",
+    "checked_by_generic_preflight": false
+  },
+  "development_started": false,
+  "real_model_trials": 0
+}
