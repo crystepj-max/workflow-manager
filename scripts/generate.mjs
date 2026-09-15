@@ -116,6 +116,8 @@ export function compileBlueprint(bp, opts = {}) {
   const heteroReview = bp.nodes.find((n) => n && (n.id === 'review' || n.profile === 'review'));
   const hetero = heteroMode !== 'off' && heteroDev && heteroReview && models[heteroDev.id] && models[heteroReview.id];
   const autoReschedule = bp.onMaxRounds === 'auto-reschedule';
+  // LOC-025 裁决一致性：仅声明了 output.consistency 的蓝图才注入路由前契约校验。
+  const hasConsistencyDecl = Array.isArray(bp.nodes) && bp.nodes.some((n) => n && n.output && n.output.consistency);
   // 内置角色清单：opts 注入优先（测试用），否则读 manifest 并缓存
   const builtinRoleIds = opts.builtinRoleIds || builtinRoleIdsCached();
   // 内置角色正文（#129 遗留项 2）：临时/未保存图编译自包含——正文内联进 ROLE_DEFS。
@@ -612,6 +614,27 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (res && res.verified_branch === expectedBranch && headOk) return null',
     '  return stage + \' 结论校验失败：verified_branch=\' + JSON.stringify(res && res.verified_branch) + \'（应为 \' + expectedBranch + \'），verified_head=\' + JSON.stringify(head)',
     '}',
+    // 裁决一致性（LOC-025 / WR-002）：节点在 output.consistency 声明配对表时，结构合法
+    // （schema 已通过）之后、路由选择之前做同一确定性检查——表外 route/verdict、route/result
+    // 组合是契约错误，不作为专业通过判断；错误携带字段与允许组合（CONTRACT_INCONSISTENT，
+    // 供错误分类消费）。仅当蓝图声明 consistency 才注入检查——未声明蓝图的产物与改动前
+    // 逐字节一致（旧蓝图/旧快照零迁移，只迁移新生成建设脚本）。
+    ...(hasConsistencyDecl ? [
+      'function contractCheck(id, res) {',
+      '  const n = BYID[id]',
+      '  const c = n && n.output && n.output.consistency',
+      '  if (!c || typeof c !== \'object\' || !c.field || !c.pairs || typeof res !== \'object\' || res === null) return null',
+      '  const raw = String(n.output.outcomePath).indexOf(\'$.\') === 0 ? String(n.output.outcomePath).slice(2) : String(n.output.outcomePath)',
+      '  const key = String(readPath(res, raw))',
+      '  if (!Object.prototype.hasOwnProperty.call(c.pairs, key)) return null',
+      '  const expected = c.pairs[key]',
+      '  const actual = readPath(res, c.field)',
+      '  if (actual === expected) return null',
+      '  const combos = Object.keys(c.pairs).map(function (k) { return k + \'/\' + c.pairs[k] }).join(\'、\')',
+      '  const detail = \'CONTRACT_INCONSISTENT：节点 \' + (n.label || id) + \' 的 route=\' + key + \' 与 \' + c.field + \'=\' + String(actual) + \' 互相矛盾，属契约错误，不作为专业通过判断（允许的组合 route/\' + c.field + \'：\' + combos + \'）\'',
+      '  return { node: id, field: c.field, route_path: n.output.outcomePath, route: readPath(res, raw) === undefined ? null : readPath(res, raw), actual: actual === undefined ? null : actual, expected: expected, allowed_combos: c.pairs, detail: detail }',
+      '}',
+    ] : []),
   );
   if (autoReschedule) {
     lines.push(
@@ -817,6 +840,17 @@ export function compileBlueprint(bp, opts = {}) {
     '      return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, detail: ce, results: results, history: history }',
     '    }',
     '  }',
+    // 裁决一致性（LOC-025）：路由选择与 UAT 组装之前的同一确定性检查；矛盾结果不写入
+    // results（不把矛盾结果存成有效通过证明），直接以结构化 CONTRACT_INCONSISTENT 终止。
+    ...(hasConsistencyDecl ? [
+      '  if (hasOutcomePath(n)) {',
+      '    const cc = contractCheck(current, res)',
+      '    if (cc) {',
+      '      history.push({ round: round, stage: current, verdict: \'CONTRACT_INCONSISTENT\', reason: cc.detail })',
+      '      return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, reason: \'CONTRACT_INCONSISTENT\', detail: cc.detail, contract: cc, results: results, history: history }',
+      '    }',
+      '  }',
+    ] : []),
     '  results[current] = res',
     '  markExec(current, res)',
     '  log((n.label || current) + \' → \' + (ok ? \'通过\' : \'未通过\'))',

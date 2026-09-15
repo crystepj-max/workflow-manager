@@ -146,7 +146,7 @@
       "profile": "review",
       "label": "收敛审查",
       "verifyBranch": true,
-      "goal": "独立会话对当前候选成果做收敛审查：阻断项=0 才可通过（route=APPROVE）；实现问题导致不通过则 RETURN_DEV；无法安全继续则 BLOCKED。优化建议不阻断。不得修改正式成果。将审查报告写入 review-report.md；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "独立会话对当前候选成果做收敛审查：阻断项=0 才可通过（route=APPROVE）；实现问题导致不通过则 RETURN_DEV；无法安全继续则 BLOCKED。优化建议不阻断。route 与 verdict 必须成对一致，矛盾组合会被运行时确定性拒绝（CONTRACT_INCONSISTENT，属契约错误而非审查裁决）：APPROVE/APPROVE、RETURN_DEV/REQUEST_CHANGES、BLOCKED/COMMENT_ONLY。仅有非阻断建议且完成审查的审查仍出 APPROVE，非阻断建议随报告呈现；COMMENT_ONLY 表示无法形成可放行裁决，只能配 BLOCKED，不作为质量通过。不得修改正式成果。将审查报告写入 review-report.md；最终回复只输出本节点 schema 对应 JSON。",
       "inputs": [
         {
           "name": "dev_summary",
@@ -167,6 +167,14 @@
       ],
       "output": {
         "outcomePath": "$.route",
+        "consistency": {
+          "field": "verdict",
+          "pairs": {
+            "APPROVE": "APPROVE",
+            "RETURN_DEV": "REQUEST_CHANGES",
+            "BLOCKED": "COMMENT_ONLY"
+          }
+        },
         "schema": {
           "type": "object",
           "properties": {
@@ -219,7 +227,7 @@
       "profile": "test",
       "label": "测试",
       "verifyBranch": true,
-      "goal": "只对刚刚通过收敛审查的同一候选成果做独立运行验证与必要回归：覆盖主路径、验收条件、边界异常、受影响已有能力、本轮修复项。通过则 route=PASS；失败回开发则 RETURN_DEV；无法安全继续则 BLOCKED。不得修改正式成果。将测试证据写入 test-report.md；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "只对刚刚通过收敛审查的同一候选成果做独立运行验证与必要回归：覆盖主路径、验收条件、边界异常、受影响已有能力、本轮修复项。通过则 route=PASS；失败回开发则 RETURN_DEV；无法安全继续则 BLOCKED。route 与 result 必须成对一致，矛盾组合会被运行时确定性拒绝（CONTRACT_INCONSISTENT，属契约错误而非测试结论）：PASS/PASSED、RETURN_DEV/FAILED、BLOCKED/BLOCKED。不得修改正式成果。将测试证据写入 test-report.md；最终回复只输出本节点 schema 对应 JSON。",
       "inputs": [
         {
           "name": "review_verdict",
@@ -240,6 +248,14 @@
       ],
       "output": {
         "outcomePath": "$.route",
+        "consistency": {
+          "field": "result",
+          "pairs": {
+            "PASS": "PASSED",
+            "RETURN_DEV": "FAILED",
+            "BLOCKED": "BLOCKED"
+          }
+        },
         "schema": {
           "type": "object",
           "properties": {
