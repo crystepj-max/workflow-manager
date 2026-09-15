@@ -100,6 +100,26 @@ function foldableNodes(bp) {
 // 统一编译器（候选一 T-IMP-12）：DSH 与 vwf 双入口的唯一翻译员。
 // 宿主侧 compileDsl 经管道消费本函数产物：一律现编译优先（与引擎契约同源），
 // 磁盘预编译产物仅在无子进程环境整体回落（UAT-80 实证过期产物与引擎不兼容）。
+// ---------- LOC-027 评价基线冻结契约（可选声明） ----------
+// 蓝图可声明 evaluationBaseline = { artifact, digestField, producerNode }：编译产物将携带
+// 基线状态机——producer 节点业务放行（非 $end 出边）时版本递增、构建活动基线引用
+// （run_id/version/artifact_path/algorithm/digest/supersedes）并输出 [eb-freeze] 冻结请求行
+//（宿主据此读取原始字节计算 SHA-256 并保存不可变副本）；消费节点若声明的摘要字段与活动
+// 基线不一致，结果在入档前被拒绝（走 technical 边重试或 TECHNICAL_FAILURE），A/B 漂移
+// 因此无法走完流程。未声明蓝图的编译产物零改动。
+function evaluationBaselineDecl(bp) {
+  const raw = bp.evaluationBaseline
+  if (raw === undefined) return null
+  const bad = (m) => { throw new Error('evaluationBaseline 声明非法：' + m) }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) bad('必须是对象 { artifact, digestField, producerNode }')
+  const { artifact, digestField, producerNode } = raw
+  if (typeof artifact !== 'string' || !artifact.trim()) bad('artifact 必填（评价契约文件名）')
+  if (typeof digestField !== 'string' || !digestField.trim()) bad('digestField 必填（节点结果中的摘要字段名）')
+  if (typeof producerNode !== 'string' || !producerNode.trim()) bad('producerNode 必填（冻结评价基线的节点 id）')
+  if (!(bp.nodes || []).some((n) => n && n.id === producerNode)) bad('producerNode 指向不存在的节点：' + producerNode)
+  return { artifact: artifact, digestField: digestField, producer: producerNode }
+}
+
 export function compileBlueprint(bp, opts = {}) {
   // 编译输入尺寸闸门（#131）：CLI compile 不做蓝图校验，vwf.script / wf_run 的临时图
   // 直达此处——主闸必须在编译器入口，保证任何进入编译的文档响应必小于通道上限。
@@ -115,6 +135,8 @@ export function compileBlueprint(bp, opts = {}) {
   if (rpErrors.length) throw new Error('retryPolicy 非法：' + rpErrors.map((e) => e.at + ' ' + e.message).join('；'));
   const retryPolicy = Object.assign({}, RETRY_POLICY_DEFAULTS, rpDeclared);
   const models = (bp.bindings && bp.bindings.models) || {};
+  // LOC-027：评价基线声明解析（声明非法时 loud-fail，不静默降级）
+  const ebDecl = evaluationBaselineDecl(bp);
   const folds = foldableNodes(bp);
   // LOC-021 异源档位三态：运行时日志与校验内核共用同一归一口径（关档不注入日志）；
   // 识别口径统一为「按节点 id 或 profile」（诊断模板开发节点 id=fix、profile=dev，不再被漏判）。
@@ -123,6 +145,8 @@ export function compileBlueprint(bp, opts = {}) {
   const heteroReview = bp.nodes.find((n) => n && (n.id === 'review' || n.profile === 'review'));
   const hetero = heteroMode !== 'off' && heteroDev && heteroReview && models[heteroDev.id] && models[heteroReview.id];
   const autoReschedule = bp.onMaxRounds === 'auto-reschedule';
+  // LOC-025 裁决一致性：仅声明了 output.consistency 的蓝图才注入路由前契约校验。
+  const hasConsistencyDecl = Array.isArray(bp.nodes) && bp.nodes.some((n) => n && n.output && n.output.consistency);
   // 内置角色清单：opts 注入优先（测试用），否则读 manifest 并缓存
   const builtinRoleIds = opts.builtinRoleIds || builtinRoleIdsCached();
   // 内置角色正文（#129 遗留项 2）：临时/未保存图编译自包含——正文内联进 ROLE_DEFS。
@@ -141,6 +165,7 @@ export function compileBlueprint(bp, opts = {}) {
     'const RUNDIR = A.runDir || (\'.agent-runs/\' + TASK)',
     'const WORK = \'dev2/\' + TASK',
     'const MAX_ROUNDS = ' + maxRounds,
+    ...(ebDecl ? ['const EB = ' + JSON.stringify(ebDecl)] : []),
     'const ITEM_CAP = 4096',
     'const AGENT_CAP = 1000',
     // LOC-031 技术预算：V1 建议基线经蓝图 control.retryPolicy 编译期固化（默认值同源
@@ -227,8 +252,16 @@ export function compileBlueprint(bp, opts = {}) {
     // #80 暂停/中断恢复现场：每个节点完成路由后输出检查点行（current/results/history 全量）。
     // 引擎取消后脚本返回值被强制丢弃（value=null），宿主据此行重建 resume 载荷；
     // 解析失败或缺失时宿主诚实降级（要求人工指定 entry，不猜现场）。
-    // LOC-031：检查点保留已耗技术预算（tb）与跨节点激活接续键（ak）——恢复不重置已耗用量。
+    // LOC-031：检查点保留已耗技术预算（tb）与跨节点激活接续键（carry）——恢复不重置已耗用量。
     'function pwCk(next) { try { log(\'[pw-ckpt]\' + JSON.stringify({ c: next, r: results, h: history, rd: round, fb: feedback, bu: budgetUsed, mr: maxRounds, ds: decisionSeq, tb: { u: actUsed, g: actGrants, m: autoUsed(), mg: autoMsGrant, p: RETRY_POLICY, carry: carryKey ? { stage: carryStage, key: carryKey } : null } })) } catch (e) { /* 检查点失败不影响运行 */ } }',
+    // LOC-029 逐次 attempt 事件：每次真实调用（含 fanout item 与技术重试）在调用前后输出
+    // [vwf-attempt] 行，宿主据此向 Formal Records Store 提交独立、可恢复且不重复的执行
+    // 记录（attempt_id 由宿主按段号+序号分配并持久化；同键同内容重放幂等）。逻辑步骤
+    // （折叠/聚合）以 a:'l' 单独标识，不与真实调用混淆。旧宿主忽略未知行，不影响运行。
+    'let AWK = 0',
+    'function attLog(ev) { try { log(\'[vwf-attempt]\' + JSON.stringify(ev)) } catch (e) { /* 证据事件失败不影响编排 */ } }',
+    'function attEnd(n, r, t, s, x, extra) { attLog(Object.assign({ a: \'e\', k: AWK, n: n, r: r, t: t, s: s }, x === undefined ? {} : { x: String(x).slice(0, 500) }, extra || {})) }',
+    'function attOf(nodeId, res) { const nd = BYID[nodeId]; const p = nd && nd.output && nd.output.outcomePath; if (!p) return {}; const raw = String(p).indexOf(\'$\') === 0 ? String(p).slice(2) : String(p); const o = readPath(res, raw); return o === undefined ? {} : { o: o, u: String(p) } }',
   ];
   if (hetero) {
     lines.push(
@@ -277,6 +310,91 @@ export function compileBlueprint(bp, opts = {}) {
     '  }',
     '  return undefined',
     '}',
+    // ---------- LOC-024 显式交接节点输入（inputs 声明 → resolved_inputs） ----------
+    // 解析发生在调用代理之前；缺必需引用在调用消费节点前返回可定位错误（node/binding/reason），
+    // 不静默退用另一轮旧结果；version_ref 为临时执行引用（执行序号 + 内容摘要），正式 Record
+    // 接入后由实际 Revision 替代。旧蓝图（未声明 inputs）维持原行为并标注 legacy 输入模式。
+    'function digest8(v) {',
+    '  const s = typeof v === \'string\' ? v : (v === undefined ? \'undefined\' : JSON.stringify(v))',
+    '  let h = 0x811c9dc5',
+    '  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 }',
+    '  return (\'00000000\' + h.toString(16)).slice(-8)',
+    '}',
+    'function inputModeOf(id) {',
+    '  const n = BYID[id]',
+    '  return (n && Array.isArray(n.inputs) && n.inputs.length) ? \'declared\' : \'legacy\'',
+    '}',
+    'function clipText(v) {',
+    '  const s = typeof v === \'string\' ? v : JSON.stringify(v)',
+    '  if (s === undefined) return String(v)',
+    '  return s.length > 2000 ? s.slice(0, 2000) + \'……（内容已按声明裁剪，完整值以 resolved_inputs 清单与文件引用为准）\' : s',
+    '}',
+    'function inputItem(b, producer, value, source, versionRef) {',
+    '  const item = { binding: b.name, selector: b.from, producer: producer, source: source, version_ref: versionRef }',
+    '  if (b.artifact) item.artifact_ref = RUNDIR + \'/\' + b.artifact',
+    '  if (value !== undefined) item.value = value',
+    '  return item',
+    '}',
+    'function versionRefOf(rec) {',
+    '  return rec ? \'tmp-exec:\' + rec.seq + \':\' + digest8(rec.result) : \'\'',
+    '}',
+    'function resolveBinding(consumerId, b) {',
+    '  const from = typeof b.from === \'string\' ? b.from : \'\'',
+    '  if (from === \'$.task\' || from.indexOf(\'$.task.\') === 0) {',
+    '    const taskPath = from === \'$.task\' ? \'\' : from.slice(7)',
+    '    const tv = readPath(A, taskPath)',
+    '    if (tv === undefined) {',
+    '      if (b.required === true && !Object.prototype.hasOwnProperty.call(b, \'default\')) return { error: \'任务输入缺少 \' + (taskPath || \'整体\') + \'（required 且未声明首次运行默认值）\' }',
+    '      if (Object.prototype.hasOwnProperty.call(b, \'default\')) return { item: inputItem(b, null, b.default, \'first_run_default\', \'first-run-default\') }',
+    '      return { item: null }',
+    '    }',
+    '    return { item: inputItem(b, null, tv, \'task_input\', \'task:\' + digest8(tv)) }',
+    '  }',
+    '  const m = /^\\$\\.results\\.([a-z0-9]+(?:-[a-z0-9]+)*)((?:\\.[A-Za-z0-9_-]+)*)$/.exec(from)',
+    '  if (!m) return { error: \'选择器非法（仅支持 $.task[.字段链] / $.results.<节点id>[.字段链]；禁止 eval、路径穿越与目录扫描）：\' + from }',
+    '  const producer = m[1]',
+    '  const fieldPath = m[2] ? m[2].slice(1) : \'\'',
+    '  const rec = EXEC_OF[producer] || null',
+    '  if (!rec) {',
+    '    if (b.required === true && !Object.prototype.hasOwnProperty.call(b, \'default\')) return { error: \'生产节点 \' + producer + \' 尚无本次流转可引用的产出（required 且未声明首次运行默认值；禁止静默退用其他轮次旧结果）\' }',
+    '    if (Object.prototype.hasOwnProperty.call(b, \'default\')) return { item: inputItem(b, producer, b.default, \'first_run_default\', \'first-run-default\') }',
+    '    return { item: null }',
+    '  }',
+    '  const rv = readPath(rec.result, fieldPath)',
+    '  if (rv === undefined) {',
+    '    if (b.required === true) return { error: \'生产节点 \' + producer + \' 的结果缺少字段 \' + (fieldPath || \'整体\') + \'（required 输入，禁止静默退用默认值或旧轮结果）\' }',
+    '    if (Object.prototype.hasOwnProperty.call(b, \'default\')) return { item: inputItem(b, producer, b.default, \'first_run_default\', \'first-run-default\') }',
+    '    return { item: null }',
+    '  }',
+    '  return { item: inputItem(b, producer, rv, \'producer_result\', versionRefOf(rec)) }',
+    '}',
+    'function resolveNodeInputs(id) {',
+    '  const n = BYID[id]',
+    '  if (!n || !Array.isArray(n.inputs) || !n.inputs.length) return { mode: \'legacy\', items: [], errors: [] }',
+    '  const items = []',
+    '  const errors = []',
+    '  for (const b of n.inputs) {',
+    '    let r',
+    '    try { r = resolveBinding(id, b) } catch (e) { r = { error: \'解析异常：\' + String((e && e.message) || e) } }',
+    '    if (r.error) { errors.push({ node: id, binding: b.name, reason: r.error }); continue }',
+    '    if (r.item) items.push(Object.freeze(r.item))',
+    '  }',
+    '  return { mode: \'declared\', items: Object.freeze(items), errors: errors }',
+    '}',
+    'function inputsBlock(items) {',
+    '  if (!items || !items.length) return \'\'',
+    '  let s = \'\\n【节点输入（编排已按本节点 inputs 声明解析；只采信本清单及其中版本引用，禁止引用其他轮次的旧结果）】\\n\'',
+    '  for (const it of items) {',
+    '    s += \'- 输入 \' + it.binding + \' ← \' + it.selector',
+    '    if (it.producer) s += \'（生产节点 \' + it.producer + \'，版本 \' + it.version_ref + \'）\'',
+    '    else s += \'（任务输入，版本 \' + it.version_ref + \'）\'',
+    '    if (it.source === \'first_run_default\') s += \'【首次运行默认值——真实输入尚未产生】\'',
+    '    s += \'：\'',
+    '    if (it.artifact_ref) s += \'正文以文件引用交付：请读取 \' + it.artifact_ref + (it.value === undefined ? \'\' : \'；摘要：\' + clipText(it.value))',
+    '    else s += \'\\n\' + clipText(it.value) + \'\\n\'',
+    '  }',
+    '  return s',
+    '}',
     'function valueType(value) { return value === null ? \'null\' : Array.isArray(value) ? \'array\' : typeof value }',
     'function itemText(item) { if (typeof item === \'string\') return item; const text = JSON.stringify(item); return text === undefined ? String(item) : text }',
     'function fanoutFailed(failOn, total, failedCount) {',
@@ -322,6 +440,7 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (RECORDS) s += \'\\n- records 路径：\' + RECORDS + \'（Formal Records 证据记录目录，业务证据写入此目录）\'',
     '  if (A.workspace_capability && !(opts && opts.hideCapability)) s += \'\\n- workspace RPC 能力令牌（调用 vwf.workspace.* / vwf_workspace 时必须原样携带）：\' + A.workspace_capability + \'（仅限本 Run 使用，禁止用于其他 Run 的 taskId）\'',
     '  if (A.guidance_text) s += \'\\n【用户指导（用户暂停期间补充的执行指导，必须遵循）】\\n\' + A.guidance_text + \'\\n\'',
+    ...(ebDecl ? ['  if (EB && ebRef && nodeId !== EB.producer) s += ebNote(nodeId)'] : []),
     '  s += \'\\n- 当前节点：\' + (n.label || nodeId) + \'\\n- 完成本节点后更新 \' + RUNDIR + \'/STATE.md（stage / round / status / updated，时间用 date -u +%FT%TZ）\\n\'',
     '  if (n.output && n.output.files) {',
     '    const _hints = Object.entries(n.output.files).map(([p,k]) => p + \'(\' + k + \')\' + ({ html: \'（完整 HTML 文档）\', canvas: \'（JSON 画布结构）\', flowchart: \'（JSON 流程图）\', diagram: \'（JSON 结构图）\' }[k] || \'\'))',
@@ -338,7 +457,9 @@ export function compileBlueprint(bp, opts = {}) {
     '}',
     'function verifyBranchStep(id) {',
     '  const branch = WORK_BRANCH || WORK',
-    '  return \'开工前置（强制）：确认 worktree 分支 = \' + branch + \'（git -C \' + (SOURCE || RUNDIR + \'/worktree\') + \' rev-parse --abbrev-ref HEAD）且 HEAD 一致；验证结论必须记录 verified_branch 与 verified_head。\'',
+    '  let s = \'开工前置（强制）：确认 worktree 分支 = \' + branch + \'（git -C \' + (SOURCE || RUNDIR + \'/worktree\') + \' rev-parse --abbrev-ref HEAD）且 HEAD 一致；验证结论必须记录 verified_branch 与 verified_head。\'',
+    '  if (A.workspace_capability) s += \'候选绑定（LOC-026 强制）：在正式开始审阅/测试任何成果之前，先调用 vwf_workspace 工具（op=captureCandidate，logical_run_id=\' + TASK + \'，capability 使用运行上下文注入的 workspace_capability 令牌）获取宿主生成的候选证明，把返回的 version.content_sha256 原样写入最终回复的 candidate_sha256 字段；结束后可再次调用确认候选未变化。候选摘要由宿主实况计算，禁止自行编造或用 git rev-parse 冒充；本节点期间不得修改业务源码文件，否则候选证明失效。\'',
+    '  return s',
     '}',
     'function coerceStructured(v, schema) {',
     '  const root = schema && schema.type',
@@ -374,7 +495,10 @@ export function compileBlueprint(bp, opts = {}) {
     'function nodePrompt(id, fbText) {',
     '  const n = BYID[id]',
     '  const fb = fbText ? \'【上轮打回反馈——必须逐条修复】\\n\' + fbText + \'\\n\\n\' : \'\'',
-    '  return roleRef(n.profile) + runtimeCtx(id, fb + (n.verifyBranch ? verifyBranchStep(id) : \'\'))',
+    // LOC-024：声明输入按块注入提示（缺必需引用的拦截在调用前的解析门，此处只做注入）
+    '  const irPrompt = resolveNodeInputs(id)',
+    '  const inputExtra = inputsBlock(irPrompt.items)',
+    '  return roleRef(n.profile) + runtimeCtx(id, fb + inputExtra + (n.verifyBranch ? verifyBranchStep(id) : \'\'))',
     '}',
     // LOC-031 格式修复反馈（单源常量）：节点内格式修复与技术自环共用同一激活预算（AC-01）。
     'const FORMAT_RETRY_FB = \'【格式要求】上一轮未返回可解析的结构化结果（运行环境只认 structured_output 等结构化通道的提交，或纯文本最终回复必须是严格符合本节点 output.schema 的裸 JSON——不认 markdown 围栏/前后缀/报告全文）。请重试：报告与产物写文件，最终回复按本节点 schema 用可解析 JSON 收尾。\'',
@@ -573,8 +697,15 @@ export function compileBlueprint(bp, opts = {}) {
     '  const head = res && res.verified_head',
     '  const headOk = typeof head === \'string\' && head.trim().length > 0',
     '  const expectedBranch = WORK_BRANCH || WORK',
-    '  if (res && res.verified_branch === expectedBranch && headOk) return null',
-    '  return stage + \' 结论校验失败：verified_branch=\' + JSON.stringify(res && res.verified_branch) + \'（应为 \' + expectedBranch + \'），verified_head=\' + JSON.stringify(head)',
+    '  // LOC-026：候选证明绑定——宿主注入 workspace capability 的新运行，审核/测试结论',
+    '  // 必须携带经 vwf_workspace op=captureCandidate 取得的候选摘要（模型自报仅作诊断，',
+    '  // 权威候选由宿主在 Proof 签发与集成闸门比较）；无 workspace 的旧形态保持原规则。',
+    '  const cand = res && res.candidate_sha256',
+    '  const candOk = !A.workspace_capability || (typeof cand === \'string\' && cand.trim().length > 0)',
+    '  if (res && res.verified_branch === expectedBranch && headOk && candOk) return null',
+    '  let detail = stage + \' 结论校验失败：verified_branch=\' + JSON.stringify(res && res.verified_branch) + \'（应为 \' + expectedBranch + \'），verified_head=\' + JSON.stringify(head)',
+    '  if (A.workspace_capability && !candOk) detail += \'，candidate_sha256=\' + JSON.stringify(cand === undefined ? null : cand) + \'（须先经 vwf_workspace op=captureCandidate 获取宿主候选证明，禁止自报）\'',
+    '  return detail',
     '}',
     // ── LOC-031 技术预算运行时 ──
     // 激活=同节点+同输入版本；首次/格式修复/技术自环重入共用 max_attempts 预算（AC-01）。
@@ -633,6 +764,9 @@ export function compileBlueprint(bp, opts = {}) {
     '  let formatUsed = false',
     '  for (;;) {',
     '    phase(BYID[stage].label || stage)',
+    // LOC-029：每次真实调用前后输出 attempt 事件（k 与调用方 attEnd 的 AWK 配对）
+    '    const __k = ++AWK',
+    '    attLog({ a: \'s\', k: __k, n: stage, r: round, t: \'call\' })',
     '    const r = await modelCall(key, nodePrompt(stage, fb), nodeCallOpts(stage, round))',
     '    if (r.stop) return r',
     '    if (r.value !== undefined) return { value: coerceStructured(r.value, BYID[stage].output && BYID[stage].output.schema) }',
@@ -697,7 +831,53 @@ export function compileBlueprint(bp, opts = {}) {
     '  }',
     '  return haltWaitingHuman(stage, null, reason, blockedEdge || null, pkg, null, { failure: failure || null, activation_key: activationKey || null })',
     '}',
+    // 裁决一致性（LOC-025 / WR-002）：节点在 output.consistency 声明配对表时，结构合法
+    // （schema 已通过）之后、路由选择之前做同一确定性检查——表外 route/verdict、route/result
+    // 组合是契约错误，不作为专业通过判断；错误携带字段与允许组合（CONTRACT_INCONSISTENT，
+    // 供错误分类消费）。仅当蓝图声明 consistency 才注入检查——未声明蓝图的产物与改动前
+    // 逐字节一致（旧蓝图/旧快照零迁移，只迁移新生成建设脚本）。
+    ...(hasConsistencyDecl ? [
+      'function contractCheck(id, res) {',
+      '  const n = BYID[id]',
+      '  const c = n && n.output && n.output.consistency',
+      '  if (!c || typeof c !== \'object\' || !c.field || !c.pairs || typeof res !== \'object\' || res === null) return null',
+      '  const raw = String(n.output.outcomePath).indexOf(\'$.\') === 0 ? String(n.output.outcomePath).slice(2) : String(n.output.outcomePath)',
+      '  const key = String(readPath(res, raw))',
+      '  if (!Object.prototype.hasOwnProperty.call(c.pairs, key)) return null',
+      '  const expected = c.pairs[key]',
+      '  const actual = readPath(res, c.field)',
+      '  if (actual === expected) return null',
+      '  const combos = Object.keys(c.pairs).map(function (k) { return k + \'/\' + c.pairs[k] }).join(\'、\')',
+      '  const detail = \'CONTRACT_INCONSISTENT：节点 \' + (n.label || id) + \' 的 route=\' + key + \' 与 \' + c.field + \'=\' + String(actual) + \' 互相矛盾，属契约错误，不作为专业通过判断（允许的组合 route/\' + c.field + \'：\' + combos + \'）\'',
+      '  return { node: id, field: c.field, route_path: n.output.outcomePath, route: readPath(res, raw) === undefined ? null : readPath(res, raw), actual: actual === undefined ? null : actual, expected: expected, allowed_combos: c.pairs, detail: detail }',
+      '}',
+    ] : []),
   );
+  if (ebDecl) {
+    lines.push(
+      // ── LOC-027 评价基线运行时（仅声明 evaluationBaseline 的蓝图携带）──────────
+      'function ebClaim(res) {',
+      '  if (!res || typeof res !== \'object\') return null',
+      '  const v = res[EB.digestField]',
+      '  return (v === undefined || v === null || String(v).trim() === \'\') ? null : String(v).trim()',
+      '}',
+      'function ebNote(nodeId) {',
+      '  const downstream = nodeId !== EB.producer',
+      '  let s = \'\\n\\n【评价基线（编排冻结注入，以此为准）】活动评价基线 v\' + ebRef.version + \'：冻结副本 \' + ebRef.artifact_path + \'（\' + (ebRef.algorithm || \'sha256\') + \'=\' + ebRef.digest + (ebRef.status === \'verified\' ? \'，已经运行时按原始字节核验\' : \'，尚未经运行时核验（模型声称值）\') + \'）\'',
+      '  if (ebRef.supersedes) s += \'。本基线取代 v\' + ebRef.supersedes.version + \'（旧摘要 \' + ebRef.supersedes.digest + \'）：旧基线下的 PASS 与结论不再适用，必须按本基线重新\' + (downstream ? \'执行与评估\' : \'确认\')',
+      '  s += \'。只允许依据该冻结副本\' + (downstream ? \'施工/评估\' : \'工作\') + \'，原路径 \' + EB.artifact + \' 不再是权威\'',
+      '  if (downstream) s += \'。最终回复的 \' + EB.digestField + \' 必须原样回填 \' + ebRef.digest + \'，与活动基线不一致的结论将在入档前被拒绝\'',
+      '  return s',
+      '}',
+      'function ebGateError(res, nodeId) {',
+      '  if (!res || typeof res !== \'object\' || nodeId === EB.producer) return null',
+      '  const claim = ebClaim(res)',
+      '  if (claim === null || !ebRef) return null',
+      '  if (claim === String(ebRef.digest).trim()) return null',
+      '  return \'结果中的 \' + EB.digestField + \'=\' + claim + \' 与活动评价基线 v\' + ebRef.version + \' 摘要 \' + ebRef.digest + \' 不一致（基线冲突）：只允许依据活动基线冻结副本 \' + ebRef.artifact_path + \' 得出结论，不得沿用其他版本基线的结论\'',
+      '}',
+    );
+  }
   if (autoReschedule) {
     lines.push(
       'function reschedulePrompt(historyText) {',
@@ -714,6 +894,12 @@ export function compileBlueprint(bp, opts = {}) {
     'let decisionSeq = Math.trunc(Number(A.decisionSeq) || 0)',
     'if (!Number.isFinite(decisionSeq) || decisionSeq < 0) decisionSeq = 0',
     'let feedback = A.feedback || \'\'',
+    ...(ebDecl ? [
+      // LOC-027 评价基线运行时状态：续跑段由宿主注入已核验引用（args.evaluation_baseline）
+      'let ebVer = Math.trunc(Number(A.evaluation_baseline_version) || 0)',
+      'let ebRef = (A.evaluation_baseline && typeof A.evaluation_baseline === \'object\' && A.evaluation_baseline.digest !== undefined && A.evaluation_baseline.version != null) ? { run_id: TASK, version: Math.trunc(Number(A.evaluation_baseline.version) || 0), artifact_path: String(A.evaluation_baseline.artifact_path || \'\'), algorithm: String(A.evaluation_baseline.algorithm || \'sha256\'), digest: String(A.evaluation_baseline.digest), status: String(A.evaluation_baseline.status || \'verified\'), supersedes: (A.evaluation_baseline.supersedes && typeof A.evaluation_baseline.supersedes === \'object\') ? { version: Math.trunc(Number(A.evaluation_baseline.supersedes.version) || 0), digest: String(A.evaluation_baseline.supersedes.digest || \'\') } : null } : null',
+      'if (ebVer === 0 && ebRef) ebVer = ebRef.version',
+    ] : []),
     'const results = {}',
     'const history = A.history || []',
     'let agentsUsed = 0',
@@ -734,7 +920,18 @@ export function compileBlueprint(bp, opts = {}) {
     'let visitSeq = 0',
     'let tbAttachKey = (TB_SNAP && typeof TB_SNAP.activation_key === \'string\' && TB_SNAP.activation_key) ? TB_SNAP.activation_key : null',
     // 历史兜底重建（未带快照的旧式续跑也不至于清零已耗技术预算）
-    'if (A.results && typeof A.results === \'object\') Object.keys(A.results).forEach(function (k) { results[k] = A.results[k] })',
+    // LOC-024：节点执行台账（seq + 最新结果）与 resolved_inputs 清单（含逐节点输入模式标注）
+    'let EXEC_SEQ = 0',
+    'const EXEC_OF = {}',
+    'const RESOLVED_INPUTS = {}',
+    'function markExec(id, res) { EXEC_SEQ += 1; EXEC_OF[id] = { seq: EXEC_SEQ, node: id, result: res } }',
+    'const INPUT_MODE = (function () {',
+    '  const ids = Object.keys(BYID).filter(function (k) { return BYID[k].kind !== \'fanout\' })',
+    '  if (!ids.length) return \'legacy\'',
+    '  const declared = ids.filter(function (k) { return inputModeOf(k) === \'declared\' })',
+    '  return declared.length === 0 ? \'legacy\' : (declared.length === ids.length ? \'declared\' : \'mixed\')',
+    '})()',
+    'if (A.results && typeof A.results === \'object\') Object.keys(A.results).forEach(function (k) { results[k] = A.results[k]; markExec(k, A.results[k]) })',
     'if (A.injectHalt) {',
     '  const inj = A.injectHalt',
     '  const reason0 = mapHaltReason(inj.reason)',
@@ -806,6 +1003,8 @@ export function compileBlueprint(bp, opts = {}) {
     '    const v = src ? src[f.path] : undefined',
     '    log(\'[\' + current + \'] 分流折叠（无 LLM）：\' + f.path + \' = \' + v)',
     '    results[current] = v === true ? { [f.path]: true } : { [f.path]: false }',
+    '    markExec(current, results[current])',
+    '    attLog({ a: \'l\', k: ++AWK, n: current, r: round, t: \'logical\', q: results[current] })',
     '    const e = route(current, results[current], true)',
     '    if (!e) return { status: \'ERROR\', detail: \'折叠节点无出边：\' + current }',
     '    current = e.to',
@@ -814,6 +1013,9 @@ export function compileBlueprint(bp, opts = {}) {
     '  }',
     '  if (n.manualCheck) {',
     '    if (A.approved !== true) {',
+    '      const irGate = resolveNodeInputs(current)',
+    '      if (irGate.errors.length) return { status: \'ERROR\', reason: \'INPUT_RESOLUTION_FAILED\', stage: current, node: current, round: round, errors: irGate.errors, detail: \'节点输入解析失败：\' + irGate.errors.map(function (e) { return e.binding + \'：\' + e.reason }).join(\'；\'), results: results, history: history, resolved_inputs: RESOLVED_INPUTS, input_mode: INPUT_MODE }',
+    '      RESOLVED_INPUTS[current] = { mode: irGate.mode, items: irGate.items }',
     '      const gKey = takeActivationKey(current)',
     '      autoOpen()',
     '      const gVisit = await visitCalls(current, gKey, round, feedback, \'门禁首次结果无效 → 节点内重试一次\')',
@@ -825,6 +1027,7 @@ export function compileBlueprint(bp, opts = {}) {
     '        return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, failure: gVisit.failure, technical_budget: technicalBudgetSnapshot(), detail: (BYID[current].label || current) + \' 门禁结果无效，未挂起\', results: results, history: history }',
     '      }',
     '      results[current] = gVisit.value',
+    '      markExec(current, gVisit.value)',
     '      autoClose()',
     '      return { status: \'AWAITING_HUMAN_\' + current, taskId: TASK, node: current, round: round, result: gVisit.value, history: history, technical_budget: technicalBudgetSnapshot(gKey), resume: { entry: current, approved: true, startRound: round, history: history, feedback: feedback } }',
     '    }',
@@ -864,8 +1067,11 @@ export function compileBlueprint(bp, opts = {}) {
     // workspace RPC（文件直写专属 scratch / run 目录）；无凭据则任何 RPC 调用被宿主拒绝，
     // 从 RPC 面杜绝「持 Run 令牌冒用可预测 worker_id 读兄弟 scratch」（规格 E2 严格口径）。
     '      const prompt = roleRef(n.profile) + runtimeCtx(current, itemExtra, renderedGoal, { hideCapability: true })',
+    '      const __ik = ++AWK',
+    '      attLog({ a: \'s\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, m: itemText(entry.item).slice(0, 512) })',
     '      const fanKey = current + \'|\' + inputDigest(current, feedback + itemText(entry.item)) + \'#\' + (visitSeq++)',
     '      const itemKey = fanKey + \'-i\' + (entry.index + 1)',
+    '      let __out',
     '      for (;;) {',
     '        const ir = await modelCall(itemKey, prompt, itemOpts)',
     '        if (ir.stop || ir.failure) {',
@@ -873,16 +1079,23 @@ export function compileBlueprint(bp, opts = {}) {
     '            await CLOCK_SLEEP(backoffFor(actUsed[itemKey]))',
     '            continue',
     '          }',
+    '          attLog({ a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'failed\', x: ir.failure ? (\'调用失败：\' + (ir.failure.code || \'\')) : \'item 未返回有效结果\' })',
     '          return null',
     '        }',
-    '        return ir.value === null ? null : coerceStructured(ir.value, n.output && n.output.schema)',
+    '        __out = ir.value === null ? null : coerceStructured(ir.value, n.output && n.output.schema)',
+    '        attLog(__out === null ? { a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'failed\', x: \'item 未返回有效结果\' } : { a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'completed\', q: __out })',
+    '        return __out',
     '      }',
     '    })',
     '    autoClose()',
     '    const failedCount = itemResults.filter(function (item) { return item === null }).length',
     '    res = { total: source.length, okCount: source.length - failedCount, failedCount: failedCount, items: itemResults }',
     '    ok = !fanoutFailed(n.failOn, res.total, res.failedCount)',
+    '    attLog(Object.assign({ a: \'l\', k: ++AWK, n: current, r: round, t: \'logical\', q: res }, attOf(current, res)))',
     '  } else {',
+    '    const irMain = resolveNodeInputs(current)',
+    '    if (irMain.errors.length) return { status: \'ERROR\', reason: \'INPUT_RESOLUTION_FAILED\', stage: current, node: current, round: round, errors: irMain.errors, detail: \'节点输入解析失败：\' + irMain.errors.map(function (e) { return e.binding + \'：\' + e.reason }).join(\'；\'), results: results, history: history, resolved_inputs: RESOLVED_INPUTS, input_mode: INPUT_MODE }',
+    '    RESOLVED_INPUTS[current] = { mode: irMain.mode, items: irMain.items }',
     '    visitKey = takeActivationKey(current)',
     '    autoOpen()',
     '    const visit = await visitCalls(current, visitKey, round, feedback, \'首次最终回复未通过格式校验 → 节点内重试一次\')',
@@ -890,6 +1103,7 @@ export function compileBlueprint(bp, opts = {}) {
     '    if (visit.stop) return blockedWaitingHuman(current, visit.stop, null, null, visitKey)',
     '    res = visit.value === undefined ? null : visit.value',
     '    if (res === null) {',
+    '      attEnd(current, round, \'call\', \'failed\', \'节点 agent 未返回有效结果\')',
     '      const failId = current',
     '      const failLabel = BYID[failId].label || failId',
     '      history.push({ round: round, stage: failId, verdict: \'AGENT_FAILED\', reason: \'节点 agent 未返回有效结果\', failure: visit.failure || null })',
@@ -923,6 +1137,7 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (n.verifyBranch) {',
     '    const ce = claimError(res, current)',
     '    if (ce) {',
+    '      attEnd(current, round, \'call\', \'rejected\', ce)',
     '      if (hasOutcomePath(n)) {',
     '        const et = routeTechnical(current)',
     '        if (!et || et.to === \'$end\') return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, detail: ce, technical_budget: technicalBudgetSnapshot(), results: results, history: history }',
@@ -940,7 +1155,37 @@ export function compileBlueprint(bp, opts = {}) {
     '      return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, detail: ce, technical_budget: technicalBudgetSnapshot(), results: results, history: history }',
     '    }',
     '  }',
+    // 裁决一致性（LOC-025）：路由选择与 UAT 组装之前的同一确定性检查；矛盾结果不写入
+    // results（不把矛盾结果存成有效通过证明），直接以结构化 CONTRACT_INCONSISTENT 终止。
+    ...(hasConsistencyDecl ? [
+      '  if (hasOutcomePath(n)) {',
+      '    const cc = contractCheck(current, res)',
+      '    if (cc) {',
+      '      history.push({ round: round, stage: current, verdict: \'CONTRACT_INCONSISTENT\', reason: cc.detail })',
+      '      return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, reason: \'CONTRACT_INCONSISTENT\', detail: cc.detail, contract: cc, results: results, history: history }',
+      '    }',
+      '  }',
+    ] : []),
+    ...(ebDecl ? [
+      // LOC-027 基线闸门：消费节点的摘要声明与活动基线不一致时，结果在入档前被拒绝
+      // （走 technical 边重试；无 technical 出口则 TECHNICAL_FAILURE——A/B 漂移无法走完流程）
+      '  {',
+      '    const ge = ebGateError(res, current)',
+      '    if (ge) {',
+      '      const et = routeTechnical(current)',
+      '      if (!et || et.to === \'$end\') return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, detail: ge, results: results, history: history }',
+      '      history.push({ round: round, stage: current, from: current, to: et.to, on: \'technical\', countRound: false, verdict: \'BASELINE_CONFLICT\', reason: ge })',
+      '      log((n.label || current) + \' 评价基线冲突拦截：\' + ge)',
+      '      current = et.to',
+      '      feedback = \'【评价基线冲突——必须修复】\' + ge + \' 只允许依据活动评价基线冻结副本与其注入摘要重做本节点结论，\' + EB.digestField + \' 必须与活动基线摘要完全一致。\'',
+      '      pwCk(current)',
+      '      continue',
+      '    }',
+      '  }',
+    ] : []),
     '  results[current] = res',
+    '  markExec(current, res)',
+    '  attEnd(current, round, \'call\', \'completed\', undefined, Object.assign({ q: res }, attOf(current, res), n.verifyBranch ? { w: { b: res.verified_branch, h: res.verified_head } } : {}))',
     '  log((n.label || current) + \' → \' + (ok ? \'通过\' : \'未通过\'))',
     '  if (A.injectHalt && A.injectHalt.node === current) {',
     '    if (!nodeDeclaresHd(current)) return { status: \'ERROR\', detail: \'无蓝图声明不得升级 Human Decision\' }',
@@ -952,6 +1197,18 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (hasOutcomePath(n)) {',
     '    const e = routeOutcome(current, res)',
     '    if (!e) return { status: \'ENDED_NO_OUTCOME_EDGE\', stage: current, results: results, history: history, budgetUsed: budgetUsed, maxRounds: maxRounds }',
+    ...(ebDecl ? [
+      // LOC-027 冻结钩子：producer 业务放行（非 $end 出边）时递增版本并发出冻结请求行（宿主据此冻结不可变副本）
+      '    if (current === EB.producer && e.to !== \'$end\') {',
+      '      const claim = ebClaim(res)',
+      '      if (claim === null) return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, detail: \'评价基线冻结失败：\' + current + \' 业务放行但未返回 \' + EB.digestField + \'，无法建立可核验的评价基线\', results: results, history: history }',
+      '      ebVer += 1',
+      '      const ebPrev = ebRef',
+      '      ebRef = { run_id: TASK, version: ebVer, artifact_path: RUNDIR + \'/evaluation-baselines/v\' + ebVer + \'/\' + EB.artifact, algorithm: \'sha256\', digest: claim, status: \'unverified\' }',
+      '      if (ebPrev) ebRef.supersedes = { version: ebPrev.version, digest: String(ebPrev.digest) }',
+      '      log(\'[eb-freeze]\' + JSON.stringify({ version: ebVer, source: RUNDIR + \'/\' + EB.artifact, copy: ebRef.artifact_path, claimed_digest: claim, supersedes: ebRef.supersedes || null }))',
+      '    }',
+    ] : []),
     '    log((n.label || current) + \' → \' + String(e.outcome))',
     '    const npHalt = noProgressBlockOrRecord(current, e)',
     '    if (npHalt) return npHalt',
@@ -990,7 +1247,7 @@ export function compileBlueprint(bp, opts = {}) {
     '  current = e.to',
     '  pwCk(current)',
     '}',
-    'const done = { status: \'DONE\', taskId: TASK, round: round, results: results, history: history, completion: completionOf(lastNode), budgetUsed: budgetUsed, maxRounds: maxRounds, technical_budget: technicalBudgetSnapshot() }',
+    'const done = { status: \'DONE\', taskId: TASK, round: round, results: results, history: history, completion: completionOf(lastNode), budgetUsed: budgetUsed, maxRounds: maxRounds, technical_budget: technicalBudgetSnapshot(), input_mode: INPUT_MODE, resolved_inputs: RESOLVED_INPUTS }',
     'if (choiceEvent) { done.decision_id = A.decision_id; done.user_choice = A.user_choice; done.control_event = choiceEvent }',
     'return done',
   );
@@ -1028,6 +1285,7 @@ export function skillWrap(bp) {
     '   - `FAILED_ITEM_CAP`：fanout 项数超过单次上限 4096，缩小 items 或拆分批次后续跑；该终态在任何子代理启动前返回。',
     '   - `FAILED_AGENT_CAP`：本次运行累计子代理将超过上限 1000，缩小 fanout 或拆分工作流后续跑；该终态在本批子代理启动前返回。',
     '   - `ENDED_NO_SUCCESS_EDGE` / `ENDED_NO_FAILURE_EDGE` / `ENDED_NO_OUTCOME_EDGE` / `TECHNICAL_FAILURE`：呈原因（图缺陷/技术失败），人工介入后按需续跑。',
+    '   - `ERROR`（`reason=INPUT_RESOLUTION_FAILED`）：节点输入声明解析失败（errors 逐项含 node / binding / reason），未调用该节点代理、已有节点结果原样保留；修正蓝图 inputs 声明或补齐上游产出后再续跑。',
     '   - `ROUTE_HALTED`：#77 引擎停机信号（reason=HUMAN_DECISION）。命中 `$human-decision` 时本脚本翻译为 `WAITING_HUMAN` 并装配 Decision Package，不把 `ROUTE_HALTED` 作为对外终态返回。',
     '   - 旧 `REJECTED_INCOMPLETE` / `BLOCKED`：已由 `FAILED_AT_<节点id>` 承接（run 级无 BLOCKED；受阻语义 = 节点结果，如 dev status=blocked → FAILED_AT_dev）。',
     '   - `DONE`：呈 cleanup 报告与合并 commit，流程结束。',
