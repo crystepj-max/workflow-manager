@@ -82,6 +82,8 @@ return {
     const GENERATOR = CODE_ROOT ? CODE_ROOT + '/scripts/generate.mjs' : null
     const WS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/workspace-isolation-host.mjs' : null
     const RECORDS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/records-host.mjs' : null
+    // LOC-032：受管理外部操作账本 + execute-or-reconcile（与 records-host 同进程边界模式）
+    const OPERATIONS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/operations-host.mjs' : null
 
     // 项目根：会话 cwd 只在模型发起的调用中存在（浏览器 RPC / 审批激活都没有），
     // 因此每次实时探测，记住最近一次有效值，最后兜底 sandboxPolicy.workspaceRoot。
@@ -173,6 +175,8 @@ return {
           logicalRunsDir: home + '/visual-workflow/logical-runs',
           // Formal Records Store 目录（LOC-008）：与 logical-runs 同组织，一逻辑运行一文件
           recordsDir: home + '/visual-workflow/records',
+          // 受管理外部操作账本目录（LOC-032）：一 Run 一文件
+          operationsDir: home + '/visual-workflow/operations',
           skillRoot: home + '/skills',
           workspaces: home + '/workspaces',
         } : null))
@@ -1890,6 +1894,17 @@ return {
       if (!id || !recordId) return fail('缺少 logical_run_id / record_id')
       return recordsHostCall('get', { logical_run_id: id, record_id: recordId })
     })
+    // LOC-032：受管理外部操作入口（execute-or-reconcile）。已确认成功只确认不重复执行；
+    // 结果不确定先核查，无法核查时 NEEDS_RECONCILIATION 受阻（unknown 禁止再次执行）。
+    // 必填字段缺失在宿主侧拒绝；授权/能力/冲突等业务码由内核返回（operationsHostCall 透传）。
+    const opCall = (cmd, a, fields) => {
+      for (const k of fields) if (!String(((a || {})[k]) || '').trim()) return fail('缺少 ' + k)
+      return operationsHostCall(cmd, a)
+    }
+    registerRpc('vwf.operations.execute', (a) => opCall('execute', a, ['run_id', 'logical_action', 'target', 'authorization_scope', 'authorization_ref']))
+    registerRpc('vwf.operations.reconcile', (a) => opCall('reconcile', a, ['run_id', 'logical_action']))
+    registerRpc('vwf.operations.get', (a) => opCall('get', a, ['run_id', 'logical_action']))
+    registerRpc('vwf.operations.list', (a) => opCall('list', a, ['run_id']))
     registerRpc('vwf.artifacts.ingest', async (a) => {
       const { runId, nodeId, artifacts } = a
       if (!runId || !nodeId || !Array.isArray(artifacts) || !artifacts.length) return fail('缺少 runId / nodeId / artifacts')
@@ -2337,6 +2352,24 @@ return {
         const parsed = JSON.parse(r.stdout)
         return parsed.ok ? parsed : { ok: false, error: parsed.error || 'records host 业务错误' }
       } catch (e) { return { ok: false, error: 'records host 输出不可解析：' + errMsg(e), raw: r.stdout } }
+    }
+    // LOC-032：操作账本进程边界（与 recordsHostCall 同模式）。外部交付动作可能慢，
+    // graceMs 放宽到 120s；业务受阻（NEEDS_RECONCILIATION 等）透传 code。
+    async function operationsHostCall(cmd, input, opts) {
+      if (!OPERATIONS_HOST || (await readTextIfExists(OPERATIONS_HOST)) === null) return { ok: false, notFound: true, error: 'operations-host.mjs 未找到（LOC-032 运行时集成未部署）' }
+      const d = await homeDirs()
+      if (!d) return { ok: false, error: '无法解析 DSH Home：operations 目录不可用' }
+      const payload = { ...input, operations_dir: input.operations_dir || d.operationsDir }
+      const r = await runNode([OPERATIONS_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 120000, maxBytes: 1024 * 1024 })
+      if (!r.ok) return { ok: false, error: 'operations host 调用失败：' + r.detail }
+      try {
+        const parsed = JSON.parse(r.stdout)
+        return parsed.ok ? parsed : {
+          ok: false, code: parsed.code, blocked: parsed.blocked === true,
+          status: parsed.status, operation_id: parsed.operation_id,
+          error: parsed.error || parsed.message || 'operations host 业务错误',
+        }
+      } catch (e) { return { ok: false, error: 'operations host 输出不可解析：' + errMsg(e), raw: r.stdout } }
     }
     // 节点收尾产物 → commit 条目（单一提交通道的宿主侧采集）：
     //  - 每个本段新完成节点 → node:<logical_run_id>:<nodeId> 的追加 Revision；
@@ -3340,7 +3373,7 @@ return {
         refreshServices()
         const d = await homeDirs()
         return JSON.stringify({
-          pluginRoot: PLUGIN_ROOT, codeRoot: CODE_ROOT, dist: DIST, generator: GENERATOR, workspaceHost: WS_HOST, recordsHost: RECORDS_HOST,
+          pluginRoot: PLUGIN_ROOT, codeRoot: CODE_ROOT, dist: DIST, generator: GENERATOR, workspaceHost: WS_HOST, recordsHost: RECORDS_HOST, operationsHost: OPERATIONS_HOST,
           projectRoot: projectRoot(), dshHome: await dshHome(), generatedRoots: generatedRoots(), userDir: d && d.userDir, skillRoot: d && d.skillRoot, runsDir: d && d.runsDir, recordsDir: d && d.recordsDir,
           fsAvailable: fs !== undefined, subprocessAvailable: subprocess !== undefined, nodePath: await resolveNode(),
         }, null, 2)

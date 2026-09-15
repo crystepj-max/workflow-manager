@@ -240,7 +240,9 @@ const clientBytes = Buffer.byteLength(dynClient)
 // LOC-021 异源档位三态（校验内核档位判定 + 运行时日志档位/角色口径 + 编辑器三档选择器与中英文案）并入后上调至 190KiB。
 // LOC-027 评价基线冻结闸门（宿主编排：[eb-freeze] 观察/检查点中止/恢复/核验；纯逻辑已分流
 // dist/evaluation-baseline.cjs 内核）并入后上调至 198KiB。
-const PAYLOAD_LIMIT = 198 * 1024
+// LOC-032 受管理外部操作账本（vwf.operations.* 四端点 + operationsHostCall 进程边界；
+// 账本/适配器逻辑在 scripts/operations-host.mjs 内核，不经动态载荷）并入后上调至 200KiB。
+const PAYLOAD_LIMIT = 200 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)

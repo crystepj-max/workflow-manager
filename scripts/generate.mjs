@@ -140,6 +140,8 @@ export function compileBlueprint(bp, opts = {}) {
   const autoReschedule = bp.onMaxRounds === 'auto-reschedule';
   // LOC-025 裁决一致性：仅声明了 output.consistency 的蓝图才注入路由前契约校验。
   const hasConsistencyDecl = Array.isArray(bp.nodes) && bp.nodes.some((n) => n && n.output && n.output.consistency);
+  // LOC-032（WR-012）：仅含收口节点的蓝图才注入恢复/重试防重规则（外部交付动作防重复）。
+  const hasCloseoutNode = Array.isArray(bp.nodes) && bp.nodes.some((n) => n && n.profile === 'closeout');
   // 内置角色清单：opts 注入优先（测试用），否则读 manifest 并缓存
   const builtinRoleIds = opts.builtinRoleIds || builtinRoleIdsCached();
   // 内置角色正文（#129 遗留项 2）：临时/未保存图编译自包含——正文内联进 ROLE_DEFS。
@@ -419,6 +421,16 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (A.workspace_capability) s += \'候选绑定（LOC-026 强制）：在正式开始审阅/测试任何成果之前，先调用 vwf_workspace 工具（op=captureCandidate，logical_run_id=\' + TASK + \'，capability 使用运行上下文注入的 workspace_capability 令牌）获取宿主生成的候选证明，把返回的 version.content_sha256 原样写入最终回复的 candidate_sha256 字段；结束后可再次调用确认候选未变化。候选摘要由宿主实况计算，禁止自行编造或用 git rev-parse 冒充；本节点期间不得修改业务源码文件，否则候选证明失效。\'',
     '  return s',
     '}',
+    // LOC-032（WR-012）：收口节点执行创建 PR/合并/关闭 issue 等受管理交付动作前，
+    // 强制先核查目标当前状态——恢复/重试不得重复已确认成功的外部动作，结果不确定保守受阻。
+    // 仅含 closeout 节点的蓝图注入（与 hasConsistencyDecl 同口径），其余蓝图产物零差异。
+    ...(hasCloseoutNode ? [
+      'function managedOpsStep(id) {',
+      '  const n = BYID[id]',
+      '  if (!n || n.profile !== \'closeout\') return \'\'',
+      '  return \'恢复/重试防重（WR-012）：本节点会执行创建 PR、合并、关闭 issue 等受管理交付动作。每类动作执行前必须先核查目标当前状态（PR 是否已存在或已合并、issue 是否已关闭、分支是否已推送）；已确认成功的动作不得重复执行，直接采用既有结果并在报告中注明；查询不到或结果不确定（超时、权限失败、状态矛盾）时停止自动重试，在最终回复与报告中明确「需核查」，禁止伪造成功或换目标重做。\'',
+      '}',
+    ] : []),
     'function coerceStructured(v, schema) {',
     '  const root = schema && schema.type',
     '  if (root !== \'object\' && root !== \'array\') return v',
@@ -453,7 +465,7 @@ export function compileBlueprint(bp, opts = {}) {
     '  const ir = resolveNodeInputs(id)',
     '  if (ir.errors.length) throw Object.assign(new Error(\'节点 \' + id + \' 输入解析失败（应在调用代理前被拦截）：\' + ir.errors.map(function (e) { return e.binding + \'：\' + e.reason }).join(\'；\')), { inputResolutionErrors: ir.errors })',
     '  const inputExtra = inputsBlock(ir.items)',
-    '  const prompt = roleRef(n.profile) + runtimeCtx(id, fb + inputExtra + (n.verifyBranch ? verifyBranchStep(id) : \'\'))',
+    '  const prompt = roleRef(n.profile) + runtimeCtx(id, fb + inputExtra + (n.verifyBranch ? verifyBranchStep(id) : \'\')' + (hasCloseoutNode ? ' + managedOpsStep(id)' : '') + ')',
     '  phase(n.label || id)',
     '  const __k = ++AWK',
     '  attLog({ a: \'s\', k: __k, n: id, r: round, t: \'call\' })',

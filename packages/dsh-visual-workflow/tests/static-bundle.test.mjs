@@ -89,7 +89,7 @@ test('静态 bundle dist 含语言资源与内置角色正文', () => {
   assert.ok(existsSync(join(here, '..', 'dist', 'dynamic', 'client.js')), 'dist/dynamic/client.js 必须存在')
 })
 
-test('开发粘贴用 dynamic 闭包合计 ≤ 198KB（一次 cordis_define 载荷），host 自带头部常量与 Buffer 垫片', () => {
+test('开发粘贴用 dynamic 闭包合计 ≤ 200KB（一次 cordis_define 载荷），host 自带头部常量与 Buffer 垫片', () => {
   const host = readFileSync(join(here, '..', 'dist', 'dynamic', 'host.js'))
   const client = readFileSync(join(here, '..', 'dist', 'dynamic', 'client.js'))
   // 预算按「同一次 cordis_define 的粘贴总量」计（两半天生不等大）。
@@ -100,7 +100,9 @@ test('开发粘贴用 dynamic 闭包合计 ≤ 198KB（一次 cordis_define 载�
   // LOC-021 异源档位三态（校验内核档位判定 + 运行时日志档位/角色口径 + 编辑器三档选择器与中英文案）并入后上调至 190KiB。
   // LOC-027 评价基线冻结闸门（宿主编排：[eb-freeze] 观察/检查点中止/恢复/核验；纯逻辑已分流
   // dist/evaluation-baseline.cjs 内核）并入后上调至 198KiB。
-  const limit = 198 * 1024
+  // LOC-032 受管理外部操作账本（vwf.operations.* 四端点 + operationsHostCall 进程边界；
+  // 账本/适配器逻辑在 scripts/operations-host.mjs 内核）并入后上调至 200KiB。
+  const limit = 200 * 1024
   assert.ok(host.byteLength + client.byteLength <= limit, `host ${host.byteLength} + client ${client.byteLength} > ${limit}`)
   const hostText = host.toString('utf8')
   const clientText = client.toString('utf8')
