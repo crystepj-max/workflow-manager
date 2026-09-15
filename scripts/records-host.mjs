@@ -37,7 +37,7 @@ import {
   getRecord,
   listRevisions,
 } from './formal-records.mjs'
-import { assertIntegrationAllowed } from './workspace-isolation.mjs'
+import { assertIntegrationAllowed, compareCandidate } from './workspace-isolation.mjs'
 
 const FILE_SCHEMA = 1
 const DEP_PREFIX = /^(node|artifact):/
@@ -237,7 +237,50 @@ export function recordsAssertIntegration(input) {
   }
 }
 
-const COMMANDS = { commit: recordsCommit, list: recordsList, get: recordsGet, assertIntegration: recordsAssertIntegration }
+// LOC-026 候选核验：Store 侧逐个 Proof（各 record_id 取最新 Revision）比较"所指候选
+// vs 当前实况候选"，比较逻辑委托内核 compareCandidate。无 candidate_ref 的历史 Proof
+// 记 legacy_unverified（兼容冻结快照，不伪造绑定、不改写为已验证）；宿主捕获失败的
+// Proof（带 candidate_error / candidate_match=false）按 mismatch 拒绝，不得当 legacy 放行。
+export function recordsAssertCandidates(input) {
+  const { records_dir, logical_run_id, candidate, capture_error } = input || {}
+  if (!candidate) {
+    return { ok: false, pass: false, code: 'GATE_CANDIDATE_FAILED', message: String(capture_error || '缺少当前实况候选（candidate）'), checks: [] }
+  }
+  if (!existsSync(fileOf(records_dir, logical_run_id))) return { ok: true, pass: true, checks: [] }
+  const { store } = loadStore(records_dir, logical_run_id)
+  const latest = new Map()
+  for (const rec of allRecords(store)) {
+    if (rec && rec.kind === KIND.PROOF_DECISION) latest.set(rec.record_id, rec)
+  }
+  const checks = []
+  for (const rec of latest.values()) {
+    const body = rec.body && rec.body.value
+    if (!body || !body.candidate_ref) {
+      const invalid = body && (body.candidate_error || body.candidate_match === false)
+      checks.push({ record_id: rec.record_id, state: invalid ? 'mismatch' : 'legacy_unverified', mismatches: invalid ? [{ field: 'candidate_ref', actual: body && body.candidate_error || '宿主候选捕获失败' }] : [] })
+      continue
+    }
+    const cmp = compareCandidate(candidate, body.candidate_ref)
+    checks.push({
+      record_id: rec.record_id,
+      state: cmp.match === true && body.candidate_match !== false ? 'match' : 'mismatch',
+      declared_candidate_sha256: body.declared_candidate_sha256 || null,
+      candidate_match: body.candidate_match === undefined ? null : body.candidate_match,
+      mismatches: cmp.mismatches || [],
+      scope_diff: cmp.scope_diff || null,
+    })
+  }
+  const bad = checks.filter((c) => c.state === 'mismatch')
+  return {
+    ok: true,
+    pass: bad.length === 0,
+    code: 'GATE_CANDIDATE_MISMATCH',
+    message: 'Proof 候选≠实况，拒绝放行；不匹配 Proof：' + bad.map((c) => c.record_id).join(', '),
+    checks,
+  }
+}
+
+const COMMANDS = { commit: recordsCommit, list: recordsList, get: recordsGet, assertIntegration: recordsAssertIntegration, assertCandidates: recordsAssertCandidates }
 
 // CLI 判定不比对 import.meta.url（安装位可能经符号链接，路径恒等守卫会静默跳过 main）
 if (process.argv.length >= 2 && /records-host\.mjs$/.test(String(process.argv[1] || ''))) {

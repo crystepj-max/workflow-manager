@@ -14,6 +14,7 @@ import {
   recordSourceSync, workerScratchPath, assembleWorkerContext, writeWorkerFile, readWorkerFile,
   writeSourceFile, readSourceFile, buildAttemptProvenance, assertProofBinding,
   computeIntegrationCheckpointFromRepo, observeTargetHead,
+  captureCandidate, compareCandidate,
   acquireLock, releaseLock, activeLockFor, cleanupWorkspace, recoverStale,
   resolveWorkspacePolicy, TEMPLATE_REGISTRY, LIFECYCLE,
 } from './workspace-isolation.mjs'
@@ -311,6 +312,25 @@ try {
       const ws = resolveWorkspaceFromRegistry(work_root, runId)
       const ok = assertProofBinding(ws, proof)
       out({ ok: true, valid: ok })
+      break
+    }
+    case 'captureCandidate': {
+      // LOC-026 候选证明：workspace 从注册表解析（A4）。范围选项缺省时由本侧取默认
+      //（排除 Run 产物目录 .agent-runs/<run_id>），保证 Proof 签发与闸门两侧捕获同口径
+      const { work_root, logical_run_id, workspace_id, options } = INPUT
+      const runId = logical_run_id || workspace_id
+      if (!work_root || !runId) err('缺少参数')
+      const ws = resolveWorkspaceFromRegistry(work_root, runId)
+      const scope = options && Object.keys(options).length ? options : { exclude: ['.agent-runs/' + String(runId)] }
+      const candidate = captureCandidate(ws, scope)
+      out({ ok: true, candidate })
+      break
+    }
+    case 'compareCandidate': {
+      // LOC-026：候选标识比较（纯函数），mismatch 明细供关口指出具体不匹配证明
+      const { current, expected } = INPUT
+      if (!current || !expected) err('缺少 current / expected 候选标识')
+      out({ ok: true, compare: compareCandidate(current, expected) })
       break
     }
     case 'acquireLock': {

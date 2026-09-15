@@ -57,6 +57,7 @@ PASSED / FAILED / BLOCKED
 - 结论只能是 PASSED / FAILED / BLOCKED（环境阻塞）之一，附证据支撑。
 - 假测试必须被拦截：测试覆盖到的代码要真实执行过断言，不能空跑。
 - 本地绿灯 ≠ 远端通过：本地工作区验证通过与远端 CI/PR 通过分开表述，不得混为一谈。
+- 所在节点同时要求业务路由（route）与结论（result）两个字段时，两者必须成对一致，矛盾组合会被工作流运行时在路由前确定性拒绝（CONTRACT_INCONSISTENT，属契约错误而非测试结论），不得单方面改其中一个字段掩盖矛盾：PASSED 配 route=PASS；FAILED 配 route=RETURN_DEV；BLOCKED 配 route=BLOCKED。
 
 ## 硬规则
 

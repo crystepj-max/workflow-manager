@@ -2215,6 +2215,7 @@ return {
         workspace_mode: ws.workspace_mode || undefined,
       }
     }
+    // LOC-026：候选捕获范围缺省由包装脚本侧排除 Run 产物目录（与编译脚本 RUNDIR 同源）
     function injectWorkspaceDefaults(script, defaults) {
       const payload = {}
       for (const k of Object.keys(defaults || {})) if (defaults[k] !== undefined && defaults[k] !== null) payload[k] = defaults[k]
@@ -2243,6 +2244,8 @@ return {
     }
     // workspace RPC 表：[包装脚本命令, 是否校验能力令牌, 载荷映射]。供编译后的 workflow 脚本在节点内调用。
     const str = (v) => String(v || '')
+    // 携带 Run 身份的载荷统一组装 logical_run_id（A4：包装脚本侧仍只信注册表解析）
+    const runArgs = (f) => (a, id) => ({ logical_run_id: id, ...f(a) })
     const WS_OPS = {
       // allocate 的模板解析要查注册表（异步）：build 为 async，模板 id 与
       // resource_kind 在进入包装脚本前已解析为最终值
@@ -2250,23 +2253,25 @@ return {
         logical_run_id: str(a.taskId), template_id: await resolveTemplateKind(a.templateId, a.declared_workspace), resource_kind: resolveResourceKind(a.resource_kind, a.declared_workspace), repository_path: a.repository_path || null, repository: a.repository || null,
         base_ref: a.baseBranch || 'main', base_commit: a.base_commit || null, work_branch: a.work_branch || null, task_identity: str(a.taskId), allow_parallel: !!a.allow_parallel,
       })],
-      get: ['get', true, (a, id) => ({ logical_run_id: id })],
-      setLifecycle: ['setLifecycle', true, (a, id) => ({ logical_run_id: id, lifecycle: str(a.lifecycle), extra: a.extra || {} })],
-      recordSourceSync: ['recordSourceSync', true, (a, id) => ({ logical_run_id: id, current_head: a.current_head || undefined, source_revision: a.source_revision || undefined })],
+      get: ['get', true, runArgs(() => ({}))],
+      setLifecycle: ['setLifecycle', true, runArgs((a) => ({ lifecycle: str(a.lifecycle), extra: a.extra || {} }))],
+      recordSourceSync: ['recordSourceSync', true, runArgs((a) => ({ current_head: a.current_head || undefined, source_revision: a.source_revision || undefined }))],
       // 只接收 Run 身份，权威 workspace 由包装脚本从注册表解析，不信任调用方传入的路径
-      buildProvenance: ['buildAttemptProvenance', true, (a, id) => ({ logical_run_id: id, node: str(a.node), attempt: Number(a.attempt || 1) })],
-      acquireLock: ['acquireLock', true, (a, id) => ({ logical_run_id: id, resource_key: str(a.resource_key), owner: str(a.owner), ttl_ms: a.ttl_ms || undefined })],
-      releaseLock: ['releaseLock', true, (a, id) => ({ lock_id: str(a.lock_id), owner: str(a.owner), logical_run_id: id, reason: a.reason || undefined })],
-      cleanup: ['cleanup', true, (a, id) => ({ logical_run_id: id, opts: a.opts || {} })],
-      writeSource: ['writeSourceFile', true, (a, id) => ({ logical_run_id: id, rel: str(a.rel), content: str(a.content) })],
-      readSource: ['readSourceFile', true, (a, id) => ({ logical_run_id: id, rel: str(a.rel) })],
-      writeWorker: ['writeWorkerFile', true, (a, id) => ({ logical_run_id: id, worker_id: str(a.worker_id), rel: str(a.rel), content: str(a.content) })],
-      readWorker: ['readWorkerFile', true, (a, id) => ({ logical_run_id: id, worker_id: str(a.worker_id), rel: str(a.rel) })],
+      buildProvenance: ['buildAttemptProvenance', true, runArgs((a) => ({ node: str(a.node), attempt: Number(a.attempt || 1) }))],
+      // LOC-026：候选证明（捕获范围由包装脚本缺省构造）
+      captureCandidate: ['captureCandidate', true, runArgs(() => ({}))],
+      acquireLock: ['acquireLock', true, runArgs((a) => ({ resource_key: str(a.resource_key), owner: str(a.owner), ttl_ms: a.ttl_ms || undefined }))],
+      releaseLock: ['releaseLock', true, runArgs((a) => ({ lock_id: str(a.lock_id), owner: str(a.owner), reason: a.reason || undefined }))],
+      cleanup: ['cleanup', true, runArgs((a) => ({ opts: a.opts || {} }))],
+      writeSource: ['writeSourceFile', true, runArgs((a) => ({ rel: str(a.rel), content: str(a.content) }))],
+      readSource: ['readSourceFile', true, runArgs((a) => ({ rel: str(a.rel) }))],
+      writeWorker: ['writeWorkerFile', true, runArgs((a) => ({ worker_id: str(a.worker_id), rel: str(a.rel), content: str(a.content) }))],
+      readWorker: ['readWorkerFile', true, runArgs((a) => ({ worker_id: str(a.worker_id), rel: str(a.rel) }))],
       checkpoint: ['computeIntegrationCheckpointFromRepo', false, (a) => ({ base_ref: str(a.base_ref), base_commit: str(a.base_commit), repository_path: str(a.repository_path), target_ref: a.target_ref || undefined })],
-      // LOC-017 集成闸门：gatePlan（只读观测 + 锁键）/ syncTarget（真 merge + 实况登记）
-      gatePlan: ['gatePlan', true, (a, id) => ({ logical_run_id: id, target_ref: a.target_ref || undefined })],
-      syncTarget: ['syncTarget', true, (a, id) => ({ logical_run_id: id, target_ref: a.target_ref || undefined })],
-      gateSyncEntry: ['gateSyncEntry', true, (a, id) => ({ logical_run_id: id, target_head: str(a.target_head), previous_synced_head: a.previous_synced_head || undefined, integrated_before: a.integrated_before === true, merge_result: str(a.merge_result), attempt: Number(a.attempt || 1), snapshot_revision: str(a.snapshot_revision) })],
+      // LOC-017 集成闸门：gatePlan（只读观测 + 候选捕获 + 锁键）/ syncTarget（真 merge + 实况登记）
+      gatePlan: ['gatePlan', true, runArgs((a) => ({ target_ref: a.target_ref || undefined }))],
+      syncTarget: ['syncTarget', true, runArgs((a) => ({ target_ref: a.target_ref || undefined }))],
+      gateSyncEntry: ['gateSyncEntry', true, runArgs((a) => ({ target_head: str(a.target_head), previous_synced_head: a.previous_synced_head || undefined, integrated_before: a.integrated_before === true, merge_result: str(a.merge_result), attempt: Number(a.attempt || 1), snapshot_revision: str(a.snapshot_revision) }))],
       activeLock: ['activeLockFor', true, (a) => ({ resource_key: str(a.resource_key) })],
     }
     for (const op of Object.keys(WS_OPS)) {
@@ -2320,8 +2325,12 @@ return {
     //    依赖（覆盖的 Record Revision）由 Store 端在签发时刻按当时全部节点/产物
     //    记录结链——之后目标 Revision 前进，旧 Proof 即 not_covering_current（stale）。
     // verified_* 以节点结论为准（编译脚本 claimError 已强制校验其存在）。
-    function nodeRecordEntries(logicalRunId, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
+    // LOC-026：Proof 绑定宿主签发时刻实况捕获的 candidate_ref（权威），并记录节点自报
+    // candidate_sha256 的核对结论 candidate_match；捕获失败仅记 candidate_match=false
+    //（闸门按 mismatch 拒绝，不当 legacy 放行）。
+    async function nodeRecordEntries(logicalRunId, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
       const entries = []
+      let cand = null
       for (const nodeId of newKeys) {
         const res = results[nodeId]
         if (res == null || typeof res !== 'object') continue
@@ -2344,16 +2353,23 @@ return {
           body_value: res,
         })
         if (node && node.verifyBranch) {
+          if (!cand) {
+            const c = await wsHostCall('captureCandidate', { logical_run_id: logicalRunId, capability: capabilityFor(logicalRunId) })
+            if (c.candidate) cand = c.candidate
+          }
+          const proofBody = {
+            node: String(nodeId),
+            verified_branch: res.verified_branch === undefined ? null : res.verified_branch,
+            verified_head: res.verified_head === undefined ? null : res.verified_head,
+            workspace: ws ? { workspace_id: ws.workspace_id || null, source_path: ws.source_path || null, work_branch: ws.work_branch || null } : null,
+            candidate_ref: cand,
+            candidate_match: !!(cand && res.candidate_sha256 === cand.version.content_sha256),
+          }
           entries.push({
             type: 'proof',
             record_id: 'proof:' + logicalRunId + ':' + nodeId,
             provenance,
-            body_value: {
-              node: String(nodeId),
-              verified_branch: res.verified_branch === undefined ? null : res.verified_branch,
-              verified_head: res.verified_head === undefined ? null : res.verified_head,
-              workspace: ws ? { workspace_id: ws.workspace_id || null, source_path: ws.source_path || null, work_branch: ws.work_branch || null } : null,
-            },
+            body_value: proofBody,
           })
         }
       }
@@ -2425,6 +2441,15 @@ return {
         if (ws.workspace_mode !== 'ISOLATED_WRITE') return { trace: Object.assign(trace, { decision: 'skipped', reason: 'non_isolated_write' }) }
         // B1 适用面：无审核/测试节点的图不是建设类流程，闸门不适用（保持旧行为，不回归）
         if (!verifyNodes.length) return { trace: Object.assign(trace, { decision: 'skipped', reason: 'no_verify_nodes' }) }
+        // ── LOC-026 候选核验：实况候选已随 gatePlan 捕获（内核 planTargetSync），此处
+        // 逐个 Proof 比较"所指候选 vs 实况"（委托 records-host assertCandidates / 内核
+        // compareCandidate）；捕获/比较失败 fail closed；无 candidate_ref 的历史 Proof 记
+        // legacy_unverified，不伪造绑定，仍由既有 Revision 覆盖判定约束（兼容冻结快照）。
+        const candGate = async (plan) => {
+          const C = await recordsHostCall('assertCandidates', { logical_run_id: wsIdentity, candidate: plan.candidate })
+          trace.candidate_checks = C.checks
+          return C.pass ? null : blocked(C.code || 'GATE_CANDIDATE_FAILED', C.message || C.error)
+        }
         // 最近一次闸门重跑段的收束现场：放行时 wf_run 返回它（人工拿到的是重跑后的 decision_id）
         let lastRerun = null
         for (let iteration = 1; iteration <= GATE_MAX_ITERATIONS; iteration++) {
@@ -2444,7 +2469,9 @@ return {
           const cp = cpRes && cpRes.ok ? cpRes.checkpoint : null
           if (!cp || typeof cp.target_advanced !== 'boolean') return blocked('GATE_OBSERVE_FAILED', '目标 HEAD 观测失败，fail closed（B13）：' + ((cpRes && cpRes.error) || '未知'))
           if (!cp.target_advanced && !lastSync) {
-            // B3：目标未前进且从未同步——直接放行，不重跑、不额外耗时
+            // B3：目标未前进且从未同步——候选核验通过后直接放行，不重跑、不额外耗时
+            const gateBlocked = await candGate(plan)
+            if (gateBlocked) return gateBlocked
             trace.decision = 'pass'
             trace.proofs_state = 'still_valid'
             return { trace }
@@ -2460,6 +2487,9 @@ return {
               target_advanced: false,
             })
             if (assertion.ok) {
+              // Revision 覆盖满足后仍须候选核验（LOC-026）：所指候选 = 实况候选才放行
+              const gateBlocked = await candGate(plan)
+              if (gateBlocked) return gateBlocked
               trace.decision = 'pass'
               trace.proofs_state = assertion.proofs_state || 'rerun_completed'
               return lastRerun
@@ -2572,7 +2602,7 @@ return {
             if (rerunResults) {
               const newKeys = Object.keys(rerunResults).filter((k) => !beforeKeys.has(k))
               if (newKeys.length) {
-                const entries = nodeRecordEntries(wsIdentity, dsl, rerunResults, newKeys, logicalRec.segments.length, fresh.ok && fresh.workspace ? fresh.workspace : ws, activeSnapshot(logicalRec), rerunValue && rerunValue.control_event)
+                const entries = await nodeRecordEntries(wsIdentity, dsl, rerunResults, newKeys, logicalRec.segments.length, fresh.ok && fresh.workspace ? fresh.workspace : ws, activeSnapshot(logicalRec), rerunValue && rerunValue.control_event)
                 if (entries.length) await commitNodeRecords(logicalRec, entries)
               }
             }
@@ -3142,7 +3172,7 @@ return {
           if (resultsNow) {
             const newKeys = Object.keys(resultsNow).filter((k) => !beforeResultKeys.has(k))
             if (newKeys.length) {
-              const entries = nodeRecordEntries(logicalRec.logical_run_id, v.sanitized, resultsNow, newKeys, logicalRec.segments.length, ws, activeSnapshot(logicalRec), value.control_event)
+              const entries = await nodeRecordEntries(logicalRec.logical_run_id, v.sanitized, resultsNow, newKeys, logicalRec.segments.length, ws, activeSnapshot(logicalRec), value.control_event)
               if (entries.length) await commitNodeRecords(logicalRec, entries)
             }
           }
