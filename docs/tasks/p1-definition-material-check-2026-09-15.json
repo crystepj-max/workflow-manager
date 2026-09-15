@@ -1,0 +1,139 @@
+{
+  "checked_at": "2026-09-15T05:13:18.354Z",
+  "status": "PASS_MATERIAL_ONLY",
+  "definition_ready": false,
+  "development_started": false,
+  "code_baseline": "775ac84e9c37e2278c2ee32a0f2bcb75cbbb8172",
+  "counts": {
+    "tasks": 10,
+    "specs": 10,
+    "definition_checks": 10,
+    "sections": 190,
+    "source_ac_preserved": 40,
+    "uat": 40,
+    "local_links": 220,
+    "files": 40
+  },
+  "original_33_registry_records_unchanged": true,
+  "untracked_but_not_ignored": true,
+  "broken_links": [],
+  "portable_paths": true,
+  "relocated_preflight": {
+    "readable_tasks": 10,
+    "blocked_as_expected": 10,
+    "missing_files": 0
+  },
+  "batch_result": {
+    "eligible": 0,
+    "excluded": 10,
+    "real_development_launches": 0
+  },
+  "tasks": [
+    {
+      "id": "LOC-034",
+      "source": "WR-007",
+      "card": "docs/tasks/LOC-034-revision-dependencies.md",
+      "spec": "docs/tasks/specs/LOC-034-revision-dependencies/task-spec-V1.md",
+      "sections": 19,
+      "ac": 4,
+      "uat": 4,
+      "registry_consistent": true
+    },
+    {
+      "id": "LOC-035",
+      "source": "WR-008",
+      "card": "docs/tasks/LOC-035-artifact-manifest.md",
+      "spec": "docs/tasks/specs/LOC-035-artifact-manifest/task-spec-V1.md",
+      "sections": 19,
+      "ac": 4,
+      "uat": 4,
+      "registry_consistent": true
+    },
+    {
+      "id": "LOC-036",
+      "source": "WR-010",
+      "card": "docs/tasks/LOC-036-exploration-coverage.md",
+      "spec": "docs/tasks/specs/LOC-036-exploration-coverage/task-spec-V1.md",
+      "sections": 19,
+      "ac": 4,
+      "uat": 4,
+      "registry_consistent": true
+    },
+    {
+      "id": "LOC-037",
+      "source": "WR-014",
+      "card": "docs/tasks/LOC-037-delivery-actions.md",
+      "spec": "docs/tasks/specs/LOC-037-delivery-actions/task-spec-V1.md",
+      "sections": 19,
+      "ac": 4,
+      "uat": 4,
+      "registry_consistent": true
+    },
+    {
+      "id": "LOC-038",
+      "source": "WR-015",
+      "card": "docs/tasks/LOC-038-preflight-unification.md",
+      "spec": "docs/tasks/specs/LOC-038-preflight-unification/task-spec-V1.md",
+      "sections": 19,
+      "ac": 4,
+      "uat": 4,
+      "registry_consistent": true
+    },
+    {
+      "id": "LOC-039",
+      "source": "WR-016",
+      "card": "docs/tasks/LOC-039-protocol-capabilities.md",
+      "spec": "docs/tasks/specs/LOC-039-protocol-capabilities/task-spec-V1.md",
+      "sections": 19,
+      "ac": 4,
+      "uat": 4,
+      "registry_consistent": true
+    },
+    {
+      "id": "LOC-040",
+      "source": "WR-017",
+      "card": "docs/tasks/LOC-040-workflow-capability-guide.md",
+      "spec": "docs/tasks/specs/LOC-040-workflow-capability-guide/task-spec-V1.md",
+      "sections": 19,
+      "ac": 4,
+      "uat": 4,
+      "registry_consistent": true
+    },
+    {
+      "id": "LOC-041",
+      "source": "WR-018",
+      "card": "docs/tasks/LOC-041-node-isolation.md",
+      "spec": "docs/tasks/specs/LOC-041-node-isolation/task-spec-V1.md",
+      "sections": 19,
+      "ac": 4,
+      "uat": 4,
+      "registry_consistent": true
+    },
+    {
+      "id": "LOC-042",
+      "source": "WR-019",
+      "card": "docs/tasks/LOC-042-workflow-conformance.md",
+      "spec": "docs/tasks/specs/LOC-042-workflow-conformance/task-spec-V1.md",
+      "sections": 19,
+      "ac": 4,
+      "uat": 4,
+      "registry_consistent": true
+    },
+    {
+      "id": "LOC-043",
+      "source": "WR-020",
+      "card": "docs/tasks/LOC-043-run-quality-cost.md",
+      "spec": "docs/tasks/specs/LOC-043-run-quality-cost/task-spec-V1.md",
+      "sections": 19,
+      "ac": 4,
+      "uat": 4,
+      "registry_consistent": true
+    }
+  ],
+  "limitations": [
+    "材料结构及路径检查通过，不等于产品已实施或本批已批准。",
+    "LOC-041 参考宿主强制隔离未实测；按规格需要真实探针。",
+    "跨组依赖需执行者核验前置合入提交，当前批量脚本不支持自动调度依赖。",
+    "文件尚未提交、合入main或上传CNB。"
+  ]
+}

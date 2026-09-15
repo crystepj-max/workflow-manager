@@ -1,0 +1,32 @@
+{
+  "checked_at": "2026-09-15T22:41:30.029Z",
+  "status": "PASS_MATERIAL_ONLY",
+  "definition_ready": false,
+  "counts": {
+    "tasks": 2,
+    "specs": 2,
+    "sections": 38,
+    "source_ac": 8,
+    "uat": 8,
+    "benchmark_tasks": 12,
+    "baseline_trials_planned": 36,
+    "candidate_trials_max": 12,
+    "total_trials_max": 48,
+    "local_links": 54,
+    "files": 13
+  },
+  "existing_43_registry_records_unchanged": true,
+  "existing_docs_preserved": 168,
+  "broken_links": [],
+  "git_ignored_files": 0,
+  "relocated_materials_readable": true,
+  "unapproved_tasks_blocked": 2,
+  "real_model_trials": 0,
+  "development_started": false,
+  "limitations": [
+    "仍需本批范围/环境/许可确认；LOC-045另需真实模型配置和预算授权。",
+    "没有运行目标代码、真实DSH恢复或付费实验。",
+    "一般preflight不检测研究预算，不把字段检查当真实实验授权。",
+    "本轮没有提交/合入main/同步CNB。"
+  ]
+}
