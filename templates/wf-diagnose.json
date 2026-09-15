@@ -160,9 +160,10 @@
       "id": "closeout",
       "profile": "closeout",
       "label": "收口",
-      "goal": "仅对回归验证通过的同一修复成果收口：保留诊断、修复、审核、回归四类记录，不得重新开发或改写结论；遗留观察项写入 followups 供后续定义摄入。完成后写 `cleanup-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "仅对回归验证通过的同一修复成果收口：保留诊断、修复、审核、回归四类记录，不得重新开发或改写结论；遗留观察项写入 followups 供后续定义摄入。完成后写 `cleanup-report.md`；最终回复只输出本节点 schema 对应 JSON，status=DELIVERED、completion_type=DELIVERED（完成映射）。",
       "output": {
         "outcomePath": "$.status",
+        "completionPath": "$.completion_type",
         "schema": {
           "type": "object",
           "properties": {
@@ -171,6 +172,10 @@
               "enum": [
                 "DELIVERED"
               ]
+            },
+            "completion_type": {
+              "type": "string",
+              "const": "DELIVERED"
             },
             "summary": {
               "type": "string"
@@ -181,6 +186,7 @@
           },
           "required": [
             "status",
+            "completion_type",
             "summary",
             "followups"
           ],

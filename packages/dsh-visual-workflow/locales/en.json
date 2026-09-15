@@ -223,6 +223,8 @@
   "dashWaitHuman": "Waiting for human",
   "dashHumanGate": "Human gate",
   "dashHumanDecision": "Human Decision {reason}",
+  "dashBlocked": "Blocked (resumable)",
+  "dashBlockedReason": "Blocked: {reason} (non-terminal, resume same run)",
   "dashGateNode": "Gate node {node}",
   "dashRunList": "Run list",
   "dashAutoPoll": "Auto-refresh 3s",

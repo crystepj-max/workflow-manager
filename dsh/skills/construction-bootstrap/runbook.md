@@ -237,6 +237,17 @@ node scripts/local-task-registry.mjs board
 
 ---
 
+## 统一受阻 / 恢复 / 完成生命周期（LOC-030）
+
+Run 的受阻与完成看 `wf_run` 返回的 `termination`（显式终止描述），技术执行段结束不自动等于业务完成：
+
+- `status=BLOCKED`（生命周期 `BLOCKED`，**非终态**，`terminal=false`）：外部条件暂缺或自动返工额度耗尽，不冒充成功也不挂人工决策，同时释放并发名额。恢复同一 Run：同 taskId + `wf_run entry=<termination.resume_node>`，恢复前先重检阻塞条件；恢复不改变快照、基线或已确认节点（不重复已确认节点）。
+- 原因码：`BUSINESS_BLOCKED`=环境/资料/权限暂缺（条件恢复后恢复）；`AUTO_REWORK_EXHAUSTED`=自动返工 3 轮耗尽（人工退回 REJECT 后新一轮交付自动重置额度）；`NEEDS_REDEFINE`=基线需重定义（`resumable=false`，不可原样恢复——完成重定义后重新发起，派生新 Run 并保留旧 Run 原样）。
+- `COMPLETION_MISSING`：脚本 DONE 但无有效业务完成映射，宿主不记 `COMPLETED`，补证后从 `resume_node` 恢复。
+- `DONE` → `COMPLETED` 仅当完成目标且材料有效（收口 `completion_type` 映射齐全）；探索类 `INSUFFICIENT` 是受控完成但显式标注证据不足。历史无终止描述的 DONE 保留 legacy 标记，不改写为已验证完成。
+
+---
+
 ## 通用规则
 
 - 路由：proceed / rollback（耗额度，上限 3）/ await-human / hold / escalate。

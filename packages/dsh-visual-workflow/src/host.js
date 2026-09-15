@@ -606,7 +606,9 @@ return {
     const RUNS_RETAIN = 50
     // #80：PAUSED 属权威运行状态（宿主回写后不得被迟到的 workflow/end 以 'cancelled' 盖掉），
     // 但不是终态——终态判定仍以 LIFECYCLE_TERMINAL 为准。
-    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
+    // LOC-030：BLOCKED 同为权威运行状态（脚本受阻返回体不得被迟到的 end 盖成 'completed'），
+    // 且同样不是生命周期终态（可恢复受阻，terminal=false）—— holdsTask 不含它，并发名额随受阻释放。
+    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|BLOCKED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
     const HD_STRING_KEYS = ['decision_id', 'reason', 'node']
     const HD_NUMBER_KEYS = ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']
     const HD_OBJECT_KEYS = ['decision_package', 'control_event', 'blocked_edge', 'results']
@@ -659,7 +661,7 @@ return {
       for (const k of HD_OBJECT_KEYS) if (val[k] && typeof val[k] === 'object') rec[k] = val[k]
       if (Array.isArray(val.history)) rec.history = val.history
     }
-    const summary = (rec) => ({ id: rec.id, name: rec.meta.name, status: rec.status, phase: rec.phase, taskId: rec.taskId, workflowId: rec.workflowId, startedAt: rec.startedAt, supersededBy: rec.supersededBy, decision_id: rec.decision_id, reason: rec.reason })
+    const summary = (rec) => ({ id: rec.id, name: rec.meta.name, status: rec.status, phase: rec.phase, taskId: rec.taskId, workflowId: rec.workflowId, startedAt: rec.startedAt, supersededBy: rec.supersededBy, decision_id: rec.decision_id, reason: rec.reason, node: rec.node || '' })
 
     // 无定时器节流：每个 run 至多一个飞行中写入，期间变更只置 dirty，写完按最新态补一次尾写
     // （队列实现收敛于 runsStore，LOC-004；此处保留原函数名作为薄委托，19 个调用点零改动）
@@ -853,10 +855,27 @@ return {
     // 段收尾 → 八态 Lifecycle + 结构化 reason（R1/R6/R11）。引擎段状态原样保留在
     // segment.status；Lifecycle 闸门不改写专业结果（R7）——业务结果由
     // recordNodeAttempts 独立落档，不参与状态映射。
+    // LOC-030：脚本携带经校验的显式终止描述（termination={business_outcome,lifecycle,
+    // reason_code,resumable,resume_node,completion_type?}）时优先按描述映射——技术执行段
+    // 结束不再自动等于业务完成：BLOCKED 非终态可恢复；COMPLETED 描述必须有有效完成映射
+    //（value.completion.type），缺失降级 COMPLETION_MISSING 可恢复受阻；旧无描述 Run
+    // 保留 legacy 标识（不改写历史，不冒充已验证完成）。
     function logicalTransitionFor(canon, stopReason, value) {
       const v = value && typeof value === 'object' ? value : {}
+      const t = v.termination
+      const str = (x) => (typeof x === 'string' && x.trim() ? x.trim() : null)
+      const okDesc = t && typeof t === 'object' && (t.lifecycle === 'BLOCKED' || t.lifecycle === 'COMPLETED')
+        && str(t.business_outcome) && str(t.reason_code) && str(t.resume_node)
+      if (okDesc) {
+        if (t.lifecycle === 'BLOCKED') return { state: 'BLOCKED', reason: logicalReason(str(t.reason_code), str(t.business_outcome)) }
+        const comp = v.completion
+        return comp && typeof comp.type === 'string' && comp.type.trim()
+          ? { state: 'COMPLETED', reason: null }
+          : { state: 'BLOCKED', reason: logicalReason('COMPLETION_MISSING') }
+      }
       const reasonFromValue = typeof v.reason === 'string' && v.reason ? logicalReason(v.reason) : null
-      if (canon === 'DONE') return { state: 'COMPLETED', reason: null }
+      // 历史 DONE 无终止描述：无法可靠推断真实业务结果——保留 COMPLETED 终态并标记 legacy 映射
+      if (canon === 'DONE') return { state: 'COMPLETED', reason: logicalReason('LEGACY') }
       if (canon === 'STOPPED') return { state: 'STOPPED', reason: reasonFromValue || logicalReason('STOPPED') }
       if (canon === 'WAITING_HUMAN') return { state: 'WAITING_HUMAN', reason: reasonFromValue || logicalReason('ESCALATED_DECISION') }
       if (canon.indexOf('AWAITING_HUMAN_') === 0) return { state: 'WAITING_HUMAN', reason: logicalReason('LEGACY_GATE', canon) }
@@ -1525,10 +1544,12 @@ return {
       const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
       return TERMINAL_STATUS_RE.test(cand) ? cand : ''
     }
-    // 脚本终态 → workspace 生命周期：人工等待保留，DONE 完成，STOPPED 停止，其余失败
+    // 脚本终态 → workspace 生命周期：人工等待保留，DONE 完成，STOPPED 停止，
+    // BLOCKED 可恢复受阻（LOC-030：不落 FAILED，恢复后继续同一 Run），其余失败
     function lifecycleFor(canon, stopReason) {
       if (canon === 'DONE') return 'COMPLETED'
       if (canon === 'STOPPED') return 'STOPPED'
+      if (canon === 'BLOCKED') return 'BLOCKED'
       if (isHumanWait(canon)) return 'WAITING_HUMAN'
       if (canon || stopReason === 'cancelled' || stopReason === 'error') return 'FAILED'
       return null
@@ -2638,6 +2659,12 @@ return {
               && latest.lifecycle.reason.code.indexOf('GATE_') === 0) {
             return '错误：逻辑运行 ' + latest.logical_run_id + ' 被集成闸门拦截（' + latest.lifecycle.reason.code + '）：人工决策续跑不可用，否则将绕过闸门放行。请从 uat 节点续跑同一逻辑运行（wf_run entry=uat），重新通过集成闸门后再进入人工验收。'
           }
+          // LOC-030：NEEDS_REDEFINE 受阻不可原样恢复（resumable=false）——保留旧 Run 原样，
+          // 基线重定义后重新发起（派生新运行并保留来源），不在同一 Run 静默换版续跑。
+          if (latest && !latest.terminal && isResumeLike && latest.lifecycle.state === 'BLOCKED'
+              && latest.lifecycle.reason && latest.lifecycle.reason.code === 'NEEDS_REDEFINE') {
+            return '错误：逻辑运行 ' + latest.logical_run_id + '（NEEDS_REDEFINE）：基线需重定义，不可原样恢复；请重定义后重新发起（保留旧 Run）。'
+          }
           logicalTrigger = isHdResume ? 'human_decision' : (isPauseResume ? 'pause_resume' : 'legacy_resume')
           // #80 暂停恢复：检查点现场 + 适用 Guidance（Run 级）+ 最新基线修订回填执行载荷
           if (isPauseResume) {
@@ -2832,7 +2859,18 @@ return {
         segmentCtrls.delete(runId)
         // 权威终态回写：completed 时以脚本返回 value.status 为准；回执保持引擎原样不翻译
         const canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
-        if (canon) onRun(runId, (r) => { r.status = canon; applyHdValue(r, result.value) })
+        if (canon) {
+          onRun(runId, (r) => {
+            r.status = canon
+            applyHdValue(r, result.value)
+            // LOC-030：受阻回执统一解释——运行卡片带原因码与恢复入口（看板与 Skill 同口径）
+            const tv = canon === 'BLOCKED' && result.value && result.value.termination
+            if (tv && typeof tv.reason_code === 'string' && tv.reason_code) {
+              r.reason = tv.reason_code
+              if (typeof tv.resume_node === 'string' && tv.resume_node) r.node = tv.resume_node
+            }
+          })
+        }
         // 诊断可追溯：引擎 error/cancelled 的渲染错误写入运行记录（此前 result.error 被丢弃，
         // 现场只能看到 status=error 无从定位）
         if (result && result.error) {
