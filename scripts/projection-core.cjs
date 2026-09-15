@@ -81,6 +81,8 @@ function projectToVwf(bp) {
   if (bp.bundleRoles) out.bundleRoles = true
   if (isDefined(bp.humanDecision)) out.humanDecision = cloneValue(bp.humanDecision)
   if (isDefined(bp.workspace)) out.workspace = cloneValue(bp.workspace)
+  // LOC-027 评价基线冻结契约声明（可选，wf-optimize）：无损透传保证编辑器另存不丢字段
+  if (isDefined(bp.evaluationBaseline)) out.evaluationBaseline = cloneValue(bp.evaluationBaseline)
   return out
 }
 
@@ -130,6 +132,7 @@ function projectToBlueprint(dsl) {
   if (dsl.bundleRoles) bp.bundleRoles = true
   if (isDefined(dsl.humanDecision)) bp.humanDecision = cloneValue(dsl.humanDecision)
   if (isDefined(dsl.workspace)) bp.workspace = cloneValue(dsl.workspace)
+  if (isDefined(dsl.evaluationBaseline)) bp.evaluationBaseline = cloneValue(dsl.evaluationBaseline)
   if (Object.keys(models).length) bp.bindings = { models }
   return bp
 }

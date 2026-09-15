@@ -17,6 +17,7 @@ const roleManifestSrc = readFileSync(join(repoRoot, 'dsh', 'roles', 'builtin-rol
 const validatorCoreSrc = readFileSync(join(repoRoot, 'scripts', 'validate-core.cjs'), 'utf8')
 const projectionCoreSrc = readFileSync(join(repoRoot, 'scripts', 'projection-core.cjs'), 'utf8')
 const formalArtifactsSrc = readFileSync(join(repoRoot, 'scripts', 'formal-artifacts.cjs'), 'utf8')
+const evaluationBaselineSrc = readFileSync(join(repoRoot, 'scripts', 'evaluation-baseline.cjs'), 'utf8')
 
 export const ROLE_CORE_SEED = {
   [DIST + '/role-library.cjs']: roleCoreSrc,
@@ -33,6 +34,7 @@ export const DIST_KERNEL_SEED = {
   [DIST + '/role-library.cjs']: roleCoreSrc,
   [DIST + '/builtin-roles.json']: roleManifestSrc,
   [DIST + '/formal-artifacts.cjs']: formalArtifactsSrc,
+  [DIST + '/evaluation-baseline.cjs']: evaluationBaselineSrc,
 }
 
 const localeDir = join(here, '..', '..', 'locales')

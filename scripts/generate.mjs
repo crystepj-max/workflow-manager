@@ -100,6 +100,26 @@ function foldableNodes(bp) {
 // 统一编译器（候选一 T-IMP-12）：DSH 与 vwf 双入口的唯一翻译员。
 // 宿主侧 compileDsl 经管道消费本函数产物：一律现编译优先（与引擎契约同源），
 // 磁盘预编译产物仅在无子进程环境整体回落（UAT-80 实证过期产物与引擎不兼容）。
+// ---------- LOC-027 评价基线冻结契约（可选声明） ----------
+// 蓝图可声明 evaluationBaseline = { artifact, digestField, producerNode }：编译产物将携带
+// 基线状态机——producer 节点业务放行（非 $end 出边）时版本递增、构建活动基线引用
+// （run_id/version/artifact_path/algorithm/digest/supersedes）并输出 [eb-freeze] 冻结请求行
+//（宿主据此读取原始字节计算 SHA-256 并保存不可变副本）；消费节点若声明的摘要字段与活动
+// 基线不一致，结果在入档前被拒绝（走 technical 边重试或 TECHNICAL_FAILURE），A/B 漂移
+// 因此无法走完流程。未声明蓝图的编译产物零改动。
+function evaluationBaselineDecl(bp) {
+  const raw = bp.evaluationBaseline
+  if (raw === undefined) return null
+  const bad = (m) => { throw new Error('evaluationBaseline 声明非法：' + m) }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) bad('必须是对象 { artifact, digestField, producerNode }')
+  const { artifact, digestField, producerNode } = raw
+  if (typeof artifact !== 'string' || !artifact.trim()) bad('artifact 必填（评价契约文件名）')
+  if (typeof digestField !== 'string' || !digestField.trim()) bad('digestField 必填（节点结果中的摘要字段名）')
+  if (typeof producerNode !== 'string' || !producerNode.trim()) bad('producerNode 必填（冻结评价基线的节点 id）')
+  if (!(bp.nodes || []).some((n) => n && n.id === producerNode)) bad('producerNode 指向不存在的节点：' + producerNode)
+  return { artifact: artifact, digestField: digestField, producer: producerNode }
+}
+
 export function compileBlueprint(bp, opts = {}) {
   // 编译输入尺寸闸门（#131）：CLI compile 不做蓝图校验，vwf.script / wf_run 的临时图
   // 直达此处——主闸必须在编译器入口，保证任何进入编译的文档响应必小于通道上限。
@@ -108,6 +128,8 @@ export function compileBlueprint(bp, opts = {}) {
   if (sizeViolation) throw new Error('工作流文档过大：' + sizeViolation.message);
   const maxRounds = (bp.control && bp.control.maxRounds) || 9;
   const models = (bp.bindings && bp.bindings.models) || {};
+  // LOC-027：评价基线声明解析（声明非法时 loud-fail，不静默降级）
+  const ebDecl = evaluationBaselineDecl(bp);
   const folds = foldableNodes(bp);
   // LOC-021 异源档位三态：运行时日志与校验内核共用同一归一口径（关档不注入日志）；
   // 识别口径统一为「按节点 id 或 profile」（诊断模板开发节点 id=fix、profile=dev，不再被漏判）。
@@ -136,6 +158,7 @@ export function compileBlueprint(bp, opts = {}) {
     'const RUNDIR = A.runDir || (\'.agent-runs/\' + TASK)',
     'const WORK = \'dev2/\' + TASK',
     'const MAX_ROUNDS = ' + maxRounds,
+    ...(ebDecl ? ['const EB = ' + JSON.stringify(ebDecl)] : []),
     'const ITEM_CAP = 4096',
     'const AGENT_CAP = 1000',
     // #93: workspace 现场注入——宿主 allocateWorkspace 后传入，脚本优先使用
@@ -367,6 +390,7 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (RECORDS) s += \'\\n- records 路径：\' + RECORDS + \'（Formal Records 证据记录目录，业务证据写入此目录）\'',
     '  if (A.workspace_capability && !(opts && opts.hideCapability)) s += \'\\n- workspace RPC 能力令牌（调用 vwf.workspace.* / vwf_workspace 时必须原样携带）：\' + A.workspace_capability + \'（仅限本 Run 使用，禁止用于其他 Run 的 taskId）\'',
     '  if (A.guidance_text) s += \'\\n【用户指导（用户暂停期间补充的执行指导，必须遵循）】\\n\' + A.guidance_text + \'\\n\'',
+    ...(ebDecl ? ['  if (EB && ebRef && nodeId !== EB.producer) s += ebNote(nodeId)'] : []),
     '  s += \'\\n- 当前节点：\' + (n.label || nodeId) + \'\\n- 完成本节点后更新 \' + RUNDIR + \'/STATE.md（stage / round / status / updated，时间用 date -u +%FT%TZ）\\n\'',
     '  if (n.output && n.output.files) {',
     '    const _hints = Object.entries(n.output.files).map(([p,k]) => p + \'(\' + k + \')\' + ({ html: \'（完整 HTML 文档）\', canvas: \'（JSON 画布结构）\', flowchart: \'（JSON 流程图）\', diagram: \'（JSON 结构图）\' }[k] || \'\'))',
@@ -645,6 +669,31 @@ export function compileBlueprint(bp, opts = {}) {
       '}',
     ] : []),
   );
+  if (ebDecl) {
+    lines.push(
+      // ── LOC-027 评价基线运行时（仅声明 evaluationBaseline 的蓝图携带）──────────
+      'function ebClaim(res) {',
+      '  if (!res || typeof res !== \'object\') return null',
+      '  const v = res[EB.digestField]',
+      '  return (v === undefined || v === null || String(v).trim() === \'\') ? null : String(v).trim()',
+      '}',
+      'function ebNote(nodeId) {',
+      '  const downstream = nodeId !== EB.producer',
+      '  let s = \'\\n\\n【评价基线（编排冻结注入，以此为准）】活动评价基线 v\' + ebRef.version + \'：冻结副本 \' + ebRef.artifact_path + \'（\' + (ebRef.algorithm || \'sha256\') + \'=\' + ebRef.digest + (ebRef.status === \'verified\' ? \'，已经运行时按原始字节核验\' : \'，尚未经运行时核验（模型声称值）\') + \'）\'',
+      '  if (ebRef.supersedes) s += \'。本基线取代 v\' + ebRef.supersedes.version + \'（旧摘要 \' + ebRef.supersedes.digest + \'）：旧基线下的 PASS 与结论不再适用，必须按本基线重新\' + (downstream ? \'执行与评估\' : \'确认\')',
+      '  s += \'。只允许依据该冻结副本\' + (downstream ? \'施工/评估\' : \'工作\') + \'，原路径 \' + EB.artifact + \' 不再是权威\'',
+      '  if (downstream) s += \'。最终回复的 \' + EB.digestField + \' 必须原样回填 \' + ebRef.digest + \'，与活动基线不一致的结论将在入档前被拒绝\'',
+      '  return s',
+      '}',
+      'function ebGateError(res, nodeId) {',
+      '  if (!res || typeof res !== \'object\' || nodeId === EB.producer) return null',
+      '  const claim = ebClaim(res)',
+      '  if (claim === null || !ebRef) return null',
+      '  if (claim === String(ebRef.digest).trim()) return null',
+      '  return \'结果中的 \' + EB.digestField + \'=\' + claim + \' 与活动评价基线 v\' + ebRef.version + \' 摘要 \' + ebRef.digest + \' 不一致（基线冲突）：只允许依据活动基线冻结副本 \' + ebRef.artifact_path + \' 得出结论，不得沿用其他版本基线的结论\'',
+      '}',
+    );
+  }
   if (autoReschedule) {
     lines.push(
       'function reschedulePrompt(historyText) {',
@@ -661,6 +710,12 @@ export function compileBlueprint(bp, opts = {}) {
     'let decisionSeq = Math.trunc(Number(A.decisionSeq) || 0)',
     'if (!Number.isFinite(decisionSeq) || decisionSeq < 0) decisionSeq = 0',
     'let feedback = A.feedback || \'\'',
+    ...(ebDecl ? [
+      // LOC-027 评价基线运行时状态：续跑段由宿主注入已核验引用（args.evaluation_baseline）
+      'let ebVer = Math.trunc(Number(A.evaluation_baseline_version) || 0)',
+      'let ebRef = (A.evaluation_baseline && typeof A.evaluation_baseline === \'object\' && A.evaluation_baseline.digest !== undefined && A.evaluation_baseline.version != null) ? { run_id: TASK, version: Math.trunc(Number(A.evaluation_baseline.version) || 0), artifact_path: String(A.evaluation_baseline.artifact_path || \'\'), algorithm: String(A.evaluation_baseline.algorithm || \'sha256\'), digest: String(A.evaluation_baseline.digest), status: String(A.evaluation_baseline.status || \'verified\'), supersedes: (A.evaluation_baseline.supersedes && typeof A.evaluation_baseline.supersedes === \'object\') ? { version: Math.trunc(Number(A.evaluation_baseline.supersedes.version) || 0), digest: String(A.evaluation_baseline.supersedes.digest || \'\') } : null } : null',
+      'if (ebVer === 0 && ebRef) ebVer = ebRef.version',
+    ] : []),
     'const results = {}',
     'const history = A.history || []',
     'let agentsUsed = 0',
@@ -860,6 +915,23 @@ export function compileBlueprint(bp, opts = {}) {
       '    }',
       '  }',
     ] : []),
+    ...(ebDecl ? [
+      // LOC-027 基线闸门：消费节点的摘要声明与活动基线不一致时，结果在入档前被拒绝
+      // （走 technical 边重试；无 technical 出口则 TECHNICAL_FAILURE——A/B 漂移无法走完流程）
+      '  {',
+      '    const ge = ebGateError(res, current)',
+      '    if (ge) {',
+      '      const et = routeTechnical(current)',
+      '      if (!et || et.to === \'$end\') return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, detail: ge, results: results, history: history }',
+      '      history.push({ round: round, stage: current, from: current, to: et.to, on: \'technical\', countRound: false, verdict: \'BASELINE_CONFLICT\', reason: ge })',
+      '      log((n.label || current) + \' 评价基线冲突拦截：\' + ge)',
+      '      current = et.to',
+      '      feedback = \'【评价基线冲突——必须修复】\' + ge + \' 只允许依据活动评价基线冻结副本与其注入摘要重做本节点结论，\' + EB.digestField + \' 必须与活动基线摘要完全一致。\'',
+      '      pwCk(current)',
+      '      continue',
+      '    }',
+      '  }',
+    ] : []),
     '  results[current] = res',
     '  markExec(current, res)',
     '  log((n.label || current) + \' → \' + (ok ? \'通过\' : \'未通过\'))',
@@ -873,6 +945,18 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (hasOutcomePath(n)) {',
     '    const e = routeOutcome(current, res)',
     '    if (!e) return { status: \'ENDED_NO_OUTCOME_EDGE\', stage: current, results: results, history: history, budgetUsed: budgetUsed, maxRounds: maxRounds }',
+    ...(ebDecl ? [
+      // LOC-027 冻结钩子：producer 业务放行（非 $end 出边）时递增版本并发出冻结请求行（宿主据此冻结不可变副本）
+      '    if (current === EB.producer && e.to !== \'$end\') {',
+      '      const claim = ebClaim(res)',
+      '      if (claim === null) return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, detail: \'评价基线冻结失败：\' + current + \' 业务放行但未返回 \' + EB.digestField + \'，无法建立可核验的评价基线\', results: results, history: history }',
+      '      ebVer += 1',
+      '      const ebPrev = ebRef',
+      '      ebRef = { run_id: TASK, version: ebVer, artifact_path: RUNDIR + \'/evaluation-baselines/v\' + ebVer + \'/\' + EB.artifact, algorithm: \'sha256\', digest: claim, status: \'unverified\' }',
+      '      if (ebPrev) ebRef.supersedes = { version: ebPrev.version, digest: String(ebPrev.digest) }',
+      '      log(\'[eb-freeze]\' + JSON.stringify({ version: ebVer, source: RUNDIR + \'/\' + EB.artifact, copy: ebRef.artifact_path, claimed_digest: claim, supersedes: ebRef.supersedes || null }))',
+      '    }',
+    ] : []),
     '    log((n.label || current) + \' → \' + String(e.outcome))',
     '    const halted = consumeOrHalt(current, res, e)',
     '    if (halted) return halted',
