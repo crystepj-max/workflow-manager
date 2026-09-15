@@ -42,7 +42,7 @@
 | LOC-019 | 内置模板默认模型 DeepSeek 化 | 会话录入 | V1 | pending | 2026-09-14T07:17:38.279Z |
 | LOC-020 | 开发 DSH 单实例化：9527 固定端口 + 任务命名隔离 | CNB issue | V1 | pending | 2026-09-14T07:55:21.910Z |
 | LOC-021 | 异源档位三态可配置（hetero-mode） | 会话录入 | V1 | pending | 2026-09-14T10:29:15.178Z |
-| LOC-023 | 工作区治理口径统一（workspace-gate） | 会话录入 | V2 | pending | 2026-09-15T15:08:14.303Z |
+| LOC-023 | 工作区治理口径统一（workspace-gate） | 会话录入 | V2 | pending | 2026-09-15T15:08:39.307Z |
 
 ## 其他（1）
 
