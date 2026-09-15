@@ -50,6 +50,7 @@ const force = process.argv.includes('--force')
 const hostPath = join(root, 'src', 'host.js')
 const clientPath = join(root, 'src', 'client.js')
 const formalArtifactsSrc = join(root, '..', '..', 'scripts', 'formal-artifacts.cjs')
+const attemptLedgerSrc = join(root, '..', '..', 'scripts', 'attempt-ledger.cjs')
 const roleLibrarySrc = join(root, '..', '..', 'scripts', 'role-library.cjs')
 const projectionCoreSrc = join(root, '..', '..', 'scripts', 'projection-core.cjs')
 const validateCoreSrc = join(root, '..', '..', 'scripts', 'validate-core.cjs')
@@ -64,6 +65,7 @@ const roleLibraryBody = readFileSync(roleLibrarySrc, 'utf8')
 const projectionCoreBody = readFileSync(projectionCoreSrc, 'utf8')
 const roleManifestBody = readFileSync(roleManifestSrc, 'utf8')
 const formalArtifactsBody = readFileSync(formalArtifactsSrc, 'utf8')
+const attemptLedgerBody = readFileSync(attemptLedgerSrc, 'utf8')
 const validateCoreBody = readFileSync(validateCoreSrc, 'utf8')
 const evaluationBaselineBody = readFileSync(evaluationBaselineSrc, 'utf8')
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
@@ -88,6 +90,7 @@ const stamp = {
   projectionCore: sha256(projectionCoreBody),
   roleManifest: sha256(roleManifestBody),
   formalArtifacts: sha256(formalArtifactsBody),
+  attemptLedger: sha256(attemptLedgerBody),
   validateCore: sha256(validateCoreBody),
   evaluationBaseline: sha256(evaluationBaselineBody),
   locales: dirStamp(localesSrc, '.json'),
@@ -104,6 +107,7 @@ const requiredArtifacts = [
   join(dist, 'host-entry.mjs'),
   join(dist, 'client.js'),
   join(dist, 'formal-artifacts.cjs'),
+  join(dist, 'attempt-ledger.cjs'),
   join(dist, 'validate-core.cjs'),
   join(dist, 'evaluation-baseline.cjs'),
   join(dist, 'projection-core.cjs'),
@@ -182,6 +186,8 @@ writeFileSync(
 
 writeFileSync(join(dist, '.src-stamp.json'), JSON.stringify(stamp, null, 2) + '\n')
 copyFileSync(formalArtifactsSrc, join(dist, 'formal-artifacts.cjs'))
+// LOC-029 逐次 attempt 提交内核：段收尾固定顺序推进的宿主侧编排（不占 dynamic 载荷预算）
+copyFileSync(attemptLedgerSrc, join(dist, 'attempt-ledger.cjs'))
 // 校验内核与其引用的投影内核必须同时随 dist 分发：validate-core 声明
 // require('./projection-core.cjs')，宿主加载器求值前按源码预解析同目录引用。
 copyFileSync(validateCoreSrc, join(dist, 'validate-core.cjs'))
