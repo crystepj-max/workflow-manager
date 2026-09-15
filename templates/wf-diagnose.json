@@ -4,7 +4,17 @@
   "description": "诊断缺陷修复正式模板：缺陷诊断 → 修复 → 审核 → 回归验证 → 收口；先诊断后修复，原始 feedback signal 贯穿全程；修复问题回修复、证据推翻根因回诊断（均消耗自动回退额度，默认 3）；证据不足且不可复现时受阻，不猜根因；默认无独立人工验收节点。",
   "entry": "diagnose",
   "control": {
-    "maxRounds": 3
+    "maxRounds": 3,
+    "retryPolicy": {
+      "max_attempts": 3,
+      "backoff_ms": [
+        1000,
+        2000
+      ],
+      "attempt_timeout_ms": 1800000,
+      "run_auto_time_ms": 14400000,
+      "no_progress_repeats": 2
+    }
   },
   "heteroCheck": "weak",
   "nodes": [
