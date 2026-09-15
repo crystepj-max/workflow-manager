@@ -242,7 +242,11 @@ const clientBytes = Buffer.byteLength(dynClient)
 // 上调至 192KiB；与已并入的 LOC-027（190→198KiB）取较高者，避免相对已合并状态收紧闸门。
 // LOC-027 评价基线冻结闸门（宿主编排：[eb-freeze] 观察/检查点中止/恢复/核验；纯逻辑已分流
 // dist/evaluation-baseline.cjs 内核）并入后上调至 198KiB。
-const PAYLOAD_LIMIT = 198 * 1024
+// LOC-031 技术重试/超时/无进展循环限制（JSON 技术预算策略 + 运行时计数器 + 快照续跑）并入后，
+// LOC-030 与 LOC-031 合并终态实测 host 102481 + client 101610 = 204091B（199.31KiB），
+// 上调至 200KiB（人工裁决：全部 P0 任务并入后按终态实测一次性定值）。
+// 余量仅 ~0.7KiB，后续新增宿主/client 载荷应优先瘦身，不要继续推高。
+const PAYLOAD_LIMIT = 200 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)

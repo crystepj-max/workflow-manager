@@ -102,7 +102,9 @@ test('开发粘贴用 dynamic 闭包合计 ≤ 198KB（一次 cordis_define 载�
   // 上调至 192KiB；与已并入的 LOC-027（190→198KiB）取较高者，避免相对已合并状态收紧预算。
   // LOC-027 评价基线冻结闸门（宿主编排：[eb-freeze] 观察/检查点中止/恢复/核验；纯逻辑已分流
   // dist/evaluation-baseline.cjs 内核）并入后上调至 198KiB。
-  const limit = 198 * 1024
+  // LOC-031 技术重试/超时/无进展循环限制并入后，LOC-030 + LOC-031 合并终态实测 204091B
+  // （199.31KiB），上调至 200KiB 与 build-bundle.mjs 保持一致；余量仅 ~0.7KiB。
+  const limit = 200 * 1024
   assert.ok(host.byteLength + client.byteLength <= limit, `host ${host.byteLength} + client ${client.byteLength} > ${limit}`)
   const hostText = host.toString('utf8')
   const clientText = client.toString('utf8')
