@@ -1,0 +1,56 @@
+{
+  "name": "P1-LOC034-043-definition-candidates",
+  "maxConcurrency": 1,
+  "candidates": [
+    {
+      "id": "LOC-034",
+      "issueBasics": "LOC-034-revision-dependencies.md",
+      "taskSpec": "specs/LOC-034-revision-dependencies/task-spec-V1.md"
+    },
+    {
+      "id": "LOC-035",
+      "issueBasics": "LOC-035-artifact-manifest.md",
+      "taskSpec": "specs/LOC-035-artifact-manifest/task-spec-V1.md"
+    },
+    {
+      "id": "LOC-036",
+      "issueBasics": "LOC-036-exploration-coverage.md",
+      "taskSpec": "specs/LOC-036-exploration-coverage/task-spec-V1.md"
+    },
+    {
+      "id": "LOC-037",
+      "issueBasics": "LOC-037-delivery-actions.md",
+      "taskSpec": "specs/LOC-037-delivery-actions/task-spec-V1.md"
+    },
+    {
+      "id": "LOC-038",
+      "issueBasics": "LOC-038-preflight-unification.md",
+      "taskSpec": "specs/LOC-038-preflight-unification/task-spec-V1.md"
+    },
+    {
+      "id": "LOC-039",
+      "issueBasics": "LOC-039-protocol-capabilities.md",
+      "taskSpec": "specs/LOC-039-protocol-capabilities/task-spec-V1.md"
+    },
+    {
+      "id": "LOC-040",
+      "issueBasics": "LOC-040-workflow-capability-guide.md",
+      "taskSpec": "specs/LOC-040-workflow-capability-guide/task-spec-V1.md"
+    },
+    {
+      "id": "LOC-041",
+      "issueBasics": "LOC-041-node-isolation.md",
+      "taskSpec": "specs/LOC-041-node-isolation/task-spec-V1.md"
+    },
+    {
+      "id": "LOC-042",
+      "issueBasics": "LOC-042-workflow-conformance.md",
+      "taskSpec": "specs/LOC-042-workflow-conformance/task-spec-V1.md"
+    },
+    {
+      "id": "LOC-043",
+      "issueBasics": "LOC-043-run-quality-cost.md",
+      "taskSpec": "specs/LOC-043-run-quality-cost/task-spec-V1.md"
+    }
+  ]
+}
