@@ -54,6 +54,7 @@ const attemptLedgerSrc = join(root, '..', '..', 'scripts', 'attempt-ledger.cjs')
 const roleLibrarySrc = join(root, '..', '..', 'scripts', 'role-library.cjs')
 const projectionCoreSrc = join(root, '..', '..', 'scripts', 'projection-core.cjs')
 const validateCoreSrc = join(root, '..', '..', 'scripts', 'validate-core.cjs')
+const evaluationBaselineSrc = join(root, '..', '..', 'scripts', 'evaluation-baseline.cjs')
 const roleManifestSrc = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
 const localesSrc = join(root, 'locales')
 const rolesSrc = join(root, '..', '..', 'dsh', 'roles')
@@ -66,6 +67,7 @@ const roleManifestBody = readFileSync(roleManifestSrc, 'utf8')
 const formalArtifactsBody = readFileSync(formalArtifactsSrc, 'utf8')
 const attemptLedgerBody = readFileSync(attemptLedgerSrc, 'utf8')
 const validateCoreBody = readFileSync(validateCoreSrc, 'utf8')
+const evaluationBaselineBody = readFileSync(evaluationBaselineSrc, 'utf8')
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
 const listNames = (dir, ext) => readdirSync(dir).filter((n) => n.endsWith(ext)).sort()
 // 目录级输入按「文件名 + 大小 + 修改时间」聚合：改名、增删文件、改内容都能被捕获。
@@ -90,6 +92,7 @@ const stamp = {
   formalArtifacts: sha256(formalArtifactsBody),
   attemptLedger: sha256(attemptLedgerBody),
   validateCore: sha256(validateCoreBody),
+  evaluationBaseline: sha256(evaluationBaselineBody),
   locales: dirStamp(localesSrc, '.json'),
   roles: dirStamp(rolesSrc, '.md'),
   // 打包脚本自身也计入：改了包装/压缩逻辑后产物必须重建
@@ -106,6 +109,7 @@ const requiredArtifacts = [
   join(dist, 'formal-artifacts.cjs'),
   join(dist, 'attempt-ledger.cjs'),
   join(dist, 'validate-core.cjs'),
+  join(dist, 'evaluation-baseline.cjs'),
   join(dist, 'projection-core.cjs'),
   join(dist, 'role-library.cjs'),
   join(dist, 'builtin-roles.json'),
@@ -188,6 +192,8 @@ copyFileSync(attemptLedgerSrc, join(dist, 'attempt-ledger.cjs'))
 // require('./projection-core.cjs')，宿主加载器求值前按源码预解析同目录引用。
 copyFileSync(validateCoreSrc, join(dist, 'validate-core.cjs'))
 copyFileSync(projectionCoreSrc, join(dist, 'projection-core.cjs'))
+// LOC-027 评价基线纯逻辑内核（冻结/核验子进程脚本文本与闸门判定），随 dist 分发
+copyFileSync(evaluationBaselineSrc, join(dist, 'evaluation-baseline.cjs'))
 // 角色库内核 + 内置角色清单：静态安装的可信加载源（host.js 只从 pluginRoot/dist 加载）
 copyFileSync(roleLibrarySrc, join(dist, 'role-library.cjs'))
 copyFileSync(roleManifestSrc, join(dist, 'builtin-roles.json'))
@@ -232,7 +238,9 @@ const clientBytes = Buffer.byteLength(dynClient)
 // LOC-014 模型覆盖层（host 合成单点 + RPC 三端点 + 模板库最小覆盖对话框）并入后上调至 188KiB，
 // 与 tests/static-bundle.test.mjs 预算保持一致。UAT 反馈轮（未保存退出/清除确认弹窗 + 沿用默认带值）后上调至 189KiB。
 // LOC-021 异源档位三态（校验内核档位判定 + 运行时日志档位/角色口径 + 编辑器三档选择器与中英文案）并入后上调至 190KiB。
-const PAYLOAD_LIMIT = 190 * 1024
+// LOC-027 评价基线冻结闸门（宿主编排：[eb-freeze] 观察/检查点中止/恢复/核验；纯逻辑已分流
+// dist/evaluation-baseline.cjs 内核）并入后上调至 198KiB。
+const PAYLOAD_LIMIT = 198 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)

@@ -32,6 +32,11 @@ const WORKSPACE_RESOURCE_KINDS = ['git', 'files', 'document', 'config', 'other']
 const MAX_ROUNDS_CAP = 9 // 系统约定上限：编辑器最大可设 9 轮（用户意见 Q7）
 const FANOUT_ITEMS_ARGS_RE = /^\$\.args(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
 const FANOUT_ITEMS_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
+// LOC-024 节点输入声明：选择器只支持 $.task / $.results.<节点id> 的明确字段链；
+// 禁止 eval、路径穿越与目录扫描（V1 无任意表达式执行器）。
+const INPUT_NAME_RE = /^[a-z][a-z0-9_]*$/
+const INPUT_SELECTOR_TASK_RE = /^\$\.task(?:\.[A-Za-z0-9_-]+)*$/
+const INPUT_SELECTOR_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)*$/
 const HD_RESULT_RE = /^[A-Z][A-Z0-9_]*$/
 const HD_REASONS = ['HUMAN_ACCEPTANCE', 'ESCALATED_DECISION', 'MAX_ROUNDS_REACHED']
 const HD_CONTROL_RESULTS = ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP']
@@ -619,6 +624,70 @@ function validateBlueprint(bp, opts) {
     }
   })
 
+  // LOC-024 节点输入声明（显式交接节点输入与返工反馈）：
+  //   - required/optional 必须显式声明；首次运行默认值以 default 显式声明
+  //   - 选择器只支持 $.task[.字段链] / $.results.<节点id>[.字段链]
+  //   - 生产节点必须沿结构边（success/outcome）先于消费节点（自引用需结构自环，如返工 outcome 自环）
+  //   - artifact 引用必须已在该生产节点 output.files 声明（引用错误在编译期拦截）
+  //   - 旧蓝图整体省略 inputs = 旧输入模式（legacy），运行时维持原行为
+  bp.nodes.forEach((n) => {
+    if (!n || !n.id) return
+    if (n.inputs === undefined) return
+    const kind = n.kind === undefined ? 'worker' : n.kind
+    if (kind === 'fanout') {
+      err('$.nodes[' + n.id + '].inputs', 'fanout 节点禁止 inputs（并行子代理不参与节点级输入交接）')
+      return
+    }
+    if (!Array.isArray(n.inputs) || n.inputs.length === 0) {
+      err('$.nodes[' + n.id + '].inputs', 'inputs 必须是非空数组（维持旧输入模式请整体省略该字段）')
+      return
+    }
+    const seenNames = {}
+    n.inputs.forEach((b, i) => {
+      const at = '$.nodes[' + n.id + '].inputs[' + i + ']'
+      if (!b || typeof b !== 'object' || Array.isArray(b)) {
+        err(at, '输入绑定必须是对象 { name, from, required, default?, artifact? }')
+        return
+      }
+      if (typeof b.name !== 'string' || !INPUT_NAME_RE.test(b.name)) {
+        err(at + '.name', '绑定名必填且为 snake_case（小写字母开头，仅小写字母/数字/下划线），当前：' + JSON.stringify(b.name))
+      } else if (seenNames[b.name]) {
+        err(at + '.name', '绑定名重复：' + b.name)
+      }
+      seenNames[b.name] = true
+      if (b.required !== true && b.required !== false) {
+        err(at + '.required', 'required 必须显式声明为布尔（true=必需，false=可选；可选未产生时按声明走 default/缺省）')
+      }
+      let producer = null
+      if (typeof b.from !== 'string' || (!INPUT_SELECTOR_TASK_RE.test(b.from) && !INPUT_SELECTOR_RESULTS_RE.test(b.from))) {
+        err(at + '.from', 'from 选择器仅支持 $.task[.字段链] 或 $.results.<节点id>[.字段链] 的明确字段链（禁止 eval、路径穿越与目录扫描），当前：' + JSON.stringify(b.from))
+      } else {
+        const rm = INPUT_SELECTOR_RESULTS_RE.exec(b.from)
+        if (rm) {
+          producer = rm[1]
+          if (!ids[producer]) {
+            err(at + '.from', 'from 引用的生产节点 ' + producer + ' 不存在')
+          } else if (!successPathExists(producer, n.id, bp.edges)) {
+            err(at + '.from', 'from 引用的生产节点 ' + producer + ' 必须沿结构边（success/outcome，含返工 outcome 环）先于消费节点 ' + n.id)
+          }
+        }
+      }
+      if (b.artifact !== undefined) {
+        if (typeof b.artifact !== 'string' || !b.artifact.trim() || b.artifact.startsWith('/') || b.artifact.includes('..')) {
+          err(at + '.artifact', 'artifact 必须是生产节点 output.files 中声明的相对文件名（禁止绝对路径与路径穿越），当前：' + JSON.stringify(b.artifact))
+        } else if (!producer) {
+          err(at + '.artifact', 'artifact 引用必须配合 $.results.<节点id> 选择器使用（任务输入没有产物文件）')
+        } else if (ids[producer]) {
+          const prod = bp.nodes.find((x) => x && x.id === producer)
+          const files = prod && prod.output && prod.output.files
+          if (!files || typeof files !== 'object' || Array.isArray(files) || !Object.keys(files).includes(b.artifact)) {
+            err(at + '.artifact', 'artifact ' + b.artifact + ' 未在生产节点 ' + producer + ' 的 output.files 中声明（引用错误须在编译期定位）')
+          }
+        }
+      }
+    })
+  })
+
   // output.files 契约（蓝图级，DSL 无此字段）
   bp.nodes.forEach((n) => {
     if (!n || !n.output || !n.output.files) return
@@ -777,6 +846,73 @@ function validateBlueprint(bp, opts) {
         if (isTechnicalEdge(e)) err(at + '.on', '旧模式节点禁止 on: technical（技术失败仍走 failure）')
       })
     }
+  })
+
+  // 裁决一致性声明（LOC-025 / WR-002）：双裁决字段节点（route + verdict / result）可在
+  // output.consistency 声明配对表 { field, pairs }——pairs 以业务路由取值为键、该路由下
+  // 结论字段必须等于的取值为值。机制全局（校验器只认蓝图声明表），语义随模板（建设
+  // review/test 的 6 个合法组合声明在 templates/wf-construction-full-feature.json，不伪装
+  // 为既有全局语义）。运行时（generate.mjs 产物）在路由选择前按同一张表做确定性检查，
+  // 表外组合以 CONTRACT_INCONSISTENT 拒绝，不作专业通过判断。未声明的节点维持原行为
+  // （旧蓝图零迁移；已启动运行的冻结快照不受影响）。
+  bp.nodes.forEach((n) => {
+    if (!n || !n.id) return
+    const decl = n.output && n.output.consistency
+    if (decl === undefined) return
+    const at = '$.nodes[' + n.id + '].output.consistency'
+    if (!hasOutcomePath(n)) {
+      err(at, 'consistency 仅支持声明了 outcomePath 的业务结果路由节点（矛盾组合须在路由选择前被确定性拒绝）')
+      return
+    }
+    if (!decl || typeof decl !== 'object' || Array.isArray(decl)) {
+      err(at, 'consistency 必须是对象 { field, pairs }')
+      return
+    }
+    if (typeof decl.field !== 'string' || !decl.field.trim()) {
+      err(at + '.field', 'consistency.field 必填（与业务路由配对的结论字段名，如 verdict / result）')
+    }
+    if (!decl.pairs || typeof decl.pairs !== 'object' || Array.isArray(decl.pairs) || Object.keys(decl.pairs).length === 0) {
+      err(at + '.pairs', 'consistency.pairs 必填（非空对象：业务路由取值 → 结论字段取值）')
+      return
+    }
+    const schema = n.output.schema
+    if (!schema || typeof schema !== 'object') return // schema 缺失由 outcomePath 规则另行报错，此处不重复
+    const outSegs = parseJsonPath(String(n.output.outcomePath).trim())
+    if (!outSegs) return // outcomePath 格式由其规则报错，此处不重复
+    if (outSegs.length === 1 && outSegs[0] === decl.field) {
+      err(at + '.field', 'consistency.field 不得与 outcomePath 字段同名（自我配对无意义）')
+    }
+    if (!pathInSchema(schema, [decl.field])) {
+      err(at + '.field', 'consistency.field 未在 output.schema 中声明：' + decl.field)
+      return
+    }
+    const fieldVals = enumerableValues(schemaLeafAt(schema, [decl.field]))
+    if (!fieldVals) {
+      err(at + '.field', 'consistency.field 必须可穷举（enum / const / oneOf 常量），当前：' + decl.field)
+      return
+    }
+    const outVals = enumerableValues(schemaLeafAt(schema, outSegs)) || []
+    const seenFieldVals = {}
+    const pairKeys = Object.keys(decl.pairs)
+    pairKeys.forEach((k) => {
+      const v = decl.pairs[k]
+      if (!outVals.some((x) => outcomeKey(x) === outcomeKey(k))) {
+        err(at + '.pairs', 'consistency.pairs 键 ' + outcomeKey(k) + ' 不在 outcomePath 枚举内（允许：' + outVals.map((x) => outcomeKey(x)).join('、') + '）')
+      }
+      if (!fieldVals.some((x) => outcomeKey(x) === outcomeKey(v))) {
+        err(at + '.pairs', 'consistency.pairs 值 ' + outcomeKey(v) + ' 不在字段 ' + decl.field + ' 枚举内（允许：' + fieldVals.map((x) => outcomeKey(x)).join('、') + '）')
+      }
+      const fk = outcomeKey(v)
+      if (seenFieldVals[fk]) {
+        err(at + '.pairs', '同一结论取值 ' + fk + ' 不得配对多个路由取值（每份专业结论只有一种可解释的路由）')
+      }
+      seenFieldVals[fk] = true
+    })
+    outVals.forEach((v) => {
+      if (!pairKeys.some((k) => outcomeKey(k) === outcomeKey(v))) {
+        err(at + '.pairs', '路由枚举取值 ' + outcomeKey(v) + ' 缺少配对（pairs 必须覆盖 outcomePath 全部取值，防止未声明组合绕过路由前检查）')
+      }
+    })
   })
 
   // Human Decision（#116）：拓扑已在结构层允许 $human-decision；此处钉契约键与互斥。

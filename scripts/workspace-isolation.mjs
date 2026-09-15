@@ -4,7 +4,8 @@
 // 证明失效只调用 #78，不平行实现 provenance。
 
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { computeCheckpoint } from './cwf-checkpoint.mjs'
@@ -418,6 +419,159 @@ export function assertProofBinding(workspace, proof) {
 
 export function observeTargetHead(repositoryPath, ref) {
   return git(['rev-parse', requireText(ref, 'ref')], requireText(repositoryPath, 'repository_path'))
+}
+
+// ── LOC-026 候选证明（WR-003 / task-spec-V1 §9）：宿主生成的 candidate_ref ─────
+// 固定字段：kind、resource_id、scope_manifest、version={head?, content_sha256}。
+// scope_manifest 为授权根下相对文件路径、类型与内容摘要；路径排序后按规范 JSON
+// 计算摘要。Git 记录仓库身份、实况 HEAD 与受审工作树内容摘要——未提交变更必然
+// 改变内容摘要，不能仅凭 HEAD 放行；非 Git 以声明文件集合标识，忽略项必须显式
+// 声明（options.exclude），不默认忽略待交付内容；options.roots 可把摘要限定在
+// 声明的成果集合内（§11 大目录成本控制）。越界符号链接一律拒绝。
+
+const CANDIDATE_KIND = { GIT: 'git', FILES: 'files' }
+const SCOPE_DIFF_CAP = 20
+
+function sha256Hex(data) {
+  return createHash('sha256').update(data).digest('hex')
+}
+
+function normalizeScopeEntry(raw, label) {
+  if (typeof raw !== 'string' || !raw.trim()) throw new Error(`${label} 必须是非空相对路径`)
+  if (isAbsolute(raw)) throw new Error(`${label} 禁止绝对路径: ${raw}`)
+  const n = raw.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
+  if (!n || n.includes('\0')) throw new Error(`非法 ${label}: ${raw}`)
+  if (n.split('/').some((part) => part === '..')) throw new Error(`${label} 逃出授权根: ${raw}`)
+  return n
+}
+
+function candidateExcluded(rel, excludes) {
+  return excludes.some((e) => rel === e || rel.startsWith(e + '/'))
+}
+
+function candidateUnderRoots(rel, roots) {
+  if (!roots.length) return true
+  return roots.some((r) => rel === r || rel.startsWith(r + '/'))
+}
+
+function gitLsFiles(cwd, extra) {
+  return git(['ls-files', ...extra, '-z'], cwd).split('\0').filter(Boolean)
+}
+
+// 非 Git source 全量相对路径枚举：目录不跟随符号链接；顶层 .git 不属于交付内容
+function walkSourceRels(root, prefix, visit) {
+  const dir = prefix ? join(root, ...prefix.split('/')) : root
+  let names
+  try {
+    names = readdirSync(dir)
+  } catch (e) {
+    throw new Error(`候选目录不可读: ${prefix || '.'}：${(e && e.message) || e}`)
+  }
+  for (const name of [...names].sort()) {
+    if (!prefix && name === '.git') continue
+    const rel = prefix ? `${prefix}/${name}` : name
+    visit(rel)
+    const st = lstatSync(join(root, ...rel.split('/')))
+    if (st.isDirectory() && !st.isSymbolicLink()) walkSourceRels(root, rel, visit)
+  }
+}
+
+export function captureCandidate(workspace, options = {}) {
+  if (!workspace || typeof workspace !== 'object') throw new Error('captureCandidate 需要 workspace')
+  if (!workspace.source_path) throw new Error('当前 workspace 没有 source，无法捕获候选')
+  const root = canonicalDir(workspace.source_path, 'source_path')
+  const excludes = (Array.isArray(options.exclude) ? options.exclude : []).map((e) => normalizeScopeEntry(e, 'options.exclude'))
+  const roots = (Array.isArray(options.roots) ? options.roots : []).map((e) => normalizeScopeEntry(e, 'options.roots'))
+  const gitMode = isGitWorkspace(workspace)
+  const rels = new Set()
+  if (gitMode) {
+    // 已跟踪文件 + 未跟踪且未被仓库忽略的文件（声明交付的未跟踪内容；.gitignore
+    // 即仓库自身的显式忽略声明），运行证据/构建临时区由调用方经 exclude 显式排除
+    for (const rel of gitLsFiles(workspace.source_path, [])) rels.add(rel.replace(/\\/g, '/'))
+    for (const rel of gitLsFiles(workspace.source_path, ['--others', '--exclude-standard'])) rels.add(rel.replace(/\\/g, '/'))
+  } else {
+    walkSourceRels(root, '', (rel) => rels.add(rel))
+  }
+  const manifest = []
+  for (const rel of rels) {
+    if (candidateExcluded(rel, excludes) || !candidateUnderRoots(rel, roots)) continue
+    // 逐段解析含符号链接校验：越界符号链接拒绝（§9 接口约定），fail closed
+    const abs = resolveInside(root, rel, workspace.workspace_path)
+    const st = lstatSync(abs)
+    if (st.isDirectory()) continue
+    if (st.isSymbolicLink()) {
+      let real
+      try {
+        real = realpathSync(abs)
+      } catch {
+        throw new Error(`候选范围内符号链接不可解析，拒绝越界符号链接: ${rel}`)
+      }
+      if (!isContained(root, real)) throw new Error(`候选范围内发现越界符号链接: ${rel}`)
+      // 根内符号链接按链接文本摘要记录，不跟随取内容（不重复计内容，也不逃逸）
+      manifest.push({ path: rel, type: 'symlink', sha256: sha256Hex('symlink:' + readlinkSync(abs)) })
+      continue
+    }
+    if (!st.isFile()) continue
+    manifest.push({ path: rel, type: 'file', sha256: sha256Hex(readFileSync(abs)) })
+  }
+  manifest.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  const version = { content_sha256: sha256Hex(JSON.stringify(manifest)) }
+  if (gitMode) version.head = observeGitHead(workspace)
+  return {
+    kind: gitMode ? CANDIDATE_KIND.GIT : CANDIDATE_KIND.FILES,
+    resource_id: gitMode ? requireText(workspace.repository, 'repository') : requireText(workspace.workspace_id, 'workspace_id'),
+    scope_manifest: manifest,
+    version,
+  }
+}
+
+function assertCandidateRef(ref, label) {
+  if (!ref || typeof ref !== 'object' || Array.isArray(ref)) throw new Error(`${label} 不是候选标识（candidate_ref）`)
+  if (ref.kind !== CANDIDATE_KIND.GIT && ref.kind !== CANDIDATE_KIND.FILES) {
+    throw new Error(`${label}.kind 非法: ${JSON.stringify(ref.kind)}`)
+  }
+  if (typeof ref.resource_id !== 'string' || !ref.resource_id.trim()) throw new Error(`${label}.resource_id 必须是非空字符串`)
+  if (!ref.version || typeof ref.version !== 'object'
+    || typeof ref.version.content_sha256 !== 'string' || !ref.version.content_sha256.trim()) {
+    throw new Error(`${label}.version.content_sha256 必须是非空字符串`)
+  }
+  if (!Array.isArray(ref.scope_manifest)) throw new Error(`${label}.scope_manifest 必须是数组`)
+}
+
+function diffScopeManifest(expected, current) {
+  const byPath = new Map()
+  for (const e of expected) byPath.set(e && e.path, e)
+  const changed = []
+  for (const c of current) {
+    const e = byPath.get(c && c.path)
+    if (!e) changed.push({ path: c.path, change: 'added' })
+    else if (e.sha256 !== c.sha256) changed.push({ path: c.path, change: 'modified' })
+    byPath.delete(c && c.path)
+  }
+  for (const [p] of byPath) changed.push({ path: p, change: 'removed' })
+  return { changed: changed.slice(0, SCOPE_DIFF_CAP), truncated: changed.length > SCOPE_DIFF_CAP }
+}
+
+// 比较两份候选标识：kind / resource_id / version 全字段一致才算同一候选。
+// 不一致时给出逐字段 mismatch 与（两侧 manifest 可用时）具体变更文件清单，
+// 供关口指出具体不匹配证明（AC-01）。输入非法一律抛错，不猜成功。
+export function compareCandidate(current, expected) {
+  assertCandidateRef(current, 'current')
+  assertCandidateRef(expected, 'expected')
+  const mismatches = []
+  const cmp = (field, exp, act) => {
+    if (exp !== act) mismatches.push({ field, expected: exp, actual: act })
+  }
+  cmp('kind', expected.kind, current.kind)
+  cmp('resource_id', expected.resource_id, current.resource_id)
+  cmp('version.head', expected.version.head === undefined ? null : expected.version.head,
+    current.version.head === undefined ? null : current.version.head)
+  cmp('version.content_sha256', expected.version.content_sha256, current.version.content_sha256)
+  const result = { match: mismatches.length === 0, mismatches }
+  if (mismatches.some((m) => m.field === 'version.content_sha256')) {
+    result.scope_diff = diffScopeManifest(expected.scope_manifest, current.scope_manifest)
+  }
+  return result
 }
 
 export function computeIntegrationCheckpoint({ base_ref, base_commit, target_head }) {
