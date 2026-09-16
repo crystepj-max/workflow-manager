@@ -1,0 +1,16 @@
+{
+  "task_id": "FIX-66",
+  "task_name": "生成 skill 描述句号重复修复",
+  "status": "已合并",
+  "archive_form": "lightweight-remote",
+  "remote_ref": "cnb#66",
+  "merge": {
+    "commit": "46395cd1ea9742ccb212e23d088c5969c6f14569",
+    "merged_at": "2026-09-16T09:13:32.748Z"
+  },
+  "branch": "dev-loc-034-r1",
+  "branch_retained": null,
+  "generated_by": "FIX-72 后续数据回填（CHORE-36 重入期间锚点漂移治理）",
+  "generated_at": "2026-09-16T10:05:15.991Z",
+  "note": "远程收口任务：经 CNB 合并请求合入。规格正文以远端 issue 为源；凭据与登记册逐字一致。"
+}
