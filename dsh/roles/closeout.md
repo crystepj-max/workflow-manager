@@ -16,7 +16,7 @@
 1. 读取验收报告（`accept-report.md`）、审核报告（`review-report.md`）、测试报告（`test-report.md`）与开发交接（`dev-report.md`）的最新终态。
 2. **一致性收口**：用知识收口流程做代码 / 文档 / 路线图 / 规则对齐——消除文档与实现的不一致，确认无遗留死代码与格式漂移，保留仓库整洁。
 3. **交接产物汇总**：整理本轮全部报告与产物清单，产出 `cleanup-report.md`，说明归档位置与后续事项。
-4. **推送、合并与关闭**：主工作区（编排区）承担推送/合并/关闭——把工作分支推送到远端（`git push -u origin <工作分支>`），基于 base 分支创建 Draft PR（`gh pr create --draft`，已存在则复用），PR 正文汇总本轮目标、验收结论与报告清单；然后将 PR 标记 ready 并合并（`gh pr merge --squash --delete-branch`），最后关闭对应 issue（`gh issue close`，评论说明验收结论与合并 commit）。**禁止绕过 PR 直接推送 base 分支**；无远端时记录本地 commit 清单即可。合并依据是「人工验收已通过」这一前置决策，本节点只执行，不重新判定。
+4. **推送、合并与关闭**：主工作区（编排区）承担推送/合并/关闭。**恢复/重试防重（WR-012）：每类外部动作执行前先核查目标当前状态**——PR 是否已存在/已合并（`gh pr view` / `gh pr list`）、issue 是否已关闭、分支是否已在远端（`git ls-remote`）；**已确认成功的动作不得重复执行**，直接采用既有结果并在报告中注明；查询不到或结果不确定（超时、权限失败、状态矛盾）时停止自动重试，在 `cleanup-report.md` 中记为「需核查」，禁止伪造成功或换目标重做。然后执行：把工作分支推送到远端（`git push -u origin <工作分支>`），基于 base 分支创建 Draft PR（`gh pr create --draft`，已存在则复用），PR 正文汇总本轮目标、验收结论与报告清单；然后将 PR 标记 ready 并合并（`gh pr merge --squash --delete-branch`），最后关闭对应 issue（`gh issue close`，评论说明验收结论与合并 commit）。**禁止绕过 PR 直接推送 base 分支**；无远端时记录本地 commit 清单即可。合并依据是「人工验收已通过」这一前置决策，本节点只执行，不重新判定。
 5. **环境回收（决策六：单实例 + 任务命名隔离）**：清理 worktree 之前，先回收本任务的开发 DSH 资源——**不删除任何「Home」**（开发 DSH 只有唯一实例，共享 Home 必须保留）。顺序：若开发 DSH 会话仍在，先用公开的 `cordis_stop` / `cordis_undefine` 停用并注销本任务定义的动态 Package；随后执行 `npm run dev:plugin -- stop --task <run_id>` 登记「已停用并注销」，再执行 `node "$CWF_ASSETS/cwf-env-recycle.mjs" recycle <runDir> --report <runDir>/cleanup-report.md`（回收**以激活登记里已有本任务的注销记录为门禁**，没有即拒绝；只清本任务命名空间精确匹配的项）。停不掉时（归属它的会话已消失）用 `npm run dev:plugin -- stop --task <run_id> --unresolved "<原因>"` 如实登记，该原因进入报告与遗留事项。**回收失败不阻塞合并主路径**，但必须把脚本 JSON 输出原样写入 `cleanup-report.md` 的「后续事项」，不得谎报已回收；只回收本任务登记的资源，不碰其他任务的登记、插件、进程或共享指针；早于本改造的 Run 无 `plugin_namespace` 登记时脚本返回 `nothing_registered`，如实记录即可。
 6. **原子清理工作区（分两阶段，口径见 `docs/design/workspace-directory-convention.md` §1.7）**：确认边界后收束——只处理本轮需求相关变更，不触碰用户已有改动或无关文件。
    - **阶段一（代码托管不可用期间，当前口径）**：**删工作区、保留分支**。判据是不对称性：工作区可再生（随时 `git worktree add <路径> <分支名>` 重建），分支不可再生（它是托管恢复后补登 PR 的唯一载体）。
@@ -65,4 +65,5 @@
 - 不把验收未通过的事项伪装成后续优化。
 - 不提交不属于本轮需求的文件；不绕过提交规范。
 - 不绕过 PR 直接推送 base 分支；合并仅依据「人工验收已通过」的前置决策执行。
+- 已确认成功的外部动作不重复执行；结果不确定时保守受阻并明示「需核查」，不伪造成功。
 - 收口不因 AI 判定打回，正常完成即进入结束。

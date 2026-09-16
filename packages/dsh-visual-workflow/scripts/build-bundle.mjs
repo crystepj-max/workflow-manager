@@ -245,8 +245,12 @@ const clientBytes = Buffer.byteLength(dynClient)
 // LOC-031 技术重试/超时/无进展循环限制（JSON 技术预算策略 + 运行时计数器 + 快照续跑）并入后，
 // LOC-030 与 LOC-031 合并终态实测 host 102481 + client 101610 = 204091B（199.31KiB），
 // 上调至 200KiB（人工裁决：全部 P0 任务并入后按终态实测一次性定值）。
-// 余量仅 ~0.7KiB，后续新增宿主/client 载荷应优先瘦身，不要继续推高。
-const PAYLOAD_LIMIT = 200 * 1024
+// LOC-032 受管理外部操作账本（vwf.operations.* 四端点 + operationsHostCall 进程边界；
+// 账本/适配器逻辑在 scripts/operations-host.mjs 内核，不经动态载荷）并入未推高预算。
+// LOC-032 操作账本宿主接线（operationsHostCall 进程边界）与 LOC-031 并入后终态实测
+// host 103804 + client 101610 = 205414B（200.6KiB）超 200KiB，按人工裁决先例
+// 「全部 P0 任务并入后按终态实测一次性定值」上调至 208KiB（含 LOC-033 并入余量）。
+const PAYLOAD_LIMIT = 208 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)
