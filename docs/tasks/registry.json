@@ -1416,12 +1416,12 @@
       "source": "会话录入",
       "source_ref": "2026-09-16 CHORE-36 交付实测（chore-36-r1）：工作区闸门 5 项失败的共同根因=编号迁移 d34f618 未收尾。① scripts/workspace-convention-core.cjs 的 TASK_ID_RE=/^(?:LOC|CWF)-\\d+$/ 与 RUN_ID_RE=/^(?:loc|cwf)-\\d+(-s\\d+)?-r\\d+$/ 仍不认新前缀 FEAT/FIX/CHORE → D-5 判新式 run 目录非法（实测 chore-36-r1）、D-3 判 FIX-65 现场 fix-65-compile-output-size 非法；② 工作区闸门 D-8/D-10 未适配 CNB 合并形态：LOC-024..031 经 CNB 合入（无 docs/tasks/archive/ 归档 → D-8 失败；合并后删分支但 branch_retained=true → D-10 判「标记保留分支但分支不存在」6 条）；③ docs/tasks/specs/（定义入库新规）与旧「决策五」废弃目录同名 → D-8 永久告警。需：命名核心与 D-3/D-5 认新前缀；D-8/D-10 适配新收口/定义形态；决策五与新目录关系显式化。证据：CHORE-36 工作区 validate-workspace 输出（5 项失败明细，2026-09-16 13:00）。",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "等待验收",
       "priority": "P1",
       "env_group": "FIX-72",
       "env_role": "独立",
       "deps": [],
-      "branch": null,
+      "branch": "dev-fix-72-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
@@ -1430,7 +1430,7 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-16T05:07:05.820Z",
-      "updated_at": "2026-09-16T06:10:59.664Z",
+      "updated_at": "2026-09-16T07:01:52.354Z",
       "spec_path": "docs/tasks/specs/FIX-72-feat-fix-chore/task-spec-V1.md"
     }
   ],
