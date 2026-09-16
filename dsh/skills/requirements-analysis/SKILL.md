@@ -227,7 +227,7 @@ Agent 必须带着分析与推荐提问，不能把分析责任转嫁给用户�
 
 在请求人工确认基线**之前**，按 `references/definition-check.md` 逐项检查并落盘：
 
-`.scratch/<feature-slug>/definition-check.md`
+`docs/tasks/specs/<任务标识>-<slug>/definition-check.md`（入库：它是「能否开工」的判定依据，下游必须能读到）
 
 硬规则：
 
@@ -246,7 +246,8 @@ Agent 必须带着分析与推荐提问，不能把分析责任转嫁给用户�
 人工确认后，必须**实际完成**下列落档（缺一不可）。两条轨道共用本清单，**仅第 2 与第 4 条载体不同**。
 
 1. **本地详细任务规格**（自 `references/task-spec-template.md` 填满）  
-   路径：`.scratch/<任务标识>-<slug>/task-spec-V<n>.md`（目录名含任务标识，便于归档与回填）
+   路径：`docs/tasks/specs/<任务标识>-<slug>/task-spec-V<n>.md`（目录名含任务标识，便于归档与回填）  
+   **必须入库**：规格是下游施工的唯一输入，留在被 Git 忽略的目录里会导致干净检出或远端克隆后无法开工。
 2. **任务基本信息**，二选一：
    - **GitHub 轨道**：自 `references/issue-basics-template.md` 写入/更新 Issue，当前状态 = `已定义`；
    - **本地轨道**：自 `references/local-task-card-template.md` 写入 `docs/tasks/<任务标识>-<slug>.md`，当前状态 = `本地已定义`，`GitHub 同步 = pending`；
@@ -254,9 +255,19 @@ Agent 必须带着分析与推荐提问，不能把分析责任转嫁给用户�
    字段：任务标识、需求来源、来源定位、任务名称、任务类型、优先级、当前状态、需求基线版本、前置依赖、施工环境组、施工环境角色、无人值守许可、任务规格位置、定义时间。
 3. **版本一致**：任务卡/Issue 基线版本 = 本地规格版本
 4. **标记就绪**：GitHub 轨道打 `ready-for-agent` 与对应 size 标签、去掉 `needs-info`；本地轨道把本地任务卡状态写为 `本地已定义` 并登记到 `docs/tasks/registry.json`（`status=本地已定义`、`github_sync=pending`）
-5. **分析摘要**（可选保留）：`.scratch/<任务标识>-<slug>/requirements-analysis.md`
+5. **分析摘要**（可选保留）：`docs/tasks/specs/<任务标识>-<slug>/requirements-analysis.md`
+6. **登记规格位置**：`node scripts/local-task-registry.mjs set --task <任务标识> --spec-path docs/tasks/specs/<任务标识>-<slug>/task-spec-V<n>.md`
+7. **通过上下文门禁**：`npm run validate:task-context`（校验规格与任务卡均已入库、活跃任务均有远端锚点）
 
-**任务标识分配**：本地轨道由登记册分配 `LOC-<序号>`（`node scripts/local-task-registry.mjs allocate --name <任务名称> --source <来源>`）；GitHub 轨道以 issue 号作为任务标识，补建 issue 后回填。
+**任务标识分配**：由远端（CNB）发号，本机不自己算号，双机并行与多会话并行都不会撞号：
+
+```bash
+node scripts/local-task-registry.mjs allocate --name <任务名称> --type FEAT|FIX|CHORE [--priority P0..P2]
+```
+
+- 返回 `FEAT-<远端号>` / `FIX-<远端号>` / `CHORE-<远端号>`，同时在 CNB 建好对应 issue，编号即 issue 号；
+- 远端不可达时降级为临时号 `TMP-<机器码>-<日期><序号>`，联网后用 `node scripts/remote-issue-sync.mjs reissue --task <临时号>` 换取正式号；
+- 历史任务（2026-09-15 及以前）沿用 `LOC-<序号>` 旧号，通过登记册 `remote` / `legacy_id` 字段与远端号双向可查。
 
 成功回报格式：
 
@@ -282,10 +293,11 @@ GitHub 同步：不适用 / 待补 issue
 
 | 产物 | 位置 |
 |---|---|
-| Definition Check | `.scratch/<任务标识>-<slug>/definition-check.md` |
-| 本地任务规格 | `.scratch/<任务标识>-<slug>/task-spec-V<n>.md` |
-| 需求分析摘要 | `.scratch/<任务标识>-<slug>/requirements-analysis.md` |
-| 任务清单（多切片） | `.scratch/<任务标识>-<slug>/issues/<NN>-<slug>.md` |
+| Definition Check | `docs/tasks/specs/<任务标识>-<slug>/definition-check.md`（入库） |
+| 本地任务规格 | `docs/tasks/specs/<任务标识>-<slug>/task-spec-V<n>.md`（入库） |
+| 需求分析摘要 | `docs/tasks/specs/<任务标识>-<slug>/requirements-analysis.md`（入库） |
+| 决策票 | `docs/tasks/specs/<任务标识>-<slug>/decision-tickets/`（入库） |
+| 任务清单（多切片） | `docs/tasks/specs/<任务标识>-<slug>/issues/<NN>-<slug>.md`（入库） |
 | **本地任务卡（本地轨道）** | `docs/tasks/<任务标识>-<slug>.md`（入库） |
 | **任务登记册（本地轨道）** | `docs/tasks/registry.json`（入库，唯一真源） |
 | **看板（本地轨道）** | `docs/tasks/BOARD.md`（自动重写） |

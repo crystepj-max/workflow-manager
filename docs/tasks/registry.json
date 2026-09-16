@@ -393,7 +393,7 @@
       "slug": "logical-run-ui",
       "source": "会话录入",
       "source_ref": "2026-09-11 开发计划表 v2（W4，#75 适配）",
-      "baseline": "V1",
+      "baseline": "V2",
       "status": "本地已定义",
       "priority": null,
       "env_group": null,
@@ -409,10 +409,13 @@
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.046Z",
-      "updated_at": "2026-09-12T15:40:14.263Z",
+      "updated_at": "2026-09-16T00:05:55.320Z",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null
+      "branch_retained": null,
+      "type": "FEAT",
+      "remote": "cnb#39",
+      "spec_path": "docs/tasks/specs/LOC-016-logical-run-ui/task-spec-V2.md"
     },
     {
       "task_id": "LOC-017",
@@ -449,7 +452,7 @@
       "source": "会话录入",
       "source_ref": "2026-09-11 开发计划表 v2（W5，#53 收口）",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "定义中",
       "priority": null,
       "env_group": null,
       "env_role": null,
@@ -470,10 +473,12 @@
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.142Z",
-      "updated_at": "2026-09-12T15:40:14.263Z",
+      "updated_at": "2026-09-16T00:07:23.973Z",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null
+      "branch_retained": null,
+      "type": "CHORE",
+      "remote": "cnb#40"
     },
     {
       "task_id": "LOC-019",
@@ -579,8 +584,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-13T11:52:10.585Z",
-      "updated_at": "2026-09-13T11:53:15.109Z",
-      "spec_path": ".scratch/LOC-022-dsh-residue-cleanup/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:05:55.348Z",
+      "spec_path": "docs/tasks/specs/LOC-022-dsh-residue-cleanup/task-spec-V1.md",
+      "type": "CHORE",
+      "remote": "cnb#41"
     },
     {
       "task_id": "LOC-023",
@@ -631,8 +638,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T09:27:22.422Z",
-      "updated_at": "2026-09-14T10:05:26.740Z",
-      "spec_path": "docs/tasks/specs/node-input-handoff/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:34.811Z",
+      "spec_path": "docs/tasks/specs/node-input-handoff/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#42"
     },
     {
       "task_id": "LOC-025",
@@ -655,8 +664,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T09:27:22.431Z",
-      "updated_at": "2026-09-14T10:05:26.827Z",
-      "spec_path": "docs/tasks/specs/verdict-consistency/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:35.330Z",
+      "spec_path": "docs/tasks/specs/verdict-consistency/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#43"
     },
     {
       "task_id": "LOC-026",
@@ -679,8 +690,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T09:27:22.432Z",
-      "updated_at": "2026-09-14T10:05:26.910Z",
-      "spec_path": "docs/tasks/specs/candidate-proof/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:35.878Z",
+      "spec_path": "docs/tasks/specs/candidate-proof/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#44"
     },
     {
       "task_id": "LOC-027",
@@ -703,8 +716,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T09:27:22.432Z",
-      "updated_at": "2026-09-14T10:05:26.992Z",
-      "spec_path": "docs/tasks/specs/evaluation-baseline/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:36.429Z",
+      "spec_path": "docs/tasks/specs/evaluation-baseline/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#45"
     },
     {
       "task_id": "LOC-028",
@@ -729,8 +744,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T09:27:22.433Z",
-      "updated_at": "2026-09-14T10:05:27.071Z",
-      "spec_path": "docs/tasks/specs/human-completion/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:37.042Z",
+      "spec_path": "docs/tasks/specs/human-completion/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#46"
     },
     {
       "task_id": "LOC-029",
@@ -753,8 +770,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T09:27:22.433Z",
-      "updated_at": "2026-09-14T10:05:27.154Z",
-      "spec_path": "docs/tasks/specs/attempt-durability/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:37.583Z",
+      "spec_path": "docs/tasks/specs/attempt-durability/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#47"
     },
     {
       "task_id": "LOC-030",
@@ -777,8 +796,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T09:27:22.433Z",
-      "updated_at": "2026-09-14T10:05:27.235Z",
-      "spec_path": "docs/tasks/specs/blocked-lifecycle/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:38.165Z",
+      "spec_path": "docs/tasks/specs/blocked-lifecycle/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#48"
     },
     {
       "task_id": "LOC-031",
@@ -787,12 +808,12 @@
       "source": "本地文档",
       "source_ref": "docs/research/workflow-review-requirements-2026-09-14/WR-011.md",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "等待验收",
       "priority": "P0",
       "env_group": "LOC-031",
       "env_role": "独立",
       "deps": [],
-      "branch": null,
+      "branch": "dev-loc-031-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
@@ -801,8 +822,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T09:27:22.434Z",
-      "updated_at": "2026-09-14T10:05:27.319Z",
-      "spec_path": "docs/tasks/specs/technical-budget/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:38.742Z",
+      "spec_path": "docs/tasks/specs/technical-budget/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#49"
     },
     {
       "task_id": "LOC-032",
@@ -825,8 +848,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T09:27:22.434Z",
-      "updated_at": "2026-09-14T10:05:27.399Z",
-      "spec_path": "docs/tasks/specs/operation-idempotency/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:39.338Z",
+      "spec_path": "docs/tasks/specs/operation-idempotency/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#50"
     },
     {
       "task_id": "LOC-033",
@@ -835,12 +860,12 @@
       "source": "本地文档",
       "source_ref": "docs/research/workflow-review-requirements-2026-09-14/WR-013.md",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "等待验收",
       "priority": "P0",
       "env_group": "LOC-033",
       "env_role": "独立",
       "deps": [],
-      "branch": null,
+      "branch": "dev-loc-033-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
@@ -849,8 +874,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-14T09:27:22.434Z",
-      "updated_at": "2026-09-14T10:05:27.479Z",
-      "spec_path": "docs/tasks/specs/role-boundaries/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:39.867Z",
+      "spec_path": "docs/tasks/specs/role-boundaries/task-spec-V1.md",
+      "type": "CHORE",
+      "remote": "cnb#51"
     },
     {
       "task_id": "LOC-034",
@@ -860,7 +887,7 @@
       "source_ref": "docs/research/workflow-review-requirements-2026-09-14/WR-007.md",
       "baseline": "V1",
       "status": "定义中",
-      "priority": "P1",
+      "priority": null,
       "env_group": "LOC-034",
       "env_role": "独立",
       "deps": [
@@ -876,8 +903,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T02:47:39.429Z",
-      "updated_at": "2026-09-15T02:47:39.431Z",
-      "spec_path": "docs/tasks/specs/LOC-034-revision-dependencies/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:40.402Z",
+      "spec_path": "docs/tasks/specs/LOC-034-revision-dependencies/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#52"
     },
     {
       "task_id": "LOC-035",
@@ -887,7 +916,7 @@
       "source_ref": "docs/research/workflow-review-requirements-2026-09-14/WR-008.md",
       "baseline": "V1",
       "status": "定义中",
-      "priority": "P1",
+      "priority": null,
       "env_group": "LOC-035",
       "env_role": "独立",
       "deps": [
@@ -902,8 +931,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T02:47:39.432Z",
-      "updated_at": "2026-09-15T02:47:39.432Z",
-      "spec_path": "docs/tasks/specs/LOC-035-artifact-manifest/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:40.972Z",
+      "spec_path": "docs/tasks/specs/LOC-035-artifact-manifest/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#53"
     },
     {
       "task_id": "LOC-036",
@@ -913,7 +944,7 @@
       "source_ref": "docs/research/workflow-review-requirements-2026-09-14/WR-010.md",
       "baseline": "V1",
       "status": "定义中",
-      "priority": "P1",
+      "priority": null,
       "env_group": "LOC-036",
       "env_role": "独立",
       "deps": [],
@@ -926,8 +957,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T02:47:39.432Z",
-      "updated_at": "2026-09-15T02:47:39.433Z",
-      "spec_path": "docs/tasks/specs/LOC-036-exploration-coverage/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:41.516Z",
+      "spec_path": "docs/tasks/specs/LOC-036-exploration-coverage/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#54"
     },
     {
       "task_id": "LOC-037",
@@ -952,8 +985,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T02:47:39.433Z",
-      "updated_at": "2026-09-15T02:47:39.433Z",
-      "spec_path": "docs/tasks/specs/LOC-037-delivery-actions/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:42.179Z",
+      "spec_path": "docs/tasks/specs/LOC-037-delivery-actions/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#55"
     },
     {
       "task_id": "LOC-038",
@@ -976,8 +1011,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T02:47:39.434Z",
-      "updated_at": "2026-09-15T02:47:39.434Z",
-      "spec_path": "docs/tasks/specs/LOC-038-preflight-unification/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:42.715Z",
+      "spec_path": "docs/tasks/specs/LOC-038-preflight-unification/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#56"
     },
     {
       "task_id": "LOC-039",
@@ -1000,8 +1037,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T02:47:39.434Z",
-      "updated_at": "2026-09-15T02:47:39.434Z",
-      "spec_path": "docs/tasks/specs/LOC-039-protocol-capabilities/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:43.598Z",
+      "spec_path": "docs/tasks/specs/LOC-039-protocol-capabilities/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#57"
     },
     {
       "task_id": "LOC-040",
@@ -1024,8 +1063,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T02:47:39.434Z",
-      "updated_at": "2026-09-15T02:47:39.435Z",
-      "spec_path": "docs/tasks/specs/LOC-040-workflow-capability-guide/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:44.202Z",
+      "spec_path": "docs/tasks/specs/LOC-040-workflow-capability-guide/task-spec-V1.md",
+      "type": "CHORE",
+      "remote": "cnb#58"
     },
     {
       "task_id": "LOC-041",
@@ -1048,8 +1089,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T02:47:39.435Z",
-      "updated_at": "2026-09-15T02:47:39.435Z",
-      "spec_path": "docs/tasks/specs/LOC-041-node-isolation/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:44.769Z",
+      "spec_path": "docs/tasks/specs/LOC-041-node-isolation/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#59"
     },
     {
       "task_id": "LOC-042",
@@ -1072,8 +1115,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T02:47:39.436Z",
-      "updated_at": "2026-09-15T02:47:39.436Z",
-      "spec_path": "docs/tasks/specs/LOC-042-workflow-conformance/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:45.325Z",
+      "spec_path": "docs/tasks/specs/LOC-042-workflow-conformance/task-spec-V1.md",
+      "type": "CHORE",
+      "remote": "cnb#60"
     },
     {
       "task_id": "LOC-043",
@@ -1098,8 +1143,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T02:47:39.436Z",
-      "updated_at": "2026-09-15T02:47:39.436Z",
-      "spec_path": "docs/tasks/specs/LOC-043-run-quality-cost/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:45.834Z",
+      "spec_path": "docs/tasks/specs/LOC-043-run-quality-cost/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#61"
     },
     {
       "task_id": "LOC-044",
@@ -1122,8 +1169,10 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T06:07:19.778Z",
-      "updated_at": "2026-09-15T06:07:19.779Z",
-      "spec_path": "docs/tasks/specs/LOC-044-state-recovery-core/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:46.373Z",
+      "spec_path": "docs/tasks/specs/LOC-044-state-recovery-core/task-spec-V1.md",
+      "type": "FEAT",
+      "remote": "cnb#62"
     },
     {
       "task_id": "LOC-045",
@@ -1146,9 +1195,95 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-15T06:07:19.780Z",
-      "updated_at": "2026-09-15T06:07:19.780Z",
-      "spec_path": "docs/tasks/specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md"
+      "updated_at": "2026-09-16T00:04:46.916Z",
+      "spec_path": "docs/tasks/specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md",
+      "type": "CHORE",
+      "remote": "cnb#63"
+    },
+    {
+      "task_id": "CHORE-36",
+      "type": "CHORE",
+      "remote": "cnb#36",
+      "legacy_id": "LOC-034",
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "验收清单前置条件规则补齐（UAT 卡与规格模板）",
+      "slug": "uat-precondition",
+      "source": "会话录入",
+      "source_ref": "LOC-023 有条件通过优化意见①（2026-09-15 人工裁决）：凡只能在合并后观测的验收项，必须在卡上标注前置条件与执行时机。",
+      "baseline": "V1",
+      "status": "定义中",
+      "priority": "P2",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-16T00:03:29.832Z",
+      "updated_at": "2026-09-16T00:03:29.832Z"
+    },
+    {
+      "task_id": "CHORE-37",
+      "type": "CHORE",
+      "remote": "cnb#37",
+      "legacy_id": "LOC-035",
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "交付链口径残留收敛：closeout 角色的 --force 表述",
+      "slug": "closeout-force-wording",
+      "source": "会话录入",
+      "source_ref": "LOC-023 有条件通过优化意见②（2026-09-15 人工裁决）：交付链文本口径与已通过决策不一致，需收敛。",
+      "baseline": "V1",
+      "status": "定义中",
+      "priority": "P2",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-16T00:03:29.832Z",
+      "updated_at": "2026-09-16T00:03:29.832Z"
+    },
+    {
+      "task_id": "CHORE-38",
+      "type": "CHORE",
+      "remote": "cnb#38",
+      "legacy_id": "LOC-036",
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "收口脚本 prune 兜底单测补齐",
+      "slug": "prune-fallback-test",
+      "source": "会话录入",
+      "source_ref": "LOC-023 有条件通过优化意见③（2026-09-15 人工裁决）：local-task-merge 的 prune 兜底行为（pruned 返回项）无任何用例断言，端到端用例未覆盖。",
+      "baseline": "V1",
+      "status": "定义中",
+      "priority": "P2",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-16T00:03:29.832Z",
+      "updated_at": "2026-09-16T00:03:29.832Z"
     }
   ],
-  "updated_at": "2026-09-13T05:27:24.591Z"
+  "updated_at": "2026-09-16T00:03:29.832Z"
 }
