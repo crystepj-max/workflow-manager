@@ -13,7 +13,7 @@
       "source": "会话录入",
       "source_ref": "LOC-023 有条件通过优化意见①（2026-09-15 人工裁决）：凡只能在合并后观测的验收项，必须在卡上标注前置条件与执行时机。",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "执行受阻",
       "priority": "P2",
       "env_group": "CHORE-36",
       "env_role": "独立",
@@ -27,8 +27,9 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-16T04:27:57.761Z",
-      "spec_path": "docs/tasks/specs/CHORE-36-uat-precondition/task-spec-V1.md"
+      "updated_at": "2026-09-16T05:07:56.148Z",
+      "spec_path": "docs/tasks/specs/CHORE-36-uat-precondition/task-spec-V1.md",
+      "leftovers": "hold：等待 FIX-72（cnb#72）完成编号迁移收尾后重入；开发本体已完成（8 载体 + 断言 + 负例），npm test 625/625"
     },
     {
       "task_id": "CHORE-37",
@@ -1401,6 +1402,34 @@
       "created_at": "2026-09-16T03:11:07.944Z",
       "updated_at": "2026-09-16T03:11:07.944Z",
       "spec_path": "docs/tasks/specs/FIX-66-skill/task-spec-V1.md"
+    },
+    {
+      "task_id": "FIX-72",
+      "type": "FIX",
+      "remote": "cnb#72",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "编号迁移收尾：工作区命名核心与闸门认新前缀（FEAT/FIX/CHORE）",
+      "slug": "feat-fix-chore",
+      "source": "会话录入",
+      "source_ref": "2026-09-16 CHORE-36 交付实测（chore-36-r1）：工作区闸门 5 项失败的共同根因=编号迁移 d34f618 未收尾。① scripts/workspace-convention-core.cjs 的 TASK_ID_RE=/^(?:LOC|CWF)-\\d+$/ 与 RUN_ID_RE=/^(?:loc|cwf)-\\d+(-s\\d+)?-r\\d+$/ 仍不认新前缀 FEAT/FIX/CHORE → D-5 判新式 run 目录非法（实测 chore-36-r1）、D-3 判 FIX-65 现场 fix-65-compile-output-size 非法；② 工作区闸门 D-8/D-10 未适配 CNB 合并形态：LOC-024..031 经 CNB 合入（无 docs/tasks/archive/ 归档 → D-8 失败；合并后删分支但 branch_retained=true → D-10 判「标记保留分支但分支不存在」6 条）；③ docs/tasks/specs/（定义入库新规）与旧「决策五」废弃目录同名 → D-8 永久告警。需：命名核心与 D-3/D-5 认新前缀；D-8/D-10 适配新收口/定义形态；决策五与新目录关系显式化。证据：CHORE-36 工作区 validate-workspace 输出（5 项失败明细，2026-09-16 13:00）。",
+      "baseline": "V1",
+      "status": "定义中",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-16T05:07:05.820Z",
+      "updated_at": "2026-09-16T05:07:55.861Z"
     }
   ],
   "updated_at": "2026-09-16T03:24:30.746Z"
