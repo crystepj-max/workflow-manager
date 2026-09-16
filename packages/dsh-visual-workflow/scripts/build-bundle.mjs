@@ -238,9 +238,19 @@ const clientBytes = Buffer.byteLength(dynClient)
 // LOC-014 模型覆盖层（host 合成单点 + RPC 三端点 + 模板库最小覆盖对话框）并入后上调至 188KiB，
 // 与 tests/static-bundle.test.mjs 预算保持一致。UAT 反馈轮（未保存退出/清除确认弹窗 + 沿用默认带值）后上调至 189KiB。
 // LOC-021 异源档位三态（校验内核档位判定 + 运行时日志档位/角色口径 + 编辑器三档选择器与中英文案）并入后上调至 190KiB。
+// LOC-030 统一受阻生命周期（终止描述派生 + 宿主描述优先映射/恢复入口 + 看板受阻口径）原按人工裁决
+// 上调至 192KiB；与已并入的 LOC-027（190→198KiB）取较高者，避免相对已合并状态收紧闸门。
 // LOC-027 评价基线冻结闸门（宿主编排：[eb-freeze] 观察/检查点中止/恢复/核验；纯逻辑已分流
 // dist/evaluation-baseline.cjs 内核）并入后上调至 198KiB。
-const PAYLOAD_LIMIT = 198 * 1024
+// LOC-031 技术重试/超时/无进展循环限制（JSON 技术预算策略 + 运行时计数器 + 快照续跑）并入后，
+// LOC-030 与 LOC-031 合并终态实测 host 102481 + client 101610 = 204091B（199.31KiB），
+// 上调至 200KiB（人工裁决：全部 P0 任务并入后按终态实测一次性定值）。
+// LOC-032 受管理外部操作账本（vwf.operations.* 四端点 + operationsHostCall 进程边界；
+// 账本/适配器逻辑在 scripts/operations-host.mjs 内核，不经动态载荷）并入未推高预算。
+// LOC-032 操作账本宿主接线（operationsHostCall 进程边界）与 LOC-031 并入后终态实测
+// host 103804 + client 101610 = 205414B（200.6KiB）超 200KiB，按人工裁决先例
+// 「全部 P0 任务并入后按终态实测一次性定值」上调至 208KiB（含 LOC-033 并入余量）。
+const PAYLOAD_LIMIT = 208 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)

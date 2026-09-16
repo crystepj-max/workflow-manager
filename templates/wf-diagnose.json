@@ -4,7 +4,17 @@
   "description": "诊断缺陷修复正式模板：缺陷诊断 → 修复 → 审核 → 回归验证 → 收口；先诊断后修复，原始 feedback signal 贯穿全程；修复问题回修复、证据推翻根因回诊断（均消耗自动回退额度，默认 3）；证据不足且不可复现时受阻，不猜根因；默认无独立人工验收节点。",
   "entry": "diagnose",
   "control": {
-    "maxRounds": 3
+    "maxRounds": 3,
+    "retryPolicy": {
+      "max_attempts": 3,
+      "backoff_ms": [
+        1000,
+        2000
+      ],
+      "attempt_timeout_ms": 1800000,
+      "run_auto_time_ms": 14400000,
+      "no_progress_repeats": 2
+    }
   },
   "heteroCheck": "weak",
   "nodes": [
@@ -230,9 +240,10 @@
       "id": "closeout",
       "profile": "closeout",
       "label": "收口",
-      "goal": "仅对回归验证通过的同一修复成果收口：保留诊断、修复、审核、回归四类记录，不得重新开发或改写结论；遗留观察项写入 followups 供后续定义摄入。完成后写 `cleanup-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "仅对回归验证通过的同一修复成果收口：保留诊断、修复、审核、回归四类记录，不得重新开发或改写结论；遗留观察项写入 followups 供后续定义摄入。完成后写 `cleanup-report.md`；最终回复只输出本节点 schema 对应 JSON，status=DELIVERED、completion_type=DELIVERED（完成映射）。",
       "output": {
         "outcomePath": "$.status",
+        "completionPath": "$.completion_type",
         "schema": {
           "type": "object",
           "properties": {
@@ -241,6 +252,10 @@
               "enum": [
                 "DELIVERED"
               ]
+            },
+            "completion_type": {
+              "type": "string",
+              "const": "DELIVERED"
             },
             "summary": {
               "type": "string"
@@ -251,6 +266,7 @@
           },
           "required": [
             "status",
+            "completion_type",
             "summary",
             "followups"
           ],

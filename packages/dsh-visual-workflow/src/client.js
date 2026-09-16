@@ -2452,8 +2452,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     function statusBadge(status) {
       const s = String(status || '')
       // #80：PAUSED 用人工关注色（可恢复等待态），不落 fail 色
-      const color = s === 'DONE' ? STATUS_COLOR.pass : s === 'running' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED') ? STATUS_COLOR.human : STATUS_COLOR.fail
-      const label = s === 'WAITING_HUMAN' ? t('dashWaitHuman') : s.indexOf('AWAITING_HUMAN_') === 0 ? t('dashHumanGate') : (s || '—')
+      // LOC-030：BLOCKED 同为可恢复等待态（统一受阻生命周期，非终态），不落 fail 色
+      const color = s === 'DONE' ? STATUS_COLOR.pass : s === 'running' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED' || s === 'BLOCKED') ? STATUS_COLOR.human : STATUS_COLOR.fail
+      const label = s === 'WAITING_HUMAN' ? t('dashWaitHuman') : s === 'BLOCKED' ? t('dashBlocked') : s.indexOf('AWAITING_HUMAN_') === 0 ? t('dashHumanGate') : (s || '—')
       return h('span', { className: 'vwf-badge', style: { color: color } }, label)
     }
     function isActiveRunStatus(status) {
@@ -2502,7 +2503,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         return [...runs].sort((a, b) => ((b.startedAt || b.ts || 0) - (a.startedAt || a.ts || 0)) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
       }, [runs])
       const activeCount = allRuns.filter((r) => !r.supersededBy && isActiveRunStatus(r.status)).length
-      const gates = allRuns.filter((r) => !r.supersededBy && (String(r.status) === 'WAITING_HUMAN' || String(r.status).indexOf('AWAITING_HUMAN_') === 0))
+      // LOC-030：BLOCKED（可恢复受阻）与人工门禁同入关注队列——恢复入口 = entry=<resume_node>
+      const gates = allRuns.filter((r) => !r.supersededBy && (String(r.status) === 'WAITING_HUMAN' || String(r.status).indexOf('AWAITING_HUMAN_') === 0 || String(r.status) === 'BLOCKED'))
       // 分页：数据刷新（新 run 落盘 / 历史拉取）时回到第 0 页
       React.useEffect(() => { setPage(0) }, [allRuns.length])
       const totalPages = Math.max(1, Math.ceil(allRuns.length / pageSize))
@@ -2537,13 +2539,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap' } },
                 h('span', { className: 'vwf-badge accent' }, i === 0 ? t('dashDeciding') : t('dashQueued', { n: i + 1 })),
                 h('strong', null, g.taskId || g.id),
-                h('span', { className: 'vwf-muted-sm' }, (g.name || g.workflowId || '') + ' · ' + (String(g.status) === 'WAITING_HUMAN' ? t('dashHumanDecision', { reason: g.reason || '' }) : t('dashGateNode', { node: String(g.status).replace('AWAITING_HUMAN_', '') }))),
+                h('span', { className: 'vwf-muted-sm' }, (g.name || g.workflowId || '') + ' · ' + (String(g.status) === 'WAITING_HUMAN' ? t('dashHumanDecision', { reason: g.reason || '' }) : String(g.status) === 'BLOCKED' ? t('dashBlockedReason', { reason: g.reason || '' }) : t('dashGateNode', { node: String(g.status).replace('AWAITING_HUMAN_', '') }))),
                 statusBadge(g.status)
               ),
               h('div', { className: 'vwf-code', style: { marginTop: 4 } },
                 String(g.status) === 'WAITING_HUMAN'
                   ? ('续跑：wf_run { taskId: "' + (g.taskId || '<taskId>') + '"' + (g.workflowId ? ', templateId: "' + g.workflowId + '"' : '') + ', decision_id: "' + (g.decision_id || '<decision_id>') + '", user_choice: "USER_ACCEPTED|ADD_BUDGET|STOP" }')
-                  : ('续跑：wf_run { taskId: "' + (g.taskId || '<taskId>') + '"' + (g.workflowId ? ', templateId: "' + g.workflowId + '"' : '') + ', entry: "' + String(g.status).replace('AWAITING_HUMAN_', '') + '", approved: true|false }'))
+                  : String(g.status) === 'BLOCKED'
+                    ? ('恢复：wf_run { taskId: "' + (g.taskId || '<taskId>') + '"' + (g.workflowId ? ', templateId: "' + g.workflowId + '"' : '') + ', entry: "' + (g.node || '<resume_node>') + '" }')
+                    : ('续跑：wf_run { taskId: "' + (g.taskId || '<taskId>') + '"' + (g.workflowId ? ', templateId: "' + g.workflowId + '"' : '') + ', entry: "' + String(g.status).replace('AWAITING_HUMAN_', '') + '", approved: true|false }'))
             )))
         ) : null,
         h('div', { className: 'vwf-card', style: { marginBottom: 8 } },

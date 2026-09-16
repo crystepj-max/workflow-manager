@@ -4,6 +4,12 @@
 // AC-02 诊断修复收到对应 diagnosis 根因与证据；建设返工收到触发本次返工的 review/test 反馈；
 // AC-03 缺必需引用时消费节点调用数为 0、错误含 node/binding/reason；可选输入未产生按声明处理；
 // AC-04 两轮反馈只取本次流转版本；蓝图编辑（投影往返）与生成脚本均保留输入声明；legacy 输入模式显式标注。
+//
+// 跨任务夹具对齐（LOC-030）：诊断模板 `closeout` 节点按 blocked-lifecycle 规格 §接口与数据约定
+// 「诊断正常回归 PASS 后 DELIVERED 必须有完成映射」新增必填 `completion_type`（const=DELIVERED）
+// 与 completionPath。本套件的诊断夹具模拟该节点输出，必须显式给出该字段，否则 schema 校验失败
+// 触发重试直至额度耗尽（旧表现 FAILED_AGENT_CAP，LOC-031 技术预算生效后为 WAITING_HUMAN）。
+// 优化模板夹具的 completion_type=EVALUATION_PASSED 不受影响。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -28,6 +34,13 @@ const runEngine = (bp, table, args = {}) => {
   return runGeneratedScript(script, { args, agent })
 }
 const callsOf = (run, label) => run.agentCalls.filter((c) => c.label === label)
+
+// LOC-026 起，verifyBranch 节点（建设 review/test、诊断 review/regression）的 output.schema.required
+// 含 verified_branch / verified_head / candidate_sha256，运行时按 expectedBranch = A.work_branch ||
+// ('dev2/' + (A.taskId || 'task')) 校验。以下夹具均是无 workspace 的旧形态：candOk 闸门不生效，
+// 但 schema 必填仍要求显式给出，故统一按默认分支 dev2/task 补齐。
+const DEV_BRANCH = 'dev2/task'
+const CAND = 'handoff-candidate'
 
 // ---------- 声明校验（编译期门） ----------
 
@@ -271,11 +284,11 @@ test('AC-02 诊断修复收到对应 diagnosis 的根因与证据；FIX_ISSUES �
     修复: () => { fixes += 1; return { route: 'FIXED', summary: '第' + fixes + '次修复', changed: 'a.js' } },
     审核: () => {
       reviews += 1
-      if (reviews === 1) return { route: 'FIX_ISSUES', verdict_reason: 'REVIEW-FIX-R1' }
-      return { route: 'APPROVE', verdict_reason: '通过' }
+      if (reviews === 1) return { route: 'FIX_ISSUES', verdict_reason: 'REVIEW-FIX-R1', verified_branch: DEV_BRANCH, verified_head: 'review-h1', candidate_sha256: CAND }
+      return { route: 'APPROVE', verdict_reason: '通过', verified_branch: DEV_BRANCH, verified_head: 'review-h2', candidate_sha256: CAND }
     },
-    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿' },
-    收口: { status: 'DELIVERED', summary: 'done', followups: '' },
+    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿', verified_branch: DEV_BRANCH, verified_head: 'regression-h1', candidate_sha256: CAND },
+    收口: { status: 'DELIVERED', completion_type: 'DELIVERED', summary: 'done', followups: '' },
   })
   assert.equal(run.result.status, 'DONE')
   const fixCalls = callsOf(run, '修复')
@@ -297,12 +310,12 @@ test('AC-02 证据推翻根因回诊断：重诊收到触发返工的反证；�
     },
     审核: () => {
       reviews += 1
-      if (reviews === 1) return { route: 'ROOT_CAUSE_REFUTED', verdict_reason: 'REFUTE-R1' }
-      return { route: 'APPROVE', verdict_reason: '通过' }
+      if (reviews === 1) return { route: 'ROOT_CAUSE_REFUTED', verdict_reason: 'REFUTE-R1', verified_branch: DEV_BRANCH, verified_head: 'review-h1', candidate_sha256: CAND }
+      return { route: 'APPROVE', verdict_reason: '通过', verified_branch: DEV_BRANCH, verified_head: 'review-h2', candidate_sha256: CAND }
     },
     修复: { route: 'FIXED', summary: '按新根因修复', changed: 'b.js' },
-    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿' },
-    收口: { status: 'DELIVERED', summary: 'done', followups: '' },
+    回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿', verified_branch: DEV_BRANCH, verified_head: 'regression-h1', candidate_sha256: CAND },
+    收口: { status: 'DELIVERED', completion_type: 'DELIVERED', summary: 'done', followups: '' },
   })
   assert.equal(run.result.status, 'DONE')
   const diagCalls = callsOf(run, '缺陷诊断')
@@ -321,13 +334,13 @@ test('AC-02/AC-04 建设返工：dev 收到触发本轮的 review/test 反馈；
     开发: () => { devs += 1; return { route: 'READY', summary: '实现S' + devs, self_check: '自检' + devs } },
     收敛审查: () => {
       reviews += 1
-      if (reviews === 1) return { route: 'RETURN_DEV', verdict: 'REQUEST_CHANGES', summary: '审查S1', blockers: 'REVIEW-R1-BLOCKERS', verified_branch: 'wb', verified_head: 'hh1' }
-      return { route: 'APPROVE', verdict: 'APPROVE', summary: '审查S2-APPROVE', blockers: '无', verified_branch: 'wb', verified_head: 'hh2' }
+      if (reviews === 1) return { route: 'RETURN_DEV', verdict: 'REQUEST_CHANGES', summary: '审查S1', blockers: 'REVIEW-R1-BLOCKERS', verified_branch: 'wb', verified_head: 'hh1', candidate_sha256: CAND }
+      return { route: 'APPROVE', verdict: 'APPROVE', summary: '审查S2-APPROVE', blockers: '无', verified_branch: 'wb', verified_head: 'hh2', candidate_sha256: CAND }
     },
     测试: () => {
       tests += 1
-      if (tests === 1) return { route: 'RETURN_DEV', result: 'FAILED', reason: 'TEST-R1-REASON', evidence: 'TEST-R1-EVID', verified_branch: 'wb', verified_head: 'hh3' }
-      return { route: 'PASS', result: 'PASSED', reason: '通过', evidence: 'TEST-R2-EVID', verified_branch: 'wb', verified_head: 'hh4' }
+      if (tests === 1) return { route: 'RETURN_DEV', result: 'FAILED', reason: 'TEST-R1-REASON', evidence: 'TEST-R1-EVID', verified_branch: 'wb', verified_head: 'hh3', candidate_sha256: CAND }
+      return { route: 'PASS', result: 'PASSED', reason: '通过', evidence: 'TEST-R2-EVID', verified_branch: 'wb', verified_head: 'hh4', candidate_sha256: CAND }
     },
     'UAT 准备': { route: 'READY_FOR_HUMAN', summary_for_human: 'S4H', why: 'W', current_state: 'C', details: 'D' },
   }, { work_branch: 'wb' })

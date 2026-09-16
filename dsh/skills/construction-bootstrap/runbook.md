@@ -213,7 +213,7 @@ node scripts/local-task-merge.mjs --task <任务标识> --branch <工作分支> 
 
    通过后自动完成：一任务一提交 → 打标签 `task/<loc-001>/<v1>` → **归档三件套**（任务卡 + 规格终版 + 证据摘要）至 `docs/tasks/archive/<任务标识>/` 并**随同一提交入库**（证据明细若仍在工作树内，脚本会先按锚定规则复制到主检出再生成摘要）→ 登记册状态改「已合并」、记录合并提交与证据保留期 → 重写看板 → `git worktree prune` 兜底注销失效登记 → 可选推送镜像仓库。
 
-   🔴 工作区与分支**暂不删除**（阶段一口径），保留供 GitHub 恢复后补 PR；`GitHub 同步` 保持 `pending`。**再强调一次这个不对称**：工作区可再生（`git worktree add` 从分支重建），分支不可再生（补登 PR 的唯一载体），所以暂停期只留分支不保留工作区。删除工作区时用 `scripts/workspace-paths.mjs` 派生的路径，并在删除后追加 `git worktree prune`。
+   🔴 **删工作区、留分支**（阶段一口径；决策 0001 §6 / 约定 §1.7.1）。判据是「工作区可再生、分支不可再生」：工作区随时可用 `git worktree add` 从分支重建，删除不损失任何不可替代的东西；分支是补登 PR 的唯一载体，暂停期必须保留。因此**工作区由本步的合并脚本自动删除**（安全门与顺序：证据锚定 → 生成摘要 → 归档三件套随同一提交入库 → `git worktree remove`，**不带 `--force`**，工作区脏则拒绝并只登记为遗留项，不阻塞合并），删除后追加 `git worktree prune` 兜底注销失效登记。删除失败时按脚本输出原样记入 `closeout_summary.leftovers`，**不得谎报已清理**。工作区路径一律由 `scripts/workspace-paths.mjs` 派生，不得自行拼接。
 
 6. 归档（**`local-task-merge` 已自动完成，此步仅用于未走合并脚本或需要单独重跑时**）：
 
@@ -234,6 +234,17 @@ node scripts/task-runs-cleanup.mjs --apply    # 执行清理（摘要缺失的�
 node scripts/local-task-registry.mjs allocate --name "<优化任务名>" --source 会话录入
 node scripts/local-task-registry.mjs board
 ```
+
+---
+
+## 统一受阻 / 恢复 / 完成生命周期（LOC-030）
+
+Run 的受阻与完成看 `wf_run` 返回的 `termination`（显式终止描述），技术执行段结束不自动等于业务完成：
+
+- `status=BLOCKED`（生命周期 `BLOCKED`，**非终态**，`terminal=false`）：外部条件暂缺或自动返工额度耗尽，不冒充成功也不挂人工决策，同时释放并发名额。恢复同一 Run：同 taskId + `wf_run entry=<termination.resume_node>`，恢复前先重检阻塞条件；恢复不改变快照、基线或已确认节点（不重复已确认节点）。
+- 原因码：`BUSINESS_BLOCKED`=环境/资料/权限暂缺（条件恢复后恢复）；`AUTO_REWORK_EXHAUSTED`=自动返工 3 轮耗尽（人工退回 REJECT 后新一轮交付自动重置额度）；`NEEDS_REDEFINE`=基线需重定义（`resumable=false`，不可原样恢复——完成重定义后重新发起，派生新 Run 并保留旧 Run 原样）。
+- `COMPLETION_MISSING`：脚本 DONE 但无有效业务完成映射，宿主不记 `COMPLETED`，补证后从 `resume_node` 恢复。
+- `DONE` → `COMPLETED` 仅当完成目标且材料有效（收口 `completion_type` 映射齐全）；探索类 `INSUFFICIENT` 是受控完成但显式标注证据不足。历史无终止描述的 DONE 保留 legacy 标记，不改写为已验证完成。
 
 ---
 

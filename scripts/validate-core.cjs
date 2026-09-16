@@ -30,6 +30,68 @@ const ON_MAX_ROUNDS = ['return', 'auto-reschedule']
 const WORKSPACE_TEMPLATE_IDS = ['construction', 'wf-optimize', 'wf-diagnose', 'wf-explore']
 const WORKSPACE_RESOURCE_KINDS = ['git', 'files', 'document', 'config', 'other']
 const MAX_ROUNDS_CAP = 9 // 系统约定上限：编辑器最大可设 9 轮（用户意见 Q7）
+
+// ---------- LOC-031 技术预算：retry_policy 契约（单一事实源） ----------
+// V1 建议基线（task-spec §9 接口与数据约定）：同一节点同一输入版本一次激活最多
+// 3 次模型尝试（含首次与格式修复）；暂时错误退避 1s、2s；单次调用截止 30 分钟；
+// Run 累计自动运行时间上限 4 小时（人工等待不计时）；无进展回边连续 2 次相同签名受阻。
+// 蓝图可在 control.retryPolicy 显式声明覆盖（结构校验见 validateRetryPolicy）；
+// 运行期启动时冻结为快照，恢复不得自动放宽或清零。
+const RETRY_POLICY_DEFAULTS = {
+  max_attempts: 3,
+  backoff_ms: [1000, 2000],
+  attempt_timeout_ms: 1800000,
+  run_auto_time_ms: 14400000,
+  no_progress_repeats: 2,
+}
+// 数值边界（校验内核与生成脚本共用常量，防两处口径漂移）
+const RETRY_POLICY_LIMITS = {
+  max_attempts_cap: 10,
+  ms_min: 1000,
+  ms_max: 24 * 60 * 60 * 1000,
+  backoff_entry_max: 3600000,
+}
+const RETRY_POLICY_KEYS = Object.keys(RETRY_POLICY_DEFAULTS)
+
+function validateRetryPolicy(rp) {
+  const errors = []
+  const err = (at, message) => errors.push({ at, message, fieldKey: fieldKeyOf(at) })
+  if (!rp || typeof rp !== 'object' || Array.isArray(rp)) {
+    err('$.control.retryPolicy', 'retryPolicy 必须是对象，允许键：' + RETRY_POLICY_KEYS.join(' | '))
+    return errors
+  }
+  const L = RETRY_POLICY_LIMITS
+  for (const k of Object.keys(rp)) {
+    if (!RETRY_POLICY_KEYS.includes(k)) err('$.control.retryPolicy.' + k, '未知键 ' + k + '（允许：' + RETRY_POLICY_KEYS.join(' | ') + '）')
+  }
+  if (rp.max_attempts !== undefined) {
+    if (!Number.isInteger(rp.max_attempts) || rp.max_attempts < 1 || rp.max_attempts > L.max_attempts_cap) {
+      err('$.control.retryPolicy.max_attempts', 'max_attempts 须为 1-' + L.max_attempts_cap + ' 的整数，当前：' + JSON.stringify(rp.max_attempts))
+    }
+  }
+  if (rp.backoff_ms !== undefined) {
+    const cap = (Number.isInteger(rp.max_attempts) && rp.max_attempts >= 1 ? rp.max_attempts : RETRY_POLICY_DEFAULTS.max_attempts) - 1
+    const okArr = Array.isArray(rp.backoff_ms) && rp.backoff_ms.length >= 1 && rp.backoff_ms.length <= cap
+      && rp.backoff_ms.every((v) => Number.isInteger(v) && v >= 0 && v <= L.backoff_entry_max)
+    if (!okArr) {
+      err('$.control.retryPolicy.backoff_ms', 'backoff_ms 须为 1-' + cap + ' 个 0-' + L.backoff_entry_max + ' 之间的整数毫秒（重试等待档位，相邻尝试之间逐档取用）')
+    }
+  }
+  const msField = (key) => {
+    if (rp[key] === undefined) return
+    if (!Number.isInteger(rp[key]) || rp[key] < L.ms_min || rp[key] > L.ms_max) {
+      err('$.control.retryPolicy.' + key, key + ' 须为 ' + L.ms_min + '-' + L.ms_max + ' 的整数毫秒，当前：' + JSON.stringify(rp[key]))
+    }
+  }
+  msField('attempt_timeout_ms')
+  msField('run_auto_time_ms')
+  if (rp.no_progress_repeats !== undefined) {
+    if (!Number.isInteger(rp.no_progress_repeats) || rp.no_progress_repeats < 1 || rp.no_progress_repeats > L.max_attempts_cap) {
+      err('$.control.retryPolicy.no_progress_repeats', 'no_progress_repeats 须为 1-' + L.max_attempts_cap + ' 的整数，当前：' + JSON.stringify(rp.no_progress_repeats))
+    }
+  }
+  return errors
+}
 const FANOUT_ITEMS_ARGS_RE = /^\$\.args(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
 const FANOUT_ITEMS_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
 // LOC-024 节点输入声明：选择器只支持 $.task / $.results.<节点id> 的明确字段链；
@@ -536,6 +598,13 @@ function validateBlueprint(bp, opts) {
   if (typeof bp.displayName !== 'string' || !bp.displayName.trim()) err('$.displayName', 'displayName（中文展示名）必填非空 —— 生成 skill 的触发词之一（FR-6）')
   if (bp.name !== undefined && bp.name !== bp.id) err('$.name', 'name 与 id 必须一致（单标识方案，D1），或删除 name')
   if (bp.onMaxRounds !== undefined && !ON_MAX_ROUNDS.includes(bp.onMaxRounds)) err('$.onMaxRounds', 'onMaxRounds ∈ { return, auto-reschedule }')
+  // LOC-031：技术预算策略声明（可选）。声明后编译期固化为运行起始快照的一部分；
+  // 运行期仍可用 retry_policy_overrides 在边界内显式调整，恢复采用冻结快照。
+  if (bp.control !== undefined && (bp.control === null || typeof bp.control !== 'object' || Array.isArray(bp.control))) {
+    err('$.control', 'control 必须是对象（{ maxRounds, retryPolicy? }）')
+  } else if (bp.control && bp.control.retryPolicy !== undefined && bp.control.retryPolicy !== null) {
+    errors.push(...validateRetryPolicy(bp.control.retryPolicy))
+  }
   // LOC-009：workspace 隔离策略声明（可选）。声明后 host 不再按模板 id 名字猜测；
   // template_id 权威集合 = workspace-isolation.mjs TEMPLATE_REGISTRY 的键。
   if (bp.workspace !== undefined) {
@@ -560,6 +629,14 @@ function validateBlueprint(bp, opts) {
     maxRounds: (bp.control && bp.control.maxRounds) !== undefined ? (bp.control && bp.control.maxRounds) : undefined,
   })
   errors.push(...structure.errors)
+
+  // LOC-030：M2 受阻开关（可选声明）。声明即「自动返工额度耗尽 → BLOCKED（非终态、可恢复
+  // 受阻，不再挂人工决策）」；目前仅接受 'BLOCKED' 一个值——其余取值视为拼写错误，
+  // 宁可 loud-fail 也不静默按旧语义（额度耗尽 → WAITING_HUMAN）运行。
+  const maxRoundsExhausted = bp.control && bp.control.maxRoundsExhausted
+  if (maxRoundsExhausted !== undefined && maxRoundsExhausted !== null && maxRoundsExhausted !== 'BLOCKED') {
+    err('$.control.maxRoundsExhausted', 'maxRoundsExhausted 目前仅接受 "BLOCKED"（额度耗尽 → 可恢复受阻，M2），当前：' + JSON.stringify(maxRoundsExhausted))
+  }
 
   // 蓝图级业务规则
   const ids = {}
@@ -1085,6 +1162,10 @@ module.exports = {
   COMPILE_INPUT_LIMIT_GOAL_BYTES,
   COND_RE,
   MAX_ROUNDS_CAP,
+  // LOC-031 技术预算：默认策略 / 数值边界 / 校验（生成脚本注入同源常量）
+  RETRY_POLICY_DEFAULTS,
+  RETRY_POLICY_LIMITS,
+  validateRetryPolicy,
   HUMAN_DECISION_ID,
   HD_REASONS,
   HD_CONTROL_RESULTS,

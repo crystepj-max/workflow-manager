@@ -82,6 +82,8 @@ return {
     const GENERATOR = CODE_ROOT ? CODE_ROOT + '/scripts/generate.mjs' : null
     const WS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/workspace-isolation-host.mjs' : null
     const RECORDS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/records-host.mjs' : null
+    // LOC-032：受管理外部操作账本 + execute-or-reconcile（与 records-host 同进程边界模式）
+    const OPERATIONS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/operations-host.mjs' : null
 
     // 项目根：会话 cwd 只在模型发起的调用中存在（浏览器 RPC / 审批激活都没有），
     // 因此每次实时探测，记住最近一次有效值，最后兜底 sandboxPolicy.workspaceRoot。
@@ -173,6 +175,8 @@ return {
           logicalRunsDir: home + '/visual-workflow/logical-runs',
           // Formal Records Store 目录（LOC-008）：与 logical-runs 同组织，一逻辑运行一文件
           recordsDir: home + '/visual-workflow/records',
+          // 受管理外部操作账本目录（LOC-032）：一 Run 一文件
+          operationsDir: home + '/visual-workflow/operations',
           skillRoot: home + '/skills',
           workspaces: home + '/workspaces',
         } : null))
@@ -611,7 +615,9 @@ return {
     const RUNS_RETAIN = 50
     // #80：PAUSED 属权威运行状态（宿主回写后不得被迟到的 workflow/end 以 'cancelled' 盖掉），
     // 但不是终态——终态判定仍以 LIFECYCLE_TERMINAL 为准。
-    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
+    // LOC-030：BLOCKED 同为权威运行状态（脚本受阻返回体不得被迟到的 end 盖成 'completed'），
+    // 且同样不是生命周期终态（可恢复受阻，terminal=false）—— holdsTask 不含它，并发名额随受阻释放。
+    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|BLOCKED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
     const HD_STRING_KEYS = ['decision_id', 'reason', 'node']
     const HD_NUMBER_KEYS = ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']
     const HD_OBJECT_KEYS = ['decision_package', 'control_event', 'blocked_edge', 'results']
@@ -664,7 +670,7 @@ return {
       for (const k of HD_OBJECT_KEYS) if (val[k] && typeof val[k] === 'object') rec[k] = val[k]
       if (Array.isArray(val.history)) rec.history = val.history
     }
-    const summary = (rec) => ({ id: rec.id, name: rec.meta.name, status: rec.status, phase: rec.phase, taskId: rec.taskId, workflowId: rec.workflowId, startedAt: rec.startedAt, supersededBy: rec.supersededBy, decision_id: rec.decision_id, reason: rec.reason })
+    const summary = (rec) => ({ id: rec.id, name: rec.meta.name, status: rec.status, phase: rec.phase, taskId: rec.taskId, workflowId: rec.workflowId, startedAt: rec.startedAt, supersededBy: rec.supersededBy, decision_id: rec.decision_id, reason: rec.reason, node: rec.node || '' })
 
     // 无定时器节流：每个 run 至多一个飞行中写入，期间变更只置 dirty，写完按最新态补一次尾写
     // （队列实现收敛于 runsStore，LOC-004；此处保留原函数名作为薄委托，19 个调用点零改动）
@@ -858,10 +864,27 @@ return {
     // 段收尾 → 八态 Lifecycle + 结构化 reason（R1/R6/R11）。引擎段状态原样保留在
     // segment.status；Lifecycle 闸门不改写专业结果（R7）——业务结果由
     // recordNodeAttempts 独立落档，不参与状态映射。
+    // LOC-030：脚本携带经校验的显式终止描述（termination={business_outcome,lifecycle,
+    // reason_code,resumable,resume_node,completion_type?}）时优先按描述映射——技术执行段
+    // 结束不再自动等于业务完成：BLOCKED 非终态可恢复；COMPLETED 描述必须有有效完成映射
+    //（value.completion.type），缺失降级 COMPLETION_MISSING 可恢复受阻；旧无描述 Run
+    // 保留 legacy 标识（不改写历史，不冒充已验证完成）。
     function logicalTransitionFor(canon, stopReason, value) {
       const v = value && typeof value === 'object' ? value : {}
+      const t = v.termination
+      const str = (x) => (typeof x === 'string' && x.trim() ? x.trim() : null)
+      const okDesc = t && typeof t === 'object' && (t.lifecycle === 'BLOCKED' || t.lifecycle === 'COMPLETED')
+        && str(t.business_outcome) && str(t.reason_code) && str(t.resume_node)
+      if (okDesc) {
+        if (t.lifecycle === 'BLOCKED') return { state: 'BLOCKED', reason: logicalReason(str(t.reason_code), str(t.business_outcome)) }
+        const comp = v.completion
+        return comp && typeof comp.type === 'string' && comp.type.trim()
+          ? { state: 'COMPLETED', reason: null }
+          : { state: 'BLOCKED', reason: logicalReason('COMPLETION_MISSING') }
+      }
       const reasonFromValue = typeof v.reason === 'string' && v.reason ? logicalReason(v.reason) : null
-      if (canon === 'DONE') return { state: 'COMPLETED', reason: null }
+      // 历史 DONE 无终止描述：无法可靠推断真实业务结果——保留 COMPLETED 终态并标记 legacy 映射
+      if (canon === 'DONE') return { state: 'COMPLETED', reason: logicalReason('LEGACY') }
       if (canon === 'STOPPED') return { state: 'STOPPED', reason: reasonFromValue || logicalReason('STOPPED') }
       if (canon === 'WAITING_HUMAN') return { state: 'WAITING_HUMAN', reason: reasonFromValue || logicalReason('ESCALATED_DECISION') }
       if (canon.indexOf('AWAITING_HUMAN_') === 0) return { state: 'WAITING_HUMAN', reason: logicalReason('LEGACY_GATE', canon) }
@@ -1561,6 +1584,8 @@ return {
               maxRounds: Number(ck.mr) || 0,
               decisionSeq: Number(ck.ds) || 0,
               degraded: false,
+              // LOC-031：检查点 tb（紧凑形 {u,g,m,mg,p,carry}）原样回带，脚本双形读取
+              ...(ck.tb && { technical_budget: ck.tb }),
             }
           }
         } catch (e) { /* 损坏行跳过，继续向前找 */ }
@@ -1612,6 +1637,8 @@ return {
         budgetUsed: Number(pr.budgetUsed) || 0,
         maxRounds: Number(pr.maxRounds) || 0,
         decisionSeq: Number(pr.decisionSeq) || 0,
+        // LOC-031：恢复携带冻结技术预算快照（脚本只读不回写；形状由脚本侧校验）
+        technical_budget: pr.technical_budget || undefined,
       }
       const applied = rec.baseline_applied_upto || 0
       const pending = (rec.baseline_revisions || []).filter((r) => r.revision > applied)
@@ -1686,10 +1713,12 @@ return {
       const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
       return TERMINAL_STATUS_RE.test(cand) ? cand : ''
     }
-    // 脚本终态 → workspace 生命周期：人工等待保留，DONE 完成，STOPPED 停止，其余失败
+    // 脚本终态 → workspace 生命周期：人工等待保留，DONE 完成，STOPPED 停止，
+    // BLOCKED 可恢复受阻（LOC-030：不落 FAILED，恢复后继续同一 Run），其余失败
     function lifecycleFor(canon, stopReason) {
       if (canon === 'DONE') return 'COMPLETED'
       if (canon === 'STOPPED') return 'STOPPED'
+      if (canon === 'BLOCKED') return 'BLOCKED'
       if (isHumanWait(canon)) return 'WAITING_HUMAN'
       if (canon || stopReason === 'cancelled' || stopReason === 'error') return 'FAILED'
       return null
@@ -1890,6 +1919,17 @@ return {
       if (!id || !recordId) return fail('缺少 logical_run_id / record_id')
       return recordsHostCall('get', { logical_run_id: id, record_id: recordId })
     })
+    // LOC-032：受管理外部操作入口（execute-or-reconcile）。已确认成功只确认不重复执行；
+    // 结果不确定先核查，无法核查时 NEEDS_RECONCILIATION 受阻（unknown 禁止再次执行）。
+    // 必填字段缺失在宿主侧拒绝；授权/能力/冲突等业务码由内核返回（operationsHostCall 透传）。
+    const opCall = (cmd, a, fields) => {
+      for (const k of fields) if (!String(((a || {})[k]) || '').trim()) return fail('缺少 ' + k)
+      return operationsHostCall(cmd, a)
+    }
+    registerRpc('vwf.operations.execute', (a) => opCall('execute', a, ['run_id', 'logical_action', 'target', 'authorization_scope', 'authorization_ref']))
+    registerRpc('vwf.operations.reconcile', (a) => opCall('reconcile', a, ['run_id', 'logical_action']))
+    registerRpc('vwf.operations.get', (a) => opCall('get', a, ['run_id', 'logical_action']))
+    registerRpc('vwf.operations.list', (a) => opCall('list', a, ['run_id']))
     registerRpc('vwf.artifacts.ingest', async (a) => {
       const { runId, nodeId, artifacts } = a
       if (!runId || !nodeId || !Array.isArray(artifacts) || !artifacts.length) return fail('缺少 runId / nodeId / artifacts')
@@ -2338,6 +2378,24 @@ return {
         return parsed.ok ? parsed : { ok: false, error: parsed.error || 'records host 业务错误' }
       } catch (e) { return { ok: false, error: 'records host 输出不可解析：' + errMsg(e), raw: r.stdout } }
     }
+    // LOC-032：操作账本进程边界（与 recordsHostCall 同模式）。外部交付动作可能慢，
+    // graceMs 放宽到 120s；业务受阻（NEEDS_RECONCILIATION 等）透传 code。
+    async function operationsHostCall(cmd, input, opts) {
+      if (!OPERATIONS_HOST || (await readTextIfExists(OPERATIONS_HOST)) === null) return { ok: false, notFound: true, error: 'operations-host.mjs 未找到（LOC-032 运行时集成未部署）' }
+      const d = await homeDirs()
+      if (!d) return { ok: false, error: '无法解析 DSH Home：operations 目录不可用' }
+      const payload = { ...input, operations_dir: input.operations_dir || d.operationsDir }
+      const r = await runNode([OPERATIONS_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 120000, maxBytes: 1024 * 1024 })
+      if (!r.ok) return { ok: false, error: 'operations host 调用失败：' + r.detail }
+      try {
+        const parsed = JSON.parse(r.stdout)
+        return parsed.ok ? parsed : {
+          ok: false, code: parsed.code, blocked: parsed.blocked === true,
+          status: parsed.status, operation_id: parsed.operation_id,
+          error: parsed.error || parsed.message || 'operations host 业务错误',
+        }
+      } catch (e) { return { ok: false, error: 'operations host 输出不可解析：' + errMsg(e), raw: r.stdout } }
+    }
     // 节点收尾产物 → commit 条目（单一提交通道的宿主侧采集）：
     //  - 每个本段新完成节点 → node:<logical_run_id>:<nodeId> 的追加 Revision；
     //  - verifyBranch 节点（审核/测试）强制加发 proof：<logical_run_id>:<nodeId> 的
@@ -2743,6 +2801,9 @@ return {
         blocked_edge: { type: 'object', additionalProperties: true, description: 'ADD_BUDGET 时被额度拦住的自动边 { from, to, on }' },
         results: { type: 'object', additionalProperties: true, description: '续跑时带回的节点结果快照' },
         model_overrides: { type: 'object', additionalProperties: true, description: '#79 续跑时可更换 Provider/Model：{ 节点id | "$default": { provider, model } }；产生追加式快照修订（旧修订保留可查），仅续跑生效' },
+        technical_budget: { type: 'object', additionalProperties: true },
+        technical_budget_grant: { type: 'object', additionalProperties: true, description: '提额' },
+        retry_policy_overrides: { type: 'object', additionalProperties: true, description: '时间上限可调' },
         resume_paused: { type: 'boolean', description: '#80 暂停恢复：对 PAUSED 的逻辑运行按检查点现场续跑同一 Logical Run；恢复后的节点读取暂停期间提交的全部 Guidance 与最新基线修订（wf_control 提交）' },
       },
       async execute(rawArgs) {
@@ -2837,6 +2898,12 @@ return {
               && latest.lifecycle.reason && typeof latest.lifecycle.reason.code === 'string'
               && latest.lifecycle.reason.code.indexOf('GATE_') === 0) {
             return '错误：逻辑运行 ' + latest.logical_run_id + ' 被集成闸门拦截（' + latest.lifecycle.reason.code + '）：人工决策续跑不可用，否则将绕过闸门放行。请从 uat 节点续跑同一逻辑运行（wf_run entry=uat），重新通过集成闸门后再进入人工验收。'
+          }
+          // LOC-030：NEEDS_REDEFINE 受阻不可原样恢复（resumable=false）——保留旧 Run 原样，
+          // 基线重定义后重新发起（派生新运行并保留来源），不在同一 Run 静默换版续跑。
+          if (latest && !latest.terminal && isResumeLike && latest.lifecycle.state === 'BLOCKED'
+              && latest.lifecycle.reason && latest.lifecycle.reason.code === 'NEEDS_REDEFINE') {
+            return '错误：逻辑运行 ' + latest.logical_run_id + '（NEEDS_REDEFINE）：基线需重定义，不可原样恢复；请重定义后重新发起（保留旧 Run）。'
           }
           logicalTrigger = isHdResume ? 'human_decision' : (isPauseResume ? 'pause_resume' : 'legacy_resume')
           // #80 暂停恢复：检查点现场 + 适用 Guidance（Run 级）+ 最新基线修订回填执行载荷
@@ -2974,6 +3041,7 @@ return {
           requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
           decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
           budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
+          technical_budget: args.technical_budget, technical_budget_grant: args.technical_budget_grant, retry_policy_overrides: args.retry_policy_overrides,
           // #80：暂停期间的用户指导（Run 级）与最新基线修订文本——经脚本 runtimeCtx/issueBlock
           // 注入执行上下文；普通 Guidance 不触碰基线，基线修订只经显式 mode=baseline 产生
           guidance_text: args.guidance_text, baseline_amendment: args.baseline_amendment,
@@ -3049,7 +3117,18 @@ return {
         // 权威终态回写：completed 时以脚本返回 value.status 为准；回执保持引擎原样不翻译
         // （LOC-027：基线闸门恢复段会接管 result，canon 相应重算）
         let canon = result && result.stopReason === 'completed' ? canonicalStop(result) : ''
-        if (canon) onRun(runId, (r) => { r.status = canon; applyHdValue(r, result.value) })
+        if (canon) {
+          onRun(runId, (r) => {
+            r.status = canon
+            applyHdValue(r, result.value)
+            // LOC-030：受阻回执统一解释——运行卡片带原因码与恢复入口（看板与 Skill 同口径）
+            const tv = canon === 'BLOCKED' && result.value && result.value.termination
+            if (tv && typeof tv.reason_code === 'string' && tv.reason_code) {
+              r.reason = tv.reason_code
+              if (typeof tv.resume_node === 'string' && tv.resume_node) r.node = tv.resume_node
+            }
+          })
+        }
         // 诊断可追溯：引擎 error/cancelled 的渲染错误写入运行记录（此前 result.error 被丢弃，
         // 现场只能看到 status=error 无从定位）
         if (result && result.error) {
@@ -3340,7 +3419,7 @@ return {
         refreshServices()
         const d = await homeDirs()
         return JSON.stringify({
-          pluginRoot: PLUGIN_ROOT, codeRoot: CODE_ROOT, dist: DIST, generator: GENERATOR, workspaceHost: WS_HOST, recordsHost: RECORDS_HOST,
+          pluginRoot: PLUGIN_ROOT, codeRoot: CODE_ROOT, dist: DIST, generator: GENERATOR, workspaceHost: WS_HOST, recordsHost: RECORDS_HOST, operationsHost: OPERATIONS_HOST,
           projectRoot: projectRoot(), dshHome: await dshHome(), generatedRoots: generatedRoots(), userDir: d && d.userDir, skillRoot: d && d.skillRoot, runsDir: d && d.runsDir, recordsDir: d && d.recordsDir,
           fsAvailable: fs !== undefined, subprocessAvailable: subprocess !== undefined, nodePath: await resolveNode(),
         }, null, 2)

@@ -75,6 +75,8 @@ WAITING_HUMAN（等待验收）
 
 人工验收退回后的新一轮交付，重新拥有最多 3 轮自动返工。
 
+**机制落点（LOC-030 统一受阻生命周期）**：蓝图以 `control.maxRoundsExhausted = "BLOCKED"` 声明本语义（仅建设模板）。额度耗尽时脚本返回 `status=BLOCKED` 与 `termination={business_outcome, lifecycle:"BLOCKED", reason_code:"AUTO_REWORK_EXHAUSTED", resumable:true, resume_node:<返工目标节点>}`，宿主映射为生命周期 `BLOCKED`（非终态、`terminal=false`）并释放并发名额，不再挂 `WAITING_HUMAN`。恢复同一 Run：同 taskId + `wf_run entry=<termination.resume_node>`（恢复前重检阻塞条件）；人工退回（REJECT）触发的恢复自动重置返工额度。`dev` 输出 `NEED_REDEFINE` 时 `reason_code=NEEDS_REDEFINE`、`resumable=false`：不可原样恢复，基线重定义后重新发起（派生新 Run 并保留旧 Run）。历史无终止描述的 DONE 保留 legacy 标记，不改写为已验证完成。
+
 ---
 
 ## 5. UAT 验收卡 → 等待验收

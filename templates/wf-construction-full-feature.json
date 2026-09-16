@@ -4,7 +4,18 @@
   "description": "M2 单任务交付：定义外置（从已定义开工）；自动返工上限 3；人工验收严格三态（通过 / 退回 / 有条件通过）。主链不含需求分析与方案设计门。",
   "entry": "preflight",
   "control": {
-    "maxRounds": 3
+    "maxRounds": 3,
+    "retryPolicy": {
+      "max_attempts": 3,
+      "backoff_ms": [
+        1000,
+        2000
+      ],
+      "attempt_timeout_ms": 1800000,
+      "run_auto_time_ms": 14400000,
+      "no_progress_repeats": 2
+    },
+    "maxRoundsExhausted": "BLOCKED"
   },
   "heteroCheck": "weak",
   "nodes": [

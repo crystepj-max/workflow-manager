@@ -174,9 +174,44 @@ test('端到端：一任务一提交合并回本地主干，标签与归档齐�
   assert.equal(after.merge.commit, out.commit)
   assert.equal(after.github_sync, 'pending')
 
-  // 分支与工作区保留（供后续补 PR）
+  // 阶段一口径：工作区自动删除、分支保留（供后续补 PR）
+  assert.equal(out.workspace.removed, true, JSON.stringify(out.workspace))
   assert.ok(g(['branch', '--list', 'dev-loc-001-r1'], repo))
-  assert.ok(fs.existsSync(worktreePathFor(repo, 'dev-loc-001-r1')))
+  assert.equal(fs.existsSync(worktreePathFor(repo, 'dev-loc-001-r1')), false)
+  assert.equal(g(['worktree', 'list', '--porcelain'], repo).includes(worktreePathFor(repo, 'dev-loc-001-r1')), false)
+  // 登记册写 branch_retained=true（否则 D-10 会静默跳过该任务）
+  assert.equal(after.branch_retained, true)
+})
+
+test('端到端：工作区不可删除时不被强制删除，合并不被阻塞且登记遗留', () => {
+  const repo = tmpRepo()
+  const rec = seedTask(repo)
+  const wt = makeBranch(repo, 'dev-loc-001-r1', 'a.txt', 'branch\n')
+  // 状态门禁（STATUS_PATHSPEC）排除 .scratch，故此处不算「工作区脏」，
+  // 但对 git 而言它是未跟踪文件——删除必须被拒绝，且不得使用 --force。
+  fs.mkdirSync(path.join(wt, '.scratch'), { recursive: true })
+  fs.writeFileSync(path.join(wt, '.scratch', 'leftover.txt'), '未归档残留\n')
+
+  const out = runMerge({ repo, taskId: rec.task_id, branch: 'dev-loc-001-r1', decision: 'accept' })
+  assert.equal(out.ok, true, JSON.stringify(out.failures))
+  assert.equal(out.merged, true)
+  assert.equal(out.workspace.removed, false)
+  // git 原话给出「需要 --force 才能删」——正是 R-4 禁止使用的路径
+  assert.match(out.workspace.error, /--force/)
+  assert.ok(fs.existsSync(wt), '工作区不得被强制删除')
+  assert.match(out.cleanup_hint, /未删除/)
+  // 分支仍保留
+  assert.ok(g(['branch', '--list', 'dev-loc-001-r1'], repo))
+})
+
+test('--keep-worktree：显式跳过工作区删除（非常规路径）', () => {
+  const repo = tmpRepo()
+  const rec = seedTask(repo)
+  const wt = makeBranch(repo, 'dev-loc-001-r1', 'a.txt', 'branch\n')
+  const out = runMerge({ repo, taskId: rec.task_id, branch: 'dev-loc-001-r1', decision: 'accept', keepWorktree: true })
+  assert.equal(out.merged, true)
+  assert.equal(out.workspace.removed, false)
+  assert.ok(fs.existsSync(wt))
 })
 
 test('端到端：冲突时中止，主干不受影响', () => {
