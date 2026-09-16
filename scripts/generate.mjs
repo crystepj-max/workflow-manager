@@ -780,8 +780,10 @@ export function compileBlueprint(bp, opts = {}) {
     'function autoClose() { if (openSince !== null) { autoMs += Math.max(0, CLOCK_NOW() - openSince); openSince = null } }',
     'function takeActivationKey(stage) {',
     '  let key',
+    // 恢复沿用冻结键的前提 = 输入与受阻时刻一致（激活 = 同节点 + 同输入版本）；业务输入
+    // 修订后旧键作废，新签名走全新键与全新预算，不继承已耗用量。
     '  if (carryStage === stage && carryKey) { key = carryKey }',
-    '  else if (tbAttachKey !== null && tbAttachKey.indexOf(stage + \'|\') === 0) { key = tbAttachKey; tbAttachKey = null }',
+    '  else if (tbAttachKey !== null && tbAttachKey.indexOf(stage + \'|\') === 0 && tbResumeDigest !== null && tbResumeDigest === inputDigest(stage, feedback)) { key = tbAttachKey; tbAttachKey = null }',
     '  else {',
     '    key = stage + \'|\' + inputDigest(stage, feedback) + \'#\' + (visitSeq++)',
     '    if (pendingGrantAttempts > 0) { actGrants[key] = (Number(actGrants[key]) || 0) + pendingGrantAttempts; pendingGrantAttempts = 0 }',
@@ -852,6 +854,7 @@ export function compileBlueprint(bp, opts = {}) {
     '    auto_ms: autoMs, auto_grant_ms: autoMsGrant, auto_limit_ms: autoLimit(),',
     '    cancellation: { model_call: \'best_effort\', note: \'无法强制终止第三方调用，超时后弃用其结果\' },',
     '    activation_key: activationKey || null,',
+    '    resume_digest: (activationKey && BYID[String(activationKey).split(\'|\')[0]]) ? inputDigest(String(activationKey).split(\'|\')[0], feedback) : null,',
     '    carry: (carryStage !== null && carryKey) ? { stage: carryStage, key: carryKey } : null,',
     '  }',
     '}',
@@ -978,6 +981,7 @@ export function compileBlueprint(bp, opts = {}) {
     'let pendingGrantAttempts = 0',
     'let visitSeq = 0',
     'let tbAttachKey = (TB_SNAP && typeof TB_SNAP.activation_key === \'string\' && TB_SNAP.activation_key) ? TB_SNAP.activation_key : null',
+    'let tbResumeDigest = (TB_SNAP && typeof TB_SNAP.resume_digest === \'string\' && TB_SNAP.resume_digest) ? TB_SNAP.resume_digest : null',
     // 历史兜底重建（未带快照的旧式续跑也不至于清零已耗技术预算）
     // LOC-030：终局命中的 outcome → $end 终止描述（循环内记录，finishRun 统一收束）
     'let endTerm = null',
