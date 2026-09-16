@@ -97,7 +97,7 @@ export function reconcilePlan(repo, baseRef = 'main') {
   return { toMerge, suspicious, ok, total: registry.tasks.length }
 }
 
-function apply(repo, baseRef) {
+function applyReconcile(repo, baseRef) {
   const registry = loadRegistry(repo)
   const facts = collectMergeFacts(repo, baseRef)
   const changed = []
@@ -115,6 +115,8 @@ function apply(repo, baseRef) {
   return changed
 }
 
+export { applyReconcile as apply }
+
 function main() {
   const cmd = process.argv[2]
   const get = (f) => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : undefined }
@@ -126,7 +128,7 @@ function main() {
     return
   }
   if (cmd === 'apply') {
-    const changed = apply(repo, baseRef)
+    const changed = applyReconcile(repo, baseRef)
     console.log(JSON.stringify({ changedCount: changed.length, changed }, null, 2))
     return
   }

@@ -47,6 +47,7 @@
 | ① 对账 | `scripts/registry-reconcile.mjs`（plan / apply） | 夜间批次开头；日常校验；发现账实不符时手工执行 |
 | ② 版本锁 | `scripts/local-task-registry.mjs` 的 load/save | 所有登记册写路径自动生效（revision 递增） |
 | ③ 依赖判定 | `scripts/ai-task-execution-plan.mjs` 的 assessCandidate | 每次批次构建自动生效 |
+| ④ 批次前对账 | `scripts/ai-task-scheduled-trigger.mjs` 唤起执行计划前 | 每次夜间批次自动生效；对账结果写入批次报告抬头，失败不阻塞 |
 
 ## 5. 验收标准
 
