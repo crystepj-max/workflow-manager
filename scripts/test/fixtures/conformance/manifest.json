@@ -1,0 +1,33 @@
+{
+  "frozen_at": "2026-09-17T00:00:00.000Z",
+  "task": "LOC-042",
+  "fixtures": {
+    "construction": {
+      "template": "wf-construction-full-feature",
+      "summary": "小型 Node CLI：保留 --help，新增 --version 输出 package.json 版本",
+      "acceptance": "node cli.mjs --version 与 package.json version 一致；--help 不回归；退出码 0",
+      "path": "construction"
+    },
+    "optimize": {
+      "template": "wf-optimize",
+      "summary": "非 Git 说明文档含 10 条编号完整原句；优化时逐字保留原句与编号，仅压缩外围说明 ≥20%（Unicode code point）",
+      "acceptance": "10 条事实映射成立；压缩率 ≥20%；编号与原句逐字保留",
+      "path": "optimize",
+      "fact_count": 10,
+      "min_reduction_ratio": 0.2
+    },
+    "diagnose": {
+      "template": "wf-diagnose",
+      "summary": "sum 函数漏计末项；[2,3,5] 错得 5，修复后 10；[]→0；[7]→7",
+      "acceptance": "buggy 稳定复现 5；fixed 得 10/0/7",
+      "path": "diagnose"
+    },
+    "explore": {
+      "template": "wf-explore",
+      "summary": "6 份本地资料：2 支持 A、2 支持 B、1 共同来源、1 成本未知；研究给定选择题",
+      "acceptance": "结论引用正确文件；反证保留；成本缺口不编造；覆盖部分失败",
+      "path": "explore",
+      "source_count": 6
+    }
+  }
+}
