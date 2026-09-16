@@ -75,7 +75,7 @@ export async function runPreflight(issuePath, specPath, opts = {}) {
 
   // 本地轨道附加校验：任务标识 + GitHub 同步状态
   if (status === STATUS_LOCAL_DEFINED) {
-    if (!taskId) fail('本地轨道任务必须填写「任务标识」（LOC-<序号>）')
+    if (!taskId) fail('本地轨道任务必须填写「任务标识」（LOC-<序号>，或 FEAT/FIX/CHORE-<远端号>）')
     if (!githubSync) fail('本地轨道任务必须填写「GitHub 同步」（pending / synced#N）')
     else if (!GITHUB_SYNC_VALUES.test(githubSync.trim())) {
       fail(`GitHub 同步取值非法：${githubSync}（应为 pending / synced#N / not-applicable）`)

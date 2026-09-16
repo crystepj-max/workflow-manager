@@ -11,16 +11,22 @@
  *   6. 先在主干并入任务分支试运行，冲突则中止（需人工解决）
  *
  * 执行：任务分支并入主干最新 → 归档三件套（任务卡 + 规格 + 证据摘要）→ squash 成一提交
- *      → 打标签 → 更新登记册与看板 → `git worktree prune` 兜底 → 可选推送镜像仓库（失败仅告警）
+ *      → 打标签 → 更新登记册与看板 → **删除本任务工作区（保留分支）** → `git worktree prune` 兜底
+ *      → 可选推送镜像仓库（失败仅告警）
  *
- * 收口四件事中的第 1、2 件由本脚本完成（归档三件套、兜底 prune）；
- * 删工作区与删分支属阶段一（托管暂停期）的人工确认动作，见
- * docs/design/workspace-directory-convention.md §1.7。
+ * 阶段一口径（托管暂停期，决策 0001 §6 / 约定 §1.7.1）：**删工作区、留分支**。
+ * 判据是「工作区可再生（`git worktree add` 从分支重建）、分支不可再生（补登 PR 的唯一载体）」。
+ * 因此本脚本完成收口四件事中的三件——归档三件套、删工作区、兜底 prune；
+ * 第四件（删分支）属阶段二（托管恢复后）动作，阶段一必须保留分支。
+ *
+ * 删除工作区的安全门（规格 §9 R-4）：仅在①登记册状态已合并 ②归档三件套已入库
+ * ③证据明细已按锚定规则落主检出 ④工作区无未提交改动/未跟踪文件 时执行；
+ * **不使用 `--force`**，被拒绝时只登记为遗留项，不阻塞合并主路径。
  *
  * CLI:
  *   node scripts/local-task-merge.mjs --task LOC-001 --branch dev-loc-001-r1 --decision accept|conditional_pass
  *     [--main main] [--worktree <path>] [--scope <范围>] [--feedback <优化意见>] [--mirror <remote>]
- *     [--run-dir <run目录>] [--repo <path>] [--dry-run]
+ *     [--run-dir <run目录>] [--repo <path>] [--keep-worktree] [--dry-run]
  */
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -42,6 +48,16 @@ function git(args, cwd) {
 
 // 运行产物目录（与 cwf-run-init 写入 info/exclude 的约定一致）不应判为「工作区脏」
 const STATUS_PATHSPEC = ['.', ':!.scratch', ':!.agent-runs']
+
+// 路径相等判定（realpath 容忍：macOS 上 /var 与 /private/var 互为软链）
+function samePath(a, b) {
+  if (path.resolve(a) === path.resolve(b)) return true
+  try {
+    return fs.realpathSync(a) === fs.realpathSync(b)
+  } catch {
+    return false
+  }
+}
 
 function worktreeStatus(cwd) {
   return git(['status', '--porcelain', '--', ...STATUS_PATHSPEC], cwd)
@@ -199,6 +215,7 @@ export function runMerge({
   mirror,
   worktree,
   runId,
+  keepWorktree = false,
   dryRun = false,
 }) {
   const check = checkMerge({ repo, taskId, branch, main, decision, worktree, runDir: undefined })
@@ -286,7 +303,15 @@ export function runMerge({
 
   // 4. 更新登记册与看板（spec_path 同步改指归档位置——否则收口后登记册仍指向
   //    .scratch 临时区的旧路径，成为悬空引用）
-  update(repo, taskId, { status: MERGED_STATUS, branch, merge_commit: 'PENDING', spec_path: specArchiveRel })
+  //    branch_retained 同步写入（阶段一口径 = 保留分支），使 D-10「收口口径一致」
+  //    覆盖全部已合并任务，而不是因字段缺失被静默跳过。
+  update(repo, taskId, {
+    status: MERGED_STATUS,
+    branch,
+    merge_commit: 'PENDING',
+    spec_path: specArchiveRel,
+    branch_retained: true,
+  })
   if (feedback) update(repo, taskId, { leftovers: feedback })
   writeBoard(repo)
 
@@ -306,7 +331,41 @@ export function runMerge({
     git(['tag', '-f', tag, commit], repo)
   } catch { /* 标签已存在时强制覆盖 */ }
 
-  // 7. 兜底注销失效的工作区登记：删父工作区不会级联注销其内部嵌套的子登记
+  // 7. 删除本任务工作区（阶段一口径：删工作区、留分支）。
+  //    安全门（规格 §9 R-4）：登记册已置「已合并」（上一步）、归档三件套已随提交入库、
+  //    证据明细已按锚定规则落主检出（步骤 3b）、工作区干净——四项同时满足才删。
+  //    **不使用 `--force`**：被拒绝时只登记遗留，不阻塞合并主路径（工作区可再生，分支已保留）。
+  let workspaceRemoved = false
+  let workspaceRemoveError = null
+  if (keepWorktree) {
+    workspaceRemoveError = '按 --keep-worktree 显式跳过删除（非常规路径）'
+  } else if (samePath(wt, repo)) {
+    workspaceRemoveError = '跳过删除：工作区路径与主干路径相同'
+  } else {
+    const dirty = worktreeStatus(wt)
+    if (dirty) {
+      workspaceRemoveError = `按 R-4 拒绝删除（有未提交改动或未跟踪文件，不使用 --force）：${dirty.split('\n')[0]}`
+    } else {
+      try {
+        git(['worktree', 'remove', wt], repo)
+        workspaceRemoved = true
+      } catch (e) {
+        // 保留 git 的原话（例如「contains modified or untracked files, use --force to delete it」），
+        // 这样才能让人从遗留项直接看出为什么没删、以及是否本可选用 --force（R-4 明确不许用）。
+        const detail = (e.stderr ? String(e.stderr).trim().split('\n')[0] : '') || String(e.message).split('\n')[0]
+        // 本机 safe-delete 钩子会让 git 报错而实际已删除（实例文档 §11.4 已记录该现象）：
+        // 一律以「登记已注销 + 磁盘已不存在」复核为准，避免把已完成的删除误记为遗留。
+        const stillRegistered = (git(['worktree', 'list', '--porcelain'], repo) || '').includes(wt)
+        if (!stillRegistered && !fs.existsSync(wt)) {
+          workspaceRemoved = true
+        } else {
+          workspaceRemoveError = `git worktree remove 被拒绝：${detail}`
+        }
+      }
+    }
+  }
+
+  // 8. 兜底注销失效的工作区登记：删父工作区不会级联注销其内部嵌套的子登记
   //    （约定 §1.7.4；该缺口已三次复现：dev-itest-a-01、ws-cwf-159-01、LOC-013 的三个 UAT 工作区）
   //    prune 失败不阻塞合并——它只是清理，不是交付条件。
   let pruned = false
@@ -343,9 +402,18 @@ export function runMerge({
     },
     pruned,
     mirror: mirrorResult,
+    workspace: {
+      path: wt,
+      removed: workspaceRemoved,
+      ...(workspaceRemoveError ? { error: workspaceRemoveError } : {}),
+    },
     cleanup_hint:
-      '三件套（任务卡 + 规格 + 证据摘要）已入库，失效登记已 prune。' +
-      '工作区与分支按托管暂停期口径保留：工作区可在确认无未归档内容后删除，分支待托管恢复补 PR 后再删。',
+      '三件套（任务卡 + 规格 + 证据摘要）已入库；失效登记已 prune；' +
+      (workspaceRemoved
+        ? `本任务工作区已删除（${wt}），分支 ${branch} 按阶段一口径保留，待托管恢复后补 PR 再删。`
+        : `本任务工作区未删除（${workspaceRemoveError}）；按 R-4 只登记遗留、不阻塞合并——` +
+          `确认无未归档内容后人工执行 git worktree remove ${wt}，随后 git worktree prune。` +
+          `分支 ${branch} 保留。`),
   }
 }
 
@@ -359,7 +427,7 @@ function main(argv) {
   const branch = get('--branch')
   const decision = get('--decision')
   if (!taskId || !branch || !decision) {
-    console.error('用法: node scripts/local-task-merge.mjs --task LOC-001 --branch dev-loc-001-r1 --decision accept|conditional_pass [--main main] [--worktree <path>] [--scope <x>] [--feedback <x>] [--mirror <remote>] [--repo <path>] [--dry-run]')
+    console.error('用法: node scripts/local-task-merge.mjs --task LOC-001 --branch dev-loc-001-r1 --decision accept|conditional_pass [--main main] [--worktree <path>] [--scope <x>] [--feedback <x>] [--mirror <remote>] [--repo <path>] [--keep-worktree] [--dry-run]')
     process.exit(2)
   }
   const repo = path.resolve(get('--repo') || process.cwd())
@@ -374,6 +442,7 @@ function main(argv) {
     mirror: get('--mirror'),
     worktree: get('--worktree'),
     runId: get('--run-id'),
+    keepWorktree: argv.includes('--keep-worktree'),
     dryRun: argv.includes('--dry-run'),
   })
   if (out.merged) update(repo, taskId, { github_sync: 'pending' })
