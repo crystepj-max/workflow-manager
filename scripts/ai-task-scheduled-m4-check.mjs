@@ -92,6 +92,7 @@ ok(
 ok(fs.existsSync(tmpReport), '须写出夜间批次报告')
 const reportText = fs.readFileSync(tmpReport, 'utf8')
 ok(/【夜间批次报告】/.test(reportText), '报告须有夜间抬头')
+ok(/【批次前对账（CHORE-73）】/.test(reportText) && /对账：/.test(reportText), '报告须含批次前对账段（CHORE-73）')
 ok(/等待验收/.test(reportText) && /未纳入|已完成/.test(reportText), '报告须含汇总分段')
 ok(/同一套 Execution Plan|未另写/.test(reportText), '报告须声明未另写调度规则')
 
@@ -100,6 +101,7 @@ try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */
 
 const skill = read('dsh/skills/execution-plan/SKILL.md')
 ok(/M4|定时|到点/.test(skill), 'execution-plan Skill 须提及定时/到点（M4）')
+ok(/批次前对账|registry-reconcile/.test(skill), 'Skill 须含批次前对账约定（CHORE-73）')
 
 if (errors.length) {
   console.error('M4 检查失败：')

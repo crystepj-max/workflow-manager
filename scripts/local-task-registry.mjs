@@ -284,13 +284,26 @@ function toBool(v) {
 
 export function loadRegistry(repo) {
   const p = registryPath(repo)
-  if (!fs.existsSync(p)) return { version: 1, tasks: [] }
+  if (!fs.existsSync(p)) return { version: 1, revision: 0, tasks: [] }
   const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'))
-  return { version: 1, tasks: [], ...parsed }
+  return { version: 1, revision: 0, tasks: [], ...parsed }
 }
 
 export function saveRegistry(repo, registry) {
   const p = registryPath(repo)
+  // 乐观锁（CHORE-73 第二层）：写回前校验「本会话读入之后，磁盘没有被其他会话改过」。
+  // 防住「长会话拿旧账本写回、覆盖别人新收口」的事故（2026-09-16 FIX-72 收口刷掉 FIX-65 收口状态）。
+  // 光比时间戳防不住——覆盖者会刷新时间戳；必须比版本号。
+  const disk = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf-8')) : null
+  const diskRevision = disk?.revision ?? 0
+  const mineRevision = registry.revision ?? 0
+  if (diskRevision !== mineRevision) {
+    throw new Error(
+      `登记册已被其他会话更新（磁盘 revision=${diskRevision}，本会话读入 revision=${mineRevision}），` +
+        '拒绝覆盖。请先 git pull 同步，再运行 node scripts/registry-reconcile.mjs apply 对账，然后重读本册操作。',
+    )
+  }
+  registry.revision = mineRevision + 1
   fs.mkdirSync(path.dirname(p), { recursive: true })
   fs.writeFileSync(p, JSON.stringify(registry, null, 2) + '\n')
   return p
