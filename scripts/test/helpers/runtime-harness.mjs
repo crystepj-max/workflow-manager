@@ -74,12 +74,25 @@ export function makeAgentScript(table) {
 }
 
 // ---------- 执行入口 ----------
-// run(script, { args, agent }) → { result, agentCalls, logs, phases }
-// 把脚本包进 async IIFE，再注入真实脚本契约中的五个钩子全局与 args。
-export async function runGeneratedScript(script, { args = {}, agent } = {}) {
+// run(script, { args, agent, mechanical }) → { result, agentCalls, mechanicalCalls, logs, phases }
+// 把脚本包进 async IIFE，再注入真实脚本契约中的钩子全局与 args。
+export async function runGeneratedScript(script, { args = {}, agent, mechanical } = {}) {
   const logs = []
   const phases = []
+  const mechanicalCalls = []
   const noAgent = async () => { throw new Error('排练厅：脚本调用了 agent 但未提供演员表') }
+  const defaultMechanical = async (id) => {
+    if (id === 'construction-preflight') {
+      return { route: 'PASS', summary: '排练厅默认机械通过', blockers: '', baseline_version: 'V1', mechanical: true, reasons: [] }
+    }
+    throw new Error('排练厅：脚本调用了 mechanical(' + id + ') 但未提供机械钩子')
+  }
+  const mechFn = mechanical || defaultMechanical
+  const wrappedMechanical = async (id, ctx) => {
+    const out = await mechFn(id, ctx)
+    mechanicalCalls.push({ id, ctx, out })
+    return out
+  }
   const parallel = async (thunks) => Promise.all(thunks.map(async (thunk) => {
     try { return await thunk() } catch (e) { return null }
   }))
@@ -92,8 +105,8 @@ export async function runGeneratedScript(script, { args = {}, agent } = {}) {
       return null
     }
   }))
-  const fn = new Function('args', 'agent', 'parallel', 'pipeline', 'log', 'phase',
+  const fn = new Function('args', 'agent', 'mechanical', 'parallel', 'pipeline', 'log', 'phase',
     'return (async () => {\n' + script + '\n})()')
-  const result = await fn(args, agent || noAgent, parallel, pipeline, (m) => logs.push(String(m)), (t) => phases.push(String(t)))
-  return { result, logs, phases, agentCalls: agent ? agent.calls : [] }
+  const result = await fn(args, agent || noAgent, wrappedMechanical, parallel, pipeline, (m) => logs.push(String(m)), (t) => phases.push(String(t)))
+  return { result, logs, phases, agentCalls: agent ? agent.calls : [], mechanicalCalls }
 }

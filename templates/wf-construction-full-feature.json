@@ -22,8 +22,9 @@
     {
       "id": "preflight",
       "profile": "evaluator",
+      "mechanical": "construction-preflight",
       "label": "实施前检查",
-      "goal": "对已定义任务做实施前硬门禁检查（不得跳过）。逐项核对：Issue 当前状态=已定义；无人值守许可=允许；本地任务规格可读且版本=Issue 需求基线版本；Run 绑定基线版本与 Issue 一致（若已绑定）；前置依赖=无；未决产品事项=0。全部通过则 route=PASS，并将已定义规格导入为已确认需求基线证据、写入定义外置说明性施工包（不是新的产品方案决策门），Issue 状态→交付中。任一项失败则 route=BLOCKED，写明原因，禁止进入开发。将检查结果写入 preflight-report.md；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "机械门禁（LOC-038）：调用 runPreflight 唯一实现，不消耗模型资格判断。逐项核对：Issue 当前状态=已定义/本地已定义；无人值守许可=允许；本地任务规格可读且版本=Issue 需求基线版本；Run 绑定基线版本与 Issue 一致（若已绑定）；前置依赖已完成（登记册+祖先校验）或同组环境串行满足；Definition Check 全部勾选且未决=0。全部通过则 route=PASS，并将已定义规格导入为已确认需求基线证据、写入定义外置说明性施工包（不是新的产品方案决策门），Issue 状态→交付中。任一项失败则 route=BLOCKED，写明原因，禁止进入开发（模型 PASS 无效）。将检查结果写入 preflight-report.md；最终回复只输出本节点 schema 对应 JSON。",
       "output": {
         "outcomePath": "$.route",
         "schema": {
