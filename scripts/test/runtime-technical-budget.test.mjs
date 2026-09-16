@@ -311,6 +311,46 @@ test('AC-03 显式提额：grant（增量+原因）后可继续，写入历史�
   assert.ok(third.result.detail.includes('reason'))
 })
 
+test('AC-03 业务输入新版本恢复：新激活签名获得全新预算，不继承已耗尽次数', async () => {
+  let evals = 0
+  const first = await runEngine(evaluateBp, {
+    intake: { go: 'NEXT' },
+    '/^execute/': { status: 'DONE' },
+    '/^evaluate/': () => {
+      evals += 1
+      return null
+    },
+  })
+  assert.equal(first.result.reason, 'TECHNICAL_BUDGET_EXHAUSTED')
+  // 业务输入修订（feedback 变化）后恢复：激活 = 同节点 + 同输入版本，新签名必须走全新键与全新预算，
+  // 不得沿用冻结键继承已耗用量（沿用则 0 次新调用立即再受阻）。
+  const resumedFeedback = first.result.resume.feedback + '\n[业务输入新版本 V2：验收标准已修订]'
+  let resumedCalls = 0
+  const second = await runEngine(evaluateBp, {
+    '/^evaluate/': () => {
+      resumedCalls += 1
+      return resumedCalls < 2 ? null : { verdict: 'PASS', completion_type: 'EVALUATION_PASSED' }
+    },
+  }, {
+    entry: first.result.resume.entry,
+    results: first.result.resume.results,
+    history: first.result.resume.history,
+    startRound: first.result.resume.startRound,
+    feedback: resumedFeedback,
+    budgetUsed: first.result.resume.budgetUsed,
+    maxRounds: first.result.resume.maxRounds,
+    decisionSeq: first.result.resume.decisionSeq,
+    technical_budget: first.result.resume.technical_budget,
+  })
+  assert.ok(resumedCalls > 0, '新业务输入必须获得全新激活预算（不得 0 次新调用即再受阻）')
+  assert.equal(second.result.status, 'DONE')
+  assert.notEqual(
+    second.result.technical_budget.activation_key,
+    first.result.resume.technical_budget.activation_key,
+    '输入版本变化后不得沿用受阻现场的激活键',
+  )
+})
+
 // ---------- AC-04：无进展回边（RECONFIRM 类）连续 2 次受阻；新目标/新基线不误判 ----------
 
 test('AC-04 无进展回边：第 2 次相同签名即受阻，业务额度 0 消耗', async () => {
