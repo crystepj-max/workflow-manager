@@ -30,7 +30,6 @@ import { mainCheckout } from './workspace-paths.mjs';
 const PROCESS_ARTIFACT_DIRS = ['.agent-runs', '.task-runs']; // 过程产物根（现行 + 目标）
 const LEGACY_RUN_ROOTS = ['.agent-runs'];                    // 待迁移的现行根
 const ARCHIVE_ROOT = 'docs/tasks/archive';
-const SPECS_ROOT = 'docs/tasks/specs';
 const REGISTRY = 'docs/tasks/registry.json';
 const TERMINAL_STATUSES = ['已合并', '已取消'];
 
@@ -40,6 +39,7 @@ const {
   BRANCH_RE,
   isMechanismDir,
   isResolvableRunDir,
+  isTaskId,
   parsePorcelain,
   scopeOfPath,
   findNestedWorktrees,
@@ -284,7 +284,13 @@ if (registry) {
   record('D-7', `终态任务（已合并/已取消，${terminal.length} 个）工作区已清理`, bad.length === 0, bad.length ? bad : ['无终态残留']);
 }
 
-// —— D-8 归档完整性（三件套：任务卡 + 规格终版 + 证据摘要）——
+// —— D-8 归档完整性 ——
+// 语义分层（FIX-72）：
+//   · 本地收口任务：全套三件套（任务卡 + 规格终版 + 证据摘要）——原有要求不变；
+//   · 远程收口任务（经 CNB 合并请求合入，本地无完整收口流程）：轻量归档——
+//     任务卡存根（.md）+ evidence-summary.json，摘要必须携带凭据字段（R-3）：
+//     `archive_form: "lightweight-remote"`、`merge.commit`（与登记册逐字一致）、
+//     `remote_ref`（CNB 指针）。缺任一凭据即失败——轻量 ≠ 无凭据。
 if (registry) {
   const merged = (registry.tasks || []).filter((t) => t.status === '已合并');
   const missing = [];
@@ -298,16 +304,37 @@ if (registry) {
     const hasCard = files.some((f) => f.startsWith(t.task_id) && f.endsWith('.md'));
     const hasSpec = files.some((f) => /^task-spec-V\d+\.md$/.test(f));
     const hasSummary = files.includes('evidence-summary.json');
-    if (!hasCard) missing.push(`${t.task_id} 缺任务卡（${ARCHIVE_ROOT}/${t.task_id}/）`);
-    if (!hasSpec) missing.push(`${t.task_id} 缺规格终版（${ARCHIVE_ROOT}/${t.task_id}/）`);
-    if (!hasSummary) missing.push(`${t.task_id} 缺证据摘要（${ARCHIVE_ROOT}/${t.task_id}/evidence-summary.json）`);
+    let summary = null;
+    if (hasSummary) {
+      try { summary = JSON.parse(fs.readFileSync(path.join(archiveDir, 'evidence-summary.json'), 'utf8')); } catch { /* 坏摘要按无凭据处理 */ }
+    }
+    const remoteCloseout = summary && summary.archive_form === 'lightweight-remote';
+    if (remoteCloseout) {
+      if (!hasCard) missing.push(`${t.task_id} 轻量归档缺任务卡存根（${ARCHIVE_ROOT}/${t.task_id}/）`);
+      const regCommit = t.merge && t.merge.commit;
+      if (!regCommit || !summary.merge || summary.merge.commit !== regCommit) {
+        missing.push(`${t.task_id} 轻量归档 merge.commit 与登记册不一致或缺失（R-5：禁止编造）`);
+      }
+      if (!summary.remote_ref) missing.push(`${t.task_id} 轻量归档缺 remote_ref（远程收口指针）`);
+    } else {
+      if (!hasCard) missing.push(`${t.task_id} 缺任务卡（${ARCHIVE_ROOT}/${t.task_id}/）`);
+      if (!hasSpec) missing.push(`${t.task_id} 缺规格终版（${ARCHIVE_ROOT}/${t.task_id}/）`);
+      if (!hasSummary) missing.push(`${t.task_id} 缺证据摘要（${ARCHIVE_ROOT}/${t.task_id}/evidence-summary.json）`);
+    }
   }
-  if (missing.length) record('D-8', `已合并任务（${merged.length} 个）归档三件套完整性`, false, missing);
-  else record('D-8', `已合并任务（${merged.length} 个）归档三件套完整性`, true, ['全部齐备（任务卡 + 规格终版 + 证据摘要）']);
-  // 已废弃目录不得残留（决策五方案甲：统一到 archive/）
-  const specsDir = path.join(root, SPECS_ROOT);
-  if (fs.existsSync(specsDir) && fs.readdirSync(specsDir).length) {
-    warn('D-8', `已废弃的 ${SPECS_ROOT}/ 仍存在（决策五：归档位置统一到 ${ARCHIVE_ROOT}/）`, fs.readdirSync(specsDir));
+  if (missing.length) record('D-8', `已合并任务（${merged.length} 个）归档完整性`, false, missing);
+  else record('D-8', `已合并任务（${merged.length} 个）归档完整性`, true, ['全部齐备（本地收口=三件套；远程收口=轻量归档含凭据）']);
+  // 决策五范围收窄（FIX-72）：docs/tasks/specs/ 已复位为「定义入库家」（2026-09-16 起），
+  // 不再作为废弃目录告警；警告改为检测 archive/ 内混入的非任务目录（同名漂移）。
+  const archiveRoot = path.join(root, ARCHIVE_ROOT);
+  if (fs.existsSync(archiveRoot)) {
+    const drift = fs
+      .readdirSync(archiveRoot, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !isTaskId(e.name))
+      .map((e) => e.name);
+    if (drift.length) {
+      warn('D-8', `${ARCHIVE_ROOT}/ 内出现非任务标识目录（同名漂移）`, drift);
+    }
   }
 }
 

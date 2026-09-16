@@ -7,9 +7,10 @@
 
 const path = require('node:path');
 
-// —— 命名派生规则（实例化说明 §1.1）——
-const TASK_ID_RE = /^(?:LOC|CWF)-\d+$/;
-const RUN_ID_RE = /^(?:loc|cwf)-\d+(?:-s\d+)?-r\d+$/;
+// —— 命名派生规则（实例化说明 §1.1；FIX-72 起认新编号前缀 FEAT/FIX/CHORE，
+//     与 CNB 远端发号 d34f618 对齐；旧前缀 LOC/CWF 永久向后兼容）——
+const TASK_ID_RE = /^(?:LOC|CWF|FEAT|FIX|CHORE)-\d+$/;
+const RUN_ID_RE = /^(?:loc|cwf|feat|fix|chore)-\d+(?:-s\d+)?-r\d+$/;
 const BRANCH_RE = /^dev-.+-r\d+$/;
 
 // 机制目录（非运行标识，由脚本按约定在产物根内生成，不算违规）：

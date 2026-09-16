@@ -27,6 +27,15 @@ test('TASK_ID：双轨道前缀 + 序号', () => {
   assert.equal(isTaskId('XYZ-1'), false);
 });
 
+test('TASK_ID：FIX-72 起认新编号前缀（CNB 远端发号对齐）', () => {
+  assert.equal(isTaskId('FIX-72'), true);
+  assert.equal(isTaskId('CHORE-36'), true);
+  assert.equal(isTaskId('FEAT-1'), true);
+  assert.equal(isTaskId('fix65'), false, '缺连字符');
+  assert.equal(isTaskId('FIX-65-x'), false, '带 slug 不是 TASK_ID');
+  assert.equal(isTaskId('Fix-65'), false, '大小写敏感');
+});
+
 test('RUN_ID：<task_id 小写>-r<n>，允许切片后缀', () => {
   assert.equal(isRunId('loc-018-r1'), true);
   assert.equal(isRunId('cwf-185-r1'), true);
@@ -36,6 +45,14 @@ test('RUN_ID：<task_id 小写>-r<n>，允许切片后缀', () => {
   assert.equal(isRunId('uat-budget-01'), false);
   assert.equal(isRunId('task'), false);
   assert.equal(isRunId('env-store'), false);
+});
+
+test('RUN_ID：新前缀（feat/fix/chore）向后兼容旧前缀', () => {
+  assert.equal(isRunId('fix-65-r1'), true);
+  assert.equal(isRunId('chore-36-r1'), true);
+  assert.equal(isRunId('feat-1-s01-r1'), true, '切片后缀同样适用');
+  assert.equal(isRunId('Fix-65-r1'), false, '大小写敏感');
+  assert.equal(isRunId('fix-65-compile-output-size'), false, '带 slug 的形态不是 RUN_ID（单轨：须重建为 dev-fix-65-r1）');
 });
 
 test('机制目录由脚本按约定生成，不算运行标识违规', () => {
