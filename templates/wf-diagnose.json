@@ -4,7 +4,17 @@
   "description": "诊断缺陷修复正式模板：缺陷诊断 → 修复 → 审核 → 回归验证 → 收口；先诊断后修复，原始 feedback signal 贯穿全程；修复问题回修复、证据推翻根因回诊断（均消耗自动回退额度，默认 3）；证据不足且不可复现时受阻，不猜根因；默认无独立人工验收节点。",
   "entry": "diagnose",
   "control": {
-    "maxRounds": 3
+    "maxRounds": 3,
+    "retryPolicy": {
+      "max_attempts": 3,
+      "backoff_ms": [
+        1000,
+        2000
+      ],
+      "attempt_timeout_ms": 1800000,
+      "run_auto_time_ms": 14400000,
+      "no_progress_repeats": 2
+    }
   },
   "heteroCheck": "weak",
   "nodes": [
@@ -13,6 +23,20 @@
       "profile": "diagnose",
       "label": "缺陷诊断",
       "goal": "从冻结 Source 开始诊断缺陷：以原始 feedback signal 为线索，先复现、再定位根因，产出根因结论与证据链（含 verified_head 锚定的复现输入与观察输出），写入 `diagnosis-report.md`。证据不足且不可复现时输出 BLOCKED（不猜根因，如实写明缺失的证据与复现尝试）；根因明确则输出 DIAGNOSED。最终回复只输出本节点 schema 对应 JSON。",
+      "inputs": [
+        {
+          "name": "refuted_by_review",
+          "from": "$.results.review.verdict_reason",
+          "required": true,
+          "default": "（首次诊断：尚无审核反证）"
+        },
+        {
+          "name": "refuted_by_regression",
+          "from": "$.results.regression.verdict_reason",
+          "required": true,
+          "default": "（首次诊断：尚无回归反证）"
+        }
+      ],
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -53,6 +77,36 @@
       "profile": "dev",
       "label": "修复",
       "goal": "只针对诊断结论（`diagnosis-report.md`）的根因修复，以原始 feedback signal 为验收基准做最小必要修改，不得顺手扩大范围；修复必须可被证据链解释（修改点与根因对应）。外部条件无法安全继续时输出 BLOCKED；否则输出 FIXED。将修复交接写入 `fix-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "inputs": [
+        {
+          "name": "diagnosis_root_cause",
+          "from": "$.results.diagnose.root_cause",
+          "required": true
+        },
+        {
+          "name": "diagnosis_evidence",
+          "from": "$.results.diagnose.evidence",
+          "required": true
+        },
+        {
+          "name": "diagnosis_report",
+          "from": "$.results.diagnose.verified_head",
+          "artifact": "diagnosis-report.md",
+          "required": true
+        },
+        {
+          "name": "review_feedback",
+          "from": "$.results.review.verdict_reason",
+          "required": true,
+          "default": "（首次进入修复：尚无审核反馈）"
+        },
+        {
+          "name": "regression_feedback",
+          "from": "$.results.regression.verdict_reason",
+          "required": true,
+          "default": "（首次进入修复：尚无回归反馈）"
+        }
+      ],
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -88,7 +142,8 @@
       "id": "review",
       "profile": "review",
       "label": "审核",
-      "goal": "对照 `diagnosis-report.md` 与 `fix-report.md` 审核修复：修改是否与根因对应、是否最小、原始 feedback signal 场景是否被覆盖、是否引入新问题。结论四选一：APPROVE（通过，交回归验证）/ FIX_ISSUES（修复本身有问题，退修复）/ ROOT_CAUSE_REFUTED（审核证据推翻根因结论，回缺陷诊断）/ BLOCKED。不得代行修复。最终回复只输出本节点 schema 对应 JSON。",
+      "verifyBranch": true,
+      "goal": "对照 `diagnosis-report.md` 与 `fix-report.md` 审核修复：修改是否与根因对应、是否最小、原始 feedback signal 场景是否被覆盖、是否引入新问题。结论四选一：APPROVE（通过，交回归验证）/ FIX_ISSUES（修复本身有问题，退修复）/ ROOT_CAUSE_REFUTED（审核证据推翻根因结论，回缺陷诊断）/ BLOCKED。不得代行修复。将审查报告写入 `review-report.md`；最终回复只输出本节点 schema 对应 JSON。",
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -105,11 +160,23 @@
             },
             "verdict_reason": {
               "type": "string"
+            },
+            "verified_branch": {
+              "type": "string"
+            },
+            "verified_head": {
+              "type": "string"
+            },
+            "candidate_sha256": {
+              "type": "string"
             }
           },
           "required": [
             "route",
-            "verdict_reason"
+            "verdict_reason",
+            "verified_branch",
+            "verified_head",
+            "candidate_sha256"
           ],
           "additionalProperties": false
         },
@@ -122,7 +189,8 @@
       "id": "regression",
       "profile": "test",
       "label": "回归验证",
-      "goal": "以原始 feedback signal 为第一回归输入验证修复：缺陷场景不再复现，且既有行为无回归（运行与修改相关的既有测试）。结论四选一：PASS（回归通过，交收口）/ FIX_ISSUES（修复未生效或引入新问题，退修复）/ ROOT_CAUSE_REFUTED（回归证据推翻根因结论，回缺陷诊断）/ BLOCKED。不得修改被测代码。最终回复只输出本节点 schema 对应 JSON。",
+      "verifyBranch": true,
+      "goal": "以原始 feedback signal 为第一回归输入验证修复：缺陷场景不再复现，且既有行为无回归（运行与修改相关的既有测试）。结论四选一：PASS（回归通过，交收口）/ FIX_ISSUES（修复未生效或引入新问题，退修复）/ ROOT_CAUSE_REFUTED（回归证据推翻根因结论，回缺陷诊断）/ BLOCKED。不得修改被测代码。将回归证据写入 `regression-report.md`；最终回复只输出本节点 schema 对应 JSON。",
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -142,12 +210,24 @@
             },
             "regression_evidence": {
               "type": "string"
+            },
+            "verified_branch": {
+              "type": "string"
+            },
+            "verified_head": {
+              "type": "string"
+            },
+            "candidate_sha256": {
+              "type": "string"
             }
           },
           "required": [
             "route",
             "verdict_reason",
-            "regression_evidence"
+            "regression_evidence",
+            "verified_branch",
+            "verified_head",
+            "candidate_sha256"
           ],
           "additionalProperties": false
         },
@@ -160,9 +240,10 @@
       "id": "closeout",
       "profile": "closeout",
       "label": "收口",
-      "goal": "仅对回归验证通过的同一修复成果收口：保留诊断、修复、审核、回归四类记录，不得重新开发或改写结论；遗留观察项写入 followups 供后续定义摄入。完成后写 `cleanup-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "仅对回归验证通过的同一修复成果收口：保留诊断、修复、审核、回归四类记录，不得重新开发或改写结论；遗留观察项写入 followups 供后续定义摄入。完成后写 `cleanup-report.md`；最终回复只输出本节点 schema 对应 JSON，status=DELIVERED、completion_type=DELIVERED（完成映射）。",
       "output": {
         "outcomePath": "$.status",
+        "completionPath": "$.completion_type",
         "schema": {
           "type": "object",
           "properties": {
@@ -171,6 +252,10 @@
               "enum": [
                 "DELIVERED"
               ]
+            },
+            "completion_type": {
+              "type": "string",
+              "const": "DELIVERED"
             },
             "summary": {
               "type": "string"
@@ -181,6 +266,7 @@
           },
           "required": [
             "status",
+            "completion_type",
             "summary",
             "followups"
           ],

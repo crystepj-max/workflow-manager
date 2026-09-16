@@ -123,12 +123,16 @@ test('CONFIRM 升人工决策（含冻结契约摘要材料），ACCEPT 续跑�
   assert.equal(resume.result.completion && resume.result.completion.type, 'USER_ACCEPTED')
 })
 
-test('目标确认 BLOCKED：直达结束，不进入执行', async () => {
+test('目标确认 BLOCKED：统一受阻生命周期（非终态可恢复），不进入执行', async () => {
   const { result } = await runEngine(optimizeBp, {
     目标确认: { route: 'BLOCKED', summary: '目标不可验证', contract_digest: '' },
   })
-  assert.equal(result.status, 'DONE')
-  assert.equal(result.completion ?? null, null)
+  // LOC-030：确认环境/资料暂缺 → status=BLOCKED（不再伪装 DONE），带可恢复终止描述
+  assert.equal(result.status, 'BLOCKED')
+  assert.equal(result.termination.reason_code, 'BUSINESS_BLOCKED')
+  assert.equal(result.termination.resumable, true)
+  assert.equal(result.termination.resume_node, 'confirm')
+  assert.equal(result.completion, null)
   assert.ok(!result.results.execute, '不得进入执行节点')
 })
 

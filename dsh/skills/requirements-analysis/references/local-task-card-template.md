@@ -23,7 +23,7 @@
 | 施工环境组 | （独立任务填本任务标识；子任务填父任务标识） |
 | 施工环境角色 | 独立 / 成员 |
 | 无人值守许可 | 允许 / 不允许 |
-| 任务规格位置 | `.scratch/LOC-001-<slug>/task-spec-V1.md` |
+| 任务规格位置 | `docs/tasks/specs/<任务标识>-<slug>/task-spec-V1.md`（必须入库，禁止指向 `.scratch/`） |
 | 定义时间 | （确认「本地已定义」时写入 ISO 8601） |
 | GitHub 同步 | pending / synced#N / not-applicable（**取值受实施前检查校验，不得写「待补 issue」等自然语言**） |
 

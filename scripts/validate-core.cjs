@@ -30,8 +30,75 @@ const ON_MAX_ROUNDS = ['return', 'auto-reschedule']
 const WORKSPACE_TEMPLATE_IDS = ['construction', 'wf-optimize', 'wf-diagnose', 'wf-explore']
 const WORKSPACE_RESOURCE_KINDS = ['git', 'files', 'document', 'config', 'other']
 const MAX_ROUNDS_CAP = 9 // 系统约定上限：编辑器最大可设 9 轮（用户意见 Q7）
+
+// ---------- LOC-031 技术预算：retry_policy 契约（单一事实源） ----------
+// V1 建议基线（task-spec §9 接口与数据约定）：同一节点同一输入版本一次激活最多
+// 3 次模型尝试（含首次与格式修复）；暂时错误退避 1s、2s；单次调用截止 30 分钟；
+// Run 累计自动运行时间上限 4 小时（人工等待不计时）；无进展回边连续 2 次相同签名受阻。
+// 蓝图可在 control.retryPolicy 显式声明覆盖（结构校验见 validateRetryPolicy）；
+// 运行期启动时冻结为快照，恢复不得自动放宽或清零。
+const RETRY_POLICY_DEFAULTS = {
+  max_attempts: 3,
+  backoff_ms: [1000, 2000],
+  attempt_timeout_ms: 1800000,
+  run_auto_time_ms: 14400000,
+  no_progress_repeats: 2,
+}
+// 数值边界（校验内核与生成脚本共用常量，防两处口径漂移）
+const RETRY_POLICY_LIMITS = {
+  max_attempts_cap: 10,
+  ms_min: 1000,
+  ms_max: 24 * 60 * 60 * 1000,
+  backoff_entry_max: 3600000,
+}
+const RETRY_POLICY_KEYS = Object.keys(RETRY_POLICY_DEFAULTS)
+
+function validateRetryPolicy(rp) {
+  const errors = []
+  const err = (at, message) => errors.push({ at, message, fieldKey: fieldKeyOf(at) })
+  if (!rp || typeof rp !== 'object' || Array.isArray(rp)) {
+    err('$.control.retryPolicy', 'retryPolicy 必须是对象，允许键：' + RETRY_POLICY_KEYS.join(' | '))
+    return errors
+  }
+  const L = RETRY_POLICY_LIMITS
+  for (const k of Object.keys(rp)) {
+    if (!RETRY_POLICY_KEYS.includes(k)) err('$.control.retryPolicy.' + k, '未知键 ' + k + '（允许：' + RETRY_POLICY_KEYS.join(' | ') + '）')
+  }
+  if (rp.max_attempts !== undefined) {
+    if (!Number.isInteger(rp.max_attempts) || rp.max_attempts < 1 || rp.max_attempts > L.max_attempts_cap) {
+      err('$.control.retryPolicy.max_attempts', 'max_attempts 须为 1-' + L.max_attempts_cap + ' 的整数，当前：' + JSON.stringify(rp.max_attempts))
+    }
+  }
+  if (rp.backoff_ms !== undefined) {
+    const cap = (Number.isInteger(rp.max_attempts) && rp.max_attempts >= 1 ? rp.max_attempts : RETRY_POLICY_DEFAULTS.max_attempts) - 1
+    const okArr = Array.isArray(rp.backoff_ms) && rp.backoff_ms.length >= 1 && rp.backoff_ms.length <= cap
+      && rp.backoff_ms.every((v) => Number.isInteger(v) && v >= 0 && v <= L.backoff_entry_max)
+    if (!okArr) {
+      err('$.control.retryPolicy.backoff_ms', 'backoff_ms 须为 1-' + cap + ' 个 0-' + L.backoff_entry_max + ' 之间的整数毫秒（重试等待档位，相邻尝试之间逐档取用）')
+    }
+  }
+  const msField = (key) => {
+    if (rp[key] === undefined) return
+    if (!Number.isInteger(rp[key]) || rp[key] < L.ms_min || rp[key] > L.ms_max) {
+      err('$.control.retryPolicy.' + key, key + ' 须为 ' + L.ms_min + '-' + L.ms_max + ' 的整数毫秒，当前：' + JSON.stringify(rp[key]))
+    }
+  }
+  msField('attempt_timeout_ms')
+  msField('run_auto_time_ms')
+  if (rp.no_progress_repeats !== undefined) {
+    if (!Number.isInteger(rp.no_progress_repeats) || rp.no_progress_repeats < 1 || rp.no_progress_repeats > L.max_attempts_cap) {
+      err('$.control.retryPolicy.no_progress_repeats', 'no_progress_repeats 须为 1-' + L.max_attempts_cap + ' 的整数，当前：' + JSON.stringify(rp.no_progress_repeats))
+    }
+  }
+  return errors
+}
 const FANOUT_ITEMS_ARGS_RE = /^\$\.args(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
 const FANOUT_ITEMS_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)?$/
+// LOC-024 节点输入声明：选择器只支持 $.task / $.results.<节点id> 的明确字段链；
+// 禁止 eval、路径穿越与目录扫描（V1 无任意表达式执行器）。
+const INPUT_NAME_RE = /^[a-z][a-z0-9_]*$/
+const INPUT_SELECTOR_TASK_RE = /^\$\.task(?:\.[A-Za-z0-9_-]+)*$/
+const INPUT_SELECTOR_RESULTS_RE = /^\$\.results\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)*$/
 const HD_RESULT_RE = /^[A-Z][A-Z0-9_]*$/
 const HD_REASONS = ['HUMAN_ACCEPTANCE', 'ESCALATED_DECISION', 'MAX_ROUNDS_REACHED']
 const HD_CONTROL_RESULTS = ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP']
@@ -531,6 +598,13 @@ function validateBlueprint(bp, opts) {
   if (typeof bp.displayName !== 'string' || !bp.displayName.trim()) err('$.displayName', 'displayName（中文展示名）必填非空 —— 生成 skill 的触发词之一（FR-6）')
   if (bp.name !== undefined && bp.name !== bp.id) err('$.name', 'name 与 id 必须一致（单标识方案，D1），或删除 name')
   if (bp.onMaxRounds !== undefined && !ON_MAX_ROUNDS.includes(bp.onMaxRounds)) err('$.onMaxRounds', 'onMaxRounds ∈ { return, auto-reschedule }')
+  // LOC-031：技术预算策略声明（可选）。声明后编译期固化为运行起始快照的一部分；
+  // 运行期仍可用 retry_policy_overrides 在边界内显式调整，恢复采用冻结快照。
+  if (bp.control !== undefined && (bp.control === null || typeof bp.control !== 'object' || Array.isArray(bp.control))) {
+    err('$.control', 'control 必须是对象（{ maxRounds, retryPolicy? }）')
+  } else if (bp.control && bp.control.retryPolicy !== undefined && bp.control.retryPolicy !== null) {
+    errors.push(...validateRetryPolicy(bp.control.retryPolicy))
+  }
   // LOC-009：workspace 隔离策略声明（可选）。声明后 host 不再按模板 id 名字猜测；
   // template_id 权威集合 = workspace-isolation.mjs TEMPLATE_REGISTRY 的键。
   if (bp.workspace !== undefined) {
@@ -555,6 +629,14 @@ function validateBlueprint(bp, opts) {
     maxRounds: (bp.control && bp.control.maxRounds) !== undefined ? (bp.control && bp.control.maxRounds) : undefined,
   })
   errors.push(...structure.errors)
+
+  // LOC-030：M2 受阻开关（可选声明）。声明即「自动返工额度耗尽 → BLOCKED（非终态、可恢复
+  // 受阻，不再挂人工决策）」；目前仅接受 'BLOCKED' 一个值——其余取值视为拼写错误，
+  // 宁可 loud-fail 也不静默按旧语义（额度耗尽 → WAITING_HUMAN）运行。
+  const maxRoundsExhausted = bp.control && bp.control.maxRoundsExhausted
+  if (maxRoundsExhausted !== undefined && maxRoundsExhausted !== null && maxRoundsExhausted !== 'BLOCKED') {
+    err('$.control.maxRoundsExhausted', 'maxRoundsExhausted 目前仅接受 "BLOCKED"（额度耗尽 → 可恢复受阻，M2），当前：' + JSON.stringify(maxRoundsExhausted))
+  }
 
   // 蓝图级业务规则
   const ids = {}
@@ -617,6 +699,70 @@ function validateBlueprint(bp, opts) {
     if (!bp.edges.some((e) => e && e.from === n.id && e.on === 'failure')) {
       err('$.nodes[' + n.id + '].kind', 'fanout 节点必须有 failure 出边')
     }
+  })
+
+  // LOC-024 节点输入声明（显式交接节点输入与返工反馈）：
+  //   - required/optional 必须显式声明；首次运行默认值以 default 显式声明
+  //   - 选择器只支持 $.task[.字段链] / $.results.<节点id>[.字段链]
+  //   - 生产节点必须沿结构边（success/outcome）先于消费节点（自引用需结构自环，如返工 outcome 自环）
+  //   - artifact 引用必须已在该生产节点 output.files 声明（引用错误在编译期拦截）
+  //   - 旧蓝图整体省略 inputs = 旧输入模式（legacy），运行时维持原行为
+  bp.nodes.forEach((n) => {
+    if (!n || !n.id) return
+    if (n.inputs === undefined) return
+    const kind = n.kind === undefined ? 'worker' : n.kind
+    if (kind === 'fanout') {
+      err('$.nodes[' + n.id + '].inputs', 'fanout 节点禁止 inputs（并行子代理不参与节点级输入交接）')
+      return
+    }
+    if (!Array.isArray(n.inputs) || n.inputs.length === 0) {
+      err('$.nodes[' + n.id + '].inputs', 'inputs 必须是非空数组（维持旧输入模式请整体省略该字段）')
+      return
+    }
+    const seenNames = {}
+    n.inputs.forEach((b, i) => {
+      const at = '$.nodes[' + n.id + '].inputs[' + i + ']'
+      if (!b || typeof b !== 'object' || Array.isArray(b)) {
+        err(at, '输入绑定必须是对象 { name, from, required, default?, artifact? }')
+        return
+      }
+      if (typeof b.name !== 'string' || !INPUT_NAME_RE.test(b.name)) {
+        err(at + '.name', '绑定名必填且为 snake_case（小写字母开头，仅小写字母/数字/下划线），当前：' + JSON.stringify(b.name))
+      } else if (seenNames[b.name]) {
+        err(at + '.name', '绑定名重复：' + b.name)
+      }
+      seenNames[b.name] = true
+      if (b.required !== true && b.required !== false) {
+        err(at + '.required', 'required 必须显式声明为布尔（true=必需，false=可选；可选未产生时按声明走 default/缺省）')
+      }
+      let producer = null
+      if (typeof b.from !== 'string' || (!INPUT_SELECTOR_TASK_RE.test(b.from) && !INPUT_SELECTOR_RESULTS_RE.test(b.from))) {
+        err(at + '.from', 'from 选择器仅支持 $.task[.字段链] 或 $.results.<节点id>[.字段链] 的明确字段链（禁止 eval、路径穿越与目录扫描），当前：' + JSON.stringify(b.from))
+      } else {
+        const rm = INPUT_SELECTOR_RESULTS_RE.exec(b.from)
+        if (rm) {
+          producer = rm[1]
+          if (!ids[producer]) {
+            err(at + '.from', 'from 引用的生产节点 ' + producer + ' 不存在')
+          } else if (!successPathExists(producer, n.id, bp.edges)) {
+            err(at + '.from', 'from 引用的生产节点 ' + producer + ' 必须沿结构边（success/outcome，含返工 outcome 环）先于消费节点 ' + n.id)
+          }
+        }
+      }
+      if (b.artifact !== undefined) {
+        if (typeof b.artifact !== 'string' || !b.artifact.trim() || b.artifact.startsWith('/') || b.artifact.includes('..')) {
+          err(at + '.artifact', 'artifact 必须是生产节点 output.files 中声明的相对文件名（禁止绝对路径与路径穿越），当前：' + JSON.stringify(b.artifact))
+        } else if (!producer) {
+          err(at + '.artifact', 'artifact 引用必须配合 $.results.<节点id> 选择器使用（任务输入没有产物文件）')
+        } else if (ids[producer]) {
+          const prod = bp.nodes.find((x) => x && x.id === producer)
+          const files = prod && prod.output && prod.output.files
+          if (!files || typeof files !== 'object' || Array.isArray(files) || !Object.keys(files).includes(b.artifact)) {
+            err(at + '.artifact', 'artifact ' + b.artifact + ' 未在生产节点 ' + producer + ' 的 output.files 中声明（引用错误须在编译期定位）')
+          }
+        }
+      }
+    })
   })
 
   // output.files 契约（蓝图级，DSL 无此字段）
@@ -777,6 +923,73 @@ function validateBlueprint(bp, opts) {
         if (isTechnicalEdge(e)) err(at + '.on', '旧模式节点禁止 on: technical（技术失败仍走 failure）')
       })
     }
+  })
+
+  // 裁决一致性声明（LOC-025 / WR-002）：双裁决字段节点（route + verdict / result）可在
+  // output.consistency 声明配对表 { field, pairs }——pairs 以业务路由取值为键、该路由下
+  // 结论字段必须等于的取值为值。机制全局（校验器只认蓝图声明表），语义随模板（建设
+  // review/test 的 6 个合法组合声明在 templates/wf-construction-full-feature.json，不伪装
+  // 为既有全局语义）。运行时（generate.mjs 产物）在路由选择前按同一张表做确定性检查，
+  // 表外组合以 CONTRACT_INCONSISTENT 拒绝，不作专业通过判断。未声明的节点维持原行为
+  // （旧蓝图零迁移；已启动运行的冻结快照不受影响）。
+  bp.nodes.forEach((n) => {
+    if (!n || !n.id) return
+    const decl = n.output && n.output.consistency
+    if (decl === undefined) return
+    const at = '$.nodes[' + n.id + '].output.consistency'
+    if (!hasOutcomePath(n)) {
+      err(at, 'consistency 仅支持声明了 outcomePath 的业务结果路由节点（矛盾组合须在路由选择前被确定性拒绝）')
+      return
+    }
+    if (!decl || typeof decl !== 'object' || Array.isArray(decl)) {
+      err(at, 'consistency 必须是对象 { field, pairs }')
+      return
+    }
+    if (typeof decl.field !== 'string' || !decl.field.trim()) {
+      err(at + '.field', 'consistency.field 必填（与业务路由配对的结论字段名，如 verdict / result）')
+    }
+    if (!decl.pairs || typeof decl.pairs !== 'object' || Array.isArray(decl.pairs) || Object.keys(decl.pairs).length === 0) {
+      err(at + '.pairs', 'consistency.pairs 必填（非空对象：业务路由取值 → 结论字段取值）')
+      return
+    }
+    const schema = n.output.schema
+    if (!schema || typeof schema !== 'object') return // schema 缺失由 outcomePath 规则另行报错，此处不重复
+    const outSegs = parseJsonPath(String(n.output.outcomePath).trim())
+    if (!outSegs) return // outcomePath 格式由其规则报错，此处不重复
+    if (outSegs.length === 1 && outSegs[0] === decl.field) {
+      err(at + '.field', 'consistency.field 不得与 outcomePath 字段同名（自我配对无意义）')
+    }
+    if (!pathInSchema(schema, [decl.field])) {
+      err(at + '.field', 'consistency.field 未在 output.schema 中声明：' + decl.field)
+      return
+    }
+    const fieldVals = enumerableValues(schemaLeafAt(schema, [decl.field]))
+    if (!fieldVals) {
+      err(at + '.field', 'consistency.field 必须可穷举（enum / const / oneOf 常量），当前：' + decl.field)
+      return
+    }
+    const outVals = enumerableValues(schemaLeafAt(schema, outSegs)) || []
+    const seenFieldVals = {}
+    const pairKeys = Object.keys(decl.pairs)
+    pairKeys.forEach((k) => {
+      const v = decl.pairs[k]
+      if (!outVals.some((x) => outcomeKey(x) === outcomeKey(k))) {
+        err(at + '.pairs', 'consistency.pairs 键 ' + outcomeKey(k) + ' 不在 outcomePath 枚举内（允许：' + outVals.map((x) => outcomeKey(x)).join('、') + '）')
+      }
+      if (!fieldVals.some((x) => outcomeKey(x) === outcomeKey(v))) {
+        err(at + '.pairs', 'consistency.pairs 值 ' + outcomeKey(v) + ' 不在字段 ' + decl.field + ' 枚举内（允许：' + fieldVals.map((x) => outcomeKey(x)).join('、') + '）')
+      }
+      const fk = outcomeKey(v)
+      if (seenFieldVals[fk]) {
+        err(at + '.pairs', '同一结论取值 ' + fk + ' 不得配对多个路由取值（每份专业结论只有一种可解释的路由）')
+      }
+      seenFieldVals[fk] = true
+    })
+    outVals.forEach((v) => {
+      if (!pairKeys.some((k) => outcomeKey(k) === outcomeKey(v))) {
+        err(at + '.pairs', '路由枚举取值 ' + outcomeKey(v) + ' 缺少配对（pairs 必须覆盖 outcomePath 全部取值，防止未声明组合绕过路由前检查）')
+      }
+    })
   })
 
   // Human Decision（#116）：拓扑已在结构层允许 $human-decision；此处钉契约键与互斥。
@@ -949,6 +1162,10 @@ module.exports = {
   COMPILE_INPUT_LIMIT_GOAL_BYTES,
   COND_RE,
   MAX_ROUNDS_CAP,
+  // LOC-031 技术预算：默认策略 / 数值边界 / 校验（生成脚本注入同源常量）
+  RETRY_POLICY_DEFAULTS,
+  RETRY_POLICY_LIMITS,
+  validateRetryPolicy,
   HUMAN_DECISION_ID,
   HD_REASONS,
   HD_CONTROL_RESULTS,

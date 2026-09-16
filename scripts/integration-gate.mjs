@@ -14,7 +14,7 @@
 //   import { planTargetSync, performTargetSync, buildSyncRecordEntry, integrationSyncRecordId } from './integration-gate.mjs'
 
 import { execFileSync } from 'node:child_process'
-import { getRunWorkspace, integrationResourceKey, recordSourceSync } from './workspace-isolation.mjs'
+import { captureCandidate, getRunWorkspace, integrationResourceKey, recordSourceSync } from './workspace-isolation.mjs'
 
 // 同步证据记录（Formal Records artifact）：B4 的载体——目标前进并完成同步后，
 // 宿主必须以本 id 追加新 Revision；重跑产生的新 Proof 依赖它，旧 Proof 由
@@ -56,6 +56,9 @@ export function planTargetSync(registry, logicalRunId, targetRef) {
     git(['merge-base', '--is-ancestor', target_head, 'HEAD'], ws.source_path)
     integrated_before = true
   } catch (e) { /* 非祖先 = 未含目标，需要 merge */ }
+  // LOC-026：读侧随 plan 捕获当前实况候选（与 Proof 签发捕获同口径，默认排除 Run 产物
+  // 目录）；捕获失败 = plan 失败（fail closed，不得在候选未知时放行）。
+  const candidate = captureCandidate(ws, { exclude: ['.agent-runs/' + String(logicalRunId)] })
   return {
     ok: true,
     resource_key: integrationResourceKey({ repository: ws.repository, target_ref: ref }),
@@ -65,6 +68,7 @@ export function planTargetSync(registry, logicalRunId, targetRef) {
     effective_base: ws.base_commit,
     source_path: ws.source_path,
     work_branch: ws.work_branch,
+    candidate,
   }
 }
 

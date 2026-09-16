@@ -4,14 +4,24 @@
   "description": "优化快速迭代正式模板：目标确认（生成并冻结 evaluation contract）→ 执行（最小必要修改，保护已满足部分）→ 评估（只输出 PASS / OPTIMIZE / CONFIRM）→ 收口；OPTIMIZE 回执行消耗自动回退额度（默认 3）；完成类型区分 EVALUATION_PASSED / USER_ACCEPTED。",
   "entry": "confirm",
   "control": {
-    "maxRounds": 3
+    "maxRounds": 3,
+    "retryPolicy": {
+      "max_attempts": 3,
+      "backoff_ms": [
+        1000,
+        2000
+      ],
+      "attempt_timeout_ms": 1800000,
+      "run_auto_time_ms": 14400000,
+      "no_progress_repeats": 2
+    }
   },
   "nodes": [
     {
       "id": "confirm",
       "profile": "requirements",
       "label": "目标确认",
-      "goal": "与当前优化目标对齐，生成并冻结 evaluation contract（评估契约：优化目标、范围、已满足部分基线、可验证的评估标准与通过判据），写入 `evaluation-contract.md`。契约一经本节点输出即冻结，执行与评估节点只读引用，不得由执行或评估改写。目标缺失或不可验证时如实写入契约的未决节并输出 BLOCKED。最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "与当前优化目标对齐，生成并冻结 evaluation contract（评估契约：优化目标、范围、已满足部分基线、可验证的评估标准与通过判据），写入 `evaluation-contract.md`。契约一经本节点输出即冻结，执行与评估节点只读引用，不得由执行或评估改写。contract_digest 必须是对 `evaluation-contract.md` 真实字节计算的小写十六进制 SHA-256（用本地命令如 sha256sum 或 node crypto 计算，不得凭空填写或自行编造摘要）；运行时会在本节点 READY 后读取原始字节重新计算并保存不可变副本，声称摘要与真实摘要不一致时本节点结果将被拒绝并要求重试。目标缺失或不可验证时如实写入契约的未决节并输出 BLOCKED。最终回复只输出本节点 schema 对应 JSON。",
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -47,7 +57,46 @@
       "id": "execute",
       "profile": "dev",
       "label": "执行",
-      "goal": "只依据冻结的 evaluation contract（`evaluation-contract.md`）施工：采用最小必要修改达成未满足目标，显式保护已满足部分不被回归。发现冻结的 evaluation contract 因新事实、约束或环境变化已不再可执行时，输出 RECONFIRM_REQUIRED（这不是评估裁决，返回目标确认重新确认或修订契约）；外部条件无法安全继续时输出 BLOCKED；否则输出 READY。将执行交接写入 `execute-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "只依据冻结的 evaluation contract 施工：运行时已把确认节点的契约保存为不可变副本（活动评价基线冻结副本，路径与 SHA-256 摘要见运行上下文的评价基线注入），原路径 `evaluation-contract.md` 不再是权威。采用最小必要修改达成未满足目标，显式保护已满足部分不被回归。发现活动评价基线因新事实、约束或环境变化已不再可执行时，输出 RECONFIRM_REQUIRED（这不是评估裁决，返回目标确认重新确认或修订契约；重新确认将产生显式新版本基线，旧版本基线的 PASS 不再适用）；外部条件无法安全继续时输出 BLOCKED；否则输出 READY。将执行交接写入 `execute-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "inputs": [
+        {
+          "name": "evaluation_verdict",
+          "from": "$.results.evaluate.route",
+          "required": true,
+          "default": "（首轮执行：尚无评估裁决，按冻结契约执行）"
+        },
+        {
+          "name": "evaluation_summary",
+          "from": "$.results.evaluate.summary",
+          "required": true,
+          "default": "（首轮执行：尚无评估摘要）"
+        },
+        {
+          "name": "evaluation_gaps",
+          "from": "$.results.evaluate.gaps",
+          "required": true,
+          "default": "（首轮执行：尚无评估差距清单）"
+        },
+        {
+          "name": "evaluation_contract_digest",
+          "from": "$.results.evaluate.contract_digest",
+          "required": true,
+          "default": "（首轮执行：尚无评估契约引用）"
+        },
+        {
+          "name": "evaluation_contract",
+          "from": "$.results.confirm.contract_digest",
+          "artifact": "evaluation-contract.md",
+          "required": true
+        },
+        {
+          "name": "current_deliverable",
+          "from": "$.results.execute.changed",
+          "artifact": "execute-report.md",
+          "required": true,
+          "default": "（首轮执行：尚无当前成果）"
+        }
+      ],
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -84,7 +133,7 @@
       "id": "evaluate",
       "profile": "evaluator",
       "label": "评估",
-      "goal": "只依据冻结的 evaluation contract（`evaluation-contract.md`）评估执行结果，评估结论只允许三选一：PASS（已满足契约判据）/ OPTIMIZE（未满足，给出差距清单）/ CONFIRM（契约判据无法自动判定，升人工确认）。不改写执行节点的原结果，也不改写冻结契约。将评估报告（含 PASS/OPTIMIZE/CONFIRM 判据引用）写入 `evaluation-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "只依据冻结的 evaluation contract 评估执行结果：运行时已把确认节点的契约保存为不可变副本（活动评价基线冻结副本，路径与 SHA-256 摘要见运行上下文的评价基线注入），必须读取该冻结副本评估，原路径 `evaluation-contract.md` 不是权威；contract_digest 必须原样回填活动基线注入的摘要，与活动基线不一致的评估结论将被拒绝（旧版本基线的 PASS 不适用于新版本基线）。评估结论只允许三选一：PASS（已满足契约判据）/ OPTIMIZE（未满足，给出差距清单）/ CONFIRM（契约判据无法自动判定，升人工确认）。不改写执行节点的原结果，也不改写冻结契约。将评估报告（含 PASS/OPTIMIZE/CONFIRM 判据引用）写入 `evaluation-report.md`；最终回复只输出本节点 schema 对应 JSON。",
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -126,6 +175,30 @@
       "profile": "closeout",
       "label": "收口",
       "goal": "区分完成类型并收口：本轮经评估 PASS 自动进入时 completion_type=EVALUATION_PASSED；经人工决策 ACCEPT 进入时 completion_type=USER_ACCEPTED。保留评估报告与执行交接，不得重新开发或改写评估结论。完成后写 `cleanup-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "inputs": [
+        {
+          "name": "evaluation_verdict",
+          "from": "$.results.evaluate.route",
+          "required": true
+        },
+        {
+          "name": "evaluation_summary",
+          "from": "$.results.evaluate.summary",
+          "required": true
+        },
+        {
+          "name": "evaluation_report",
+          "from": "$.results.evaluate.summary",
+          "artifact": "evaluation-report.md",
+          "required": true
+        },
+        {
+          "name": "execute_handover",
+          "from": "$.results.execute.changed",
+          "artifact": "execute-report.md",
+          "required": true
+        }
+      ],
       "output": {
         "outcomePath": "$.status",
         "completionPath": "$.completion_type",
@@ -260,6 +333,11 @@
         "model": "deepseek-flash"
       }
     }
+  },
+  "evaluationBaseline": {
+    "artifact": "evaluation-contract.md",
+    "digestField": "contract_digest",
+    "producerNode": "confirm"
   },
   "heteroCheck": "weak"
 }

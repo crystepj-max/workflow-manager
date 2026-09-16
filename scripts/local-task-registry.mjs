@@ -15,9 +15,20 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { execFileSync } from 'node:child_process'
+import os from 'node:os'
 
+// 旧编号（2026-09-15 及之前分配的历史任务）：LOC-<三位序号>，由本机计算，双机并行会撞号。
 export const TASK_ID_PREFIX = 'LOC-'
 export const ID_PATTERN = /^LOC-(\d{3,})$/
+
+// 新编号（2026-09-16 起）：<类型>-<远端 issue 号>，号由 CNB 服务端分配，本机不自己算。
+// FEAT 需求迭代 / FIX 缺陷修复 / CHORE 维护性（文档、脚本、口径收敛、测试补齐）
+export const TASK_TYPES = ['FEAT', 'FIX', 'CHORE']
+export const TYPE_LABELS = { FEAT: '需求迭代', FIX: '缺陷修复', CHORE: '维护性' }
+export const NEW_ID_PATTERN = /^(FEAT|FIX|CHORE)-(\d+)$/
+// 远端不可达时的临时号：TMP-<机器码>-<日期><当日序号>，联网后必须换取正式号
+export const TMP_ID_PATTERN = /^TMP-[a-z0-9]+-\d{6}[a-z]?$/i
 
 // 状态词汇唯一来源（LOC-002）：merge / preflight 一律引用这里的常量，禁止字面量重抄。
 export const STATUS_LOCAL_DEFINED = '本地已定义'
@@ -55,6 +66,70 @@ export function slugify(name, fallback = 'task') {
   return s || fallback
 }
 
+// —— 远端发号（CNB）——
+// 任务编号由 CNB 建 issue 时服务端分配，本机不再自己算号，从根上消除双机/多会话撞号。
+// 仓库 slug 从 git remote 的 cnb 远端解析，不写死。
+export function resolveRemoteSlug(repo) {
+  try {
+    const url = execFileSync('git', ['-C', repo, 'remote', 'get-url', 'cnb'], { encoding: 'utf8' }).trim()
+    const m = /^[a-z]+:\/\/[^/]+\/(.+?)(?:\.git)?$/i.exec(url)
+    return m ? m[1] : null
+  } catch {
+    return null
+  }
+}
+
+export function machineCode() {
+  return String(os.hostname() || 'local').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'local'
+}
+
+/**
+ * 在 CNB 建 issue 并取得服务端分配的编号。
+ * @returns {number} issue 编号
+ * @throws 远端不可达或建 issue 失败时抛错，由调用方降级为临时号
+ */
+export function remoteAllocate({
+  type = 'FEAT',
+  name,
+  body = '',
+  priority = null,
+  repo = process.cwd(),
+} = {}) {
+  const slug = resolveRemoteSlug(repo)
+  if (!slug) throw new Error('未找到 cnb 远端，无法向远端申请编号')
+  const args = [
+    'issues', 'create-issue',
+    '--repo', slug,
+    '--title', name,
+    '--labels', String(type).toLowerCase(),
+    '--body', body,
+    '--verbose',
+  ]
+  if (priority) args.push('--priority', priority)
+  const out = execFileSync('cnb', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const m = /"number"\s*:\s*"?(\d+)"?/.exec(out)
+  if (!m) throw new Error('远端未返回 issue 编号')
+  return Number(m[1])
+}
+
+/**
+ * 远端不可达时的临时号：TMP-<机器码>-<年月日><当日序号>。
+ * 不计入正式序列，联网后必须换取正式号。
+ */
+export function tmpId(records, now = new Date()) {
+  const d = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+  const prefix = `TMP-${machineCode()}-${d}`
+  const used = new Set(
+    records.map((r) => String(r?.task_id ?? '')).filter((id) => id.toUpperCase().startsWith(prefix.toUpperCase())),
+  )
+  const letters = 'abcdefghijklmnopqrstuvwxyz'
+  for (const c of letters) {
+    const id = `${prefix}${c}`
+    if (!used.has(id)) return id
+  }
+  throw new Error('当日临时号已用尽')
+}
+
 // 证据明细保留期（天）。起算点是**合并时间**，不是创建时间。
 // 依据：docs/design/workspace-directory-convention.md §1.8。
 export const DEFAULT_EVIDENCE_RETENTION_DAYS = 7
@@ -67,17 +142,27 @@ export function evidenceExpiry(mergedAt, retentionDays = DEFAULT_EVIDENCE_RETENT
 
 export function newRecord({
   seq,
+  taskId,
   name,
+  slug,
   source = '会话录入',
   sourceRef = '',
   baseline = 'V1',
   now = new Date().toISOString(),
+  type = 'FEAT',
+  remote = null,
+  legacyId = null,
 }) {
   if (!name) throw new Error('任务名称必填（--name）')
   return {
-    task_id: formatId(seq),
+    task_id: taskId ?? formatId(seq),
+    type,
+    remote,
+    legacy_id: legacyId,
+    origin_machine: machineCode(),
+    origin_agent: process.env.AI_AGENT_NAME ?? null,
     name,
-    slug: slugify(name),
+    slug: slug || slugify(name),
     source,
     source_ref: sourceRef,
     baseline,
@@ -104,6 +189,10 @@ export function applyUpdate(record, patch = {}) {
   const allowed = [
     'name',
     'slug',
+    'type',
+    'remote',
+    'legacy_id',
+    'origin_agent',
     'source',
     'source_ref',
     'baseline',
@@ -148,17 +237,28 @@ export function renderBoard(records) {
     groups.get(key).push(r)
   }
   const lines = ['# 本地任务看板', '', '> 自动生成，请勿手工编辑。来源：`docs/tasks/registry.json`', '']
+  const pendingRemote = records.filter(
+    (r) => r.status !== '已合并' && r.status !== '已取消' && (r.remote === 'pending' || r.remote == null || r.remote === 'none'),
+  )
+  if (pendingRemote.length > 0) {
+    lines.push(
+      `> ⚠️ 待换取远端正式号：**${pendingRemote.length}** 个（${pendingRemote.map((r) => r.task_id).join('、')}）`,
+      '',
+    )
+  }
   let total = 0
   for (const status of order) {
     const items = groups.get(status)
     if (!items || items.length === 0) continue
     total += items.length
     lines.push(`## ${status}（${items.length}）`, '')
-    lines.push('| 任务标识 | 任务名称 | 来源 | 基线 | GitHub 同步 | 更新于 |')
-    lines.push('|---|---|---|---|---|---|')
+    lines.push('| 任务标识 | 类型 | 任务名称 | 来源 | 基线 | 远端 | 更新于 |')
+    lines.push('|---|---|---|---|---|---|---|')
     for (const r of items) {
+      const type = r.type ? `${TYPE_LABELS[r.type] ?? r.type}` : '-'
+      const remote = r.remote ?? (r.github_sync === 'pending' ? '待同步' : (r.github_sync ?? '-'))
       lines.push(
-        `| ${r.task_id} | ${r.name} | ${r.source ?? '-'} | ${r.baseline ?? '-'} | ${r.github_sync ?? '-'} | ${r.updated_at ?? '-'} |`,
+        `| ${r.task_id} | ${type} | ${r.name} | ${r.source ?? '-'} | ${r.baseline ?? '-'} | ${remote} | ${r.updated_at ?? '-'} |`,
       )
     }
     lines.push('')
@@ -196,9 +296,56 @@ export function saveRegistry(repo, registry) {
   return p
 }
 
-export function allocate(repo, { name, source, sourceRef, baseline }) {
+// 建 issue 时的正文：任务卡还没写出来，先把登记册里的已知信息落远端，联网可查。
+function issueBody({ name, source, sourceRef, baseline }) {
+  return [
+    `任务名称: ${name}`,
+    `需求来源: ${source ?? '会话录入'}`,
+    `来源定位: ${sourceRef || '（待补）'}`,
+    `需求基线: ${baseline ?? 'V1'}`,
+    '',
+    '_本 issue 由任务登记册在建任务时自动创建，任务卡全文随后补入。_',
+  ].join('\n')
+}
+
+/**
+ * 分配任务编号：默认向 CNB 申请（服务端发号，双机/多会话不会撞号）；
+ * 远端不可达或显式 --offline 时降级为临时号，remote 记为 pending，联网后须换取正式号。
+ */
+export function allocate(repo, { name, slug, source, sourceRef, baseline, type = 'FEAT', priority = null, offline = false }) {
+  const t = String(type).toUpperCase()
+  if (!TASK_TYPES.includes(t)) throw new Error(`任务类型必须是 ${TASK_TYPES.join(' / ')} 之一`)
   const registry = loadRegistry(repo)
-  const record = newRecord({ seq: nextSeq(registry.tasks), name, source, sourceRef, baseline })
+  let taskId
+  let remote
+  const remoteSlug = offline ? null : resolveRemoteSlug(repo)
+  if (offline) {
+    taskId = tmpId(registry.tasks)
+    remote = 'pending'
+  } else if (!remoteSlug) {
+    // 未配置 cnb 远端（如临时目录、测试仓）：沿用旧的本地序号，并明确标注无远端锚点。
+    taskId = formatId(nextSeq(registry.tasks))
+    remote = 'none'
+    console.error(`[warn] 未配置 cnb 远端，已用本地序号 ${taskId}；该号无远端锚点，双机并行可能撞号`)
+  } else {
+    try {
+      const number = remoteAllocate({
+        type: t,
+        name,
+        body: issueBody({ name, source, sourceRef, baseline }),
+        priority,
+        repo,
+      })
+      taskId = `${t}-${number}`
+      remote = `cnb#${number}`
+    } catch (err) {
+      taskId = tmpId(registry.tasks)
+      remote = 'pending'
+      console.error(`[warn] 远端发号失败（${err.message}），已降级为临时号 ${taskId}，联网后请换取正式号`)
+    }
+  }
+  const record = newRecord({ name, source, sourceRef, baseline, taskId, type: t, remote, slug })
+  if (priority) record.priority = priority
   registry.tasks.push(record)
   saveRegistry(repo, registry)
   return record
@@ -233,11 +380,18 @@ function main(argv) {
   if (cmd === 'allocate') {
     const name = get('--name')
     if (!name) {
-      console.error('用法: allocate --name <任务名称> [--slug <x>] [--source <来源>] [--source-ref <x>] [--repo <path>]')
+      console.error(
+        '用法: allocate --name <任务名称> [--type FEAT|FIX|CHORE] [--priority P0..P2] [--offline]\n' +
+          '        [--slug <x>] [--source <来源>] [--source-ref <x>] [--repo <path>]',
+      )
       process.exit(2)
     }
     const rec = allocate(repo, {
       name,
+      slug: get('--slug'),
+      type: get('--type') || 'FEAT',
+      priority: get('--priority') || null,
+      offline: argv.includes('--offline'),
       source: get('--source') || '会话录入',
       sourceRef: get('--source-ref') || '',
       baseline: get('--baseline') || 'V1',
@@ -261,9 +415,12 @@ function main(argv) {
     const retention = get('--retention-days')
     const rec = update(repo, taskId, {
       status: get('--status'),
+      type: get('--type'),
+      remote: get('--remote'),
       baseline: get('--baseline'),
       branch: get('--branch'),
       worktree: nullable(get('--worktree')),
+      spec_path: nullable(get('--spec-path')),
       github_sync: get('--github-sync'),
       merge_commit: get('--merge-commit'),
       evidence_expires_at: nullable(get('--evidence-expires-at')),
