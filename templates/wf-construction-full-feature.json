@@ -63,7 +63,7 @@
       "id": "dev",
       "profile": "dev",
       "label": "开发",
-      "goal": "只按当前已确认需求基线与本地任务规格施工，严格控制范围，在本 Run 隔离工作区完成实现并按角色规则自检。发现必须改变产品结果（目标/范围/验收标准）才能继续时输出 NEED_REDEFINE（不消耗自动返工额度，需回到定义阶段）；外部条件无法安全继续时输出 BLOCKED；否则输出 READY。将完整开发交接写入 dev-report.md；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "只按当前已确认需求基线与本地任务规格施工，严格控制范围，在本 Run 隔离工作区完成实现并按角色规则自检。场景契约：本节点在隔离 worktree 内施工（worktree 路径与工作分支以运行上下文/run.json 为准）；允许必要自测与实现相关测试，独立测试证明由后续独立测试节点出具，不由本节点自签。发现必须改变产品结果（目标/范围/验收标准）才能继续时输出 NEED_REDEFINE（不消耗自动返工额度，需回到定义阶段）；外部条件无法安全继续时输出 BLOCKED；否则输出 READY。将完整开发交接写入 dev-report.md；最终回复只输出本节点 schema 对应 JSON。",
       "inputs": [
         {
           "name": "preflight_baseline",
@@ -326,7 +326,7 @@
       "id": "uat",
       "profile": "accept",
       "label": "UAT 准备",
-      "goal": "自动阶段完成后生成 UAT 验收卡与通俗验收摘要，供人工正式验收。Agent 只负责验收准备，不得代替人工签字。按模板覆盖每个主要功能切片至少一个 UAT 点；写明已知风险与未覆盖项。准备就绪后输出 READY_FOR_HUMAN，升人工决策等待验收。将 uat-card.md 与 acceptance-summary.md 写盘；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "自动阶段完成后生成 UAT 验收卡与通俗验收摘要，供人工正式验收。Agent 只负责验收准备，不得代替人工签字。人工裁决采用严格三态：ACCEPT（通过）/ REJECT（退回）/ CONDITIONAL_PASS（有条件通过）；验收材料按三态组织与呈现，「有条件通过」独立呈现，不得用通过/不通过二态表述覆盖，也不得代签。按模板覆盖每个主要功能切片至少一个 UAT 点；写明已知风险与未覆盖项。准备就绪后输出 READY_FOR_HUMAN，升人工决策等待验收。将 uat-card.md 与 acceptance-summary.md 写盘；最终回复只输出本节点 schema 对应 JSON。",
       "inputs": [
         {
           "name": "test_result",
