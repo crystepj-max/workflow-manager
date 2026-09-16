@@ -164,8 +164,10 @@ function mergeProvenance(base, extra) {
 function recordView(store, rec) {
   const coverage = annotateRecordCoverage(rec)
   const view = { ...rec, dependency_coverage: coverage }
-  if (rec.kind === 'proof_decision' && coverage === 'complete') {
-    const chain = staleReasonChain(store, rec)
+  const ref = { record_id: rec.record_id, record_revision: rec.record_revision }
+  const chain = staleReasonChain(store, ref)
+  if (chain.length || dependsOnStaleInputsDeep(store, ref)) {
+    view.stale = true
     if (chain.length) view.stale_reason_chain = chain
   }
   return view
@@ -528,12 +530,14 @@ export function recordsGet(input) {
       if (cs.stale) row.stale_reason_chain = staleReasonChain(store, proof)
       return row
     })
+  const latest = revisions[revisions.length - 1]
   return {
     ok: true,
     found: true,
     record_id,
     current_revision: currentRevision(store, record_id),
-    dependency_coverage: revisions[revisions.length - 1].dependency_coverage,
+    dependency_coverage: latest.dependency_coverage,
+    ...(latest.stale ? { stale: true, stale_reason_chain: latest.stale_reason_chain } : {}),
     revisions,
     coverage,
   }

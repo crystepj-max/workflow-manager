@@ -53,6 +53,10 @@ module.exports = {
     if (typeof deps.onLine === 'function') {
       try { deps.onLine(ev, lrec) } catch (e) { /* 宿主 hook 失败不阻断 Store 提交 */ }
     }
+      const sync = lrec.last_gate_sync
+      const explicitRefs = (ev.w && sync && sync.record_id && sync.record_revision)
+        ? [{ record_id: sync.record_id, record_revision: sync.record_revision }]
+        : undefined
       const p = call('attempt', {
         logical_run_id: lrec.logical_run_id,
         attempt_id: 'a' + segNo + 'k' + ev.k,
@@ -62,6 +66,7 @@ module.exports = {
         model: String((pm && pm.model) || 'default'),
         workspace: wsMap.get(key) || null,
         resolved_inputs: ev.ri || null,
+        explicit_refs: explicitRefs,
         ev,
       })
       st.f = st.f.then(() => p).then(

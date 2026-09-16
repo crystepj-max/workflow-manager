@@ -16,6 +16,7 @@ import {
 } from '../workspace-isolation.mjs'
 import { planTargetSync, mergeTarget, performTargetSync, buildSyncRecordEntry, integrationSyncRecordId } from '../integration-gate.mjs'
 import { recordsCommit, recordsList, recordsGet, recordsAssertIntegration } from '../records-host.mjs'
+import { digest8 } from '../revision-dependencies.mjs'
 import { appendRecord, coverageStatus, NOT_COVERING_CURRENT, COVERING, toRef } from '../formal-records.mjs'
 
 const fixtureRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.scratch', 'ws-isolation-tests')
@@ -164,7 +165,10 @@ test('G5 B4 证据链：真实同步 → 同步证据新 Revision → 重跑新 
   const testProof = 'proof:' + runId + ':test'
 
   const syncId = integrationSyncRecordId(runId)
-  const nodeRi = (node) => ({ mode: 'declared', items: [{ binding: 'from_' + node, producer: node.replace('node:' + runId + ':', ''), version_ref: 'tmp-exec:1:00000000' }] })
+  const nodeRi = (nodeId, body) => {
+    const producer = nodeId.replace('node:' + runId + ':', '')
+    return { mode: 'declared', items: [{ binding: 'from_' + producer, producer, version_ref: 'tmp-exec:1:' + digest8(body) }] }
+  }
   const syncRi = (rev) => ({ mode: 'declared', items: [{ binding: 'sync', record_ref: { record_id: syncId, record_revision: rev }, version_ref: 'record:' + syncId + '@' + rev }] })
 
   // ① 首段：review/test 完成 → node_result + proof（精确依赖各自节点 Revision）
@@ -172,9 +176,9 @@ test('G5 B4 证据链：真实同步 → 同步证据新 Revision → 重跑新 
     records_dir: dir, logical_run_id: runId,
     entries: [
       { type: 'node_result', record_id: reviewNode, provenance: prov(runId, 'review', 1), body_value: { verdict: 'APPROVE' } },
-      { type: 'proof', record_id: reviewProof, provenance: prov(runId, 'review', 1), body_value: { node: 'review', verified_head: ws.base_commit }, resolved_inputs: nodeRi(reviewNode) },
+      { type: 'proof', record_id: reviewProof, provenance: prov(runId, 'review', 1), body_value: { node: 'review', verified_head: ws.base_commit }, resolved_inputs: nodeRi(reviewNode, { verdict: 'APPROVE' }) },
       { type: 'node_result', record_id: testNode, provenance: prov(runId, 'test', 1), body_value: { verdict: 'PASS' } },
-      { type: 'proof', record_id: testProof, provenance: prov(runId, 'test', 1), body_value: { node: 'test', verified_head: ws.base_commit }, resolved_inputs: nodeRi(testNode) },
+      { type: 'proof', record_id: testProof, provenance: prov(runId, 'test', 1), body_value: { node: 'test', verified_head: ws.base_commit }, resolved_inputs: nodeRi(testNode, { verdict: 'PASS' }) },
     ],
   })
   assert.equal(first.ok, true)

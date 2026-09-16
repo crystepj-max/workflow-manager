@@ -1,7 +1,7 @@
 // LOC-034 精确依赖：从 resolved_inputs / 显式引用组装 dependencies，拒绝不可靠引用，
 // 标注 dependency_coverage，计算 stale 原因链。覆盖判定仍委托 formal-records.mjs。
 
-import { currentRevision, getRecord, coverageStatus, COVERING, NOT_COVERING_CURRENT } from './formal-records.mjs'
+import { currentRevision, getRecord, listRevisions, coverageStatus, COVERING, NOT_COVERING_CURRENT } from './formal-records.mjs'
 
 export const DEPENDENCY_COVERAGE = {
   COMPLETE: 'complete',
@@ -79,11 +79,34 @@ export function resolveFormalRef(store, logicalRunId, rawRef, path) {
   return { ref: { record_id: ref.record_id, record_revision: ref.record_revision } }
 }
 
-export function resolveProducerRef(store, logicalRunId, producer, path) {
+export function digest8(v) {
+  const s = typeof v === 'string' ? v : (v === undefined ? 'undefined' : JSON.stringify(v))
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 }
+  return ('00000000' + h.toString(16)).slice(-8)
+}
+
+function revisionForProducerVersionRef(store, logicalRunId, producer, versionRef) {
   const record_id = nodeRecordId(logicalRunId, producer)
-  const record_revision = currentRevision(store, record_id)
+  const parts = String(versionRef || '').split(':')
+  if (parts[0] !== 'tmp-exec' || parts.length < 3) return undefined
+  const expectedDigest = parts[2]
+  for (const rec of listRevisions(store, record_id)) {
+    if (!rec || !rec.body) continue
+    if (digest8(rec.body.value) === expectedDigest) return rec.record_revision
+  }
+  return undefined
+}
+
+export function resolveProducerRef(store, logicalRunId, producer, path, versionRef) {
+  const record_id = nodeRecordId(logicalRunId, producer)
+  const pinned = versionRef ? revisionForProducerVersionRef(store, logicalRunId, producer, versionRef) : undefined
+  const record_revision = pinned !== undefined ? pinned : currentRevision(store, record_id)
   if (record_revision === undefined) {
     return { error: { code: DEPENDENCY_ERROR.MISSING_REF, path, message: '生产节点 ' + producer + ' 尚无正式 Record（' + record_id + '）' } }
+  }
+  if (versionRef && isTmpExecRef(versionRef) && pinned === undefined) {
+    return { error: { code: DEPENDENCY_ERROR.MISSING_REF, path, message: '无法钉住版本引用 ' + versionRef + '（生产节点 ' + producer + '）' } }
   }
   return { ref: { record_id, record_revision } }
 }
@@ -93,17 +116,14 @@ function resolveInputItem(store, logicalRunId, item, index, { requireFormal }) {
   if (!item || typeof item !== 'object') {
     return { error: { code: DEPENDENCY_ERROR.MISSING_REF, path, message: '输入项非法' } }
   }
+  if (item.source === 'first_run_default' || item.version_ref === 'first-run-default') {
+    return { skip: true }
+  }
   if (item.record_ref) {
     return resolveFormalRef(store, logicalRunId, item.record_ref, path + '.record_ref')
   }
   if (item.producer) {
-    const resolved = resolveProducerRef(store, logicalRunId, item.producer, path)
-    if (resolved.error) return resolved
-    if (requireFormal && isTmpExecRef(item.version_ref)) {
-      // 生产节点已落盘正式 Revision：tmp-exec 仅作解析前标识，提交时钉住当前 Revision
-      return resolved
-    }
-    return resolved
+    return resolveProducerRef(store, logicalRunId, item.producer, path, item.version_ref)
   }
   if (requireFormal && (isTmpExecRef(item.version_ref) || String(item.version_ref || '').startsWith('tmp-exec:'))) {
     return { error: { code: DEPENDENCY_ERROR.NONFORMAL_REF, path, message: '正式 Proof 不可依赖临时执行引用：' + item.version_ref } }
@@ -131,28 +151,34 @@ export function resolveInputDependencies(store, logicalRunId, resolvedInputs, op
 }
 
 export function detectDependencyCycle(store, recordId, dependencies) {
-  const graph = new Map()
-  function depsOf(id) {
-    if (id === recordId) return dependencies.filter((d) => d.record_id !== recordId).map((d) => d.record_id)
-    const rev = currentRevision(store, id)
-    const rec = rev === undefined ? null : getRecord(store, id, rev)
-    return rec ? rec.dependencies.filter((d) => d.record_id !== id).map((d) => d.record_id) : []
+  const prev = currentRevision(store, recordId)
+  const nextRev = prev === undefined ? 1 : prev + 1
+  const start = { record_id: recordId, record_revision: nextRev }
+  const initialDeps = dependencies.filter((d) => !(d.record_id === recordId && d.record_revision === prev))
+
+  function refKey(ref) { return ref.record_id + '@' + ref.record_revision }
+
+  function depsAt(ref) {
+    const rec = getRecord(store, ref.record_id, ref.record_revision)
+    if (!rec) return []
+    return (rec.dependencies || []).filter((d) => !(d.record_id === ref.record_id && d.record_revision === ref.record_revision))
   }
-  graph.set(recordId, depsOf(recordId))
-  const visited = new Set()
-  const stack = new Set()
-  function walk(id) {
-    if (stack.has(id)) return true
-    if (visited.has(id)) return false
-    visited.add(id)
-    stack.add(id)
-    for (const depId of depsOf(id)) {
-      if (walk(depId)) return true
+
+  function walk(ref, stack) {
+    const key = refKey(ref)
+    if (stack.has(key)) return true
+    stack.add(key)
+    const deps = ref.record_id === recordId && ref.record_revision === nextRev
+      ? initialDeps
+      : depsAt(ref)
+    for (const dep of deps) {
+      if (walk(dep, stack)) return true
     }
-    stack.delete(id)
+    stack.delete(key)
     return false
   }
-  return walk(recordId)
+
+  return walk(start, new Set())
 }
 
 export function buildRecordDependencies(store, input) {

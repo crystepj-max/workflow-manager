@@ -18,6 +18,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path, { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { digest8 } from '../revision-dependencies.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const RECORDS_HOST = join(here, '..', 'records-host.mjs')
@@ -54,7 +55,7 @@ function nodeEntry(nodeId, value, extra = {}) {
   }
 }
 
-function proofEntry(nodeId, head, extra = {}) {
+function proofEntry(nodeId, head, implBody = { verdict: 'ok' }, extra = {}) {
   return {
     type: 'proof',
     record_id: 'proof:task-1:' + nodeId,
@@ -67,7 +68,7 @@ function proofEntry(nodeId, head, extra = {}) {
     },
     resolved_inputs: {
       mode: 'declared',
-      items: [{ binding: 'from_impl', producer: 'impl', version_ref: 'tmp-exec:1:00000000' }],
+      items: [{ binding: 'from_impl', producer: 'impl', version_ref: 'tmp-exec:1:' + digest8(implBody) }],
     },
     ...extra,
   }
@@ -102,7 +103,7 @@ test('R2 verifyBranch Proof 签发：绑定 verified_* / workspace，依赖当�
 test('R3 产生 I2 后，依赖 I1 的 RV1 判 not_covering_current（stale，保留不删）', () => {
   const dir = recordsDir()
   cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [nodeEntry('impl', { verdict: 'ok', v: 1 })] })
-  cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [proofEntry('review', 'head-A')] })
+  cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [proofEntry('review', 'head-A', { verdict: 'ok', v: 1 })] })
   // I2（同节点重新完成）出现后，RV1 仍保留但不再覆盖当前 Revision
   cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [nodeEntry('impl', { verdict: 'ok', v: 2 })] })
   const list = cli('list', { records_dir: dir, logical_run_id: 'task-1' })
@@ -121,8 +122,8 @@ test('R3 产生 I2 后，依赖 I1 的 RV1 判 not_covering_current（stale，�
 test('R3b 审核后再测试：T1 直接依赖 I，I2 后 T1 同判 stale（契约典型链）', () => {
   const dir = recordsDir()
   cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [nodeEntry('impl', { v: 1 })] })
-  cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [proofEntry('review', 'head-A')] })
-  cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [proofEntry('test', 'head-A')] })
+  cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [proofEntry('review', 'head-A', { v: 1 })] })
+  cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [proofEntry('test', 'head-A', { v: 1 })] })
   cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [nodeEntry('impl', { v: 2 })] })
   const list = cli('list', { records_dir: dir, logical_run_id: 'task-1' })
   for (const pid of ['proof:task-1:review', 'proof:task-1:test']) {
@@ -135,9 +136,9 @@ test('R4 E2E 反例：另一 HEAD 的 Proof 不为当前 Revision 背书', () =>
   const dir = recordsDir()
   // head-A 上：I1 + RV1（verified_head=head-A）
   cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [nodeEntry('impl', { v: 1 })] })
-  cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [proofEntry('review', 'head-A')] })
+  cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [proofEntry('review', 'head-A', { v: 1 })] })
   // head-B 上：I2 重新完成（verified_head=head-B 的新 Proof 另记）
-  cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [nodeEntry('impl', { v: 2 }), proofEntry('review', 'head-B')] })
+  cli('commit', { records_dir: dir, logical_run_id: 'task-1', entries: [nodeEntry('impl', { v: 2 }), proofEntry('review', 'head-B', { v: 2 })] })
   const get = cli('get', { records_dir: dir, logical_run_id: 'task-1', record_id: 'node:task-1:impl' })
   assert.equal(get.current_revision, 2)
   const byProof = Object.fromEntries(get.coverage.map((c) => [c.proof.record_revision, c]))
