@@ -12,14 +12,14 @@
 | 分类 | enhancement |
 | 体量 | M |
 | 优先级 | P1 |
-| 当前状态 | 定义中 |
+| 当前状态 | 本地已定义 |
 | 需求基线版本 | V1 |
 | 前置依赖 | LOC-029 |
 | 施工环境组 | LOC-035 |
 | 施工环境角色 | 独立 |
-| 无人值守许可 | 不允许 |
+| 无人值守许可 | 允许 |
 | 任务规格位置 | docs/tasks/specs/LOC-035-artifact-manifest/task-spec-V1.md |
-| 定义时间 | 待人工确认；材料编制于 2026-09-15T02:47:39.403Z |
+| 定义时间 | 2026-09-16T09:35:29Z |
 | GitHub 同步 | pending |
 
 ## 摘要（三要素）
@@ -37,16 +37,16 @@
 
 ## 开工材料与状态
 
-- [详细任务规格 V1](specs/LOC-035-artifact-manifest/task-spec-V1.md)：19 项完整规格，四组 UAT、异常边界与接口归属。
-- [Definition Check](specs/LOC-035-artifact-manifest/definition-check.md)：分析完成，产品规则与许可待确认。
-- [本批确认单](p1-definition-confirmation-2026-09-15.md)：明确审批对象与开工边界。
-- 当前不得开工；P0 LOC-024–033 的批准不适用于本条。
-- 前置：LOC-029 必须先提供稳定生产 attempt、原子提交及恢复去重；否则同轮重试与重启后无法可靠归属文件版本。
-- 施工环境组 LOC-035 为独立环境。跨组前置须先核验合入证据；现有批量调度器排除此任务。
-- GitHub 403，本地轨道；CNB 不作为任务定义状态来源。本轮不创建 Run、不开发、不提交或同步远端。
+- [详细任务规格 V1](specs/LOC-035-artifact-manifest/task-spec-V1.md)：19 项完整规格，四组 UAT、异常边界与接口归属。V1 已于 2026-09-16 获用户确认。
+- [Definition Check](specs/LOC-035-artifact-manifest/definition-check.md)：全部通过，未决产品事项 0（2026-09-16 确认后复核）。
+- [本批确认单](p1-definition-confirmation-2026-09-15.md)：D-BATCH 施工许可为 P1 批共享确认（2026-09-16），一次适用 LOC-034–043；本条 V1 产品规则已单独确认。
+- 前置 LOC-029 已合入 main（登记册记录合并 commit）。开工时仍须按规格 §14 从登记册核对合入 commit 并验证 `git merge-base --is-ancestor`；缺证据一律受阻，不以定义完成替代依赖核验。
+- 施工环境组 LOC-035 为独立环境。现有批量调度器排除有依赖任务，本条经单任务入口分阶段启动。
+- GitHub 403，本地轨道；CNB 不作为任务定义状态来源。定义落档已完成；开工、提交与同步按后续授权执行。
 
 ## 变更记录
 
 | 时间 | 状态 | 说明 |
 |---|---|---|
 | 2026-09-15T02:47:39.403Z | 定义中 | 从 WR-008 登记，完成 V1 候选和验证材料，等待真实确认 |
+| 2026-09-16T09:35:29Z | 本地已定义 | 用户确认 V1 基线与 D-BATCH 施工许可；未决清零，Definition Check 通过，登记册同步 |
