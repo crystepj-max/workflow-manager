@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 5,
+  "revision": 7,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -23,15 +23,15 @@
       "worktree": null,
       "runs": [],
       "merge": {
-        "commit": "PENDING",
-        "merged_at": "2026-09-16T13:53:57.180Z"
+        "commit": "e2c3994332287c612027ac87c06efba80a5d5f82",
+        "merged_at": "2026-09-16T13:53:57.247Z"
       },
       "github_sync": "pending",
-      "evidence_expires_at": "2026-09-23T13:53:57.180Z",
+      "evidence_expires_at": "2026-09-23T13:53:57.247Z",
       "evidence_cleared_at": null,
       "branch_retained": true,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-16T13:53:57.180Z",
+      "updated_at": "2026-09-16T13:53:57.590Z",
       "spec_path": "docs/tasks/archive/CHORE-36/task-spec-V1.md",
       "leftovers": "重入完成：3 轮审查 approve / 3 轮测试 pass / checkpoint rerun_completed / 证据链①~⑨全通过"
     },
