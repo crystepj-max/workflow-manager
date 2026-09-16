@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 3,
+  "revision": 5,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -14,23 +14,26 @@
       "source": "会话录入",
       "source_ref": "LOC-023 有条件通过优化意见①（2026-09-15 人工裁决）：凡只能在合并后观测的验收项，必须在卡上标注前置条件与执行时机。",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P2",
       "env_group": "CHORE-36",
       "env_role": "独立",
       "deps": [],
-      "branch": null,
+      "branch": "dev-chore-36-r1",
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "PENDING",
+        "merged_at": "2026-09-16T13:53:57.180Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-23T13:53:57.180Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-16T13:50:04.476Z",
-      "spec_path": "docs/tasks/specs/CHORE-36-uat-precondition/task-spec-V1.md",
-      "leftovers": "hold：等待 FIX-72（cnb#72）完成编号迁移收尾后重入；开发本体已完成（8 载体 + 断言 + 负例），npm test 625/625"
+      "updated_at": "2026-09-16T13:53:57.180Z",
+      "spec_path": "docs/tasks/archive/CHORE-36/task-spec-V1.md",
+      "leftovers": "重入完成：3 轮审查 approve / 3 轮测试 pass / checkpoint rerun_completed / 证据链①~⑨全通过"
     },
     {
       "task_id": "CHORE-37",

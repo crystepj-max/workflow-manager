@@ -1,0 +1,69 @@
+{
+  "task_id": "CHORE-36",
+  "run_id": "chore-36-r1",
+  "task_name": "验收清单前置条件规则补齐（UAT 卡与规格模板）",
+  "status": "等待验收",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-16T04:51:02.912Z",
+      "produced_by": "workbuddy-chore36-requirements",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-16T04:51:03.042Z",
+      "produced_by": "workbuddy-chore36-requirements"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": "2026-09-16T08:48:41.432Z",
+      "produced_by": "workbuddy-chore36-dev",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a3.json",
+      "created_at": "2026-09-16T10:51:33.794Z",
+      "produced_by": "cursor-chore36-review",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a3.json",
+      "created_at": "2026-09-16T10:52:05.869Z",
+      "produced_by": "cursor-chore36-test",
+      "summary": {
+        "verdict": "pass",
+        "environment": "独立测试会话（cursor-chore36-test，只读规划模式）第 3 轮：V-1~V-10 与 UAT-01 逐项实测全 pass（原始 14 条 findings 见本 payload；原始输出留档 .agent-runs/chore-36-r1/test-output-cursor-r3-raw.log）。本 mapping 由基线 10 条逐字构建。另 2 条 B 类：construction-external runbook 未内联时机规则（不在范围）、examples 旧样例（非目标不追溯）。"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a3.json",
+      "created_at": "2026-09-16T10:52:24.637Z",
+      "produced_by": "workbuddy-chore36-uat",
+      "summary": {
+        "status": "awaiting_decision"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/chore-36-r1",
+    "file_count": 23,
+    "total_bytes": 76476
+  },
+  "generated_at": "2026-09-16T13:53:57.179Z"
+}
