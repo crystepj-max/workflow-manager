@@ -1,0 +1,122 @@
+{
+  "version": "V1",
+  "task_set_id": "loc-045-benchmark",
+  "repeat_order": ["AB", "BA", "AB"],
+  "tasks": [
+    {
+      "id": "B01",
+      "category": "construction",
+      "template": "wf-construction-full-feature",
+      "description": "CLI 增加 --version，读取 package.json",
+      "fixture_dir": "tasks/B01",
+      "candidate_applicable": ["baseline", "c1"]
+    },
+    {
+      "id": "B02",
+      "category": "construction",
+      "template": "wf-construction-full-feature",
+      "description": "JSON 配置校验器增加必填 name",
+      "fixture_dir": "tasks/B02",
+      "candidate_applicable": ["baseline", "c1"]
+    },
+    {
+      "id": "B03",
+      "category": "construction",
+      "template": "wf-construction-full-feature",
+      "description": "listNumbers 增加升序选项",
+      "fixture_dir": "tasks/B03",
+      "candidate_applicable": ["baseline", "c1"]
+    },
+    {
+      "id": "O01",
+      "category": "optimize",
+      "template": "wf-optimize",
+      "description": "十条事实文档压缩 ≥20%",
+      "fixture_dir": "tasks/O01",
+      "candidate_applicable": ["baseline"]
+    },
+    {
+      "id": "O02",
+      "category": "optimize",
+      "template": "wf-optimize",
+      "description": "三环境配置等价重组",
+      "fixture_dir": "tasks/O02",
+      "candidate_applicable": ["baseline"]
+    },
+    {
+      "id": "O03",
+      "category": "optimize",
+      "template": "wf-optimize",
+      "description": "六步操作指南缩短 ≥20%",
+      "fixture_dir": "tasks/O03",
+      "candidate_applicable": ["baseline"]
+    },
+    {
+      "id": "D01",
+      "category": "diagnose",
+      "template": "wf-diagnose",
+      "description": "求和漏最后一项",
+      "fixture_dir": "tasks/D01",
+      "candidate_applicable": ["baseline"]
+    },
+    {
+      "id": "D02",
+      "category": "diagnose",
+      "template": "wf-diagnose",
+      "description": "分页多返回一条",
+      "fixture_dir": "tasks/D02",
+      "candidate_applicable": ["baseline"]
+    },
+    {
+      "id": "D03",
+      "category": "diagnose",
+      "template": "wf-diagnose",
+      "description": "maxValue 空数组应为 null",
+      "fixture_dir": "tasks/D03",
+      "candidate_applicable": ["baseline"]
+    },
+    {
+      "id": "X01",
+      "category": "explore",
+      "template": "wf-explore",
+      "description": "A/B 吞吐资料矛盾比较",
+      "fixture_dir": "tasks/X01",
+      "candidate_applicable": ["baseline"]
+    },
+    {
+      "id": "X02",
+      "category": "explore",
+      "template": "wf-explore",
+      "description": "三视角探索，成本资料工具 TEMP_UNAVAILABLE",
+      "fixture_dir": "tasks/X02",
+      "candidate_applicable": ["baseline", "c2"]
+    },
+    {
+      "id": "X03",
+      "category": "explore",
+      "template": "wf-explore",
+      "description": "成本页明确未提供数字",
+      "fixture_dir": "tasks/X03",
+      "candidate_applicable": ["baseline"]
+    }
+  ],
+  "arms": {
+    "baseline": {
+      "label": "当前基准（冻结四模板）",
+      "tasks": ["B01", "B02", "B03", "O01", "O02", "O03", "D01", "D02", "D03", "X01", "X02", "X03"],
+      "repeats": 3
+    },
+    "c1": {
+      "label": "C1 机械资格检查（建设 B01–B03）",
+      "tasks": ["B01", "B02", "B03"],
+      "repeats": 3,
+      "diff": "将建设 preflight 模型调用替换为 ai-task-preflight-check 机械检查"
+    },
+    "c2": {
+      "label": "C2 定向补充（探索 X02）",
+      "tasks": ["X02"],
+      "repeats": 3,
+      "diff": "首轮三视角不变，补充轮仅调成本视角"
+    }
+  }
+}

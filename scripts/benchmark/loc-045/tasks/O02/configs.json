@@ -1,0 +1,5 @@
+{
+  "dev": { "timeout": 30, "retry": 2, "endpoint": "/dev" },
+  "test": { "timeout": 30, "retry": 2, "endpoint": "/test" },
+  "prod": { "timeout": 30, "retry": 3, "endpoint": "/prod" }
+}
