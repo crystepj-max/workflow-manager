@@ -12,14 +12,14 @@
 | 分类 | enhancement |
 | 体量 | M |
 | 优先级 | P2 |
-| 当前状态 | 定义中 |
+| 当前状态 | 本地已定义 |
 | 需求基线版本 | V1 |
 | 前置依赖 | 无 |
 | 施工环境组 | LOC-044 |
 | 施工环境角色 | 独立 |
-| 无人值守许可 | 不允许 |
+| 无人值守许可 | 允许 |
 | 任务规格位置 | docs/tasks/specs/LOC-044-state-recovery-core/task-spec-V1.md |
-| 定义时间 | 待人工确认；编制于 2026-09-15T06:07:19.705Z |
+| 定义时间 | 2026-09-16T10:47:53Z |
 | GitHub 同步 | pending |
 
 ## 摘要（三要素）
@@ -37,14 +37,15 @@
 
 ## 开工材料与状态
 
-- [详细任务规格 V1](specs/LOC-044-state-recovery-core/task-spec-V1.md)：19节完整定义、4组UAT及配套协议。
-- [Definition Check](specs/LOC-044-state-recovery-core/definition-check.md)：当前定义中，未决2项。
-- [P2确认单](p2-definition-confirmation-2026-09-15.md)：新基线、环境和权限对象。
+- [详细任务规格 V1](specs/LOC-044-state-recovery-core/task-spec-V1.md)：19节完整定义、4组UAT及配套协议。V1 与 D-ENV 已于 2026-09-16 获用户确认。
+- [Definition Check](specs/LOC-044-state-recovery-core/definition-check.md)：全部通过，未决产品事项 0（2026-09-16 确认后复核）。
+- [P2确认单](p2-definition-confirmation-2026-09-15.md)：D-ENV 为 P2 批确认对象（2026-09-16 确认）；本条 V1 范围已单独确认。
 - 无。LOC-024/029/030/031 可能同改核心文件，属于合入风险。建议在这些高优先级改动稳定后合入；不是必须先完成它们才能开始行为刻画。若期间 main 新增已批准修复，重新冻结该受影响行为并保留修复，不把它回退为旧缺陷。
-- 本轮仅分析，不启动开发/实验；未得到确认不能开工。
+- 本轮只完成定义落档，不启动开发；开工、提交与同步按后续授权执行。
 
 ## 变更记录
 
 | 时间 | 状态 | 说明 |
 |---|---|---|
 | 2026-09-15T06:07:19.705Z | 定义中 | 从 WR-021 分配正式ID，形成V1候选，未改P0/P1状态 |
+| 2026-09-16T10:47:53Z | 本地已定义 | 用户确认 V1 范围与 D-ENV 环境/无人值守许可；未决清零，Definition Check 通过，登记册同步 |

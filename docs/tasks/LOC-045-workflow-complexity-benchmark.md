@@ -12,14 +12,14 @@
 | 分类 | enhancement |
 | 体量 | M |
 | 优先级 | P2 |
-| 当前状态 | 定义中 |
+| 当前状态 | 本地已定义 |
 | 需求基线版本 | V1 |
 | 前置依赖 | 无 |
 | 施工环境组 | LOC-045 |
 | 施工环境角色 | 独立 |
-| 无人值守许可 | 不允许 |
+| 无人值守许可 | 允许 |
 | 任务规格位置 | docs/tasks/specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md |
-| 定义时间 | 待人工确认；编制于 2026-09-15T06:07:19.705Z |
+| 定义时间 | 2026-09-16T10:56:19Z |
 | GitHub 同步 | pending |
 
 ## 摘要（三要素）
@@ -37,14 +37,16 @@
 
 ## 开工材料与状态
 
-- [详细任务规格 V1](specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md)：19节完整定义、4组UAT及配套协议。
-- [Definition Check](specs/LOC-045-workflow-complexity-benchmark/definition-check.md)：当前定义中，未决3项。
-- [P2确认单](p2-definition-confirmation-2026-09-15.md)：新基线、环境和权限对象。
-- 无产品任务硬前置。技术/业务前置：可运行的隔离DSH环境、可用且已批准的模型设置、真实实验费用上限和人工验收参与。模型路由/币种/金额待用户确认；这一缺口阻止真实实验，不能留给无人值守执行者猜测。
-- 本轮仅分析，不启动开发/实验；未得到确认不能开工。真实模型配置及费用额度尚缺，现有批量预检不检查这些研究专属条件。
+- [详细任务规格 V1](specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md)：19节完整定义、4组UAT及配套协议。V1、D-ENV、D-EXP 已于 2026-09-16 全部获用户确认。
+- [Definition Check](specs/LOC-045-workflow-complexity-benchmark/definition-check.md)：全部通过，未决产品事项 0（2026-09-16 确认后复核）。
+- [P2确认单](p2-definition-confirmation-2026-09-15.md)：D-ENV 与 D-EXP 确认记录见该单 §5；本条 V1 范围已确认。
+- 无产品任务硬前置。D-EXP 已确认：模型 GLM-5.3-Flash、预算上限 1 亿 token（按 token 计量）；模型 Profile 引用与每角色设置在开工冻结时按已配置凭据落定，48 次运行上限与 token 额度约束按[实验计划 §3](specs/LOC-045-workflow-complexity-benchmark/benchmark-plan-V1.md) 执行。
+- 本轮只完成定义落档，不启动开发/实验；真实实验按后续授权执行，人工验收参与仍按原安排。
 
 ## 变更记录
 
 | 时间 | 状态 | 说明 |
 |---|---|---|
 | 2026-09-15T06:07:19.705Z | 定义中 | 从 WR-022 分配正式ID，形成V1候选，未改P0/P1状态 |
+| 2026-09-16T10:52:27Z | 定义中（部分确认） | 用户确认 V1 范围与 D-ENV；D-EXP（模型/预算/币种）保持明确待定，任务保持定义中 |
+| 2026-09-16T10:56:19Z | 本地已定义 | 用户补充 D-EXP（GLM-5.3-Flash、1 亿 token）后全部确认；未决清零，Definition Check 通过，登记册同步 |
