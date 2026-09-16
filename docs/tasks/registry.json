@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 9,
+  "revision": 11,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -1477,6 +1477,34 @@
       "spec_path": "docs/tasks/specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md",
       "type": "CHORE",
       "remote": "cnb#63"
+    },
+    {
+      "task_id": "CHORE-75",
+      "type": "CHORE",
+      "remote": "cnb#75",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "开工与收口纪律对齐：工作区命名与收口归档的强制护栏（集成 registry-reconcile 例行对账）",
+      "slug": "registry-reconcile",
+      "source": "会话录入",
+      "source_ref": "2026-09-16 CHORE-36 重入实测（第 4 次同型现象）：FIX-72 已把工作区命名尺子修好（TASK_ID_RE/RUN_ID_RE 认 FEAT/FIX/CHORE），但**用尺子的人**未对齐——并行会话连续产出违规现场与缺口：① 非 dev-<run_id> 工作区（fix-65-compile-output-size、chore-73-registry-reconcile，D-3 两次转红）；② 经 CNB 合并请求收口不走本地归档/轻量归档（LOC-024..033、FIX-65/66、CHORE-73 等 13+ 个任务缺归档，D-8 四次转红，每次靠 CHORE-36/FIX-72 会话人工回填）。本票范围：① 开工护栏——cwf-run-init/环境登记拒绝或纠正非规范工作区命名（把 D-3 检查前移到开工时点）；② 收口护栏——CNB 合并流程（或其收尾脚本）强制产出轻量归档（复用 FIX-72 的 lightweight-remote 凭据形态），并把 registry-reconcile（CHORE-73）的账实对账纳入例行（如夜批或收口钩子）；③ 各会话 AGENTS.md/规则分发的开工收口纪律条款对齐。证据：validate-workspace 当日 4 次 D-3/D-8 转红记录与三次人工回填提交（d19ee88/081e7f5/01699d4 前身）。",
+      "baseline": "V1",
+      "status": "定义中",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-16T13:57:49.950Z",
+      "updated_at": "2026-09-16T13:58:31.699Z"
     }
   ],
   "updated_at": "2026-09-16T10:20:06.264Z"
