@@ -1,0 +1,16 @@
+{
+  "task_id": "CHORE-73",
+  "task_name": "登记册账实对账机制：合并事实自动回写 + 版本锁防覆盖",
+  "status": "已合并",
+  "archive_form": "lightweight-remote",
+  "remote_ref": "cnb#73",
+  "merge": {
+    "commit": "84e52a3834b74d7ede144b51fe535757d975ab6e",
+    "merged_at": "2026-09-16T10:18:35.153Z"
+  },
+  "branch": null,
+  "branch_retained": null,
+  "generated_by": "CHORE-36 收口后锚点漂移治理",
+  "generated_at": "2026-09-16T13:56:41.680Z",
+  "note": "远程收口任务（cnb#73）：卡存根与规格已在归档，补齐凭据摘要。"
+}
