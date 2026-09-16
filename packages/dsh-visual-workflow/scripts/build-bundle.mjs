@@ -54,6 +54,7 @@ const attemptLedgerSrc = join(root, '..', '..', 'scripts', 'attempt-ledger.cjs')
 const roleLibrarySrc = join(root, '..', '..', 'scripts', 'role-library.cjs')
 const projectionCoreSrc = join(root, '..', '..', 'scripts', 'projection-core.cjs')
 const validateCoreSrc = join(root, '..', '..', 'scripts', 'validate-core.cjs')
+const schemaProtocolCoreSrc = join(root, '..', '..', 'scripts', 'schema-protocol-core.cjs')
 const evaluationBaselineSrc = join(root, '..', '..', 'scripts', 'evaluation-baseline.cjs')
 const roleManifestSrc = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
 const localesSrc = join(root, 'locales')
@@ -67,6 +68,7 @@ const roleManifestBody = readFileSync(roleManifestSrc, 'utf8')
 const formalArtifactsBody = readFileSync(formalArtifactsSrc, 'utf8')
 const attemptLedgerBody = readFileSync(attemptLedgerSrc, 'utf8')
 const validateCoreBody = readFileSync(validateCoreSrc, 'utf8')
+const schemaProtocolCoreBody = readFileSync(schemaProtocolCoreSrc, 'utf8')
 const evaluationBaselineBody = readFileSync(evaluationBaselineSrc, 'utf8')
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
 const listNames = (dir, ext) => readdirSync(dir).filter((n) => n.endsWith(ext)).sort()
@@ -92,6 +94,7 @@ const stamp = {
   formalArtifacts: sha256(formalArtifactsBody),
   attemptLedger: sha256(attemptLedgerBody),
   validateCore: sha256(validateCoreBody),
+  schemaProtocolCore: sha256(schemaProtocolCoreBody),
   evaluationBaseline: sha256(evaluationBaselineBody),
   locales: dirStamp(localesSrc, '.json'),
   roles: dirStamp(rolesSrc, '.md'),
@@ -109,6 +112,7 @@ const requiredArtifacts = [
   join(dist, 'formal-artifacts.cjs'),
   join(dist, 'attempt-ledger.cjs'),
   join(dist, 'validate-core.cjs'),
+  join(dist, 'schema-protocol-core.cjs'),
   join(dist, 'evaluation-baseline.cjs'),
   join(dist, 'projection-core.cjs'),
   join(dist, 'role-library.cjs'),
@@ -191,6 +195,7 @@ copyFileSync(attemptLedgerSrc, join(dist, 'attempt-ledger.cjs'))
 // 校验内核与其引用的投影内核必须同时随 dist 分发：validate-core 声明
 // require('./projection-core.cjs')，宿主加载器求值前按源码预解析同目录引用。
 copyFileSync(validateCoreSrc, join(dist, 'validate-core.cjs'))
+copyFileSync(schemaProtocolCoreSrc, join(dist, 'schema-protocol-core.cjs'))
 copyFileSync(projectionCoreSrc, join(dist, 'projection-core.cjs'))
 // LOC-027 评价基线纯逻辑内核（冻结/核验子进程脚本文本与闸门判定），随 dist 分发
 copyFileSync(evaluationBaselineSrc, join(dist, 'evaluation-baseline.cjs'))

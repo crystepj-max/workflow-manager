@@ -93,6 +93,8 @@ function projectToVwf(bp) {
   if (isDefined(bp.workspace)) out.workspace = cloneValue(bp.workspace)
   // LOC-027 评价基线冻结契约声明（可选，wf-optimize）：无损透传保证编辑器另存不丢字段
   if (isDefined(bp.evaluationBaseline)) out.evaluationBaseline = cloneValue(bp.evaluationBaseline)
+  // LOC-039：协议版本与能力声明往返投影
+  if (isDefined(bp.protocol)) out.protocol = cloneValue(bp.protocol)
   return out
 }
 
@@ -151,6 +153,7 @@ function projectToBlueprint(dsl) {
   if (isDefined(dsl.humanDecision)) bp.humanDecision = cloneValue(dsl.humanDecision)
   if (isDefined(dsl.workspace)) bp.workspace = cloneValue(dsl.workspace)
   if (isDefined(dsl.evaluationBaseline)) bp.evaluationBaseline = cloneValue(dsl.evaluationBaseline)
+  if (isDefined(dsl.protocol)) bp.protocol = cloneValue(dsl.protocol)
   if (Object.keys(models).length) bp.bindings = { models }
   return bp
 }

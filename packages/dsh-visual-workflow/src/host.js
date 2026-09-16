@@ -1586,6 +1586,7 @@ return {
               degraded: false,
               // LOC-031：检查点 tb（紧凑形 {u,g,m,mg,p,carry}）原样回带，脚本双形读取
               ...(ck.tb && { technical_budget: ck.tb }),
+              ...(ck.pt && { protocol_snapshot: ck.pt }),
             }
           }
         } catch (e) { /* 损坏行跳过，继续向前找 */ }
@@ -1639,6 +1640,7 @@ return {
         decisionSeq: Number(pr.decisionSeq) || 0,
         // LOC-031：恢复携带冻结技术预算快照（脚本只读不回写；形状由脚本侧校验）
         technical_budget: pr.technical_budget || undefined,
+        protocol_snapshot: pr.protocol_snapshot || undefined,
       }
       const applied = rec.baseline_applied_upto || 0
       const pending = (rec.baseline_revisions || []).filter((r) => r.revision > applied)
