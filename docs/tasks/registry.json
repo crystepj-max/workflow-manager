@@ -99,7 +99,7 @@
       "source": "会话录入",
       "source_ref": "2026-09-16 合并 cnb/main 9b4bfee 后 npm test 复现：最小图（hello-blueprint）编译产物 75.3KB，超宿主 runNode maxBytes 64KB（scripts/test/generate.test.mjs:339 S6）",
       "baseline": "V1",
-      "status": "定义中",
+      "status": "已合并",
       "priority": "P1",
       "env_group": null,
       "env_role": null,
@@ -107,13 +107,16 @@
       "branch": null,
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "51739d6b3e3556888ad9cda0d03072b77f19d090",
+        "merged_at": "2026-09-16T08:54:56.448Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-23T08:54:56.448Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-16T00:36:55.200Z",
-      "updated_at": "2026-09-16T06:24:41.878Z",
+      "updated_at": "2026-09-16T08:54:56.453Z",
       "spec_path": "docs/tasks/specs/FIX-65-compile-output-size/task-spec-V1.md",
       "leftovers": "协调事项（FIX-72，2026-09-16）：命名基准已定为 A 单轨延伸（分支=dev-<run_id>）。请属主在重入时把工作区 fix-65-compile-output-size 重建为 dev-fix-65-r1（现分支仅 1 个诊断提交 677ab08，可携带）；FIX-72 不代改他人活跃现场。"
     },
