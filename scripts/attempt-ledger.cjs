@@ -49,6 +49,10 @@ module.exports = {
       const segNo = (lrec.segments || []).length
       const st = jobs.get(key) || { f: Promise.resolve(), x: [] }
       jobs.set(key, st)
+    // onLine(ev, lrec)：可选；宿主可在此挂接 resolved_inputs 等段内事实（LOC-034）
+    if (typeof deps.onLine === 'function') {
+      try { deps.onLine(ev, lrec) } catch (e) { /* 宿主 hook 失败不阻断 Store 提交 */ }
+    }
       const p = call('attempt', {
         logical_run_id: lrec.logical_run_id,
         attempt_id: 'a' + segNo + 'k' + ev.k,
@@ -57,6 +61,7 @@ module.exports = {
         provider: String((pm && pm.provider) || 'default'),
         model: String((pm && pm.model) || 'default'),
         workspace: wsMap.get(key) || null,
+        resolved_inputs: ev.ri || null,
         ev,
       })
       st.f = st.f.then(() => p).then(
