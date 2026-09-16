@@ -1580,6 +1580,8 @@ return {
               maxRounds: Number(ck.mr) || 0,
               decisionSeq: Number(ck.ds) || 0,
               degraded: false,
+              // LOC-031：检查点 tb（紧凑形 {u,g,m,mg,p,carry}）原样回带，脚本双形读取
+              ...(ck.tb && { technical_budget: ck.tb }),
             }
           }
         } catch (e) { /* 损坏行跳过，继续向前找 */ }
@@ -1631,6 +1633,8 @@ return {
         budgetUsed: Number(pr.budgetUsed) || 0,
         maxRounds: Number(pr.maxRounds) || 0,
         decisionSeq: Number(pr.decisionSeq) || 0,
+        // LOC-031：恢复携带冻结技术预算快照（脚本只读不回写；形状由脚本侧校验）
+        technical_budget: pr.technical_budget || undefined,
       }
       const applied = rec.baseline_applied_upto || 0
       const pending = (rec.baseline_revisions || []).filter((r) => r.revision > applied)
@@ -2764,6 +2768,9 @@ return {
         blocked_edge: { type: 'object', additionalProperties: true, description: 'ADD_BUDGET 时被额度拦住的自动边 { from, to, on }' },
         results: { type: 'object', additionalProperties: true, description: '续跑时带回的节点结果快照' },
         model_overrides: { type: 'object', additionalProperties: true, description: '#79 续跑时可更换 Provider/Model：{ 节点id | "$default": { provider, model } }；产生追加式快照修订（旧修订保留可查），仅续跑生效' },
+        technical_budget: { type: 'object', additionalProperties: true },
+        technical_budget_grant: { type: 'object', additionalProperties: true, description: '提额' },
+        retry_policy_overrides: { type: 'object', additionalProperties: true, description: '时间上限可调' },
         resume_paused: { type: 'boolean', description: '#80 暂停恢复：对 PAUSED 的逻辑运行按检查点现场续跑同一 Logical Run；恢复后的节点读取暂停期间提交的全部 Guidance 与最新基线修订（wf_control 提交）' },
       },
       async execute(rawArgs) {
@@ -3001,6 +3008,7 @@ return {
           requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
           decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
           budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
+          technical_budget: args.technical_budget, technical_budget_grant: args.technical_budget_grant, retry_policy_overrides: args.retry_policy_overrides,
           // #80：暂停期间的用户指导（Run 级）与最新基线修订文本——经脚本 runtimeCtx/issueBlock
           // 注入执行上下文；普通 Guidance 不触碰基线，基线修订只经显式 mode=baseline 产生
           guidance_text: args.guidance_text, baseline_amendment: args.baseline_amendment,

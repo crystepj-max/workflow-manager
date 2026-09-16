@@ -47,6 +47,10 @@ function heteroModeForEdit(value) {
 function projectToVwf(bp) {
   const models = (bp.bindings && bp.bindings.models) || {}
   const control = { maxRounds: (bp.control && bp.control.maxRounds) || 9 }
+  // LOC-031：技术预算策略随 control 投影（互逆性要求——否则内置模板在编辑器另存后丢字段）
+  if (bp.control && bp.control.retryPolicy !== undefined && bp.control.retryPolicy !== null) {
+    control.retryPolicy = cloneValue(bp.control.retryPolicy)
+  }
   // LOC-030：M2 受阻开关随 control 往返投影（额度耗尽 → BLOCKED）；未声明不携带，
   // 保持既有 DSL/产物零漂移。
   if (bp.control && bp.control.maxRoundsExhausted !== undefined && bp.control.maxRoundsExhausted !== null) {
@@ -134,6 +138,11 @@ function projectToBlueprint(dsl) {
     if (dsl.control.maxRounds != null) bp.control.maxRounds = cloneValue(dsl.control.maxRounds)
     // LOC-030：M2 受阻开关反向投影（DSL → 蓝图），非法值交给校验报告，不在这里吞掉
     if (dsl.control.maxRoundsExhausted != null) bp.control.maxRoundsExhausted = cloneValue(dsl.control.maxRoundsExhausted)
+  }
+  // LOC-031：技术预算策略回投（DSL → 蓝图），与 projectToVwf 互逆
+  if (dsl.control && dsl.control.retryPolicy !== undefined && dsl.control.retryPolicy !== null) {
+    bp.control = bp.control || {}
+    bp.control.retryPolicy = cloneValue(dsl.control.retryPolicy)
   }
   if (isDefined(dsl.onMaxRounds)) bp.onMaxRounds = cloneValue(dsl.onMaxRounds)
   // DSL 档位为三态字符串（或编辑器 JSON 直填的旧布尔/非法值）：透传落盘，非法值交给校验报告

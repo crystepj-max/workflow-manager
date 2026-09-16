@@ -5,6 +5,16 @@
   "entry": "preflight",
   "control": {
     "maxRounds": 3,
+    "retryPolicy": {
+      "max_attempts": 3,
+      "backoff_ms": [
+        1000,
+        2000
+      ],
+      "attempt_timeout_ms": 1800000,
+      "run_auto_time_ms": 14400000,
+      "no_progress_repeats": 2
+    },
     "maxRoundsExhausted": "BLOCKED"
   },
   "heteroCheck": "weak",

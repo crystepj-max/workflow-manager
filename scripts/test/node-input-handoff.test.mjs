@@ -4,6 +4,12 @@
 // AC-02 诊断修复收到对应 diagnosis 根因与证据；建设返工收到触发本次返工的 review/test 反馈；
 // AC-03 缺必需引用时消费节点调用数为 0、错误含 node/binding/reason；可选输入未产生按声明处理；
 // AC-04 两轮反馈只取本次流转版本；蓝图编辑（投影往返）与生成脚本均保留输入声明；legacy 输入模式显式标注。
+//
+// 跨任务夹具对齐（LOC-030）：诊断模板 `closeout` 节点按 blocked-lifecycle 规格 §接口与数据约定
+// 「诊断正常回归 PASS 后 DELIVERED 必须有完成映射」新增必填 `completion_type`（const=DELIVERED）
+// 与 completionPath。本套件的诊断夹具模拟该节点输出，必须显式给出该字段，否则 schema 校验失败
+// 触发重试直至额度耗尽（旧表现 FAILED_AGENT_CAP，LOC-031 技术预算生效后为 WAITING_HUMAN）。
+// 优化模板夹具的 completion_type=EVALUATION_PASSED 不受影响。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -282,7 +288,7 @@ test('AC-02 诊断修复收到对应 diagnosis 的根因与证据；FIX_ISSUES �
       return { route: 'APPROVE', verdict_reason: '通过', verified_branch: DEV_BRANCH, verified_head: 'review-h2', candidate_sha256: CAND }
     },
     回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿', verified_branch: DEV_BRANCH, verified_head: 'regression-h1', candidate_sha256: CAND },
-    收口: { status: 'DELIVERED', summary: 'done', followups: '' },
+    收口: { status: 'DELIVERED', completion_type: 'DELIVERED', summary: 'done', followups: '' },
   })
   assert.equal(run.result.status, 'DONE')
   const fixCalls = callsOf(run, '修复')
@@ -309,7 +315,7 @@ test('AC-02 证据推翻根因回诊断：重诊收到触发返工的反证；�
     },
     修复: { route: 'FIXED', summary: '按新根因修复', changed: 'b.js' },
     回归验证: { route: 'PASS', verdict_reason: '缺陷不复现', regression_evidence: '测试绿', verified_branch: DEV_BRANCH, verified_head: 'regression-h1', candidate_sha256: CAND },
-    收口: { status: 'DELIVERED', summary: 'done', followups: '' },
+    收口: { status: 'DELIVERED', completion_type: 'DELIVERED', summary: 'done', followups: '' },
   })
   assert.equal(run.result.status, 'DONE')
   const diagCalls = callsOf(run, '缺陷诊断')
