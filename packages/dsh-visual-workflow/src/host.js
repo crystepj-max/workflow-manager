@@ -765,6 +765,9 @@ return {
         // Formal Records Store 互相引用（LOC-008）：提交成功后由宿主刷新（count + 时间）
         formal_records: null,
         workspace: null,
+        // LOC-028：宿主签发的人工决定与消费记录（防伪造 completion / 幂等恢复）
+        human_decisions: [],
+        consumed_decisions: {},
       }
       // Rev 1 冻结：工作流定义 + 角色（编译产物内联角色正文与路由）+ Provider/Model
       // 绑定 + 运行关键配置。修订仅 Provider/Model，不改脚本，故后续修订以 script_ref
@@ -990,6 +993,8 @@ return {
         evaluation_baselines: rec.evaluation_baselines || [],
         formal_records: rec.formal_records || null,
         workspace: rec.workspace || null,
+        human_decisions: rec.human_decisions || [],
+        consumed_decisions: rec.consumed_decisions || {},
       }
     }
     // 队列实现收敛于 logicalStore（LOC-004）；保留原函数名作为薄委托，11 个调用点零改动
@@ -1028,6 +1033,8 @@ return {
         evaluation_baselines: Array.isArray(data.evaluation_baselines) ? data.evaluation_baselines.filter((r) => r && typeof r === 'object') : [],
         formal_records: asObj(data.formal_records),
         workspace: asObj(data.workspace),
+        human_decisions: Array.isArray(data.human_decisions) ? data.human_decisions.filter((d) => d && typeof d === 'object') : [],
+        consumed_decisions: asObj(data.consumed_decisions) || {},
       }
       logicalRuns.set(id, rec)
       for (const s of rec.segments) if (s.run_id) logicalRunByEngineRun.set(s.run_id, id)
@@ -2849,6 +2856,7 @@ return {
           if (emptyObj(args.results) && parked.results) args.results = parked.results
           if (emptyObj(args.results) && parked.node && parked.control_event && parked.control_event.triggering_node_outcome) args.results = { [parked.node]: parked.control_event.triggering_node_outcome }
           if (args.history == null && parked.history) args.history = parked.history
+          if (!args.halt_reason && parked.reason) args.halt_reason = parked.reason
           for (const k of ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']) {
             const argKey = k === 'round' ? 'startRound' : k
             if (args[argKey] == null && parked[k] != null) args[argKey] = parked[k]
@@ -3035,11 +3043,61 @@ return {
         if (ws) log('workspace allocated: ' + ws.workspace_id + ' at ' + ws.workspace_path)
         else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为')
 
+        // LOC-028：人工决策续跑必须由宿主签发 decision_ref（含候选绑定），禁止信任模型自报
+        let hostDecisionRef = null
+        if (isHdResume && logicalRec) {
+          let candidateRef = null
+          if (ws && ws.source_path) {
+            try {
+              const cap = await wsHostCall('captureCandidate', { logical_run_id: logicalRec.logical_run_id, capability: capabilityFor(logicalRec.logical_run_id) })
+              candidateRef = cap && cap.candidate ? cap.candidate : null
+            } catch (e) { log('captureCandidate（人工决定）失败：' + errMsg(e)) }
+          }
+          hostDecisionRef = {
+            decision_id: String(args.decision_id),
+            logical_run_id: logicalRec.logical_run_id,
+            checkpoint_id: String(args.decision_id),
+            candidate_ref: candidateRef,
+            choice: String(args.user_choice),
+            actor_source: 'host_ui',
+            decided_at: new Date().toISOString(),
+          }
+          if (hostDecisionRef.logical_run_id !== logicalRec.logical_run_id) {
+            return '错误：人工决定归属 Run 不匹配，拒绝续跑。'
+          }
+          const dig = candidateRef && candidateRef.version && candidateRef.version.content_sha256
+            ? String(candidateRef.version.content_sha256) : null
+          const prior = logicalRec.consumed_decisions && logicalRec.consumed_decisions[hostDecisionRef.decision_id]
+          if (prior) {
+            if (prior.candidate_digest && dig && prior.candidate_digest !== dig) {
+              return '错误：成果在决定后已变化，须重新获得针对新版本的验收（decision_id=' + hostDecisionRef.decision_id + '）。'
+            }
+            if (prior.completion && (args.user_choice === 'USER_ACCEPTED' || args.user_choice === 'ACCEPT' || args.user_choice === 'CONDITIONAL_PASS')) {
+              return JSON.stringify({
+                runId: holder && holder.id ? holder.id : 'idempotent',
+                stopReason: 'completed',
+                value: {
+                  status: 'DONE',
+                  taskId: args.taskId,
+                  decision_id: hostDecisionRef.decision_id,
+                  user_choice: args.user_choice,
+                  completion: prior.completion,
+                  idempotent_replay: true,
+                  results: args.results || (parked && parked.results) || null,
+                },
+                agentsStarted: 0,
+              })
+            }
+          }
+          logicalRec.human_decisions = (logicalRec.human_decisions || []).concat([hostDecisionRef])
+          controlEvent(logicalRec, 'human_decision_recorded', { decision_id: hostDecisionRef.decision_id, choice: hostDecisionRef.choice, candidate_digest: dig })
+        }
+
         const scriptArgs = Object.assign({
           taskId: args.taskId, runDir: args.runDir, roleDir: args.roleDir || c.roleDir, baseBranch: args.baseBranch,
           issueRef: args.issueRef, issueTitle: args.issueTitle, issueBody: args.issueBody, issueComments: args.issueComments,
           requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
-          decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
+          decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results, halt_reason: args.halt_reason,
           budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
           technical_budget: args.technical_budget, technical_budget_grant: args.technical_budget_grant, retry_policy_overrides: args.retry_policy_overrides,
           // #80：暂停期间的用户指导（Run 级）与最新基线修订文本——经脚本 runtimeCtx/issueBlock
@@ -3050,7 +3108,12 @@ return {
           // #79: 快照修订的 Provider/Model（Codex R2 ②：active 快照的合并绑定；仅续跑
           // 生效——新启透传会让脚本用覆盖模型执行而 Rev1 快照仍记蓝图绑定，归因失真）
           model_overrides: modelOverridesForExec,
+          decision_ref: hostDecisionRef || undefined,
+          consumed_decisions: logicalRec ? (logicalRec.consumed_decisions || {}) : undefined,
         }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined) : {})
+        if (hostDecisionRef && ws && ws.source_path && hostDecisionRef.candidate_ref) {
+          scriptArgs.candidate_ref = hostDecisionRef.candidate_ref
+        }
         for (const k of Object.keys(scriptArgs)) if (scriptArgs[k] === undefined) delete scriptArgs[k]
 
         // 启动引擎前先标 RUNNING：崩溃/start 抛错不得把 workspace 永久留在 READY
@@ -3261,6 +3324,17 @@ return {
                 node: comp.node !== undefined && comp.node !== null ? String(comp.node) : '',
                 path: comp.path !== undefined && comp.path !== null ? String(comp.path) : '',
               }
+            }
+            // LOC-028：记录已消费的人工决定，供幂等恢复与候选变化拦截
+            const consumed = value && value.consumed_decision
+            if (consumed && consumed.decision_id) {
+              logicalRec.consumed_decisions = Object.assign({}, logicalRec.consumed_decisions || {}, {
+                [String(consumed.decision_id)]: {
+                  candidate_digest: consumed.candidate_digest || null,
+                  completion: consumed.completion || logicalRec.completion || null,
+                  consumed_at: Date.now(),
+                },
+              })
             }
           }
           // LOC-029 完成顺序：保存结果（脚本）→ 逐次提交确认（Store）→ 更新最新索引
