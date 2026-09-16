@@ -28,7 +28,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { STATUS_WAITING_ACCEPTANCE, STATUS_EXECUTION_BLOCKED } from './local-task-registry.mjs'
+import { STATUS_WAITING_ACCEPTANCE, STATUS_EXECUTION_BLOCKED, loadRegistry } from './local-task-registry.mjs'
+import { collectMergeFacts } from './registry-reconcile.mjs'
 import { runPreflight } from './ai-task-preflight-check.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -130,8 +131,28 @@ async function main() {
       reason: null,
     }
     if (dep && dep !== '无') {
-      excluded.reason = 'V0.1 暂不支持关联任务自动执行'
-      return { ok: false, excluded }
+      // CHORE-73 第三层：依赖满足判定改看 git 事实（合并提交/收口标签），登记册仅作快路径。
+      // 登记册状态回写天然滞后于实际合并（LOC-028 被夜间批次跳过的根因），
+      // 因此「登记册未记合并」时再查一次主干痕迹，有痕即视为已完成。
+      const repoRoot = path.resolve(__dirname, '..')
+      const depIds = dep.split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
+      let unmet = depIds
+      try {
+        const reg = loadRegistry(repoRoot)
+        const facts = collectMergeFacts(repoRoot, 'main')
+        unmet = depIds.filter((d) => {
+          const dt = reg.tasks.find((x) => x.task_id === d)
+          if (dt && dt.status === '已合并') return false
+          return !facts.has(d)
+        })
+      } catch (e) {
+        excluded.reason = `依赖事实核查失败：${e.message}`
+        return { ok: false, excluded }
+      }
+      if (unmet.length) {
+        excluded.reason = `依赖未完成: ${unmet.join(', ')}`
+        return { ok: false, excluded }
+      }
     }
     if (!pr.ok) {
       excluded.reason = pr.failures[0] || '实施前检查未通过'

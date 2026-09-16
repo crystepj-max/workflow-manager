@@ -57,7 +57,7 @@ const r2 = spawnSync(process.execPath, [plan, tmpBatch], { encoding: 'utf8' })
 ok(r2.status === 0, `依赖场景 dry-run 应成功\n${r2.stderr}`)
 let out2 = {}
 try { out2 = JSON.parse(r2.stdout) } catch (e) { fail('依赖场景输出非 JSON') }
-ok(out2.excluded && out2.excluded.some((x) => x.id === 'D' && /前置依赖|暂不支持/.test(x.reason || '')), 'D 应未纳入并说明依赖')
+ok(out2.excluded && out2.excluded.some((x) => x.id === 'D' && /前置依赖|暂不支持|依赖未完成/.test(x.reason || '')), 'D 应未纳入并说明依赖')
 ok(out2.snapshotIds && out2.snapshotIds.includes('A') && !out2.snapshotIds.includes('D'), '快照应含 A 不含 D')
 try { fs.unlinkSync(tmpBatch) } catch { /* ignore */ }
 
