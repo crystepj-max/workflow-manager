@@ -1324,7 +1324,7 @@
       "source": "会话录入",
       "source_ref": "2026-09-16 合并 cnb/main 9b4bfee 后 npm test 复现：最小图（hello-blueprint）编译产物 75.3KB，超宿主 runNode maxBytes 64KB（scripts/test/generate.test.mjs:339 S6）",
       "baseline": "V1",
-      "status": "定义中",
+      "status": "已合并",
       "priority": "P1",
       "env_group": null,
       "env_role": null,
@@ -1332,13 +1332,16 @@
       "branch": null,
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "51739d6b3e3556888ad9cda0d03072b77f19d090",
+        "merged_at": "2026-09-16T05:55:28.238Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-23T05:55:28.238Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-16T00:36:55.200Z",
-      "updated_at": "2026-09-16T00:37:37.332Z",
+      "updated_at": "2026-09-16T05:55:28.281Z",
       "spec_path": "docs/tasks/specs/FIX-65-compile-output-size/task-spec-V1.md"
     },
     {
