@@ -169,7 +169,8 @@ test('AC-03 诊断回归节点：注入文本声明回归产物 regression-repor
     收口: { status: 'DELIVERED', summary: 's', followups: '' },
   })
   const { result } = await runGeneratedScript(script, { args: { work_branch: branch }, agent })
-  assert.equal(result.status, 'DONE')
+  // LOC-030 终止语义（PR #33 先例）：回归 PASS 后升人工验收关口，不再直接 DONE。
+  assert.equal(result.status, 'WAITING_HUMAN')
 
   const prompt = call(agent, '回归验证')
   assertSnapshot(prompt, 'test', '诊断回归')
