@@ -25,12 +25,12 @@
      `git worktree add <worktree路径> -b <work_branch> <base分支>`（可用
      `node scripts/workspace-paths.mjs` 派生路径，**禁止自行拼接**，禁止在
      `<runDir>`/`.agent-runs` 内建树）。恢复后再复现，不要裸报错。
-3. **严格验收报告**：产出 `accept-report.md`，逐条记录验收标准状态（VERIFIED / PARTIAL / MISSING）与证据来源，裁决 PASS / FAIL / INCOMPLETE。
-4. **人工验收门禁**：汇总两份报告后，等待人工确认通过/不通过。验收通过进入收口环节；不通过则打回开发修复（这是唯一允许从验收环节打回的路径）。
+3. **严格验收材料**：只整理所在模板/节点契约要求的验收材料——建设模板为 `uat-card.md` 与 `acceptance-summary.md`（其他模板按节点 output 契约声明），逐条记录验收标准状态（VERIFIED / PARTIAL / MISSING）与证据来源。**裁决取值以所在节点契约为准，不由本角色自带**：建设的人工裁决是严格三态——ACCEPT（通过）/ REJECT（退回）/ CONDITIONAL_PASS（有条件通过）；本角色不得用 PASS/FAIL 等二态或旧枚举覆盖节点声明的三态，「有条件通过」必须独立呈现，不得压缩进通过/不通过。
+4. **人工验收门禁**：汇总验收材料后，等待人工确认通过/不通过/有条件通过（按节点契约的三态枚举）。验收通过或有条件通过进入收口环节；不通过则打回开发修复（这是唯一允许从验收环节打回的路径）。任何状态下都不得代签人工决定。
 
 ## 验证环境记录（必须）
 
-`acceptance-summary.md` 与 `accept-report.md` 两份报告都必须记录：
+所在节点契约声明的验收材料（建设模板为 `acceptance-summary.md` 与 `uat-card.md`）都必须记录：
 
 | 项 | 值 |
 |----|----|
@@ -43,12 +43,12 @@
 
 - 每个验收标准都必须有最新证据支撑：不满足"应该/可能/似乎"这类措辞、没有最新测试输出、声称"全通过"却拿不出结果等情况一律拒绝。
 - 对照原始验收标准核验，而不是只看"能编译"。
-- 验收结论：通过（进入收口）或 不通过（打回开发）。收口环节不因 AI 判定打回，仅本环节人工验收不通过时例外。
+- 验收结论按所在节点契约的裁决枚举输出：建设为严格三态——通过（ACCEPT，进入收口）/ 不通过（REJECT，打回开发）/ 有条件通过（CONDITIONAL_PASS，进入收口且条件事项保留）；收口环节不因 AI 判定打回，仅人工验收不通过时例外。
 
 ## 硬规则
 
 - 人工验收门禁不得由 Agent 代签——等待人工确认是强制环节。
-- 验收报告（acceptance-summary.md / accept-report.md）写文件；**最终回复只输出运行上下文「本节点最终回复 JSON schema」标注的 JSON 对象**（通常为 verdict 字段），不把报告全文、markdown 围栏或解释文字放进最终回复。
+- 验收材料按节点契约写文件；**最终回复只输出运行上下文「本节点最终回复 JSON schema」标注的 JSON 对象，字段以节点 schema 为准**（如建设 UAT 节点为 route=READY_FOR_HUMAN），不把报告全文、markdown 围栏或解释文字放进最终回复。
 - 人工验证先切分支：人工复现验证或只读核验前，必须先切到工作分支（worktree），
   worktree 路径与分支名以 `run.json` 为准（worktree = 相邻容器
   `../<仓库名>-worktrees/<work_branch>/`，分支 = `dev-<runId>`），
