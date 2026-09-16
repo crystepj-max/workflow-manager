@@ -144,6 +144,7 @@ export function newRecord({
   seq,
   taskId,
   name,
+  slug,
   source = '会话录入',
   sourceRef = '',
   baseline = 'V1',
@@ -161,7 +162,7 @@ export function newRecord({
     origin_machine: machineCode(),
     origin_agent: process.env.AI_AGENT_NAME ?? null,
     name,
-    slug: slugify(name),
+    slug: slug || slugify(name),
     source,
     source_ref: sourceRef,
     baseline,
@@ -311,17 +312,17 @@ function issueBody({ name, source, sourceRef, baseline }) {
  * 分配任务编号：默认向 CNB 申请（服务端发号，双机/多会话不会撞号）；
  * 远端不可达或显式 --offline 时降级为临时号，remote 记为 pending，联网后须换取正式号。
  */
-export function allocate(repo, { name, source, sourceRef, baseline, type = 'FEAT', priority = null, offline = false }) {
+export function allocate(repo, { name, slug, source, sourceRef, baseline, type = 'FEAT', priority = null, offline = false }) {
   const t = String(type).toUpperCase()
   if (!TASK_TYPES.includes(t)) throw new Error(`任务类型必须是 ${TASK_TYPES.join(' / ')} 之一`)
   const registry = loadRegistry(repo)
   let taskId
   let remote
-  const slug = offline ? null : resolveRemoteSlug(repo)
+  const remoteSlug = offline ? null : resolveRemoteSlug(repo)
   if (offline) {
     taskId = tmpId(registry.tasks)
     remote = 'pending'
-  } else if (!slug) {
+  } else if (!remoteSlug) {
     // 未配置 cnb 远端（如临时目录、测试仓）：沿用旧的本地序号，并明确标注无远端锚点。
     taskId = formatId(nextSeq(registry.tasks))
     remote = 'none'
@@ -343,7 +344,7 @@ export function allocate(repo, { name, source, sourceRef, baseline, type = 'FEAT
       console.error(`[warn] 远端发号失败（${err.message}），已降级为临时号 ${taskId}，联网后请换取正式号`)
     }
   }
-  const record = newRecord({ name, source, sourceRef, baseline, taskId, type: t, remote })
+  const record = newRecord({ name, source, sourceRef, baseline, taskId, type: t, remote, slug })
   if (priority) record.priority = priority
   registry.tasks.push(record)
   saveRegistry(repo, registry)
@@ -387,6 +388,7 @@ function main(argv) {
     }
     const rec = allocate(repo, {
       name,
+      slug: get('--slug'),
       type: get('--type') || 'FEAT',
       priority: get('--priority') || null,
       offline: argv.includes('--offline'),
