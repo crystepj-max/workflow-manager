@@ -1353,10 +1353,14 @@ export function blueprintSourceRel(bpId) {
 
 export function skillWrap(bp) {
   const src = blueprintSourceRel(bp.id);
+  // 描述拼接归一（FIX-66，历史 LOC-034）：蓝图 description 多数已以句号结尾，无脑再追加「。」会产出
+  // 「。。」；description 为空时也不应留下孤立的「：」分隔符。
+  const desc = String(bp.description || '').trim().replace(/[。．.]+$/, '');
+  const descSeg = desc ? bp.displayName + '：' + desc : bp.displayName;
   return [
     '---',
     'name: ' + bp.id,
-    'description: "' + (bp.displayName + '：' + (bp.description || '') + '。当用户说『' + bp.displayName + '』『' + bp.id + '』或用自然语言要求以该工作流完成需求时使用。').replace(/"/g, '\\"') + '"',
+    'description: "' + (descSeg + '。当用户说『' + bp.displayName + '』『' + bp.id + '』或用自然语言要求以该工作流完成需求时使用。').replace(/"/g, '\\"') + '"',
     '---',
     '# ' + bp.displayName + '（生成 skill）',
     '本 skill 由生成器从蓝图 `' + src + '` 编译产出（NFR-1：生成物不可手改，改蓝图重生成）。',
