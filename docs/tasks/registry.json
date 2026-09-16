@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "revision": 2,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -86,6 +87,38 @@
       "branch_retained": null,
       "created_at": "2026-09-16T00:03:29.832Z",
       "updated_at": "2026-09-16T00:03:29.832Z"
+    },
+    {
+      "task_id": "CHORE-73",
+      "type": "CHORE",
+      "remote": "cnb#73",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "登记册账实对账机制：合并事实自动回写 + 版本锁防覆盖",
+      "slug": "registry-reconcile",
+      "source": "会话录入",
+      "source_ref": "2026-09-16 一天三次同型事故（分叉互相覆盖/收口脚本读旧写回刷掉 FIX-65/远端合并后登记滞后致 LOC-028 被跳过），松哥确认三层改进方案",
+      "baseline": "V1",
+      "status": "已合并",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": {
+        "commit": "84e52a3834b74d7ede144b51fe535757d975ab6e",
+        "merged_at": "2026-09-16T10:18:35.153Z"
+      },
+      "github_sync": "pending",
+      "evidence_expires_at": "2026-09-23T10:18:35.153Z",
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-16T09:13:19.894Z",
+      "updated_at": "2026-09-16T10:20:28.083Z",
+      "spec_path": "docs/tasks/archive/CHORE-73/task-spec-V1.md"
     },
     {
       "task_id": "FIX-65",
@@ -1441,39 +1474,7 @@
       "spec_path": "docs/tasks/specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md",
       "type": "CHORE",
       "remote": "cnb#63"
-    },
-    {
-      "task_id": "CHORE-73",
-      "type": "CHORE",
-      "remote": "cnb#73",
-      "legacy_id": null,
-      "origin_machine": "chrisdem",
-      "origin_agent": null,
-      "name": "登记册账实对账机制：合并事实自动回写 + 版本锁防覆盖",
-      "slug": "registry-reconcile",
-      "source": "会话录入",
-      "source_ref": "2026-09-16 一天三次同型事故（分叉互相覆盖/收口脚本读旧写回刷掉 FIX-65/远端合并后登记滞后致 LOC-028 被跳过），松哥确认三层改进方案",
-      "baseline": "V1",
-      "status": "已合并",
-      "priority": "P1",
-      "env_group": null,
-      "env_role": null,
-      "deps": [],
-      "branch": null,
-      "worktree": null,
-      "runs": [],
-      "merge": {
-        "commit": "84e52a3834b74d7ede144b51fe535757d975ab6e",
-        "merged_at": "2026-09-16T10:18:35.153Z"
-      },
-      "github_sync": "pending",
-      "evidence_expires_at": "2026-09-23T10:18:35.153Z",
-      "evidence_cleared_at": null,
-      "branch_retained": null,
-      "created_at": "2026-09-16T09:13:19.894Z",
-      "updated_at": "2026-09-16T10:18:46.078Z",
-      "spec_path": "docs/tasks/archive/CHORE-73/task-spec-V1.md"
     }
   ],
-  "updated_at": "2026-09-16T08:53:46.466Z"
+  "updated_at": "2026-09-16T10:20:06.264Z"
 }

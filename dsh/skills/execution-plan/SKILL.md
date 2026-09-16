@@ -76,6 +76,13 @@ node scripts/ai-task-scheduled-trigger.mjs path/to/schedule.json --now
 
 预约单含 `runAt` + 与立即跑相同的 `batch`；到点后由触发脚本唤起 `scripts/ai-task-execution-plan.mjs`，并写出夜间批次报告。不新建第二套定时 Skill。
 
+**批次前对账（CHORE-73，强制）**：触发脚本在唤起执行计划前，先以主干合并事实回写登记册（`registry-reconcile` 的 plan/apply）——「实际已合并但登记滞后」的条目自动补记，防止调度按旧账误判依赖；对账结果写入批次报告抬头，可疑差异（登记记已合并但主干无痕迹）只提示人工核对，不阻塞批次。手工跑执行计划（不经触发脚本）时，应先自行执行：
+
+```bash
+node scripts/registry-reconcile.mjs apply   # 先对账（账实一致时为空操作）
+node scripts/ai-task-execution-plan.mjs path/to/batch.json
+```
+
 ## 输出
 
 必须落盘或回报「批次汇总」（字段见 `execution-plan-m3.md` §6），并列出等待验收任务的定位信息。到点触发时额外落盘「夜间批次报告」（字段对齐汇总，见 M4 短文）。
