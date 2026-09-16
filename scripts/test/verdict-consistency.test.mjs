@@ -24,6 +24,11 @@ const testMd = readFileSync(path.join(root, 'dsh/roles/test.md'), 'utf8')
 const REVIEW_PAIRS = { APPROVE: 'APPROVE', RETURN_DEV: 'REQUEST_CHANGES', BLOCKED: 'COMMENT_ONLY' }
 const TEST_PAIRS = { PASS: 'PASSED', RETURN_DEV: 'FAILED', BLOCKED: 'BLOCKED' }
 
+// LOC-026 起，verifyBranch 节点（建设 review/test）的 output.schema.required 含候选证明摘要
+// candidate_sha256。本套件的真实模板排练是无 workspace 的旧形态：运行时 candOk 闸门不生效
+// （A.workspace_capability 为空），但 schema 必填仍要求非空字符串，故夹具统一显式给出。
+const CAND = 'verdict-consistency-candidate'
+
 const clone = (bp) => JSON.parse(JSON.stringify(bp))
 const expectOk = (bp, label) => {
   const r = validateBlueprint(bp)
@@ -129,8 +134,12 @@ test('AC-01 review 三个合法组合各走预期边', async () => {
       '收敛审查': { route, verdict, summary: 's' },
       ...downstream,
     })
-    assert.equal(result.status, route === 'APPROVE' ? 'WAITING_HUMAN' : 'DONE',
-      route + '：APPROVE 升人工验收、其余走 $end，实际 ' + result.status)
+    // LOC-030 跨任务对齐：$end 终止描述按 outcome 派生生命周期——outcome=BLOCKED 是
+    // 业务受阻（status=BLOCKED / 非终态可恢复），不再等同脚本 DONE；APPROVE 升人工验收、
+    // RETURN_DEV 走返工边后由 dev 收束为 DONE。
+    const expectStatus = route === 'APPROVE' ? 'WAITING_HUMAN' : route === 'BLOCKED' ? 'BLOCKED' : 'DONE'
+    assert.equal(result.status, expectStatus,
+      route + '：APPROVE 升人工验收、BLOCKED 为业务受阻、其余走返工边，实际 ' + result.status)
     assert.equal(result.results.review.verdict, verdict, route + '：结论字段保留')
     const edge = result.history.find((h) => h.from === 'review' && h.outcome === route)
     const expectedTo = route === 'APPROVE' ? 'test' : route === 'RETURN_DEV' ? 'dev' : '$end'
@@ -147,8 +156,11 @@ test('AC-01 test 三个合法组合各走预期边', async () => {
       'UAT 准备': { route: 'READY_FOR_HUMAN' },
       '返工开发': { route: 'READY' },
     })
-    assert.equal(result.status, route === 'PASS' ? 'WAITING_HUMAN' : 'DONE',
-      route + '：PASS 升人工验收、其余走 $end，实际 ' + result.status)
+    // 同 review 用例：PASS 升人工验收、BLOCKED 为业务受阻（status=BLOCKED）、
+    // RETURN_DEV 走返工边后由 dev 收束为 DONE（LOC-030 终止描述）。
+    const expectStatus = route === 'PASS' ? 'WAITING_HUMAN' : route === 'BLOCKED' ? 'BLOCKED' : 'DONE'
+    assert.equal(result.status, expectStatus,
+      route + '：PASS 升人工验收、BLOCKED 为业务受阻、其余走返工边，实际 ' + result.status)
     const edge = result.history.find((h) => h.from === 'test' && h.outcome === route)
     const expectedTo = route === 'PASS' ? 'uat' : route === 'RETURN_DEV' ? 'dev' : '$end'
     assert.equal(edge.to, expectedTo, route + '：应走 ' + expectedTo + ' 边，history=' + JSON.stringify(result.history))
@@ -233,8 +245,8 @@ test('AC-02 真实建设模板：收敛审查 APPROVE/REQUEST_CHANGES 到不了 
   const agent = makeAgentScript({
     '实施前检查': { route: 'PASS', summary: 's', blockers: '无', baseline_version: 'V1' },
     '开发': { route: 'READY', summary: 's', self_check: 'ok' },
-    '收敛审查': { route: 'APPROVE', verdict: 'REQUEST_CHANGES', summary: '矛盾', blockers: '', verified_branch: branch, verified_head: 'h1' },
-    '测试': { route: 'PASS', result: 'PASSED', reason: 'r', evidence: 'e', verified_branch: branch, verified_head: 'h1' },
+    '收敛审查': { route: 'APPROVE', verdict: 'REQUEST_CHANGES', summary: '矛盾', blockers: '', verified_branch: branch, verified_head: 'h1', candidate_sha256: CAND },
+    '测试': { route: 'PASS', result: 'PASSED', reason: 'r', evidence: 'e', verified_branch: branch, verified_head: 'h1', candidate_sha256: CAND },
     'UAT 准备': { route: 'READY_FOR_HUMAN', summary_for_human: 's', why: 'w', current_state: 'c', details: 'd' },
     '收口': { status: 'DELIVERED', completion_type: 'DELIVERED', summary: 's', followups: '' },
   })
@@ -253,8 +265,8 @@ test('AC-02 真实建设模板：测试 PASS/FAILED 矛盾到不了 UAT 与收�
   const agent = makeAgentScript({
     '实施前检查': { route: 'PASS', summary: 's', blockers: '无', baseline_version: 'V1' },
     '开发': { route: 'READY', summary: 's', self_check: 'ok' },
-    '收敛审查': { route: 'APPROVE', verdict: 'APPROVE', summary: 's', blockers: '', verified_branch: branch, verified_head: 'h1' },
-    '测试': { route: 'PASS', result: 'FAILED', reason: '矛盾', evidence: 'e', verified_branch: branch, verified_head: 'h1' },
+    '收敛审查': { route: 'APPROVE', verdict: 'APPROVE', summary: 's', blockers: '', verified_branch: branch, verified_head: 'h1', candidate_sha256: CAND },
+    '测试': { route: 'PASS', result: 'FAILED', reason: '矛盾', evidence: 'e', verified_branch: branch, verified_head: 'h1', candidate_sha256: CAND },
     'UAT 准备': { route: 'READY_FOR_HUMAN', summary_for_human: 's', why: 'w', current_state: 'c', details: 'd' },
     '收口': { status: 'DELIVERED', completion_type: 'DELIVERED', summary: 's', followups: '' },
   })
@@ -271,8 +283,8 @@ test('真实建设模板合法主链不受影响：APPROVE/APPROVE + PASS/PASSED
   const agent = makeAgentScript({
     '实施前检查': { route: 'PASS', summary: 's', blockers: '无', baseline_version: 'V1' },
     '开发': { route: 'READY', summary: 's', self_check: 'ok' },
-    '收敛审查': { route: 'APPROVE', verdict: 'APPROVE', summary: 's', blockers: '', verified_branch: branch, verified_head: 'h1' },
-    '测试': { route: 'PASS', result: 'PASSED', reason: 'r', evidence: 'e', verified_branch: branch, verified_head: 'h1' },
+    '收敛审查': { route: 'APPROVE', verdict: 'APPROVE', summary: 's', blockers: '', verified_branch: branch, verified_head: 'h1', candidate_sha256: CAND },
+    '测试': { route: 'PASS', result: 'PASSED', reason: 'r', evidence: 'e', verified_branch: branch, verified_head: 'h1', candidate_sha256: CAND },
     'UAT 准备': { route: 'READY_FOR_HUMAN', summary_for_human: 's', why: 'w', current_state: 'c', details: 'd' },
   })
   const { result } = await runGeneratedScript(script, { agent })

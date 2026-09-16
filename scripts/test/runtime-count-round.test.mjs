@@ -63,7 +63,7 @@ test('#73 OPTIMIZE 达到额度：保留 OPTIMIZE，WAITING_HUMAN + MAX_ROUNDS_R
   assert.notEqual(result.status, 'FAILED_MAX_ROUNDS')
 })
 
-test('#73 RECONFIRM 不计数：超过 maxRounds 次仍完整记录且不耗尽', async () => {
+test('#73 RECONFIRM 不计数：第 2 次相同签名无进展回边受阻（LOC-031 AC-04），业务额度不受影响', async () => {
   let execs = 0
   const { result } = await runEngine(reconfirmBp, {
     kickoff: { go: 'START' },
@@ -75,11 +75,52 @@ test('#73 RECONFIRM 不计数：超过 maxRounds 次仍完整记录且不耗尽'
     },
     evaluate: { verdict: 'PASS', completion_type: 'EVALUATION_PASSED' },
   })
-  assert.equal(result.status, 'DONE')
+  // LOC-031：不计业务额度的回边连续 2 次相同签名 → WAITING_HUMAN，不再无限消耗
+  assert.equal(result.status, 'WAITING_HUMAN')
+  assert.equal(result.reason, 'NO_PROGRESS_BLOCKED')
+  assert.equal(execs, 2)
   assert.equal(result.budgetUsed, 0)
   const recs = result.history.filter((h) => h.outcome === 'RECONFIRM_REQUIRED')
-  assert.equal(recs.length, 3)
-  assert.ok(recs.every((h) => h.countRound === false && !h.halted))
+  assert.equal(recs.length, 2)
+  assert.ok(recs.every((h) => h.countRound === false))
+  // 受阻卡：保留原 Node Business Outcome + 预算种类/下一步 + 恢复现场（AC-03/AC-05）
+  assert.equal(result.results.execute.status, 'RECONFIRM_REQUIRED')
+  assert.ok(result.decision_package.why.includes('NO_PROGRESS_BLOCKED'))
+  assert.ok(result.decision_package.why.includes('新目标/新基线'))
+  assert.ok(result.resume && result.resume.technical_budget)
+})
+
+test('#73 RECONFIRM：真正的新基线不被误判（LOC-031 AC-04 反例）', async () => {
+  // 恢复后基线修订改变输入摘要 → 无进展签名重置，可继续走完
+  let execs = 0
+  const first = await runEngine(reconfirmBp, {
+    kickoff: { go: 'START' },
+    '/^intake/': { go: 'NEXT' },
+    execute: () => {
+      execs += 1
+      return { status: 'RECONFIRM_REQUIRED' }
+    },
+    evaluate: { verdict: 'PASS', completion_type: 'EVALUATION_PASSED' },
+  })
+  assert.equal(first.result.reason, 'NO_PROGRESS_BLOCKED')
+  const second = await runEngine(reconfirmBp, {
+    kickoff: { go: 'START' },
+    '/^intake/': { go: 'NEXT' },
+    execute: { status: 'DONE' },
+    evaluate: { verdict: 'PASS', completion_type: 'EVALUATION_PASSED' },
+  }, {
+    entry: first.result.resume.entry,
+    results: first.result.resume.results,
+    history: first.result.resume.history,
+    startRound: first.result.resume.startRound,
+    feedback: first.result.resume.feedback,
+    budgetUsed: first.result.resume.budgetUsed,
+    maxRounds: first.result.resume.maxRounds,
+    decisionSeq: first.result.resume.decisionSeq,
+    technical_budget: first.result.resume.technical_budget,
+    baseline_amendment: '基线修订：目标改为直接交付',
+  })
+  assert.equal(second.result.status, 'DONE')
 })
 
 test('#73 探索第 3 轮 NEEDS_RESEARCH：保留结果并转人工（自动补充研究额度=2）', async () => {
