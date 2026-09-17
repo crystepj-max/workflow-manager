@@ -1,0 +1,566 @@
+[
+  {
+    "pairs": [
+      {
+        "background": "#ffffff",
+        "foreground": "#1d2b43",
+        "name": "正文",
+        "pass": true,
+        "ratio": 14.2,
+        "target": 4.5
+      },
+      {
+        "background": "#f1f4fa",
+        "foreground": "#1d2b43",
+        "name": "正文/画布",
+        "pass": true,
+        "ratio": 12.89,
+        "target": 4.5
+      },
+      {
+        "background": "#ffffff",
+        "foreground": "#58677e",
+        "name": "次要文字",
+        "pass": true,
+        "ratio": 5.74,
+        "target": 4.5
+      },
+      {
+        "background": "#f1f4fa",
+        "foreground": "#58677e",
+        "name": "次要文字/画布",
+        "pass": true,
+        "ratio": 5.21,
+        "target": 4.5
+      },
+      {
+        "background": "#e8ecff",
+        "foreground": "#3d53b6",
+        "name": "强调文字",
+        "pass": true,
+        "ratio": 5.74,
+        "target": 4.5
+      },
+      {
+        "background": "#3d53b6",
+        "foreground": "#ffffff",
+        "name": "按钮",
+        "pass": true,
+        "ratio": 6.75,
+        "target": 4.5
+      },
+      {
+        "background": "#e5f2eb",
+        "foreground": "#24694f",
+        "name": "成功",
+        "pass": true,
+        "ratio": 5.68,
+        "target": 4.5
+      },
+      {
+        "background": "#fff1d8",
+        "foreground": "#865008",
+        "name": "等待",
+        "pass": true,
+        "ratio": 5.95,
+        "target": 4.5
+      },
+      {
+        "background": "#fce9ec",
+        "foreground": "#a22f44",
+        "name": "异常",
+        "pass": true,
+        "ratio": 5.95,
+        "target": 4.5
+      },
+      {
+        "background": "#ffffff",
+        "foreground": "#7c8aa3",
+        "name": "控件边界",
+        "pass": true,
+        "ratio": 3.49,
+        "target": 3
+      },
+      {
+        "background": "#f1f4fa",
+        "foreground": "#7c8aa3",
+        "name": "控件边界/画布",
+        "pass": true,
+        "ratio": 3.17,
+        "target": 3
+      }
+    ],
+    "theme": "light",
+    "variant": "A"
+  },
+  {
+    "pairs": [
+      {
+        "background": "#182338",
+        "foreground": "#edf2ff",
+        "name": "正文",
+        "pass": true,
+        "ratio": 14.03,
+        "target": 4.5
+      },
+      {
+        "background": "#101827",
+        "foreground": "#edf2ff",
+        "name": "正文/画布",
+        "pass": true,
+        "ratio": 15.86,
+        "target": 4.5
+      },
+      {
+        "background": "#182338",
+        "foreground": "#acb9d1",
+        "name": "次要文字",
+        "pass": true,
+        "ratio": 7.94,
+        "target": 4.5
+      },
+      {
+        "background": "#101827",
+        "foreground": "#acb9d1",
+        "name": "次要文字/画布",
+        "pass": true,
+        "ratio": 8.98,
+        "target": 4.5
+      },
+      {
+        "background": "#293759",
+        "foreground": "#b3c1ff",
+        "name": "强调文字",
+        "pass": true,
+        "ratio": 6.72,
+        "target": 4.5
+      },
+      {
+        "background": "#b3c1ff",
+        "foreground": "#172039",
+        "name": "按钮",
+        "pass": true,
+        "ratio": 9.21,
+        "target": 4.5
+      },
+      {
+        "background": "#1e3c32",
+        "foreground": "#a0ddbd",
+        "name": "成功",
+        "pass": true,
+        "ratio": 7.77,
+        "target": 4.5
+      },
+      {
+        "background": "#46391f",
+        "foreground": "#f3ce88",
+        "name": "等待",
+        "pass": true,
+        "ratio": 7.5,
+        "target": 4.5
+      },
+      {
+        "background": "#4b2935",
+        "foreground": "#ffb1bf",
+        "name": "异常",
+        "pass": true,
+        "ratio": 7.37,
+        "target": 4.5
+      },
+      {
+        "background": "#182338",
+        "foreground": "#7c8caa",
+        "name": "控件边界",
+        "pass": true,
+        "ratio": 4.63,
+        "target": 3
+      },
+      {
+        "background": "#101827",
+        "foreground": "#7c8caa",
+        "name": "控件边界/画布",
+        "pass": true,
+        "ratio": 5.24,
+        "target": 3
+      }
+    ],
+    "theme": "dark",
+    "variant": "A"
+  },
+  {
+    "pairs": [
+      {
+        "background": "#fcfefd",
+        "foreground": "#193a34",
+        "name": "正文",
+        "pass": true,
+        "ratio": 12.22,
+        "target": 4.5
+      },
+      {
+        "background": "#edf4f1",
+        "foreground": "#193a34",
+        "name": "正文/画布",
+        "pass": true,
+        "ratio": 11.09,
+        "target": 4.5
+      },
+      {
+        "background": "#fcfefd",
+        "foreground": "#526d64",
+        "name": "次要文字",
+        "pass": true,
+        "ratio": 5.56,
+        "target": 4.5
+      },
+      {
+        "background": "#edf4f1",
+        "foreground": "#526d64",
+        "name": "次要文字/画布",
+        "pass": true,
+        "ratio": 5.04,
+        "target": 4.5
+      },
+      {
+        "background": "#deeee7",
+        "foreground": "#216558",
+        "name": "强调文字",
+        "pass": true,
+        "ratio": 5.7,
+        "target": 4.5
+      },
+      {
+        "background": "#216558",
+        "foreground": "#ffffff",
+        "name": "按钮",
+        "pass": true,
+        "ratio": 6.85,
+        "target": 4.5
+      },
+      {
+        "background": "#e5f2eb",
+        "foreground": "#24694f",
+        "name": "成功",
+        "pass": true,
+        "ratio": 5.68,
+        "target": 4.5
+      },
+      {
+        "background": "#fff1d8",
+        "foreground": "#865008",
+        "name": "等待",
+        "pass": true,
+        "ratio": 5.95,
+        "target": 4.5
+      },
+      {
+        "background": "#fce9ec",
+        "foreground": "#a22f44",
+        "name": "异常",
+        "pass": true,
+        "ratio": 5.95,
+        "target": 4.5
+      },
+      {
+        "background": "#fcfefd",
+        "foreground": "#739183",
+        "name": "控件边界",
+        "pass": true,
+        "ratio": 3.4,
+        "target": 3
+      },
+      {
+        "background": "#edf4f1",
+        "foreground": "#739183",
+        "name": "控件边界/画布",
+        "pass": true,
+        "ratio": 3.08,
+        "target": 3
+      }
+    ],
+    "theme": "light",
+    "variant": "B"
+  },
+  {
+    "pairs": [
+      {
+        "background": "#19332c",
+        "foreground": "#e8f6ef",
+        "name": "正文",
+        "pass": true,
+        "ratio": 12.16,
+        "target": 4.5
+      },
+      {
+        "background": "#112420",
+        "foreground": "#e8f6ef",
+        "name": "正文/画布",
+        "pass": true,
+        "ratio": 14.54,
+        "target": 4.5
+      },
+      {
+        "background": "#19332c",
+        "foreground": "#aac8bb",
+        "name": "次要文字",
+        "pass": true,
+        "ratio": 7.53,
+        "target": 4.5
+      },
+      {
+        "background": "#112420",
+        "foreground": "#aac8bb",
+        "name": "次要文字/画布",
+        "pass": true,
+        "ratio": 9.01,
+        "target": 4.5
+      },
+      {
+        "background": "#294a3e",
+        "foreground": "#a0dac3",
+        "name": "强调文字",
+        "pass": true,
+        "ratio": 6.21,
+        "target": 4.5
+      },
+      {
+        "background": "#a0dac3",
+        "foreground": "#15352b",
+        "name": "按钮",
+        "pass": true,
+        "ratio": 8.45,
+        "target": 4.5
+      },
+      {
+        "background": "#1e3c32",
+        "foreground": "#a0ddbd",
+        "name": "成功",
+        "pass": true,
+        "ratio": 7.77,
+        "target": 4.5
+      },
+      {
+        "background": "#46391f",
+        "foreground": "#f3ce88",
+        "name": "等待",
+        "pass": true,
+        "ratio": 7.5,
+        "target": 4.5
+      },
+      {
+        "background": "#4b2935",
+        "foreground": "#ffb1bf",
+        "name": "异常",
+        "pass": true,
+        "ratio": 7.37,
+        "target": 4.5
+      },
+      {
+        "background": "#19332c",
+        "foreground": "#7ea995",
+        "name": "控件边界",
+        "pass": true,
+        "ratio": 5.15,
+        "target": 3
+      },
+      {
+        "background": "#112420",
+        "foreground": "#7ea995",
+        "name": "控件边界/画布",
+        "pass": true,
+        "ratio": 6.17,
+        "target": 3
+      }
+    ],
+    "theme": "dark",
+    "variant": "B"
+  },
+  {
+    "pairs": [
+      {
+        "background": "#ffffff",
+        "foreground": "#312d44",
+        "name": "正文",
+        "pass": true,
+        "ratio": 13.21,
+        "target": 4.5
+      },
+      {
+        "background": "#f2f0f6",
+        "foreground": "#312d44",
+        "name": "正文/画布",
+        "pass": true,
+        "ratio": 11.68,
+        "target": 4.5
+      },
+      {
+        "background": "#ffffff",
+        "foreground": "#665e79",
+        "name": "次要文字",
+        "pass": true,
+        "ratio": 6.1,
+        "target": 4.5
+      },
+      {
+        "background": "#f2f0f6",
+        "foreground": "#665e79",
+        "name": "次要文字/画布",
+        "pass": true,
+        "ratio": 5.39,
+        "target": 4.5
+      },
+      {
+        "background": "#efe4f7",
+        "foreground": "#754698",
+        "name": "强调文字",
+        "pass": true,
+        "ratio": 5.54,
+        "target": 4.5
+      },
+      {
+        "background": "#754698",
+        "foreground": "#ffffff",
+        "name": "按钮",
+        "pass": true,
+        "ratio": 6.81,
+        "target": 4.5
+      },
+      {
+        "background": "#e5f2eb",
+        "foreground": "#24694f",
+        "name": "成功",
+        "pass": true,
+        "ratio": 5.68,
+        "target": 4.5
+      },
+      {
+        "background": "#fff1d8",
+        "foreground": "#865008",
+        "name": "等待",
+        "pass": true,
+        "ratio": 5.95,
+        "target": 4.5
+      },
+      {
+        "background": "#fce9ec",
+        "foreground": "#a22f44",
+        "name": "异常",
+        "pass": true,
+        "ratio": 5.95,
+        "target": 4.5
+      },
+      {
+        "background": "#ffffff",
+        "foreground": "#9483a5",
+        "name": "控件边界",
+        "pass": true,
+        "ratio": 3.47,
+        "target": 3
+      },
+      {
+        "background": "#f2f0f6",
+        "foreground": "#9483a5",
+        "name": "控件边界/画布",
+        "pass": true,
+        "ratio": 3.07,
+        "target": 3
+      }
+    ],
+    "theme": "light",
+    "variant": "C"
+  },
+  {
+    "pairs": [
+      {
+        "background": "#292233",
+        "foreground": "#f3ebfc",
+        "name": "正文",
+        "pass": true,
+        "ratio": 13.2,
+        "target": 4.5
+      },
+      {
+        "background": "#1d1826",
+        "foreground": "#f3ebfc",
+        "name": "正文/画布",
+        "pass": true,
+        "ratio": 14.95,
+        "target": 4.5
+      },
+      {
+        "background": "#292233",
+        "foreground": "#c1b3d0",
+        "name": "次要文字",
+        "pass": true,
+        "ratio": 7.75,
+        "target": 4.5
+      },
+      {
+        "background": "#1d1826",
+        "foreground": "#c1b3d0",
+        "name": "次要文字/画布",
+        "pass": true,
+        "ratio": 8.78,
+        "target": 4.5
+      },
+      {
+        "background": "#463252",
+        "foreground": "#d6b0f1",
+        "name": "强调文字",
+        "pass": true,
+        "ratio": 6.17,
+        "target": 4.5
+      },
+      {
+        "background": "#d6b0f1",
+        "foreground": "#301d40",
+        "name": "按钮",
+        "pass": true,
+        "ratio": 8.24,
+        "target": 4.5
+      },
+      {
+        "background": "#1e3c32",
+        "foreground": "#a0ddbd",
+        "name": "成功",
+        "pass": true,
+        "ratio": 7.77,
+        "target": 4.5
+      },
+      {
+        "background": "#46391f",
+        "foreground": "#f3ce88",
+        "name": "等待",
+        "pass": true,
+        "ratio": 7.5,
+        "target": 4.5
+      },
+      {
+        "background": "#4b2935",
+        "foreground": "#ffb1bf",
+        "name": "异常",
+        "pass": true,
+        "ratio": 7.37,
+        "target": 4.5
+      },
+      {
+        "background": "#292233",
+        "foreground": "#a18ab2",
+        "name": "控件边界",
+        "pass": true,
+        "ratio": 4.96,
+        "target": 3
+      },
+      {
+        "background": "#1d1826",
+        "foreground": "#a18ab2",
+        "name": "控件边界/画布",
+        "pass": true,
+        "ratio": 5.61,
+        "target": 3
+      }
+    ],
+    "theme": "dark",
+    "variant": "C"
+  }
+]
