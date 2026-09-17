@@ -85,6 +85,8 @@ return {
     const QUALITY_COST_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/run-quality-cost.mjs' : null
     // LOC-032：受管理外部操作账本 + execute-or-reconcile（与 records-host 同进程边界模式）
     const OPERATIONS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/operations-host.mjs' : null
+    // LOC-041：节点隔离适配（node_capabilities / isolation_guarantee / 探针）
+    const NODE_ISOLATION_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/node-isolation-host.mjs' : null
     // LOC-037：收口事实整理与授权交付动作分离（与 operations-host 同进程边界模式）
     const DELIVERY_CLOSEOUT_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/delivery-closeout-host.mjs' : null
 
@@ -1971,7 +1973,8 @@ return {
         const prepared = await prepareRunWorkspace({ taskId: taskId, templateId: a.templateId || v.sanitized.id, baseBranch: a.baseBranch || 'main', declaredWorkspace: v.sanitized.workspace, resourceKind: a.resource_kind })
         if (!prepared.ok) return fail('Run Workspace 分配失败，隔离保证无法建立：' + prepared.error)
         if (prepared.workspace) {
-          workspaceArgs = scriptArgsFromWorkspace(prepared.workspace, prepared.capability, taskId)
+          const iso = await probeIsolationGuarantee()
+          workspaceArgs = scriptArgsFromWorkspace(prepared.workspace, prepared.capability, taskId, iso)
           script = injectWorkspaceDefaults(script, workspaceArgs)
           await markWorkspaceLifecycle(taskId, 'RUNNING')
         }
@@ -2378,6 +2381,30 @@ return {
       return applied.ok ? { ok: true, id: a.id } : applied
     }))
 
+    // ── LOC-041 节点隔离：核心 = scripts/node-isolation.mjs，经包装脚本子进程调用 ──
+    async function niHostCall(cmd, input, opts) {
+      if (!NODE_ISOLATION_HOST || (await readTextIfExists(NODE_ISOLATION_HOST)) === null) return { ok: false, notFound: true, error: 'node-isolation-host.mjs 未找到（LOC-041 集成未部署）' }
+      const r = await runNode([NODE_ISOLATION_HOST, cmd, JSON.stringify(input || {})], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 256 * 1024 })
+      if (!r.ok) return { ok: false, error: 'node isolation host 调用失败：' + r.detail }
+      try {
+        const parsed = JSON.parse(r.stdout)
+        return parsed.ok ? parsed : Object.assign({ ok: false, error: parsed.error || 'node isolation host 业务错误', detail: parsed.detail }, parsed)
+      } catch (e) { return { ok: false, error: 'node isolation host 输出不可解析：' + errMsg(e), raw: r.stdout } }
+    }
+    let isolationProbePromise = null
+    async function probeIsolationGuarantee() {
+      if (!isolationProbePromise) {
+        isolationProbePromise = niHostCall('probe', {}).then((r) => {
+          if (!r || !r.ok) { isolationProbePromise = null; return { guarantee: 'unavailable', evidence: { reason: r && r.error || 'probe 失败' } } }
+          return { guarantee: r.guarantee || 'unavailable', backend: r.backend || null, evidence: r.evidence || {} }
+        }).catch(() => {
+          isolationProbePromise = null
+          return { guarantee: 'unavailable', evidence: { reason: 'probe 异常' } }
+        })
+      }
+      return isolationProbePromise
+    }
+
     // ── 工作区隔离：核心实现 = scripts/workspace-isolation.mjs，经包装脚本子进程调用 ──
     async function wsHostCall(cmd, input, opts) {
       if (!WS_HOST || (await readTextIfExists(WS_HOST)) === null) return { ok: false, notFound: true, error: 'workspace-isolation-host.mjs 未找到（宿主未部署 #93 集成）' }
@@ -2444,12 +2471,15 @@ return {
       }
       return cap
     }
-    function scriptArgsFromWorkspace(ws, cap, taskId) {
+    function scriptArgsFromWorkspace(ws, cap, taskId, isolation) {
       return {
         taskId: taskId || undefined, workspace_id: ws.workspace_id, workspace_path: ws.workspace_path, source_path: ws.source_path,
         records_path: ws.records_path, work_branch: ws.work_branch, source_revision: ws.source_revision, workspace_capability: cap || undefined,
         // LOC-013：隔离模式随现场注入脚本（ISOLATED_READ 时运行上下文标注 source 只读）
         workspace_mode: ws.workspace_mode || undefined,
+        // LOC-041：宿主探测的隔离保证等级（enforced | unavailable）
+        isolation_guarantee: isolation && isolation.guarantee ? isolation.guarantee : undefined,
+        isolation_backend: isolation && isolation.backend ? isolation.backend : undefined,
       }
     }
     // LOC-026：候选捕获范围缺省由包装脚本侧排除 Run 产物目录（与编译脚本 RUNDIR 同源）
@@ -2651,6 +2681,13 @@ return {
           resolved_inputs: resolvedInputsFor(logicalRec, nodeId, results, false, newKeys),
         })
         if (node && node.verifyBranch) {
+          const iso = await probeIsolationGuarantee()
+          const proofGate = await niHostCall('canIssueProof', {
+            isolation_guarantee: iso.guarantee,
+            profile: String(node.profile || ''),
+            node_capabilities: node.node_capabilities || undefined,
+          })
+          const canProof = proofGate.ok && proofGate.decision && proofGate.decision.ok
           if (!cand) {
             const c = await wsHostCall('captureCandidate', { logical_run_id: logicalRunId, capability: capabilityFor(logicalRunId) })
             if (c.candidate) cand = c.candidate
@@ -2662,6 +2699,9 @@ return {
             workspace: ws ? { workspace_id: ws.workspace_id || null, source_path: ws.source_path || null, work_branch: ws.work_branch || null } : null,
             candidate_ref: cand,
             candidate_match: !!(cand && res.candidate_sha256 === cand.version.content_sha256),
+            isolation_guarantee: iso.guarantee || 'unavailable',
+            independent_proof_eligible: canProof === true,
+            independent_proof_block_reason: canProof ? null : ((proofGate.decision && proofGate.decision.reason) || (iso.guarantee !== 'enforced' ? 'isolation_guarantee=unavailable' : '节点不具备 independent_proof')),
           }
           entries.push({
             type: 'proof',
@@ -3258,6 +3298,8 @@ return {
         const ws = prepared.workspace || null
         if (ws) log('workspace allocated: ' + ws.workspace_id + ' at ' + ws.workspace_path)
         else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为')
+        const isolationProbe = ws ? await probeIsolationGuarantee() : null
+        if (isolationProbe) log('node isolation probe: guarantee=' + isolationProbe.guarantee + (isolationProbe.backend ? (' backend=' + isolationProbe.backend) : ''))
 
         // LOC-028：人工决策续跑必须由宿主签发 decision_ref（含候选绑定），禁止信任模型自报
         let hostDecisionRef = null
@@ -3326,7 +3368,7 @@ return {
           model_overrides: modelOverridesForExec,
           decision_ref: hostDecisionRef || undefined,
           consumed_decisions: logicalRec ? (logicalRec.consumed_decisions || {}) : undefined,
-        }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined) : {})
+        }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined, isolationProbe) : {})
         if (hostDecisionRef && ws && ws.source_path && hostDecisionRef.candidate_ref) {
           scriptArgs.candidate_ref = hostDecisionRef.candidate_ref
         }

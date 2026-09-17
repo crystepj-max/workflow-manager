@@ -233,6 +233,8 @@ export function compileBlueprint(bp, opts = {}) {
     'const SOURCE_REVISION = A.source_revision || null',
     // LOC-013：宿主经 args.workspace_mode 注入 #93 隔离模式（ISOLATED_READ 时 source 只读）
     'const WS_MODE = A.workspace_mode || null',
+    // LOC-041：宿主探测的节点隔离保证（enforced | unavailable）
+    'const ISOLATION_GUARANTEE = A.isolation_guarantee || \'unavailable\'',
     'const NODES = ' + JSON.stringify(bp.nodes),
     'const EDGES = ' + JSON.stringify(bp.edges),
     // #79：续跑快照修订仅允许更换 Provider/Model——宿主经 args.model_overrides 注入
@@ -525,6 +527,9 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (WS) s += \'\\n- workspace 路径：\' + WS + \'（#93 隔离工作区，其下 source=业务源码、records=Formal Records、tmp/build/cache=按 Run 隔离资源）\'',
     '  if (RECORDS) s += \'\\n- records 路径：\' + RECORDS + \'（Formal Records 证据记录目录，业务证据写入此目录）\'',
     '  if (A.workspace_capability && !(opts && opts.hideCapability)) s += \'\\n- workspace RPC 能力令牌（调用 vwf.workspace.* / vwf_workspace 时必须原样携带）：\' + A.workspace_capability + \'（仅限本 Run 使用，禁止用于其他 Run 的 taskId）\'',
+    '  if (ISOLATION_GUARANTEE) s += \'\\n- 节点隔离保证等级（LOC-041）：\' + ISOLATION_GUARANTEE + (ISOLATION_GUARANTEE === \'enforced\' ? \'（宿主已落实文件/进程边界，可参与正式独立 Proof）\' : \'（强制隔离不可用：不得签发正式独立 Proof，只能查看非独立结果）\')',
+    '  const _nc = n.node_capabilities',
+    '  if (_nc && typeof _nc === \'object\') s += \'\\n- 本节点声明能力（node_capabilities，已由宿主裁剪）：\' + JSON.stringify(_nc)',
     '  if (A.guidance_text) s += \'\\n【用户指导（用户暂停期间补充的执行指导，必须遵循）】\\n\' + A.guidance_text + \'\\n\'',
     ...(ebDecl ? ['  if (EB && ebRef && nodeId !== EB.producer) s += ebNote(nodeId)'] : []),
     '  s += \'\\n- 当前节点：\' + (n.label || nodeId) + \'\\n- 完成本节点后更新 \' + RUNDIR + \'/STATE.md（stage / round / status / updated，时间用 date -u +%FT%TZ）\\n\'',
@@ -842,6 +847,7 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (res && res.verified_branch === expectedBranch && headOk && candOk) return null',
     '  let detail = stage + \' 结论校验失败：verified_branch=\' + JSON.stringify(res && res.verified_branch) + \'（应为 \' + expectedBranch + \'），verified_head=\' + JSON.stringify(head)',
     '  if (A.workspace_capability && !candOk) detail += \'，candidate_sha256=\' + JSON.stringify(cand === undefined ? null : cand) + \'（须先经 vwf_workspace op=captureCandidate 获取宿主候选证明，禁止自报）\'',
+    '  if (ISOLATION_GUARANTEE !== \'enforced\') detail += \'，isolation_guarantee=\' + JSON.stringify(ISOLATION_GUARANTEE) + \'（强制隔离不可用，不能签发正式独立 Proof）\'',
     '  return detail',
     '}',
     // ── LOC-031 技术预算运行时 ──
