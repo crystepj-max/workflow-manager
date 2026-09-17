@@ -251,6 +251,14 @@ function attemptBody(attemptId, ev, segment, ctx) {
   if (ev.q !== undefined) v.result = ev.q
   if (ev.o !== undefined) v.outcome = ev.o
   if (ev.u !== undefined) v.outcome_path = String(ev.u)
+  if (ev.rk !== undefined) v.retry_kind = String(ev.rk)
+  if (ev.usage !== undefined && ev.usage !== null && typeof ev.usage === 'object') {
+    v.usage = {
+      source: ev.usage.source ? String(ev.usage.source) : 'provider',
+      input_tokens: Number.isFinite(Number(ev.usage.input_tokens)) ? Number(ev.usage.input_tokens) : null,
+      output_tokens: Number.isFinite(Number(ev.usage.output_tokens)) ? Number(ev.usage.output_tokens) : null,
+    }
+  }
   return v
 }
 
@@ -267,6 +275,10 @@ function attemptEntryOf(value, recordRef) {
     model: value.model,
     outcome: value.outcome === undefined ? null : value.outcome,
     outcome_path: value.outcome_path || null,
+    retry_kind: value.retry_kind || 'unknown',
+    usage: value.usage || null,
+    started_at: value.started_at || null,
+    ended_at: value.ended_at || null,
     completed_at: Date.parse(value.ended_at || value.started_at || '') || Date.now(),
     record: recordRef,
   }

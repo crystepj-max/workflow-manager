@@ -309,6 +309,9 @@ export function compileBlueprint(bp, opts = {}) {
     // 记录（attempt_id 由宿主按段号+序号分配并持久化；同键同内容重放幂等）。逻辑步骤
     // （折叠/聚合）以 a:'l' 单独标识，不与真实调用混淆。旧宿主忽略未知行，不影响运行。
     'let AWK = 0',
+    // LOC-043：下一节点首次调用的 retry_kind（业务返工由 countRound 边写入；技术重试由 visitCalls 内循环判定）
+    'const pendingRetryKind = {}',
+    'let lastAttRk = \'normal\'',
     'function attLog(ev) { try { log(\'[vwf-attempt]\' + JSON.stringify(ev)) } catch (e) { /* 证据事件失败不影响编排 */ } }',
     'function attEnd(n, r, t, s, x, extra) { attLog(Object.assign({ a: \'e\', k: AWK, n: n, r: r, t: t, s: s }, x === undefined ? {} : { x: String(x).slice(0, 500) }, extra || {})) }',
     // LOC-035 产物清单：节点完成时声明 output.files（及 fanout 动态条目）供宿主核验
@@ -771,6 +774,7 @@ export function compileBlueprint(bp, opts = {}) {
     '  const npQualifies = !!e && !countsBudget(e) && (e.to === fromId || Object.prototype.hasOwnProperty.call(results, e.to))',
     '  const entry = { round: round, stage: fromId, from: fromId, to: e ? e.to : null, outcome: e ? e.outcome : undefined, countRound: countsBudget(e) }',
     '  if (npQualifies) entry.nps = noProgressBase(fromId, e.outcome === undefined ? null : e.outcome)',
+    '  if (e && countsBudget(e) && e.to) pendingRetryKind[e.to] = \'business_rework\'',
     '  history.push(entry)',
     '}',
     'function consumeOrHalt(fromId, outcome, e) {',
@@ -887,11 +891,16 @@ export function compileBlueprint(bp, opts = {}) {
     'async function visitCalls(stage, key, round, entryFb, retryLogText) {',
     '  let fb = entryFb',
     '  let formatUsed = false',
+    '  let visitTry = 0',
     '  for (;;) {',
     '    phase(BYID[stage].label || stage)',
     // LOC-029：每次真实调用前后输出 attempt 事件（k 与调用方 attEnd 的 AWK 配对）
     '    const __k = ++AWK',
-    '    attLog({ a: \'s\', k: __k, n: stage, r: round, t: \'call\' })',
+    '    const __rk = visitTry === 0 ? (pendingRetryKind[stage] || \'normal\') : \'technical_retry\'',
+    '    if (visitTry === 0) delete pendingRetryKind[stage]',
+    '    visitTry++',
+    '    lastAttRk = __rk',
+    '    attLog({ a: \'s\', k: __k, n: stage, r: round, t: \'call\', rk: __rk })',
     '    const r = await modelCall(key, nodePrompt(stage, fb), nodeCallOpts(stage, round))',
     '    if (r.stop) return r',
     '    if (r.value !== undefined) return { value: coerceStructured(r.value, BYID[stage].output && BYID[stage].output.schema) }',
@@ -1368,7 +1377,7 @@ export function compileBlueprint(bp, opts = {}) {
     ] : []),
     '  results[current] = res',
     '  markExec(current, res)',
-    '  attEnd(current, round, \'call\', \'completed\', undefined, Object.assign({ q: res }, attOf(current, res), n.verifyBranch ? { w: { b: res.verified_branch, h: res.verified_head } } : {}, RESOLVED_INPUTS[current] ? { ri: RESOLVED_INPUTS[current] } : {}))',
+    '  attEnd(current, round, \'call\', \'completed\', undefined, Object.assign({ q: res, rk: lastAttRk }, attOf(current, res), n.verifyBranch ? { w: { b: res.verified_branch, h: res.verified_head } } : {}, RESOLVED_INPUTS[current] ? { ri: RESOLVED_INPUTS[current] } : {}))',
     '  if (ok) emitArtifactSubmit(current, round, null, AWK)',
     '  log((n.label || current) + \' → \' + (ok ? \'通过\' : \'未通过\'))',
     '  if (A.injectHalt && A.injectHalt.node === current) {',

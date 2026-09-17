@@ -82,6 +82,7 @@ return {
     const GENERATOR = CODE_ROOT ? CODE_ROOT + '/scripts/generate.mjs' : null
     const WS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/workspace-isolation-host.mjs' : null
     const RECORDS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/records-host.mjs' : null
+    const QUALITY_COST_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/run-quality-cost.mjs' : null
     // LOC-032：受管理外部操作账本 + execute-or-reconcile（与 records-host 同进程边界模式）
     const OPERATIONS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/operations-host.mjs' : null
     // LOC-037：收口事实整理与授权交付动作分离（与 operations-host 同进程边界模式）
@@ -770,6 +771,7 @@ return {
         // LOC-028：宿主签发的人工决定与消费记录（防伪造 completion / 幂等恢复）
         human_decisions: [],
         consumed_decisions: {},
+        human_waits: [],
       }
       // Rev 1 冻结：工作流定义 + 角色（编译产物内联角色正文与路由）+ Provider/Model
       // 绑定 + 运行关键配置。修订仅 Provider/Model，不改脚本，故后续修订以 script_ref
@@ -833,8 +835,25 @@ return {
       const pm = (snap && snap.provider_model) || {}
       return pm[nodeId] || null
     }
+    function trackHumanWait(rec, prevState, nextState) {
+      rec.human_waits = Array.isArray(rec.human_waits) ? rec.human_waits : []
+      const waitStates = ['WAITING_HUMAN', 'PAUSED', 'BLOCKED']
+      const open = rec.human_waits.find((w) => w && !w.ended_at)
+      if (waitStates.indexOf(nextState) >= 0 && prevState === 'RUNNING') {
+        rec.human_waits.push({
+          started_at: new Date().toISOString(),
+          ended_at: null,
+          reason: nextState,
+          node: null,
+        })
+      } else if (open && nextState === 'RUNNING') {
+        open.ended_at = new Date().toISOString()
+      }
+    }
     function logicalSetState(rec, state, reason) {
       if (LIFECYCLE_STATES.indexOf(state) < 0) return false
+      const prev = rec.lifecycle && rec.lifecycle.state ? rec.lifecycle.state : null
+      trackHumanWait(rec, prev, state)
       rec.lifecycle = { state: state, reason: reason || null }
       rec.terminal = LIFECYCLE_TERMINAL.indexOf(state) >= 0
       rec.updated_at = Date.now()
@@ -997,6 +1016,7 @@ return {
         workspace: rec.workspace || null,
         human_decisions: rec.human_decisions || [],
         consumed_decisions: rec.consumed_decisions || {},
+        human_waits: rec.human_waits || [],
       }
     }
     // 队列实现收敛于 logicalStore（LOC-004）；保留原函数名作为薄委托，11 个调用点零改动
@@ -1037,6 +1057,7 @@ return {
         workspace: asObj(data.workspace),
         human_decisions: Array.isArray(data.human_decisions) ? data.human_decisions.filter((d) => d && typeof d === 'object') : [],
         consumed_decisions: asObj(data.consumed_decisions) || {},
+        human_waits: Array.isArray(data.human_waits) ? data.human_waits.filter((w) => w && typeof w === 'object') : [],
       }
       logicalRuns.set(id, rec)
       for (const s of rec.segments) if (s.run_id) logicalRunByEngineRun.set(s.run_id, id)
@@ -1981,6 +2002,61 @@ return {
       const recordId = String((a && a.record_id) || '')
       if (!id || !recordId) return fail('缺少 logical_run_id / record_id')
       return recordsHostCall('get', { logical_run_id: id, record_id: recordId })
+    })
+    // LOC-043：质量成本 metrics（消费 attempt 记录 + 质量证据；可重建 JSON + 人读摘要）
+    async function qualityCostCall(cmd, input, opts) {
+      if (!QUALITY_COST_HOST || (await readTextIfExists(QUALITY_COST_HOST)) === null) {
+        return { ok: false, notFound: true, error: 'run-quality-cost.mjs 未找到（LOC-043 运行时集成未部署）' }
+      }
+      const r = await runNode([QUALITY_COST_HOST, cmd, JSON.stringify(input || {})], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 1024 * 1024 })
+      if (!r.ok) return { ok: false, error: 'quality cost 调用失败：' + r.detail }
+      try {
+        const parsed = JSON.parse(r.stdout)
+        return parsed.ok ? parsed : { ok: false, error: parsed.error || 'quality cost 业务错误' }
+      } catch (e) { return { ok: false, error: 'quality cost 输出不可解析：' + errMsg(e), raw: r.stdout } }
+    }
+    async function buildMetricsForRun(id, priceTable) {
+      let rec = logicalRuns.get(id)
+      if (!rec) {
+        const d = fs === undefined ? null : await homeDirs()
+        if (d) {
+          try {
+            hydrateLogicalRunFromDisk(JSON.parse(await fs.readText(await fs.resolve(d.logicalRunsDir + '/' + logicalStore.fileOf(id)))))
+          } catch (e) { /* miss */ }
+          rec = logicalRuns.get(id)
+        }
+      }
+      const list = await recordsHostCall('list', { logical_run_id: id })
+      if (!list.ok) return list
+      return qualityCostCall('build', {
+        logical_run_id: id,
+        template_id: rec ? rec.template_id : null,
+        attempts: list.attempts || [],
+        human_waits: rec ? rec.human_waits || [] : [],
+        records: list.records || [],
+        price_table: priceTable || null,
+      })
+    }
+    registerRpc('vwf.metrics.get', async (a) => {
+      const id = String((a && a.logical_run_id) || '')
+      if (!id) return fail('缺少 logical_run_id')
+      const built = await buildMetricsForRun(id, a && a.price_table ? a.price_table : null)
+      if (!built.ok) return built
+      const rep = await qualityCostCall('report', { metrics: built.metrics })
+      return { ok: true, logical_run_id: id, metrics: built.metrics, report: rep.ok ? rep.report : null }
+    })
+    registerRpc('vwf.metrics.compare', async (a) => {
+      const ids = Array.isArray(a && a.logical_run_ids) ? a.logical_run_ids.map(String).filter(Boolean) : []
+      if (!ids.length) return fail('缺少 logical_run_ids')
+      const runs = []
+      for (const id of ids) {
+        const built = await buildMetricsForRun(id, a && a.price_table ? a.price_table : null)
+        if (!built.ok) return built
+        runs.push(built.metrics)
+      }
+      const cmp = await qualityCostCall('compare', { runs })
+      if (!cmp.ok) return cmp
+      return { ok: true, comparison: cmp.comparison, runs }
     })
     // LOC-032：受管理外部操作入口（execute-or-reconcile）。已确认成功只确认不重复执行；
     // 结果不确定先核查，无法核查时 NEEDS_RECONCILIATION 受阻（unknown 禁止再次执行）。
