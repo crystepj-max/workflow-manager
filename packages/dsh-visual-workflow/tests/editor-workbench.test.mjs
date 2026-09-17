@@ -478,19 +478,23 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
   assert.equal(rows().length, BUILTIN_DSL.nodes.length, '逐节点列出模型设置')
   for (const r of rows()) assert.ok(r.textContent.indexOf('默认') >= 0, '未覆盖时显示默认徽标')
 
-  // ② 覆盖：给第一个节点写 provider/model 并保存
-  await act(async () => {
-    const selects = Array.from(rows()[0].querySelectorAll('select'))
-    assert.equal(selects.length, 2, '每行有 provider / model 两个选择器')
-    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set
-    setter.call(selects[0], 'deepseek-official')
-    selects[0].dispatchEvent(new dom.window.Event('change', { bubbles: true }))
-    await flush()
-    const modelSelects = Array.from(rows()[0].querySelectorAll('select'))
-    setter.call(modelSelects[1], 'deepseek-v4-flash')
-    modelSelects[1].dispatchEvent(new dom.window.Event('change', { bubbles: true }))
-    await flush()
-  })
+  // ② 覆盖：给两个节点各写 provider/model 并保存（两个节点才能验证「单节点还原只清一个」）
+  const setRowOverride = async (rowIndex) => {
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set
+      const selects = Array.from(rows()[rowIndex].querySelectorAll('select'))
+      assert.equal(selects.length, 2, '每行有 provider / model 两个选择器')
+      setter.call(selects[0], 'deepseek-official')
+      selects[0].dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+      await flush()
+      const modelSelects = Array.from(rows()[rowIndex].querySelectorAll('select'))
+      setter.call(modelSelects[1], 'deepseek-v4-flash')
+      modelSelects[1].dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+      await flush()
+    })
+  }
+  await setRowOverride(0)
+  await setRowOverride(1)
   await act(async () => {
     byText(ovDialog, '保存覆盖').click()
     await flush(); await flush()
@@ -499,6 +503,7 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
   assert.ok(savedCall, '保存覆盖调用了 vwf.workflows.modelOverride.save')
   assert.equal(savedCall.overrides[BUILTIN_DSL.nodes[0].id].provider, 'deepseek-official', '覆盖写入 provider')
   assert.equal(savedCall.overrides[BUILTIN_DSL.nodes[0].id].model, 'deepseek-v4-flash', '覆盖写入 model')
+  assert.ok(savedCall.overrides[BUILTIN_DSL.nodes[1].id], '第二个节点的覆盖一并写入')
 
   // ③ 单节点还原：该行「还原」使覆盖行消失
   await act(async () => {
@@ -513,10 +518,31 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
     await flush()
   })
   assert.ok(overriddenRow.textContent.indexOf('默认') >= 0, '单节点还原后回到默认徽标')
+  // 还原只改草稿，真正生效要保存；断言必须落在 RPC 载荷上（否则是假绿）
+  const savesBefore = state.overrideCalls.filter((c) => c.op === 'save').length
+  await act(async () => {
+    byText(ovDialog2, '保存覆盖').click()
+    await flush(); await flush()
+  })
+  const savesAfter = state.overrideCalls.filter((c) => c.op === 'save')
+  assert.equal(savesAfter.length, savesBefore + 1, '还原后保存覆盖再次落盘')
+  const lastSave = savesAfter.pop()
+  assert.equal(lastSave.overrides[BUILTIN_DSL.nodes[0].id], undefined, '单节点还原在持久化载荷中已清除该节点覆盖')
+  assert.ok(lastSave.overrides[BUILTIN_DSL.nodes[1].id], '单节点还原只清该节点，其他节点的覆盖保留')
+  assert.equal(state.overrides[BUILTIN_DSL.nodes[0].id], undefined, '回读持久化层：被还原节点已无覆盖')
+  assert.ok(state.overrides[BUILTIN_DSL.nodes[1].id], '回读持久化层：另一节点覆盖仍在')
 
   // ④ 全部还原：清除该模板的全部覆盖（需二次确认）
+  // 上一步「保存覆盖」成功后对话框会关闭，这里重新打开（保存成功即关闭是既有行为）
   await act(async () => {
-    byText(ovDialog2, '清除恢复默认').click()
+    byText(container, '模型覆盖').click()
+    await flush(); await flush()
+  })
+  const ovDialog3 = Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型覆盖') >= 0)
+  assert.ok(ovDialog3, '再次打开模型覆盖对话框')
+  assert.ok(ovDialog3.textContent.indexOf('已覆盖') >= 0, '保存后重新打开仍显示已覆盖')
+  await act(async () => {
+    byText(ovDialog3, '清除恢复默认').click()
     await flush()
   })
   const confirm = container.querySelector('.vwf-confirm-mask')
@@ -531,6 +557,59 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
 
   // 结构只读与模型设置互不影响：模型设置走独立 RPC，未触碰结构保存
   assert.equal(state.saved.length, 0, '模型设置全程没有保存内置模板结构')
+})
+
+
+test('V-7 结构锁：内置模板可选中节点与连接（定位 / 查看），但不能改结构', async () => {
+  const { container } = await mountPage({ dsl: BUILTIN_DSL, list: [{ id: 'wf-builtin', name: '内置流程', description: '', builtin: true, dsl: JSON.parse(JSON.stringify(BUILTIN_DSL)) }] })
+  await openEditor(container, '查看并验收')
+
+  // 可选中节点：点画布节点后右侧显示该节点详情
+  await act(async () => {
+    container.querySelector('g[data-node-id="' + BUILTIN_DSL.nodes[1].id + '"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    await flush()
+  })
+  assert.equal(sectionHead(container, 'basic').getAttribute('aria-expanded'), 'true', '点节点后进入该节点配置')
+  assert.ok(container.querySelector('.vwf-inspector').textContent.indexOf(BUILTIN_DSL.nodes[1].label) >= 0
+    || container.querySelectorAll('.vwf-inspector .vwf-input').length > 0, '右侧为该节点详情')
+
+  // 可选中连接：点边后出现边配置
+  await act(async () => {
+    const rows = container.querySelectorAll('.vwf-wb-conn-row')
+    assert.ok(rows.length >= 1, '连接清单有条目')
+    rows[0].click()
+    await flush()
+  })
+  assert.ok(container.querySelector('.vwf-inspector').textContent.indexOf('边配置') >= 0, '点连接后进入边配置')
+
+  // 结构不可改：连线把手不渲染（无把手就无法拖线），右键菜单不可用
+  assert.equal(container.querySelectorAll('.vwf-editor-dialog .vwf-handle').length, 0, '内置模板不渲染连线把手')
+  assert.equal(container.querySelectorAll('.vwf-editor-dialog .vwf-handle-src').length, 0, '内置模板不渲染连线源把手')
+  await act(async () => {
+    container.querySelector('.vwf-editor-dialog .vwf-canvas-wrap').dispatchEvent(new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    await flush()
+  })
+  assert.equal(container.querySelector('.vwf-editor-dialog .vwf-menu'), null, '内置模板右键不出现结构编辑菜单')
+})
+
+test('V-7 编辑器结构锁与运行看板只读画布互不影响', async () => {
+  const { container } = await mountPage({ dsl: BUILTIN_DSL, list: [{ id: 'wf-builtin', name: '内置流程', description: '', builtin: true, dsl: JSON.parse(JSON.stringify(BUILTIN_DSL)) }] })
+  await openEditor(container, '查看并验收')
+  // 编辑器：结构锁（不是 readOnly）——把手不渲染但节点可点
+  assert.equal(container.querySelectorAll('.vwf-editor-dialog .vwf-handle').length, 0, '编辑器内无连线把手')
+  await act(async () => {
+    const closeBtn = byText(container, '关闭')
+    closeBtn.click()
+    await flush()
+  })
+  // 运行看板仍走 readOnly：连节点点击都不进入编辑态（本轮不改变看板行为）
+  await act(async () => {
+    const dashTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '运行看板')
+    assert.ok(dashTab, '运行看板 tab 存在')
+    dashTab.click()
+    await flush()
+  })
+  assert.equal(container.querySelectorAll('.vwf-editor-dialog').length, 0, '看板不打开编辑器')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
