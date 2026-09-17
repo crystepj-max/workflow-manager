@@ -149,13 +149,40 @@ return {
 .vwf-msg-line.bad { color:var(--dsw-alias-state-error-primary, #f85149); }
 .vwf-msg-line.warn { color:var(--dsw-alias-state-warn-primary, #f59e0b); }
 .vwf-msg-line.muted { color:var(--dsw-alias-label-tertiary, #8a8a8a); }
-.vwf-editor-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; overscroll-behavior:contain; }
-.vwf-editor { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:12px; align-items:stretch; height:100%; min-height:0; }
-@media (max-width: 900px) { .vwf-editor { grid-template-columns:minmax(0,1fr); height:auto; } .vwf-inspector { position:static; height:auto; } }
-.vwf-canvas-col { min-width:0; min-height:0; display:flex; flex-direction:column; }
+/* 大工作区（A 编排台）——FEAT-84：外层不再承担页面级滚动。
+   改造前 .vwf-editor-body 是 overflow:auto 的共享滚动容器，画布行按内容撑高，
+   配置栏一滚就把画布带出视口。现在外层只负责定高与裁剪，四个直接网格项
+   （步骤定位 / 画布 / 连接清单 / 节点配置栏）各自滚动，互不带动。 */
+.vwf-editor-body { flex:1; min-height:0; overflow:hidden; position:relative; overscroll-behavior:contain; }
+/* 绝对定位（inset）而不是 height:100% 或 flex 拉伸：列向 flex 派生的高度在 Chromium 里
+   不构成百分比可解析的「确定高度」，网格行 minmax(0,1fr) 会退化为 max-content——
+   实测内容被撑到 2151px 而容器只有 675px，随后被 overflow:hidden 裁掉（配置栏滚不动、
+   画布被推出视口）。inset 给出确定高度，三个滚动区才真正各自生效。 */
+.vwf-editor { position:absolute; inset:12px 16px; display:grid; grid-template-columns:minmax(0,224px) minmax(0,1fr) minmax(0,368px); grid-template-rows:minmax(0,1fr) minmax(0,1fr); grid-template-areas:"nav canvas config" "conn canvas config"; gap:12px; align-items:stretch; min-width:0; min-height:0; }
+/* 窄屏：流程 / 配置两个区域切换，不把桌面画布压成不可读小图（规格 §11）。
+   断点与 matchMedia 使用同一阈值（900px），保证 CSS 与 JS 判定一致。 */
+/* 窄屏（≤900px）：流程 / 配置两个区域切换，纯 CSS 驱动（与 JS 无关，matchMedia 缺失也不会错位）。
+   未参与当前 grid-template-areas 的网格项必须显式 display:none——否则会被自动放置进隐式行，
+   把版面撑坏（实测：配置栏落进隐式行后，切换按钮被拉到 330px 高、画布宽度归零）。 */
+.vwf-pane-switch { display:none; }
+@media (max-width: 900px) {
+  .vwf-pane-switch { display:flex; gap:6px; position:absolute; top:12px; left:16px; right:16px; z-index:3; }
+  .vwf-editor { grid-template-columns:minmax(0,1fr); inset:54px 16px 12px; }
+  .vwf-editor.pane-flow { grid-template-rows:auto minmax(0,1fr); grid-template-areas:"nav" "canvas"; }
+  .vwf-editor.pane-config { grid-template-rows:minmax(0,1.4fr) minmax(0,1fr); grid-template-areas:"config" "conn"; }
+  .vwf-editor.pane-flow .vwf-wb-conn-card, .vwf-editor.pane-flow .vwf-inspector { display:none; }
+  .vwf-editor.pane-config .vwf-nav-col, .vwf-editor.pane-config .vwf-canvas-col { display:none; }
+  /* 步骤定位转为横向位置条：保留步骤方位感，不再占据半个屏幕宽 */
+  .vwf-nav-col { flex-direction:row; align-items:stretch; }
+  .vwf-nav-col .vwf-wb-steps-body { display:flex; flex-direction:row; gap:6px; overflow-x:auto; overflow-y:hidden; padding:8px 10px; }
+  .vwf-wb-step { flex:0 0 auto; min-width:132px; }
+}
+.vwf-canvas-col { grid-area:canvas; min-width:0; min-height:0; display:flex; flex-direction:column; }
 .vwf-canvas-col > .vwf-card { flex:1; min-height:0; display:flex; flex-direction:column; }
 .vwf-canvas-wrap { position:relative; height:560px; overflow:auto; display:flex; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-base, #181818); overscroll-behavior:contain; }
-.vwf-editor .vwf-canvas-wrap { flex:1; min-height:360px; height:auto; }
+/* 工作区内画布由网格行定高，自身滚动；min-height:0 是网格子项能真正收缩的前提 */
+.vwf-editor-dialog .vwf-canvas-host { flex:1; min-height:0; display:flex; flex-direction:column; }
+.vwf-editor .vwf-canvas-wrap { flex:1; min-height:0; height:auto; background:var(--vwf-wb-canvas); }
 .vwf-canvas-stage { flex:0 0 auto; width:max-content; height:max-content; box-sizing:border-box; margin:auto; padding:24px; cursor:grab; }
 .vwf-canvas-stage:active { cursor:grabbing; }
 /* 画布工具栏：文档流内一行（不再悬浮遮挡入口节点）；窄屏允许提示换行增高 */
@@ -187,7 +214,110 @@ return {
 .vwf-zoom button { width:30px; height:30px; border:0; border-bottom:1px solid var(--dsw-alias-border-l2, #333); background:transparent; color:var(--dsw-alias-label-secondary, #9a9a9a); cursor:pointer; font-size:14px; }
 .vwf-zoom button:last-child { border-bottom:0; }
 .vwf-zoom button:hover { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); }
-.vwf-inspector { position:sticky; top:0; height:100%; min-height:0; overflow:auto; padding:12px; }
+/* 大工作区语义 token（FEAT-84 共享契约冻结在 prototypes/ui-workbench/DESIGN.md 的 A 编排台）：
+   宿主 --dsw-alias-* 优先，缺失时按 A 方向浅色板兜底；深色由 prefers-color-scheme 覆盖同一组变量。
+   工作区内一律引用 --vwf-wb-*，避免「深色背景 + 深色字」这类跨主题错配。 */
+.vwf-editor-dialog {
+  --vwf-wb-canvas:var(--dsw-alias-bg-base, #F1F4FA);
+  --vwf-wb-surface:var(--dsw-alias-bg-layer-1, #FFFFFF);
+  --vwf-wb-surface-2:var(--dsw-alias-bg-layer-2, #FFFFFF);
+  --vwf-wb-text:var(--dsw-alias-label-primary, #1D2B43);
+  --vwf-wb-text-2:var(--dsw-alias-label-secondary, #58677E);
+  --vwf-wb-accent:var(--dsw-alias-brand-primary, #3D53B6);
+  --vwf-wb-accent-text:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #3D53B6));
+  --vwf-wb-accent-soft:var(--dsw-alias-brand-fill-soft, #E8ECFF);
+  --vwf-wb-border:var(--dsw-alias-border-l2, #C3CCDD);
+  --vwf-wb-border-strong:var(--dsw-alias-border-l3, #8E9CB8);
+  /* 控件边界（按钮 / 输入 / 可点行）：契约目标 ≥3:1。宿主 border-l3 优先（宿主按自身主题
+     给值），兜底在浅色下实测对 #FFFFFF 3.30:1、对画布 #F1F4FA 3.30:1 */
+  --vwf-wb-border-control:var(--dsw-alias-border-l3, #7088A8);
+}
+@media (prefers-color-scheme: dark) {
+  .vwf-editor-dialog {
+    --vwf-wb-canvas:var(--dsw-alias-bg-base, #101827);
+    --vwf-wb-surface:var(--dsw-alias-bg-layer-1, #182338);
+    --vwf-wb-surface-2:var(--dsw-alias-bg-layer-2, #182338);
+    --vwf-wb-text:var(--dsw-alias-label-primary, #EDF2FF);
+    --vwf-wb-text-2:var(--dsw-alias-label-secondary, #ACB9D1);
+    --vwf-wb-accent:var(--dsw-alias-brand-primary, #B3C1FF);
+    --vwf-wb-accent-text:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #B3C1FF));
+    --vwf-wb-accent-soft:var(--dsw-alias-brand-fill-soft, #293759);
+    --vwf-wb-border:var(--dsw-alias-border-l2, #3A4A6B);
+    --vwf-wb-border-strong:var(--dsw-alias-border-l3, #52658C);
+    /* 深色控件边界：兜底实测对 #182338 4.26:1、对 #101827 4.82:1、对强调底 #293759 3.20:1 */
+    --vwf-wb-border-control:var(--dsw-alias-border-l3, #8E9CB8);
+  }
+}
+/* 工作区键盘焦点：焦点可见且不被滚动容器裁掉（WCAG 2.2 焦点不被遮挡） */
+.vwf-editor-dialog :focus-visible { outline:2px solid var(--vwf-wb-accent); outline-offset:2px; }
+/* 右侧节点配置栏：网格项自身滚动（不再 position:sticky + height:100% 依附父级滚动） */
+.vwf-inspector { grid-area:config; min-width:0; min-height:0; overflow:auto; padding:12px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
+.vwf-nav-col { grid-area:nav; min-width:0; min-height:0; display:flex; flex-direction:column; gap:12px; }
+.vwf-wb-steps-card { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+.vwf-wb-conn-card { grid-area:conn; min-width:0; min-height:0; display:flex; flex-direction:column; }
+.vwf-wb-steps-body, .vwf-wb-conn-body { flex:1; min-height:0; overflow:auto; padding:8px 10px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
+.vwf-wb-step, .vwf-wb-conn-row { width:100%; text-align:left; border:1px solid var(--vwf-wb-border-control); background:var(--vwf-wb-surface); color:var(--vwf-wb-text); cursor:pointer; font:inherit; font-size:12px; }
+.vwf-wb-step { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:10px; }
+.vwf-wb-step + .vwf-wb-step, .vwf-wb-conn-row + .vwf-wb-conn-row { margin-top:6px; }
+.vwf-wb-step:hover { border-color:var(--vwf-wb-border-strong); }
+.vwf-wb-step.on { border-color:var(--vwf-wb-accent); background:var(--vwf-wb-accent-soft); color:var(--vwf-wb-text); }
+.vwf-wb-step-seq { flex:0 0 auto; min-width:20px; height:20px; padding:0 4px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; background:var(--vwf-wb-surface-2); border:1px solid var(--vwf-wb-border); color:var(--vwf-wb-text-2); font-size:11px; font-weight:700; font-variant-numeric:tabular-nums; }
+.vwf-wb-step.on .vwf-wb-step-seq { border-color:var(--vwf-wb-accent); color:var(--vwf-wb-accent-text); }
+.vwf-wb-step-label { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.vwf-wb-step-role { flex:0 0 auto; color:var(--vwf-wb-text-2); font-size:11px; max-width:88px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vwf-wb-conn-row { display:flex; flex-direction:column; gap:2px; padding:7px 9px; border-radius:9px; }
+.vwf-wb-step:hover, .vwf-wb-conn-row:hover, .vwf-wb-outcome-row:hover { border-color:var(--vwf-wb-border-strong); }
+.vwf-wb-conn-row.on { border-color:var(--vwf-wb-accent); }
+.vwf-wb-conn-route { overflow-wrap:anywhere; }
+.vwf-wb-conn-meta { color:var(--vwf-wb-text-2); font-size:11px; overflow-wrap:anywhere; }
+.vwf-wb-conn-kind { flex:0 0 auto; font-size:10px; padding:1px 7px; border-radius:99px; border:1px solid currentColor; white-space:nowrap; }
+.vwf-wb-conn-kind.normal { color:var(--dsw-alias-state-success-primary, #1F7A4D); }
+.vwf-wb-conn-kind.loop { color:var(--dsw-alias-state-warn-primary, #9A6100); }
+.vwf-wb-conn-kind.retry { color:var(--vwf-wb-text-2); }
+.vwf-wb-conn-group { font-size:11px; font-weight:700; letter-spacing:.04em; color:var(--vwf-wb-text-2); margin:10px 0 2px; }
+.vwf-wb-conn-group:first-child { margin-top:0; }
+.vwf-wb-legend { display:flex; flex-direction:column; gap:3px; padding:8px 10px; border-top:1px solid var(--vwf-wb-border); background:var(--vwf-wb-surface-2); }
+.vwf-wb-legend-line { font-size:11px; color:var(--vwf-wb-text-2); overflow-wrap:anywhere; }
+.vwf-wb-legend-line b { color:var(--vwf-wb-text); }
+/* 配置栏渐进披露：三段可折叠区；含校验错误的段自动展开（错误不被折叠隐藏） */
+.vwf-wb-sec { border:1px solid var(--vwf-wb-border); border-radius:10px; background:var(--vwf-wb-surface); margin-top:10px; }
+.vwf-wb-sec-head { display:flex; align-items:center; gap:8px; width:100%; text-align:left; padding:9px 11px; border:0; background:transparent; color:var(--vwf-wb-text); cursor:pointer; font:inherit; font-size:13px; font-weight:600; }
+.vwf-wb-sec-head:hover { background:var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.1)); }
+.vwf-wb-sec-caret { flex:0 0 auto; width:14px; color:var(--vwf-wb-text-2); font-size:11px; }
+.vwf-wb-sec-note { flex:1 1 auto; min-width:0; font-weight:400; font-size:11px; color:var(--vwf-wb-text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vwf-wb-sec-err { flex:0 0 auto; font-size:11px; color:var(--dsw-alias-state-error-primary, #e5484d); }
+.vwf-wb-sec-body { padding:0 11px 11px; border-top:1px solid var(--vwf-wb-border); }
+/* 工作区内的表单控件与按钮统一使用控件边界色（宿主 border token 服务于宿主表面，
+   工作区表面是 A 编排台调色板，V-8 的边界目标按工作区计量） */
+.vwf-editor-dialog :is(.vwf-input, .vwf-select, .vwf-textarea):not(.err),
+.vwf-editor-dialog .vwf-btn:not(.primary):not(.ghost):not(.danger),
+.vwf-editor-dialog .vwf-toolbar-actions,
+.vwf-editor-dialog .vwf-card,
+.vwf-editor-dialog .vwf-section,
+.vwf-editor-dialog .vwf-subsection,
+.vwf-editor-dialog .vwf-canvas-toolbar { border-color:var(--vwf-wb-border-control); }
+/* 画布面与 SVG 语义色收口到工作区 token：宿主 token 缺失时，预置兜底是纯深色一套，
+   与工作区浅色表面相撞会出现「浅底浅字」（实测画布节点名 1.11:1）。作用域限定在
+   大工作区，运行看板的只读画布不受影响（属 FEAT-85 范围）。 */
+.vwf-editor-dialog .vwf-canvas-wrap { background:var(--vwf-wb-canvas); }
+.vwf-editor-dialog .vwf-canvas-toolbar,
+.vwf-editor-dialog .vwf-zoom { background:var(--vwf-wb-surface-2); }
+.vwf-editor-dialog .vwf-zoom button { color:var(--vwf-wb-text-2); }
+.vwf-editor-dialog .vwf-node-card { fill:var(--vwf-wb-surface); stroke:var(--vwf-wb-border-control); }
+.vwf-editor-dialog .vwf-node-label { fill:var(--vwf-wb-text); }
+.vwf-editor-dialog .vwf-node-kind { fill:var(--vwf-wb-text-2); }
+.vwf-editor-dialog .vwf-node-seq { fill:var(--vwf-wb-accent-text); }
+.vwf-editor-dialog .vwf-node-seq-badge { fill:var(--vwf-wb-surface); stroke:var(--vwf-wb-accent); }
+.vwf-editor-dialog .vwf-entry-badge { fill:var(--vwf-wb-surface); stroke:var(--vwf-wb-border-control); }
+.vwf-editor-dialog .vwf-entry-badge-text { fill:var(--vwf-wb-text-2); }
+.vwf-editor-dialog .vwf-handle { fill:var(--vwf-wb-text-2); stroke:var(--vwf-wb-surface); }
+.vwf-wb-readonly { display:flex; gap:6px; align-items:flex-start; margin-top:8px; padding:8px 10px; border:1px solid var(--vwf-wb-border); border-radius:9px; background:var(--vwf-wb-surface-2); color:var(--vwf-wb-text-2); font-size:11px; }
+.vwf-wb-outcome-row { display:flex; flex-direction:column; gap:3px; padding:8px 10px; border:1px solid var(--vwf-wb-border-control); border-radius:9px; background:var(--vwf-wb-surface-2); margin-top:6px; }
+.vwf-wb-outcome-name { font-weight:600; }
+.vwf-wb-outcome-to { color:var(--vwf-wb-text-2); font-size:11px; overflow-wrap:anywhere; }
+/* 工作区固定小节：画布与配置栏内部不再出现页面级滚动条 */
+.vwf-wb-pane-tab { padding:6px 14px; border:1px solid var(--vwf-wb-border-control); border-radius:999px; background:var(--vwf-wb-surface); color:var(--vwf-wb-text); cursor:pointer; font:inherit; font-size:12px; }
+.vwf-wb-pane-tab.on { border-color:var(--vwf-wb-accent); background:var(--vwf-wb-accent-soft); font-weight:600; }
 .vwf-empty { display:grid; place-items:center; min-height:120px; border:1px dashed var(--dsw-alias-border-l2, #333); border-radius:10px; color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:12px; padding:16px; text-align:center; }
 .vwf-dialog-mask { position:fixed; inset:0; z-index:950; background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.45)); display:flex; align-items:center; justify-content:center; }
 .vwf-dialog { width:min(520px, 92vw); max-height:80vh; display:flex; flex-direction:column; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:14px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:10px; }
@@ -238,10 +368,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 .vwf-handle-src:hover { fill:var(--dsw-alias-brand-primary, #4d9fff); }
 .vwf-entry-badge { fill:var(--dsw-alias-bg-layer-1, #1e1e1e); stroke:var(--dsw-alias-border-l3, #444); }
 .vwf-entry-badge-text { fill:var(--dsw-alias-label-secondary, #9a9a9a); font-size:10px; }
-/* ── 滚动条常显样式（画布内纵向滚动 + 编辑层/面板/弹窗） ── */
-.vwf-canvas-wrap::-webkit-scrollbar, .vwf-editor-body::-webkit-scrollbar, .vwf-inspector::-webkit-scrollbar, .vwf-dialog-issues::-webkit-scrollbar { width:10px; height:10px; }
-.vwf-canvas-wrap::-webkit-scrollbar-thumb, .vwf-editor-body::-webkit-scrollbar-thumb, .vwf-inspector::-webkit-scrollbar-thumb, .vwf-dialog-issues::-webkit-scrollbar-thumb { background:var(--dsw-alias-border-l3, #444); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
-.vwf-canvas-wrap::-webkit-scrollbar-track, .vwf-editor-body::-webkit-scrollbar-track, .vwf-inspector::-webkit-scrollbar-track, .vwf-dialog-issues::-webkit-scrollbar-track { background:transparent; }
+/* ── 滚动条常显样式（画布内纵向滚动 + 工作区四个独立滚动区 + 弹窗） ── */
+.vwf-canvas-wrap::-webkit-scrollbar, .vwf-editor-body::-webkit-scrollbar, .vwf-inspector::-webkit-scrollbar, .vwf-wb-steps-body::-webkit-scrollbar, .vwf-wb-conn-body::-webkit-scrollbar, .vwf-dialog-issues::-webkit-scrollbar { width:10px; height:10px; }
+.vwf-canvas-wrap::-webkit-scrollbar-thumb, .vwf-editor-body::-webkit-scrollbar-thumb, .vwf-inspector::-webkit-scrollbar-thumb, .vwf-wb-steps-body::-webkit-scrollbar-thumb, .vwf-wb-conn-body::-webkit-scrollbar-thumb, .vwf-dialog-issues::-webkit-scrollbar-thumb { background:var(--dsw-alias-border-l3, #444); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
+.vwf-canvas-wrap::-webkit-scrollbar-track, .vwf-editor-body::-webkit-scrollbar-track, .vwf-inspector::-webkit-scrollbar-track, .vwf-wb-steps-body::-webkit-scrollbar-track, .vwf-wb-conn-body::-webkit-scrollbar-track, .vwf-dialog-issues::-webkit-scrollbar-track { background:transparent; }
 `)
 
     const h = React.createElement
@@ -625,6 +755,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       return h('select', {
         className: 'vwf-select' + (props.invalid ? ' err' : ''),
         value: props.value,
+        disabled: !!props.disabled,
+        title: props.title || '',
         onChange: (ev) => props.onChange(ev.target.value),
       }, flat.map(renderOpt).concat(groups.map(g => h('optgroup', { key: g.group, label: g.group }, g.items.map(renderOpt)))))
     }
@@ -962,7 +1094,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         })
       }
 
-      return h('div', { style: { position: 'relative' } },
+      return h('div', { className: 'vwf-canvas-host', style: { position: 'relative' } },
         h('div', {
           className: 'vwf-canvas-wrap',
           ref: wrapRef,
@@ -1039,6 +1171,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     function ArtifactFilesEditor(props) {
       const files = (props.node.output && props.node.output.files) || {}
+      // 基础段用业务词「交付内容」；技术口径（Formal Artifact）在高级层不重复出现
+      const label = props.label || t('artifactFiles')
       const entries = Object.entries(files)
       const errorsFor = props.errorsFor || (() => [])
       const setFiles = (next) => {
@@ -1069,20 +1203,179 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setFiles(next)
       }
       return h('div', { className: 'vwf-subsection' },
-        h(Field, { label: t('artifactFiles'), help: t('artifactFilesHelp'), errors: errorsFor('output.files') },
+        h(Field, { label, help: t('artifactFilesHelp'), errors: errorsFor('output.files') },
           entries.length ? entries.map(([path, kind]) => h('div', { key: path, className: 'vwf-row', style: { gap: 6, marginBottom: 6, flexWrap: 'wrap' } },
             h('input', {
               className: 'vwf-input vwf-mono', style: { flex: 2, minWidth: 140 }, value: path, placeholder: 'contract.md',
+              disabled: !!props.readOnly,
               onChange: (ev) => updateEntry(path, ev.target.value, kind),
             }),
             h(VwfSelect, {
               value: kind || 'markdown',
+              disabled: !!props.readOnly,
               options: ARTIFACT_KINDS.map((k) => ({ value: k, label: k })),
               onChange: (v) => updateEntry(path, path, v),
             }),
-            h('button', { className: 'vwf-btn sm danger', type: 'button', onClick: () => removeEntry(path) }, t('removeArtifact'))
+            props.readOnly ? null : h('button', { className: 'vwf-btn sm danger', type: 'button', onClick: () => removeEntry(path) }, t('removeArtifact'))
           )) : h('div', { className: 'vwf-muted-sm' }, '—'),
-          h('button', { className: 'vwf-btn sm', type: 'button', style: { marginTop: 6 }, onClick: addEntry }, t('addArtifact'))
+          props.readOnly ? null : h('button', { className: 'vwf-btn sm', type: 'button', style: { marginTop: 6 }, onClick: addEntry }, t('addArtifact'))
+        )
+      )
+    }
+
+    // ── 配置栏渐进披露区（FEAT-84 §7.3）────────────────────────────────────
+    // 段内出现校验错误时自动展开一次，避免必填错误被折叠藏起来（错误不得静默隐藏）。
+    function InspectorSection(props) {
+      const hasError = !!props.hasError
+      const errKey = props.errKey || ''
+      const [open, setOpen] = React.useState(props.defaultOpen !== false)
+      const lastErrKey = React.useRef(hasError ? errKey : '')
+      React.useEffect(() => {
+        if (hasError && lastErrKey.current !== errKey) setOpen(true)
+        lastErrKey.current = hasError ? errKey : ''
+      }, [hasError, errKey])
+      const bodyId = 'vwf-wb-sec-' + String(props.id || '').replace(/[^A-Za-z0-9_-]/g, '-')
+      return h('div', { className: 'vwf-wb-sec' },
+        h('button', {
+          className: 'vwf-wb-sec-head', type: 'button',
+          'data-vwf-section': props.id || '',
+          'aria-expanded': open ? 'true' : 'false', 'aria-controls': bodyId,
+          onClick: () => setOpen(v => !v),
+        },
+          h('span', { className: 'vwf-wb-sec-caret', 'aria-hidden': 'true' }, open ? '▾' : '▸'),
+          h('span', null, props.title),
+          props.note ? h('span', { className: 'vwf-wb-sec-note' }, props.note) : null,
+          !open && hasError ? h('span', { className: 'vwf-wb-sec-err' }, '⚠️') : null
+        ),
+        open ? h('div', { className: 'vwf-wb-sec-body', id: bodyId }, props.children) : null
+      )
+    }
+
+    // ── 左侧步骤定位区（FEAT-84 §7.2）──────────────────────────────────────
+    // 按画布同一套分层序号列出步骤（与节点角标一一对应）；点击定位画布并选中该节点。
+    // 扇出节点额外标注「并行组」，其下游节点标注「汇总」，让扇出与汇总的结构可读。
+    function StepNavigator(props) {
+      const dsl = props.dsl || {}
+      const visibleTerminals = props.visibleTerminals || []
+      const lay = React.useMemo(() => {
+        try { return layoutGraph(dsl, visibleTerminals) } catch (e) { return null }
+      }, [JSON.stringify({ entry: dsl.entry || '', n: (dsl.nodes || []).map(n => n.id), e: (dsl.edges || []).map(e => [e.from, e.to, e.on, e.outcome, e.countRound]), v: visibleTerminals })])
+      if (!lay) return h('div', { className: 'vwf-wb-steps-body' }, h('div', { className: 'vwf-muted-sm' }, '—'))
+      const seqLabels = lay.seqLabels || {}
+      const rankOf = (id) => (lay.rank && lay.rank[id] != null ? lay.rank[id] : null)
+      // 汇总 = 直接接收扇出节点出边的节点（扇出完成后汇聚到它）
+      const fanoutIds = (dsl.nodes || []).filter(n => n.kind === 'fanout').map(n => n.id)
+      const summaryIds = {}
+      ;(dsl.edges || []).forEach(e => { if (e && fanoutIds.indexOf(e.from) >= 0) summaryIds[e.to] = true })
+      const seqOrder = (id) => {
+        const r = rankOf(id)
+        const s = seqLabels[id]
+        const sub = s && s.indexOf('.') >= 0 ? Number(s.split('.')[1]) : 0
+        return (r == null ? 9999 : r) * 1000 + sub
+      }
+      const ids = (dsl.nodes || []).map(n => n.id).filter(id => seqLabels[id] != null || rankOf(id) != null)
+        .sort((a, b) => seqOrder(a) - seqOrder(b))
+      return h('div', { className: 'vwf-wb-steps-body' },
+        ids.map(id => {
+          const node = (dsl.nodes || []).find(n => n.id === id) || {}
+          const on = props.selectedNodeId === id
+          return h('button', {
+            key: id, type: 'button',
+            className: 'vwf-wb-step' + (on ? ' on' : ''),
+            'data-node-id': id,
+            'aria-current': on ? 'true' : 'false',
+            title: (node.label || id) + ' · ' + id,
+            onClick: () => props.onPick(id),
+          },
+            h('span', { className: 'vwf-wb-step-seq' }, seqLabels[id] != null ? String(seqLabels[id]) : '·'),
+            h('span', { className: 'vwf-wb-step-label' }, node.label || id),
+            summaryIds[id] ? h('span', { className: 'vwf-badge accent' }, t('wbSummaryBadge')) : null,
+            node.kind === 'fanout' ? h('span', { className: 'vwf-badge' }, t('wbParallelBadge')) : null,
+            node.profile ? h('span', { className: 'vwf-wb-step-role' }, node.profile) : null
+          )
+        }),
+        !ids.length ? h('div', { className: 'vwf-muted-sm' }, t('wbNoSteps')) : null
+      )
+    }
+
+    // ── 连接清单（FEAT-84 §7.7/V-4/V-5）────────────────────────────────────
+    // 直接遍历模板定义的 edges 渲染 —— 不依赖节点侧的结果声明，保证「不漏边」。
+    // 三类分组：普通业务路由 / 业务回环 / 调用重试；返工轮次作为独立概念在页脚说明。
+    function ConnectionList(props) {
+      const dsl = props.dsl || {}
+      const edges = dsl.edges || []
+      const rankOf = props.rankOf || (() => null)
+      const orderOf = (id) => {
+        const r = rankOf(id)
+        if (r == null) return null
+        if (id === END_NODE) return Number.MAX_SAFE_INTEGER
+        return r
+      }
+      const nodeLabel = (id) => {
+        if (id === END_NODE) return t('endNode')
+        const n = (dsl.nodes || []).find(x => x.id === id)
+        return (n && (n.label || n.id)) || id
+      }
+      const rows = edges.map((e, i) => ({ e, i, cls: connectionClassOf(e, orderOf) }))
+      const groups = [
+        { cls: 'normal', label: t('wbConnNormal'), help: t('wbConnNormalHelp') },
+        { cls: 'loop', label: t('wbConnLoop'), help: t('wbConnLoopHelp') },
+        { cls: 'retry', label: t('wbConnRetry'), help: t('wbConnRetryHelp') },
+      ]
+      // 缺项提示（规格 §11）：源节点声明了业务结果取值，但模板定义里没有对应去向
+      const missing = []
+      ;(dsl.nodes || []).forEach(n => {
+        const name = routingNameOf(n.output && n.output.outcomePath)
+        if (!name) return
+        routingValuesOf(n).forEach(v => {
+          const val = String(v == null ? '' : v).trim()
+          if (!val) return
+          const hit = edges.some(e => e && e.from === n.id && String(e.outcome == null ? '' : e.outcome) === val)
+          if (!hit) missing.push({ node: n.id, label: nodeLabel(n.id), value: val })
+        })
+      })
+      return h('div', { className: 'vwf-wb-conn-body' },
+        !edges.length ? h('div', { className: 'vwf-muted-sm' }, t('wbConnEmpty')) : null,
+        groups.map(g => {
+          const list = rows.filter(r => r.cls === g.cls)
+          if (!list.length) return null
+          return h('div', { key: g.cls },
+            h('div', { className: 'vwf-wb-conn-group' }, g.label + '（' + list.length + '）'),
+            list.map(({ e, i, cls }) => {
+              const kindKey = cls === 'retry' ? 'wbConnRetry' : cls === 'loop' ? 'wbConnLoop' : 'wbConnNormal'
+              const sub = edgeKind(e) === 'outcome'
+                ? t('wbConnBusinessResult') + (e.countRound ? ' · ' + t('edgeCountRound') : '')
+                : edgeKind(e) === 'technical' ? t('edgeType_technical')
+                  : edgeKind(e) === 'failure' ? t('edgeType_failure') : t('edgeType_success')
+              return h('button', {
+                key: i, type: 'button',
+                className: 'vwf-wb-conn-row' + (props.selectedEdgeIndex === i ? ' on' : ''),
+                onClick: () => props.onPickEdge(i),
+              },
+                h('span', { className: 'vwf-row', style: { gap: 6, flexWrap: 'nowrap' } },
+                  h('span', { className: 'vwf-wb-conn-kind ' + cls }, g.label),
+                  h('span', { className: 'vwf-wb-conn-route' }, nodeLabel(e.from) + ' → ' + nodeLabel(e.to))
+                ),
+                h('span', { className: 'vwf-wb-conn-meta' }, sub),
+                h('span', { className: 'vwf-wb-conn-meta' }, g.help)
+              )
+            })
+          )
+        }),
+        missing.length
+          ? h('div', { className: 'vwf-err-line', style: { marginTop: 8 } },
+              t('wbConnMissingEdges') + missing.map(m => m.label + ' · ' + m.value).join('、'))
+          : null,
+        h('div', { className: 'vwf-wb-legend' },
+          h('div', { className: 'vwf-wb-legend-line' },
+            t('wbConnCount', { n: edges.length }) + ' · ' + t('wbConnCountBreakdown', {
+              normal: rows.filter(r => r.cls === 'normal').length,
+              loop: rows.filter(r => r.cls === 'loop').length,
+              retry: rows.filter(r => r.cls === 'retry').length,
+            })),
+          h('div', { className: 'vwf-wb-legend-line' }, h('b', null, t('wbConnLegendLoop')), t('wbConnLegendLoopHelp')),
+          h('div', { className: 'vwf-wb-legend-line' }, h('b', null, t('wbConnLegendRetry')), t('wbConnLegendRetryHelp')),
+          h('div', { className: 'vwf-wb-legend-line' }, h('b', null, t('wbConnLegendRounds')), t('wbConnLegendRoundsHelp'))
         )
       )
     }
@@ -1210,10 +1503,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           h('textarea', {
             className: 'vwf-textarea vwf-mono' + (errorsFor('output.schema').length ? ' err' : ''),
             rows: 6, value: schemaDraft, placeholder: t('outputSchemaPlaceholder'),
-            onChange: (ev) => onSchemaChange(ev.target.value),
-            onBlur: () => { if (schemaDirty) { commitSchema(schemaDraft); setSchemaDirty(false) } },
+            disabled: !!props.readOnlyStructure, title: props.readOnlyStructure ? t('wbBuiltinStructureReadonly') : '',
+            onChange: (ev) => { if (!props.readOnlyStructure) onSchemaChange(ev.target.value) },
+            onBlur: () => { if (!props.readOnlyStructure && schemaDirty) { commitSchema(schemaDraft); setSchemaDirty(false) } },
           }),
-          h('button', {
+          props.readOnlyStructure ? null : h('button', {
             className: 'vwf-btn sm', title: t('outputSchemaBeautify'),
             style: { position: 'absolute', right: 6, top: 6 },
             onMouseDown: (ev) => ev.preventDefault(),
@@ -1274,73 +1568,76 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       // 当前值不在清单（旧工作流/宿主脏数据）时兜底保留展示
       if (node.profile && !roles.some(r => r.id === node.profile)) roleOptions.push({ value: node.profile, label: node.profile, title: '' })
 
-      return h('div', { className: 'vwf-section' },
-        h('div', { className: 'vwf-row' },
-          h('strong', null, t('nodeConfig')),
-          h('span', { className: 'vwf-spacer' }),
-          h('span', { className: 'vwf-badge' }, isFanout ? 'fanout' : 'worker')
-        ),
-        h(Field, { label: t('nodeKind'), required: true, errors: errorsFor('kind') },
-          h(VwfSelect, {
-            value: isFanout ? 'fanout' : 'worker',
-            invalid: errorsFor('kind').length > 0,
-            options: [
-              { value: 'worker', label: t('nodeKindWorker') },
-              { value: 'fanout', label: t('nodeKindFanout') },
-            ],
-            onChange: changeKind,
+      // ── 渐进披露分组（FEAT-84 §7.3）：业务词在前，技术词与 JSON 收进高级设置 ──
+      // 字段 → 归属段。必填字段被折叠时，InspectorSection 会在段内出现校验错误时自动展开，
+      // 不出现「保存被拦却看不到是哪个字段」的死角。
+      const errCount = (fields) => fields.reduce((n, f) => n + errorsFor(f).length, 0)
+      const errSignature = (fields) => fields.map(f => f + ':' + errorsFor(f).length).join('|')
+      // 内置模板结构只读（§9/§11）：控件不可用并给出只读说明，不静默忽略点击
+      const ro = !!props.readOnlyStructure
+      const roDis = ro ? { disabled: true, title: t('wbBuiltinStructureReadonly') } : {}
+      const basicFields = ['label', 'goal', 'profile', 'output.files']
+      const outcomeFields = isFanout ? ['failOn'] : ['output.outcomePath', 'output.successCondition']
+      const advancedFields = ['id', 'kind', 'items', 'failOn', 'model.provider', 'model.model', 'output.schema', 'output.outcomePath']
+      const nodeLabelOf = (id) => {
+        if (id === END_NODE) return t('endNode')
+        const n = (dsl.nodes || []).find(x => x.id === id)
+        return (n && (n.label || n.id)) || id
+      }
+      // 「从这个步骤往哪走」：出边按连接清单同一套分类，业务结果名与去向都直接可读
+      const outEdges = (dsl.edges || []).map((e, i) => ({ e, i })).filter(x => x.e && x.e.from === node.id)
+      const outgoingKindLabel = (cls) => cls === 'retry' ? t('wbConnRetry') : cls === 'loop' ? t('wbConnLoop') : t('wbConnNormal')
+      const outgoingBlock = h('div', { className: 'vwf-field', style: { marginTop: 10 } },
+        h('div', { className: 'vwf-field-label' }, t('wbOutgoing'),
+          h('span', { className: 'vwf-help', title: t('wbOutgoingHelp') }, '?')),
+        outEdges.length
+          ? outEdges.map(({ e, i }) => {
+            const cls = connectionClassOf(e, props.orderOf)
+            const cond = edgeKind(e) === 'outcome'
+              ? t('wbConnBusinessResult') + '：' + String(e.outcome == null ? '' : e.outcome)
+              : edgeKind(e) === 'technical' ? t('edgeType_technical')
+                : edgeKind(e) === 'failure' ? t('edgeType_failure') : t('edgeType_success')
+            return h('button', {
+              key: i, type: 'button', className: 'vwf-wb-outcome-row',
+              onClick: () => { if (props.onPickEdge) props.onPickEdge(i) },
+            },
+              h('span', { className: 'vwf-row', style: { gap: 6, flexWrap: 'nowrap' } },
+                h('span', { className: 'vwf-wb-conn-kind ' + cls }, outgoingKindLabel(cls)),
+                h('span', { className: 'vwf-wb-outcome-name' }, nodeLabelOf(e.to))
+              ),
+              h('span', { className: 'vwf-wb-outcome-to' }, cond)
+            )
           })
+          : h('div', { className: 'vwf-muted-sm' }, t('wbOutgoingNone'))
+      )
+
+      const basicSection = h(InspectorSection, {
+        key: 'basic', id: 'basic', title: t('wbSecBasic'), note: t('wbSecBasicNote'),
+        defaultOpen: true, hasError: errCount(basicFields) > 0, errKey: errSignature(basicFields),
+      },
+        h(Field, { label: t('wbFieldStepName'), errors: errorsFor('label') },
+          h('input', { className: 'vwf-input', value: node.label || '', ...roDis, onChange: (ev) => { if (!ro) props.onUpdate(node.id, { label: ev.target.value }) } })
         ),
-        h(Field, { label: t('nodeId'), required: true, errors: errorsFor('id') },
-          h('input', {
-            className: 'vwf-input' + (errorsFor('id').length ? ' err' : ''),
-            value: idDraft,
-            onChange: (ev) => setIdDraft(ev.target.value),
-            onBlur: (ev) => commitNodeId(ev.target.value),
-            onCompositionStart: () => setIdComposing(true),
-            onCompositionEnd: (ev) => { setIdComposing(false); setIdDraft(ev.currentTarget.value); commitNodeId(ev.currentTarget.value) },
-            onKeyDown: (ev) => { if (ev.key === 'Enter' && !idComposing) ev.currentTarget.blur() },
-          })
+        h(Field, { label: t('wbFieldTask'), required: true, help: isFanout ? t('fanoutItemsHelp') : undefined, errors: errorsFor('goal') },
+          h('textarea', { className: 'vwf-textarea' + (errorsFor('goal').length ? ' err' : ''), rows: 3, value: node.goal || '', placeholder: isFanout ? t('fanoutGoalPlaceholder') : t('defaultNodeGoal'), ...roDis, onChange: (ev) => { if (!ro) props.onUpdate(node.id, { goal: ev.target.value }) } })
         ),
-        h(Field, { label: t('nodeLabel'), errors: errorsFor('label') },
-          h('input', { className: 'vwf-input', value: node.label || '', onChange: (ev) => props.onUpdate(node.id, { label: ev.target.value }) })
-        ),
-        h(Field, { label: t('profile'), required: true, help: t('profileHelp'), errors: errorsFor('profile') },
+        h(Field, { label: t('wbFieldRole'), required: true, help: t('profileHelp'), errors: errorsFor('profile') },
           h(VwfSelect, {
             value: node.profile || '', invalid: errorsFor('profile').length > 0,
-            options: roleOptions,
-            onChange: (v) => props.onUpdate(node.id, { profile: v || null }),
+            options: roleOptions, disabled: ro, title: ro ? t('wbBuiltinStructureReadonly') : '',
+            onChange: (v) => { if (!ro) props.onUpdate(node.id, { profile: v || null }) },
           })
         ),
-        h(Field, { label: t('agent'), required: true, errors: errorsFor('model.provider') },
-          provOpts.length
-            ? h(VwfSelect, {
-                value: curProv,
-                options: [{ value: '', label: t('selectAgent') }].concat(provOpts.map(id => ({ value: id, label: id }))),
-                onChange: (v) => props.onUpdate(node.id, { model: { provider: v || undefined, model: undefined } }),
-              })
-            : h('input', { className: 'vwf-input', value: curProv, placeholder: 'deepseek-official', onChange: (ev) => props.onUpdate(node.id, { model: { provider: ev.target.value, model: curModel || undefined } }) })
-        ),
-        h(Field, { label: t('model'), required: true, errors: errorsFor('model.model') },
-          providers.length
-            ? h(VwfSelect, {
-                value: curModel,
-                options: [{ value: '', label: t('selectModel') }].concat(modelOpts.map(id => ({ value: id, label: id }))),
-                onChange: (v) => props.onUpdate(node.id, { model: { provider: curProv || undefined, model: v || undefined } }),
-              })
-            : h('input', { className: 'vwf-input', value: curModel, placeholder: 'deepseek-v4-flash', onChange: (ev) => props.onUpdate(node.id, { model: { provider: curProv || undefined, model: ev.target.value || undefined } }) })
-        ),
-        h(Field, { label: t('goal'), required: true, help: isFanout ? t('fanoutItemsHelp') : undefined, errors: errorsFor('goal') },
-          h('textarea', { className: 'vwf-textarea' + (errorsFor('goal').length ? ' err' : ''), rows: 3, value: node.goal || '', placeholder: isFanout ? t('fanoutGoalPlaceholder') : t('defaultNodeGoal'), onChange: (ev) => props.onUpdate(node.id, { goal: ev.target.value }) })
-        ),
-        isFanout ? h('div', { className: 'vwf-subsection' },
-          h(Field, { label: t('fanoutItems'), required: true, help: t('fanoutItemsHelp'), errors: errorsFor('items') },
-            h('input', {
-              className: 'vwf-input vwf-mono' + (errorsFor('items').length ? ' err' : ''),
-              value: node.items || '', placeholder: '$.args.items',
-              onChange: (ev) => props.onUpdate(node.id, { items: ev.target.value }),
-            })
-          ),
+        !isFanout ? h(ArtifactFilesEditor, { node, readOnly: ro, label: t('wbFieldDeliverable'), onUpdate: (id, patch) => { if (!ro) props.onUpdate(id, patch) }, errorsFor }) : null
+      )
+
+      const outcomeSection = h(InspectorSection, {
+        key: 'outcome', id: 'outcome', title: t('wbSecOutcome'), note: t('wbSecOutcomeNote'),
+        defaultOpen: true, hasError: errCount(outcomeFields) > 0, errKey: errSignature(outcomeFields),
+      },
+        isFanout ? h('div', null,
+          h('div', { style: { fontSize: 13, fontWeight: 500, marginTop: 10 } }, t('wbFanoutGroup')),
+          h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('wbFanoutGroupHelp')),
           h(Field, { label: t('fanoutFailOn'), required: true, help: t('fanoutFailOnHelp'), errors: errorsFor('failOn') },
             h(VwfSelect, {
               value: failOnMode,
@@ -1350,17 +1647,19 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 { value: 'any', label: 'any' },
                 { value: 'number', label: t('fanoutFailOnNumber') },
               ],
-              onChange: (value) => props.onUpdate(node.id, { failOn: value === 'number' ? 0 : value }),
+              disabled: ro, title: ro ? t('wbBuiltinStructureReadonly') : '',
+              onChange: (value) => { if (!ro) props.onUpdate(node.id, { failOn: value === 'number' ? 0 : value }) },
             }),
             failOnMode === 'number' ? h('input', {
               className: 'vwf-input' + (errorsFor('failOn').length ? ' err' : ''),
-              type: 'number', min: 0, step: 1, value: failOnValue,
-              onChange: (ev) => props.onUpdate(node.id, { failOn: Math.max(0, Math.trunc(Number(ev.target.value) || 0)) }),
+              type: 'number', min: 0, step: 1, value: failOnValue, ...roDis,
+              onChange: (ev) => { if (!ro) props.onUpdate(node.id, { failOn: Math.max(0, Math.trunc(Number(ev.target.value) || 0)) }) },
             }) : null
           ),
-          schemaField({ label: t('outputSchema'), help: t('perItemSchemaHelp') })
-        ) : h('div', { className: 'vwf-subsection' },
-          h('div', { style: { fontSize: 13, fontWeight: 500 } }, t('resultMode')),
+          // 扇出未完成不得冒充汇总完成（§9）：把汇总语义写在业务侧，不只在运行页体现
+          h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('wbFanoutSummaryWait'))
+        ) : h('div', null,
+          h('div', { style: { fontSize: 13, fontWeight: 500, marginTop: 10 } }, t('resultMode')),
           h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('resultModeDescription')),
           h('div', { className: 'vwf-field' },
             h(VwfSelect, {
@@ -1371,6 +1670,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 { value: 'manual', label: t('manualCheck') },
                 { value: 'routing', label: t('resultModeRouting') },
               ],
+              disabled: ro, title: ro ? t('wbBuiltinStructureReadonly') : '',
               onChange: (mode) => {
                 setSchemaError(null)
                 setSchemaDirty(false)
@@ -1396,22 +1696,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           resultMode === 'ai' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('outputValidationDescription')) : null,
           resultMode === 'manual' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('manualCheckDescription')) : null,
           resultMode === 'routing' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('resultModeRoutingDescription')) : null,
-          resultMode === 'ai' ? h('div', null,
-            schemaField({ label: t('outputSchema'), required: true, help: t('outputSchemaHelp') }),
-            h(Field, { label: t('successCondition'), required: true, help: t('successConditionHelp'), errors: errorsFor('output.successCondition') },
-              h('input', {
-                className: 'vwf-input vwf-mono' + (errorsFor('output.successCondition').length ? ' err' : ''),
-                value: (node.output && node.output.successCondition) || '', placeholder: '$.result == true',
-                onChange: (ev) => { setSchemaNotice(null); props.onUpdate(node.id, { output: { ...(node.output || {}), successCondition: ev.target.value } }) },
-              })
-            )
-          ) : null,
           resultMode === 'routing' ? h('div', null,
             // F1：只填参数名（`$.` 前缀属于实现细节，对用户不可见）；粘贴 `$.route` 会自动归一
             h(Field, { label: t('routingFieldName'), required: true, help: t('routingFieldNameHelp'), errors: errorsFor('output.outcomePath') },
               h('input', {
                 className: 'vwf-input vwf-mono' + (errorsFor('output.outcomePath').length ? ' err' : ''),
-                value: routingNameDraft, placeholder: 'route', list: 'vwf-routing-candidates',
+                value: routingNameDraft, placeholder: 'route', list: 'vwf-routing-candidates', ...roDis,
                 onChange: (ev) => {
                   setRoutingNotice(null)
                   setRoutingNameDraft(ev.target.value)
@@ -1440,9 +1730,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 routingValuesDraft.map((v, i) => {
                   const st = routingStatus.values.find((x) => x.value === v)
                   const state = st ? st.state : 'missing'
+                  const declared = String(v == null ? '' : v).trim()
+                  const dest = declared
+                    ? (dsl.edges || []).map((e, ei) => ({ e, ei })).filter(x => x.e && x.e.from === node.id && String(x.e.outcome == null ? '' : x.e.outcome) === declared)
+                    : []
                   return h('div', { key: i, className: 'vwf-row vwf-routing-row', style: { marginTop: 4 } },
                     h('input', {
-                      className: 'vwf-input vwf-mono', value: v, placeholder: 'pass',
+                      className: 'vwf-input vwf-mono', value: v, placeholder: 'pass', ...roDis,
                       onChange: (ev) => {
                         const next = routingValuesDraft.slice()
                         next[i] = ev.target.value
@@ -1455,13 +1749,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                       className: 'vwf-routing-badge',
                       title: state === 'ok' ? t('routingEdgeExists') : state === 'duplicated' ? t('routingEdgeDuplicated') : t('routingEdgeMissing'),
                     }, state === 'ok' ? '✅' : state === 'duplicated' ? '❗' : '⚠️'),
-                    state !== 'ok' && props.onAddOutcomeEdge
+                    // 业务结果的去向：直接写出这个结果会走到哪一步，不必去连接清单里找
+                    h('span', { className: 'vwf-wb-outcome-to', style: { flex: '0 1 auto', minWidth: 0 } },
+                      dest.length ? '→ ' + dest.map(d => nodeLabelOf(d.e.to)).join('、') : t('wbOutcomeNoTarget')),
+                    state !== 'ok' && props.onAddOutcomeEdge && !ro
                       ? h('button', {
                         className: 'vwf-btn sm',
                         onClick: () => props.onAddOutcomeEdge(node.id, normalizeRoutingName(v)),
                       }, t('routingAddEdge'))
                       : null,
-                    h('button', {
+                    ro ? null : h('button', {
                       className: 'vwf-btn sm ghost', title: t('routingRemoveValue'),
                       onClick: () => {
                         if (st && st.state !== 'missing') { setRoutingNotice(t('routingRemoveBlocked')); return }
@@ -1473,7 +1770,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     }, '−')
                   )
                 }),
-                h('button', {
+                ro ? null : h('button', {
                   className: 'vwf-btn sm', style: { marginTop: 6 },
                   onClick: () => { setRoutingValuesDraft(routingValuesDraft.concat([''])); setRoutingNotice(null) },
                 }, '＋ ' + t('routingAddValue')),
@@ -1491,17 +1788,99 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                   ? h('div', { className: 'vwf-err-line' }, t('routingUndeclaredEdges') + routingStatus.undeclared.map((x) => x.value + ' → ' + x.to).join('、'))
                   : null,
                 routingNotice ? h('div', { className: 'vwf-err-line' }, routingNotice) : null
-              ),
-            schemaField({ label: t('outputSchema'), required: true, help: t('outputSchemaHelp') })
-          ) : null,
-          // 「人工验收 / 无」两档不渲染 outcomePath/successCondition，但只要节点仍持有 output
-          // （典型场景：只声明了交付文件 files），内核就要求 output.schema —— 必须给出可编辑入口，
-          // 否则保存被拦却无处可改。
-          (resultMode === 'manual' || resultMode === 'none') && node.output
-            ? schemaField({ label: t('outputSchema'), required: true, help: t('outputSchemaHelp') })
-            : null,
-          !isFanout ? h(ArtifactFilesEditor, { node, onUpdate: props.onUpdate, errorsFor }) : null
-        )
+              )
+          ) : null
+        ),
+        // 这一步的全部去向（两类模板共用一份，避免重复渲染分支）
+        outgoingBlock
+      )
+
+      const advancedSection = h(InspectorSection, {
+        key: 'advanced', id: 'advanced', title: t('wbSecAdvanced'), note: t('wbSecAdvancedNote'),
+        defaultOpen: false, hasError: errCount(advancedFields) > 0, errKey: errSignature(advancedFields),
+      },
+        h('div', { className: 'vwf-muted-sm', style: { marginTop: 10, marginBottom: 2 } }, t('wbAdvancedHelp')),
+        h(Field, { label: t('nodeKind'), required: true, errors: errorsFor('kind') },
+          h(VwfSelect, {
+            value: isFanout ? 'fanout' : 'worker',
+            invalid: errorsFor('kind').length > 0,
+            options: [
+              { value: 'worker', label: t('nodeKindWorker') },
+              { value: 'fanout', label: t('nodeKindFanout') },
+            ],
+            disabled: ro, title: ro ? t('wbBuiltinStructureReadonly') : '',
+            onChange: (v) => { if (!ro) changeKind(v) },
+          })
+        ),
+        h(Field, { label: t('nodeId'), required: true, help: t('nodeIdHelp'), errors: errorsFor('id') },
+          h('input', {
+            className: 'vwf-input vwf-mono' + (errorsFor('id').length ? ' err' : ''),
+            value: idDraft, ...roDis,
+            onChange: (ev) => { if (!ro) setIdDraft(ev.target.value) },
+            onBlur: (ev) => { if (!ro) commitNodeId(ev.target.value) },
+            onCompositionStart: () => setIdComposing(true),
+            onCompositionEnd: (ev) => { setIdComposing(false); setIdDraft(ev.currentTarget.value); commitNodeId(ev.currentTarget.value) },
+            onKeyDown: (ev) => { if (ev.key === 'Enter' && !idComposing) ev.currentTarget.blur() },
+          })
+        ),
+        isFanout ? h(Field, { label: t('fanoutItems'), required: true, help: t('fanoutItemsHelp'), errors: errorsFor('items') },
+          h('input', {
+            className: 'vwf-input vwf-mono' + (errorsFor('items').length ? ' err' : ''),
+            value: node.items || '', placeholder: '$.args.items', ...roDis,
+            onChange: (ev) => { if (!ro) props.onUpdate(node.id, { items: ev.target.value }) },
+          })
+        ) : null,
+        // AI 服务与模型：技术信息按契约收进高级层；内置模板的默认 / 覆盖入口在流程库侧
+        h(Field, { label: t('agent'), required: true, help: t('wbAgentHelp'), errors: errorsFor('model.provider') },
+          provOpts.length
+            ? h(VwfSelect, {
+                value: curProv,
+                options: [{ value: '', label: t('selectAgent') }].concat(provOpts.map(id => ({ value: id, label: id }))),
+                disabled: ro, title: ro ? t('wbBuiltinStructureReadonly') : '',
+                onChange: (v) => { if (!ro) props.onUpdate(node.id, { model: { provider: v || undefined, model: undefined } }) },
+              })
+            : h('input', { className: 'vwf-input', value: curProv, placeholder: 'deepseek-official', ...roDis, onChange: (ev) => { if (!ro) props.onUpdate(node.id, { model: { provider: ev.target.value, model: curModel || undefined } }) } })
+        ),
+        h(Field, { label: t('model'), required: true, errors: errorsFor('model.model') },
+          providers.length
+            ? h(VwfSelect, {
+                value: curModel,
+                options: [{ value: '', label: t('selectModel') }].concat(modelOpts.map(id => ({ value: id, label: id }))),
+                disabled: ro, title: ro ? t('wbBuiltinStructureReadonly') : '',
+                onChange: (v) => { if (!ro) props.onUpdate(node.id, { model: { provider: curProv || undefined, model: v || undefined } }) },
+              })
+            : h('input', { className: 'vwf-input', value: curModel, placeholder: 'deepseek-v4-flash', ...roDis, onChange: (ev) => { if (!ro) props.onUpdate(node.id, { model: { provider: curProv || undefined, model: ev.target.value || undefined } }) } })
+        ),
+        h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('wbModelScopeNote')),
+        isFanout
+          ? schemaField({ label: t('outputSchema'), help: t('perItemSchemaHelp') })
+          : h('div', null,
+              resultMode === 'ai' || resultMode === 'routing' || node.output
+                ? schemaField({ label: t('outputSchema'), required: resultMode === 'ai' || resultMode === 'routing', help: t('outputSchemaHelp') })
+                : null,
+              resultMode === 'ai' ? h(Field, { label: t('successCondition'), required: true, help: t('successConditionHelp'), errors: errorsFor('output.successCondition') },
+                h('input', {
+                  className: 'vwf-input vwf-mono' + (errorsFor('output.successCondition').length ? ' err' : ''),
+                  value: (node.output && node.output.successCondition) || '', placeholder: '$.result == true', ...roDis,
+                  onChange: (ev) => { if (!ro) { setSchemaNotice(null); props.onUpdate(node.id, { output: { ...(node.output || {}), successCondition: ev.target.value } }) } },
+                })
+              ) : null
+            )
+      )
+
+      return h('div', { className: 'vwf-section' },
+        h('div', { className: 'vwf-row' },
+          h('strong', null, t('nodeConfig')),
+          h('span', { className: 'vwf-spacer' }),
+          h('span', { className: 'vwf-badge' }, isFanout ? 'fanout' : 'worker'),
+          props.readOnlyStructure ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null
+        ),
+        props.readOnlyStructure
+          ? h('div', { className: 'vwf-wb-readonly' }, t('wbBuiltinStructureReadonly'))
+          : null,
+        basicSection,
+        outcomeSection,
+        advancedSection
       )
     }
 
@@ -1530,17 +1909,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           usedByOthers[String(e2.outcome)] = true
         })
       }
+      const ro = !!props.readOnlyStructure
+      const roDis = ro ? { disabled: true, title: t('wbBuiltinStructureReadonly') } : {}
+      const roSel = ro ? { disabled: true, title: t('wbBuiltinStructureReadonly') } : {}
       return h('div', { className: 'vwf-section' },
         h('div', { className: 'vwf-row' },
           h('strong', null, t('edgeConfig')),
           h('span', { className: 'vwf-spacer' }),
-          h('button', { className: 'vwf-btn sm danger', onClick: props.onDelete }, t('deleteEdge'))
+          ro ? null : h('button', { className: 'vwf-btn sm danger', onClick: props.onDelete }, t('deleteEdge'))
         ),
+        ro ? h('div', { className: 'vwf-wb-readonly' }, t('wbBuiltinStructureReadonly')) : null,
         h(Field, { label: t('edgeOutcome'), required: true, errors: errorsFor('on') },
           h(VwfSelect, {
             value: kind,
             options: ['success', 'failure', 'technical', 'outcome'].map(v => ({ value: v, label: t('edgeType_' + v) })),
-            onChange: (v) => props.onUpdate(index, { kind: v }),
+            ...roSel,
+            onChange: (v) => { if (!ro) props.onUpdate(index, { kind: v }) },
           })
         ),
         kind === 'outcome' ? h(Field, { label: t('edgeOutcomeName'), required: true, help: srcValues.length ? t('edgeOutcomeNameSelectHelp') : t('edgeOutcomeNameHelp'), errors: errorsFor('outcome') },
@@ -1556,16 +1940,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                   ? [{ value: outValue, label: outValue + '（' + t('edgeOutcomeUndeclared') + '）' }]
                   : []
               ),
-              onChange: (v) => props.onUpdate(index, { [outField]: v }),
+              ...roSel,
+              onChange: (v) => { if (!ro) props.onUpdate(index, { [outField]: v }) },
             })
             : h('input', {
               className: 'vwf-input vwf-mono' + (errorsFor('outcome').length ? ' err' : ''),
-              value: outValue, placeholder: 'PASS',
-              onChange: (ev) => props.onUpdate(index, { [outField]: ev.target.value }),
+              value: outValue, placeholder: 'PASS', ...roDis,
+              onChange: (ev) => { if (!ro) props.onUpdate(index, { [outField]: ev.target.value }) },
             })
         ) : null,
         kind === 'outcome' ? h('label', { className: 'vwf-field-label', style: { cursor: 'pointer' } },
-          h('input', { type: 'checkbox', checked: !!edge.countRound, style: { margin: 0 }, onChange: (ev) => props.onUpdate(index, { countRound: ev.target.checked }) }),
+          h('input', { type: 'checkbox', checked: !!edge.countRound, style: { margin: 0 }, ...roDis, onChange: (ev) => { if (!ro) props.onUpdate(index, { countRound: ev.target.checked }) } }),
           t('edgeCountRound'),
           h('span', { className: 'vwf-help', title: t('edgeCountRoundHelp') }, '?')
         ) : null,
@@ -1573,15 +1958,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         h(Field, { label: t('edgeTarget'), required: true, errors: errorsFor('to') },
           h(VwfSelect, {
             value: edge.to,
-            options: targetOpts,
-            onChange: (v) => props.onUpdate(index, { to: v }),
+            options: targetOpts, ...roSel,
+            onChange: (v) => { if (!ro) props.onUpdate(index, { to: v }) },
           })
         ),
         kind === 'success' ? h(Field, { label: t('edgeWhen'), help: t('edgeWhenHelp'), errors: errorsFor('when') },
           h('input', {
             className: 'vwf-input vwf-mono' + (errorsFor('when').length ? ' err' : ''),
-            value: edge.when || '', placeholder: '$.need_integration_test == true',
-            onChange: (ev) => props.onUpdate(index, { when: ev.target.value }),
+            value: edge.when || '', placeholder: '$.need_integration_test == true', ...roDis,
+            onChange: (ev) => { if (!ro) props.onUpdate(index, { when: ev.target.value }) },
           })
         ) : null
       )
@@ -2024,6 +2409,44 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const entryCandidates = React.useMemo(() => deriveEntryCandidates(wf), [wf])
       // 编辑已有模板且 ID 已修改 → 保存置灰，只能另存为（currentId=原模板 id）
       const idChanged = props.currentId != null && wf.id !== props.currentId
+      // 内置模板结构只读（§9/V-7）：节点与连接不可编辑，控件不可用并给出说明；
+      // 供应商 / 模型仍走既有「模型覆盖」入口（流程库行内），本任务不重新设计该入口。
+      const readOnlyStructure = !!props.builtin
+
+      // ── A 编排台（FEAT-84）：窄屏流程 / 配置窗格 + 步骤/连接共用同一套执行序 ─────
+      // 窄屏本身由 CSS 媒体查询驱动（900px）；这里只管当前窗格，
+      // 桌面宽度下 pane-* 类不参与任何布局。
+      const [narrowPane, setNarrowPane] = React.useState('flow')
+      const wbLayout = React.useMemo(() => {
+        try { return layoutGraph(wf, visibleTerminals) } catch (e) { return null }
+      }, [JSON.stringify({ entry: wf.entry || '', n: (wf.nodes || []).map(n => n.id), e: (wf.edges || []).map(e => [e.from, e.to, e.on, e.outcome, e.countRound]), v: visibleTerminals })])
+      // 执行序 = 画布分层序号（与节点角标同源）；连接分类与「步骤在前在后」判定共用它
+      const rankOf = (id) => (wbLayout && wbLayout.rank && wbLayout.rank[id] != null ? wbLayout.rank[id] : null)
+      const pickStep = (id) => {
+        setSelectedNodeId(id)
+        setSelectedEdgeIndex(null)
+        if (props.onPickNode) props.onPickNode()
+        ctx.timeout(() => { if (scrollToRef.current) scrollToRef.current(id) }, 0)
+      }
+      const pickEdge = (index) => {
+        setSelectedEdgeIndex(index)
+        setSelectedNodeId(null)
+        if (props.onPickNode) props.onPickNode()
+      }
+      // 未保存三选一的「保存并返回」需要能触发编辑器内的保存流程（校验失败时留在原处）
+      React.useEffect(() => {
+        if (props.registerSave) props.registerSave(() => { void handleSave() })
+      })
+      // Escape 分层关闭：先关最上层（角色库 / 校验弹窗），都不在时才让宿主关闭整个工作区
+      React.useEffect(() => {
+        const onKey = (ev) => {
+          if (ev.key !== 'Escape') return
+          if (roleUI) { ev.preventDefault(); ev.stopPropagation(); setRoleUI(null); return }
+          if (dialogOpen) { ev.preventDefault(); ev.stopPropagation(); closeValidationDialog() }
+        }
+        document.addEventListener('keydown', onKey, true)
+        return () => document.removeEventListener('keydown', onKey, true)
+      })
 
       // history: 'now' = 结构变更立即入栈；默认 debounce = 打字合并为一条
       const syncWorkflow = (next, opts) => {
@@ -2227,7 +2650,32 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             )
           )
         ) : null,
-        h('div', { className: 'vwf-editor' },
+        // 窗格切换条与网格平级：放在网格内会随所在窗格一起被隐藏（配置窗格里无法切回流程）
+        h('div', { className: 'vwf-pane-switch', role: 'tablist', 'aria-label': t('wbPaneSwitch') },
+          h('button', {
+            className: 'vwf-wb-pane-tab' + (narrowPane === 'flow' ? ' on' : ''), type: 'button', role: 'tab',
+            'aria-selected': narrowPane === 'flow' ? 'true' : 'false',
+            onClick: () => setNarrowPane('flow'),
+          }, t('wbPaneFlow')),
+          h('button', {
+            className: 'vwf-wb-pane-tab' + (narrowPane === 'config' ? ' on' : ''), type: 'button', role: 'tab',
+            'aria-selected': narrowPane === 'config' ? 'true' : 'false',
+            onClick: () => setNarrowPane('config'),
+          }, t('wbPaneConfig'))
+        ),
+        h('div', { className: 'vwf-editor pane-' + narrowPane },
+          h('div', { className: 'vwf-nav-col' },
+            h('div', { className: 'vwf-card vwf-wb-steps-card' },
+              h('div', { className: 'vwf-card-head' },
+                h('div', { className: 'vwf-card-title' }, t('wbSteps')),
+                h('span', { className: 'vwf-badge' }, (wf.nodes || []).length + '')
+              ),
+              h(StepNavigator, {
+                dsl: wf, visibleTerminals, selectedNodeId,
+                onPick: pickStep,
+              })
+            )
+          ),
           h('div', { className: 'vwf-canvas-col' },
             h('div', { className: 'vwf-card' },
               h('div', { className: 'vwf-card-head' },
@@ -2239,13 +2687,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     h('input', {
                       className: 'vwf-input', style: { width: 220 },
                       value: wf.name || '', placeholder: t('templateName'),
-                      onChange: (ev) => syncWorkflow({ ...wf, name: ev.target.value }),
+                      disabled: readOnlyStructure, title: readOnlyStructure ? t('wbBuiltinStructureReadonly') : '',
+                      onChange: (ev) => { if (!readOnlyStructure) syncWorkflow({ ...wf, name: ev.target.value }) },
                     }),
                     h('span', { className: 'vwf-field-label' }, t('templateId'), h('span', { className: 'req' }, '*')),
                     h('input', {
                       className: 'vwf-input vwf-mono', style: { width: 180 },
                       value: wf.id || '', placeholder: 'my-workflow',
-                      onChange: (ev) => syncWorkflow({ ...wf, id: ev.target.value }),
+                      disabled: readOnlyStructure, title: readOnlyStructure ? t('wbBuiltinStructureReadonly') : '',
+                      onChange: (ev) => { if (!readOnlyStructure) syncWorkflow({ ...wf, id: ev.target.value }) },
                     })
                   ),
                   h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('subtitle'))
@@ -2257,7 +2707,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                   ),
                   h('div', { className: 'vwf-row', style: { gap: 2 } },
                     h('button', { className: 'vwf-btn sm' + (tab === 'canvas' ? ' primary' : ''), onClick: () => setTab('canvas') }, t('canvas')),
-                    h('button', { className: 'vwf-btn sm' + (tab === 'json' ? ' primary' : ''), onClick: () => setTab('json') }, 'JSON')
+                    h('button', {
+                      className: 'vwf-btn sm' + (tab === 'json' ? ' primary' : ''),
+                      disabled: readOnlyStructure, title: readOnlyStructure ? t('wbBuiltinStructureReadonly') : '',
+                      onClick: () => { if (!readOnlyStructure) setTab('json') },
+                    }, 'JSON')
                   ),
                   h('button', {
                     className: 'vwf-btn sm',
@@ -2272,16 +2726,29 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     onClick: () => { void props.onOneClickCheck(true) },
                   }, props.probing ? t('oneClickCheckRunning') : t('probeForceRerun')),
                   idChanged ? h('button', { className: 'vwf-btn sm', onClick: () => { void handleSave() } }, t('saveAs')) : null,
-                  h('button', { className: 'vwf-btn sm primary', disabled: props.saving || !(wf.nodes || []).length || idChanged, onClick: () => { void handleSave() } }, t('saveWorkflow'))
+                  h('button', {
+                    className: 'vwf-btn sm primary',
+                    disabled: props.saving || !(wf.nodes || []).length || idChanged || readOnlyStructure,
+                    title: readOnlyStructure ? t('wbBuiltinSaveDisabled') : '',
+                    onClick: () => { if (!readOnlyStructure) { void handleSave() } },
+                  }, t('saveWorkflow'))
                 )
               ),
               tab === 'canvas' ? h('div', { className: 'vwf-canvas-toolbar' },
                 h('div', { className: 'vwf-toolbar-actions' },
-                  h('button', { className: 'vwf-toolbar-action', onClick: addNode },
+                  h('button', {
+                    className: 'vwf-toolbar-action', disabled: readOnlyStructure,
+                    title: readOnlyStructure ? t('wbBuiltinStructureReadonly') : '',
+                    onClick: () => { if (!readOnlyStructure) addNode() },
+                  },
                     h('span', { className: 'vwf-toolbar-action-icon' }, '＋'),
                     h('span', { className: 'vwf-toolbar-action-label' }, t('addNode'))
                   ),
-                  h('button', { className: 'vwf-toolbar-action danger', disabled: !selectedNodeId, onClick: deleteSelectedNode },
+                  h('button', {
+                    className: 'vwf-toolbar-action danger', disabled: !selectedNodeId || readOnlyStructure,
+                    title: readOnlyStructure ? t('wbBuiltinStructureReadonly') : '',
+                    onClick: () => { if (!readOnlyStructure) deleteSelectedNode() },
+                  },
                     h('span', { className: 'vwf-toolbar-action-icon' }, '−'),
                     h('span', { className: 'vwf-toolbar-action-label' }, t('deleteNode'))
                   )
@@ -2297,6 +2764,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 ? h(Canvas, {
                     dsl: wf,
                     height: canvasHeight,
+                    readOnly: readOnlyStructure,
                     visibleTerminals,
                     selectedNode: selectedNodeId,
                     selectedEdge: selectedEdgeIndex,
@@ -2325,6 +2793,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               ? h('div', { className: 'vwf-status warn', style: { marginTop: 2 } },
                   '⚠️ ' + liveWarnings.length + ' ' + t('validWarnings') + '：' + liveWarnings[0] + (liveWarnings.length > 1 ? ' …' : ''))
               : null
+          ),
+          // 连接清单：独立滚动区；直接遍历模板定义的 edges，保证不漏边（§9/V-4）
+          h('div', { className: 'vwf-card vwf-wb-conn-card' },
+            h('div', { className: 'vwf-card-head' },
+              h('div', { className: 'vwf-card-title' }, t('wbConnections')),
+              h('span', { className: 'vwf-badge' }, (wf.edges || []).length + '')
+            ),
+            h(ConnectionList, {
+              dsl: wf, rankOf, selectedEdgeIndex,
+              onPickEdge: pickEdge,
+            })
           ),
           h('div', { className: 'vwf-card vwf-inspector' },
             h('div', { className: 'vwf-card-title', style: { marginBottom: 4 } }, t('inspector')),
@@ -2375,8 +2854,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 )
               )
             ),
-            selectedNode ? h(NodeInspector, { node: selectedNode, dsl: wf, fieldErrors, providers: props.providers, roles: props.roles, onUpdate: updateNode, onAddOutcomeEdge: addOutcomeEdge }) : null,
-            selectedEdge ? h(EdgeInspector, { edge: selectedEdge, index: selectedEdgeIndex, dsl: wf, fieldErrors, onUpdate: updateEdge, onDelete: deleteSelectedEdge }) : null,
+            selectedNode ? h(NodeInspector, {
+              node: selectedNode, dsl: wf, fieldErrors, providers: props.providers, roles: props.roles,
+              readOnlyStructure, orderOf: rankOf, onPickEdge: pickEdge,
+              onUpdate: updateNode, onAddOutcomeEdge: addOutcomeEdge,
+            }) : null,
+            selectedEdge ? h(EdgeInspector, { edge: selectedEdge, index: selectedEdgeIndex, dsl: wf, fieldErrors, readOnlyStructure, onUpdate: updateEdge, onDelete: deleteSelectedEdge }) : null,
             !selectedNode && !selectedEdge ? h('div', { className: 'vwf-empty', style: { marginTop: 10 } }, t('selectHint')) : null
           )
         ),
@@ -2667,6 +3150,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const [providers, setProviders] = React.useState([])
       const [roles, setRoles] = React.useState([])
       const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false)
+      // 未保存三选一（§7.11）：由 Page 触发的「保存并返回」需要回调到编辑器内的保存流程
+      const editorSaveRef = React.useRef(null)
+      // 流程库筛选（V-1：关闭工作区后回到原列表、筛选与滚动位置）
+      const [tplFilter, setTplFilter] = React.useState('')
       const editorDialogRef = React.useRef(null)
       const editorOpen = !!wf
 
@@ -2795,6 +3282,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         refetchRoles()
       }, [refetchRoles])
 
+      // Escape 分层关闭：未保存三选一在最上层时先关它，不把整个工作区一起带走
+      React.useEffect(() => {
+        if (!confirmDiscardOpen) return undefined
+        const onKey = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); setConfirmDiscardOpen(false) } }
+        document.addEventListener('keydown', onKey, true)
+        return () => document.removeEventListener('keydown', onKey, true)
+      }, [confirmDiscardOpen])
       const openEditor = (id) => {
         const w = (list || []).find(x => x.id === id)
         if (!w) return
@@ -2952,6 +3446,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
 
       const editingBuiltin = !!(list || []).find(x => x.id === editId && x.builtin)
+      // 流程库筛选：按名称 / ID / 摘要匹配（找模板），筛选词随页面状态保留
+      const tplFilterNorm = tplFilter.trim().toLowerCase()
+      const filteredList = !tplFilterNorm ? (list || []) : (list || []).filter(w => {
+        const hay = [w.name, w.id, w.description].map(x => String(x == null ? '' : x).toLowerCase()).join(' ')
+        return hay.indexOf(tplFilterNorm) >= 0
+      })
       // LOC-014 覆盖对话框行：每节点一行；两列下拉的"沿用默认"各自带出本列实际值
       // （provider 列显示默认 provider，model 列显示默认 model）；无 providers 回退文本输入
       const ovRows = () => {
@@ -3015,10 +3515,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           h('div', { className: 'vwf-row' },
             h('button', { className: 'vwf-btn', onClick: onNew }, '＋ ' + t('newTemplate')),
             h('button', { className: 'vwf-btn', onClick: refresh }, t('refresh')),
+            h('input', {
+              className: 'vwf-input', style: { width: 220, marginLeft: 'auto' },
+              value: tplFilter, placeholder: t('wbLibraryFilter'), 'aria-label': t('wbLibraryFilter'),
+              onChange: (ev) => setTplFilter(ev.target.value),
+            }),
             !providers.length ? h('span', { className: 'vwf-muted-sm' }, t('noModels')) : null
           ),
           h('div', { className: 'vwf-list' },
-            (list || []).map(w => h('div', { key: w.id, className: 'vwf-list-item' },
+            filteredList.map(w => h('div', { key: w.id, className: 'vwf-list-item' },
               h('div', { style: { minWidth: 0, flex: 1 } },
                 h('div', { className: 'vwf-row', style: { gap: 6 } },
                   h('span', { className: 'vwf-list-name' }, w.name || w.id),
@@ -3028,11 +3533,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 ),
                 w.description ? h('div', { className: 'vwf-list-desc' }, w.description) : null
               ),
-              h('button', { className: 'vwf-btn sm', onClick: () => openEditor(w.id) }, t('editTemplate')),
+              h('button', { className: 'vwf-btn sm', onClick: () => openEditor(w.id) }, t(w.builtin ? 'viewAndAccept' : 'editTemplate')),
               w.builtin ? h('button', { className: 'vwf-btn sm', onClick: () => openOv(w) }, t('modelOverride')) : null,
               h('button', { className: 'vwf-btn sm danger', disabled: !!w.builtin, title: w.builtin ? t('builtinReadonly') : '', onClick: () => onRemove(w.id) }, t('deleteTemplate'))
             )),
-            list && !list.length ? h('div', { className: 'vwf-empty' }, '—') : null
+            list && !list.length ? h('div', { className: 'vwf-empty' }, '—') : null,
+            list && list.length && !filteredList.length ? h('div', { className: 'vwf-empty' }, t('wbLibraryFilterEmpty')) : null
           )
         ) : null,
         tab === 'dashboard' ? h(Dashboard, { wf }) : null,
@@ -3061,18 +3567,29 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               key: editId || 'new',
               wf, providers, roles, saving, probing,
               currentId: editId,
+              builtin: editingBuiltin,
               setWf: (next) => { setWf(next); setDirty(true) },
               onSaved: (id) => { onSaved(id); if (!editId) setEditId(id) },
               onOneClickCheck,
               onRolesChanged: refetchRoles,
+              registerSave: (fn) => { editorSaveRef.current = fn },
             })
           ),
           confirmDiscardOpen ? h('div', { className: 'vwf-confirm-mask', onClick: () => setConfirmDiscardOpen(false) },
             h('div', { className: 'vwf-confirm', onClick: (ev) => ev.stopPropagation() },
-              h('div', { className: 'vwf-confirm-title' }, t('confirmDiscard')),
+              h('div', { className: 'vwf-confirm-title' }, t('wbUnsavedTitle')),
+              h('div', { className: 'vwf-dialog-desc' }, t('wbUnsavedDesc')),
               h('div', { className: 'vwf-confirm-actions' },
-                h('button', { className: 'vwf-btn', onClick: () => setConfirmDiscardOpen(false) }, t('discardCancel')),
-                h('button', { className: 'vwf-btn danger', onClick: () => { setConfirmDiscardOpen(false); closeEditor() } }, t('discardConfirm'))
+                h('button', { className: 'vwf-btn', onClick: () => setConfirmDiscardOpen(false) }, t('wbUnsavedKeepEditing')),
+                h('button', { className: 'vwf-btn danger', onClick: () => { setConfirmDiscardOpen(false); closeEditor() } }, t('wbUnsavedDiscard')),
+                h('button', {
+                  className: 'vwf-btn primary', disabled: saving,
+                  onClick: () => {
+                    setConfirmDiscardOpen(false)
+                    // 校验失败时编辑器内会给出问题清单并留在原处，不静默丢弃输入
+                    if (editorSaveRef.current) editorSaveRef.current()
+                  },
+                }, t('wbUnsavedSaveAndBack'))
               )
             )
           ) : null
@@ -3289,6 +3806,22 @@ function edgeLabelText(e, l) {
   if (e.on === 'technical') return l.technical || 'technical'
   if (e.on === 'failure') return l.failure || 'failure'
   return l.success || 'success'
+}
+
+// ── 连接分类（FEAT-84 §9/V-5）────────────────────────────────────────────────
+// 三类互斥，且与「返工轮次」分开表述 —— 不得合并成同一个「重试」：
+//   retry（调用重试）：on=technical 的技术自环，系统自动重发同一步骤，不消耗返工轮次
+//   loop （业务回环）：显式计入打回轮次（countRound），或指向执行序上更早的步骤
+//   normal（普通业务路由）：单向前进的业务结果去向
+// orderOf(nodeId) 返回该节点的执行序位（画布分层序号），未知返回 null。
+function connectionClassOf(edge, orderOf) {
+  if (!edge || typeof edge !== 'object') return 'normal'
+  if (edge.on === 'technical') return 'retry'
+  if (edge.countRound === true) return 'loop'
+  const from = orderOf ? orderOf(edge.from) : null
+  const to = orderOf ? orderOf(edge.to) : null
+  if (from != null && to != null && to < from) return 'loop'
+  return 'normal'
 }
 
 // ── 业务结果路由模型（LOC-001 V2：录入体验改造）──────────────────────────────

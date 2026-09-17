@@ -48,6 +48,17 @@ function byClass(root, cls) {
   return root.querySelector('.' + cls)
 }
 
+// FEAT-84 渐进披露：技术词（节点类型 / AI 服务与模型 / JSON 结构）收进「高级设置」，默认折叠。
+// 需要操作这些字段的用例先展开对应段——展开本身也是被测行为之一（见 editor-workbench.test.mjs）。
+async function openSection(root, id) {
+  const head = root.querySelector('.vwf-wb-sec-head[data-vwf-section="' + id + '"]')
+  assert.ok(head, '存在 ' + id + ' 配置段')
+  if (head.getAttribute('aria-expanded') !== 'true') {
+    await act(async () => { head.click(); await flush() })
+  }
+  return head
+}
+
 const SEED_DSL = {
   id: 'wf1',
   name: '测试流',
@@ -557,6 +568,7 @@ test('JSON tab：双 tab 切换与 JSON 编辑区', async () => {
 })
 
 test('fanout 编辑器：类型切换显示专属字段，画布卡片同步类型', async () => {
+  await openSection(container, 'advanced')
   const kindLabel = byText(container, '节点类型')
   assert.ok(kindLabel, '存在节点类型字段')
   const kindSelect = kindLabel.closest('.vwf-field').querySelector('select')
@@ -565,8 +577,9 @@ test('fanout 编辑器：类型切换显示专属字段，画布卡片同步类�
     kindSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
     await flush()
   })
+  await openSection(container, 'advanced')
   assert.ok(byText(container, 'items 来源'), 'fanout 显示 items 来源')
-  assert.ok(byText(container, '失败阈值'), 'fanout 显示失败阈值')
+  assert.ok(byText(container, '失败阈值'), 'fanout 显示失败阈值（结果与去向层）')
   assert.ok(container.querySelector('.vwf-help[title*="该 Schema 校验每个子代理"]'), 'fanout 显示 per-item schema 说明')
   const kinds = Array.from(container.querySelectorAll('text.vwf-node-kind')).map((el) => el.textContent)
   assert.ok(kinds.includes('fanout'), '画布卡片显示 fanout')
@@ -1034,8 +1047,10 @@ test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async ()
   const confirmMask = fresh.querySelector('.vwf-confirm-mask')
   assert.ok(confirmMask, '未保存关闭时显示统一样式确认弹窗')
   assert.ok(confirmMask.querySelector('.vwf-confirm'), '确认层含产品样式对话框')
-  assert.ok(byText(fresh, '我再想想'), '存在「我再想想」按钮')
-  assert.ok(byText(fresh, '不改了'), '存在「不改了」按钮')
+  // FEAT-84：未保存关闭为三选一（继续编辑 / 放弃修改 / 保存并返回）
+  assert.ok(byText(fresh, '继续编辑'), '存在「继续编辑」按钮')
+  assert.ok(byText(fresh, '放弃修改'), '存在「放弃修改」按钮')
+  assert.ok(byText(fresh, '保存并返回'), '存在「保存并返回」按钮')
   const maskRect = confirmMask.getBoundingClientRect ? confirmMask.getBoundingClientRect() : null
   if (maskRect && maskRect.width) {
     // jsdom 无法布局时跳过位置断言；真实 Chromium 证据另在 docs 中采集
@@ -1043,11 +1058,11 @@ test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async ()
     assert.ok(Math.abs((maskRect.left + maskRect.width / 2) - (window.innerWidth / 2)) < 2, '确认弹窗横向居中')
   }
   await act(async () => {
-    byText(fresh, '我再想想').click()
+    byText(fresh, '继续编辑').click()
     await flush()
   })
   assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '点击我再想想后编辑器仍打开')
-  assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '我再想想关闭确认弹窗')
+  assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '继续编辑关闭确认弹窗')
   // 再次取消 → 点击遮罩空白关闭（编辑器保留）
   await act(async () => {
     fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
@@ -1060,14 +1075,14 @@ test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async ()
   })
   assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '点击遮罩后编辑器仍打开')
   assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '点击遮罩关闭确认弹窗')
-  // 再次取消 → 点击「不改了」关闭
+  // 再次取消 → 点击「放弃修改」关闭
   await act(async () => {
     fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
     await flush()
-    byText(fresh, '不改了').click()
+    byText(fresh, '放弃修改').click()
     await flush()
   })
-  assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '点击不改了后编辑器关闭')
+  assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '点击放弃修改后编辑器关闭')
   assert.equal(nativeConfirmCalls, 0, '全程未调用 window.confirm')
   dom.window.confirm = origConfirm
   // 干净状态（无未保存改动）直接关闭，不询问
@@ -1456,6 +1471,7 @@ test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链从左到右
     container.querySelector('g[data-node-id="requirements"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
     await flush()
   })
+  await openSection(container, 'advanced')
   const selects = Array.from(container.querySelectorAll('.vwf-inspector select.vwf-select'))
   const values = selects.map((s) => s.value)
   assert.ok(values.includes('kimi-coding'), '节点 provider 从 bindings.models 投影：' + JSON.stringify(values))
