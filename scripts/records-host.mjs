@@ -21,10 +21,10 @@
 // commit 条目（按序追加，同一 Store 内结链）：
 //   { type: 'node_result', record_id, provenance, body_value }        节点结果 → result 记录；
 //     dependencies/based_on = 自身当前最新 Revision（重复完成自然形成 Revision 链）
-//   { type: 'proof', record_id, provenance, body_value }              verifyBranch 强制签发
-//     的 proof_decision；dependencies = 签发时 Store 内全部 node:/artifact: 记录的当前
-//     Revision + 自身前一 Revision——目标 Revision 前进后旧 Proof 经 coverageStatus
-//     判 not_covering_current（保留不删，标记 stale，LOC-008 验收①②）
+//   { type: 'proof', record_id, provenance, body_value, resolved_inputs? }  verifyBranch
+//     强制签发的 proof_decision；dependencies = 本次 attempt 的 resolved_inputs 中实际
+//     解析成功的正式引用 + 显式基线/候选引用 + 自身前一 Revision（LOC-034：禁止从
+//     Store 全量推导；旧式无 resolved_inputs 的记录标 dependency_coverage=incomplete）
 //   { type: 'artifact', record_id, provenance, body_value, kind }     多格式产物（#69
 //     record_id 约定不变），经 parseArtifactBody 定 body，链规则同 node_result
 
@@ -46,9 +46,16 @@ import {
   listRevisions,
 } from './formal-records.mjs'
 import { assertIntegrationAllowed, compareCandidate } from './workspace-isolation.mjs'
+import {
+  annotateRecordCoverage,
+  buildRecordDependencies,
+  canIssueCoveringProof,
+  coverageStatusDeep,
+  dependsOnStaleInputsDeep,
+  staleReasonChain,
+} from './revision-dependencies.mjs'
 
 const FILE_SCHEMA = 1
-const DEP_PREFIX = /^(node|artifact):/
 
 function requireText(v, label) {
   if (typeof v !== 'string' || !/\S/.test(v)) throw new Error(`${label} 必须是非空字符串`)
@@ -149,21 +156,21 @@ const attemptHash = (v) => {
   return contentHash(rest)
 }
 
-function dependenciesOf(store, recordId, type) {
-  const dependencies = []
-  if (type === 'proof') {
-    // 证明依赖：签发时刻 Store 内全部节点/产物记录的当前 Revision（直接依赖，
-    // 不做传递闭包；跨段沿用——上一段完成的节点同样构成可失效的输入集）
-    const seen = new Set()
-    for (const ref of store.order) {
-      if (ref.record_id === recordId || !DEP_PREFIX.test(ref.record_id) || seen.has(ref.record_id)) continue
-      seen.add(ref.record_id)
-      dependencies.push({ record_id: ref.record_id, record_revision: currentRevision(store, ref.record_id) })
-    }
+function mergeProvenance(base, extra) {
+  if (!extra || typeof extra !== 'object') return base
+  return { ...base, ...extra }
+}
+
+function recordView(store, rec) {
+  const coverage = annotateRecordCoverage(rec)
+  const view = { ...rec, dependency_coverage: coverage }
+  const ref = { record_id: rec.record_id, record_revision: rec.record_revision }
+  const chain = staleReasonChain(store, ref)
+  if (chain.length || dependsOnStaleInputsDeep(store, ref)) {
+    view.stale = true
+    if (chain.length) view.stale_reason_chain = chain
   }
-  const prev = currentRevision(store, recordId)
-  if (prev !== undefined) dependencies.push({ record_id: recordId, record_revision: prev })
-  return { dependencies, prev }
+  return view
 }
 
 export function recordsCommit(input) {
@@ -185,18 +192,24 @@ export function recordsCommit(input) {
         throw new Error('非法 entry.type: ' + String(type) + '（允许 node_result / proof / artifact）')
       }
       const recordId = requireText(e.record_id, 'entry.record_id')
-      const { dependencies, prev } = dependenciesOf(store, recordId, type)
+      const depCtx = buildRecordDependencies(store, {
+        logical_run_id,
+        record_id: recordId,
+        type,
+        resolved_inputs: e.resolved_inputs,
+        explicit_refs: e.explicit_refs,
+      })
       const body = type === 'artifact'
         ? formalArtifacts.parseArtifactBody(requireText(e.kind, 'entry.kind'), e.body_value)
         : { media_type: 'application/json', value: e.body_value === undefined ? null : e.body_value }
-      const provenance = { ...(e.provenance || {}) }
+      const provenance = mergeProvenance({ ...(e.provenance || {}) }, depCtx.provenance_extra)
       if (provenance.node_business_outcome === undefined) provenance.node_business_outcome = null
       const record = appendRecord(store, {
         record_id: recordId,
         kind: type === 'proof' ? KIND.PROOF_DECISION : KIND.RESULT,
         body,
-        dependencies,
-        ...(prev !== undefined ? { based_on: { record_id: recordId, record_revision: prev } } : {}),
+        dependencies: depCtx.dependencies,
+        ...(depCtx.prev !== undefined ? { based_on: { record_id: recordId, record_revision: depCtx.prev } } : {}),
         provenance,
       })
       committed.push({ record_id: record.record_id, record_revision: record.record_revision, kind: record.kind })
@@ -350,21 +363,32 @@ export function recordsAttempt(input) {
       || ev.a === 'l'
     if (publishes) {
       const nodeId = 'node:' + logical_run_id + ':' + node
-      const deps = dependenciesOf(store, nodeId, 'node_result')
+      const nodeDeps = buildRecordDependencies(store, {
+        logical_run_id,
+        record_id: nodeId,
+        type: 'node_result',
+        resolved_inputs: input.resolved_inputs || ev.ri,
+        explicit_refs: input.explicit_refs,
+      })
       const nodeRecord = appendRecord(store, {
         record_id: nodeId,
         kind: KIND.RESULT,
         body: { media_type: 'application/json', value: ev.q === undefined ? null : ev.q },
-        dependencies: deps.dependencies,
-        ...(deps.prev !== undefined ? { based_on: { record_id: nodeId, record_revision: deps.prev } } : {}),
-        provenance: { ...provenance, produced_by: 'vwf:runtime' },
+        dependencies: nodeDeps.dependencies,
+        ...(nodeDeps.prev !== undefined ? { based_on: { record_id: nodeId, record_revision: nodeDeps.prev } } : {}),
+        provenance: mergeProvenance({ ...provenance, produced_by: 'vwf:runtime' }, nodeDeps.provenance_extra),
       })
       keys['rc:' + aid] = { hash: contentHash(nodeRecord.body.value), record_id: nodeId, record_revision: nodeRecord.record_revision }
       committed.push({ record_id: nodeId, record_revision: nodeRecord.record_revision, kind: 'result' })
       if (ev.w && typeof ev.w === 'object') {
-        // verifyBranch 强制 Proof：依赖 = 签发时刻全部节点记录当前 Revision（与段末扫描同形）
         const proofId = 'proof:' + logical_run_id + ':' + node
-        const pd = dependenciesOf(store, proofId, 'proof')
+        const pd = buildRecordDependencies(store, {
+          logical_run_id,
+          record_id: proofId,
+          type: 'proof',
+          resolved_inputs: input.resolved_inputs || ev.ri,
+          explicit_refs: input.explicit_refs,
+        })
         const proofRecord = appendRecord(store, {
           record_id: proofId,
           kind: KIND.PROOF_DECISION,
@@ -379,7 +403,7 @@ export function recordsAttempt(input) {
           },
           dependencies: pd.dependencies,
           ...(pd.prev !== undefined ? { based_on: { record_id: proofId, record_revision: pd.prev } } : {}),
-          provenance: { ...provenance, produced_by: 'vwf:runtime' },
+          provenance: mergeProvenance({ ...provenance, produced_by: 'vwf:runtime' }, pd.provenance_extra),
         })
         keys['pf:' + aid] = { hash: contentHash(proofRecord.body.value), record_id: proofId, record_revision: proofRecord.record_revision }
         committed.push({ record_id: proofId, record_revision: proofRecord.record_revision, kind: 'proof_decision' })
@@ -403,7 +427,7 @@ export function recordsList(input) {
     return { ok: true, found: false, logical_run_id: String(logical_run_id), record_count: 0, records: [], attempts: [], entries: [], bos: {}, coverage: [] }
   }
   const { store, meta } = loadStore(records_dir, logical_run_id)
-  const records = allRecords(store)
+  const records = allRecords(store).map((rec) => recordView(store, rec))
   // 逐次 attempt 视图（LOC-029 稳定查询接口）：按 Run 全量，支持 node / attempt_id 过滤；
   // 同一 attempt 多 Revision 时取最新（如 running → completed / interrupted）。
   // segment 过滤（段收尾回填专用）：entries = 可直接入档 node_attempts 的条目，
@@ -452,13 +476,16 @@ export function recordsList(input) {
     for (const d of proof.dependencies) {
       if (seen.has(d.record_id)) continue
       seen.add(d.record_id)
-      const cs = coverageStatus(store, proof, d.record_id)
-      coverage.push({
+      const cs = coverageStatusDeep(store, proof, d.record_id)
+      const row = {
         proof: { record_id: proof.record_id, record_revision: proof.record_revision },
         target_record_id: d.record_id,
         status: cs.status,
         stale: cs.stale,
-      })
+        dependency_coverage: annotateRecordCoverage(proof),
+      }
+      if (cs.stale) row.stale_reason_chain = staleReasonChain(store, proof)
+      coverage.push(row)
     }
   }
   return {
@@ -488,23 +515,29 @@ export function recordsGet(input) {
   const file = fileOf(records_dir, logical_run_id)
   if (!existsSync(file)) return { ok: true, found: false, record_id, revisions: [], coverage: [] }
   const { store } = loadStore(records_dir, logical_run_id)
-  const revisions = listRevisions(store, record_id)
+  const revisions = listRevisions(store, record_id).map((rec) => recordView(store, rec))
   if (!revisions.length) return { ok: true, found: false, record_id, revisions: [], coverage: [] }
   const coverage = allRecords(store)
     .filter((r) => r.kind === KIND.PROOF_DECISION && r.dependencies.some((d) => d.record_id === record_id))
     .map((proof) => {
-      const cs = coverageStatus(store, proof, record_id)
-      return {
+      const cs = coverageStatusDeep(store, proof, record_id)
+      const row = {
         proof: { record_id: proof.record_id, record_revision: proof.record_revision },
         status: cs.status,
         stale: cs.stale,
+        dependency_coverage: annotateRecordCoverage(proof),
       }
+      if (cs.stale) row.stale_reason_chain = staleReasonChain(store, proof)
+      return row
     })
+  const latest = revisions[revisions.length - 1]
   return {
     ok: true,
     found: true,
     record_id,
     current_revision: currentRevision(store, record_id),
+    dependency_coverage: latest.dependency_coverage,
+    ...(latest.stale ? { stale: true, stale_reason_chain: latest.stale_reason_chain } : {}),
     revisions,
     coverage,
   }
