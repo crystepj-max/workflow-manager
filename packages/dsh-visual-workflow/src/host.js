@@ -84,6 +84,8 @@ return {
     const RECORDS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/records-host.mjs' : null
     // LOC-032：受管理外部操作账本 + execute-or-reconcile（与 records-host 同进程边界模式）
     const OPERATIONS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/operations-host.mjs' : null
+    // LOC-037：收口事实整理与授权交付动作分离（与 operations-host 同进程边界模式）
+    const DELIVERY_CLOSEOUT_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/delivery-closeout-host.mjs' : null
 
     // 项目根：会话 cwd 只在模型发起的调用中存在（浏览器 RPC / 审批激活都没有），
     // 因此每次实时探测，记住最近一次有效值，最后兜底 sandboxPolicy.workspaceRoot。
@@ -1991,6 +1993,14 @@ return {
     registerRpc('vwf.operations.reconcile', (a) => opCall('reconcile', a, ['run_id', 'logical_action']))
     registerRpc('vwf.operations.get', (a) => opCall('get', a, ['run_id', 'logical_action']))
     registerRpc('vwf.operations.list', (a) => opCall('list', a, ['run_id']))
+    // LOC-037：收口交付动作（事实整理 / 动作计划 / 完整收口）。必填 run_id；closeout 另需 operations_dir。
+    const deliveryCall = (cmd, a, fields) => {
+      for (const k of fields) if (!String(((a || {})[k]) || '').trim()) return fail('缺少 ' + k)
+      return deliveryCloseoutHostCall(cmd, a)
+    }
+    registerRpc('vwf.delivery.gatherFacts', (a) => deliveryCall('gather-facts', a, ['run_id']))
+    registerRpc('vwf.delivery.planActions', (a) => deliveryCall('plan-actions', a, ['run_id']))
+    registerRpc('vwf.delivery.closeout', (a) => deliveryCall('closeout', a, ['run_id']))
     registerRpc('vwf.artifacts.ingest', async (a) => {
       const { runId, nodeId, artifacts } = a
       if (!runId || !nodeId || !Array.isArray(artifacts) || !artifacts.length) return fail('缺少 runId / nodeId / artifacts')
@@ -2456,6 +2466,23 @@ return {
           error: parsed.error || parsed.message || 'operations host 业务错误',
         }
       } catch (e) { return { ok: false, error: 'operations host 输出不可解析：' + errMsg(e), raw: r.stdout } }
+    }
+    // LOC-037：收口交付动作进程边界（与 operationsHostCall 同模式）
+    async function deliveryCloseoutHostCall(cmd, input, opts) {
+      if (!DELIVERY_CLOSEOUT_HOST || (await readTextIfExists(DELIVERY_CLOSEOUT_HOST)) === null) return { ok: false, notFound: true, error: 'delivery-closeout-host.mjs 未找到（LOC-037 运行时集成未部署）' }
+      const d = await homeDirs()
+      if (!d) return { ok: false, error: '无法解析 DSH Home：operations 目录不可用' }
+      const payload = { ...input, operations_dir: input.operations_dir || d.operationsDir }
+      const r = await runNode([DELIVERY_CLOSEOUT_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 120000, maxBytes: 1024 * 1024 })
+      if (!r.ok) return { ok: false, error: 'delivery closeout host 调用失败：' + r.detail }
+      try {
+        const parsed = JSON.parse(r.stdout)
+        return parsed.ok ? parsed : {
+          ok: false, code: parsed.code, status: parsed.status,
+          delivery_status: parsed.delivery_status,
+          error: parsed.error || parsed.message || 'delivery closeout host 业务错误',
+        }
+      } catch (e) { return { ok: false, error: 'delivery closeout host 输出不可解析：' + errMsg(e), raw: r.stdout } }
     }
     // 节点收尾产物 → commit 条目（单一提交通道的宿主侧采集）：
     //  - 每个本段新完成节点 → node:<logical_run_id>:<nodeId> 的追加 Revision；
@@ -3616,7 +3643,7 @@ return {
         refreshServices()
         const d = await homeDirs()
         return JSON.stringify({
-          pluginRoot: PLUGIN_ROOT, codeRoot: CODE_ROOT, dist: DIST, generator: GENERATOR, workspaceHost: WS_HOST, recordsHost: RECORDS_HOST, operationsHost: OPERATIONS_HOST,
+          pluginRoot: PLUGIN_ROOT, codeRoot: CODE_ROOT, dist: DIST, generator: GENERATOR, workspaceHost: WS_HOST, recordsHost: RECORDS_HOST, operationsHost: OPERATIONS_HOST, deliveryCloseoutHost: DELIVERY_CLOSEOUT_HOST,
           projectRoot: projectRoot(), dshHome: await dshHome(), generatedRoots: generatedRoots(), userDir: d && d.userDir, skillRoot: d && d.skillRoot, runsDir: d && d.runsDir, recordsDir: d && d.recordsDir,
           fsAvailable: fs !== undefined, subprocessAvailable: subprocess !== undefined, nodePath: await resolveNode(),
         }, null, 2)

@@ -541,6 +541,11 @@ export function compileBlueprint(bp, opts = {}) {
       '  if (!n || n.profile !== \'closeout\') return \'\'',
       '  return \'恢复/重试防重（WR-012）：本节点会执行创建 PR、合并、关闭 issue 等受管理交付动作。每类动作执行前必须先核查目标当前状态（PR 是否已存在或已合并、issue 是否已关闭、分支是否已推送）；已确认成功的动作不得重复执行，直接采用既有结果并在报告中注明；查询不到或结果不确定（超时、权限失败、状态矛盾）时停止自动重试，在最终回复与报告中明确「需核查」，禁止伪造成功或换目标重做。\'',
       '}',
+      'function deliveryActionsStep(id) {',
+      '  const n = BYID[id]',
+      '  if (!n || n.profile !== \'closeout\') return \'\'',
+      '  return \'交付动作分离（WR-014）：先只读整理 delivery_report（候选版本、证明、人工决定、未完成项），再按动作计划执行必要外部动作。非 Git 默认 required_actions=[]；缺必要授权先交付事实再等待；有效授权复用不重复询问；必要动作失败不得 DELIVERED；可选清理失败记 cleanup_pending；目标须读 remote.pushDefault/上游，不硬编码 origin；GitHub/未知适配器 capability_unavailable 不回落 CNB。运行时入口：vwf.delivery.* / scripts/delivery-closeout-host.mjs。\'',
+      '}',
     ] : []),
     'function coerceStructured(v, schema) {',
     '  const root = schema && schema.type',
@@ -579,7 +584,7 @@ export function compileBlueprint(bp, opts = {}) {
     // LOC-024：声明输入按块注入提示（缺必需引用的拦截在调用前的解析门，此处只做注入）
     '  const irPrompt = resolveNodeInputs(id)',
     '  const inputExtra = inputsBlock(irPrompt.items)',
-    '  return roleRef(n.profile) + runtimeCtx(id, fb + inputExtra + (n.verifyBranch ? verifyBranchStep(id) : \'\')' + (hasCloseoutNode ? ' + managedOpsStep(id)' : '') + ')',
+    '  return roleRef(n.profile) + runtimeCtx(id, fb + inputExtra + (n.verifyBranch ? verifyBranchStep(id) : \'\')' + (hasCloseoutNode ? ' + managedOpsStep(id) + deliveryActionsStep(id)' : '') + ')',
     '}',
     // LOC-031 格式修复反馈（单源常量）：节点内格式修复与技术自环共用同一激活预算（AC-01）。
     'const FORMAT_RETRY_FB = \'【格式要求】上一轮未返回可解析的结构化结果（运行环境只认 structured_output 等结构化通道的提交，或纯文本最终回复必须是严格符合本节点 output.schema 的裸 JSON——不认 markdown 围栏/前后缀/报告全文）。请重试：报告与产物写文件，最终回复按本节点 schema 用可解析 JSON 收尾。\'',
