@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -109,4 +110,59 @@ test('采集：候选携带 issue/spec 路径与优先级（供 M3 机械门禁�
   assert.equal(c.issueBasics, path.join('docs/tasks', 'PASS-001-pass-001.md'))
   assert.equal(c.taskSpec, 'docs/tasks/specs/pass-001/task-spec-V1.md')
   assert.equal(c.priority, 'P1')
+})
+
+// ===== FIX-76：依赖判定结合主干合并事实（双源判定）=====
+// collectMergeFacts 仅识别 LOC-/FEAT-/FIX-/CHORE- 前缀任务号，故依赖号用这些前缀；
+// 该判定需仓库为 git 且有主干历史，故本组用独立 git 夹具（与上面仅登记册判定的 tmpRepo 区分）。
+function gitTmpRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fix-76-'))
+  execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main'])
+  execFileSync('git', ['-C', dir, 'config', 'user.email', 'test@example.com'])
+  execFileSync('git', ['-C', dir, 'config', 'user.name', 'test'])
+  return dir
+}
+
+function gitCommit(repo, message) {
+  const f = path.join(repo, `f-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.txt`)
+  fs.writeFileSync(f, message)
+  execFileSync('git', ['-C', repo, 'add', '-A'])
+  execFileSync('git', ['-C', repo, 'commit', '-q', '-m', message])
+}
+
+test('FIX-76 验收#1：依赖已 git 合并但登记册滞后 → 依赖方进候选', () => {
+  const repo = gitTmpRepo()
+  gitCommit(repo, 'feat: 依赖任务已合并 (FEAT-900 V1)') // 制造主干合并事实
+  writeRegistry(repo, [
+    rec('FEAT-900', '本地已定义', { deps: [] }), // 登记册滞后：未记合并
+    rec('TASK-001', '本地已定义', { deps: ['FEAT-900'] }),
+  ])
+  const r = collectLocalCandidates({ repo })
+  assert.ok(r.candidates.some((c) => c.id === 'TASK-001'), '依赖方应进入候选（不被依赖排除）')
+  assert.ok(!r.excluded.some((e) => e.id === 'TASK-001'), '依赖方不应出现在排除列表')
+})
+
+test('FIX-76 验收#2：依赖无合并痕迹且非已合并 → 排除并标注', () => {
+  const repo = gitTmpRepo()
+  // 不提交任何合并事实
+  writeRegistry(repo, [
+    rec('FEAT-901', '本地已定义', { deps: [] }),
+    rec('TASK-002', '本地已定义', { deps: ['FEAT-901'] }),
+  ])
+  const r = collectLocalCandidates({ repo })
+  assert.ok(!r.candidates.some((c) => c.id === 'TASK-002'), '依赖方应被排除')
+  const ex = r.excluded.find((e) => e.id === 'TASK-002')
+  assert.ok(ex, '依赖方应出现在排除列表')
+  assert.match(ex.reason, /依赖未满足/)
+  assert.match(ex.reason, /主干无合并痕迹/)
+})
+
+test('FIX-76 回归：依赖登记册已合并（无 git 事实）→ 仍进候选', () => {
+  const repo = gitTmpRepo()
+  writeRegistry(repo, [
+    rec('FEAT-902', '已合并', { deps: [] }),
+    rec('TASK-003', '本地已定义', { deps: ['FEAT-902'] }),
+  ])
+  const r = collectLocalCandidates({ repo })
+  assert.ok(r.candidates.some((c) => c.id === 'TASK-003'), '依赖方应进入候选')
 })
