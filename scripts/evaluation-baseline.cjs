@@ -125,15 +125,8 @@ function baselineRefOf(frozen, req, taskId) {
 
 // 恢复段参数装配：检查点现场 + 已核验基线引用（剥掉人工决策字段，杜绝绕过）
 function resumeArgsOf(scriptArgs, ck, ref) {
-  const args = Object.assign({}, scriptArgs, {
-    entry: ck.entry,
-    results: ck.results,
-    history: ck.history,
-    startRound: ck.round,
-    feedback: '',
-    budgetUsed: ck.budgetUsed,
-    maxRounds: ck.maxRounds,
-    decisionSeq: ck.decisionSeq,
+  const src = require('./state-recovery-core.cjs')
+  const args = Object.assign({}, scriptArgs, src.checkpointToResumeFields(ck), {
     evaluation_baseline: ref,
     evaluation_baseline_version: ref.version,
   })

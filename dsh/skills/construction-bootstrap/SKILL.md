@@ -10,6 +10,7 @@ description: "在 DSH 会话中驱动「建设 · 完整功能开发」单任务
 本 skill 是**建设工作流**的 DSH Bootstrap 执行 Profile，产品主链以 **AI 任务定义与批量交付 V0.1 / M2** 为准：
 
 > 权威产品主链：`docs/design/ai-task-define-delivery/single-task-delivery-m2.md`  
+> **M2 与 Portable 旧七阶段（唯一权威）**：`docs/design/m2-vs-portable-delivery.md`  
 > 公共字段/状态/验收三态/返工上限：`docs/design/ai-task-define-delivery/public-task-contract.md`  
 > 证据底物契约：`docs/design/construction-workflow-portable-contract.md`（内部交接包；**不得**在交付中重开定义决策闭环）
 

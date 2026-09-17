@@ -47,6 +47,7 @@ function plantOfficialBuiltin(fs) {
 const validatorCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
 const schemaProtocolCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'schema-protocol-core.cjs'), 'utf8')
 const projectionCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'projection-core.cjs'), 'utf8')
+const stateRecoveryCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'state-recovery-core.cjs'), 'utf8')
 
 const VALIDATOR_KERNEL_SEED = {
   [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
@@ -1246,6 +1247,7 @@ test('从插件 dist/validate-core.cjs 加载校验内核', async () => {
     [PLUGIN + '/dist/validate-core.cjs']: validatorCoreSrc,
     [PLUGIN + '/dist/schema-protocol-core.cjs']: schemaProtocolCoreSrc,
     [PLUGIN + '/dist/projection-core.cjs']: projectionCoreSrc,
+    [PLUGIN + '/dist/state-recovery-core.cjs']: stateRecoveryCoreSrc,
   })
   const { handlers } = loadHost({
     fs,
@@ -1905,6 +1907,7 @@ test('角色库 core 加载：只信插件 dist 清单，home / repo 旧清单�
     [PLUGIN + '/dist/validate-core.cjs']: validatorCoreSrc,
     [PLUGIN + '/dist/schema-protocol-core.cjs']: schemaProtocolCoreSrc,
     [PLUGIN + '/dist/projection-core.cjs']: projectionCoreSrc,
+    [PLUGIN + '/dist/state-recovery-core.cjs']: stateRecoveryCoreSrc,
     [DSH_HOME + '/visual-workflow/builtin-roles.json']: JSON.stringify(staleHome),
     [REPO + '/dsh/roles/builtin-roles.json']: JSON.stringify(staleRepo),
   })

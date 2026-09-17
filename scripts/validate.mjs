@@ -50,6 +50,15 @@ if (!fs.existsSync(GEN_DIR)) {
   else pass('生成物与重生成一致（' + files.size + ' 个文件）');
 }
 
+// ②′ LOC-040：生成 Skill runbook 漂移与四模板语义探针
+console.log('—— ②′ 生成指南漂移检查 ——');
+try {
+  execFileSync(process.execPath, ['scripts/validate-guide-drift.mjs'], { cwd: root, stdio: 'pipe' });
+  pass('生成 Skill runbook 与蓝图一致');
+} catch (e) {
+  fail('生成指南漂移：' + String(e.stdout || e.stderr || e.message).trim().split('\n').slice(-6).join('\n'));
+}
+
 // ③ 引擎层测试 + 包测试
 console.log('—— ③ 引擎层测试 ——');
 try {
