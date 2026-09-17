@@ -1,14 +1,14 @@
 {
-  "_说明": "机器本地配置示例（复制到 <项目>/.scratch/night-batches/machine.json 后按本机实际调整；此文件不入库）。args 占位符：{taskId} {runId} {runDir} {worktree} {promptFile} {project}。下面 CLI 参数为示意写法，请按本机所装 AI CLI 的真实无人值守参数调整，核心要求：非交互、在指定工作树内施工、权限档与所选档位一致。",
+  "_说明": "机器本地配置示例（复制到 <项目>/.scratch/night-batches/machine.json 后按本机实际调整；此文件不入库）。args 占位符：{taskId} {runId} {runDir} {worktree} {promptFile} {project}。zcode 模板已在本机实测通过（2026-09-17）：① -p 不能漏——漏了它 zcode 会把整段提示词当「未知命令」直接退出；② 需要 ~/.zcode/cli/config.json 模型配置（可从桌面 App ~/.zcode/v2/config.json 镜像 provider 并加 model 键）；③ zcode 0.16.5 的 --max-turns 参数实际不可用，时长上限交给调度器看门狗。",
   "agent": {
     "templates": {
       "full-access": {
         "command": "bash",
-        "args": ["-lc", "claude -p \"$(cat {promptFile})\" --dangerously-skip-permissions"]
+        "args": ["-lc", "exec node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs --cwd {worktree} --mode yolo --no-color -p \"$(cat {promptFile})\""]
       },
       "auto-edit": {
         "command": "bash",
-        "args": ["-lc", "claude -p \"$(cat {promptFile})\" --permission-mode acceptEdits"]
+        "args": ["-lc", "exec node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs --cwd {worktree} --mode edit --no-color -p \"$(cat {promptFile})\""]
       }
     }
   },

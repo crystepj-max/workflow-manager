@@ -75,6 +75,20 @@ node scripts/ai-task-dispatcher.mjs <schedule.json路径>
 - 远端 CNB 核验是**报告性**的：远端有、本地无条目的任务一律「未纳入（缺本地定义）」，
   夜间不做需求补齐（与旧规则一致）。
 
+> **2026-09-17 ZCode 本机实测更新**
+>
+> - CLI 入口：`node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs`（无独立 PATH 命令）。
+> - 无人值守参数：`--cwd <dir> -p "<prompt>"` + `--mode yolo`（全权限）/ `--mode edit`（自动编辑）。
+> - `~/.zcode/cli/config.json` 必须存在且含 `model` 键（如 `builtin:bigmodel-coding-plan/GLM-5.3-Flash`）
+>   与 `provider`；可从桌面 App `~/.zcode/v2/config.json` 镜像。缺它报 "Model config is missing"。
+> - 已知问题：`--max-turns` 在 0.16.5 帮助里出现但解析器不认，时长上限交给看门狗；
+>   **`-p` 不能漏**——漏了它 zcode 把整段提示词当「未知命令」直接退出（调度器会如实记
+>   「会话退出但未写释放事件」并释放名额）。
+> - 全链路实测通过：真实 cwf-run-init 建现场 → 真实 ZCode 会话施工 → 释放事件 WAITING_HUMAN
+>   → 报告「等待验收」定位表（分支/worktree/run 目录/验收卡齐备）；现场创建失败、重复 run
+>   拦截两条保护路径也在实测中触发过并行为正确。`scripts/night-batch-machine.example.json`
+>   的 zcode 模板即实测可用版本。
+
 ## 验证状态
 
 - `scripts/test/ai-task-candidate-collect-m5.test.mjs`：采集闸门 6 项
