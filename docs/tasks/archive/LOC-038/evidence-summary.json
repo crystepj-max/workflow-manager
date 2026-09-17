@@ -1,0 +1,17 @@
+{
+  "task_id": "LOC-038",
+  "run_id": "loc-038-r1",
+  "task_name": "WR-015 建设实施前检查复用现有确定性判定",
+  "branch": "dev-loc-038-r1",
+  "status": "等待验收",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-038-r1",
+    "file_count": 15,
+    "total_bytes": 16994
+  },
+  "generated_at": "2026-09-17T14:26:12.751Z"
+}

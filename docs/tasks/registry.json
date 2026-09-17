@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 51,
+  "revision": 54,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -1290,7 +1290,7 @@
       "source": "本地文档",
       "source_ref": "docs/research/workflow-review-requirements-2026-09-14/WR-015.md",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "LOC-038",
       "env_role": "独立",
@@ -1298,13 +1298,16 @@
       "branch": "dev-loc-038-r1",
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "6e1e5903ead9ca5985b4dc03264473f30bbe2a44",
+        "merged_at": "2026-09-17T14:26:12.816Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-24T14:26:12.816Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": false,
       "created_at": "2026-09-15T02:47:39.434Z",
-      "updated_at": "2026-09-16T17:11:41.627Z",
+      "updated_at": "2026-09-17T14:26:12.817Z",
       "spec_path": "docs/tasks/specs/LOC-038-preflight-unification/task-spec-V1.md",
       "type": "FEAT",
       "remote": "cnb#56"
@@ -1316,7 +1319,7 @@
       "source": "本地文档",
       "source_ref": "docs/research/workflow-review-requirements-2026-09-14/WR-016.md",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "LOC-039",
       "env_role": "独立",
@@ -1324,13 +1327,16 @@
       "branch": "dev-loc-039-r1",
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "beb852490aaef0164049c219003b7ef39016cf8f",
+        "merged_at": "2026-09-17T14:26:12.921Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-24T14:26:12.921Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": false,
       "created_at": "2026-09-15T02:47:39.434Z",
-      "updated_at": "2026-09-16T17:11:41.659Z",
+      "updated_at": "2026-09-17T14:26:12.921Z",
       "spec_path": "docs/tasks/specs/LOC-039-protocol-capabilities/task-spec-V1.md",
       "type": "FEAT",
       "remote": "cnb#57"
@@ -1400,7 +1406,7 @@
       "source": "本地文档",
       "source_ref": "docs/research/workflow-review-requirements-2026-09-14/WR-019.md",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "LOC-042",
       "env_role": "独立",
@@ -1408,13 +1414,16 @@
       "branch": "dev-loc-042-r1",
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "3f5d5917ed4b4dd95b80e634348a9f1358625298",
+        "merged_at": "2026-09-17T14:26:13.022Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-24T14:26:13.022Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": false,
       "created_at": "2026-09-15T02:47:39.436Z",
-      "updated_at": "2026-09-16T17:11:41.752Z",
+      "updated_at": "2026-09-17T14:26:13.022Z",
       "spec_path": "docs/tasks/specs/LOC-042-workflow-conformance/task-spec-V1.md",
       "type": "CHORE",
       "remote": "cnb#60"
