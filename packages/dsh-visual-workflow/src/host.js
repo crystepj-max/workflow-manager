@@ -99,6 +99,12 @@ return {
       if (knownCwd) return knownCwd
       return (sp && typeof sp.workspaceRoot === 'string' && sp.workspaceRoot) ? sp.workspaceRoot : null
     }
+    // 运行产物（runDir，缺省 .agent-runs/<taskId>）的唯一解析基准：编译脚本按会话/执行现场
+    // cwd 落盘，故评价基线冻结与产物清单必须与它同口径（内核 freezePayload 注释同义）；
+    // 隔离工作区 source 只是源码现场，不是 run 产物目录。两处共用本函数，禁止各自写一套。
+    function runArtifactCwd(ws) {
+      return projectRoot() || ((ws && ws.source_path) || '')
+    }
 
     let nodePathPromise = null
     function resolveNode() {
@@ -1574,8 +1580,12 @@ return {
       const fresh = await wsHostCall('get', { logical_run_id: wsIdentity, capability: cap }).catch(() => ({ ok: false }))
       const resumeArgs = ebc.kernel.resumeArgsOf(scriptArgs, ck, deepCloneData(ref))
       if (fresh && fresh.ok && fresh.workspace) Object.assign(resumeArgs, scriptArgsFromWorkspace(fresh.workspace, cap))
+      // 恢复段必须新起段控制器：本段之所以进入恢复分支，正是因为 segCtl 已被中止
+      // （见 maybeAbortAtBaselinePending），复用已中止信号会让引擎启动即
+      // 「workflow start signal already aborted」→ CANCELLED，恢复永远无法生效。
+      const resumeCtl = typeof AbortController === 'function' ? new AbortController() : null
       const resumeReq = { script: execScript, meta: meta, args: resumeArgs, parent: parent }
-      if (segCtl) resumeReq.signal = segCtl.signal
+      if (resumeCtl) resumeReq.signal = resumeCtl.signal
       if (ws && ws.source_path) { resumeReq.cwd = ws.source_path; resumeReq.workspaceRoot = ws.source_path }
       const resumed = gateEngine.start(resumeReq)
       const resumedId = String(resumed.id)
@@ -1586,7 +1596,7 @@ return {
       persist(resumedId)
       onRun(String(engineRunId), (r) => { r.supersededBy = resumedId })
       ebRuns.set(resumedId, { decl: ebc.decl, kernel: ebc.kernel, cwd: ebc.cwd, runDir: ebc.runDir, taskId: ebc.taskId, pending: new Map() })
-      if (segCtl) segmentCtrls.set(resumedId, segCtl)
+      if (resumeCtl) segmentCtrls.set(resumedId, resumeCtl)
       appendLogicalSegment(logicalRec, resumedId, 'evaluation_baseline_resume')
       logicalSetState(logicalRec, 'RUNNING', null)
       requestLogicalPersist(logicalRec.logical_run_id)
@@ -2340,7 +2350,10 @@ return {
     }
     function scriptArgsFromWorkspace(ws, cap, taskId) {
       return {
-        taskId: taskId || undefined, workspace_id: ws.workspace_id, workspace_path: ws.workspace_path, source_path: ws.source_path,
+        // taskId 只在显式给出时携带：本对象参与 Object.assign，undefined 值会抹掉调用点
+        // 已有的 taskId，使脚本 TASK 退化为默认 'task'、RUNDIR 默认错位到 .agent-runs/task
+        ...(taskId ? { taskId: taskId } : {}),
+        workspace_id: ws.workspace_id, workspace_path: ws.workspace_path, source_path: ws.source_path,
         records_path: ws.records_path, work_branch: ws.work_branch, source_revision: ws.source_revision, workspace_capability: cap || undefined,
         // LOC-013：隔离模式随现场注入脚本（ISOLATED_READ 时运行上下文标注 source 只读）
         workspace_mode: ws.workspace_mode || undefined,
@@ -3219,7 +3232,7 @@ return {
           model_overrides: modelOverridesForExec,
           decision_ref: hostDecisionRef || undefined,
           consumed_decisions: logicalRec ? (logicalRec.consumed_decisions || {}) : undefined,
-        }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined) : {})
+        }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, logicalTaskId) : {})
         if (hostDecisionRef && ws && ws.source_path && hostDecisionRef.candidate_ref) {
           scriptArgs.candidate_ref = hostDecisionRef.candidate_ref
         }
@@ -3264,7 +3277,7 @@ return {
           : null
         if (ebDecl && logicalRec) {
           const ebk = await ebKernel()
-          if (ebk) ebRuns.set(runId, { decl: ebDecl, kernel: ebk, cwd: (ws && ws.source_path) || projectRoot() || '', runDir: args.runDir || null, taskId: logicalTaskId, pending: new Map() })
+          if (ebk) ebRuns.set(runId, { decl: ebDecl, kernel: ebk, cwd: runArtifactCwd(ws), runDir: args.runDir || null, taskId: logicalTaskId, pending: new Map() })
           else log('评价基线内核不可用（dist/evaluation-baseline.cjs 缺失）：本运行基线保持未核验口径')
         }
         const amk = await amKernel()
@@ -3272,7 +3285,7 @@ return {
           const runDirRel = args.runDir || ('.agent-runs/' + logicalTaskId)
           amRuns.set(runId, {
             kernel: amk,
-            cwd: projectRoot() || ((ws && ws.source_path) || ''),
+            cwd: runArtifactCwd(ws),
             runDir: runDirRel,
             taskId: logicalTaskId,
             byNode: new Map(),
