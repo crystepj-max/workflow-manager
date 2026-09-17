@@ -1,51 +1,17 @@
 // 运行时排练厅（runtime harness）——候选三产物，契约见 CONTEXT.md「运行时排练厅」。
 // 用途：把生成的 workflow 脚本当黑盒真实执行（stub agent/log/phase），断言返回体（接口）
 // 而非字符串嗅探。演员表 = 剧本：按 agent 出场 label（精确或正则）提供台词，
-// 台词可为静态值或函数；交作业（result）会按 opts.schema（8 关键字子集）验收，
+// 台词可为静态值或函数；交作业（result）会按 opts.schema 验收（LOC-039 共享语义），
 // 不合格返回 null（仿真真实引擎：带 schema 时 resolve 校验后对象、子代理失败 resolve null）。
 
-// ---------- schema 验收器（8 关键字子集：type/oneOf/properties/required/
-// additionalProperties/items/enum/const；注解字段忽略） ----------
-function typeOk(t, v) {
-  switch (t) {
-    case 'object': return typeof v === 'object' && v !== null && !Array.isArray(v)
-    case 'array': return Array.isArray(v)
-    case 'string': return typeof v === 'string'
-    case 'number': return typeof v === 'number'
-    case 'integer': return Number.isInteger(v)
-    case 'boolean': return typeof v === 'boolean'
-    case 'null': return v === null
-    default: return true
-  }
-}
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
+const { legacyInstanceValid, instanceValid } = require('../../schema-protocol-core.cjs')
 
-export function validateResult(schema, value) {
+export function validateResult(schema, value, mode) {
   if (schema === undefined || schema === null || typeof schema !== 'object') return true
-  if (schema.oneOf !== undefined) {
-    let n = 0
-    for (const alt of schema.oneOf) if (validateResult(alt, value)) n++
-    return n === 1
-  }
-  if (schema.const !== undefined) return value === schema.const
-  if (schema.enum !== undefined) return schema.enum.includes(value)
-  const t = schema.type
-  if (Array.isArray(t)) { if (!t.some((x) => typeOk(x, value))) return false }
-  else if (typeof t === 'string' && t !== 'object' && t !== 'array') { if (!typeOk(t, value)) return false }
-  if (t === 'object' || (Array.isArray(t) && t.includes('object'))) {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-    if (schema.properties) {
-      for (const k of schema.required || []) if (!(k in value)) return false
-      for (const [k, v] of Object.entries(value)) {
-        const ps = schema.properties[k]
-        if (ps === undefined) { if (schema.additionalProperties === false) return false; continue }
-        if (!validateResult(ps, v)) return false
-      }
-    }
-  } else if (t === 'array' || (Array.isArray(t) && t.includes('array'))) {
-    if (!Array.isArray(value)) return false
-    if (schema.items) for (const v of value) if (!validateResult(schema.items, v)) return false
-  }
-  return true
+  const m = mode || 'legacy'
+  return m === 'legacy' ? legacyInstanceValid(schema, value) : instanceValid(schema, value, m)
 }
 
 // ---------- 演员表（剧本） ----------

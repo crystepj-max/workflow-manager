@@ -20,6 +20,17 @@
   "workspace": {
     "template_id": "wf-explore"
   },
+  "protocol": {
+    "version": "1.0",
+    "required_capabilities": [
+      "additionalProperties",
+      "enum",
+      "items",
+      "properties",
+      "required",
+      "type"
+    ]
+  },
   "nodes": [
     {
       "id": "orchestrate",

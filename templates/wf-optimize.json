@@ -16,6 +16,16 @@
       "no_progress_repeats": 2
     }
   },
+  "protocol": {
+    "version": "1.0",
+    "required_capabilities": [
+      "additionalProperties",
+      "enum",
+      "properties",
+      "required",
+      "type"
+    ]
+  },
   "nodes": [
     {
       "id": "confirm",

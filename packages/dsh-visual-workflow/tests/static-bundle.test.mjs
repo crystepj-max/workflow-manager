@@ -41,6 +41,11 @@ test('静态 bundle dist 含 validate-core.cjs（浏览器保存无仓库 cwd �
   assert.ok(existsSync(kernelDist), 'dist/validate-core.cjs 必须存在（build 时从 scripts/ 复制）')
 })
 
+test('静态 bundle dist 含 schema-protocol-core.cjs（validate-core 同目录引用）', () => {
+  const coreDist = join(here, '..', 'dist', 'schema-protocol-core.cjs')
+  assert.ok(existsSync(coreDist), 'dist/schema-protocol-core.cjs 必须存在（build 时从 scripts/ 复制）')
+})
+
 test('静态 bundle dist 含 projection-core.cjs 且两个投影入口可加载', () => {
   const coreDist = join(here, '..', 'dist', 'projection-core.cjs')
   assert.ok(existsSync(coreDist), 'dist/projection-core.cjs 必须存在（build 时从 scripts/ 复制）')
@@ -62,10 +67,12 @@ test('静态 bundle dist 含 state-recovery-core.cjs 且状态/恢复内核可�
 test('静态 Host：正式 pluginRoot/dist 的投影内核可驱动校验链路', async () => {
   const pluginRoot = '/plugin/static'
   const validatorSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
+  const schemaProtocolSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'schema-protocol-core.cjs'), 'utf8')
   const projectionSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'projection-core.cjs'), 'utf8')
   const fs = makeFs({
     [REPO + '/scripts/validate-core.cjs']: validatorSrc,
     [pluginRoot + '/dist/validate-core.cjs']: validatorSrc,
+    [pluginRoot + '/dist/schema-protocol-core.cjs']: schemaProtocolSrc,
     [pluginRoot + '/dist/projection-core.cjs']: projectionSrc,
   })
   const loaded = loadStaticHost({

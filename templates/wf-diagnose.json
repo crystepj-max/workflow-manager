@@ -17,6 +17,17 @@
     }
   },
   "heteroCheck": "weak",
+  "protocol": {
+    "version": "1.0",
+    "required_capabilities": [
+      "additionalProperties",
+      "const",
+      "enum",
+      "properties",
+      "required",
+      "type"
+    ]
+  },
   "nodes": [
     {
       "id": "diagnose",

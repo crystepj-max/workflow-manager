@@ -49,6 +49,8 @@ function buildCheckpointCompact(fields) {
     ds: Number(f.decisionSeq) || 0,
   }
   if (f.technicalBudget !== undefined && f.technicalBudget !== null) out.tb = f.technicalBudget
+  // LOC-039：检查点携带协议快照（协议版本/能力矩阵的观测锚点，恢复段沿用）
+  if (f.protocolSnapshot !== undefined && f.protocolSnapshot !== null) out.pt = f.protocolSnapshot
   return out
 }
 
@@ -66,6 +68,7 @@ function parseCheckpointCompact(ck) {
     degraded: false,
   }
   if (ck.tb) parsed.technical_budget = ck.tb
+  if (ck.pt) parsed.protocol_snapshot = ck.pt
   return parsed
 }
 

@@ -13,8 +13,11 @@ import projectionCore from './projection-core.cjs';
 // 角色库内核（候选二深化）：内置角色清单唯一事实源 = dsh/roles/builtin-roles.json；
 // 正文安全读取与「被引用角色文件打包」共享内核实现（含自定义角色——dispatcher 等）。
 import roleLibrary from './role-library.cjs';
+import { createRequire } from 'node:module';
 import exploreCoverageCore from './explore-coverage.cjs';
 import { runtimeHelpersSource } from './human-completion.mjs';
+
+const nodeRequire = createRequire(import.meta.url);
 
 const { buildSnapshot, readRoleFileSafe, collectReferencedRoleFiles } = roleLibrary;
 const { projectToVwf } = projectionCore;
@@ -161,6 +164,44 @@ function evaluationBaselineDecl(bp) {
   if (typeof producerNode !== 'string' || !producerNode.trim()) bad('producerNode 必填（冻结评价基线的节点 id）')
   if (!(bp.nodes || []).some((n) => n && n.id === producerNode)) bad('producerNode 指向不存在的节点：' + producerNode)
   return { artifact: artifact, digestField: digestField, producer: producerNode }
+}
+
+let _schemaProtocolEmbedCache = null
+function schemaProtocolRuntimeSource() {
+  if (!_schemaProtocolEmbedCache) {
+    const raw = fs.readFileSync(path.join(__dirname, 'schema-protocol-core.cjs'), 'utf8')
+    _schemaProtocolEmbedCache = raw.replace(/module\.exports[\s\S]*$/, '').trim()
+  }
+  return _schemaProtocolEmbedCache
+}
+
+function buildSchemaProtocolEmbedLines(bp) {
+  const body = schemaProtocolRuntimeSource()
+  return [
+    'const __SP__ = (function(){',
+    ...body.split('\n').map((line) => '  ' + line),
+    '  return { validateInstanceSimple, instanceValid, legacyInstanceValid, resolveProtocol, checkProtocolGate, buildRuntimeEnvelope, freezeProtocolSnapshot, PROTOCOL_VERSION };',
+    '})();',
+    'const __BP_PROTOCOL__ = ' + JSON.stringify(bp.protocol || null),
+    'const __SCRIPT_DIGEST__ = __digest({ id: ' + JSON.stringify(bp.id) + ', protocol: __BP_PROTOCOL__ })',
+    'function schemaInstanceMode() { return (PROTOCOL_SNAPSHOT && PROTOCOL_SNAPSHOT.mode === \'legacy-unversioned\') ? \'legacy\' : \'1.0\' }',
+    'function validateNodeInstance(stage, value) {',
+    '  const sch = BYID[stage] && BYID[stage].output && BYID[stage].output.schema',
+    '  if (!sch) return null',
+    '  const mode = schemaInstanceMode()',
+    '  const ok = mode === \'legacy\' ? __SP__.legacyInstanceValid(sch, value) : __SP__.instanceValid(sch, value, mode)',
+    '  if (ok) return null',
+    '  const errs = __SP__.validateInstanceSimple(sch, value, mode)',
+    '  return errs.length ? errs[0] : \'schema 校验失败\'',
+    '}',
+    'function schemaGateBeforeAgent(stage) {',
+    '  const snap = PROTOCOL_SNAPSHOT || {}',
+    '  const decl = snap.mode === \'legacy-unversioned\' ? null : { version: snap.protocol_version, required_capabilities: snap.required_capabilities || [] }',
+    '  const gate = __SP__.checkProtocolGate(__SP__.resolveProtocol({ protocol: decl }))',
+    '  if (gate.length) return gate[0].message',
+    '  return null',
+    '}',
+  ]
 }
 
 export function compileBlueprint(bp, opts = {}) {
@@ -311,13 +352,14 @@ export function compileBlueprint(bp, opts = {}) {
     'const ROLE_DEFS = ' + JSON.stringify(builtinRoleDefs),
     'const BYID = {}',
     'for (const n of NODES) BYID[n.id] = n',
+    ...buildSchemaProtocolEmbedLines(bp),
     // LOC-044：状态/恢复纯逻辑内核（state-recovery-core.cjs 编译期内联）
     ...stateRecoveryCoreSourceLines(),
     // #80 暂停/中断恢复现场：每个节点完成路由后输出检查点行（current/results/history 全量）。
     // 引擎取消后脚本返回值被强制丢弃（value=null），宿主据此行重建 resume 载荷；
     // 解析失败或缺失时宿主诚实降级（要求人工指定 entry，不猜现场）。
     // LOC-031：检查点保留已耗技术预算（tb）与跨节点激活接续键（carry）——恢复不重置已耗用量。
-    'function pwCk(next) { try { log(formatCheckpointLogLine(buildCheckpointCompact({ entry: next, results: results, history: history, round: round, feedback: feedback, budgetUsed: budgetUsed, maxRounds: maxRounds, decisionSeq: decisionSeq, technicalBudget: { u: actUsed, g: actGrants, m: autoUsed(), mg: autoMsGrant, p: RETRY_POLICY, carry: carryKey ? { stage: carryStage, key: carryKey } : null } }))) } catch (e) { /* 检查点失败不影响运行 */ } }',
+    'function pwCk(next) { try { log(formatCheckpointLogLine(buildCheckpointCompact({ entry: next, results: results, history: history, round: round, feedback: feedback, budgetUsed: budgetUsed, maxRounds: maxRounds, decisionSeq: decisionSeq, technicalBudget: { u: actUsed, g: actGrants, m: autoUsed(), mg: autoMsGrant, p: RETRY_POLICY, carry: carryKey ? { stage: carryStage, key: carryKey } : null }, protocolSnapshot: PROTOCOL_SNAPSHOT }))) } catch (e) { /* 检查点失败不影响运行 */ } }',
     // LOC-029 逐次 attempt 事件：每次真实调用（含 fanout item 与技术重试）在调用前后输出
     // [vwf-attempt] 行，宿主据此向 Formal Records Store 提交独立、可恢复且不重复的执行
     // 记录（attempt_id 由宿主按段号+序号分配并持久化；同键同内容重放幂等）。逻辑步骤
@@ -917,9 +959,16 @@ export function compileBlueprint(bp, opts = {}) {
     '    visitTry++',
     '    lastAttRk = __rk',
     '    attLog({ a: \'s\', k: __k, n: stage, r: round, t: \'call\', rk: __rk })',
+    '    const __gate = schemaGateBeforeAgent(stage)',
+    '    if (__gate) return { failure: { cls: \'fatal_error\', code: \'SCHEMA_PROTOCOL_BLOCKED\', detail: __gate } }',
     '    const r = await modelCall(key, nodePrompt(stage, fb), nodeCallOpts(stage, round))',
     '    if (r.stop) return r',
-    '    if (r.value !== undefined) return { value: coerceStructured(r.value, BYID[stage].output && BYID[stage].output.schema) }',
+    '    if (r.value !== undefined) {',
+    '      const coerced = coerceStructured(r.value, BYID[stage].output && BYID[stage].output.schema)',
+    '      const vErr = validateNodeInstance(stage, coerced)',
+    '      if (vErr) return { failure: { cls: \'invalid_output\', code: \'INVALID_OUTPUT\', detail: vErr } }',
+    '      return { value: coerced }',
+    '    }',
     '    const f = r.failure',
     '    if (f.cls === \'fatal_error\' || f.cls === \'timeout\') return r',
     '    if (actRemain(key) <= 0) return r',
@@ -1072,6 +1121,9 @@ export function compileBlueprint(bp, opts = {}) {
     'let visitSeq = 0',
     'let tbAttachKey = (TB_SNAP && typeof TB_SNAP.activation_key === \'string\' && TB_SNAP.activation_key) ? TB_SNAP.activation_key : null',
     'let tbResumeDigest = (TB_SNAP && typeof TB_SNAP.resume_digest === \'string\' && TB_SNAP.resume_digest) ? TB_SNAP.resume_digest : null',
+    'let PROTOCOL_SNAPSHOT = (A.protocol_snapshot && typeof A.protocol_snapshot === \'object\') ? A.protocol_snapshot : __SP__.freezeProtocolSnapshot({ protocol: __BP_PROTOCOL__ }, __SCRIPT_DIGEST__)',
+    'if (PROTOCOL_SNAPSHOT.mode === \'legacy-unversioned\') log(\'[schema-protocol] legacy-unversioned\')',
+    'else log(\'[schema-protocol] \' + JSON.stringify({ version: PROTOCOL_SNAPSHOT.protocol_version, capabilities: PROTOCOL_SNAPSHOT.required_capabilities, script_digest: PROTOCOL_SNAPSHOT.script_digest }))',
     // 历史兜底重建（未带快照的旧式续跑也不至于清零已耗技术预算）
     // LOC-030：终局命中的 outcome → $end 终止描述（循环内记录，finishRun 统一收束）
     'let endTerm = null',
@@ -1250,6 +1302,8 @@ export function compileBlueprint(bp, opts = {}) {
     '      const itemKey = fanKey + \'-i\' + (entry.index + 1)',
     '      let __out',
     '      for (;;) {',
+    '        const __fg = schemaGateBeforeAgent(current)',
+    '        if (__fg) { attLog({ a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'failed\', x: __fg }); return null }',
     '        const ir = await modelCall(itemKey, prompt, itemOpts)',
     '        if (ir.stop || ir.failure) {',
     '          if (ir.failure && ir.failure.cls === \'transient_error\' && actRemain(itemKey) > 0) {',
@@ -1260,6 +1314,7 @@ export function compileBlueprint(bp, opts = {}) {
     '          return null',
     '        }',
     '        __out = ir.value === null ? null : coerceStructured(ir.value, n.output && n.output.schema)',
+    '        if (__out !== null) { const __ve = validateNodeInstance(current, __out); if (__ve) { attLog({ a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'failed\', x: __ve }); return null } }',
     '        attLog(__out === null ? { a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'failed\', x: \'item 未返回有效结果\' } : { a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'completed\', q: __out })',
     '        if (__out && typeof __out === \'object\' && __out.expert_id) emitArtifactSubmit(current, round, __out.expert_id, __ik, [{ logical_name: \'research-\' + __out.expert_id + \'.md\', relative_path: \'research-\' + __out.expert_id + \'.md\', media_type: \'text/markdown\', required: true }])',
     '        return __out',

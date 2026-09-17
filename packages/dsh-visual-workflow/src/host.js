@@ -1700,6 +1700,7 @@ return {
               decisionSeq: Number(ck.ds) || 0,
               degraded: false,
               ...(ck.tb && { technical_budget: ck.tb }),
+              ...(ck.pt && { protocol_snapshot: ck.pt }),
             }
           }
         } catch (e) { /* 损坏行跳过，继续向前找 */ }
@@ -1774,6 +1775,7 @@ return {
         maxRounds: Number(pr.maxRounds) || 0,
         decisionSeq: Number(pr.decisionSeq) || 0,
         technical_budget: pr.technical_budget || undefined,
+        protocol_snapshot: pr.protocol_snapshot || undefined,
       }
       const lastRev = pending.length ? pending[pending.length - 1] : (rec.baseline_revisions || [])[rec.baseline_revisions.length - 1]
       if (lastRev) args.baseline_amendment = lastRev.text
