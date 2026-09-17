@@ -1653,6 +1653,30 @@ test('角色库：内置角色只读可查看可复制，不提供编辑/删除�
   await act(async () => { freshRoot.unmount(); fresh.remove() })
 })
 
+test('角色库：读取失败显示明确失败态，不把空列表当作「没有角色」（规格 §11）', async () => {
+  state.failRoles = true
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+  await act(async () => { byText(fresh, '编辑').click(); await flush() })
+  await act(async () => {
+    Array.from(fresh.querySelectorAll('.vwf-role-zone button')).find(b => b.textContent.includes('管理角色')).click()
+    await flush()
+  })
+  const mgr = fresh.querySelector('.vwf-role-mgr')
+  assert.ok(byText(mgr, '角色服务不可用'), '展示失败原因')
+  assert.ok(!byText(mgr, '暂无自定义角色'), '失败态不得显示为空列表')
+  assert.ok(!mgr.querySelector('.vwf-role-row'), '失败态不渲染任何角色行')
+  state.failRoles = false
+  // 失败态不是终态：关闭后重开可恢复（roles 重新拉取）
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+})
+
 test('清理：卸载冒烟测试根节点', async () => {
   await act(async () => {
     root.unmount()

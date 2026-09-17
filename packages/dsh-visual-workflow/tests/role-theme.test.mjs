@@ -114,8 +114,9 @@ test('V-5/V-6：可见焦点与窄屏规则就位（不靠缩字号解决拥挤�
   assert.match(src, /\.vwf-root :focus-visible \{ outline:2px solid var\(--vwf-focus\)/, '键盘焦点可见且限本插件作用域')
   assert.match(src, /@media \(max-width: 480px\) \{[\s\S]*?\.vwf-role-actions \{ flex:1 1 100%; margin-left:0; \}/, '窄屏下角色行操作折行而不是缩字号')
   assert.match(src, /\.vwf-role-mgr \{ width:min\(780px, 94vw\); max-height:calc\(100vh - 2 \* var\(--vwf-safe-gap\)\)/, '弹层保留安全边距')
-  assert.match(src, /\.vwf-role-content \{[^}]*-webkit-line-clamp|-webkit-line-clamp:2/, '摘要按两行收敛')
-  assert.match(src, /\.vwf-role-content \{[^}]*max-height:min\(340px, 40vh\)/, '详情为独立滚动区且随视口收敛')
+  // 两行收敛必须落在摘要选择器上（独立审查 F-03：原断言用了可选分支，选择器写错也能通过）
+  assert.match(src, /\.vwf-role-summary \{[^}]*-webkit-line-clamp:2/, '摘要选择器自身按两行收敛')
+  assert.match(src, /\.vwf-role-content \{[^}]*max-height:min\(340px, 40vh\)/, '完整职责区独立滚动且随视口收敛')
   assert.match(src, /\.vwf-role-summary \{[^}]*overflow-wrap:anywhere/, '连续长串断词换行')
 })
 
