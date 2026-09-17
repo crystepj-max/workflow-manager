@@ -293,5 +293,10 @@
   "modelOverrideDefaultBadge": "默认",
   "modelOverrideCurrent": "当前：",
   "modelOverrideKeepDefault": "沿用默认",
-  "modelOverrideConfirmDiscard": "覆盖修改尚未保存，确认放弃并关闭？"
+  "modelOverrideConfirmDiscard": "覆盖修改尚未保存，确认放弃并关闭？",
+  "viewRoleDetail": "查看详情",
+  "roleViewCustom": "自定义角色为工作区内的角色资产：可查看、编辑、复制与删除；删除前会先显示引用位置。",
+  "roleLoadFailed": "角色列表读取失败：",
+  "roleFilterAll": "全部",
+  "noBuiltinRoles": "暂无内置角色"
 }

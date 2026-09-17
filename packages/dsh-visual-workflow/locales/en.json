@@ -293,5 +293,10 @@
   "modelOverrideDefaultBadge": "default",
   "modelOverrideCurrent": "current: ",
   "modelOverrideKeepDefault": "keep default",
-  "modelOverrideConfirmDiscard": "Unsaved override changes — discard and close?"
+  "modelOverrideConfirmDiscard": "Unsaved override changes — discard and close?",
+  "viewRoleDetail": "View details",
+  "roleViewCustom": "Custom roles are workspace role assets: view, edit, clone or delete them; references are listed before deletion.",
+  "roleLoadFailed": "Failed to load roles: ",
+  "roleFilterAll": "All",
+  "noBuiltinRoles": "No built-in roles"
 }
