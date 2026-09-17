@@ -176,7 +176,7 @@ runState.records['lr-a'] = {
     logicalAttempt('lr-a', 'test', 1, { attempt_id: 'a1k3', outcome: 'PASS', result: { note: '第 1 轮测试通过' } }),
     logicalAttempt('lr-a', 'dev', 2, { attempt_id: 'a2k1', outcome: 'READY', outcomePath: '$.status', result: { summary: '第 2 次实现成果' } }),
     logicalAttempt('lr-a', 'review', 2, { attempt_id: 'a2k2', round: 1, outcome: 'APPROVE', result: { note: '检查通过' } }),
-    { record_id: 'node:lr-a:dev', record_revision: 2, body: { media_type: 'application/json', value: { summary: '第 2 次实现成果' } }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY' }, resolved_inputs: { mode: 'record', items: [{ binding: 'from_preflight', producer: 'preflight' }] } },
+    { record_id: 'node:lr-a:dev', record_revision: 2, body: { media_type: 'application/json', value: { summary: '第 2 次实现成果' } }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY' }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY', resolved_inputs_snapshot: { mode: 'record', items: [{ binding: 'from_preflight', producer: 'preflight' }] } } },
   ], attempts: [],
 }
 
@@ -203,7 +203,7 @@ runState.records['lr-b'] = {
     attemptRec('lr-b', { attempt_id: 'a1k11', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 1, item: '用户需求', result: { finding: '需求集中在位置感' }, ended_at: '2026-09-17T10:02:00Z' }),
     attemptRec('lr-b', { attempt_id: 'a1k12', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'running', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 2, item: '风险与反证', started_at: '2026-09-17T10:03:00Z' }),
     logicalAttempt('lr-b', 'synth', 1, { attempt_id: 'a1k20', outcome: 'SYNTHESIS_READY', result: { summary: '汇总了 2 份研究' } }),
-    { record_id: 'node:lr-b:synth', record_revision: 1, body: { media_type: 'application/json', value: { summary: '汇总了 2 份研究' } }, provenance: { node: 'synth', attempt: 1, snapshot_revision: '1', provider: 'p1', model: 'm1' }, resolved_inputs: { mode: 'record', items: [{ binding: 'from_explore', producer: 'explore' }, { binding: 'from_note', producer: 'note' }] } },
+    { record_id: 'node:lr-b:synth', record_revision: 1, body: { media_type: 'application/json', value: { summary: '汇总了 2 份研究' } }, provenance: { node: 'synth', attempt: 1, snapshot_revision: '1', provider: 'p1', model: 'm1', resolved_inputs_snapshot: { mode: 'record', items: [{ binding: 'from_explore', producer: 'explore' }, { binding: 'from_note', producer: 'note' }] } } },
   ], attempts: [],
 }
 
@@ -1924,9 +1924,14 @@ test('FEAT-85 详情：唯一选中节点结果出口 + 结果/检查/活动三�
   assert.deepEqual(labels, ['结果', '检查', '活动'], '三个页签：' + JSON.stringify(labels))
   await clickEl(detailTabs().find((t) => t.textContent.trim() === '检查'))
   assert.equal(container.querySelectorAll('.vwf-tab-panel').length, 1, '切换后仍只有一个面板')
-  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('需要修改的问题') === false || true, '检查页签渲染')
+  const checksPanel = container.querySelector('.vwf-tab-panel').textContent
+  // 当前选中「实现」的第 2 次执行（第 2 段）：该段检查已通过，因此如实显示没有退回意见
+  assert.ok(checksPanel.includes('本次执行没有记录退回意见'), '检查页签按所选执行如实显示：' + checksPanel.slice(0, 140))
+  assert.ok(!checksPanel.includes('第 1 次实现成果'), '检查页签不重复展示结果页签正文（不叠加）')
   await clickEl(detailTabs().find((t) => t.textContent.trim() === '活动'))
-  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('活动'), '活动页签渲染')
+  const actPanel = container.querySelector('.vwf-tab-panel').textContent
+  assert.ok(actPanel.includes('活动记录'), '活动页签渲染：' + actPanel.slice(0, 120))
+  assert.ok(!actPanel.includes('本次执行没有记录退回意见'), '切换页签后不再显示检查页签内容（不叠加）')
   assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('[段 2]'), '运行日志标注来源分段')
   await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))
 })

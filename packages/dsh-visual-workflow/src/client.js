@@ -2751,8 +2751,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         if (!m.task.logicalRunId) return wsFilter === '__none__'
         return wsFilter === '__unknown__' ? !m.wsId : m.wsId === wsFilter
       })
-      // 分页：数据刷新（新 run 落盘 / 历史拉取）时回到第 0 页
-      React.useEffect(() => { setPage(0) }, [visible.length])
+      // 分页：仅在筛选条件或每页条数变化时回到第 0 页；轮询导致列表长度变化时保留用户当前位置
+      // （越界由 safePage 收敛，不会显示空页）
+      React.useEffect(() => { setPage(0) }, [wsFilter, bucketFilter, resultFilter, completionFilter, pageSize])
       const totalPages = Math.max(1, Math.ceil(visible.length / pageSize))
       const safePage = Math.min(page, totalPages - 1)
       const pageModels = visible.slice(safePage * pageSize, safePage * pageSize + pageSize)
@@ -3039,8 +3040,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
       const nodeResolvedInputs = (nodeId) => {
         const rec = nodeResults.get('node:' + lrId + ':' + nodeId)
-        if (!rec || !rec.resolved_inputs) return []
-        const items = rec.resolved_inputs.items
+        if (!rec) return []
+        // 输入清单的权威位置是 provenance.resolved_inputs_snapshot（scripts/revision-dependencies.mjs
+        // 经 buildRecordDependencies 写入）；兼容少数直接带顶层 resolved_inputs 的记录形状。
+        const snap = (rec.provenance && rec.provenance.resolved_inputs_snapshot) || rec.resolved_inputs || null
+        const items = snap && snap.items
         return Array.isArray(items) ? items : []
       }
       const sendControl = (action, extra) => {
@@ -3170,9 +3174,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           rt.push(h('div', { className: 'vwf-note warn', key: 'prev' }, t('rdPrevRoundNote')))
         }
         if (recErr) rt.push(h('div', { className: 'vwf-note warn', key: 'rec' }, t('rdNoRecords')))
-        const bodyValue = nodeResultBody(selected.id)
-        // 成果必须跟随所选 attempt：attempt 记录自带该次结果（与 node_result 同源），
-        // 避免选了历史执行却显示最新一轮成果。
+        // 成果必须跟随所选 attempt：attempt 记录自带该次结果（与 node_result 同源）。
+        // node_result 是「最新 Revision」语义，因此只在所选就是最新一次时才回退到它——
+        // 历史执行没有正文时如实显示「暂无成果」，不冒充最新一轮成果。
+        const isLatestPick = pickedIdx === latestIdx
+        const bodyValue = isLatestPick ? nodeResultBody(selected.id) : null
         const showValue = pickedValue && pickedValue.result !== undefined
           ? pickedValue.result
           : (bodyValue !== null && bodyValue !== undefined ? bodyValue : null)
