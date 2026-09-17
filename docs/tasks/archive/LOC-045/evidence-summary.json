@@ -1,0 +1,17 @@
+{
+  "task_id": "LOC-045",
+  "run_id": "loc-045-r1",
+  "task_name": "WR-022 用代表任务度量模板复杂度并形成简化决策",
+  "branch": "dev-loc-045-r1",
+  "status": "等待验收",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-045-r1",
+    "file_count": 14,
+    "total_bytes": 19885
+  },
+  "generated_at": "2026-09-17T14:05:16.088Z"
+}

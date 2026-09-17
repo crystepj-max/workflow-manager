@@ -1,0 +1,54 @@
+{
+  "task_id": "LOC-044",
+  "run_id": "loc-044-r1",
+  "task_name": "WR-021 提炼状态与恢复核心，减少跨生成器和宿主的重复维护",
+  "branch": "dev-loc-044-r1",
+  "status": "等待验收",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-16T16:55:00.000Z",
+      "produced_by": "loc-044-r1-night",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": "2026-09-16T16:55:00.000Z",
+      "produced_by": "loc-044-r1-night",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.r1.json",
+      "created_at": "2026-09-16T16:55:00.000Z",
+      "produced_by": "loc-044-r1-night-self-review"
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.t1.json",
+      "created_at": "2026-09-16T16:55:00.000Z",
+      "produced_by": "loc-044-r1-night"
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a1.json",
+      "created_at": "2026-09-16T16:56:00.000Z",
+      "produced_by": "loc-044-r1-night"
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-044-r1",
+    "file_count": 21,
+    "total_bytes": 17788
+  },
+  "generated_at": "2026-09-17T14:05:15.990Z"
+}
