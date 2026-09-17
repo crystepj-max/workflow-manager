@@ -55,6 +55,7 @@ const roleLibrarySrc = join(root, '..', '..', 'scripts', 'role-library.cjs')
 const projectionCoreSrc = join(root, '..', '..', 'scripts', 'projection-core.cjs')
 const validateCoreSrc = join(root, '..', '..', 'scripts', 'validate-core.cjs')
 const evaluationBaselineSrc = join(root, '..', '..', 'scripts', 'evaluation-baseline.cjs')
+const artifactManifestSrc = join(root, '..', '..', 'scripts', 'artifact-manifest.cjs')
 const roleManifestSrc = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
 const localesSrc = join(root, 'locales')
 const rolesSrc = join(root, '..', '..', 'dsh', 'roles')
@@ -68,6 +69,7 @@ const formalArtifactsBody = readFileSync(formalArtifactsSrc, 'utf8')
 const attemptLedgerBody = readFileSync(attemptLedgerSrc, 'utf8')
 const validateCoreBody = readFileSync(validateCoreSrc, 'utf8')
 const evaluationBaselineBody = readFileSync(evaluationBaselineSrc, 'utf8')
+const artifactManifestBody = readFileSync(artifactManifestSrc, 'utf8')
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
 const listNames = (dir, ext) => readdirSync(dir).filter((n) => n.endsWith(ext)).sort()
 // 目录级输入按「文件名 + 大小 + 修改时间」聚合：改名、增删文件、改内容都能被捕获。
@@ -93,6 +95,7 @@ const stamp = {
   attemptLedger: sha256(attemptLedgerBody),
   validateCore: sha256(validateCoreBody),
   evaluationBaseline: sha256(evaluationBaselineBody),
+  artifactManifest: sha256(artifactManifestBody),
   locales: dirStamp(localesSrc, '.json'),
   roles: dirStamp(rolesSrc, '.md'),
   // 打包脚本自身也计入：改了包装/压缩逻辑后产物必须重建
@@ -110,6 +113,7 @@ const requiredArtifacts = [
   join(dist, 'attempt-ledger.cjs'),
   join(dist, 'validate-core.cjs'),
   join(dist, 'evaluation-baseline.cjs'),
+  join(dist, 'artifact-manifest.cjs'),
   join(dist, 'projection-core.cjs'),
   join(dist, 'role-library.cjs'),
   join(dist, 'builtin-roles.json'),
@@ -194,6 +198,8 @@ copyFileSync(validateCoreSrc, join(dist, 'validate-core.cjs'))
 copyFileSync(projectionCoreSrc, join(dist, 'projection-core.cjs'))
 // LOC-027 评价基线纯逻辑内核（冻结/核验子进程脚本文本与闸门判定），随 dist 分发
 copyFileSync(evaluationBaselineSrc, join(dist, 'evaluation-baseline.cjs'))
+// LOC-035 产物清单纯逻辑内核，随 dist 分发
+copyFileSync(artifactManifestSrc, join(dist, 'artifact-manifest.cjs'))
 // 角色库内核 + 内置角色清单：静态安装的可信加载源（host.js 只从 pluginRoot/dist 加载）
 copyFileSync(roleLibrarySrc, join(dist, 'role-library.cjs'))
 copyFileSync(roleManifestSrc, join(dist, 'builtin-roles.json'))

@@ -1448,6 +1448,51 @@ return {
       return ev
     }
 
+    // ── LOC-035 产物清单（纯逻辑内核 = dist/artifact-manifest.cjs）────────────────────
+    // 编译脚本节点完成时输出 [am-submit] → 宿主读字节核验、不可变快照与 manifest 索引；
+    // WAITING_HUMAN（READY_FOR_HUMAN）前检查必需产物，缺失则 BLOCKED 但保留专业结果。
+    let amKernelPromise = null
+    function amKernel() {
+      if (!amKernelPromise) amKernelPromise = loadDist('artifact-manifest.cjs').catch(() => { amKernelPromise = null; return null })
+      return amKernelPromise
+    }
+    const amRuns = new Map()
+    function observeArtifactSubmit(engineRunId, message) {
+      const amc = amRuns.get(String(engineRunId || ''))
+      if (!amc) return
+      const req = amc.kernel.parseSubmitRequest(message)
+      if (!req) return
+      let result
+      try {
+        const prev = amc.byNode.get(req.node) || null
+        result = amc.kernel.processSubmit({ cwd: amc.cwd, runDir: amc.runDir, taskId: amc.taskId, req, prevManifest: prev })
+      } catch (e) {
+        result = { ok: false, error: errMsg(e) }
+      }
+      if (result && result.ok && result.manifest) {
+        amc.byNode.set(req.node, result.manifest)
+        const lrId = logicalRunByEngineRun.get(String(engineRunId))
+        const lrec = lrId ? logicalRuns.get(lrId) : null
+        if (lrec) {
+          lrec.artifact_manifests = lrec.artifact_manifests || {}
+          lrec.artifact_manifests[req.node] = result.manifest
+          controlEvent(lrec, 'artifact_manifest_submitted', {
+            node: req.node,
+            revision: result.manifest.revision,
+            materials_status: result.manifest.materials_status,
+            required_complete: result.manifest.required_complete,
+          })
+          requestLogicalPersist(lrec.logical_run_id)
+        }
+      }
+    }
+    function artifactGateOf(engineRunId, nodeId) {
+      const amc = amRuns.get(String(engineRunId || ''))
+      if (!amc) return null
+      const man = amc.byNode.get(String(nodeId || ''))
+      return amc.kernel.gateBlockOf(man, nodeId)
+    }
+
     // ── LOC-027 评价基线冻结契约（纯逻辑内核 = dist/evaluation-baseline.cjs，进程边界留在宿主）──
     // producer 业务放行时脚本输出 [eb-freeze] 请求行 → 子进程按原始字节算 SHA-256 并在
     // Run 产物目录按版本隔离保存不可变副本 → 检查点边界中止本段（复用 #80 abort）→
@@ -1685,6 +1730,7 @@ return {
       // LOC-027 评价基线：冻结请求观察 + 冻结待决时的检查点中止
       observeBaselineRequest(info.id, message)
       maybeAbortAtBaselinePending(info.id, message)
+      observeArtifactSubmit(info.id, message)
       attk().then((t) => t.line(info.id, message)).catch(() => { /* 内核缺失：段末扫描回退 */ })
     })
     ctx.on('workflow/agent-start', (info, agent) => onRun(info.id, (rec) => rec.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' })))
@@ -1695,6 +1741,7 @@ return {
       // LOC-027：无待决冻结的基线上下文随段结束回收（待决条目等待闸门消费，不在此删）
       const ebcEnd = ebRuns.get(String(info.id || ''))
       if (ebcEnd && ebcEnd.pending.size === 0) ebRuns.delete(String(info.id || ''))
+      amRuns.delete(String(info.id || ''))
       onRun(info.id, (rec) => {
         // wf_run 已回写的脚本权威终态（WAITING_HUMAN / DONE / …）不得被迟到的 end 盖掉
         if (!TERMINAL_STATUS_RE.test(String(rec.status || ''))) rec.status = String(result.stopReason)
@@ -3193,6 +3240,19 @@ return {
           if (ebk) ebRuns.set(runId, { decl: ebDecl, kernel: ebk, cwd: (ws && ws.source_path) || projectRoot() || '', runDir: args.runDir || null, taskId: logicalTaskId, pending: new Map() })
           else log('评价基线内核不可用（dist/evaluation-baseline.cjs 缺失）：本运行基线保持未核验口径')
         }
+        const amk = await amKernel()
+        if (amk && logicalRec) {
+          const runDirRel = args.runDir || ('.agent-runs/' + logicalTaskId)
+          amRuns.set(runId, {
+            kernel: amk,
+            cwd: projectRoot() || ((ws && ws.source_path) || ''),
+            runDir: runDirRel,
+            taskId: logicalTaskId,
+            byNode: new Map(),
+          })
+        } else if (logicalRec) {
+          log('产物清单内核不可用（dist/artifact-manifest.cjs 缺失）：材料就绪闸门停用')
+        }
         // #79：本段执行挂到逻辑运行（READY/WAITING_HUMAN → RUNNING，清 reason）
         if (logicalRec) {
           appendLogicalSegment(logicalRec, runId, logicalTrigger, isHdResume ? String(args.decision_id || '') : '')
@@ -3435,6 +3495,34 @@ return {
                 },
                 agentsStarted: (result && result.agentsStarted) || 0,
                 evaluation_baseline_gate: { decision: 'blocked', code: conflict.code },
+              })
+            }
+          }
+          // LOC-035：材料就绪闸门——WAITING_HUMAN 前检查节点产物 manifest；必需缺失
+          // 则 BLOCKED（专业结果保留在 value.results，不宣称验收材料就绪）。
+          if (canon === 'WAITING_HUMAN' && value && value.node) {
+            const ag = artifactGateOf(currentRunId, value.node)
+            if (ag) {
+              logicalSetState(logicalRec, 'BLOCKED', logicalReason(ag.code, ag.message))
+              controlEvent(logicalRec, ag.event, { node: value.node, code: ag.code, manifest_revision: ag.manifest_revision })
+              await refreshWorkspaceContext(logicalRec, wsIdentity)
+              requestLogicalPersist(logicalRec.logical_run_id)
+              onRun(currentRunId, (r) => { r.status = 'BLOCKED'; r.reason = ag.code })
+              if (ws) await markWorkspaceLifecycle(wsIdentity, 'BLOCKED')
+              return JSON.stringify({
+                runId: currentRunId,
+                stopReason: result && result.stopReason,
+                value: {
+                  status: 'BLOCKED',
+                  code: ag.code,
+                  message: ag.message,
+                  recovery_hint: ag.recovery_hint || null,
+                  node: value.node,
+                  results: value.results,
+                  artifact_manifest: ag.entries || null,
+                },
+                agentsStarted: (result && result.agentsStarted) || 0,
+                artifact_manifest_gate: { decision: 'blocked', code: ag.code },
               })
             }
           }
