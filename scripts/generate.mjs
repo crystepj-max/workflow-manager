@@ -1455,6 +1455,147 @@ export function compileBlueprint(bp, opts = {}) {
   return { script: lines.join('\n'), folds };
 }
 
+// ---------- LOC-040：模板能力摘要（生成 Skill runbook，禁止全模板泛化 merge/PR） ----------
+export function analyzeTemplateGuide(bp) {
+  const nodes = bp.nodes || [];
+  const edges = bp.edges || [];
+  const closeout = nodes.find((n) => n && n.id === 'closeout');
+  const uat = nodes.find((n) => n && n.id === 'uat');
+  const manualNodes = nodes.filter((n) => n && n.manualCheck);
+  const humanDecisionTriggers = edges
+    .filter((e) => e && e.to === HUMAN_DECISION_ID && e.outcome)
+    .map((e) => ({ from: e.from, outcome: e.outcome }));
+  const humanDecisionRoutes = edges
+    .filter((e) => e && e.from === HUMAN_DECISION_ID && e.outcome)
+    .map((e) => ({ outcome: e.outcome, to: e.to }));
+  const artifacts = [];
+  for (const n of nodes) {
+    const files = n.output && n.output.files;
+    if (!files || typeof files !== 'object') continue;
+    for (const [file, kind] of Object.entries(files)) {
+      artifacts.push({ node: n.id, file, kind });
+    }
+  }
+  const completionTypes = [];
+  for (const n of nodes) {
+    const ct = n.output && n.output.schema && n.output.schema.properties && n.output.schema.properties.completion_type;
+    if (ct && Array.isArray(ct.enum)) completionTypes.push(...ct.enum);
+  }
+  const endOutcomes = edges
+    .filter((e) => e && e.to === '$end' && e.outcome !== undefined && e.outcome !== null && e.outcome !== '')
+    .map((e) => ({ from: e.from, outcome: e.outcome }));
+  const closeoutGoal = closeout ? String(closeout.goal || '') : '';
+  const executeGoal = (nodes.find((n) => n && n.id === 'execute') || {}).goal || '';
+  const requiresMergePr =
+    !!closeout &&
+    /合并|PR|Draft PR|推送/.test(closeoutGoal) &&
+    !/不要求.*PR|不建 PR|不要求创建 worktree\/分支\/PR/.test(String(executeGoal));
+  return {
+    entry: bp.entry || null,
+    manualCheckNodes: manualNodes.map((n) => n.id),
+    humanDecisionTriggers,
+    humanDecisionRoutes,
+    uatNode: uat ? uat.id : null,
+    artifacts,
+    completionTypes: [...new Set(completionTypes)],
+    endOutcomes,
+    hasCloseout: !!closeout,
+    requiresMergePr,
+    m2BlockedExhausted: !!(bp.control && bp.control.maxRoundsExhausted === 'BLOCKED'),
+  };
+}
+
+export function buildDoneRunbookLine(bp) {
+  const id = bp.id;
+  if (id === 'wf-explore') {
+    return '研究在 evaluate 以 PASS 或 INSUFFICIENT 结束；**不要求 merge commit 或 PR**（详见下方「模板能力摘要」）。';
+  }
+  if (id === 'wf-optimize') {
+    return '评估 PASS 或人工 ACCEPT 后进入 closeout 写 cleanup-report；**不要求 PR**（详见下方「模板能力摘要」）。';
+  }
+  if (id === 'wf-diagnose') {
+    return '回归通过后 closeout 写 cleanup-report；**不要求 PR 或 merge**（详见下方「模板能力摘要」）。';
+  }
+  if (id === 'wf-construction-full-feature') {
+    return '须先经 uat→人工三态，closeout 才对已验收成果做合并/关闭；额度耗尽走 BLOCKED 而非 WAITING_HUMAN（详见下方「模板能力摘要」）。';
+  }
+  const a = analyzeTemplateGuide(bp);
+  if (a.requiresMergePr) return 'closeout 按蓝图 goal 可能要求推送/合并 PR；以 closeout 节点 goal 为准。';
+  if (a.hasCloseout) return '经 closeout 写 cleanup-report 后结束；本模板未声明 merge/PR 要求。';
+  return '按终态节点业务结果结束；无统一 merge commit 要求。';
+}
+
+export function templateGuideSection(bp) {
+  const a = analyzeTemplateGuide(bp);
+  const lines = [
+    '## 模板能力摘要（由蓝图生成；改模板须 `npm run generate`）',
+    '',
+    'M2 与 Portable 旧七阶段：[`docs/design/m2-vs-portable-delivery.md`](../docs/design/m2-vs-portable-delivery.md)。能力 Current/Target/Legacy：[`docs/design/workflow-capability-index.md`](../docs/design/workflow-capability-index.md)。',
+    '',
+    '- **入口节点**：`' + (a.entry || '（未声明）') + '`',
+  ];
+  if (a.manualCheckNodes.length) {
+    lines.push('- **manualCheck 人工门禁**：' + a.manualCheckNodes.map((x) => '`' + x + '`').join('、'));
+  }
+  if (a.uatNode) {
+    lines.push('- **UAT 节点**：`' + a.uatNode + '` → `$human-decision`（验收严格三态，AI 不代签）');
+  } else if (a.humanDecisionTriggers.length) {
+    lines.push(
+      '- **$human-decision 触发**：' +
+        a.humanDecisionTriggers.map((t) => '`' + t.from + '`/' + t.outcome).join('、'),
+    );
+    if (a.humanDecisionRoutes.length) {
+      lines.push(
+        '- **$human-decision 出边**：' +
+          a.humanDecisionRoutes.map((r) => r.outcome + '→`' + r.to + '`').join('、'),
+      );
+    }
+  } else {
+    lines.push('- **固定人工门**：无（探索/诊断模板不在链内挂 UAT）');
+  }
+  if (a.artifacts.length) {
+    lines.push('- **节点产物**（`output.files`）：');
+    for (const art of a.artifacts) {
+      lines.push('  - `' + art.node + '` → `' + art.file + '`（' + art.kind + '）');
+    }
+  }
+  if (a.completionTypes.length) {
+    lines.push('- **完成类型**（`completionPath`）：' + a.completionTypes.map((x) => '`' + x + '`').join('、'));
+  } else if (a.endOutcomes.length) {
+    lines.push(
+      '- **直达 `$end` 的业务结果**：' +
+        a.endOutcomes.map((e) => '`' + e.from + '`/' + e.outcome).join('、'),
+    );
+  }
+  if (a.m2BlockedExhausted) {
+    lines.push('- **自动返工耗尽**：`control.maxRoundsExhausted=BLOCKED`（`AUTO_REWORK_EXHAUSTED`，可恢复受阻）');
+  }
+  lines.push('', '### `DONE` 收口要求（本模板专属）');
+  if (bp.id === 'wf-explore') {
+    lines.push('- 无 closeout；`evaluate` 的 `PASS` / `INSUFFICIENT` 直达 `$end`。');
+    lines.push('- **禁止**要求 merge commit、PR 或 cleanup-report 合并叙事。');
+    lines.push('- `INSUFFICIENT` = 受控完成（`completion_type=INSUFFICIENT`），不是失败。');
+  } else if (bp.id === 'wf-optimize') {
+    lines.push('- `execute` 无 Git 前置；纯文档等非 Git 任务可完整执行。');
+    lines.push('- **禁止**要求 PR 或 merge commit；收口仅 `cleanup-report.md`。');
+    lines.push('- `evaluate`/`CONFIRM`/`ACCEPT` 路径见上方 $human-decision 表。');
+  } else if (bp.id === 'wf-diagnose') {
+    lines.push('- 回归 `PASS` 后 `closeout`；写 `cleanup-report.md`。');
+    lines.push('- **禁止**要求 PR 或 merge commit。');
+  } else if (bp.id === 'wf-construction-full-feature') {
+    lines.push('- **禁止**跳过 `uat` 人工三态进入 `closeout`。');
+    lines.push('- `closeout` 可对已验收成果执行合并/任务关闭（见蓝图 closeout.goal）。');
+    lines.push('- 不得把 `USER_ACCEPTED` Decision Result 与验收 `CONDITIONAL_PASS` 混用。');
+  } else if (a.requiresMergePr) {
+    lines.push('- Legacy/自定义：`closeout` goal 含推送/PR 语义，以蓝图为准。');
+  } else if (a.hasCloseout) {
+    lines.push('- 经 `closeout` 写 `cleanup-report.md`；未声明 merge/PR。');
+  } else {
+    lines.push('- 无统一收口节点；按终态业务结果结束。');
+  }
+  return lines.join('\n');
+}
+
 // ---------- skill 包装（契约 FR-2/FR-6；runbook 覆盖全部返回状态，T-IMP-09） ----------
 /** 正式内置在 templates/<id>.json；历史迁出的自定义种子在 templates/custom-seeds/。 */
 export function blueprintSourceRel(bpId) {
@@ -1494,7 +1635,8 @@ export function skillWrap(bp) {
     '   - `ROUTE_HALTED`：#77 引擎停机信号（reason=HUMAN_DECISION）。命中 `$human-decision` 时本脚本翻译为 `WAITING_HUMAN` 并装配 Decision Package，不把 `ROUTE_HALTED` 作为对外终态返回。',
     '   - `BLOCKED`（统一受阻生命周期）：环境/资料/权限暂缺或额度耗尽的**非终态受阻**，不冒充成功也不挂人工决策。`termination`={business_outcome, lifecycle, reason_code, resumable, resume_node, completion_type?}，`blocked` 携带 failed_node / rounds_used / max_rounds / last_outcome 现场。恢复同一 Run：同 taskId + `entry=<termination.resume_node>`（恢复前重检阻塞条件；不重复已完成节点）。原因码：`BUSINESS_BLOCKED`=外部条件暂缺，条件恢复后恢复；`AUTO_REWORK_EXHAUSTED`=M2 自动返工额度耗尽（人工退回后新一轮交付自动重置额度）；`NEEDS_REDEFINE`=基线需重定义，resumable=false 不可原样恢复——重新发起运行将派生新 Run 并保留旧 Run；`COMPLETION_MISSING`=脚本 DONE 但无有效完成映射，不记 COMPLETED，补证后从 resume_node 恢复。',
     '   - `DONE`：只有完成目标且材料有效才映射 COMPLETED；探索 `INSUFFICIENT` 是受控完成（完成类型显式标注证据不足）。历史无终止描述的 DONE 保留 legacy 标记，不改写为已验证完成。',
-    '   - `DONE`：呈 cleanup 报告与合并 commit，流程结束。',
+    '   - `DONE`：' + buildDoneRunbookLine(bp),
+    templateGuideSection(bp),
     '## 生成信息',
     '- 蓝图：`' + src + '`',
     '- 节点：' + bp.nodes.length + ' · 边：' + bp.edges.length + ' · 最大轮次：' + ((bp.control && bp.control.maxRounds) || 9),

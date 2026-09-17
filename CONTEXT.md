@@ -147,7 +147,9 @@
   LOC-015 已定：不建回灌通道，正式入口统一走 `wf_run`（插件自身发起即可拿到返回值），
   内置 `workflow` 工具直起的运行保持如实提示的退化态。
 
-## 扇出（fanout · 规划中 #18，语义已拍板未实现）
+## 扇出（fanout · Current）
+
+> **Current（main 已实现）**：受限并行 fanout 节点已在编译器与运行时落地；详细证据见 [`docs/design/workflow-capability-index.md`](docs/design/workflow-capability-index.md)。下文为 Current 语义（原 #18 规划中表述已过时，勿再引用）。
 
 - **扇出（fan-out）**：一个节点按运行时数组展开为 N 个并行子任务，聚合结果后交给下游；
   与「AI 自由拆解」相对（D1 选方案 B 受限并行，方案 C 保留扩展位）。
@@ -184,7 +186,9 @@
 > `scheduled-trigger-m4.md`。  
 > 工程真源在本仓；`my-agent-skills` 为通用 skill 集副本。  
 > 定义入口 = `requirements-analysis`；单任务交付 = 内置蓝图 + `construction-bootstrap`；  
-> 批量调度 = `execution-plan`；到点开跑 = `scripts/ai-task-scheduled-trigger.mjs`（唤起同一执行计划，不另建 Skill）。
+> 批量调度 = `execution-plan`；到点开跑 = `scripts/ai-task-scheduled-trigger.mjs`（唤起同一执行计划，不另建 Skill）。  
+> **M2 与 Portable 旧七阶段关系（唯一权威）**：[`docs/design/m2-vs-portable-delivery.md`](docs/design/m2-vs-portable-delivery.md)。  
+> **能力 Current/Target/Legacy 索引**：[`docs/design/workflow-capability-index.md`](docs/design/workflow-capability-index.md)。
 
 - **已定义（DEFINED）**：Definition Check 通过、未决产品事项为 0、人工确认基线、Issue 基本信息与本地任务规格版本一致后的状态；交付应从这里开工。
 - **Definition Check（定义完成检查）**：进入「待确认」前的门禁清单（目标范围/规则边界/决策完整性/任务组织/验收/无人值守）。
