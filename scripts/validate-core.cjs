@@ -657,6 +657,12 @@ function validateBlueprint(bp, opts) {
     if (kind !== 'fanout') {
       if (n.items !== undefined) err('$.nodes[' + n.id + '].items', 'items 仅允许用于 kind=fanout 节点')
       if (n.failOn !== undefined) err('$.nodes[' + n.id + '].failOn', 'failOn 仅允许用于 kind=fanout 节点')
+      if (n.mechanical !== undefined) {
+        if (typeof n.mechanical !== 'string' || !String(n.mechanical).trim()) {
+          err('$.nodes[' + n.id + '].mechanical', 'mechanical 须为非空字符串（机械节点 id，如 construction-preflight）')
+        }
+        if (kind !== 'worker') err('$.nodes[' + n.id + '].mechanical', 'mechanical 仅允许用于 kind=worker 节点')
+      }
       return
     }
 

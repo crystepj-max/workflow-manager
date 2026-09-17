@@ -82,6 +82,7 @@ return {
     const GENERATOR = CODE_ROOT ? CODE_ROOT + '/scripts/generate.mjs' : null
     const WS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/workspace-isolation-host.mjs' : null
     const RECORDS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/records-host.mjs' : null
+    const PREFLIGHT_GATE = CODE_ROOT ? CODE_ROOT + '/scripts/construction-preflight-gate.mjs' : null
     const QUALITY_COST_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/run-quality-cost.mjs' : null
     // LOC-032：受管理外部操作账本 + execute-or-reconcile（与 records-host 同进程边界模式）
     const OPERATIONS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/operations-host.mjs' : null
@@ -133,6 +134,26 @@ return {
         if (outcome.exitCode !== 0) return { ok: false, detail: ((stderr || stdout) || ('exit ' + outcome.exitCode)).trim().slice(0, 500) }
         return { ok: true, stdout: stdout, stderr: stderr }
       } catch (e) { return { ok: false, detail: errMsg(e) } }
+    }
+    // LOC-038：wf_run 建设模板机械资格检查（与模型探针分离；失败不分配 workspace）
+    async function runConstructionPreflightHost(opts) {
+      if (!PREFLIGHT_GATE) return { ok: false, detail: 'construction-preflight-gate 脚本不可用' }
+      const o = opts || {}
+      const argv = [PREFLIGHT_GATE]
+      if (o.issuePath && o.specPath) argv.push(o.issuePath, o.specPath)
+      else argv.push('--task-id', String(o.taskId || ''))
+      if (o.repo) argv.push('--repo', o.repo)
+      if (o.runBaseline) argv.push('--run-baseline', o.runBaseline)
+      if (o.envStore) argv.push('--env-store', o.envStore)
+      const r = await runNode(argv, { cwd: o.repo || CODE_ROOT, maxBytes: 256 * 1024 })
+      if (!r.ok) return { ok: false, detail: r.detail }
+      try {
+        const text = String(r.stdout || '').trim()
+        const json = text.slice(text.indexOf('{'))
+        return { ok: true, gate: JSON.parse(json) }
+      } catch (e) {
+        return { ok: false, detail: 'construction-preflight-gate 输出解析失败：' + errMsg(e) }
+      }
     }
     const rm = (path) => runNode(['-e', "require('fs').rmSync(process.argv[1],{recursive:true,force:true})", path])
 
@@ -3283,6 +3304,35 @@ return {
           }
         }
 
+        // LOC-038：建设模板机械资格门禁（runPreflight）——在 workspace 分配前执行，
+        // 与上方 preflight_probe（模型服务探针）分离；结果预填 results.preflight 供脚本零 LLM 消费。
+        const tplIdForGate = String(args.templateId || v.sanitized.id || '')
+        const resumePastPreflight = !!(args.entry && args.entry !== 'preflight')
+        const hasPrefill = !!(args.results && args.results.preflight && args.results.preflight.mechanical)
+        if (tplIdForGate === 'wf-construction-full-feature' && logicalRec && !resumePastPreflight && !hasPrefill) {
+          const repoForGate = CODE_ROOT || projectRoot()
+          const gateRun = await runConstructionPreflightHost({
+            taskId: logicalTaskId,
+            issuePath: args.issuePath,
+            specPath: args.specPath,
+            repo: repoForGate,
+            runBaseline: args.run_baseline || args.runBaseline,
+            envStore: args.env_store || args.envStore,
+          })
+          if (!gateRun.ok) {
+            logicalSetState(logicalRec, 'BLOCKED', logicalReason('PREFLIGHT_GATE_FAILED', gateRun.detail || '机械资格检查执行失败'))
+            requestLogicalPersist(logicalRec.logical_run_id)
+            return JSON.stringify({ blocked: true, stage: 'preflight_qualification', logical_run_id: logicalRec.logical_run_id, detail: gateRun.detail }, null, 2)
+          }
+          const gate = gateRun.gate
+          if (gate.route === 'BLOCKED') {
+            logicalSetState(logicalRec, 'BLOCKED', logicalReason('PREFLIGHT_BLOCKED', String(gate.blockers || gate.summary || '资格检查未通过')))
+            requestLogicalPersist(logicalRec.logical_run_id)
+            return JSON.stringify({ blocked: true, stage: 'preflight_qualification', logical_run_id: logicalRec.logical_run_id, route: gate.route, blockers: gate.blockers, reasons: gate.reasons }, null, 2)
+          }
+          args.results = Object.assign({}, args.results || {}, { preflight: gate })
+        }
+
         // Codex R2 ③：派生运行按自身 logical_run_id 分配 workspace——沿用原 taskId 会让
         // #93 注册表把前任（仍注册）的 workspace 复用给派生运行，或在清理后把溯源记到
         // 旧身份下。markWorkspaceLifecycle/refreshWorkspaceContext 同步用该 ID。
@@ -3354,6 +3404,8 @@ return {
         const scriptArgs = Object.assign({
           taskId: args.taskId, runDir: args.runDir, roleDir: args.roleDir || c.roleDir, baseBranch: args.baseBranch,
           issueRef: args.issueRef, issueTitle: args.issueTitle, issueBody: args.issueBody, issueComments: args.issueComments,
+          issuePath: args.issuePath, specPath: args.specPath, repo_path: CODE_ROOT || projectRoot(),
+          run_baseline: args.run_baseline || args.runBaseline, env_store: args.env_store || args.envStore,
           requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
           decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results, halt_reason: args.halt_reason,
           budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
