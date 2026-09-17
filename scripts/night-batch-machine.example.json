@@ -1,0 +1,20 @@
+{
+  "_说明": "机器本地配置示例（复制到 <项目>/.scratch/night-batches/machine.json 后按本机实际调整；此文件不入库）。args 占位符：{taskId} {runId} {runDir} {worktree} {promptFile} {project}。zcode 模板已在本机实测通过（2026-09-17）：① -p 不能漏——漏了它 zcode 会把整段提示词当「未知命令」直接退出；② 需要 ~/.zcode/cli/config.json 模型配置（可从桌面 App ~/.zcode/v2/config.json 镜像 provider 并加 model 键）；③ zcode 0.16.5 的 --max-turns 参数实际不可用，时长上限交给调度器看门狗。",
+  "agent": {
+    "templates": {
+      "full-access": {
+        "command": "bash",
+        "args": ["-lc", "exec node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs --cwd {worktree} --mode yolo --no-color -p \"$(cat {promptFile})\""]
+      },
+      "auto-edit": {
+        "command": "bash",
+        "args": ["-lc", "exec node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs --cwd {worktree} --mode edit --no-color -p \"$(cat {promptFile})\""]
+      }
+    }
+  },
+  "sceneInit": {
+    "command": "node",
+    "args": ["{project}/scripts/cwf-run-init.mjs", "{taskId}", "{runId}", "--local-base"]
+  },
+  "remoteIssueCommand": "cnb issue list --repo chris.ai/workflow-manager"
+}
