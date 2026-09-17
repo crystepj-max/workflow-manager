@@ -1,0 +1,66 @@
+{
+  "task_id": "LOC-028",
+  "run_id": "loc-028-r1",
+  "task_name": "WR-005 人工接受完成必须具备真实决定与版本来源",
+  "branch": "dev-loc-028-r1",
+  "status": "等待验收",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-16T15:45:00.000Z",
+      "produced_by": "construction-loc028-r1",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-16T15:50:00.000Z",
+      "produced_by": "construction-loc028-r1"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": "2026-09-16T16:10:00.000Z",
+      "produced_by": "construction-loc028-r1",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a1.json",
+      "created_at": "2026-09-16T16:20:00.000Z",
+      "produced_by": "construction-loc028-r1",
+      "summary": {
+        "verdict": "APPROVE"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a1.json",
+      "created_at": "2026-09-16T16:25:00.000Z",
+      "produced_by": "construction-loc028-r1"
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a1.json",
+      "created_at": "2026-09-16T16:30:00.000Z",
+      "produced_by": "construction-loc028-r1",
+      "summary": {
+        "status": "awaiting_decision"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-028-r1",
+    "file_count": 15,
+    "total_bytes": 18725
+  },
+  "generated_at": "2026-09-17T04:31:51.248Z"
+}

@@ -16,6 +16,7 @@
 // 蓝图 ↔ DSL 形态投影：唯一实现 = ./projection-core.cjs（生成器直接 import，宿主经 dist 加载）。
 // 本文件只转发导出——两份投影实现曾各自漂移（克隆 vs 共享引用），禁止再内嵌副本。
 const { projectToVwf, projectToBlueprint, effectiveHeteroMode, isKnownHeteroValue } = require('./projection-core.cjs')
+const schemaProtocol = require('./schema-protocol-core.cjs')
 
 const COND_RE = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
 const HUMAN_DECISION_ID = '$human-decision'
@@ -630,12 +631,16 @@ function validateBlueprint(bp, opts) {
   })
   errors.push(...structure.errors)
 
-  // LOC-030：M2 受阻开关（可选声明）。声明即「自动返工额度耗尽 → BLOCKED（非终态、可恢复
-  // 受阻，不再挂人工决策）」；目前仅接受 'BLOCKED' 一个值——其余取值视为拼写错误，
-  // 宁可 loud-fail 也不静默按旧语义（额度耗尽 → WAITING_HUMAN）运行。
+  // LOC-030 / LOC-036：自动返工额度耗尽语义（可选声明）。
+  // BLOCKED（M2 建设模板）：可恢复受阻，不再挂人工决策。
+  // INSUFFICIENT（wf-explore）：保留原 NEEDS_RESEARCH 裁决，宿主收口为证据不足完成。
   const maxRoundsExhausted = bp.control && bp.control.maxRoundsExhausted
-  if (maxRoundsExhausted !== undefined && maxRoundsExhausted !== null && maxRoundsExhausted !== 'BLOCKED') {
-    err('$.control.maxRoundsExhausted', 'maxRoundsExhausted 目前仅接受 "BLOCKED"（额度耗尽 → 可恢复受阻，M2），当前：' + JSON.stringify(maxRoundsExhausted))
+  const allowedExhausted = ['BLOCKED', 'INSUFFICIENT']
+  if (maxRoundsExhausted !== undefined && maxRoundsExhausted !== null && !allowedExhausted.includes(maxRoundsExhausted)) {
+    err('$.control.maxRoundsExhausted', 'maxRoundsExhausted 仅接受 ' + allowedExhausted.map((x) => JSON.stringify(x)).join(' | ') + '，当前：' + JSON.stringify(maxRoundsExhausted))
+  }
+  if (maxRoundsExhausted === 'INSUFFICIENT' && bp.id !== 'wf-explore') {
+    err('$.control.maxRoundsExhausted', 'INSUFFICIENT 额度耗尽语义目前仅允许 wf-explore 模板声明')
   }
 
   // 蓝图级业务规则
@@ -653,6 +658,12 @@ function validateBlueprint(bp, opts) {
     if (kind !== 'fanout') {
       if (n.items !== undefined) err('$.nodes[' + n.id + '].items', 'items 仅允许用于 kind=fanout 节点')
       if (n.failOn !== undefined) err('$.nodes[' + n.id + '].failOn', 'failOn 仅允许用于 kind=fanout 节点')
+      if (n.mechanical !== undefined) {
+        if (typeof n.mechanical !== 'string' || !String(n.mechanical).trim()) {
+          err('$.nodes[' + n.id + '].mechanical', 'mechanical 须为非空字符串（机械节点 id，如 construction-preflight）')
+        }
+        if (kind !== 'worker') err('$.nodes[' + n.id + '].mechanical', 'mechanical 仅允许用于 kind=worker 节点')
+      }
       return
     }
 
@@ -1141,6 +1152,13 @@ function validateBlueprint(bp, opts) {
     })
   }
 
+  // LOC-039：协议版本与 Schema 能力矩阵（静态 schema 审计 + 声明一致性）
+  {
+    const audit = schemaProtocol.auditBlueprintSchemas(bp)
+    audit.errors.forEach((e) => err(e.at, e.message))
+    audit.warnings.forEach((w) => warnings.push(w.message))
+  }
+
   return { ok: errors.length === 0, errors, warnings, counts: { nodes: bp.nodes.length, edges: bp.edges.length } }
 }
 
@@ -1176,4 +1194,6 @@ module.exports = {
   HD_EVENT_RECORD_KIND,
   HD_EVENT_TRIGGER,
   HD_UNKNOWN,
+  // LOC-039 Schema 协议（转发 schema-protocol-core，禁止再内嵌副本）
+  ...schemaProtocol,
 }
