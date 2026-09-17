@@ -27,6 +27,12 @@ const stages = [
     cwd: pluginRoot,
   },
   {
+    name: 'LOC-042 消费方契约机器层',
+    command: process.execPath,
+    args: ['scripts/workflow-conformance/run.mjs', '--machine-only'],
+    cwd: repoRoot,
+  },
+  {
     name: '运行项目测试',
     command: npm,
     args: ['test'],

@@ -16,6 +16,8 @@
     "validate:task-context": "node scripts/validate-task-spec-sync.mjs",
     "sync:remote-issues": "node scripts/remote-issue-sync.mjs",
     "test": "node --test \"scripts/test/*.test.mjs\"",
+    "test:conformance": "node --test scripts/test/workflow-conformance.test.mjs",
+    "conformance": "node scripts/workflow-conformance/run.mjs",
     "benchmark:loc-045:freeze": "node scripts/benchmark/loc-045/bin/loc-045-freeze.mjs",
     "benchmark:loc-045:prepare": "node scripts/benchmark/loc-045/bin/loc-045-prepare.mjs",
     "benchmark:loc-045:plan": "node scripts/benchmark/loc-045/bin/loc-045-plan.mjs",
