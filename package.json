@@ -15,6 +15,11 @@
     "validate:workspace": "node scripts/validate-workspace.mjs",
     "validate:task-context": "node scripts/validate-task-spec-sync.mjs",
     "sync:remote-issues": "node scripts/remote-issue-sync.mjs",
-    "test": "node --test \"scripts/test/*.test.mjs\""
+    "test": "node --test \"scripts/test/*.test.mjs\"",
+    "benchmark:loc-045:freeze": "node scripts/benchmark/loc-045/bin/loc-045-freeze.mjs",
+    "benchmark:loc-045:prepare": "node scripts/benchmark/loc-045/bin/loc-045-prepare.mjs",
+    "benchmark:loc-045:plan": "node scripts/benchmark/loc-045/bin/loc-045-plan.mjs",
+    "benchmark:loc-045:verify-fixtures": "node scripts/benchmark/loc-045/bin/loc-045-verify-fixtures.mjs",
+    "benchmark:loc-045:report": "node scripts/benchmark/loc-045/bin/loc-045-report.mjs"
   }
 }

@@ -1,0 +1,21 @@
+{
+  "experiment_id": "loc-045-benchmark-v1",
+  "model_settings": {
+    "model_config_ref": "GLM-5.3-Flash",
+    "budget_authorization_ref": "100000000 tokens",
+    "budget_enforcement": "per-run token check before each logical run",
+    "profile_frozen": false,
+    "confirmed_at": "2026-09-16",
+    "confirmed_by": "用户（D-EXP）"
+  },
+  "max_logical_runs": 48,
+  "adoption_threshold": {
+    "call_savings_rate_min": 0.2,
+    "median_auto_time_must_not_increase": true,
+    "quality_must_not_regress": true
+  },
+  "isolation": {
+    "bench_root": "scripts/benchmark/loc-045",
+    "production_templates_unmodified": true
+  }
+}

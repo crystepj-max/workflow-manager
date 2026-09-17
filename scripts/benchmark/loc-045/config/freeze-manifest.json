@@ -1,0 +1,35 @@
+{
+  "frozen_at": "2026-09-16T16:56:27.100Z",
+  "repo_head": null,
+  "fixture_digests": {
+    "B01": "7de4a112669c39aedda68467ee377abaee92f6b4b4b29336b330fc1fd4e46d7c",
+    "B02": "c83a29f960eb7a8207624dcda03fe982c704fdde758caec1a0ccb710ecf75474",
+    "B03": "8f498cae60adce8def51c6796dc7b17005d940d4f8ac87b5f36a35c315372f72",
+    "O01": "eff17ac89f158cf25915dd3467814070245923b1546516bdb29f207693c69127",
+    "O02": "7c1cb7b9de439fd67302bfbb0abff1083e3a2bbcebdfe5bb5dad42ef7f98b0c6",
+    "O03": "3c0f126937fdf7ca6fcfb81d0875dea504bc6ca0fc12945f7ef1e53c391e56d3",
+    "D01": "540a88e3dbd807514d5debedc4b482cb64d118134c89c499a6308da54fb0e981",
+    "D02": "1070d82626326e89984f531f66782a02d3b2f0db17fd4980ddcea65bb2d0eeb0",
+    "D03": "4bb3aa1f70ea209505814c4e74a030488726b2efc9f177011c1f3631db2f9c26",
+    "X01": "b017cf35b308997f2b77c6ec7d31292283db5bca5674149945d563d0e0602cb6",
+    "X02": "f67208d00ad97ee280e4200c933b049a9338df091b6306d23f8e2fb0463202e4",
+    "X03": "d2527d161e4ceb2782d0f75f904809d1f947ae6d469bf381e7bf4f5bf43abd94"
+  },
+  "template_digests": {
+    "wf-construction-full-feature": "43a7d72a17ad91909000168cd7cbe2aef03df20cb98a3f1b9d002a0a2bdd3491",
+    "wf-optimize": "0d3f46ca5a9341f706838a8f2f3b8501e99b212c751edee0d26b1a40c7f75ab7",
+    "wf-diagnose": "907c5bd834c4e54c3b40db8e466f95e7be7a4e23e57c36be2cfc4f9fcca6b419",
+    "wf-explore": "e065d32fd4598a8a73cea007dfd92762d5ac240fb40bbab7429aad1d3c41e725"
+  },
+  "script_digest": "fc0940dbe850f618b2c7ec643db0f8dc49af7fd4e0c3f0040286df61849a7c71",
+  "baseline_digest": "1d0296de6b64c1b20d7253bc9fb10f433d337e6ee16fd9b88fe544eb8f651b75",
+  "model_settings": {
+    "model_config_ref": "GLM-5.3-Flash",
+    "budget_authorization_ref": "100000000 tokens",
+    "budget_enforcement": "per-run token check before each logical run",
+    "profile_frozen": false,
+    "confirmed_at": "2026-09-16",
+    "confirmed_by": "用户（D-EXP）"
+  },
+  "task_registry_digest": "be715f5b71b1ba3ae98560fb17ee27136f89d5a22772abd2238a6eb4a8d64a83"
+}
