@@ -50,6 +50,15 @@ test('静态 bundle dist 含 projection-core.cjs 且两个投影入口可加载'
   assert.equal(typeof module.exports.projectToBlueprint, 'function', 'dist 投影内核必须导出 projectToBlueprint')
 })
 
+test('静态 bundle dist 含 state-recovery-core.cjs 且状态/恢复内核可加载', () => {
+  const coreDist = join(here, '..', 'dist', 'state-recovery-core.cjs')
+  assert.ok(existsSync(coreDist), 'dist/state-recovery-core.cjs 必须存在（build 时从 scripts/ 复制）')
+  const module = { exports: {} }
+  new Function('module', 'exports', readFileSync(coreDist, 'utf8'))(module, module.exports)
+  assert.equal(typeof module.exports.extractCheckpointFromLogs, 'function')
+  assert.equal(typeof module.exports.canonicalStopFromResult, 'function')
+})
+
 test('静态 Host：正式 pluginRoot/dist 的投影内核可驱动校验链路', async () => {
   const pluginRoot = '/plugin/static'
   const validatorSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')

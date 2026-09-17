@@ -46,6 +46,7 @@ function plantOfficialBuiltin(fs) {
 // validate-core require('./projection-core.cjs')（唯一投影实现）：两者必须同时种入。
 const validatorCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
 const projectionCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'projection-core.cjs'), 'utf8')
+const stateRecoveryCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'state-recovery-core.cjs'), 'utf8')
 
 function seedFs(extra = {}) {
   const seed = {
@@ -1234,6 +1235,7 @@ test('从插件 dist/validate-core.cjs 加载校验内核', async () => {
   const fs = makeFs({
     [PLUGIN + '/dist/validate-core.cjs']: validatorCoreSrc,
     [PLUGIN + '/dist/projection-core.cjs']: projectionCoreSrc,
+    [PLUGIN + '/dist/state-recovery-core.cjs']: stateRecoveryCoreSrc,
   })
   const { handlers } = loadHost({
     fs,
@@ -1892,6 +1894,7 @@ test('角色库 core 加载：只信插件 dist 清单，home / repo 旧清单�
     [PLUGIN + '/dist/builtin-roles.json']: JSON.stringify(trusted),
     [PLUGIN + '/dist/validate-core.cjs']: validatorCoreSrc,
     [PLUGIN + '/dist/projection-core.cjs']: projectionCoreSrc,
+    [PLUGIN + '/dist/state-recovery-core.cjs']: stateRecoveryCoreSrc,
     [DSH_HOME + '/visual-workflow/builtin-roles.json']: JSON.stringify(staleHome),
     [REPO + '/dsh/roles/builtin-roles.json']: JSON.stringify(staleRepo),
   })

@@ -620,7 +620,17 @@ return {
     // 但不是终态——终态判定仍以 LIFECYCLE_TERMINAL 为准。
     // LOC-030：BLOCKED 同为权威运行状态（脚本受阻返回体不得被迟到的 end 盖成 'completed'），
     // 且同样不是生命周期终态（可恢复受阻，terminal=false）—— holdsTask 不含它，并发名额随受阻释放。
-    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|BLOCKED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
+    let srcMod = (typeof __VWF_KERNELS__ === 'object' && __VWF_KERNELS__ && __VWF_KERNELS__['state-recovery-core.cjs']) || null
+    let srcCorePromise = null
+    function srcCore() {
+      if (srcMod) return Promise.resolve(srcMod)
+      if (!srcCorePromise) {
+        srcCorePromise = loadDist('state-recovery-core.cjs').then((m) => { srcMod = m; return m }).catch((e) => { srcCorePromise = null; throw e })
+      }
+      return srcCorePromise
+    }
+    srcCore().catch((e) => log('state-recovery-core 预加载失败（首次 wf_run 将重试）：' + errMsg(e)))
+    const TERMINAL_STATUS_RE = () => (srcMod && srcMod.TERMINAL_STATUS_RE) || /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|BLOCKED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
     const HD_STRING_KEYS = ['decision_id', 'reason', 'node']
     const HD_NUMBER_KEYS = ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']
     const HD_OBJECT_KEYS = ['decision_package', 'control_event', 'blocked_edge', 'results']
@@ -634,10 +644,10 @@ return {
     const runFiles = runsStore.fileNames
     const runFile = (id) => runsStore.fileOf(id)
     const live = new Set()
-    const isHumanWait = (s) => s === 'WAITING_HUMAN' || String(s || '').indexOf('AWAITING_HUMAN_') === 0
+    const isHumanWait = (s) => (srcMod ? srcMod.isHumanWaitStatus(s) : (s === 'WAITING_HUMAN' || String(s || '').indexOf('AWAITING_HUMAN_') === 0))
     // workflow/end 只有 completed，可能在 wf_run 回写 WAITING_HUMAN 之后到达把等待态盖掉；
     // 此时仍靠 decision_id + Package 识别可续跑的停机记录
-    const isParkedHd = (rec) => !!rec && (rec.status === 'WAITING_HUMAN' || (rec.status === 'completed' && !!rec.decision_id && !!rec.decision_package && typeof rec.decision_package === 'object'))
+    const isParkedHd = (rec) => (srcMod ? srcMod.isParkedHumanDecision(rec) : (!!rec && (rec.status === 'WAITING_HUMAN' || (rec.status === 'completed' && !!rec.decision_id && !!rec.decision_package && typeof rec.decision_package === 'object'))))
     // #80：PAUSED 记录持有任务（可恢复现场），占用 taskId 直到恢复或派生
     const holdsTask = (rec) => !!rec && !rec.supersededBy && (live.has(rec.id) || isHumanWait(rec.status) || isParkedHd(rec) || rec.status === 'PAUSED')
     const runTs = (rec) => rec.updatedAt || rec.startedAt || 0
@@ -1648,13 +1658,13 @@ return {
     // 无检查点 = 该段无可用现场（旧脚本/解析失败）：恢复退化为人工指定 entry，不猜。
     function extractCheckpoint(runRec) {
       if (!runRec) return null
+      if (srcMod) return srcMod.extractCheckpointFromLogs(runRec.logs)
       for (let i = runRec.logs.length - 1; i >= 0; i--) {
         const line = String(runRec.logs[i] || '')
         const idx = line.indexOf('[pw-ckpt]')
         if (idx < 0) continue
         try {
           const ck = JSON.parse(line.slice(idx + '[pw-ckpt]'.length))
-          // c='$end' 只是循环退出标记，不是可恢复节点：跳过它向前找真实检查点
           if (ck && typeof ck === 'object' && typeof ck.c === 'string' && ck.c && ck.c !== '$end') {
             return {
               entry: ck.c,
@@ -1666,7 +1676,6 @@ return {
               maxRounds: Number(ck.mr) || 0,
               decisionSeq: Number(ck.ds) || 0,
               degraded: false,
-              // LOC-031：检查点 tb（紧凑形 {u,g,m,mg,p,carry}）原样回带，脚本双形读取
               ...(ck.tb && { technical_budget: ck.tb }),
             }
           }
@@ -1710,6 +1719,28 @@ return {
     function buildPauseResumeArgs(rec) {
       const pr = rec.pause_resume || null
       if (!pr) return null
+      const applied = rec.baseline_applied_upto || 0
+      const pending = (rec.baseline_revisions || []).filter((r) => r.revision > applied)
+      const rev1Dsl = rec.snapshots && rec.snapshots[0] && rec.snapshots[0].workflow && rec.snapshots[0].workflow.dsl
+      const built = srcMod ? srcMod.buildPauseResumePayload({
+        pauseResume: {
+          entry: pr.entry,
+          results: deepCloneData(pr.results && typeof pr.results === 'object' ? pr.results : {}),
+          history: Array.isArray(pr.history) ? deepCloneData(pr.history) : [],
+          round: Number(pr.round) || 0,
+          feedback: typeof pr.feedback === 'string' ? pr.feedback : '',
+          budgetUsed: Number(pr.budgetUsed) || 0,
+          maxRounds: Number(pr.maxRounds) || 0,
+          decisionSeq: Number(pr.decisionSeq) || 0,
+          technical_budget: pr.technical_budget || undefined,
+        },
+        baselineRevisions: rec.baseline_revisions || [],
+        baselineAppliedUpto: applied,
+        rev1Entry: rev1Dsl && rev1Dsl.entry ? rev1Dsl.entry : null,
+        guidance: rec.guidance || [],
+        extraArgs: ebBaselineArgs(rec),
+      }) : null
+      if (built) return built
       const args = {
         entry: pr.entry || undefined,
         results: pr.results && typeof pr.results === 'object' ? deepCloneData(pr.results) : {},
@@ -1719,22 +1750,17 @@ return {
         budgetUsed: Number(pr.budgetUsed) || 0,
         maxRounds: Number(pr.maxRounds) || 0,
         decisionSeq: Number(pr.decisionSeq) || 0,
-        // LOC-031：恢复携带冻结技术预算快照（脚本只读不回写；形状由脚本侧校验）
         technical_budget: pr.technical_budget || undefined,
       }
-      const applied = rec.baseline_applied_upto || 0
-      const pending = (rec.baseline_revisions || []).filter((r) => r.revision > applied)
       const lastRev = pending.length ? pending[pending.length - 1] : (rec.baseline_revisions || [])[rec.baseline_revisions.length - 1]
       if (lastRev) args.baseline_amendment = lastRev.text
       let rebaseBlocked = false
       if (pending.length) {
-        const rev1Dsl = rec.snapshots && rec.snapshots[0] && rec.snapshots[0].workflow && rec.snapshots[0].workflow.dsl
         if (rev1Dsl && rev1Dsl.entry) args.entry = rev1Dsl.entry
         else rebaseBlocked = true
       }
       const coach = (rec.guidance || []).filter((g) => g.mode === 'coach' && g.text)
       if (coach.length) args.guidance_text = coach.map((g) => '- ' + g.text).join('\n')
-      // LOC-027：恢复段携带活动评价基线引用（已核验/历史版本均原样传递，不迁移改写）
       Object.assign(args, ebBaselineArgs(rec))
       return { args: args, pendingRebase: pending.length > 0, rebaseBlocked: rebaseBlocked }
     }
@@ -1767,7 +1793,7 @@ return {
       amRuns.delete(String(info.id || ''))
       onRun(info.id, (rec) => {
         // wf_run 已回写的脚本权威终态（WAITING_HUMAN / DONE / …）不得被迟到的 end 盖掉
-        if (!TERMINAL_STATUS_RE.test(String(rec.status || ''))) rec.status = String(result.stopReason)
+        if (!TERMINAL_STATUS_RE().test(String(rec.status || ''))) rec.status = String(result.stopReason)
         // 终局时仍 running 的子代理不可能再有结果（引擎对启动即失败的项不投递 agent-end）
         for (const a of rec.agents) if (a.outcome === 'running') a.outcome = 'failed'
       })
@@ -1793,19 +1819,23 @@ return {
       }
     }
     function canonicalStop(result) {
-      const v = result && result.value
-      const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
-      return TERMINAL_STATUS_RE.test(cand) ? cand : ''
+      return srcMod ? srcMod.canonicalStopFromResult(result) : (function () {
+        const v = result && result.value
+        const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
+        return TERMINAL_STATUS_RE().test(cand) ? cand : ''
+      })()
     }
     // 脚本终态 → workspace 生命周期：人工等待保留，DONE 完成，STOPPED 停止，
     // BLOCKED 可恢复受阻（LOC-030：不落 FAILED，恢复后继续同一 Run），其余失败
     function lifecycleFor(canon, stopReason) {
-      if (canon === 'DONE') return 'COMPLETED'
-      if (canon === 'STOPPED') return 'STOPPED'
-      if (canon === 'BLOCKED') return 'BLOCKED'
-      if (isHumanWait(canon)) return 'WAITING_HUMAN'
-      if (canon || stopReason === 'cancelled' || stopReason === 'error') return 'FAILED'
-      return null
+      return srcMod ? srcMod.lifecycleForStatus(canon, stopReason) : (function () {
+        if (canon === 'DONE') return 'COMPLETED'
+        if (canon === 'STOPPED') return 'STOPPED'
+        if (canon === 'BLOCKED') return 'BLOCKED'
+        if (isHumanWait(canon)) return 'WAITING_HUMAN'
+        if (canon || stopReason === 'cancelled' || stopReason === 'error') return 'FAILED'
+        return null
+      })()
     }
 
     // ── 模板 / 校验 / 编译 / 运行状态 RPC ─────────────────────────────────────
@@ -3000,6 +3030,7 @@ return {
       },
       async execute(rawArgs) {
         refreshServices()
+        await srcCore()
         // 工具平台会 deepFreeze 入参：续跑回填写到浅拷贝上
         const args = Object.assign({}, rawArgs || {})
         const taskId = String(args.taskId || '')

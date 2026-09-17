@@ -22,6 +22,16 @@ const { projectToVwf } = projectionCore;
 const { validateBlueprint, compileInputSizeViolation, COND_RE, HUMAN_DECISION_ID, HD_CONTROL_RESULTS, HD_PACKAGE_REQUIRED, HD_UNKNOWN, HD_EVENT_RECORD_KIND, HD_EVENT_TRIGGER, effectiveHeteroMode, RETRY_POLICY_DEFAULTS, RETRY_POLICY_LIMITS, validateRetryPolicy } = validatorCore;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const STATE_RECOVERY_CORE_PATH = path.join(__dirname, 'state-recovery-core.cjs');
+
+// LOC-044：编译期内联 state-recovery-core 函数体（自包含脚本，禁止手写副本）
+function stateRecoveryCoreSourceLines() {
+  let src = fs.readFileSync(STATE_RECOVERY_CORE_PATH, 'utf8');
+  src = src.replace(/^'use strict'\s*\n/, '');
+  src = src.replace(/\nmodule\.exports\s*=\s*\{[\s\S]*\}\s*;?\s*$/, '');
+  // 去掉注释行：内联进沙箱脚本后不得含 require/process 等字样（generate.test 白名单门禁）
+  return src.trim().split('\n').filter((line) => !/^\s*\/\//.test(line));
+}
 const DEFAULT_TPL_DIR = path.join(__dirname, '..', 'templates');
 const DEFAULT_OUT_DIR = path.join(__dirname, '..', '.generated');
 const DEFAULT_MANIFEST_PATH = path.join(__dirname, '..', 'dsh', 'roles', 'builtin-roles.json');
@@ -299,11 +309,13 @@ export function compileBlueprint(bp, opts = {}) {
     'const ROLE_DEFS = ' + JSON.stringify(builtinRoleDefs),
     'const BYID = {}',
     'for (const n of NODES) BYID[n.id] = n',
+    // LOC-044：状态/恢复纯逻辑内核（state-recovery-core.cjs 编译期内联）
+    ...stateRecoveryCoreSourceLines(),
     // #80 暂停/中断恢复现场：每个节点完成路由后输出检查点行（current/results/history 全量）。
     // 引擎取消后脚本返回值被强制丢弃（value=null），宿主据此行重建 resume 载荷；
     // 解析失败或缺失时宿主诚实降级（要求人工指定 entry，不猜现场）。
     // LOC-031：检查点保留已耗技术预算（tb）与跨节点激活接续键（carry）——恢复不重置已耗用量。
-    'function pwCk(next) { try { log(\'[pw-ckpt]\' + JSON.stringify({ c: next, r: results, h: history, rd: round, fb: feedback, bu: budgetUsed, mr: maxRounds, ds: decisionSeq, tb: { u: actUsed, g: actGrants, m: autoUsed(), mg: autoMsGrant, p: RETRY_POLICY, carry: carryKey ? { stage: carryStage, key: carryKey } : null } })) } catch (e) { /* 检查点失败不影响运行 */ } }',
+    'function pwCk(next) { try { log(formatCheckpointLogLine(buildCheckpointCompact({ entry: next, results: results, history: history, round: round, feedback: feedback, budgetUsed: budgetUsed, maxRounds: maxRounds, decisionSeq: decisionSeq, technicalBudget: { u: actUsed, g: actGrants, m: autoUsed(), mg: autoMsGrant, p: RETRY_POLICY, carry: carryKey ? { stage: carryStage, key: carryKey } : null } }))) } catch (e) { /* 检查点失败不影响运行 */ } }',
     // LOC-029 逐次 attempt 事件：每次真实调用（含 fanout item 与技术重试）在调用前后输出
     // [vwf-attempt] 行，宿主据此向 Formal Records Store 提交独立、可恢复且不重复的执行
     // 记录（attempt_id 由宿主按段号+序号分配并持久化；同键同内容重放幂等）。逻辑步骤
@@ -641,9 +653,7 @@ export function compileBlueprint(bp, opts = {}) {
     // LOC-030：受阻返回体（status=BLOCKED 非终态）：termination 显式描述 + blocked 现场
     //（原因码/失败节点/已耗额度/未解决问题原样保留），不冒充成功也不挂人工决策。
     'function blockedRun(term, failedNode, lastOutcome, extra) {',
-    '  const b = { reason_code: term.reason_code, business_outcome: term.business_outcome, resumable: term.resumable === true, resume_node: term.resume_node, failed_node: failedNode || null, last_outcome: lastOutcome === undefined ? null : lastOutcome }',
-    '  if (extra && typeof extra === \'object\') Object.assign(b, extra)',
-    '  return { status: \'BLOCKED\', taskId: TASK, round: round, results: results, history: history, completion: null, budgetUsed: budgetUsed, maxRounds: maxRounds, termination: term, blocked: b }',
+    '  return buildBlockedRunBody({ termination: term, failedNode: failedNode, lastOutcome: lastOutcome, blockedExtra: extra, taskId: TASK, round: round, results: results, history: history, budgetUsed: budgetUsed, maxRounds: maxRounds })',
     '}',
     'const HD_ID = ' + JSON.stringify(HUMAN_DECISION_ID),
     'const HD_CONTROL = ' + JSON.stringify(HD_CONTROL_RESULTS),
@@ -757,7 +767,7 @@ export function compileBlueprint(bp, opts = {}) {
     '    decision_package: pkg, control_event: ev, blocked_edge: blockedEdge || null,',
     '    result: outcome == null ? null : outcome, results: results, history: history, round: round,',
     '    budgetUsed: budgetUsed, maxRounds: maxRounds,',
-    '    resume: { entry: nodeId, decision_id: decisionId, startRound: round, history: history, feedback: feedback, results: results, blocked_edge: blockedEdge || null, budgetUsed: budgetUsed, maxRounds: maxRounds, decisionSeq: decisionSeq }',
+    '    resume: buildHumanWaitResume({ entry: nodeId, decisionId: decisionId, round: round, history: history, feedback: feedback, results: results, blockedEdge: blockedEdge || null, budgetUsed: budgetUsed, maxRounds: maxRounds, decisionSeq: decisionSeq, technicalBudget: null })',
     '  }',
     '  halt.technical_budget = technicalBudgetSnapshot(extra && extra.activation_key)',
     '  halt.resume.technical_budget = halt.technical_budget',
