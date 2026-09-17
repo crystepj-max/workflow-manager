@@ -554,6 +554,7 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
     await flush(); await flush()
   })
   assert.ok(state.overrideCalls.some((c) => c.op === 'clear'), '全部还原调用了 vwf.workflows.modelOverride.clear')
+  assert.deepEqual(state.overrides, {}, '回读持久化层：全部还原后该模板已无任何覆盖')
 
   // 结构只读与模型设置互不影响：模型设置走独立 RPC，未触碰结构保存
   assert.equal(state.saved.length, 0, '模型设置全程没有保存内置模板结构')
