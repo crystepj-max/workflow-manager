@@ -16,6 +16,7 @@ import {
 } from '../workspace-isolation.mjs'
 import { planTargetSync, mergeTarget, performTargetSync, buildSyncRecordEntry, integrationSyncRecordId } from '../integration-gate.mjs'
 import { recordsCommit, recordsList, recordsGet, recordsAssertIntegration } from '../records-host.mjs'
+import { digest8 } from '../revision-dependencies.mjs'
 import { appendRecord, coverageStatus, NOT_COVERING_CURRENT, COVERING, toRef } from '../formal-records.mjs'
 
 const fixtureRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.scratch', 'ws-isolation-tests')
@@ -163,14 +164,21 @@ test('G5 B4 证据链：真实同步 → 同步证据新 Revision → 重跑新 
   const reviewProof = 'proof:' + runId + ':review'
   const testProof = 'proof:' + runId + ':test'
 
-  // ① 首段：review/test 完成 → node_result + proof（依赖当时全部节点记录）
+  const syncId = integrationSyncRecordId(runId)
+  const nodeRi = (nodeId, body) => {
+    const producer = nodeId.replace('node:' + runId + ':', '')
+    return { mode: 'declared', items: [{ binding: 'from_' + producer, producer, version_ref: 'tmp-exec:1:' + digest8(body) }] }
+  }
+  const syncRi = (rev) => ({ mode: 'declared', items: [{ binding: 'sync', record_ref: { record_id: syncId, record_revision: rev }, version_ref: 'record:' + syncId + '@' + rev }] })
+
+  // ① 首段：review/test 完成 → node_result + proof（精确依赖各自节点 Revision）
   const first = recordsCommit({
     records_dir: dir, logical_run_id: runId,
     entries: [
       { type: 'node_result', record_id: reviewNode, provenance: prov(runId, 'review', 1), body_value: { verdict: 'APPROVE' } },
-      { type: 'proof', record_id: reviewProof, provenance: prov(runId, 'review', 1), body_value: { node: 'review', verified_head: ws.base_commit } },
+      { type: 'proof', record_id: reviewProof, provenance: prov(runId, 'review', 1), body_value: { node: 'review', verified_head: ws.base_commit }, resolved_inputs: nodeRi(reviewNode, { verdict: 'APPROVE' }) },
       { type: 'node_result', record_id: testNode, provenance: prov(runId, 'test', 1), body_value: { verdict: 'PASS' } },
-      { type: 'proof', record_id: testProof, provenance: prov(runId, 'test', 1), body_value: { node: 'test', verified_head: ws.base_commit } },
+      { type: 'proof', record_id: testProof, provenance: prov(runId, 'test', 1), body_value: { node: 'test', verified_head: ws.base_commit }, resolved_inputs: nodeRi(testNode, { verdict: 'PASS' }) },
     ],
   })
   assert.equal(first.ok, true)
@@ -181,7 +189,6 @@ test('G5 B4 证据链：真实同步 → 同步证据新 Revision → 重跑新 
   const merged = performTargetSync(registry, runId, plan)
   assert.equal(merged.ok, true)
 
-  const syncId = integrationSyncRecordId(runId)
   const preAssert = recordsAssertIntegration({ records_dir: dir, logical_run_id: runId, target_record_id: syncId, proofs: [toRef({ record_id: reviewProof, record_revision: 1 }), toRef({ record_id: testProof, record_revision: 1 })], target_advanced: true })
   assert.equal(preAssert.ok, false, '同步后、重跑前：旧 Proof 不得为新集成背书')
 
@@ -204,9 +211,9 @@ test('G5 B4 证据链：真实同步 → 同步证据新 Revision → 重跑新 
     records_dir: dir, logical_run_id: runId,
     entries: [
       { type: 'node_result', record_id: reviewNode, provenance: prov(runId, 'review', 2), body_value: { verdict: 'APPROVE' } },
-      { type: 'proof', record_id: reviewProof, provenance: prov(runId, 'review', 2), body_value: { node: 'review', verified_head: merged.current_head } },
+      { type: 'proof', record_id: reviewProof, provenance: prov(runId, 'review', 2), body_value: { node: 'review', verified_head: merged.current_head }, resolved_inputs: syncRi(2) },
       { type: 'node_result', record_id: testNode, provenance: prov(runId, 'test', 2), body_value: { verdict: 'PASS' } },
-      { type: 'proof', record_id: testProof, provenance: prov(runId, 'test', 2), body_value: { node: 'test', verified_head: merged.current_head } },
+      { type: 'proof', record_id: testProof, provenance: prov(runId, 'test', 2), body_value: { node: 'test', verified_head: merged.current_head }, resolved_inputs: syncRi(2) },
     ],
   })
 

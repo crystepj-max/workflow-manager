@@ -10,6 +10,7 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { computeCheckpoint } from './cwf-checkpoint.mjs'
 import { coverageStatus, COVERING } from './formal-records.mjs'
+import { coverageStatusDeep, canIssueCoveringProof } from './revision-dependencies.mjs'
 import { validateRecord } from './cwf-validate.mjs'
 
 export const WORKSPACE_MODE = {
@@ -596,7 +597,11 @@ export function assertIntegrationAllowed({ checkpoint, formalStore, targetRecord
   const id = requireText(targetRecordId, 'targetRecordId')
   const stale = []
   for (const proof of proofs) {
-    const st = coverageStatus(formalStore, proof, id)
+    if (!canIssueCoveringProof(proof)) {
+      stale.push({ proof: proof.record_id, status: 'incomplete_dependencies' })
+      continue
+    }
+    const st = coverageStatusDeep(formalStore, proof, id)
     if (st.status !== COVERING) stale.push({ proof: proof.record_id, status: st.status })
   }
   if (checkpoint.target_advanced && stale.length > 0) {

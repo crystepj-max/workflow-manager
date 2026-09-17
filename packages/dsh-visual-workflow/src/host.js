@@ -1417,6 +1417,13 @@ return {
         return lrId ? logicalRuns.get(lrId) : null
       },
       snapOf: activeSnapshot,
+      onLine: (ev, lrec) => {
+        if (!ev || !ev.n || !ev.ri || typeof ev.ri !== 'object') return
+        if (ev.a !== 'e' && ev.a !== 'l') return
+        if (ev.a === 'e' && ev.s && ev.s !== 'completed') return
+        lrec.resolved_inputs_map = lrec.resolved_inputs_map || {}
+        lrec.resolved_inputs_map[String(ev.n)] = ev.ri
+      },
     })))
     // Safe Pause 的检查点观察：仅 action=pause 等待检查点；interrupt 即时路径不经此。
     // c='$end' 的检查点代表图已走完（随后正常收束走 control_voided），不得在其上中止。
@@ -2413,7 +2420,32 @@ return {
     // LOC-026：Proof 绑定宿主签发时刻实况捕获的 candidate_ref（权威），并记录节点自报
     // candidate_sha256 的核对结论 candidate_match；捕获失败仅记 candidate_match=false
     //（闸门按 mismatch 拒绝，不当 legacy 放行）。
-    async function nodeRecordEntries(logicalRunId, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
+    //  - verifyBranch 节点强制加发 proof；dependencies 来自 resolved_inputs（LOC-034），
+    //    不再从 Store 全量推导。段内 [vwf-attempt] 的 ri 由 attempt-ledger 写入
+    //    logicalRec.resolved_inputs_map；段末扫描回退时用 legacy 规则补上游节点引用。
+    function resolvedInputsFor(logicalRec, nodeId, results, isProof, newKeys) {
+      const riMap = logicalRec.resolved_inputs_map || {}
+      if (riMap[nodeId]) return riMap[nodeId]
+      if (!isProof) return { mode: 'legacy', items: [] }
+      const idx = Array.isArray(newKeys) ? newKeys.indexOf(nodeId) : -1
+      const upstream = idx >= 0 ? newKeys.slice(0, idx) : Object.keys(results || {}).filter((k) => k !== nodeId)
+      const items = upstream.filter((k) => results[k] != null).map((k) => ({
+        binding: 'from_' + k,
+        producer: String(k),
+        version_ref: 'tmp-exec:1:00000000',
+      }))
+      const sync = logicalRec.last_gate_sync
+      if (sync && sync.record_id && sync.record_revision) {
+        items.push({
+          binding: 'sync',
+          record_ref: { record_id: sync.record_id, record_revision: sync.record_revision },
+          version_ref: 'record:' + sync.record_id + '@' + sync.record_revision,
+        })
+      }
+      return { mode: 'legacy', items }
+    }
+    async function nodeRecordEntries(logicalRec, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
+      const logicalRunId = logicalRec.logical_run_id
       const entries = []
       let cand = null
       for (const nodeId of newKeys) {
@@ -2436,6 +2468,7 @@ return {
           record_id: 'node:' + logicalRunId + ':' + nodeId,
           provenance,
           body_value: res,
+          resolved_inputs: resolvedInputsFor(logicalRec, nodeId, results, false, newKeys),
         })
         if (node && node.verifyBranch) {
           if (!cand) {
@@ -2455,6 +2488,7 @@ return {
             record_id: 'proof:' + logicalRunId + ':' + nodeId,
             provenance,
             body_value: proofBody,
+            resolved_inputs: resolvedInputsFor(logicalRec, nodeId, results, true, newKeys),
           })
         }
       }
@@ -2623,6 +2657,7 @@ return {
               last.record_revision = committed.record_revision
               last.current_head = sync.current_head
               last.merge_result = sync.merge_result
+              logicalRec.last_gate_sync = { record_id: plan.sync_record_id, record_revision: committed.record_revision }
               await markWorkspaceLifecycle(wsIdentity, 'RUNNING')
             } else if (!needRerun) {
               // 理论不可达（advanced 或 needRerun 必有一）：保守放行判定交给下一轮
@@ -2691,7 +2726,7 @@ return {
             if (rerunResults && !attRerun) {
               const newKeys = Object.keys(rerunResults).filter((k) => !beforeKeys.has(k))
               if (newKeys.length) {
-                const entries = await nodeRecordEntries(wsIdentity, dsl, rerunResults, newKeys, logicalRec.segments.length, fresh.ok && fresh.workspace ? fresh.workspace : ws, activeSnapshot(logicalRec), rerunValue && rerunValue.control_event)
+                const entries = await nodeRecordEntries(logicalRec, dsl, rerunResults, newKeys, logicalRec.segments.length, fresh.ok && fresh.workspace ? fresh.workspace : ws, activeSnapshot(logicalRec), rerunValue && rerunValue.control_event)
                 if (entries.length) await commitNodeRecords(logicalRec, entries)
               }
             }
@@ -3364,7 +3399,7 @@ return {
           if (resultsNow && !att) {
             const newKeys = Object.keys(resultsNow).filter((k) => !beforeResultKeys.has(k))
             if (newKeys.length) {
-              const entries = await nodeRecordEntries(logicalRec.logical_run_id, v.sanitized, resultsNow, newKeys, logicalRec.segments.length, ws, activeSnapshot(logicalRec), value.control_event)
+              const entries = await nodeRecordEntries(logicalRec, v.sanitized, resultsNow, newKeys, logicalRec.segments.length, ws, activeSnapshot(logicalRec), value.control_event)
               if (entries.length) await commitNodeRecords(logicalRec, entries)
             }
           }

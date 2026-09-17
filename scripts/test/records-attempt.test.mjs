@@ -13,6 +13,7 @@ import { existsSync, mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path, { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { digest8 } from '../revision-dependencies.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const RECORDS_HOST = join(here, '..', 'records-host.mjs')
@@ -49,6 +50,10 @@ function attemptInput(dir, run, attemptId, ev, extra = {}) {
 const callEnd = (k, n, verdict, extra = {}) => ({
   a: 'e', k, n, r: 0, t: 'call', s: 'completed', q: { verdict, node: n, round: k }, o: verdict, u: '$.verdict', ...extra,
 })
+function reviewRiForImplRound(k) {
+  const q = { verdict: 'PASS', node: 'impl', round: k }
+  return { mode: 'declared', items: [{ binding: 'from_impl', producer: 'impl', version_ref: 'tmp-exec:1:' + digest8(q) }] }
+}
 
 test('AC-01 8 次调用留 8 个完成 attempts；3 次评估 3 个 Revision，最新索引指向第 3 次', () => {
   const dir = recordsDir()
@@ -188,13 +193,12 @@ test('AC-04 并发提交：多进程同时写同一 Run，磁盘互斥下零丢�
 test('verifyBranch 完成事件按段末扫描同形签发 Proof：依赖当时节点 Revision，目标前进后 stale', () => {
   const dir = recordsDir()
   cli('attempt', attemptInput(dir, 'run-pf', 'a1k1', callEnd(1, 'impl', 'PASS')))
-  cli('attempt', attemptInput(dir, 'run-pf', 'a1k2', callEnd(2, 'review', 'PASS', { w: { b: 'dev-x', h: 'head-A' } })))
+  cli('attempt', attemptInput(dir, 'run-pf', 'a1k2', callEnd(2, 'review', 'PASS', { w: { b: 'dev-x', h: 'head-A' }, ri: reviewRiForImplRound(1) })))
   const list1 = cli('list', { records_dir: dir, logical_run_id: 'run-pf' })
   const proofRec = list1.records.find((r) => r.record_id === 'proof:run-pf:review')
   assert.ok(proofRec, 'verifyBranch 完成事件签发 proof_decision')
-  // 与段末扫描同形：依赖 = 签发时刻全部节点记录当前 Revision（含刚落盘的 review 自身）
   assert.ok(proofRec.dependencies.some((d) => d.record_id === 'node:run-pf:impl' && d.record_revision === 1), 'Proof 依赖签发时 impl 当前 Revision')
-  assert.ok(proofRec.dependencies.some((d) => d.record_id === 'node:run-pf:review' && d.record_revision === 1), 'Proof 依赖含 review 自身刚推进的 Revision')
+  assert.ok(!proofRec.dependencies.some((d) => d.record_id === 'node:run-pf:review'), 'Proof 不再机械依赖全部节点')
   assert.equal(proofRec.body.value.verified_head, 'head-A')
   assert.equal(proofRec.body.value.verified_branch, 'dev-x')
   // impl 前进后旧 Proof 判 stale（保留不删）

@@ -1294,7 +1294,7 @@ export function compileBlueprint(bp, opts = {}) {
     ] : []),
     '  results[current] = res',
     '  markExec(current, res)',
-    '  attEnd(current, round, \'call\', \'completed\', undefined, Object.assign({ q: res }, attOf(current, res), n.verifyBranch ? { w: { b: res.verified_branch, h: res.verified_head } } : {}))',
+    '  attEnd(current, round, \'call\', \'completed\', undefined, Object.assign({ q: res }, attOf(current, res), n.verifyBranch ? { w: { b: res.verified_branch, h: res.verified_head } } : {}, RESOLVED_INPUTS[current] ? { ri: RESOLVED_INPUTS[current] } : {}))',
     '  log((n.label || current) + \' → \' + (ok ? \'通过\' : \'未通过\'))',
     '  if (A.injectHalt && A.injectHalt.node === current) {',
     '    if (!nodeDeclaresHd(current)) return { status: \'ERROR\', detail: \'无蓝图声明不得升级 Human Decision\' }',

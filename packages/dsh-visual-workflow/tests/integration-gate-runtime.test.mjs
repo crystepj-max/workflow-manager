@@ -304,8 +304,13 @@ test('W1 主场景：目标前进 → 自动锁/同步/新 Revision/重跑 → �
   const list = recordsList({ records_dir: recordsHostDir, logical_run_id: 'task-1' })
   const reviewProofRevs = list.records.filter((r) => r.record_id === 'proof:task-1:review')
   assert.equal(reviewProofRevs.length, 2)
-  const staleRows = list.coverage.filter((c) => c.proof.record_id === 'proof:task-1:review' && c.proof.record_revision === 1 && c.status === 'not_covering_current')
-  assert.ok(staleRows.length > 0, '旧 HEAD 的 Proof 不为新集成背书')
+  const oldAssert = recordsAssertIntegration({
+    records_dir: recordsHostDir, logical_run_id: 'task-1',
+    target_record_id: integrationSyncRecordId('task-1'),
+    proofs: [{ record_id: 'proof:task-1:review', record_revision: 1 }, { record_id: 'proof:task-1:test', record_revision: 1 }],
+    target_advanced: true,
+  })
+  assert.equal(oldAssert.ok, false, '旧 HEAD 的 Proof 不为新集成背书')
   const syncRecord = recordsGet({ records_dir: recordsHostDir, logical_run_id: 'task-1', record_id: integrationSyncRecordId('task-1') })
   assert.equal(syncRecord.current_revision, 1)
   const okAssert = recordsAssertIntegration({

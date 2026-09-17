@@ -436,6 +436,10 @@ function normalizeProvenance(p) {
     throw new Error('provenance.attempt 必须是正整数')
   }
   if (p.lifecycle_event) out.lifecycle_event = requireText(p.lifecycle_event, 'provenance.lifecycle_event')
+  if (p.input_mode) out.input_mode = requireText(p.input_mode, 'provenance.input_mode')
+  if (p.dependency_source) out.dependency_source = requireText(p.dependency_source, 'provenance.dependency_source')
+  if (p.dependency_coverage) out.dependency_coverage = requireText(p.dependency_coverage, 'provenance.dependency_coverage')
+  if (p.resolved_inputs_snapshot !== undefined) out.resolved_inputs_snapshot = structuredClone(p.resolved_inputs_snapshot)
   if (p.related_decision) out.related_decision = normalizeRef(p.related_decision, 'related_decision')
   if (p.related_guidance) out.related_guidance = normalizeRef(p.related_guidance, 'related_guidance')
   if (p.portable) {
