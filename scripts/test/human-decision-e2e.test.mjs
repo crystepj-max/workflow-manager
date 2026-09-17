@@ -90,18 +90,6 @@ test('#122 STOP / USER_ACCEPTED / ADD_BUDGET 各一条', async () => {
   assert.equal(stopped.result.status, 'STOPPED')
   assert.ok(!stopped.agentCalls.some((c) => c.label === '收口'))
 
-  const halt2 = await runBp(hd, { 执行: confirm }, { taskId: 'e2e-accept' })
-  const accepted = await runBp(hd, { 收口: { done: true } }, {
-    taskId: 'e2e-accept',
-    entry: halt2.result.node,
-    decision_id: halt2.result.decision_id,
-    user_choice: 'USER_ACCEPTED',
-    results: halt2.result.results,
-  })
-  assert.equal(accepted.result.status, 'DONE')
-  assert.equal(accepted.result.results.work.status, 'confirm')
-  assert.ok(!accepted.agentCalls.some((c) => c.label === '收口'))
-
   const halt3 = await runBp(hd, { 执行: confirm }, {
     taskId: 'e2e-budget',
     injectHalt: {
@@ -113,6 +101,19 @@ test('#122 STOP / USER_ACCEPTED / ADD_BUDGET 各一条', async () => {
   assert.equal(halt3.result.status, 'WAITING_HUMAN')
   assert.equal(halt3.result.reason, 'MAX_ROUNDS_REACHED')
   assert.ok(halt3.result.decision_package.options.some((o) => o.id === 'ADD_BUDGET'))
+  const accepted = await runBp(hd, { 收口: { done: true } }, {
+    taskId: 'e2e-budget',
+    entry: halt3.result.node,
+    decision_id: halt3.result.decision_id,
+    user_choice: 'USER_ACCEPTED',
+    results: halt3.result.results,
+    history: halt3.result.history,
+    halt_reason: halt3.result.reason,
+    blocked_edge: halt3.result.blocked_edge,
+  })
+  assert.equal(accepted.result.status, 'DONE')
+  assert.equal(accepted.result.results.work.status, 'confirm')
+  assert.ok(!accepted.agentCalls.some((c) => c.label === '收口'))
   const budgeted = await runBp(hd, { 收口: { done: true } }, {
     taskId: 'e2e-budget',
     entry: halt3.result.node,

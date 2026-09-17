@@ -144,7 +144,8 @@ test('#118 新模式 outcomePath 命中 $human-decision 翻译为 WAITING_HUMAN�
   for (const key of HD_PACKAGE_REQUIRED) {
     assert.ok(result.decision_package && result.decision_package[key], 'Package 缺 ' + key)
   }
-  assert.ok(result.decision_package.options.some((o) => o.id === 'USER_ACCEPTED'))
+  assert.ok(result.decision_package.options.some((o) => o.id === 'CONFIRM_PROCEED'))
+  assert.ok(!result.decision_package.options.some((o) => o.id === 'USER_ACCEPTED'), '业务出边蓝图不得混入通用 USER_ACCEPTED 控制项')
   assert.equal(result.control_event.record_kind, 'DECISION')
   assert.equal(result.control_event.user_choice, null)
   assert.equal(result.control_event.triggering_node_outcome.verdict, 'CONFIRM')
@@ -189,7 +190,7 @@ test('#119 STOP 后本 Run 不再执行；不派生新 Run', async () => {
   assert.ok(!r2.agentCalls.some((c) => c.label === '收口'), 'STOP 不得续跑下游')
 })
 
-test('#119 USER_ACCEPTED 完成且不把原 Outcome 改成 PASS', async () => {
+test('#119 业务出边蓝图拒绝通用 USER_ACCEPTED 控制项（LOC-028）', async () => {
   const halt = await runHd({ 执行: workOk })
   const r2 = await runHd({ 收口: { done: true } }, {
     entry: halt.result.node,
@@ -197,11 +198,10 @@ test('#119 USER_ACCEPTED 完成且不把原 Outcome 改成 PASS', async () => {
     user_choice: 'USER_ACCEPTED',
     results: halt.result.results,
   })
-  assert.equal(r2.result.status, 'DONE')
-  assert.equal(r2.result.completion, null)
+  assert.equal(r2.result.status, 'WAITING_HUMAN')
+  assert.equal(r2.result.rejected_choice, 'USER_ACCEPTED')
   assert.deepEqual(r2.result.results.work, halt.result.results.work)
   assert.equal(r2.result.results.work.status, 'confirm')
-  assert.notEqual(r2.result.results.work.status, 'PASS')
   assert.ok(!r2.agentCalls.some((c) => c.label === '收口'))
 })
 
