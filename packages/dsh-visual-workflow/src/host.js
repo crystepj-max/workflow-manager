@@ -85,6 +85,8 @@ return {
     const QUALITY_COST_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/run-quality-cost.mjs' : null
     // LOC-032：受管理外部操作账本 + execute-or-reconcile（与 records-host 同进程边界模式）
     const OPERATIONS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/operations-host.mjs' : null
+    // LOC-037：收口事实整理与授权交付动作分离（与 operations-host 同进程边界模式）
+    const DELIVERY_CLOSEOUT_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/delivery-closeout-host.mjs' : null
 
     // 项目根：会话 cwd 只在模型发起的调用中存在（浏览器 RPC / 审批激活都没有），
     // 因此每次实时探测，记住最近一次有效值，最后兜底 sandboxPolicy.workspaceRoot。
@@ -766,6 +768,9 @@ return {
         // Formal Records Store 互相引用（LOC-008）：提交成功后由宿主刷新（count + 时间）
         formal_records: null,
         workspace: null,
+        // LOC-028：宿主签发的人工决定与消费记录（防伪造 completion / 幂等恢复）
+        human_decisions: [],
+        consumed_decisions: {},
         human_waits: [],
       }
       // Rev 1 冻结：工作流定义 + 角色（编译产物内联角色正文与路由）+ Provider/Model
@@ -1009,6 +1014,8 @@ return {
         evaluation_baselines: rec.evaluation_baselines || [],
         formal_records: rec.formal_records || null,
         workspace: rec.workspace || null,
+        human_decisions: rec.human_decisions || [],
+        consumed_decisions: rec.consumed_decisions || {},
         human_waits: rec.human_waits || [],
       }
     }
@@ -1048,6 +1055,8 @@ return {
         evaluation_baselines: Array.isArray(data.evaluation_baselines) ? data.evaluation_baselines.filter((r) => r && typeof r === 'object') : [],
         formal_records: asObj(data.formal_records),
         workspace: asObj(data.workspace),
+        human_decisions: Array.isArray(data.human_decisions) ? data.human_decisions.filter((d) => d && typeof d === 'object') : [],
+        consumed_decisions: asObj(data.consumed_decisions) || {},
         human_waits: Array.isArray(data.human_waits) ? data.human_waits.filter((w) => w && typeof w === 'object') : [],
       }
       logicalRuns.set(id, rec)
@@ -1431,6 +1440,13 @@ return {
         return lrId ? logicalRuns.get(lrId) : null
       },
       snapOf: activeSnapshot,
+      onLine: (ev, lrec) => {
+        if (!ev || !ev.n || !ev.ri || typeof ev.ri !== 'object') return
+        if (ev.a !== 'e' && ev.a !== 'l') return
+        if (ev.a === 'e' && ev.s && ev.s !== 'completed') return
+        lrec.resolved_inputs_map = lrec.resolved_inputs_map || {}
+        lrec.resolved_inputs_map[String(ev.n)] = ev.ri
+      },
     })))
     // Safe Pause 的检查点观察：仅 action=pause 等待检查点；interrupt 即时路径不经此。
     // c='$end' 的检查点代表图已走完（随后正常收束走 control_voided），不得在其上中止。
@@ -1453,6 +1469,51 @@ return {
       rec.control_events.push(ev)
       rec.updated_at = ev.at
       return ev
+    }
+
+    // ── LOC-035 产物清单（纯逻辑内核 = dist/artifact-manifest.cjs）────────────────────
+    // 编译脚本节点完成时输出 [am-submit] → 宿主读字节核验、不可变快照与 manifest 索引；
+    // WAITING_HUMAN（READY_FOR_HUMAN）前检查必需产物，缺失则 BLOCKED 但保留专业结果。
+    let amKernelPromise = null
+    function amKernel() {
+      if (!amKernelPromise) amKernelPromise = loadDist('artifact-manifest.cjs').catch(() => { amKernelPromise = null; return null })
+      return amKernelPromise
+    }
+    const amRuns = new Map()
+    function observeArtifactSubmit(engineRunId, message) {
+      const amc = amRuns.get(String(engineRunId || ''))
+      if (!amc) return
+      const req = amc.kernel.parseSubmitRequest(message)
+      if (!req) return
+      let result
+      try {
+        const prev = amc.byNode.get(req.node) || null
+        result = amc.kernel.processSubmit({ cwd: amc.cwd, runDir: amc.runDir, taskId: amc.taskId, req, prevManifest: prev })
+      } catch (e) {
+        result = { ok: false, error: errMsg(e) }
+      }
+      if (result && result.ok && result.manifest) {
+        amc.byNode.set(req.node, result.manifest)
+        const lrId = logicalRunByEngineRun.get(String(engineRunId))
+        const lrec = lrId ? logicalRuns.get(lrId) : null
+        if (lrec) {
+          lrec.artifact_manifests = lrec.artifact_manifests || {}
+          lrec.artifact_manifests[req.node] = result.manifest
+          controlEvent(lrec, 'artifact_manifest_submitted', {
+            node: req.node,
+            revision: result.manifest.revision,
+            materials_status: result.manifest.materials_status,
+            required_complete: result.manifest.required_complete,
+          })
+          requestLogicalPersist(lrec.logical_run_id)
+        }
+      }
+    }
+    function artifactGateOf(engineRunId, nodeId) {
+      const amc = amRuns.get(String(engineRunId || ''))
+      if (!amc) return null
+      const man = amc.byNode.get(String(nodeId || ''))
+      return amc.kernel.gateBlockOf(man, nodeId)
     }
 
     // ── LOC-027 评价基线冻结契约（纯逻辑内核 = dist/evaluation-baseline.cjs，进程边界留在宿主）──
@@ -1692,6 +1753,7 @@ return {
       // LOC-027 评价基线：冻结请求观察 + 冻结待决时的检查点中止
       observeBaselineRequest(info.id, message)
       maybeAbortAtBaselinePending(info.id, message)
+      observeArtifactSubmit(info.id, message)
       attk().then((t) => t.line(info.id, message)).catch(() => { /* 内核缺失：段末扫描回退 */ })
     })
     ctx.on('workflow/agent-start', (info, agent) => onRun(info.id, (rec) => rec.agents.push({ seq: agent.seq, label: String(agent.label || ''), phase: agent.phase ? String(agent.phase) : '', outcome: 'running' })))
@@ -1702,6 +1764,7 @@ return {
       // LOC-027：无待决冻结的基线上下文随段结束回收（待决条目等待闸门消费，不在此删）
       const ebcEnd = ebRuns.get(String(info.id || ''))
       if (ebcEnd && ebcEnd.pending.size === 0) ebRuns.delete(String(info.id || ''))
+      amRuns.delete(String(info.id || ''))
       onRun(info.id, (rec) => {
         // wf_run 已回写的脚本权威终态（WAITING_HUMAN / DONE / …）不得被迟到的 end 盖掉
         if (!TERMINAL_STATUS_RE.test(String(rec.status || ''))) rec.status = String(result.stopReason)
@@ -2006,6 +2069,14 @@ return {
     registerRpc('vwf.operations.reconcile', (a) => opCall('reconcile', a, ['run_id', 'logical_action']))
     registerRpc('vwf.operations.get', (a) => opCall('get', a, ['run_id', 'logical_action']))
     registerRpc('vwf.operations.list', (a) => opCall('list', a, ['run_id']))
+    // LOC-037：收口交付动作（事实整理 / 动作计划 / 完整收口）。必填 run_id；closeout 另需 operations_dir。
+    const deliveryCall = (cmd, a, fields) => {
+      for (const k of fields) if (!String(((a || {})[k]) || '').trim()) return fail('缺少 ' + k)
+      return deliveryCloseoutHostCall(cmd, a)
+    }
+    registerRpc('vwf.delivery.gatherFacts', (a) => deliveryCall('gather-facts', a, ['run_id']))
+    registerRpc('vwf.delivery.planActions', (a) => deliveryCall('plan-actions', a, ['run_id']))
+    registerRpc('vwf.delivery.closeout', (a) => deliveryCall('closeout', a, ['run_id']))
     registerRpc('vwf.artifacts.ingest', async (a) => {
       const { runId, nodeId, artifacts } = a
       if (!runId || !nodeId || !Array.isArray(artifacts) || !artifacts.length) return fail('缺少 runId / nodeId / artifacts')
@@ -2472,6 +2543,23 @@ return {
         }
       } catch (e) { return { ok: false, error: 'operations host 输出不可解析：' + errMsg(e), raw: r.stdout } }
     }
+    // LOC-037：收口交付动作进程边界（与 operationsHostCall 同模式）
+    async function deliveryCloseoutHostCall(cmd, input, opts) {
+      if (!DELIVERY_CLOSEOUT_HOST || (await readTextIfExists(DELIVERY_CLOSEOUT_HOST)) === null) return { ok: false, notFound: true, error: 'delivery-closeout-host.mjs 未找到（LOC-037 运行时集成未部署）' }
+      const d = await homeDirs()
+      if (!d) return { ok: false, error: '无法解析 DSH Home：operations 目录不可用' }
+      const payload = { ...input, operations_dir: input.operations_dir || d.operationsDir }
+      const r = await runNode([DELIVERY_CLOSEOUT_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 120000, maxBytes: 1024 * 1024 })
+      if (!r.ok) return { ok: false, error: 'delivery closeout host 调用失败：' + r.detail }
+      try {
+        const parsed = JSON.parse(r.stdout)
+        return parsed.ok ? parsed : {
+          ok: false, code: parsed.code, status: parsed.status,
+          delivery_status: parsed.delivery_status,
+          error: parsed.error || parsed.message || 'delivery closeout host 业务错误',
+        }
+      } catch (e) { return { ok: false, error: 'delivery closeout host 输出不可解析：' + errMsg(e), raw: r.stdout } }
+    }
     // 节点收尾产物 → commit 条目（单一提交通道的宿主侧采集）：
     //  - 每个本段新完成节点 → node:<logical_run_id>:<nodeId> 的追加 Revision；
     //  - verifyBranch 节点（审核/测试）强制加发 proof：<logical_run_id>:<nodeId> 的
@@ -2482,7 +2570,32 @@ return {
     // LOC-026：Proof 绑定宿主签发时刻实况捕获的 candidate_ref（权威），并记录节点自报
     // candidate_sha256 的核对结论 candidate_match；捕获失败仅记 candidate_match=false
     //（闸门按 mismatch 拒绝，不当 legacy 放行）。
-    async function nodeRecordEntries(logicalRunId, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
+    //  - verifyBranch 节点强制加发 proof；dependencies 来自 resolved_inputs（LOC-034），
+    //    不再从 Store 全量推导。段内 [vwf-attempt] 的 ri 由 attempt-ledger 写入
+    //    logicalRec.resolved_inputs_map；段末扫描回退时用 legacy 规则补上游节点引用。
+    function resolvedInputsFor(logicalRec, nodeId, results, isProof, newKeys) {
+      const riMap = logicalRec.resolved_inputs_map || {}
+      if (riMap[nodeId]) return riMap[nodeId]
+      if (!isProof) return { mode: 'legacy', items: [] }
+      const idx = Array.isArray(newKeys) ? newKeys.indexOf(nodeId) : -1
+      const upstream = idx >= 0 ? newKeys.slice(0, idx) : Object.keys(results || {}).filter((k) => k !== nodeId)
+      const items = upstream.filter((k) => results[k] != null).map((k) => ({
+        binding: 'from_' + k,
+        producer: String(k),
+        version_ref: 'tmp-exec:1:00000000',
+      }))
+      const sync = logicalRec.last_gate_sync
+      if (sync && sync.record_id && sync.record_revision) {
+        items.push({
+          binding: 'sync',
+          record_ref: { record_id: sync.record_id, record_revision: sync.record_revision },
+          version_ref: 'record:' + sync.record_id + '@' + sync.record_revision,
+        })
+      }
+      return { mode: 'legacy', items }
+    }
+    async function nodeRecordEntries(logicalRec, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
+      const logicalRunId = logicalRec.logical_run_id
       const entries = []
       let cand = null
       for (const nodeId of newKeys) {
@@ -2505,6 +2618,7 @@ return {
           record_id: 'node:' + logicalRunId + ':' + nodeId,
           provenance,
           body_value: res,
+          resolved_inputs: resolvedInputsFor(logicalRec, nodeId, results, false, newKeys),
         })
         if (node && node.verifyBranch) {
           if (!cand) {
@@ -2524,6 +2638,7 @@ return {
             record_id: 'proof:' + logicalRunId + ':' + nodeId,
             provenance,
             body_value: proofBody,
+            resolved_inputs: resolvedInputsFor(logicalRec, nodeId, results, true, newKeys),
           })
         }
       }
@@ -2692,6 +2807,7 @@ return {
               last.record_revision = committed.record_revision
               last.current_head = sync.current_head
               last.merge_result = sync.merge_result
+              logicalRec.last_gate_sync = { record_id: plan.sync_record_id, record_revision: committed.record_revision }
               await markWorkspaceLifecycle(wsIdentity, 'RUNNING')
             } else if (!needRerun) {
               // 理论不可达（advanced 或 needRerun 必有一）：保守放行判定交给下一轮
@@ -2760,7 +2876,7 @@ return {
             if (rerunResults && !attRerun) {
               const newKeys = Object.keys(rerunResults).filter((k) => !beforeKeys.has(k))
               if (newKeys.length) {
-                const entries = await nodeRecordEntries(wsIdentity, dsl, rerunResults, newKeys, logicalRec.segments.length, fresh.ok && fresh.workspace ? fresh.workspace : ws, activeSnapshot(logicalRec), rerunValue && rerunValue.control_event)
+                const entries = await nodeRecordEntries(logicalRec, dsl, rerunResults, newKeys, logicalRec.segments.length, fresh.ok && fresh.workspace ? fresh.workspace : ws, activeSnapshot(logicalRec), rerunValue && rerunValue.control_event)
                 if (entries.length) await commitNodeRecords(logicalRec, entries)
               }
             }
@@ -2925,6 +3041,7 @@ return {
           if (emptyObj(args.results) && parked.results) args.results = parked.results
           if (emptyObj(args.results) && parked.node && parked.control_event && parked.control_event.triggering_node_outcome) args.results = { [parked.node]: parked.control_event.triggering_node_outcome }
           if (args.history == null && parked.history) args.history = parked.history
+          if (!args.halt_reason && parked.reason) args.halt_reason = parked.reason
           for (const k of ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']) {
             const argKey = k === 'round' ? 'startRound' : k
             if (args[argKey] == null && parked[k] != null) args[argKey] = parked[k]
@@ -3111,11 +3228,61 @@ return {
         if (ws) log('workspace allocated: ' + ws.workspace_id + ' at ' + ws.workspace_path)
         else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为')
 
+        // LOC-028：人工决策续跑必须由宿主签发 decision_ref（含候选绑定），禁止信任模型自报
+        let hostDecisionRef = null
+        if (isHdResume && logicalRec) {
+          let candidateRef = null
+          if (ws && ws.source_path) {
+            try {
+              const cap = await wsHostCall('captureCandidate', { logical_run_id: logicalRec.logical_run_id, capability: capabilityFor(logicalRec.logical_run_id) })
+              candidateRef = cap && cap.candidate ? cap.candidate : null
+            } catch (e) { log('captureCandidate（人工决定）失败：' + errMsg(e)) }
+          }
+          hostDecisionRef = {
+            decision_id: String(args.decision_id),
+            logical_run_id: logicalRec.logical_run_id,
+            checkpoint_id: String(args.decision_id),
+            candidate_ref: candidateRef,
+            choice: String(args.user_choice),
+            actor_source: 'host_ui',
+            decided_at: new Date().toISOString(),
+          }
+          if (hostDecisionRef.logical_run_id !== logicalRec.logical_run_id) {
+            return '错误：人工决定归属 Run 不匹配，拒绝续跑。'
+          }
+          const dig = candidateRef && candidateRef.version && candidateRef.version.content_sha256
+            ? String(candidateRef.version.content_sha256) : null
+          const prior = logicalRec.consumed_decisions && logicalRec.consumed_decisions[hostDecisionRef.decision_id]
+          if (prior) {
+            if (prior.candidate_digest && dig && prior.candidate_digest !== dig) {
+              return '错误：成果在决定后已变化，须重新获得针对新版本的验收（decision_id=' + hostDecisionRef.decision_id + '）。'
+            }
+            if (prior.completion && (args.user_choice === 'USER_ACCEPTED' || args.user_choice === 'ACCEPT' || args.user_choice === 'CONDITIONAL_PASS')) {
+              return JSON.stringify({
+                runId: holder && holder.id ? holder.id : 'idempotent',
+                stopReason: 'completed',
+                value: {
+                  status: 'DONE',
+                  taskId: args.taskId,
+                  decision_id: hostDecisionRef.decision_id,
+                  user_choice: args.user_choice,
+                  completion: prior.completion,
+                  idempotent_replay: true,
+                  results: args.results || (parked && parked.results) || null,
+                },
+                agentsStarted: 0,
+              })
+            }
+          }
+          logicalRec.human_decisions = (logicalRec.human_decisions || []).concat([hostDecisionRef])
+          controlEvent(logicalRec, 'human_decision_recorded', { decision_id: hostDecisionRef.decision_id, choice: hostDecisionRef.choice, candidate_digest: dig })
+        }
+
         const scriptArgs = Object.assign({
           taskId: args.taskId, runDir: args.runDir, roleDir: args.roleDir || c.roleDir, baseBranch: args.baseBranch,
           issueRef: args.issueRef, issueTitle: args.issueTitle, issueBody: args.issueBody, issueComments: args.issueComments,
           requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
-          decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results,
+          decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results, halt_reason: args.halt_reason,
           budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
           technical_budget: args.technical_budget, technical_budget_grant: args.technical_budget_grant, retry_policy_overrides: args.retry_policy_overrides,
           // #80：暂停期间的用户指导（Run 级）与最新基线修订文本——经脚本 runtimeCtx/issueBlock
@@ -3126,7 +3293,12 @@ return {
           // #79: 快照修订的 Provider/Model（Codex R2 ②：active 快照的合并绑定；仅续跑
           // 生效——新启透传会让脚本用覆盖模型执行而 Rev1 快照仍记蓝图绑定，归因失真）
           model_overrides: modelOverridesForExec,
+          decision_ref: hostDecisionRef || undefined,
+          consumed_decisions: logicalRec ? (logicalRec.consumed_decisions || {}) : undefined,
         }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined) : {})
+        if (hostDecisionRef && ws && ws.source_path && hostDecisionRef.candidate_ref) {
+          scriptArgs.candidate_ref = hostDecisionRef.candidate_ref
+        }
         for (const k of Object.keys(scriptArgs)) if (scriptArgs[k] === undefined) delete scriptArgs[k]
 
         // 启动引擎前先标 RUNNING：崩溃/start 抛错不得把 workspace 永久留在 READY
@@ -3170,6 +3342,19 @@ return {
           const ebk = await ebKernel()
           if (ebk) ebRuns.set(runId, { decl: ebDecl, kernel: ebk, cwd: (ws && ws.source_path) || projectRoot() || '', runDir: args.runDir || null, taskId: logicalTaskId, pending: new Map() })
           else log('评价基线内核不可用（dist/evaluation-baseline.cjs 缺失）：本运行基线保持未核验口径')
+        }
+        const amk = await amKernel()
+        if (amk && logicalRec) {
+          const runDirRel = args.runDir || ('.agent-runs/' + logicalTaskId)
+          amRuns.set(runId, {
+            kernel: amk,
+            cwd: projectRoot() || ((ws && ws.source_path) || ''),
+            runDir: runDirRel,
+            taskId: logicalTaskId,
+            byNode: new Map(),
+          })
+        } else if (logicalRec) {
+          log('产物清单内核不可用（dist/artifact-manifest.cjs 缺失）：材料就绪闸门停用')
         }
         // #79：本段执行挂到逻辑运行（READY/WAITING_HUMAN → RUNNING，清 reason）
         if (logicalRec) {
@@ -3338,6 +3523,17 @@ return {
                 path: comp.path !== undefined && comp.path !== null ? String(comp.path) : '',
               }
             }
+            // LOC-028：记录已消费的人工决定，供幂等恢复与候选变化拦截
+            const consumed = value && value.consumed_decision
+            if (consumed && consumed.decision_id) {
+              logicalRec.consumed_decisions = Object.assign({}, logicalRec.consumed_decisions || {}, {
+                [String(consumed.decision_id)]: {
+                  candidate_digest: consumed.candidate_digest || null,
+                  completion: consumed.completion || logicalRec.completion || null,
+                  consumed_at: Date.now(),
+                },
+              })
+            }
           }
           // LOC-029 完成顺序：保存结果（脚本）→ 逐次提交确认（Store）→ 更新最新索引
           // 与检查点 → 推进。确认失败的段 fail-closed：保留专业结论与既有证据，
@@ -3366,7 +3562,7 @@ return {
           if (resultsNow && !att) {
             const newKeys = Object.keys(resultsNow).filter((k) => !beforeResultKeys.has(k))
             if (newKeys.length) {
-              const entries = await nodeRecordEntries(logicalRec.logical_run_id, v.sanitized, resultsNow, newKeys, logicalRec.segments.length, ws, activeSnapshot(logicalRec), value.control_event)
+              const entries = await nodeRecordEntries(logicalRec, v.sanitized, resultsNow, newKeys, logicalRec.segments.length, ws, activeSnapshot(logicalRec), value.control_event)
               if (entries.length) await commitNodeRecords(logicalRec, entries)
             }
           }
@@ -3402,6 +3598,34 @@ return {
                 },
                 agentsStarted: (result && result.agentsStarted) || 0,
                 evaluation_baseline_gate: { decision: 'blocked', code: conflict.code },
+              })
+            }
+          }
+          // LOC-035：材料就绪闸门——WAITING_HUMAN 前检查节点产物 manifest；必需缺失
+          // 则 BLOCKED（专业结果保留在 value.results，不宣称验收材料就绪）。
+          if (canon === 'WAITING_HUMAN' && value && value.node) {
+            const ag = artifactGateOf(currentRunId, value.node)
+            if (ag) {
+              logicalSetState(logicalRec, 'BLOCKED', logicalReason(ag.code, ag.message))
+              controlEvent(logicalRec, ag.event, { node: value.node, code: ag.code, manifest_revision: ag.manifest_revision })
+              await refreshWorkspaceContext(logicalRec, wsIdentity)
+              requestLogicalPersist(logicalRec.logical_run_id)
+              onRun(currentRunId, (r) => { r.status = 'BLOCKED'; r.reason = ag.code })
+              if (ws) await markWorkspaceLifecycle(wsIdentity, 'BLOCKED')
+              return JSON.stringify({
+                runId: currentRunId,
+                stopReason: result && result.stopReason,
+                value: {
+                  status: 'BLOCKED',
+                  code: ag.code,
+                  message: ag.message,
+                  recovery_hint: ag.recovery_hint || null,
+                  node: value.node,
+                  results: value.results,
+                  artifact_manifest: ag.entries || null,
+                },
+                agentsStarted: (result && result.agentsStarted) || 0,
+                artifact_manifest_gate: { decision: 'blocked', code: ag.code },
               })
             }
           }
@@ -3495,7 +3719,7 @@ return {
         refreshServices()
         const d = await homeDirs()
         return JSON.stringify({
-          pluginRoot: PLUGIN_ROOT, codeRoot: CODE_ROOT, dist: DIST, generator: GENERATOR, workspaceHost: WS_HOST, recordsHost: RECORDS_HOST, operationsHost: OPERATIONS_HOST,
+          pluginRoot: PLUGIN_ROOT, codeRoot: CODE_ROOT, dist: DIST, generator: GENERATOR, workspaceHost: WS_HOST, recordsHost: RECORDS_HOST, operationsHost: OPERATIONS_HOST, deliveryCloseoutHost: DELIVERY_CLOSEOUT_HOST,
           projectRoot: projectRoot(), dshHome: await dshHome(), generatedRoots: generatedRoots(), userDir: d && d.userDir, skillRoot: d && d.skillRoot, runsDir: d && d.runsDir, recordsDir: d && d.recordsDir,
           fsAvailable: fs !== undefined, subprocessAvailable: subprocess !== undefined, nodePath: await resolveNode(),
         }, null, 2)

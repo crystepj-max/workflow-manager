@@ -13,6 +13,8 @@ import projectionCore from './projection-core.cjs';
 // 角色库内核（候选二深化）：内置角色清单唯一事实源 = dsh/roles/builtin-roles.json；
 // 正文安全读取与「被引用角色文件打包」共享内核实现（含自定义角色——dispatcher 等）。
 import roleLibrary from './role-library.cjs';
+import exploreCoverageCore from './explore-coverage.cjs';
+import { runtimeHelpersSource } from './human-completion.mjs';
 
 const { buildSnapshot, readRoleFileSafe, collectReferencedRoleFiles } = roleLibrary;
 const { projectToVwf } = projectionCore;
@@ -179,6 +181,10 @@ export function compileBlueprint(bp, opts = {}) {
   // LOC-030：M2 受阻开关（仅声明 control.maxRoundsExhausted='BLOCKED' 的模板生效，
   // 当前即建设模板）：自动返工额度耗尽不再挂人工决策，而是 BLOCKED（可恢复受阻）并释放并发
   const maxRoundsExhaustedBlocked = !!(bp.control && bp.control.maxRoundsExhausted === 'BLOCKED');
+  // LOC-036（wf-explore）：额度耗尽仍 NEEDS_RESEARCH → 保留原裁决并收口 INSUFFICIENT
+  const maxRoundsExhaustedInsufficient = !!(bp.control && bp.control.maxRoundsExhausted === 'INSUFFICIENT');
+  const hasExploreCoverage = bp.id === 'wf-explore';
+  const exploreCoverageRuntime = hasExploreCoverage ? exploreCoverageCore.runtimeSource() : '';
   const terminations = terminationDescriptors(bp);
   // LOC-025 裁决一致性：仅声明了 output.consistency 的蓝图才注入路由前契约校验。
   const hasConsistencyDecl = Array.isArray(bp.nodes) && bp.nodes.some((n) => n && n.output && n.output.consistency);
@@ -284,6 +290,9 @@ export function compileBlueprint(bp, opts = {}) {
     // 技术执行段结束 ≠ 业务完成：BLOCKED 非终态可恢复；完成必须带有效完成映射。
     'const TERMINATIONS = ' + JSON.stringify(terminations),
     'const MAX_ROUNDS_EXHAUSTED_BLOCKED = ' + (maxRoundsExhaustedBlocked ? 'true' : 'false'),
+    'const MAX_ROUNDS_EXHAUSTED_INSUFFICIENT = ' + (maxRoundsExhaustedInsufficient ? 'true' : 'false'),
+    'const EXPLORE_COVERAGE = ' + (hasExploreCoverage ? 'true' : 'false'),
+    ...(hasExploreCoverage && exploreCoverageRuntime ? exploreCoverageRuntime.split('\n') : []),
     // 内置角色清单（单一事实源 = dsh/roles/builtin-roles.json）：roleRef 据此决定内置/自定义读取优先级
     'const BUILTIN_ROLE_IDS = ' + JSON.stringify(builtinRoleIds),
     // 内置角色正文（#129 遗留项 2）：编译期内联，临时编译自包含；缺失时 roleRef 走读路径回退
@@ -305,6 +314,27 @@ export function compileBlueprint(bp, opts = {}) {
     'let lastAttRk = \'normal\'',
     'function attLog(ev) { try { log(\'[vwf-attempt]\' + JSON.stringify(ev)) } catch (e) { /* 证据事件失败不影响编排 */ } }',
     'function attEnd(n, r, t, s, x, extra) { attLog(Object.assign({ a: \'e\', k: AWK, n: n, r: r, t: t, s: s }, x === undefined ? {} : { x: String(x).slice(0, 500) }, extra || {})) }',
+    // LOC-035 产物清单：节点完成时声明 output.files（及 fanout 动态条目）供宿主核验
+    'let AMREV = 0',
+    'function artifactEntriesFromFiles(files) {',
+    '  const out = []',
+    '  if (!files || typeof files !== \'object\') return out',
+    '  for (const p of Object.keys(files)) {',
+    '    const k = files[p]',
+    '    const media = { json: \'application/json\', markdown: \'text/markdown\', text: \'text/plain\', html: \'text/html\', canvas: \'application/vnd.workflow.canvas+json\', flowchart: \'application/vnd.workflow.flowchart+json\', diagram: \'application/vnd.workflow.diagram+json\' }',
+    '    if (typeof k === \'string\') out.push({ logical_name: p, relative_path: p, media_type: media[k] || \'application/octet-stream\', required: true, allow_empty: false })',
+    '    else if (k && typeof k === \'object\') out.push({ logical_name: p, relative_path: p, media_type: k.media_type || media[k.kind || k.type] || \'application/octet-stream\', required: k.required !== false, allow_empty: k.allow_empty === true, sha256: k.sha256 || null })',
+    '  }',
+    '  return out',
+    '}',
+    'function emitArtifactSubmit(nodeId, round, itemId, attemptK, extra) {',
+    '  const n = BYID[nodeId]',
+    '  let entries = artifactEntriesFromFiles(n && n.output && n.output.files)',
+    '  if (extra && extra.length) entries = entries.concat(extra)',
+    '  if (!entries.length) return',
+    '  AMREV += 1',
+    '  log(\'[am-submit]\' + JSON.stringify({ revision: AMREV, node: nodeId, producer_attempt_id: \'a0k\' + attemptK, round_id: round, item_id: itemId == null ? null : itemId, entries: entries }))',
+    '}',
     'function attOf(nodeId, res) { const nd = BYID[nodeId]; const p = nd && nd.output && nd.output.outcomePath; if (!p) return {}; const raw = String(p).indexOf(\'$\') === 0 ? String(p).slice(2) : String(p); const o = readPath(res, raw); return o === undefined ? {} : { o: o, u: String(p) } }',
   ];
   if (hetero) {
@@ -514,6 +544,11 @@ export function compileBlueprint(bp, opts = {}) {
       '  if (!n || n.profile !== \'closeout\') return \'\'',
       '  return \'恢复/重试防重（WR-012）：本节点会执行创建 PR、合并、关闭 issue 等受管理交付动作。每类动作执行前必须先核查目标当前状态（PR 是否已存在或已合并、issue 是否已关闭、分支是否已推送）；已确认成功的动作不得重复执行，直接采用既有结果并在报告中注明；查询不到或结果不确定（超时、权限失败、状态矛盾）时停止自动重试，在最终回复与报告中明确「需核查」，禁止伪造成功或换目标重做。\'',
       '}',
+      'function deliveryActionsStep(id) {',
+      '  const n = BYID[id]',
+      '  if (!n || n.profile !== \'closeout\') return \'\'',
+      '  return \'交付动作分离（WR-014）：先只读整理 delivery_report（候选版本、证明、人工决定、未完成项），再按动作计划执行必要外部动作。非 Git 默认 required_actions=[]；缺必要授权先交付事实再等待；有效授权复用不重复询问；必要动作失败不得 DELIVERED；可选清理失败记 cleanup_pending；目标须读 remote.pushDefault/上游，不硬编码 origin；GitHub/未知适配器 capability_unavailable 不回落 CNB。运行时入口：vwf.delivery.* / scripts/delivery-closeout-host.mjs。\'',
+      '}',
     ] : []),
     'function coerceStructured(v, schema) {',
     '  const root = schema && schema.type',
@@ -552,7 +587,7 @@ export function compileBlueprint(bp, opts = {}) {
     // LOC-024：声明输入按块注入提示（缺必需引用的拦截在调用前的解析门，此处只做注入）
     '  const irPrompt = resolveNodeInputs(id)',
     '  const inputExtra = inputsBlock(irPrompt.items)',
-    '  return roleRef(n.profile) + runtimeCtx(id, fb + inputExtra + (n.verifyBranch ? verifyBranchStep(id) : \'\')' + (hasCloseoutNode ? ' + managedOpsStep(id)' : '') + ')',
+    '  return roleRef(n.profile) + runtimeCtx(id, fb + inputExtra + (n.verifyBranch ? verifyBranchStep(id) : \'\')' + (hasCloseoutNode ? ' + managedOpsStep(id) + deliveryActionsStep(id)' : '') + ')',
     '}',
     // LOC-031 格式修复反馈（单源常量）：节点内格式修复与技术自环共用同一激活预算（AC-01）。
     'const FORMAT_RETRY_FB = \'【格式要求】上一轮未返回可解析的结构化结果（运行环境只认 structured_output 等结构化通道的提交，或纯文本最终回复必须是严格符合本节点 output.schema 的裸 JSON——不认 markdown 围栏/前后缀/报告全文）。请重试：报告与产物写文件，最终回复按本节点 schema 用可解析 JSON 收尾。\'',
@@ -591,6 +626,10 @@ export function compileBlueprint(bp, opts = {}) {
     '  const raw = String(path).indexOf(\'$.\') === 0 ? String(path).slice(2) : String(path)',
     '  const type = readPath(results[nodeId], raw)',
     '  if (typeof type !== \'string\' || !type.trim()) return null',
+    '  if (type === \'USER_ACCEPTED\') {',
+    '    const acc = hcVerifiedAcceptDecision()',
+    '    if (!acc.ok) return null',
+    '  }',
     '  return { type: type, node: nodeId, path: path }',
     '}',
     // LOC-030：终局终止描述查找（outcome → $end 时记录，循环结束后统一收束）
@@ -610,6 +649,7 @@ export function compileBlueprint(bp, opts = {}) {
     'const HD_CONTROL = ' + JSON.stringify(HD_CONTROL_RESULTS),
     'const HD_PKG_REQUIRED = ' + JSON.stringify(HD_PACKAGE_REQUIRED),
     'const HD_CFG = ' + JSON.stringify(bp.humanDecision || {}),
+    runtimeHelpersSource(),
     'function hdDeclared() {',
     '  if (HD_CFG && Object.keys(HD_CFG).length) return true',
     '  return EDGES.some(function (e) { return e && (e.to === HD_ID || e.from === HD_ID) })',
@@ -655,9 +695,13 @@ export function compileBlueprint(bp, opts = {}) {
     '      pkg.options.push({ id: id })',
     '      pkg.subsequent_effects[id] = e.subsequent_effect || (\'选择 \' + id + \' 后沿蓝图出边继续\')',
     '    })',
-    '    ;[\'USER_ACCEPTED\', \'STOP\'].forEach(function (id) {',
-    '      if (!pkg.subsequent_effects[id]) { pkg.options.push({ id: id }); pkg.subsequent_effects[id] = effects[id] }',
-    '    })',
+    '    if (!hdHasBusinessOutcomes()) {',
+    '      ;[\'USER_ACCEPTED\', \'STOP\'].forEach(function (id) {',
+    '        if (!pkg.subsequent_effects[id]) { pkg.options.push({ id: id }); pkg.subsequent_effects[id] = effects[id] }',
+    '      })',
+    '    } else if (!pkg.subsequent_effects.STOP) {',
+    '      pkg.options.push({ id: \'STOP\' }); pkg.subsequent_effects.STOP = effects.STOP',
+    '    }',
     '  }',
     '  return pkg',
     '}',
@@ -736,6 +780,14 @@ export function compileBlueprint(bp, opts = {}) {
     'function consumeOrHalt(fromId, outcome, e) {',
     '  if (countsBudget(e) && budgetUsed >= maxRounds) {',
     '    history.push({ round: round, stage: fromId, from: fromId, to: e.to, outcome: e.outcome, countRound: true, halted: true, reason: \'MAX_ROUNDS_REACHED\' })',
+    '    if (MAX_ROUNDS_EXHAUSTED_INSUFFICIENT && fromId === \'evaluate\' && e && e.outcome === \'NEEDS_RESEARCH\') {',
+    '      // LOC-036：补充额度耗尽 → 保留原 NEEDS_RESEARCH，有效终态 INSUFFICIENT',
+    '      const wrapped = __ecBudgetExhausted(outcome, results.synthesize)',
+    '      results.explore_budget_exhausted = wrapped',
+    '      endTerm = endDescriptor(fromId, \'INSUFFICIENT\', wrapped)',
+    '      current = \'$end\'',
+    '      return { status: \'EXPLORE_BUDGET_INSUFFICIENT\', wrapped: wrapped }',
+    '    }',
     '    if (MAX_ROUNDS_EXHAUSTED_BLOCKED) {',
     '      // M2（LOC-030）：自动返工额度耗尽 → BLOCKED（可恢复受阻，恢复入口=返工目标节点），',
     '      // 释放并发名额；人工退回后新一轮交付重置额度。未解决问题（触发节点原结果）原样保留。',
@@ -977,6 +1029,7 @@ export function compileBlueprint(bp, opts = {}) {
     'let decisionSeq = Math.trunc(Number(A.decisionSeq) || 0)',
     'if (!Number.isFinite(decisionSeq) || decisionSeq < 0) decisionSeq = 0',
     'let feedback = A.feedback || \'\'',
+    'let explorePlanApproved = !!A.explore_plan_approved',
     ...(ebDecl ? [
       // LOC-027 评价基线运行时状态：续跑段由宿主注入已核验引用（args.evaluation_baseline）
       'let ebVer = Math.trunc(Number(A.evaluation_baseline_version) || 0)',
@@ -1026,11 +1079,28 @@ export function compileBlueprint(bp, opts = {}) {
     '}',
     'if (A.decision_id && A.user_choice) {',
     '  const choice = A.user_choice',
+    '  const prior = HC_CONSUMED[A.decision_id]',
+    '  if (prior && A.decision_ref) {',
+    '    const dig = hcCandidateDigest(A.decision_ref)',
+    '    if (prior.candidate_digest && dig && prior.candidate_digest !== dig) {',
+    '      return { status: \'ERROR\', detail: \'成果在决定后已变化，须重新获得针对新版本的验收\' }',
+    '    }',
+    '    if (prior.completion && (choice === \'USER_ACCEPTED\' || choice === \'ACCEPT\' || choice === \'CONDITIONAL_PASS\')) {',
+    '      return { status: \'DONE\', taskId: TASK, decision_id: A.decision_id, results: results, history: history, user_choice: choice, completion: prior.completion, idempotent_replay: true }',
+    '    }',
+    '  }',
     '  if (choice === \'STOP\') {',
     '    choiceEvent = choiceControlEvent(choice, \'STOP\')',
     '    return { status: \'STOPPED\', taskId: TASK, decision_id: A.decision_id, results: results, history: history, user_choice: choice, control_event: choiceEvent }',
     '  }',
     '  if (choice === \'USER_ACCEPTED\') {',
+    '    const maxRoundsHd = A.halt_reason === \'MAX_ROUNDS_REACHED\' || history.some(function (h) { return h && (h.reason === \'MAX_ROUNDS_REACHED\' || (h.halted && h.reason === \'MAX_ROUNDS_REACHED\')) })',
+    '    if (hdHasBusinessOutcomes() && !maxRoundsHd) {',
+    '      const nodeId = A.entry || \'' + (bp.entry || '') + '\'',
+    '      const waiting = haltWaitingHuman(nodeId, results[nodeId], \'ESCALATED_DECISION\', A.blocked_edge || null, null, A.decision_id)',
+    '      if (waiting && waiting.status === \'WAITING_HUMAN\') waiting.rejected_choice = choice',
+    '      return waiting',
+    '    }',
     '    choiceEvent = choiceControlEvent(choice, \'USER_ACCEPTED\')',
     '    return { status: \'DONE\', taskId: TASK, decision_id: A.decision_id, results: results, history: history, user_choice: choice, control_event: choiceEvent, completion: null }',
     '  }',
@@ -1175,6 +1245,7 @@ export function compileBlueprint(bp, opts = {}) {
     '        }',
     '        __out = ir.value === null ? null : coerceStructured(ir.value, n.output && n.output.schema)',
     '        attLog(__out === null ? { a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'failed\', x: \'item 未返回有效结果\' } : { a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'completed\', q: __out })',
+    '        if (__out && typeof __out === \'object\' && __out.expert_id) emitArtifactSubmit(current, round, __out.expert_id, __ik, [{ logical_name: \'research-\' + __out.expert_id + \'.md\', relative_path: \'research-\' + __out.expert_id + \'.md\', media_type: \'text/markdown\', required: true }])',
     '        return __out',
     '      }',
     '    })',
@@ -1257,6 +1328,36 @@ export function compileBlueprint(bp, opts = {}) {
       '    }',
       '  }',
     ] : []),
+    ...(hasExploreCoverage ? [
+      '  if (EXPLORE_COVERAGE) {',
+      '    if (current === \'orchestrate\') {',
+      '      const pv = __ecValidatePlan(res, __ecExploreCtx())',
+      '      if (!pv.ok) {',
+      '        if (pv.kind === \'boundary\' && !explorePlanApproved) {',
+      '          results[current] = res',
+      '          markExec(current, res)',
+      '          return haltWaitingHuman(current, res, \'EXPLORE_PLAN_COUNT_BOUNDARY\', null, __ecPlanBoundaryPkg(res, pv))',
+      '        }',
+      '        history.push({ round: round, stage: current, verdict: \'PLAN_REJECTED\', reason: pv.detail, code: pv.code })',
+      '        return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, reason: \'EXPLORE_PLAN_REJECTED\', detail: pv.detail, results: results, history: history }',
+      '      }',
+      '    }',
+      '    if (current === \'synthesize\') {',
+      '      const sv = __ecValidateSynth(res, __ecExploreCtx())',
+      '      if (!sv.ok) {',
+      '        history.push({ round: round, stage: current, verdict: \'EXPLORE_COVERAGE_VIOLATION\', reason: sv.detail, code: sv.code })',
+      '        return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, reason: \'EXPLORE_SYNTHESIS_REJECTED\', detail: sv.detail, results: results, history: history }',
+      '      }',
+      '    }',
+      '    if (current === \'evaluate\') {',
+      '      const evc = __ecValidateEval(res, __ecExploreCtx())',
+      '      if (!evc.ok) {',
+      '        history.push({ round: round, stage: current, verdict: \'EXPLORE_EVAL_REJECTED\', reason: evc.detail, code: evc.code })',
+      '        return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, reason: \'EXPLORE_EVAL_REJECTED\', detail: evc.detail, results: results, history: history }',
+      '      }',
+      '    }',
+      '  }',
+    ] : []),
     ...(ebDecl ? [
       // LOC-027 基线闸门：消费节点的摘要声明与活动基线不一致时，结果在入档前被拒绝
       // （走 technical 边重试；无 technical 出口则 TECHNICAL_FAILURE——A/B 漂移无法走完流程）
@@ -1276,7 +1377,8 @@ export function compileBlueprint(bp, opts = {}) {
     ] : []),
     '  results[current] = res',
     '  markExec(current, res)',
-    '  attEnd(current, round, \'call\', \'completed\', undefined, Object.assign({ q: res, rk: lastAttRk }, attOf(current, res), n.verifyBranch ? { w: { b: res.verified_branch, h: res.verified_head } } : {}))',
+    '  attEnd(current, round, \'call\', \'completed\', undefined, Object.assign({ q: res, rk: lastAttRk }, attOf(current, res), n.verifyBranch ? { w: { b: res.verified_branch, h: res.verified_head } } : {}, RESOLVED_INPUTS[current] ? { ri: RESOLVED_INPUTS[current] } : {}))',
+    '  if (ok) emitArtifactSubmit(current, round, null, AWK)',
     '  log((n.label || current) + \' → \' + (ok ? \'通过\' : \'未通过\'))',
     '  if (A.injectHalt && A.injectHalt.node === current) {',
     '    if (!nodeDeclaresHd(current)) return { status: \'ERROR\', detail: \'无蓝图声明不得升级 Human Decision\' }',
@@ -1304,6 +1406,7 @@ export function compileBlueprint(bp, opts = {}) {
     '    const npHalt = noProgressBlockOrRecord(current, e)',
     '    if (npHalt) return npHalt',
     '    const halted = consumeOrHalt(current, res, e)',
+    '    if (halted && halted.status === \'EXPLORE_BUDGET_INSUFFICIENT\') { pwCk(\'$end\'); continue }',
     '    if (halted) return halted',
     '    if (e.to === HD_ID) {',
     '      return translateRouteHalted({ status: \'ROUTE_HALTED\', reason: \'HUMAN_DECISION\', node: current }, res)',
@@ -1342,17 +1445,164 @@ export function compileBlueprint(bp, opts = {}) {
     // LOC-030：终局统一收束——受阻描述 → BLOCKED 返回体；完成描述 → DONE + termination
     //（completion_type 缺省时以实际完成映射回填）；无描述（历史形态）保持原 DONE 契约。
     'function finishRun() {',
-    '  const completion = completionOf(lastNode)',
+    '  let completion = completionOf(lastNode)',
+    '  if (results.explore_budget_exhausted && results.explore_budget_exhausted.completion_type) {',
+    '    completion = { type: results.explore_budget_exhausted.completion_type, node: \'evaluate\', path: \'$.explore_budget_exhausted.completion_type\' }',
+    '  }',
     '  const t = endTerm && endTerm.term ? endTerm.term : null',
     '  if (t && t.lifecycle === \'BLOCKED\') return blockedRun(t, endTerm.node, endTerm.outcome, null)',
     '  const done = { status: \'DONE\', taskId: TASK, round: round, results: results, history: history, completion: completion, budgetUsed: budgetUsed, maxRounds: maxRounds, technical_budget: technicalBudgetSnapshot(), input_mode: INPUT_MODE, resolved_inputs: RESOLVED_INPUTS }',
     '  if (t) done.termination = (!t.completion_type && completion && completion.type) ? Object.assign({}, t, { completion_type: completion.type }) : t',
     '  if (choiceEvent) { done.decision_id = A.decision_id; done.user_choice = A.user_choice; done.control_event = choiceEvent }',
+    '  if (A.decision_ref && completion && completion.type) {',
+    '    done.consumed_decision = { decision_id: A.decision_ref.decision_id, candidate_digest: hcCandidateDigest(A.decision_ref), completion: completion }',
+    '  }',
     '  return done',
     '}',
     'return finishRun()',
   );
   return { script: lines.join('\n'), folds };
+}
+
+// ---------- LOC-040：模板能力摘要（生成 Skill runbook，禁止全模板泛化 merge/PR） ----------
+export function analyzeTemplateGuide(bp) {
+  const nodes = bp.nodes || [];
+  const edges = bp.edges || [];
+  const closeout = nodes.find((n) => n && n.id === 'closeout');
+  const uat = nodes.find((n) => n && n.id === 'uat');
+  const manualNodes = nodes.filter((n) => n && n.manualCheck);
+  const humanDecisionTriggers = edges
+    .filter((e) => e && e.to === HUMAN_DECISION_ID && e.outcome)
+    .map((e) => ({ from: e.from, outcome: e.outcome }));
+  const humanDecisionRoutes = edges
+    .filter((e) => e && e.from === HUMAN_DECISION_ID && e.outcome)
+    .map((e) => ({ outcome: e.outcome, to: e.to }));
+  const artifacts = [];
+  for (const n of nodes) {
+    const files = n.output && n.output.files;
+    if (!files || typeof files !== 'object') continue;
+    for (const [file, kind] of Object.entries(files)) {
+      artifacts.push({ node: n.id, file, kind });
+    }
+  }
+  const completionTypes = [];
+  for (const n of nodes) {
+    const ct = n.output && n.output.schema && n.output.schema.properties && n.output.schema.properties.completion_type;
+    if (ct && Array.isArray(ct.enum)) completionTypes.push(...ct.enum);
+  }
+  const endOutcomes = edges
+    .filter((e) => e && e.to === '$end' && e.outcome !== undefined && e.outcome !== null && e.outcome !== '')
+    .map((e) => ({ from: e.from, outcome: e.outcome }));
+  const closeoutGoal = closeout ? String(closeout.goal || '') : '';
+  const executeGoal = (nodes.find((n) => n && n.id === 'execute') || {}).goal || '';
+  const requiresMergePr =
+    !!closeout &&
+    /合并|PR|Draft PR|推送/.test(closeoutGoal) &&
+    !/不要求.*PR|不建 PR|不要求创建 worktree\/分支\/PR/.test(String(executeGoal));
+  return {
+    entry: bp.entry || null,
+    manualCheckNodes: manualNodes.map((n) => n.id),
+    humanDecisionTriggers,
+    humanDecisionRoutes,
+    uatNode: uat ? uat.id : null,
+    artifacts,
+    completionTypes: [...new Set(completionTypes)],
+    endOutcomes,
+    hasCloseout: !!closeout,
+    requiresMergePr,
+    m2BlockedExhausted: !!(bp.control && bp.control.maxRoundsExhausted === 'BLOCKED'),
+  };
+}
+
+export function buildDoneRunbookLine(bp) {
+  const id = bp.id;
+  if (id === 'wf-explore') {
+    return '研究在 evaluate 以 PASS 或 INSUFFICIENT 结束；**不要求 merge commit 或 PR**（详见下方「模板能力摘要」）。';
+  }
+  if (id === 'wf-optimize') {
+    return '评估 PASS 或人工 ACCEPT 后进入 closeout 写 cleanup-report；**不要求 PR**（详见下方「模板能力摘要」）。';
+  }
+  if (id === 'wf-diagnose') {
+    return '回归通过后 closeout 写 cleanup-report；**不要求 PR 或 merge**（详见下方「模板能力摘要」）。';
+  }
+  if (id === 'wf-construction-full-feature') {
+    return '须先经 uat→人工三态，closeout 才对已验收成果做合并/关闭；额度耗尽走 BLOCKED 而非 WAITING_HUMAN（详见下方「模板能力摘要」）。';
+  }
+  const a = analyzeTemplateGuide(bp);
+  if (a.requiresMergePr) return 'closeout 按蓝图 goal 可能要求推送/合并 PR；以 closeout 节点 goal 为准。';
+  if (a.hasCloseout) return '经 closeout 写 cleanup-report 后结束；本模板未声明 merge/PR 要求。';
+  return '按终态节点业务结果结束；无统一 merge commit 要求。';
+}
+
+export function templateGuideSection(bp) {
+  const a = analyzeTemplateGuide(bp);
+  const lines = [
+    '## 模板能力摘要（由蓝图生成；改模板须 `npm run generate`）',
+    '',
+    'M2 与 Portable 旧七阶段：[`docs/design/m2-vs-portable-delivery.md`](../docs/design/m2-vs-portable-delivery.md)。能力 Current/Target/Legacy：[`docs/design/workflow-capability-index.md`](../docs/design/workflow-capability-index.md)。',
+    '',
+    '- **入口节点**：`' + (a.entry || '（未声明）') + '`',
+  ];
+  if (a.manualCheckNodes.length) {
+    lines.push('- **manualCheck 人工门禁**：' + a.manualCheckNodes.map((x) => '`' + x + '`').join('、'));
+  }
+  if (a.uatNode) {
+    lines.push('- **UAT 节点**：`' + a.uatNode + '` → `$human-decision`（验收严格三态，AI 不代签）');
+  } else if (a.humanDecisionTriggers.length) {
+    lines.push(
+      '- **$human-decision 触发**：' +
+        a.humanDecisionTriggers.map((t) => '`' + t.from + '`/' + t.outcome).join('、'),
+    );
+    if (a.humanDecisionRoutes.length) {
+      lines.push(
+        '- **$human-decision 出边**：' +
+          a.humanDecisionRoutes.map((r) => r.outcome + '→`' + r.to + '`').join('、'),
+      );
+    }
+  } else {
+    lines.push('- **固定人工门**：无（探索/诊断模板不在链内挂 UAT）');
+  }
+  if (a.artifacts.length) {
+    lines.push('- **节点产物**（`output.files`）：');
+    for (const art of a.artifacts) {
+      lines.push('  - `' + art.node + '` → `' + art.file + '`（' + art.kind + '）');
+    }
+  }
+  if (a.completionTypes.length) {
+    lines.push('- **完成类型**（`completionPath`）：' + a.completionTypes.map((x) => '`' + x + '`').join('、'));
+  } else if (a.endOutcomes.length) {
+    lines.push(
+      '- **直达 `$end` 的业务结果**：' +
+        a.endOutcomes.map((e) => '`' + e.from + '`/' + e.outcome).join('、'),
+    );
+  }
+  if (a.m2BlockedExhausted) {
+    lines.push('- **自动返工耗尽**：`control.maxRoundsExhausted=BLOCKED`（`AUTO_REWORK_EXHAUSTED`，可恢复受阻）');
+  }
+  lines.push('', '### `DONE` 收口要求（本模板专属）');
+  if (bp.id === 'wf-explore') {
+    lines.push('- 无 closeout；`evaluate` 的 `PASS` / `INSUFFICIENT` 直达 `$end`。');
+    lines.push('- **禁止**要求 merge commit、PR 或 cleanup-report 合并叙事。');
+    lines.push('- `INSUFFICIENT` = 受控完成（`completion_type=INSUFFICIENT`），不是失败。');
+  } else if (bp.id === 'wf-optimize') {
+    lines.push('- `execute` 无 Git 前置；纯文档等非 Git 任务可完整执行。');
+    lines.push('- **禁止**要求 PR 或 merge commit；收口仅 `cleanup-report.md`。');
+    lines.push('- `evaluate`/`CONFIRM`/`ACCEPT` 路径见上方 $human-decision 表。');
+  } else if (bp.id === 'wf-diagnose') {
+    lines.push('- 回归 `PASS` 后 `closeout`；写 `cleanup-report.md`。');
+    lines.push('- **禁止**要求 PR 或 merge commit。');
+  } else if (bp.id === 'wf-construction-full-feature') {
+    lines.push('- **禁止**跳过 `uat` 人工三态进入 `closeout`。');
+    lines.push('- `closeout` 可对已验收成果执行合并/任务关闭（见蓝图 closeout.goal）。');
+    lines.push('- 不得把 `USER_ACCEPTED` Decision Result 与验收 `CONDITIONAL_PASS` 混用。');
+  } else if (a.requiresMergePr) {
+    lines.push('- Legacy/自定义：`closeout` goal 含推送/PR 语义，以蓝图为准。');
+  } else if (a.hasCloseout) {
+    lines.push('- 经 `closeout` 写 `cleanup-report.md`；未声明 merge/PR。');
+  } else {
+    lines.push('- 无统一收口节点；按终态业务结果结束。');
+  }
+  return lines.join('\n');
 }
 
 // ---------- skill 包装（契约 FR-2/FR-6；runbook 覆盖全部返回状态，T-IMP-09） ----------
@@ -1394,7 +1644,8 @@ export function skillWrap(bp) {
     '   - `ROUTE_HALTED`：#77 引擎停机信号（reason=HUMAN_DECISION）。命中 `$human-decision` 时本脚本翻译为 `WAITING_HUMAN` 并装配 Decision Package，不把 `ROUTE_HALTED` 作为对外终态返回。',
     '   - `BLOCKED`（统一受阻生命周期）：环境/资料/权限暂缺或额度耗尽的**非终态受阻**，不冒充成功也不挂人工决策。`termination`={business_outcome, lifecycle, reason_code, resumable, resume_node, completion_type?}，`blocked` 携带 failed_node / rounds_used / max_rounds / last_outcome 现场。恢复同一 Run：同 taskId + `entry=<termination.resume_node>`（恢复前重检阻塞条件；不重复已完成节点）。原因码：`BUSINESS_BLOCKED`=外部条件暂缺，条件恢复后恢复；`AUTO_REWORK_EXHAUSTED`=M2 自动返工额度耗尽（人工退回后新一轮交付自动重置额度）；`NEEDS_REDEFINE`=基线需重定义，resumable=false 不可原样恢复——重新发起运行将派生新 Run 并保留旧 Run；`COMPLETION_MISSING`=脚本 DONE 但无有效完成映射，不记 COMPLETED，补证后从 resume_node 恢复。',
     '   - `DONE`：只有完成目标且材料有效才映射 COMPLETED；探索 `INSUFFICIENT` 是受控完成（完成类型显式标注证据不足）。历史无终止描述的 DONE 保留 legacy 标记，不改写为已验证完成。',
-    '   - `DONE`：呈 cleanup 报告与合并 commit，流程结束。',
+    '   - `DONE`：' + buildDoneRunbookLine(bp),
+    templateGuideSection(bp),
     '## 生成信息',
     '- 蓝图：`' + src + '`',
     '- 节点：' + bp.nodes.length + ' · 边：' + bp.edges.length + ' · 最大轮次：' + ((bp.control && bp.control.maxRounds) || 9),
