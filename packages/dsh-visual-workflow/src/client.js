@@ -2523,7 +2523,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const lrunId = selRow ? String(selRow.logical_run_id || '') : ''
       const lrState = selRow ? String(selRow.logical_state || '') : ''
       const [lrun, setLrun] = React.useState(null)
+      const [metrics, setMetrics] = React.useState(null)
+      const [metricsLoading, setMetricsLoading] = React.useState(false)
+      const loadMetrics = React.useCallback(() => {
+        if (!lrunId) { setMetrics(null); return }
+        setMetricsLoading(true)
+        host.call('vwf.metrics.get', { logical_run_id: lrunId }).then((r) => {
+          setMetrics(r && r.ok ? r : null)
+        }).catch(() => setMetrics(null)).finally(() => setMetricsLoading(false))
+      }, [lrunId])
       React.useEffect(() => { if (lrunId && lrState === 'PAUSED') host.call('vwf.logicalRuns.get', { logical_run_id: lrunId }).then((r) => { if (r && r.found) setLrun(r.record) }).catch(() => {}) }, [lrunId, lrState, snapState ? snapState.updatedAt : 0])
+      React.useEffect(() => { loadMetrics() }, [loadMetrics, snapState ? snapState.updatedAt : 0])
       const sendControl = (action) => {
         if (!lrunId) return
         if (action === 'interrupt' && !window.confirm(t('ctlConfirmInterrupt'))) return
@@ -2628,6 +2638,24 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                   h('thead', null, h('tr', null, h('th', null, t('dashColIndex')), h('th', null, t('dashColNode')), h('th', null, t('dashColPhase')), h('th', null, t('dashColResult')))),
                   h('tbody', null, dashboardAgentRows(snap.state.agents))
                 ),
+                lrunId ? h('div', { className: 'vwf-card', style: { marginTop: 8 } },
+                  h('div', { className: 'vwf-card-head' },
+                    h('div', { className: 'vwf-card-title' }, t('qualityCostMetrics')),
+                    h('button', { className: 'vwf-btn sm', onClick: loadMetrics, disabled: metricsLoading }, t('qualityCostRefresh'))
+                  ),
+                  h('div', { style: { padding: '8px 14px 12px' } },
+                    metricsLoading ? h('div', { className: 'vwf-muted-sm' }, t('qualityCostLoading'))
+                      : metrics && metrics.metrics
+                        ? h('div', null,
+                            h('div', { className: 'vwf-muted-sm', style: { marginBottom: 6 } },
+                              '调用 ' + (metrics.metrics.aggregates.attempt_count || 0)
+                              + ' · 墙钟 ' + (metrics.metrics.aggregates.auto_wall_clock_ms && metrics.metrics.aggregates.auto_wall_clock_ms.value != null ? metrics.metrics.aggregates.auto_wall_clock_ms.value + 'ms' : 'unavailable')
+                              + ' · 等待 ' + (metrics.metrics.aggregates.human_wait_ms && metrics.metrics.aggregates.human_wait_ms.value != null ? metrics.metrics.aggregates.human_wait_ms.value + 'ms' : '0')),
+                            h('pre', { className: 'vwf-code', style: { maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap' } }, metrics.report || JSON.stringify(metrics.metrics, null, 2))
+                          )
+                        : h('div', { className: 'vwf-muted-sm' }, t('qualityCostEmpty'))
+                  )
+                ) : null,
                 (() => {
                   const arts = latestArtifactRecords(snap.state.formalRecords)
                   return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
