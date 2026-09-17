@@ -191,9 +191,15 @@ test('AC-04 探索模板：orchestrator 注入 PLAN_READY、researcher 注入小
       route: 'PLAN_READY',
       round_type: 'BROAD',
       research_question: 'Q',
+      questions: [
+        { id: 'q1', required: true, text: 't1' },
+        { id: 'q2', required: true, text: 't2' },
+        { id: 'q3', required: true, text: 't3' },
+      ],
       expert_briefs: [
-        { expert_id: 'expert-1', focus: 'f1', brief: 'b1' },
-        { expert_id: 'expert-2', focus: 'f2', brief: 'b2' },
+        { expert_id: 'expert-1', focus: 'f1', brief: 'b1', question_ids: ['q1'] },
+        { expert_id: 'expert-2', focus: 'f2', brief: 'b2', question_ids: ['q2'] },
+        { expert_id: 'expert-3', focus: 'f3', brief: 'b3', question_ids: ['q3'] },
       ],
       plan_summary: '方案',
     },
@@ -206,8 +212,8 @@ test('AC-04 探索模板：orchestrator 注入 PLAN_READY、researcher 注入小
       uncertainties: ['未知'],
       confidence: 'medium',
     },
-    综合分析: { route: 'SYNTHESIS_READY', consensus: ['c'], disagreements: ['d'], evidence_map: 'm', open_gaps: ['g'], synthesis_summary: 's' },
-    结论评估: { verdict: 'PASS', why: 'w', summary_for_human: 'h', current_state: 'st' },
+    综合分析: { route: 'SYNTHESIS_READY', consensus: ['c'], disagreements: ['d'], evidence_map: 'm', coverage: [{ question_id: 'q1', status: 'answered', evidence_refs: ['r1'] }, { question_id: 'q2', status: 'answered', evidence_refs: ['r2'] }, { question_id: 'q3', status: 'answered', evidence_refs: ['r3'] }], source_overlaps: [], research_failures: [], open_gaps: ['g'], synthesis_summary: 's' },
+    结论评估: { verdict: 'PASS', why: 'w', summary_for_human: 'h', current_state: 'st', completion_type: 'EVALUATION_PASSED' },
   })
   const { result } = await runGeneratedScript(script, { args: { work_branch: branch }, agent })
   assert.equal(result.status, 'DONE')
@@ -263,14 +269,19 @@ test('AC-04 全量：四模板编译注入的角色定义并集覆盖除 designe
   const explore = await run(BPS.explore, {
     探索统筹: {
       route: 'PLAN_READY', round_type: 'BROAD', research_question: 'Q',
-      expert_briefs: [{ expert_id: 'expert-1', focus: 'f', brief: 'b' }],
+      questions: [{ id: 'q1', required: true }, { id: 'q2', required: true }, { id: 'q3', required: true }],
+      expert_briefs: [
+        { expert_id: 'expert-1', focus: 'f1', brief: 'b1', question_ids: ['q1'] },
+        { expert_id: 'expert-2', focus: 'f2', brief: 'b2', question_ids: ['q2'] },
+        { expert_id: 'expert-3', focus: 'f3', brief: 'b3', question_ids: ['q3'] },
+      ],
       plan_summary: '方案',
     },
     '/^专家研究 #/': {
       expert_id: 'expert-1', findings: 'f', evidence: ['e'], counter_evidence: ['c'], assumptions: ['a'], uncertainties: ['u'], confidence: 'low',
     },
-    综合分析: { route: 'SYNTHESIS_READY', consensus: ['c'], disagreements: ['d'], evidence_map: 'm', open_gaps: ['g'], synthesis_summary: 's' },
-    结论评估: { verdict: 'PASS', why: 'w', summary_for_human: 'h', current_state: 'st' },
+    综合分析: { route: 'SYNTHESIS_READY', consensus: ['c'], disagreements: ['d'], evidence_map: 'm', coverage: [{ question_id: 'q1', status: 'answered', evidence_refs: ['r1'] }, { question_id: 'q2', status: 'answered', evidence_refs: ['r2'] }, { question_id: 'q3', status: 'answered', evidence_refs: ['r3'] }], source_overlaps: [], research_failures: [], open_gaps: ['g'], synthesis_summary: 's' },
+    结论评估: { verdict: 'PASS', why: 'w', summary_for_human: 'h', current_state: 'st', completion_type: 'EVALUATION_PASSED' },
   })
 
   const injected = new Map() // roleId -> 已注入正文（须与文件逐字一致）

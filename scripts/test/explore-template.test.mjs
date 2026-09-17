@@ -27,11 +27,17 @@ const briefs = (n) => Array.from({ length: n }, (_, i) => ({
   expert_id: 'expert-' + (i + 1),
   focus: '视角 ' + (i + 1),
   brief: '取证要求 ' + (i + 1),
+  question_ids: ['q' + ((i % 3) + 1)],
 }))
 const plan = (n, roundType) => ({
   route: 'PLAN_READY',
   round_type: roundType || 'BROAD',
   research_question: 'Q',
+  questions: [
+    { id: 'q1', required: true, text: '问题1' },
+    { id: 'q2', required: true, text: '问题2' },
+    { id: 'q3', required: true, text: '问题3' },
+  ],
   expert_briefs: briefs(n),
   plan_summary: '方案',
 })
@@ -49,7 +55,14 @@ const synthesis = {
   consensus: ['共识'],
   disagreements: ['分歧'],
   evidence_map: '证据地图',
-  open_gaps: ['缺口'],
+  coverage: [
+    { question_id: 'q1', status: 'answered', evidence_refs: ['r1'], reason: '已回答' },
+    { question_id: 'q2', status: 'answered', evidence_refs: ['r2'], reason: '已回答' },
+    { question_id: 'q3', status: 'answered', evidence_refs: ['r3'], reason: '已回答' },
+  ],
+  source_overlaps: [],
+  research_failures: [],
+  open_gaps: ['q2'],
   synthesis_summary: '综合摘要',
 }
 const evalVerdict = (verdict, extra = {}) => ({
@@ -96,13 +109,18 @@ test('LOC-013 正常路径：统筹→专家 fanout→综合→PASS，完成类�
 test('LOC-013 NEEDS_RESEARCH 自动回退 2 次后 PASS（初次 BROAD 不计额度）', async () => {
   let evals = 0
   let orchestras = 0
+  const targetedPlan = () => {
+    const p = plan(1, 'TARGETED')
+    p.expert_briefs = [{ expert_id: 'gap-expert', focus: '缺口', brief: '补 q2', question_ids: ['q2'], research_targets: ['q2'] }]
+    return p
+  }
   const { result } = await runEngine(exploreBp, {
-    探索统筹: () => { orchestras += 1; return plan(3, orchestras === 1 ? 'BROAD' : 'TARGETED') },
+    探索统筹: () => { orchestras += 1; return orchestras === 1 ? plan(3, 'BROAD') : targetedPlan() },
     '/^专家研究 #/': (label) => researchItem(Number(label.slice(-1))),
     综合分析: synthesis,
     结论评估: () => {
       evals += 1
-      if (evals < 3) return evalVerdict('NEEDS_RESEARCH', { research_targets: ['缺口' + evals] })
+      if (evals < 3) return evalVerdict('NEEDS_RESEARCH', { research_targets: ['q2'] })
       return evalVerdict('PASS', { completion_type: 'EVALUATION_PASSED' })
     },
   })
@@ -115,73 +133,19 @@ test('LOC-013 NEEDS_RESEARCH 自动回退 2 次后 PASS（初次 BROAD 不计额
   assert.ok(nrHistory.every((h) => h.countRound === true && !h.halted))
 })
 
-test('LOC-013 第 3 轮仍 NEEDS_RESEARCH：保留原结论，WAITING_HUMAN + MAX_ROUNDS_REACHED', async () => {
+test('LOC-036 第 3 轮仍 NEEDS_RESEARCH：保留原裁决，DONE + INSUFFICIENT（额度耗尽收口）', async () => {
   const table = {
     探索统筹: plan(3),
     '/^专家研究 #/': (label) => researchItem(Number(label.slice(-1))),
     综合分析: synthesis,
-    结论评估: () => evalVerdict('NEEDS_RESEARCH', { research_targets: ['仍有缺口'] }),
+    结论评估: () => evalVerdict('NEEDS_RESEARCH', { research_targets: ['q2'] }),
   }
-  const halt = await runEngine(exploreBp, table, { taskId: 'explore-halt' })
-  assert.equal(halt.result.status, 'WAITING_HUMAN')
-  assert.equal(halt.result.reason, 'MAX_ROUNDS_REACHED')
-  assert.equal(halt.result.node, 'evaluate')
-  // 规格红线：不改写 Node Business Outcome
-  assert.equal(halt.result.results.evaluate.verdict, 'NEEDS_RESEARCH')
-  assert.equal(halt.result.budgetUsed, 2)
-  // 决策材料：默认控制选项齐全（USER_ACCEPTED / ADD_BUDGET / STOP）
-  const optionIds = halt.result.decision_package.options.map((o) => o.id)
-  for (const id of ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP']) assert.ok(optionIds.includes(id), '缺选项 ' + id)
-  assert.ok(halt.result.decision_package.why.includes('NEEDS_RESEARCH'))
-
-  // USER_ACCEPTED：受控完成，不重跑任何节点
-  const accepted = await runEngine(exploreBp, {}, {
-    taskId: 'explore-halt',
-    entry: 'evaluate',
-    decision_id: halt.result.decision_id,
-    user_choice: 'USER_ACCEPTED',
-    results: halt.result.results,
-  })
-  assert.equal(accepted.result.status, 'DONE')
-  assert.equal(accepted.result.results.evaluate.verdict, 'NEEDS_RESEARCH')
-  assert.equal(accepted.agentCalls.length, 0)
-})
-
-test('LOC-013 ADD_BUDGET 续跑：显式入账后沿被拦边再走一轮', async () => {
-  const table = {
-    探索统筹: plan(3),
-    '/^专家研究 #/': (label) => researchItem(Number(label.slice(-1))),
-    综合分析: synthesis,
-    结论评估: () => evalVerdict('NEEDS_RESEARCH', { research_targets: ['仍有缺口'] }),
-  }
-  const halt = await runEngine(exploreBp, table, { taskId: 'explore-budget' })
-  assert.equal(halt.result.status, 'WAITING_HUMAN')
-
-  let evals = 0
-  const resumed = await runEngine(exploreBp, {
-    探索统筹: plan(3, 'TARGETED'),
-    '/^专家研究 #/': (label) => researchItem(Number(label.slice(-1))),
-    综合分析: synthesis,
-    结论评估: () => { evals += 1; return evalVerdict('PASS', { completion_type: 'EVALUATION_PASSED' }) },
-  }, {
-    taskId: 'explore-budget',
-    entry: 'evaluate',
-    decision_id: halt.result.decision_id,
-    user_choice: 'ADD_BUDGET',
-    results: halt.result.results,
-    blocked_edge: halt.result.blocked_edge,
-    budgetUsed: halt.result.budgetUsed,
-    maxRounds: halt.result.maxRounds,
-    history: halt.result.history,
-    decisionSeq: halt.result.decisionSeq,
-  })
-  assert.equal(resumed.result.status, 'DONE')
-  assert.equal(evals, 1)
-  assert.equal(resumed.result.results.orchestrate.round_type, 'TARGETED')
-  assert.equal(resumed.result.completion && resumed.result.completion.type, 'EVALUATION_PASSED')
-  // ADD_BUDGET 显式入账：maxRounds+1，被拦边走完后 budgetUsed=3
-  assert.equal(resumed.result.maxRounds, 3)
-  assert.equal(resumed.result.budgetUsed, 3)
+  const done = await runEngine(exploreBp, table, { taskId: 'explore-halt' })
+  assert.equal(done.result.status, 'DONE')
+  assert.equal(done.result.completion && done.result.completion.type, 'INSUFFICIENT')
+  assert.equal(done.result.results.evaluate.verdict, 'NEEDS_RESEARCH')
+  assert.equal(done.result.results.explore_budget_exhausted.effective_verdict, 'INSUFFICIENT')
+  assert.equal(done.result.budgetUsed, 2)
 })
 
 test('LOC-013 INSUFFICIENT 是合法完成：DONE + completion.type=INSUFFICIENT', async () => {
@@ -199,7 +163,7 @@ test('LOC-013 INSUFFICIENT 是合法完成：DONE + completion.type=INSUFFICIENT
 test('LOC-013 技术失败沿 on:technical 自环重试，不消耗回退额度', async () => {
   let synthCalls = 0
   const { result } = await runEngine(exploreBp, {
-    探索统筹: plan(2),
+    探索统筹: plan(3),
     '/^专家研究 #/': (label) => researchItem(Number(label.slice(-1))),
     综合分析: () => {
       synthCalls += 1
@@ -244,7 +208,7 @@ test('LOC-013 fanout 注入独立 scratch 与隔离禁令（有 workspace 现场
 
 test('LOC-013 无 workspace 现场时 fanout 不注入 scratch（安全降级）', async () => {
   const { result, agentCalls } = await runEngine(exploreBp, {
-    探索统筹: plan(2),
+    探索统筹: plan(3),
     '/^专家研究 #/': (label) => researchItem(Number(label.slice(-1))),
     综合分析: synthesis,
     结论评估: evalVerdict('PASS', { completion_type: 'EVALUATION_PASSED' }),
@@ -314,7 +278,7 @@ test('LOC-013 E4：fanout 部分失败不伪装业务结果，默认 failOn=all 
 
 test('LOC-013 E4：fanout 全部失败走 failure 边，FAILED_AT_research 而非业务路由', async () => {
   const { result, agentCalls } = await runEngine(exploreBp, {
-    探索统筹: plan(2),
+    探索统筹: plan(3),
     '/^专家研究 #/': { bad: '全部不合规' },
     综合分析: synthesis,
     结论评估: evalVerdict('PASS', { completion_type: 'EVALUATION_PASSED' }),
@@ -324,7 +288,7 @@ test('LOC-013 E4：fanout 全部失败走 failure 边，FAILED_AT_research 而�
   assert.ok(!agentCalls.some((c) => c.label === '综合分析'))
   assert.ok(!agentCalls.some((c) => c.label === '结论评估'))
   assert.equal(result.results.evaluate, undefined)
-  assert.equal(result.results.research.failedCount, 2)
+  assert.equal(result.results.research.failedCount, 3)
 })
 
 test('LOC-013 B7 targeted 重算：新证据只让依赖它的 Synthesis/Evaluation 标 stale（真实 #78 通道）', () => {

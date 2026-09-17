@@ -13,6 +13,7 @@ import projectionCore from './projection-core.cjs';
 // 角色库内核（候选二深化）：内置角色清单唯一事实源 = dsh/roles/builtin-roles.json；
 // 正文安全读取与「被引用角色文件打包」共享内核实现（含自定义角色——dispatcher 等）。
 import roleLibrary from './role-library.cjs';
+import exploreCoverageCore from './explore-coverage.cjs';
 import { runtimeHelpersSource } from './human-completion.mjs';
 
 const { buildSnapshot, readRoleFileSafe, collectReferencedRoleFiles } = roleLibrary;
@@ -180,6 +181,10 @@ export function compileBlueprint(bp, opts = {}) {
   // LOC-030：M2 受阻开关（仅声明 control.maxRoundsExhausted='BLOCKED' 的模板生效，
   // 当前即建设模板）：自动返工额度耗尽不再挂人工决策，而是 BLOCKED（可恢复受阻）并释放并发
   const maxRoundsExhaustedBlocked = !!(bp.control && bp.control.maxRoundsExhausted === 'BLOCKED');
+  // LOC-036（wf-explore）：额度耗尽仍 NEEDS_RESEARCH → 保留原裁决并收口 INSUFFICIENT
+  const maxRoundsExhaustedInsufficient = !!(bp.control && bp.control.maxRoundsExhausted === 'INSUFFICIENT');
+  const hasExploreCoverage = bp.id === 'wf-explore';
+  const exploreCoverageRuntime = hasExploreCoverage ? exploreCoverageCore.runtimeSource() : '';
   const terminations = terminationDescriptors(bp);
   // LOC-025 裁决一致性：仅声明了 output.consistency 的蓝图才注入路由前契约校验。
   const hasConsistencyDecl = Array.isArray(bp.nodes) && bp.nodes.some((n) => n && n.output && n.output.consistency);
@@ -285,6 +290,9 @@ export function compileBlueprint(bp, opts = {}) {
     // 技术执行段结束 ≠ 业务完成：BLOCKED 非终态可恢复；完成必须带有效完成映射。
     'const TERMINATIONS = ' + JSON.stringify(terminations),
     'const MAX_ROUNDS_EXHAUSTED_BLOCKED = ' + (maxRoundsExhaustedBlocked ? 'true' : 'false'),
+    'const MAX_ROUNDS_EXHAUSTED_INSUFFICIENT = ' + (maxRoundsExhaustedInsufficient ? 'true' : 'false'),
+    'const EXPLORE_COVERAGE = ' + (hasExploreCoverage ? 'true' : 'false'),
+    ...(hasExploreCoverage && exploreCoverageRuntime ? exploreCoverageRuntime.split('\n') : []),
     // 内置角色清单（单一事实源 = dsh/roles/builtin-roles.json）：roleRef 据此决定内置/自定义读取优先级
     'const BUILTIN_ROLE_IDS = ' + JSON.stringify(builtinRoleIds),
     // 内置角色正文（#129 遗留项 2）：编译期内联，临时编译自包含；缺失时 roleRef 走读路径回退
@@ -763,6 +771,14 @@ export function compileBlueprint(bp, opts = {}) {
     'function consumeOrHalt(fromId, outcome, e) {',
     '  if (countsBudget(e) && budgetUsed >= maxRounds) {',
     '    history.push({ round: round, stage: fromId, from: fromId, to: e.to, outcome: e.outcome, countRound: true, halted: true, reason: \'MAX_ROUNDS_REACHED\' })',
+    '    if (MAX_ROUNDS_EXHAUSTED_INSUFFICIENT && fromId === \'evaluate\' && e && e.outcome === \'NEEDS_RESEARCH\') {',
+    '      // LOC-036：补充额度耗尽 → 保留原 NEEDS_RESEARCH，有效终态 INSUFFICIENT',
+    '      const wrapped = __ecBudgetExhausted(outcome, results.synthesize)',
+    '      results.explore_budget_exhausted = wrapped',
+    '      endTerm = endDescriptor(fromId, \'INSUFFICIENT\', wrapped)',
+    '      current = \'$end\'',
+    '      return { status: \'EXPLORE_BUDGET_INSUFFICIENT\', wrapped: wrapped }',
+    '    }',
     '    if (MAX_ROUNDS_EXHAUSTED_BLOCKED) {',
     '      // M2（LOC-030）：自动返工额度耗尽 → BLOCKED（可恢复受阻，恢复入口=返工目标节点），',
     '      // 释放并发名额；人工退回后新一轮交付重置额度。未解决问题（触发节点原结果）原样保留。',
@@ -999,6 +1015,7 @@ export function compileBlueprint(bp, opts = {}) {
     'let decisionSeq = Math.trunc(Number(A.decisionSeq) || 0)',
     'if (!Number.isFinite(decisionSeq) || decisionSeq < 0) decisionSeq = 0',
     'let feedback = A.feedback || \'\'',
+    'let explorePlanApproved = !!A.explore_plan_approved',
     ...(ebDecl ? [
       // LOC-027 评价基线运行时状态：续跑段由宿主注入已核验引用（args.evaluation_baseline）
       'let ebVer = Math.trunc(Number(A.evaluation_baseline_version) || 0)',
@@ -1297,6 +1314,36 @@ export function compileBlueprint(bp, opts = {}) {
       '    }',
       '  }',
     ] : []),
+    ...(hasExploreCoverage ? [
+      '  if (EXPLORE_COVERAGE) {',
+      '    if (current === \'orchestrate\') {',
+      '      const pv = __ecValidatePlan(res, __ecExploreCtx())',
+      '      if (!pv.ok) {',
+      '        if (pv.kind === \'boundary\' && !explorePlanApproved) {',
+      '          results[current] = res',
+      '          markExec(current, res)',
+      '          return haltWaitingHuman(current, res, \'EXPLORE_PLAN_COUNT_BOUNDARY\', null, __ecPlanBoundaryPkg(res, pv))',
+      '        }',
+      '        history.push({ round: round, stage: current, verdict: \'PLAN_REJECTED\', reason: pv.detail, code: pv.code })',
+      '        return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, reason: \'EXPLORE_PLAN_REJECTED\', detail: pv.detail, results: results, history: history }',
+      '      }',
+      '    }',
+      '    if (current === \'synthesize\') {',
+      '      const sv = __ecValidateSynth(res, __ecExploreCtx())',
+      '      if (!sv.ok) {',
+      '        history.push({ round: round, stage: current, verdict: \'EXPLORE_COVERAGE_VIOLATION\', reason: sv.detail, code: sv.code })',
+      '        return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, reason: \'EXPLORE_SYNTHESIS_REJECTED\', detail: sv.detail, results: results, history: history }',
+      '      }',
+      '    }',
+      '    if (current === \'evaluate\') {',
+      '      const evc = __ecValidateEval(res, __ecExploreCtx())',
+      '      if (!evc.ok) {',
+      '        history.push({ round: round, stage: current, verdict: \'EXPLORE_EVAL_REJECTED\', reason: evc.detail, code: evc.code })',
+      '        return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, reason: \'EXPLORE_EVAL_REJECTED\', detail: evc.detail, results: results, history: history }',
+      '      }',
+      '    }',
+      '  }',
+    ] : []),
     ...(ebDecl ? [
       // LOC-027 基线闸门：消费节点的摘要声明与活动基线不一致时，结果在入档前被拒绝
       // （走 technical 边重试；无 technical 出口则 TECHNICAL_FAILURE——A/B 漂移无法走完流程）
@@ -1345,6 +1392,7 @@ export function compileBlueprint(bp, opts = {}) {
     '    const npHalt = noProgressBlockOrRecord(current, e)',
     '    if (npHalt) return npHalt',
     '    const halted = consumeOrHalt(current, res, e)',
+    '    if (halted && halted.status === \'EXPLORE_BUDGET_INSUFFICIENT\') { pwCk(\'$end\'); continue }',
     '    if (halted) return halted',
     '    if (e.to === HD_ID) {',
     '      return translateRouteHalted({ status: \'ROUTE_HALTED\', reason: \'HUMAN_DECISION\', node: current }, res)',
@@ -1383,7 +1431,10 @@ export function compileBlueprint(bp, opts = {}) {
     // LOC-030：终局统一收束——受阻描述 → BLOCKED 返回体；完成描述 → DONE + termination
     //（completion_type 缺省时以实际完成映射回填）；无描述（历史形态）保持原 DONE 契约。
     'function finishRun() {',
-    '  const completion = completionOf(lastNode)',
+    '  let completion = completionOf(lastNode)',
+    '  if (results.explore_budget_exhausted && results.explore_budget_exhausted.completion_type) {',
+    '    completion = { type: results.explore_budget_exhausted.completion_type, node: \'evaluate\', path: \'$.explore_budget_exhausted.completion_type\' }',
+    '  }',
     '  const t = endTerm && endTerm.term ? endTerm.term : null',
     '  if (t && t.lifecycle === \'BLOCKED\') return blockedRun(t, endTerm.node, endTerm.outcome, null)',
     '  const done = { status: \'DONE\', taskId: TASK, round: round, results: results, history: history, completion: completion, budgetUsed: budgetUsed, maxRounds: maxRounds, technical_budget: technicalBudgetSnapshot(), input_mode: INPUT_MODE, resolved_inputs: RESOLVED_INPUTS }',
