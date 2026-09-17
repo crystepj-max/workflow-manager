@@ -14,6 +14,8 @@ import { dirname, join } from 'node:path'
 import { JSDOM } from 'jsdom'
 
 const here = dirname(fileURLToPath(import.meta.url))
+// 真实内置模板：扇出（并行研究组）+ 汇总 + 三类连接齐备（V-4 要求的第三类模板）
+const EXPLORE_DSL = JSON.parse(readFileSync(join(here, '..', '..', '..', 'templates', 'wf-explore.json'), 'utf8'))
 const src = readFileSync(join(here, '..', 'src', 'client.js'), 'utf8')
 
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'http://localhost/', pretendToBeVisual: true })
@@ -91,7 +93,7 @@ const ROLES = [
 // ── 运行环境（与真实插件同形的动态客户端装配）──────────────────────────────
 function makeRuntime(opts) {
   const options = opts || {}
-  const state = { saved: [], list: options.list || [{ id: 'wf1', name: '测试流', description: 'seed', builtin: false, dsl: JSON.parse(JSON.stringify(options.dsl || PLAIN_DSL)) }] }
+  const state = { saved: [], overrides: {}, overrideCalls: [], list: options.list || [{ id: 'wf1', name: '测试流', description: 'seed', builtin: false, dsl: JSON.parse(JSON.stringify(options.dsl || PLAIN_DSL)) }] }
   const rpc = async (method, args) => {
     switch (method) {
       case 'vwf.workflows.list':
@@ -105,6 +107,16 @@ function makeRuntime(opts) {
       case 'vwf.workflows.save':
         state.saved.push(JSON.parse(JSON.stringify(args.dsl)))
         return { ok: true, id: args.dsl.id, dsl: args.dsl }
+      case 'vwf.workflows.modelOverride.get':
+        return { ok: true, overrides: JSON.parse(JSON.stringify(state.overrides || {})) }
+      case 'vwf.workflows.modelOverride.save':
+        state.overrides = JSON.parse(JSON.stringify(args.overrides || {}))
+        state.overrideCalls = (state.overrideCalls || []).concat([{ op: 'save', overrides: state.overrides }])
+        return { ok: true }
+      case 'vwf.workflows.modelOverride.clear':
+        state.overrides = {}
+        state.overrideCalls = (state.overrideCalls || []).concat([{ op: 'clear' }])
+        return { ok: true }
       case 'vwf.i18n':
         return { locale: 'zh', messages: JSON.parse(readFileSync(join(here, '..', 'locales', 'zh.json'), 'utf8')) }
       default:
@@ -303,6 +315,61 @@ test('V-4 已声明但缺少去向的业务结果给出缺项提示，且不删�
   assert.equal(container.querySelectorAll('.vwf-wb-conn-row').length, before, '缺项不导致任何连接被删除')
 })
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V-4 扇出后汇总（真实内置模板 wf-explore：并行研究组 + 汇总 + 三类连接）
+// ═══════════════════════════════════════════════════════════════════════════
+test('V-4 扇出后汇总模板：并行组与汇总可辨认，连接清单不漏边且三类分类正确', async () => {
+  const dsl = JSON.parse(JSON.stringify(EXPLORE_DSL))
+  const { container } = await mountPage({ dsl, list: [{ id: dsl.id, name: dsl.id, description: '', builtin: true, dsl }] })
+  await openEditor(container, '查看并验收')
+
+  // 步骤定位区：扇出节点标「并行组」，其下游汇总节点标「汇总」
+  const stepRows = Array.from(container.querySelectorAll('.vwf-wb-step'))
+  assert.equal(stepRows.length, dsl.nodes.length, '步骤定位覆盖全部节点')
+  const fanoutIds = dsl.nodes.filter((n) => n.kind === 'fanout').map((n) => n.id)
+  // 汇总只可能是真实节点：扇出也可以直接以 failure 连到 $end（终止节点，不是汇总页）
+  const summaryIds = dsl.edges.filter((e) => fanoutIds.indexOf(e.from) >= 0 && e.to !== '$end').map((e) => e.to)
+  assert.ok(fanoutIds.length >= 1, '模板含扇出节点')
+  assert.ok(summaryIds.length >= 1, '扇出节点有下游汇总节点')
+  for (const id of fanoutIds) {
+    const row = stepRows.find((r) => r.getAttribute('data-node-id') === id)
+    assert.ok(row && row.textContent.indexOf('并行组') >= 0, '扇出节点标为并行组：' + id)
+  }
+  for (const id of summaryIds) {
+    const row = stepRows.find((r) => r.getAttribute('data-node-id') === id)
+    assert.ok(row && row.textContent.indexOf('汇总') >= 0, '扇出下游节点标为汇总：' + id)
+  }
+
+  // 连接清单：条数 = 模板定义连接数（不漏边），三类分类与定义一一对应
+  const rows = Array.from(container.querySelectorAll('.vwf-wb-conn-row'))
+  assert.equal(rows.length, dsl.edges.length, '连接清单条数 = 模板定义连接数（' + dsl.edges.length + '）')
+  const body = container.querySelector('.vwf-wb-conn-body').textContent
+  const countOf = (label) => { const seg = body.split(label + '（')[1]; return seg ? Number(seg.split('）')[0]) : -1 }
+  const expectRetry = dsl.edges.filter((e) => e.on === 'technical').length
+  const expectLoop = dsl.edges.filter((e) => e.on !== 'technical' && e.countRound === true).length
+  assert.equal(countOf('调用重试'), expectRetry, '调用重试条数（技术自环）')
+  assert.equal(countOf('业务回环'), expectLoop, '业务回环条数（计入打回轮次）')
+  assert.equal(countOf('普通业务路由'), dsl.edges.length - expectRetry - expectLoop, '普通业务路由条数')
+  // 每条连接的源与目标都在清单里出现（逐条核对，不是只数总数）
+  const labelOf = (id) => id === '$end' ? '结束' : ((dsl.nodes.find((n) => n.id === id) || {}).label || id)
+  for (const e of dsl.edges) {
+    assert.ok(body.indexOf(labelOf(e.from) + ' → ' + labelOf(e.to)) >= 0, '清单含该连接：' + labelOf(e.from) + ' → ' + labelOf(e.to))
+  }
+
+  // 扇出的汇总语义写在业务侧：部分子任务未完成时汇总保持等待
+  const fanoutId = fanoutIds[0]
+  await act(async () => {
+    container.querySelector('g[data-node-id="' + fanoutId + '"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    await flush()
+  })
+  const inspector = container.querySelector('.vwf-inspector')
+  assert.ok(inspector.textContent.indexOf('并行研究组') >= 0, '扇出节点显示并行研究组说明')
+  assert.ok(inspector.textContent.indexOf('每个子任务各自交自己的报告') >= 0, '说明子任务各自报告')
+  assert.ok(inspector.textContent.indexOf('汇总') >= 0 && inspector.textContent.indexOf('保持等待') >= 0, '说明未完成时汇总保持等待')
+  assert.ok(inspector.textContent.indexOf('不会显示为已完成') >= 0, '明确不冒充完成')
+})
+
 // ═══════════════════════════════════════════════════════════════════════════
 // V-5 三类连接标签与说明
 // ═══════════════════════════════════════════════════════════════════════════
@@ -392,6 +459,80 @@ test('V-7 自定义模板无模型默认 / 覆盖入口，节点结构可编辑'
   assert.ok(container.textContent.indexOf('模型覆盖') < 0, '自定义模板不出现模型覆盖入口')
 })
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V-7 兼容检查项：内置节点的供应商 / 模型默认 → 覆盖 → 单节点还原 → 全部还原
+// ═══════════════════════════════════════════════════════════════════════════
+test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / 全部还原四步可走通', async () => {
+  const { container, state } = await mountPage({ dsl: BUILTIN_DSL, list: [{ id: 'wf-builtin', name: '内置流程', description: '', builtin: true, dsl: JSON.parse(JSON.stringify(BUILTIN_DSL)) }] })
+  // 流程库行内的「模型覆盖」是既有入口，本任务不重新设计它
+  await act(async () => {
+    byText(container, '模型覆盖').click()
+    await flush(); await flush()
+  })
+  const ovDialog = Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型覆盖') >= 0)
+  assert.ok(ovDialog, '模型覆盖对话框已打开')
+
+  // ① 默认：未覆盖时每个节点显示「默认」徽标
+  const rows = () => Array.from(ovDialog.querySelectorAll('.vwf-list-item'))
+  assert.equal(rows().length, BUILTIN_DSL.nodes.length, '逐节点列出模型设置')
+  for (const r of rows()) assert.ok(r.textContent.indexOf('默认') >= 0, '未覆盖时显示默认徽标')
+
+  // ② 覆盖：给第一个节点写 provider/model 并保存
+  await act(async () => {
+    const selects = Array.from(rows()[0].querySelectorAll('select'))
+    assert.equal(selects.length, 2, '每行有 provider / model 两个选择器')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set
+    setter.call(selects[0], 'deepseek-official')
+    selects[0].dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush()
+    const modelSelects = Array.from(rows()[0].querySelectorAll('select'))
+    setter.call(modelSelects[1], 'deepseek-v4-flash')
+    modelSelects[1].dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush()
+  })
+  await act(async () => {
+    byText(ovDialog, '保存覆盖').click()
+    await flush(); await flush()
+  })
+  const savedCall = state.overrideCalls.filter((c) => c.op === 'save').pop()
+  assert.ok(savedCall, '保存覆盖调用了 vwf.workflows.modelOverride.save')
+  assert.equal(savedCall.overrides[BUILTIN_DSL.nodes[0].id].provider, 'deepseek-official', '覆盖写入 provider')
+  assert.equal(savedCall.overrides[BUILTIN_DSL.nodes[0].id].model, 'deepseek-v4-flash', '覆盖写入 model')
+
+  // ③ 单节点还原：该行「还原」使覆盖行消失
+  await act(async () => {
+    byText(container, '模型覆盖').click()
+    await flush(); await flush()
+  })
+  const ovDialog2 = Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型覆盖') >= 0)
+  const overriddenRow = Array.from(ovDialog2.querySelectorAll('.vwf-list-item')).find((r) => r.textContent.indexOf('已覆盖') >= 0)
+  assert.ok(overriddenRow, '覆盖保存后重新打开显示「已覆盖」徽标')
+  await act(async () => {
+    byText(overriddenRow, '还原').click()
+    await flush()
+  })
+  assert.ok(overriddenRow.textContent.indexOf('默认') >= 0, '单节点还原后回到默认徽标')
+
+  // ④ 全部还原：清除该模板的全部覆盖（需二次确认）
+  await act(async () => {
+    byText(ovDialog2, '清除恢复默认').click()
+    await flush()
+  })
+  const confirm = container.querySelector('.vwf-confirm-mask')
+  assert.ok(confirm, '全部还原需要二次确认')
+  await act(async () => {
+    const doClear = Array.from(confirm.querySelectorAll('button')).find((b) => b.textContent === '清除恢复默认')
+    assert.ok(doClear, '确认层给出清除动作')
+    doClear.click()
+    await flush(); await flush()
+  })
+  assert.ok(state.overrideCalls.some((c) => c.op === 'clear'), '全部还原调用了 vwf.workflows.modelOverride.clear')
+
+  // 结构只读与模型设置互不影响：模型设置走独立 RPC，未触碰结构保存
+  assert.equal(state.saved.length, 0, '模型设置全程没有保存内置模板结构')
+})
+
 // ═══════════════════════════════════════════════════════════════════════════
 // V-1 两层表面与关闭后位置保留
 // ═══════════════════════════════════════════════════════════════════════════
@@ -412,6 +553,12 @@ test('V-1 关闭大工作区后回到原列表、筛选词与列表内容保持'
   const listNames = () => Array.from(container.querySelectorAll('.vwf-list-item .vwf-list-name')).map((el) => el.textContent)
   assert.deepEqual(listNames(), ['另一条流'], '筛选生效')
 
+  // 列表滚动位置：先滚一段，再开关工作区，断言没有被重置
+  const scroller = container.querySelector('.vwf-root') || container
+  scroller.scrollTop = 120
+  const scrollBefore = scroller.scrollTop
+  assert.equal(scrollBefore, 120, 'jsdom 允许设置 scrollTop（真机布局由浏览器承担）')
+
   await openEditor(container, '编辑')
   assert.ok(container.querySelector('dialog.vwf-editor-dialog'), '大工作区打开时列表仍在页面上（两层表面，不卸载小设置入口）')
   // 无未保存改动 → 直接关闭
@@ -424,6 +571,10 @@ test('V-1 关闭大工作区后回到原列表、筛选词与列表内容保持'
   const filterAfter = container.querySelector('input[placeholder^="筛选模板"]')
   assert.equal(filterAfter.value, '另一条', '关闭后筛选词保留')
   assert.deepEqual(listNames(), ['另一条流'], '关闭后列表筛选结果保留')
+  // 关闭后列表容器仍是同一个 DOM 节点（两层表面不卸载小设置入口），滚动位置因此不被重置
+  const scrollerAfter = container.querySelector('.vwf-root') || container
+  assert.equal(scrollerAfter, scroller, '关闭后列表容器未被重建')
+  assert.equal(scrollerAfter.scrollTop, scrollBefore, '关闭后列表滚动位置保持')
 })
 
 test('V-1 未保存改动关闭时给出继续编辑 / 放弃修改 / 保存并返回', async () => {

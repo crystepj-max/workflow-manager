@@ -761,7 +761,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }, flat.map(renderOpt).concat(groups.map(g => h('optgroup', { key: g.group, label: g.group }, g.items.map(renderOpt)))))
     }
 
-    // ── SVG 画布（编辑态与运行看板共用；readOnly 时无把手/菜单/连线）─────────
+    // ── SVG 画布（编辑态与运行看板共用）────────────────────────────────────
+    // readOnly = 整块只读视图（无把手/菜单/连线，也不选中）；
+    // structureLocked = 仅锁结构（内置模板：仍可点选节点与连接做定位与查看，不能改结构）。
+    // 两者都不渲染连线把手与右键菜单。
     function Canvas(props) {
       const dsl = props.dsl
       const wrapRef = React.useRef(null)
@@ -936,7 +939,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
 
       const onPaneContextMenu = (ev) => {
-        if (props.readOnly) return
+        if (props.readOnly || props.structureLocked) return
         ev.preventDefault()
         const wrap = wrapRef.current
         if (!wrap) return
@@ -1073,8 +1076,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           h('text', { className: 'vwf-node-label', x: p.w / 2, y: p.h / 2 - 4, textAnchor: 'middle' }, (node && (node.label || node.id)) || id),
           h('text', { className: 'vwf-node-kind', x: p.w / 2, y: p.h / 2 + 15, textAnchor: 'middle' }, (node && node.kind) || 'worker'),
           status ? h('circle', { cx: p.w - 14, cy: 14, r: 6, fill: STATUS_COLOR[status] }) : null,
-          !props.readOnly ? h('circle', { className: 'vwf-handle', cx: 0, cy: p.h / 2, r: 4 }) : null,
-          !props.readOnly ? h('circle', {
+          !props.readOnly && !props.structureLocked ? h('circle', { className: 'vwf-handle', cx: 0, cy: p.h / 2, r: 4 }) : null,
+          !props.readOnly && !props.structureLocked ? h('circle', {
             className: 'vwf-handle vwf-handle-src', cx: p.w, cy: p.h / 2, r: 5,
             onPointerDown: (ev) => onSourceDown(id, ev),
           }) : null
@@ -2764,7 +2767,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 ? h(Canvas, {
                     dsl: wf,
                     height: canvasHeight,
-                    readOnly: readOnlyStructure,
+                    structureLocked: readOnlyStructure,
                     visibleTerminals,
                     selectedNode: selectedNodeId,
                     selectedEdge: selectedEdgeIndex,
