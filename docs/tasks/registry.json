@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 54,
+  "revision": 55,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -47,13 +47,13 @@
       "source": "会话录入",
       "source_ref": "LOC-023 有条件通过优化意见②（2026-09-15 人工裁决）：交付链文本口径与已通过决策不一致，需收敛。",
       "baseline": "V1",
-      "status": "定义中",
+      "status": "等待验收",
       "priority": "P2",
-      "env_group": null,
-      "env_role": null,
+      "env_group": "CHORE-37",
+      "env_role": "独立",
       "deps": [],
-      "branch": null,
-      "worktree": null,
+      "branch": "dev-chore-37-r1",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/dev-chore-37-r1",
       "runs": [],
       "merge": null,
       "github_sync": "pending",
@@ -61,7 +61,8 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-16T00:03:29.832Z"
+      "updated_at": "2026-09-17T15:20:21.606Z",
+      "spec_path": "docs/tasks/specs/CHORE-37-closeout-force-wording/task-spec-V1.md"
     },
     {
       "task_id": "CHORE-38",
