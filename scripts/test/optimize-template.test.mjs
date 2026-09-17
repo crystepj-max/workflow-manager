@@ -8,6 +8,7 @@ import path from 'node:path'
 import { compileBlueprint } from '../generate.mjs'
 import { runGeneratedScript, makeAgentScript } from './helpers/runtime-harness.mjs'
 import validatorCore from '../validate-core.cjs'
+import { createDecisionRef } from '../human-completion.mjs'
 
 const { validateBlueprint } = validatorCore
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -115,12 +116,31 @@ test('CONFIRM 升人工决策（含冻结契约摘要材料），ACCEPT 续跑�
   const resume = await runEngine(optimizeBp, {
     收口: { status: 'DELIVERED', completion_type: 'USER_ACCEPTED', summary: 'done', followups: '' },
   }, {
+    taskId: halt.result.taskId,
     decision_id: halt.result.decision_id,
     user_choice: 'ACCEPT',
     results: halt.result.results,
+    decision_ref: createDecisionRef({
+      decision_id: halt.result.decision_id,
+      logical_run_id: halt.result.taskId,
+      checkpoint_id: halt.result.decision_id,
+      candidate_ref: null,
+      choice: 'ACCEPT',
+    }),
   })
   assert.equal(resume.result.status, 'DONE')
   assert.equal(resume.result.completion && resume.result.completion.type, 'USER_ACCEPTED')
+})
+
+test('LOC-028：PASS 路径 closeout 自报 USER_ACCEPTED 无 decision_ref 不得完成', async () => {
+  const { result } = await runEngine(optimizeBp, {
+    目标确认: { route: 'READY', summary: '契约冻结', contract_digest: 'c1' },
+    执行: { route: 'READY', summary: '最小修改', changed: 'a.md' },
+    评估: { route: 'PASS', summary: '满足判据', contract_digest: 'c1', gaps: '' },
+    收口: { status: 'DELIVERED', completion_type: 'USER_ACCEPTED', summary: 'done', followups: '' },
+  })
+  assert.equal(result.status, 'DONE')
+  assert.equal(result.completion, null)
 })
 
 test('目标确认 BLOCKED：统一受阻生命周期（非终态可恢复），不进入执行', async () => {

@@ -93,32 +93,16 @@ export function autoPhaseDone(state) {
   return state.running.size === 0 && state.queue.length === 0
 }
 
-// ---------- CLI ----------
+// ---------- 资格筛选（导出供 M5 调度器复用，勿另写一份筛选规则） ----------
 
-// batch.json 的路径解析基准（候选相对路径基于 batch 文件所在目录）——见 main 内 baseDir
-async function main() {
-  const argv = process.argv.slice(2)
-  if (argv.length < 1) {
-    console.error('用法: node scripts/ai-task-execution-plan.mjs <batch.json> [--simulate events.json]')
-    process.exit(2)
-  }
-
-  const batchPath = path.resolve(argv[0])
-  let simulatePath = null
-  const sIdx = argv.indexOf('--simulate')
-  if (sIdx >= 0) simulatePath = path.resolve(argv[sIdx + 1])
-
-  const batch = JSON.parse(fs.readFileSync(batchPath, 'utf8'))
-  const maxConcurrency = Number(batch.maxConcurrency)
-  if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
-    console.error('maxConcurrency 必须为正整数')
-    process.exit(2)
-  }
-
+// batch.json 的候选相对路径基于 batch 文件所在目录解析。
+// repoRoot 仅用于依赖合并事实核查；缺省为脚本所在仓库（M3 CLI 行为不变），
+// M5 调度器唤起其他项目批次时显式传目标项目主检出。
+export async function assessAndSort(candidates, batchPath, repoRoot = path.resolve(__dirname, '..')) {
   const PRI = { P0: 0, P1: 1, P2: 2 }
+  const baseDir = path.dirname(batchPath)
 
   async function assessCandidate(candidate) {
-    const baseDir = path.dirname(batchPath)
     const issuePath = path.resolve(baseDir, candidate.issueBasics)
     const specPath = path.resolve(baseDir, candidate.taskSpec)
     // LOC-003：进程内调用结构化校验，不再 spawn 子进程、不再自行重读 issue 文件
@@ -134,7 +118,6 @@ async function main() {
       // CHORE-73 第三层：依赖满足判定改看 git 事实（合并提交/收口标签），登记册仅作快路径。
       // 登记册状态回写天然滞后于实际合并（LOC-028 被夜间批次跳过的根因），
       // 因此「登记册未记合并」时再查一次主干痕迹，有痕即视为已完成。
-      const repoRoot = path.resolve(__dirname, '..')
       const depIds = dep.split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
       let unmet = depIds
       try {
@@ -175,7 +158,7 @@ async function main() {
 
   const excluded = []
   const eligible = []
-  const assessments = await Promise.all((batch.candidates || []).map((c) => assessCandidate(c)))
+  const assessments = await Promise.all((candidates || []).map((c) => assessCandidate(c)))
   for (const a of assessments) {
     if (a.ok) eligible.push(a.task)
     else excluded.push(a.excluded)
@@ -187,6 +170,33 @@ async function main() {
     if (pa !== pb) return pa - pb
     return String(a.definedAt).localeCompare(String(b.definedAt))
   })
+
+  return { eligible, excluded }
+}
+
+// ---------- CLI ----------
+
+// batch.json 的路径解析基准（候选相对路径基于 batch 文件所在目录）——见 main 内 baseDir
+async function main() {
+  const argv = process.argv.slice(2)
+  if (argv.length < 1) {
+    console.error('用法: node scripts/ai-task-execution-plan.mjs <batch.json> [--simulate events.json]')
+    process.exit(2)
+  }
+
+  const batchPath = path.resolve(argv[0])
+  let simulatePath = null
+  const sIdx = argv.indexOf('--simulate')
+  if (sIdx >= 0) simulatePath = path.resolve(argv[sIdx + 1])
+
+  const batch = JSON.parse(fs.readFileSync(batchPath, 'utf8'))
+  const maxConcurrency = Number(batch.maxConcurrency)
+  if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
+    console.error('maxConcurrency 必须为正整数')
+    process.exit(2)
+  }
+
+  const { eligible, excluded } = await assessAndSort(batch.candidates, batchPath)
 
   const startedAt = new Date().toISOString()
   const snapshot = eligible.map((t) => ({ ...t, snapshotAt: startedAt }))
