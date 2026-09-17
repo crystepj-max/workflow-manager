@@ -1,0 +1,17 @@
+{
+  "task_id": "LOC-037",
+  "run_id": "loc-037-r1",
+  "task_name": "WR-014 将收口事实整理与授权交付动作分离",
+  "branch": "dev-loc-037-r1",
+  "status": "等待验收",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-037-r1",
+    "file_count": 13,
+    "total_bytes": 15708
+  },
+  "generated_at": "2026-09-17T04:31:51.787Z"
+}

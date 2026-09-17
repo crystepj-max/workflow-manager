@@ -1,0 +1,12 @@
+{
+  "questions": [
+    { "question_id": "feature", "topic": "功能", "source": "feature.md" },
+    { "question_id": "operations", "topic": "运维", "source": "operations.md" },
+    { "question_id": "cost", "topic": "成本", "source": "cost.md" }
+  ],
+  "tool_injection": {
+    "question_id": "cost",
+    "first_round": "TEMP_UNAVAILABLE",
+    "supplement_round": "RESTORED"
+  }
+}

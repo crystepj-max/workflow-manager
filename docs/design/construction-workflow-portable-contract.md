@@ -1,6 +1,7 @@
 # 建设 · 完整功能开发 Portable Contract
 
-> **版本**：**v0.1.8 + M2 overlay（2026-09-05）** —— 正文七阶段证据底物仍以 v0.1.8 冻结为准；**产品可见单任务交付主链以** `docs/design/ai-task-define-delivery/single-task-delivery-m2.md` **为准（定义外置）**。
+> **版本**：**v0.1.8 + M2 overlay（2026-09-05）** —— 正文七阶段证据底物仍以 v0.1.8 冻结为准；**产品可见单任务交付主链以** `docs/design/ai-task-define-delivery/single-task-delivery-m2.md` **为准（定义外置）**。  
+> **M2 与 Portable 七阶段差异（接手者必读，唯一权威）**：[`m2-vs-portable-delivery.md`](m2-vs-portable-delivery.md) —— 其他文档须引用该文，不得再写第二套「当前主链」。
 > **来源**：#102（epic，A1–A5 节为本契约的决断依据）、#103（本契约的任务 issue）；M2 对接《AI 任务定义与批量交付 V0.1》
 > **消费者**：DSH Execution Profile（#105）、External Coding Agent Profile（#104，Codex/Cursor）
 > **纪律**：两个 Profile 只通过引用本契约 + M2 overlay 工作，不得复制或分叉业务语义；本契约是 executor 中立的，只定义产品语义，不定义实现字段（实现字段由各 Profile 的 Adapter 映射）。
