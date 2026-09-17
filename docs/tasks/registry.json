@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 56,
+  "revision": 58,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -56,15 +56,15 @@
       "worktree": "/Users/chris/workspace/workflow-manager-worktrees/dev-chore-37-r1",
       "runs": [],
       "merge": {
-        "commit": "PENDING",
-        "merged_at": "2026-09-17T15:21:56.954Z"
+        "commit": "2f2fc550e8655a42d756b16c1d456097ea6f76f9",
+        "merged_at": "2026-09-17T15:21:57.001Z"
       },
       "github_sync": "pending",
-      "evidence_expires_at": "2026-09-24T15:21:56.954Z",
+      "evidence_expires_at": "2026-09-24T15:21:57.001Z",
       "evidence_cleared_at": null,
       "branch_retained": true,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-17T15:21:56.954Z",
+      "updated_at": "2026-09-17T15:21:57.202Z",
       "spec_path": "docs/tasks/archive/CHORE-37/task-spec-V1.md"
     },
     {
