@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 32,
+  "revision": 34,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -1533,6 +1533,34 @@
       "branch_retained": null,
       "created_at": "2026-09-17T00:20:30.299Z",
       "updated_at": "2026-09-17T00:21:10.599Z"
+    },
+    {
+      "task_id": "FEAT-77",
+      "type": "FEAT",
+      "remote": "cnb#77",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "M5 夜间批次调度器实现",
+      "slug": "night-batch-dispatcher",
+      "source": "夜间批次运行能力（M5）落地",
+      "source_ref": "",
+      "baseline": "V1",
+      "status": "定义中",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "feat/FEAT-77-night-batch-dispatcher",
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-17T01:56:30.789Z",
+      "updated_at": "2026-09-17T02:01:24.560Z"
     }
   ],
   "updated_at": "2026-09-16T10:20:06.264Z"
