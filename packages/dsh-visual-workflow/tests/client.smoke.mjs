@@ -303,7 +303,13 @@ function makeRuntime() {
       case 'vwf.roles':
         // FEAT-86：读取失败必须与「没有角色」区分（规格 §11 边界）
         if (state.failRoles) return { ok: false, errors: [{ at: '$', message: '角色服务不可用' }] }
-        return { roles: roleState.roles.map(r => ({ id: r.id, name: r.name, summary: r.summary, builtin: r.builtin })) }
+        // 与宿主同口径：列表条目一定带 summary（显式优先，缺失时由职责生成）
+        return {
+          roles: roleState.roles.map(r => ({
+            id: r.id, name: r.name, builtin: r.builtin,
+            summary: r.summary || String(r.content || '').split('\n')[0],
+          })),
+        }
       case 'vwf.roles.get': {
         const role = roleState.roles.find(r => r.id === args.id)
         return role ? { ok: true, role: { ...role } } : { ok: false, errors: [{ at: '$', message: '角色不存在：' + args.id }] }
@@ -1407,7 +1413,7 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
   assert.ok(inspector, '选中节点后显示节点配置')
   const inspectorBtns = Array.from(inspector.querySelectorAll('button')).map((b) => b.textContent)
   assert.ok(!inspectorBtns.some(s => s.includes('管理角色')), '节点配置不提供管理角色入口')
-  assert.ok(!inspectorBtns.some(s => s.includes('新增角色')), '节点配置不提供新增角色入口')
+  assert.ok(!inspectorBtns.some(s => s.includes('新建角色')), '节点配置不提供新建角色入口')
   // 关闭工作区回到设置页，再进入角色页签：内置/自定义分区
   await act(async () => {
     Array.from(editorDlg.querySelectorAll('button')).find(b => b.textContent === '关闭').click()
@@ -1418,14 +1424,25 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
   const mgr = await openRolesTab(fresh)
   assert.ok(mgr, '角色页签渲染角色库列表')
   // 新增角色入口在列表层常驻（不依赖分区列表中的按钮）
-  const newRoleBtn = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '＋ 新增角色')
-  assert.ok(newRoleBtn, '新增角色入口常驻（不随自定义角色数量消失）')
+  const newRoleBtn = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '＋ 新建角色')
+  assert.ok(newRoleBtn, '新建角色入口常驻（不随自定义角色数量消失）')
+  // FEAT-101 V-1：新建入口在列表头右侧（原型 settings-section-head：标题 + 说明在左，按钮在右），
+  // 位置在来源筛选与列表之前
+  const head = mgr.querySelector('.vwf-role-tab > .vwf-row')
+  assert.ok(head, '列表头存在')
+  const headKids = Array.from(head.children)
+  assert.ok(headKids.length >= 2, '列表头分左右两块')
+  assert.ok(byText(headKids[0], '角色管理'), '左侧是标题与说明')
+  assert.ok(Array.from(headKids[headKids.length - 1].querySelectorAll('button')).some(b => b.textContent === '＋ 新建角色'), '新建角色在右侧块')
+  const filterGroup = mgr.querySelector('[role="group"][aria-label="角色库"]')
+  assert.ok(filterGroup, '存在来源筛选分组')
+  assert.ok((head.compareDocumentPosition(filterGroup) & 4) !== 0, '列表头在来源筛选之前')
   await act(async () => {
     newRoleBtn.click()
     await flush()
   })
   const createMgr = fresh.querySelector('.vwf-role-mgr')
-  assert.ok(createMgr, '新增角色打开创建表单浮层')
+  assert.ok(createMgr, '新建角色打开创建表单浮层')
   assert.ok(createMgr.querySelector('input.vwf-input'), '创建表单提供名称输入')
   assert.ok(byText(createMgr, '保存角色'), '创建表单提供保存')
   await act(async () => {
@@ -1437,8 +1454,10 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
   assert.ok(byText(mgr, '内置角色'), '内置角色分区渲染')
   assert.ok(byText(mgr, '自定义角色'), '自定义角色分区渲染')
   assert.ok(byText(mgr, '需求分析师'), '自定义角色列出')
-  const viewBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '查看详情')
+  // FEAT-101 V-3：单一入口——内置只有「查看」（原「查看详情」），自定义只有「编辑」
+  const viewBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '查看')
   assert.ok(viewBtns.length >= 1, '内置角色提供查看入口')
+  assert.equal(Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '查看详情').length, 0, '不再并列「查看详情」入口')
   const editBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '编辑')
   // issue-81 后自定义角色为 dispatcher + 需求分析师两个；内置仅剩 dev，不提供编辑入口
   assert.ok(editBtns.length === 2, '内置角色不提供编辑入口（仅自定义）')
@@ -1448,7 +1467,7 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
     await flush()
   })
   assert.ok(byText(mgr, '开发角色正文'), '查看内置角色完整配置')
-  const createFromBtn = byText(mgr, '基于此角色创建自定义角色')
+  const createFromBtn = byText(mgr, '基于此角色创建')
   assert.ok(createFromBtn, '内置查看页提供基于此角色创建')
   await act(async () => {
     createFromBtn.click()
@@ -1471,6 +1490,10 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
     await flush()
   })
   assert.ok(byText(mgr, '调度变体'), '新角色立即出现在自定义列表')
+  // FEAT-101 V-2：基于内置角色创建落成的是自定义角色，原内置角色内容不被写回
+  const created = roleState.roles.find(r => r.id === '调度变体')
+  assert.ok(created && created.builtin === false, '基于内置角色创建的是自定义角色')
+  assert.equal(roleState.roles.find(r => r.id === 'dev').content, '开发角色正文\n', '原内置角色内容未被写回')
   // 删除被引用角色 → 阻止 + 引用位置详情
   await act(async () => {
     const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, '需求分析师'))
@@ -1541,8 +1564,8 @@ test('角色库：自定义角色「基于此创建」克隆 + usage 失败时�
   const mgr = await openRolesTab(fresh)
   // 自定义行提供「基于此创建」
   const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, '需求分析师'))
-  const cloneBtn = Array.from(row.querySelectorAll('button')).find(b => b.textContent === '基于此创建')
-  assert.ok(cloneBtn, '自定义角色行提供基于此创建')
+  const cloneBtn = Array.from(row.querySelectorAll('button')).find(b => b.textContent === '基于此角色创建')
+  assert.ok(cloneBtn, '自定义角色行提供基于此角色创建（与内置同一入口文案）')
   await act(async () => {
     cloneBtn.click()
     await flush()
@@ -1616,7 +1639,7 @@ test('角色库 UX 收紧：首尾点/Windows 保留名保存时被 Host 权威�
   })
   await openRolesTab(fresh)
   const mgr = fresh.querySelector('[data-vwf-roles-tab]')
-  await act(async () => { byText(mgr, '新增角色').click(); await flush() })
+  await act(async () => { byText(mgr, '新建角色').click(); await flush() })
   const nameInput = mgr.querySelector('input.vwf-input')
   const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
   const before = roleState.roles.length
@@ -1827,6 +1850,9 @@ test('角色库收口：来源双重可辨识、长摘要两行收敛、详情�
   const longSummary = '无空格连续长串'.repeat(30)
   const longContent = '职责说明：'.repeat(40) + 'x'.repeat(600)
   roleState.roles.push({ id: '长职责角色', name: '长职责角色', summary: longSummary, builtin: false, content: longContent })
+  // FEAT-101 V-3：只读「查看」是内置角色的入口（自定义角色走「编辑」表单）——长职责的
+  // 独立滚动区改由内置角色验证；自定义一侧改验表单内的滚动文本域（同一条能力，两种形态）。
+  roleState.roles.push({ id: '长职责内置角色', name: '长职责内置角色', summary: longSummary, builtin: true, content: longContent })
   const fresh = document.createElement('div')
   document.body.appendChild(fresh)
   const freshRoot = createRoot(fresh)
@@ -1860,9 +1886,13 @@ test('角色库收口：来源双重可辨识、长摘要两行收敛、详情�
   assert.ok(!rows().some(r => byText(r, 'dev')), '自定义筛选隐藏内置角色')
   await act(async () => { filterBtn('全部').click(); await flush() })
   assert.ok(rows().some(r => byText(r, 'dev')) && rows().some(r => byText(r, '长职责角色')), '全部筛选恢复两个分区')
-  // V-2 查看详情：完整职责在独立滚动区，键盘可进入
-  const backRow = rows().find(r => byText(r, '长职责角色'))
-  const detailBtn = Array.from(backRow.querySelectorAll('button')).find(b => b.textContent === '查看详情')
+  // 自定义角色单一入口「编辑」：全文落在表单滚动文本域里，列表行仍不承载完整职责
+  const customRow = rows().find(r => byText(r, '长职责角色'))
+  const customBtns = Array.from(customRow.querySelectorAll('button')).map(b => b.textContent)
+  assert.deepEqual(customBtns, ['编辑', '基于此角色创建', '删除'], '自定义角色不再并列查看 + 编辑：' + JSON.stringify(customBtns))
+  // V-2 查看详情：完整职责在独立滚动区，键盘可进入（内置角色）
+  const backRow = rows().find(r => byText(r, '长职责内置角色'))
+  const detailBtn = Array.from(backRow.querySelectorAll('button')).find(b => b.textContent === '查看')
   await act(async () => { detailBtn.click(); await flush() })
   const content = fresh.querySelector('.vwf-role-content')
   assert.ok(content, '详情提供完整职责区')
@@ -1876,14 +1906,26 @@ test('角色库收口：来源双重可辨识、长摘要两行收敛、详情�
   })
   assert.ok(!fresh.querySelector('.vwf-role-content'), 'Escape 关闭详情回到列表')
   // 焦点回收到触发元素：行按钮是返回列表后重新渲染的节点，按角色重新取当次元素
-  const viewBtnBack = Array.from(rows().find(r => byText(r, '长职责角色')).querySelectorAll('button')).find(b => b.textContent === '查看详情')
+  const viewBtnBack = Array.from(rows().find(r => byText(r, '长职责内置角色')).querySelectorAll('button')).find(b => b.textContent === '查看')
   assert.ok(dom.window.document.activeElement === viewBtnBack, 'Escape 关闭详情后焦点回收到触发元素')
+  // 自定义角色的同一条能力（完整职责不撑高列表）：编辑表单内是自带滚动的文本域
+  await act(async () => {
+    Array.from(rows().find(r => byText(r, '长职责角色')).querySelectorAll('button')).find(b => b.textContent === '编辑').click()
+    await flush()
+  })
+  const roleArea = ovPanel().querySelector('textarea')
+  assert.ok(roleArea && roleArea.value === longContent, '自定义角色编辑表单承载完整职责原文')
+  assert.ok(!fresh.querySelector('.vwf-role-content'), '自定义角色编辑态不再渲染只读详情滚动区')
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
   // 摘要生成不写回原文（规格 §9）：查看前后角色字段逐字不变
   assert.equal(roleState.roles.find(r => r.id === '长职责角色').content, longContent, '职责原文未被改写')
   assert.equal(roleState.roles.find(r => r.id === '长职责角色').summary, longSummary, '摘要字段未被写回')
   // V-6 真实 label：表单字段用 label[for] 绑定
-  const newBtn = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '＋ 新增角色')
-  assert.ok(newBtn, '列表层常驻新增角色入口（不随自定义角色数量消失）')
+  const newBtn = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '＋ 新建角色')
+  assert.ok(newBtn, '列表层常驻新建角色入口（不随自定义角色数量消失）')
   await act(async () => { newBtn.click(); await flush() })
   const formPanel = ovPanel()
   assert.ok(formPanel, '新增角色打开创建表单浮层')
@@ -1896,8 +1938,8 @@ test('角色库收口：来源双重可辨识、长摘要两行收敛、详情�
   assert.ok(!fresh.querySelector('#vwf-role-name'), 'Escape 关闭表单回到列表')
   // 焦点回收（V-6）：取消新建没有对应行，焦点归位到列表层的「新增角色」（重新渲染后的当次节点），
   // 不掉到 body
-  const newBtnBack = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '＋ 新增角色')
-  assert.ok(dom.window.document.activeElement === newBtnBack, '关闭表单后焦点回到列表层新增角色')
+  const newBtnBack = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '＋ 新建角色')
+  assert.ok(dom.window.document.activeElement === newBtnBack, '关闭表单后焦点回到列表层新建角色')
   // V-6 逐层 Escape 止于列表层：列表层不再是自己的一层浮层（角色=设置页签，FEAT-100 V-1），
   // 该层不能再吞掉 Escape——否则宿主设置面板按 Escape 关不上。
   let escaped = null
@@ -1908,7 +1950,7 @@ test('角色库收口：来源双重可辨识、长摘要两行收敛、详情�
   assert.ok(fresh.querySelector('[data-vwf-roles-tab]'), '列表层 Escape 不关闭角色页签')
   assert.equal(escaped, true, '列表层 Escape 放行给宿主（未 preventDefault / stopPropagation）')
   await act(async () => { freshRoot.unmount(); fresh.remove() })
-  roleState.roles = roleState.roles.filter(r => r.id !== '长职责角色')
+  roleState.roles = roleState.roles.filter(r => r.id !== '长职责角色' && r.id !== '长职责内置角色')
 })
 
 test('角色库：内置角色只读可查看可复制，不提供编辑/删除（V-1 权限边界）', async () => {
@@ -1924,13 +1966,45 @@ test('角色库：内置角色只读可查看可复制，不提供编辑/删除�
   const mgr = fresh.querySelector('[data-vwf-roles-tab]')
   const builtinRow = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => r.getAttribute('data-vwf-role-origin') === 'builtin')
   const builtinBtns = Array.from(builtinRow.querySelectorAll('button')).map(b => b.textContent)
-  assert.deepEqual(builtinBtns, ['查看详情'], '内置角色只有查看入口，无编辑/复制/删除')
+  assert.deepEqual(builtinBtns, ['查看'], '内置角色只有查看入口，无编辑/复制/删除')
   await act(async () => { Array.from(builtinRow.querySelectorAll('button'))[0].click(); await flush() })
   const viewBtns = Array.from(fresh.querySelectorAll('.vwf-role-mgr button')).map(b => b.textContent)
-  assert.ok(viewBtns.includes('基于此角色创建自定义角色'), '内置详情提供复制为自定义')
+  assert.ok(viewBtns.includes('基于此角色创建'), '内置详情提供复制为自定义')
   assert.ok(!viewBtns.includes('编辑'), '内置详情无编辑入口')
   assert.ok(byText(mgr, '开发角色正文'), '内置详情展示完整内容')
   await act(async () => { freshRoot.unmount(); fresh.remove() })
+})
+
+test('FEAT-101 V-4：角色详情展示一句话简介；缺失时由职责生成展示、不写回原文', async () => {
+  // 无 summary 的 fixture：详情必须由职责生成一段可读简介，且不改写角色对象
+  roleState.roles.push({ id: '无简介角色', name: '无简介角色', builtin: true, content: '第一句职责。\n第二句职责。\n' })
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+  const mgr = await openRolesTab(fresh)
+  const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, '无简介角色'))
+  assert.ok(row, '无简介角色出现在内置分区')
+  const rowSummary = row.querySelector('.vwf-role-summary')
+  assert.equal(rowSummary.textContent, '第一句职责。', '列表行展示列表载荷给出的摘要')
+  await act(async () => {
+    Array.from(row.querySelectorAll('button')).find(b => b.textContent === '查看').click()
+    await flush()
+  })
+  const detailSummary = fresh.querySelector('.vwf-role-mgr .vwf-role-summary')
+  assert.ok(detailSummary, '详情页展示一句话简介')
+  // vwf.roles.get 返回的角色没有 summary 字段 → 客户端按既有规则由完整职责生成（不写回）
+  assert.equal(detailSummary.textContent, '第一句职责。 第二句职责。', '缺失 summary 时按既有规则由职责生成')
+  assert.ok(fresh.querySelector('.vwf-role-content').textContent.indexOf('第一句职责。') >= 0, '完整职责仍在独立滚动区')
+  const stored = roleState.roles.find(r => r.id === '无简介角色')
+  assert.equal(stored.summary, undefined, '摘要不写回角色字段')
+  assert.equal(stored.content, '第一句职责。\n第二句职责。\n', '职责原文未被改写')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+  roleState.roles = roleState.roles.filter(r => r.id !== '无简介角色')
 })
 
 test('角色库：读取失败显示明确失败态，不把空列表当作「没有角色」（规格 §11）', async () => {

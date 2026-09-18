@@ -212,6 +212,8 @@ function editorOf(container) {
   return container.querySelector('.vwf-editor')
 }
 
+const css0 = (styleText) => compactCss(styleText.join('\n'))
+
 // 源码样式带缩进与空格；断言前统一成紧凑口径（保留后代选择器空格与 @media 名称）
 function compactCss(text) {
   return String(text)
@@ -224,18 +226,26 @@ function compactCss(text) {
 // ═══════════════════════════════════════════════════════════════════════════
 // V-2 三段结构与独立滚动
 // ═══════════════════════════════════════════════════════════════════════════
-test('V-2 三段结构：步骤定位 / 画布 / 配置栏三个独立滚动区，外层不再承担页面级滚动', async () => {
+test('V-2 四段结构：节点选择 / 全局参数 / 画布 / 配置栏四个独立滚动区，外层不再承担页面级滚动', async () => {
   const { container, styleText } = await mountPage()
   await openEditor(container)
 
   const editor = editorOf(container)
   assert.ok(editor, '存在工作区网格')
-  // 三个直接网格项各占一个 grid-area —— 各自滚动互不带动
-  assert.ok(editor.querySelector('.vwf-nav-col'), '左侧步骤定位区存在')
+  // 四个直接网格项各占一个 grid-area —— 各自滚动互不带动
+  assert.ok(editor.querySelector('.vwf-nav-col'), '左侧节点选择区存在')
+  assert.ok(editor.querySelector('.vwf-params-col'), '左侧全局参数配置区存在（FEAT-101 V-5）')
   assert.ok(editor.querySelector('.vwf-canvas-col'), '中间路线画布存在')
   assert.ok(editor.querySelector('.vwf-inspector'), '右侧节点配置栏存在')
   const areas = Array.from(editor.children).map((el) => el.className)
-  assert.equal(areas.length, 3, '工作区只有三个直接子项：' + JSON.stringify(areas))
+  assert.equal(areas.length, 4, '工作区只有四个直接子项：' + JSON.stringify(areas))
+  // FEAT-101 V-5：左列 6:4 竖向分割 = 节点选择（上）+ 全局参数配置（下），
+  // 两块同属第一列，画布与配置栏整列通高
+  assert.match(css0(styleText), /grid-template-rows:minmax\(0,6fr\) minmax\(0,4fr\)/, '左列 6:4 竖向分割')
+  assert.match(css0(styleText), /grid-template-areas:"nav canvas config" "params canvas config"/, '左列两块与画布/配置栏同网格分区')
+  assert.ok(editor.querySelector('.vwf-params-col .vwf-wb-steps-card') === null, '全局参数不是节点选择卡片的子项')
+  const paramFields = Array.from(editor.querySelectorAll('.vwf-params-col input, .vwf-params-col select'))
+  assert.equal(paramFields.length, 3, '全局参数配置含既有全部字段（打回上限 / 异源要求 / 超限行为）：' + paramFields.length)
 
   const css = compactCss(styleText.join('\n'))
   // 外层容器只负责裁剪，不再滚动（改造前是 overflow:auto 的共享滚动源）
@@ -265,6 +275,41 @@ test('V-2 配置栏内容长于可视高度时，画布仍是独立滚动区（�
   assert.ok(body.contains(inspector) && body.contains(canvasWrap), '两者都在工作区外层之内')
   assert.ok(inspector.parentElement.classList.contains('vwf-editor'), '配置栏是工作区网格的直接子项')
   assert.ok(canvasWrap.closest('.vwf-editor') === inspector.parentElement, '画布与配置栏属于同一个工作区网格')
+})
+
+test('FEAT-101 V-5 全局参数配置：三个字段落在左列下块，改动仍写回同一份 control（保存行为不变）', async () => {
+  const { container, state } = await mountPage()
+  await openEditor(container)
+  const editor = editorOf(container)
+  const kids = Array.from(editor.children).map((el) => el.className)
+  assert.deepEqual(kids, ['vwf-nav-col', 'vwf-params-col', 'vwf-canvas-col', 'vwf-card vwf-inspector'],
+    '左列两块（节点选择 / 全局参数）+ 画布 + 配置栏：' + JSON.stringify(kids))
+  const params = container.querySelector('.vwf-params-col')
+  assert.ok(params, '全局参数配置区存在')
+  assert.ok(!container.querySelector('.vwf-inspector .vwf-params-body'), '全局参数不在右列配置面板内（V-5 位置）')
+  // 既有全部字段：打回上限 / 异源要求 / 超限行为（字段本身与校验行为不变）
+  const labels = Array.from(params.querySelectorAll('.vwf-field-label')).map((el) => el.textContent)
+  assert.equal(labels.length, 3, '全局参数配置含既有全部字段：' + JSON.stringify(labels))
+  for (const word of ['打回上限', '异源要求', '超限行为']) {
+    assert.ok(labels.some((l) => l.indexOf(word) >= 0), '含字段：' + word)
+  }
+  // 参数说明仍在（收成问号点，内容不丢）
+  assert.ok(params.querySelector('.vwf-help'), '参数说明以问号点保留')
+  // 保存行为不变：改「打回上限」→ 保存载荷里的 control.maxRounds 随之变化
+  const input = params.querySelector('input[type="number"]')
+  assert.ok(input, '打回上限是既有数字输入')
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    setter.call(input, '5')
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+  })
+  await act(async () => {
+    byText(container, '保存工作流').click()
+    await flush(); await flush()
+  })
+  assert.ok(state.saved.length >= 1, '保存落到既有保存通道')
+  assert.equal(state.saved[0].control.maxRounds, 5, '左列改动写回同一份 control')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -561,11 +606,22 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
   })
   const ovDialog = Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型设置') >= 0)
   assert.ok(ovDialog, '模型设置对话框已打开')
+  // FEAT-101 V-7：对话框呈现照原型——标题「节点模型设置 · <模板>」+ 底栏「全部还原默认 / 取消 / 保存节点设置」
+  assert.ok(ovDialog.textContent.indexOf('节点模型设置 · ') >= 0, '标题为节点模型设置 · 模板名')
+  const footBtns = Array.from(ovDialog.querySelectorAll('button')).map((b) => b.textContent)
+  for (const label of ['全部还原默认', '取消', '保存节点设置']) {
+    assert.ok(footBtns.includes(label), '底栏含：' + label)
+  }
 
-  // ① 默认：未覆盖时每个节点显示「默认」徽标
-  const rows = () => Array.from(ovDialog.querySelectorAll('.vwf-list-item'))
+  // ① 默认：未覆盖时每个节点显示「默认」徽标（FEAT-101 V-7：每节点一块，原型 modelRow 形态）
+  const rows = () => Array.from(ovDialog.querySelectorAll('.vwf-model-row'))
   assert.equal(rows().length, BUILTIN_DSL.nodes.length, '逐节点列出模型设置')
-  for (const r of rows()) assert.ok(r.textContent.indexOf('默认') >= 0, '未覆盖时显示默认徽标')
+  for (const r of rows()) {
+    assert.ok(r.textContent.indexOf('默认') >= 0, '未覆盖时显示默认徽标')
+    assert.ok(r.textContent.indexOf('默认：') >= 0, '给出该节点预设（原型：默认：<供应商> / <模型>）')
+    assert.ok(byText(r, '供应商') && byText(r, '模型'), '两个下拉各自带标签')
+    assert.ok(byText(r, '还原本节点默认'), '每节点提供「还原本节点默认」')
+  }
 
   // ② 覆盖：给两个节点各写 provider/model 并保存（两个节点才能验证「单节点还原只清一个」）
   const setRowOverride = async (rowIndex) => {
@@ -585,11 +641,11 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
   await setRowOverride(0)
   await setRowOverride(1)
   await act(async () => {
-    byText(ovDialog, '保存覆盖').click()
+    byText(ovDialog, '保存节点设置').click()
     await flush(); await flush()
   })
   const savedCall = state.overrideCalls.filter((c) => c.op === 'save').pop()
-  assert.ok(savedCall, '保存覆盖调用了 vwf.workflows.modelOverride.save')
+  assert.ok(savedCall, '保存节点设置调用了 vwf.workflows.modelOverride.save')
   assert.equal(savedCall.overrides[BUILTIN_DSL.nodes[0].id].provider, 'deepseek-official', '覆盖写入 provider')
   assert.equal(savedCall.overrides[BUILTIN_DSL.nodes[0].id].model, 'deepseek-v4-flash', '覆盖写入 model')
   assert.ok(savedCall.overrides[BUILTIN_DSL.nodes[1].id], '第二个节点的覆盖一并写入')
@@ -600,21 +656,21 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
     await flush(); await flush()
   })
   const ovDialog2 = Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型设置') >= 0)
-  const overriddenRow = Array.from(ovDialog2.querySelectorAll('.vwf-list-item')).find((r) => r.textContent.indexOf('已覆盖') >= 0)
+  const overriddenRow = Array.from(ovDialog2.querySelectorAll('.vwf-model-row')).find((r) => r.textContent.indexOf('已覆盖') >= 0)
   assert.ok(overriddenRow, '覆盖保存后重新打开显示「已覆盖」徽标')
   await act(async () => {
-    byText(overriddenRow, '还原').click()
+    byText(overriddenRow, '还原本节点默认').click()
     await flush()
   })
   assert.ok(overriddenRow.textContent.indexOf('默认') >= 0, '单节点还原后回到默认徽标')
   // 还原只改草稿，真正生效要保存；断言必须落在 RPC 载荷上（否则是假绿）
   const savesBefore = state.overrideCalls.filter((c) => c.op === 'save').length
   await act(async () => {
-    byText(ovDialog2, '保存覆盖').click()
+    byText(ovDialog2, '保存节点设置').click()
     await flush(); await flush()
   })
   const savesAfter = state.overrideCalls.filter((c) => c.op === 'save')
-  assert.equal(savesAfter.length, savesBefore + 1, '还原后保存覆盖再次落盘')
+  assert.equal(savesAfter.length, savesBefore + 1, '还原后保存节点设置再次落盘')
   const lastSave = savesAfter.pop()
   assert.equal(lastSave.overrides[BUILTIN_DSL.nodes[0].id], undefined, '单节点还原在持久化载荷中已清除该节点覆盖')
   assert.ok(lastSave.overrides[BUILTIN_DSL.nodes[1].id], '单节点还原只清该节点，其他节点的覆盖保留')
@@ -631,13 +687,13 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
   assert.ok(ovDialog3, '再次打开模型设置对话框')
   assert.ok(ovDialog3.textContent.indexOf('已覆盖') >= 0, '保存后重新打开仍显示已覆盖')
   await act(async () => {
-    byText(ovDialog3, '清除恢复默认').click()
+    byText(ovDialog3, '全部还原默认').click()
     await flush()
   })
   const confirm = container.querySelector('.vwf-confirm-mask')
   assert.ok(confirm, '全部还原需要二次确认')
   await act(async () => {
-    const doClear = Array.from(confirm.querySelectorAll('button')).find((b) => b.textContent === '清除恢复默认')
+    const doClear = Array.from(confirm.querySelectorAll('button')).find((b) => b.textContent === '全部还原默认')
     assert.ok(doClear, '确认层给出清除动作')
     doClear.click()
     await flush(); await flush()
@@ -821,12 +877,13 @@ test('V-9 窄屏 390×844：流程 / 配置两个区域可切换，不把桌面�
   const css = compactCss(styleText.join('\n'))
   const has = (frag, label) => assert.ok(css.indexOf(frag) >= 0, label)
   has('@media (max-width:900px){', '窄屏规则集中在媒体查询内')
-  has('.vwf-editor{grid-template-columns:minmax(0,1fr);inset:54px 16px 12px}', '窄屏单列可收缩且让出切换条高度')
+  has('.vwf-editor{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);inset:54px 16px 12px}', '窄屏单列单行可收缩且让出切换条高度')
   has('.vwf-editor.pane-flow{grid-template-rows:auto minmax(0,1fr);grid-template-areas:"nav" "canvas"}', '流程窗格：步骤条自适应 + 画布占满剩余高度')
-  has('.vwf-editor.pane-config{grid-template-rows:minmax(0,1fr);grid-template-areas:"config"}', '配置窗格：配置栏占满剩余高度（连接信息走弹窗，不再占窗格）')
+  has('.vwf-editor.pane-config{grid-template-rows:auto minmax(0,1fr);grid-template-areas:"params" "config"}', '配置窗格：全局参数 + 配置栏占满剩余高度（连接信息走弹窗，不再占窗格）')
   // 未参与当窗格 grid-template-areas 的项必须显式隐藏，否则被自动放置撑出隐式行
   has('.vwf-editor.pane-flow .vwf-inspector{display:none}', '流程窗格隐藏配置栏')
-  has('.vwf-editor.pane-config .vwf-nav-col,.vwf-editor.pane-config .vwf-canvas-col{display:none}', '配置窗格隐藏步骤定位与画布')
+  has('.vwf-editor.pane-flow .vwf-params-col{display:none}', '流程窗格隐藏全局参数配置（仍可从配置窗格进入）')
+  has('.vwf-editor.pane-config .vwf-nav-col,.vwf-editor.pane-config .vwf-canvas-col{display:none}', '配置窗格隐藏节点选择与画布')
 })
 
 test('V-9 桌面宽度保持三段布局：切换条默认隐藏，网格为三列一行', async () => {
@@ -836,7 +893,7 @@ test('V-9 桌面宽度保持三段布局：切换条默认隐藏，网格为三�
   const css = compactCss(styleText.join('\n'))
   const has = (frag, label) => assert.ok(css.indexOf(frag) >= 0, label)
   has('.vwf-pane-switch{display:none}', '切换条默认隐藏')
-  has('grid-template-rows:minmax(0,1fr);grid-template-areas:"nav canvas config"', '桌面单行网格与区域划分')
+  has('grid-template-rows:minmax(0,6fr) minmax(0,4fr);grid-template-areas:"nav canvas config" "params canvas config"', '桌面网格：左列 6:4 上下两块，画布与配置栏整列通高')
   // 画布宿主必须撑满卡片剩余高度（否则画布只有内容高度，首屏 fit 落到缩放下限）
   has('.vwf-editor-dialog .vwf-canvas-host{flex:1;min-height:0;display:flex;flex-direction:column}', '画布宿主撑满卡片')
 })
@@ -926,16 +983,34 @@ test('V-12 画布自上而下：入口在上、下游节点在下；同级兄弟
   assert.ok(Math.abs(nums[nums.length - 2] - (b1.x + b1.w / 2)) < 2, '前向边落到目标节点上边框中点')
 })
 
-test('V-12 纵向布局保持缩放 / 拖拽 / 首屏 fit 与连接可查看（V-2 能力不回退）', async () => {
+test('V-6/V-12 纵向布局保持缩放 / 拖拽 / 适配全图与连接可查看（V-2 能力不回退）', async () => {
   const { container } = await mountPage({ dsl: DIAG_DSL, list: [{ id: 'wf-diag', name: '诊断与修复', description: '', builtin: false, dsl: JSON.parse(JSON.stringify(DIAG_DSL)) }] })
   await openEditor(container)
-  // 首屏 fit：内容尺寸随纵向布局给出（高度 = 主序号方向的总长，宽度 = 同级并排方向的总长）
+  // FEAT-101 V-6：打开时默认「就近清晰」——固定 0.85 可读比例（原型默认值），不再 fit 全图。
+  // 内容尺寸随纵向布局给出（高度 = 主序号方向的总长，宽度 = 同级并排方向的总长）。
   const wrap = container.querySelector('.vwf-canvas-wrap')
+  const svg0 = container.querySelector('svg.vwf-svg')
+  assert.ok(svg0, '画布 SVG 渲染')
+  const scaleOf = (el) => Number(el.getAttribute('width')) / Number(el.getAttribute('viewBox').split(' ')[2])
+  assert.ok(Number(svg0.getAttribute('width')) > 0 && Number(svg0.getAttribute('height')) > 0, '默认视图给出可用缩放')
+  assert.ok(Math.abs(scaleOf(svg0) - 0.85) < 1e-9, '默认按可读比例 0.85 展示：' + scaleOf(svg0))
+  // 适配全图仍是可达能力（V-2 不回退）：点击后缩放值随之变化
+  await act(async () => {
+    container.querySelector('.vwf-zoom button[title="适配视图"]').click()
+    await flush()
+  })
+  assert.notEqual(scaleOf(container.querySelector('svg.vwf-svg')), 0.85, '「适配视图」按钮仍可一键 fit 全图')
+  // 回到可读比例再继续后续缩放 / 拖拽断言（默认 0.85 下画布尺寸与内容一致）
+  await act(async () => {
+    container.querySelector('.vwf-zoom button[title="放大"]').click()
+    container.querySelector('.vwf-zoom button[title="放大"]').click()
+    container.querySelector('.vwf-zoom button[title="放大"]').click()
+    container.querySelector('.vwf-zoom button[title="放大"]').click()
+    await flush()
+  })
   const svg = container.querySelector('svg.vwf-svg')
-  assert.ok(svg, '画布 SVG 渲染')
   const w = Number(svg.getAttribute('width'))
-  const h = Number(svg.getAttribute('height'))
-  assert.ok(w > 0 && h > 0, '首屏 fit 给出可用缩放：' + w + '×' + h)
+  assert.ok(w > 0, '缩放操作后画布仍可用')
   // 滚轮缩放
   const zoomBefore = svg.getAttribute('viewBox')
   await act(async () => {

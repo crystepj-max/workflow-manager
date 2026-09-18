@@ -187,6 +187,9 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-badge { display:inline-block; padding:1px 8px; border-radius:99px; font-size:10px; border:1px solid var(--vwf-border-strong); color:var(--vwf-text-2); }
 .vwf-badge.accent { color:var(--vwf-accent); border-color:currentColor; }
 .vwf-list { display:flex; flex-direction:column; gap:8px; }
+/* 模型设置每节点一块（原型 modelRow）：名称 + 默认/覆盖徽标同行，默认值一行，两个字段并排 */
+.vwf-model-row { padding:10px 12px; border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-canvas); }
+.vwf-two-fields { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .vwf-list-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-canvas); }
 .vwf-list-item:hover { border-color:var(--vwf-border-strong); }
 .vwf-list-name { font-weight:600; font-size:13px; }
@@ -220,14 +223,16 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-msg-line.muted { color:var(--dsw-alias-label-tertiary, #8a8a8a); }
 /* 大工作区（A 编排台）——FEAT-84：外层不再承担页面级滚动。
    改造前 .vwf-editor-body 是 overflow:auto 的共享滚动容器，画布行按内容撑高，
-   配置栏一滚就把画布带出视口。现在外层只负责定高与裁剪，三个直接网格项
-   （步骤定位 / 画布 / 节点配置栏）各自滚动，互不带动；连接信息走弹窗（V-13）。 */
+   配置栏一滚就把画布带出视口。现在外层只负责定高与裁剪，四个直接网格项
+   （左列 节点选择 / 全局参数配置，画布，节点配置栏）各自滚动，互不带动；连接信息走弹窗（V-13）。
+   FEAT-101 V-5：左列拆成上下两块 —— 节点选择（上，6）+ 全局参数配置（下，4）；
+   两块都落在第一列内，画布与配置栏仍整列通高。 */
 .vwf-editor-body { flex:1; min-height:0; overflow:hidden; position:relative; overscroll-behavior:contain; }
 /* 绝对定位（inset）而不是 height:100% 或 flex 拉伸：列向 flex 派生的高度在 Chromium 里
    不构成百分比可解析的「确定高度」，网格行 minmax(0,1fr) 会退化为 max-content——
    实测内容被撑到 2151px 而容器只有 675px，随后被 overflow:hidden 裁掉（配置栏滚不动、
-   画布被推出视口）。inset 给出确定高度，三个滚动区才真正各自生效。 */
-.vwf-editor { position:absolute; inset:12px 16px; display:grid; grid-template-columns:minmax(0,224px) minmax(0,1fr) minmax(0,368px); grid-template-rows:minmax(0,1fr); grid-template-areas:"nav canvas config"; gap:12px; align-items:stretch; min-width:0; min-height:0; }
+   画布被推出视口）。inset 给出确定高度，各滚动区才真正各自生效。 */
+.vwf-editor { position:absolute; inset:12px 16px; display:grid; grid-template-columns:minmax(0,224px) minmax(0,1fr) minmax(0,368px); grid-template-rows:minmax(0,6fr) minmax(0,4fr); grid-template-areas:"nav canvas config" "params canvas config"; gap:12px; align-items:stretch; min-width:0; min-height:0; }
 /* 窄屏：流程 / 配置两个区域切换，不把桌面画布压成不可读小图（规格 §11）。
    断点与 matchMedia 使用同一阈值（900px），保证 CSS 与 JS 判定一致。 */
 /* 窄屏（≤900px）：流程 / 配置两个区域切换，纯 CSS 驱动（与 JS 无关，matchMedia 缺失也不会错位）。
@@ -236,12 +241,13 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-pane-switch { display:none; }
 @media (max-width: 900px) {
   .vwf-pane-switch { display:flex; gap:6px; position:absolute; top:12px; left:16px; right:16px; z-index:3; }
-  .vwf-editor { grid-template-columns:minmax(0,1fr); inset:54px 16px 12px; }
+  .vwf-editor { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); inset:54px 16px 12px; }
   .vwf-editor.pane-flow { grid-template-rows:auto minmax(0,1fr); grid-template-areas:"nav" "canvas"; }
-  .vwf-editor.pane-config { grid-template-rows:minmax(0,1fr); grid-template-areas:"config"; }
+  .vwf-editor.pane-config { grid-template-rows:auto minmax(0,1fr); grid-template-areas:"params" "config"; }
   .vwf-editor.pane-flow .vwf-inspector { display:none; }
+  .vwf-editor.pane-flow .vwf-params-col { display:none; }
   .vwf-editor.pane-config .vwf-nav-col, .vwf-editor.pane-config .vwf-canvas-col { display:none; }
-  /* 步骤定位转为横向位置条：保留步骤方位感，不再占据半个屏幕宽 */
+  /* 节点选择转为横向位置条：保留步骤方位感，不再占据半个屏幕宽 */
   .vwf-nav-col { flex-direction:row; align-items:stretch; }
   .vwf-nav-col .vwf-wb-steps-body { display:flex; flex-direction:row; gap:6px; overflow-x:auto; overflow-y:hidden; padding:8px 10px; }
   .vwf-wb-step { flex:0 0 auto; min-width:132px; }
@@ -322,6 +328,10 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 /* 右侧节点配置栏：网格项自身滚动（不再 position:sticky + height:100% 依附父级滚动） */
 .vwf-inspector { grid-area:config; min-width:0; min-height:0; overflow:auto; padding:12px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 .vwf-nav-col { grid-area:nav; min-width:0; min-height:0; display:flex; flex-direction:column; gap:12px; }
+/* FEAT-101 V-5：全局参数配置固定在左列下方（节点选择之下），两块都是自己的滚动区 */
+.vwf-params-col { grid-area:params; min-width:0; min-height:0; display:flex; flex-direction:column; gap:12px; }
+.vwf-params-col > .vwf-card { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+.vwf-params-body { flex:1; min-height:0; overflow:auto; padding:8px 10px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 .vwf-wb-steps-card { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
 .vwf-wb-steps-body, .vwf-wb-conn-body { flex:1; min-height:0; overflow:auto; padding:8px 10px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 .vwf-wb-step, .vwf-wb-conn-row { width:100%; text-align:left; border:1px solid var(--vwf-wb-border-control); background:var(--vwf-wb-surface); color:var(--vwf-wb-text); cursor:pointer; font:inherit; font-size:12px; }
@@ -524,6 +534,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     const MARGIN_X = 56
     const MARGIN_Y = 64
     const CANVAS_PAD = 24
+    // 默认视图比例（FEAT-101 V-6）：按可读比例落在入口段，不 fit 全图——
+    // 节点多时 fit 会落到 0.3 下限，节点文字不可读。取值与原型默认 85% 一致。
+    const DEFAULT_VIEW_SCALE = 0.85
     const END_NODE = '$end'
     const HUMAN_DECISION_ID = '$human-decision'
     const STATUS_COLOR = { running: 'var(--vwf-accent)', pass: 'var(--vwf-ok)', fail: 'var(--vwf-err)', human: 'var(--vwf-warn)' }
@@ -981,14 +994,35 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           wrapRef.current.scrollTop = Math.max(0, (stageH - wrapRef.current.clientHeight) / 2)
         }, 0)
       }, [W, H])
-      const fittedRef = React.useRef(false)
+      // FEAT-101 V-6：打开时默认「就近清晰」——固定到可读比例并落在入口节点一段，
+      // 不再 fit 全图（节点多时 0.3 下限下节点内容看不清）。缩放 / 拖拽 / ⤢ 适配全图
+      // 三个能力不变：fitView 仍是同一个函数，只是不再被首帧自动调用。
+      const focusEntry = React.useCallback(() => {
+        const wrap = wrapRef.current
+        if (!wrap) return
+        const s = DEFAULT_VIEW_SCALE
+        setScale(s)
+        setPanOffset({ x: 0, y: 0 })
+        ctx.timeout(() => {
+          const w = wrapRef.current
+          if (!w) return
+          // 入口段 = 声明入口节点；未声明时退回首节点（布局自上而下，rank 0 在最上）
+          const first = (dsl.nodes || [])[0]
+          const anchorId = pos[dsl.entry] ? dsl.entry : (first && pos[first.id] ? first.id : null)
+          const a = anchorId ? pos[anchorId] : null
+          if (!a) { w.scrollTop = 0; w.scrollLeft = 0; return }
+          w.scrollTop = Math.max(0, a.y * s - CANVAS_PAD)
+          w.scrollLeft = Math.max(0, (a.x + a.w / 2) * s - w.clientWidth / 2)
+        }, 0)
+      }, [pos, dsl.entry, dsl.nodes])
+      const enteredRef = React.useRef(false)
       React.useEffect(() => {
-        if (fittedRef.current) return undefined
-        fittedRef.current = true
-        // 编辑器宿主是先渲染 <dialog>、再在父级 effect 中 showModal；初始 fit 延后到
+        if (enteredRef.current) return undefined
+        enteredRef.current = true
+        // 编辑器宿主是先渲染 <dialog>、再在父级 effect 中 showModal；初始视图延后到
         // 下一轮，确保读到的是弹层打开后的真实可视尺寸，而不是 display:none 的 0 尺寸。
-        return ctx.timeout(fitView, 0)
-      }, [fitView])
+        return ctx.timeout(focusEntry, 0)
+      }, [focusEntry])
       React.useEffect(() => { props.registerFit && props.registerFit(fitView) }, [fitView])
       // 定位到指定节点（校验弹窗关闭后聚焦首个问题节点，对应 Gold-Band 的 setCenter）
       const posRef = React.useRef(pos)
@@ -2161,10 +2195,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const [confirm, setConfirm] = React.useState(null) // {kind:'delete'|'blocked'|'impact', role?, usage?, name?, content?}
       const [saving, setSaving] = React.useState(false)
       const dialogRef = React.useRef(null)
-      const viewBtnRefs = React.useRef({}) // 角色 id → 「查看详情」按钮（返回列表后回收焦点）
+      const rowBtnRefs = React.useRef({}) // 角色 id → 行内唯一入口按钮（查看 / 编辑，返回列表后回收焦点）
       const returnFocusRef = React.useRef(null) // 待回收焦点的角色 id
       const confirmReturnRef = React.useRef(null) // 关闭二次确认后要回收焦点的元素
-      const newBtnRef = React.useRef(null) // 列表层「新增角色」：关闭浮层后没有指定行的兜底焦点
+      const newBtnRef = React.useRef(null) // 列表头「新建角色」：关闭浮层后没有指定行的兜底焦点
       const mountedRef = React.useRef(false)
       const refetch = React.useCallback(() => {
         host.call('vwf.roles').then((r) => {
@@ -2181,13 +2215,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       React.useEffect(() => { refetch() }, [])
       // 焦点回收（V-6）：打开详情/表单时焦点进入浮层容器；Escape/返回回到列表时，
       // 焦点归位到该角色的「查看详情」按钮（行按钮是重新渲染的新节点，故按 id 取当次元素）；
-      // 没有指定行时（取消新建等）归位到列表层的「新增角色」，不让焦点掉到 body。
+      // 没有指定行时（取消新建等）归位到列表头的「新建角色」，不让焦点掉到 body。
       // 首次挂载即列表层（角色=设置页签），不抢焦点。
       React.useEffect(() => {
         if (!mountedRef.current) { mountedRef.current = true; return }
         const id = view === 'list' ? returnFocusRef.current : null
         if (view === 'list') returnFocusRef.current = null
-        const el = id ? viewBtnRefs.current[id] : (view === 'list' ? newBtnRef.current : dialogRef.current)
+        const el = id ? rowBtnRefs.current[id] : (view === 'list' ? newBtnRef.current : dialogRef.current)
         if (el && el.focus) el.focus()
       }, [view])
       const fmt = (tpl, vars) => {
@@ -2225,7 +2259,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         }).catch((e) => setError(String(e)))
       }
       const openEdit = (id) => {
-        returnFocusRef.current = null
+        // 自定义角色的「编辑」是行内唯一入口（V-3）：与内置「查看」同口径回收焦点
+        returnFocusRef.current = id
         setCurrent(null); setError(null)
         host.call('vwf.roles.get', { id }).then((r) => {
           if (r && r.ok) {
@@ -2348,8 +2383,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         return h('span', { className: 'vwf-badge' + (origin.builtin ? ' accent' : '') },
           origin.builtin ? t('builtinRoleBadge') : t('customRoleBadge'))
       }
-      // 列表行：名称 + 来源 badge + 最多两行摘要 + 折行的操作组。摘要为显示层生成，
+      // 列表行：名称 + 来源 badge + 最多两行摘要 + 操作组。摘要为显示层生成，
       // 不写回角色原文（规格 §9）；行高不随职责全文增长（V-2）。
+      // FEAT-101 V-3（原型 roleRow）：每行只有一个「进入」入口——内置「查看」、自定义「编辑」，
+      // 不再并列查看 + 编辑；「基于此角色创建」按原型承载复制语义，删除是既有动作而非并列入口，
+      // 两者能力保持（FEAT-86 权限边界：内置不可编辑/删除，自定义可复制/删除）。
       const roleRow = (role) => {
         const origin = roleOriginOf(role)
         const summary = roleSummaryOf(role)
@@ -2360,9 +2398,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           ),
           summary ? h('div', { className: 'vwf-role-summary', title: summary }, summary) : null,
           h('div', { className: 'vwf-role-actions' },
-            h('button', { className: 'vwf-btn sm', ref: (el) => { viewBtnRefs.current[role.id] = el }, onClick: () => openView(role.id) }, t('viewRoleDetail')),
-            origin.builtin ? null : h('button', { className: 'vwf-btn sm', onClick: () => openEdit(role.id) }, t('editRole')),
-            origin.builtin ? null : h('button', { className: 'vwf-btn sm', onClick: () => openCloneCustom(role) }, t('cloneFromRole')),
+            h('button', {
+              className: 'vwf-btn sm',
+              ref: (el) => { rowBtnRefs.current[role.id] = el },
+              onClick: () => { if (origin.builtin) openView(role.id); else openEdit(role.id) },
+            }, origin.builtin ? t('viewRole') : t('editRole')),
+            origin.builtin ? null : h('button', { className: 'vwf-btn sm', onClick: () => openCloneCustom(role) }, t('createFromRole')),
             origin.builtin ? null : h('button', { className: 'vwf-btn sm danger', onClick: () => askDelete(role) }, t('deleteRole'))
           )
         )
@@ -2386,7 +2427,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         body = h('div', { className: 'vwf-role-empty', role: 'alert' }, loadError || t('roleLoading'))
       } else if (view === 'list') {
         body = h('div', null,
-          h('div', { className: 'vwf-muted-sm' }, t('roleMgmtHint')),
           h('div', { className: 'vwf-row', role: 'group', 'aria-label': t('roleLibrary') },
             filterBtn('all', t('roleFilterAll'), allRows.length),
             filterBtn('builtin', t('roleBuiltinShort'), builtinRows.length),
@@ -2414,14 +2454,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('span', { className: 'vwf-dialog-title' }, current.name || current.id),
                 originBadge(current)
               ),
-              h('div', { className: 'vwf-muted-sm' },
-                roleOriginOf(current).builtin ? t('roleViewBuiltin') : t('roleViewCustom')),
+              // V-4：详情展示一句话简介；缺失时由职责生成展示（roleSummaryOf），不写回角色原文
+              h('div', { className: 'vwf-role-summary', title: roleSummaryOf(current) }, roleSummaryOf(current)),
+              h('div', { className: 'vwf-muted-sm' }, t('roleViewBuiltin')),
               h('div', { className: 'vwf-role-section-title' }, h('span', null, t('roleContent'))),
               // 独立滚动区 + 键盘可进入：完整职责再长也不撑高列表或弹层
               h('div', { className: 'vwf-role-content', tabIndex: 0 }, current.content || ''),
               h('div', { className: 'vwf-row', style: { marginTop: 8, gap: 8 } },
+                // V-2：内置角色用「基于此角色创建」承载复制语义（原型同一入口），
+                // 走 create（新稿），绝不写回原内置角色（FEAT-86 权限边界）
                 h('button', { className: 'vwf-btn primary', onClick: () => openCreate(current) }, t('createFromRole')),
-                !roleOriginOf(current).builtin ? h('button', { className: 'vwf-btn', onClick: () => openEdit(current.id) }, t('editRole')) : null,
                 h('button', { className: 'vwf-btn sm', onClick: backToList }, t('back'))
               )
             )
@@ -2516,13 +2558,21 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // 滚动、逐层 Escape、焦点回收」三条能力原样保留（FEAT-86 V-2/V-6）。浮层留在页签容器内，
       // 页签本身不随浮层开合而消失。
       return h('div', { className: 'vwf-role-tab', 'data-vwf-roles-tab': '' },
+        // V-1（原型 settings-section-head）：标题与说明在左，「新建角色」在右——
+        // 新建入口位置与原型一致，仍常驻（不随自定义角色数量消失）。
         view === 'list'
-          ? h('div', { className: 'vwf-row' },
-              h('button', {
-                className: 'vwf-btn sm primary', ref: newBtnRef,
-                onClick: () => openCreate(null),
-              }, '＋ ' + t('newRole')),
-              h('button', { className: 'vwf-btn sm', onClick: refetch }, t('refresh'))
+          ? h('div', { className: 'vwf-row', style: { gap: 10, alignItems: 'flex-start' } },
+              h('div', { style: { minWidth: 0, flex: 1 } },
+                h('div', { className: 'vwf-card-title' }, t('roleManager')),
+                h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('roleMgmtHint'))
+              ),
+              h('div', { className: 'vwf-row', style: { gap: 6 } },
+                h('button', {
+                  className: 'vwf-btn sm primary', ref: newBtnRef,
+                  onClick: () => openCreate(null),
+                }, '＋ ' + t('newRole')),
+                h('button', { className: 'vwf-btn sm', onClick: refetch }, t('refresh'))
+              )
             )
           : null,
         error ? h('div', { className: 'vwf-err-line', role: 'alert' }, error) : null,
@@ -2978,6 +3028,60 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               })
             )
           ),
+          // FEAT-101 V-5：全局参数配置（原配置面板顶部的工作流控制）落在左列下块，
+          // 与节点选择构成 6:4 竖向分割；字段与保存行为不变（仍是同一份 wf.control / meta）。
+          h('div', { className: 'vwf-params-col' },
+            h('div', { className: 'vwf-card' },
+              h('div', { className: 'vwf-card-head' },
+                h('div', { className: 'vwf-card-title' }, t('workflowControls'), h(HelpDot, { text: t('workflowControlsHelp') }))
+              ),
+              h('div', { className: 'vwf-params-body' },
+                h(Field, { label: t('maxRounds'), help: t('maxRoundsHelp'), errors: fieldErrors['control:maxRounds'] || [] },
+                  h('input', {
+                    className: 'vwf-input' + ((fieldErrors['control:maxRounds'] || []).length ? ' err' : ''),
+                    type: 'number', min: 1, max: 9, step: 1,
+                    value: wf.control && wf.control.maxRounds != null ? wf.control.maxRounds : '',
+                    placeholder: '9',
+                    onChange: (ev) => {
+                      const raw = ev.target.value
+                      if (!raw.trim()) return updateControl({ maxRounds: null })
+                      const parsed = Number(raw)
+                      // 系统约定上限 9（候选二 Q7）：超 9 钳制到 9，校验器同样强制 1-9
+                      updateControl({ maxRounds: Number.isFinite(parsed) ? Math.min(9, Math.trunc(parsed)) : 0 })
+                    },
+                  })
+                ),
+                h(Field, { label: t('heteroCheck'), help: t('heteroCheckHelp'), errors: fieldErrors['heteroCheck'] || [] },
+                  h('select', {
+                    className: 'vwf-input' + ((fieldErrors['heteroCheck'] || []).length ? ' err' : ''),
+                    // 异源档位三态（LOC-021）：默认档 = 弱；关档下开发与审核同模型属用户显式选择，系统不提示
+                    value: (wf.heteroCheck === true || wf.heteroCheck === undefined || wf.heteroCheck === null || wf.heteroCheck === 'weak')
+                      ? 'weak'
+                      : (wf.heteroCheck === false ? 'off' : wf.heteroCheck),
+                    onChange: (ev) => updateMeta({ heteroCheck: ev.target.value }),
+                  },
+                    h('option', { value: 'weak' }, t('heteroModeWeak')),
+                    h('option', { value: 'strong' }, t('heteroModeStrong')),
+                    h('option', { value: 'off' }, t('heteroModeOff'))
+                  )
+                ),
+                h(Field, { label: t('onMaxRounds'), help: t('onMaxRoundsHelp'), errors: fieldErrors['onMaxRounds'] || [] },
+                  h('select', {
+                    className: 'vwf-input',
+                    value: wf.onMaxRounds || 'return',
+                    onChange: (ev) => {
+                      const v = ev.target.value
+                      if (v === 'return') updateMeta({ onMaxRounds: undefined })
+                      else updateMeta({ onMaxRounds: v })
+                    },
+                  },
+                    h('option', { value: 'return' }, 'return'),
+                    h('option', { value: 'auto-reschedule' }, 'auto-reschedule')
+                  )
+                )
+              )
+            )
+          ),
           h('div', { className: 'vwf-canvas-col' },
             h('div', { className: 'vwf-card' },
               h('div', { className: 'vwf-card-head' },
@@ -3101,53 +3205,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           ),
           h('div', { className: 'vwf-card vwf-inspector' },
             h('div', { className: 'vwf-card-title', style: { marginBottom: 4 } }, t('inspector')),
-            h('div', { className: 'vwf-section' },
-              h('div', { style: { fontSize: 13, fontWeight: 500 } }, t('workflowControls')),
-              h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('workflowControlsHelp')),
-              h(Field, { label: t('maxRounds'), help: t('maxRoundsHelp'), errors: fieldErrors['control:maxRounds'] || [] },
-                h('input', {
-                  className: 'vwf-input' + ((fieldErrors['control:maxRounds'] || []).length ? ' err' : ''),
-                  type: 'number', min: 1, max: 9, step: 1,
-                  value: wf.control && wf.control.maxRounds != null ? wf.control.maxRounds : '',
-                  placeholder: '9',
-                  onChange: (ev) => {
-                    const raw = ev.target.value
-                    if (!raw.trim()) return updateControl({ maxRounds: null })
-                    const parsed = Number(raw)
-                    // 系统约定上限 9（候选二 Q7）：超 9 钳制到 9，校验器同样强制 1-9
-                    updateControl({ maxRounds: Number.isFinite(parsed) ? Math.min(9, Math.trunc(parsed)) : 0 })
-                  },
-                })
-              ),
-              h(Field, { label: t('heteroCheck'), help: t('heteroCheckHelp'), errors: fieldErrors['heteroCheck'] || [] },
-                h('select', {
-                  className: 'vwf-input' + ((fieldErrors['heteroCheck'] || []).length ? ' err' : ''),
-                  // 异源档位三态（LOC-021）：默认档 = 弱；关档下开发与审核同模型属用户显式选择，系统不提示
-                  value: (wf.heteroCheck === true || wf.heteroCheck === undefined || wf.heteroCheck === null || wf.heteroCheck === 'weak')
-                    ? 'weak'
-                    : (wf.heteroCheck === false ? 'off' : wf.heteroCheck),
-                  onChange: (ev) => updateMeta({ heteroCheck: ev.target.value }),
-                },
-                  h('option', { value: 'weak' }, t('heteroModeWeak')),
-                  h('option', { value: 'strong' }, t('heteroModeStrong')),
-                  h('option', { value: 'off' }, t('heteroModeOff'))
-                )
-              ),
-              h(Field, { label: t('onMaxRounds'), help: t('onMaxRoundsHelp'), errors: fieldErrors['onMaxRounds'] || [] },
-                h('select', {
-                  className: 'vwf-input',
-                  value: wf.onMaxRounds || 'return',
-                  onChange: (ev) => {
-                    const v = ev.target.value
-                    if (v === 'return') updateMeta({ onMaxRounds: undefined })
-                    else updateMeta({ onMaxRounds: v })
-                  },
-                },
-                  h('option', { value: 'return' }, 'return'),
-                  h('option', { value: 'auto-reschedule' }, 'auto-reschedule')
-                )
-              )
-            ),
             selectedNode ? h(NodeInspector, {
               node: selectedNode, dsl: wf, fieldErrors, providers: props.providers, roles: props.roles,
               readOnlyStructure, orderOf: rankOf, onPickEdge: pickEdge,
@@ -4780,8 +4837,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const hay = [w.name, w.id, w.description].map(x => String(x == null ? '' : x).toLowerCase()).join(' ')
         return hay.indexOf(tplFilterNorm) >= 0
       })
-      // LOC-014 覆盖对话框行：每节点一行；两列下拉的"沿用默认"各自带出本列实际值
-      // （provider 列显示默认 provider，model 列显示默认 model）；无 providers 回退文本输入
+      // LOC-014 覆盖对话框行；FEAT-101 V-7：呈现与交互对齐原型 modelRow——
+      // 每节点一块：节点名 + 「默认 / 覆盖」徽标同行，下行给出该节点预设（默认供应商 / 模型），
+      // 再并排「供应商 / 模型」两个带标签的下拉，最后是「还原本节点默认」。
+      // 两列下拉的「沿用默认」各自带出本列实际值；无 providers 回退文本输入。
       const ovRows = () => {
         const models = (ovW && ovW.dsl && ovW.dsl.bindings && ovW.dsl.bindings.models && typeof ovW.dsl.bindings.models === 'object') ? ovW.dsl.bindings.models : {}
         const provList = (providers || []).map(p => p.id)
@@ -4796,23 +4855,23 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           const curProv = String(d.provider || '').trim() || (eff ? String(eff.provider || '') : '')
           const provCtl = provList.length
             ? h(VwfSelect, { value: d.provider || '', options: [{ value: '', label: provKeep }].concat(provList.map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(n.id, 'provider', v) })
-            : h('input', { className: 'vwf-input vwf-mono', style: { width: 150 }, value: d.provider || '', placeholder: provKeep, onChange: (ev) => ovSet(n.id, 'provider', ev.target.value) })
+            : h('input', { className: 'vwf-input vwf-mono', value: d.provider || '', placeholder: provKeep, onChange: (ev) => ovSet(n.id, 'provider', ev.target.value) })
           const modelCtl = provList.length
             ? h(VwfSelect, { value: d.model || '', options: [{ value: '', label: modelKeep }].concat(modelsOfProv(curProv).map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(n.id, 'model', v) })
-            : h('input', { className: 'vwf-input vwf-mono', style: { width: 170 }, value: d.model || '', placeholder: modelKeep, onChange: (ev) => ovSet(n.id, 'model', ev.target.value) })
-          return h('div', { key: 'ov-row-' + n.id, className: 'vwf-list-item' },
-            h('div', { style: { minWidth: 0, flex: 1 } },
-              h('div', { className: 'vwf-row', style: { gap: 6 } },
-                h('span', null, isOver ? '🔵' : '⚪'),
-                h('span', { className: 'vwf-list-name' }, (n.label || n.id) + '（' + n.id + '）'),
-                isOver
-                  ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge'))
-                  : h('span', { className: 'vwf-badge' }, t('modelOverrideDefaultBadge')),
-                h('span', { className: 'vwf-muted-sm vwf-mono' }, t('modelOverrideCurrent') + (eff ? eff.provider + ' / ' + eff.model : t('modelOverrideInherit')))
-              )
+            : h('input', { className: 'vwf-input vwf-mono', value: d.model || '', placeholder: modelKeep, onChange: (ev) => ovSet(n.id, 'model', ev.target.value) })
+          return h('div', { key: 'ov-row-' + n.id, className: 'vwf-model-row', 'data-vwf-model-node': n.id },
+            h('div', { className: 'vwf-row', style: { justifyContent: 'space-between', gap: 6 } },
+              h('div', { className: 'vwf-list-name' }, (n.label || n.id) + '（' + n.id + '）'),
+              isOver
+                ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge'))
+                : h('span', { className: 'vwf-badge' }, t('modelOverrideDefaultBadge'))
             ),
-            h('div', { style: { width: 150 } }, provCtl),
-            h('div', { style: { width: 170 } }, modelCtl),
+            // 该节点预设即「默认」，覆盖后仍以此行为准（原型：默认：<供应商> / <模型>）
+            h('div', { className: 'vwf-muted-sm vwf-mono' }, t('modelOverrideDefaultLine') + '：' + (eff ? eff.provider + ' / ' + eff.model : t('modelOverrideInherit'))),
+            h('div', { className: 'vwf-two-fields' },
+              h(Field, { label: t('modelOverrideProvider') }, provCtl),
+              h(Field, { label: t('modelOverrideModel') }, modelCtl)
+            ),
             h('button', { className: 'vwf-btn sm', disabled: ovBusy || !isOver, onClick: () => ovSet(n.id, 'provider', '') || ovSet(n.id, 'model', '') }, t('modelOverrideResetRow'))
           )
         })
@@ -4954,7 +5013,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           onClose: closeOv,
         },
           h('div', { className: 'vwf-editor-head' },
-            h('strong', null, t('modelOverride') + ' · ' + (ovW.name || ovW.id)),
+            h('strong', null, t('modelOverrideTitle') + ' · ' + (ovW.name || ovW.id)),
             h('span', { className: 'vwf-badge' }, ovW.id),
             h('span', { className: 'vwf-spacer' }),
             h('button', { className: 'vwf-btn sm', onClick: requestCloseOv }, t('close'))
@@ -4963,9 +5022,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: 'vwf-muted-sm', style: { marginBottom: 8 } }, t('modelOverrideHelp')),
             h('div', { className: 'vwf-list' }, ovRows())
           ),
+          // 原型对话框底栏：全部还原默认 / 取消 / 保存节点设置。
+          // 「全部还原默认」保持既有二次确认（破坏性动作不静默执行），清空走同一 clear RPC。
           h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8, padding: '8px 0' } },
-            h('button', { className: 'vwf-btn sm danger', disabled: ovBusy, onClick: () => setOvConfirm('clear') }, t('modelOverrideClear')),
-            h('button', { className: 'vwf-btn sm', disabled: ovBusy, onClick: saveOv }, t('modelOverrideSave'))
+            h('button', { className: 'vwf-btn sm', disabled: ovBusy, onClick: () => setOvConfirm('clear') }, t('modelOverrideClear')),
+            h('button', { className: 'vwf-btn sm', disabled: ovBusy, onClick: requestCloseOv }, t('cancelAction')),
+            h('button', { className: 'vwf-btn sm primary', disabled: ovBusy, onClick: saveOv }, t('modelOverrideSave'))
           ),
           ovConfirm ? h('div', { className: 'vwf-confirm-mask', onClick: () => setOvConfirm(null) },
             h('div', { className: 'vwf-confirm', onClick: (ev) => ev.stopPropagation() },
