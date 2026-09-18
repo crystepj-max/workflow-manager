@@ -328,17 +328,23 @@
             },
             "followups": {
               "type": "string"
+            },
+            "completion_type": {
+              "type": "string",
+              "const": "done"
             }
           },
           "required": [
             "status",
+            "completion_type",
             "summary"
           ],
           "additionalProperties": false
         },
         "files": {
           "cleanup-report.md": "markdown"
-        }
+        },
+        "completionPath": "$.completion_type"
       }
     }
   ],

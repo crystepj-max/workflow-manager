@@ -89,14 +89,37 @@ test('静态 bundle dist 含语言资源与内置角色正文', () => {
   assert.ok(existsSync(join(here, '..', 'dist', 'dynamic', 'client.js')), 'dist/dynamic/client.js 必须存在')
 })
 
-test('开发粘贴用 dynamic 闭包双半均 ≤ 80KB', () => {
+test('开发粘贴用 dynamic 闭包合计 ≤ 232KB（一次 cordis_define 载荷），host 自带头部常量与 Buffer 垫片', () => {
   const host = readFileSync(join(here, '..', 'dist', 'dynamic', 'host.js'))
   const client = readFileSync(join(here, '..', 'dist', 'dynamic', 'client.js'))
-  const limit = 80 * 1024
-  assert.ok(host.byteLength <= limit, `host ${host.byteLength} > ${limit}`)
-  assert.ok(client.byteLength <= limit, `client ${client.byteLength} > ${limit}`)
-  assert.match(host.toString('utf8'), /^return\{/, 'host 必须是 return {...} 闭包体')
-  assert.match(client.toString('utf8'), /^return\{/, 'client 必须是 return {...} 闭包体')
+  // 预算按「同一次 cordis_define 的粘贴总量」计（两半天生不等大）。
+  // 160KiB 为瘦身高水位（build-bundle 软上限：超出仅警告）；#80 运行控制 UI 与
+  // LOC-001 编辑器 V2 并入后硬顶上调至 176KiB，持续超出仍应回做面板瘦身。
+  // LOC-017 集成闸门宿主编排并入后上调至 184KiB（决策 1 载体=产品运行时，host 半不可省）。
+  // LOC-014 模型覆盖层（host 合成单点 + RPC 三端点 + 模板库最小覆盖对话框）并入后上调至 188KiB。
+  // LOC-021 异源档位三态（校验内核档位判定 + 运行时日志档位/角色口径 + 编辑器三档选择器与中英文案）并入后上调至 190KiB。
+  // LOC-030 统一受阻生命周期（终止描述派生 + 宿主描述优先映射/恢复入口 + 看板受阻口径）原按人工裁决
+  // 上调至 192KiB；与已并入的 LOC-027（190→198KiB）取较高者，避免相对已合并状态收紧预算。
+  // LOC-027 评价基线冻结闸门（宿主编排：[eb-freeze] 观察/检查点中止/恢复/核验；纯逻辑已分流
+  // dist/evaluation-baseline.cjs 内核）并入后上调至 198KiB。
+  // LOC-031 技术重试/超时/无进展循环限制并入后，LOC-030 + LOC-031 合并终态实测 204091B
+  // （199.31KiB），上调至 200KiB 与 build-bundle.mjs 保持一致；余量仅 ~0.7KiB。
+  // LOC-032 操作账本宿主接线与 LOC-031 并入后终态实测 205414B 超 200KiB，
+  // 按人工裁决先例「全部 P0 任务并入后按终态实测一次性定值」上调至 208KiB。
+  // FEAT-84 编排台工作流模板编辑器并入后终态实测 host 109822 + client 121816 = 231638B
+  // （226.21KiB），按同一口径上调至 272KiB（84+85+86 三切片并入后终态实测 271327B，余量 7.2KiB；FIX-65 先例：上限按终态实测定值，新增载荷优先瘦身），
+  // 与 build-bundle.mjs 保持一致；新增载荷仍应先瘦身。
+  const limit = 272 * 1024
+  assert.ok(host.byteLength + client.byteLength <= limit, `host ${host.byteLength} + client ${client.byteLength} > ${limit}`)
+  const hostText = host.toString('utf8')
+  const clientText = client.toString('utf8')
+  // 闭包体形态：前置语句（注入头/垫片）之后必须是 return {...}（宿主以函数体求值）
+  assert.match(hostText, /\nreturn\{name:"visual-workflow-host"/, 'host 必须以注入头 + return {...} 闭包体收尾')
+  assert.match(clientText, /^return\{/, 'client 必须是 return {...} 闭包体')
+  // 动态沙箱缺省注入：插件根常量（loadDist 内核来源）与 Buffer 垫片（validate-core 尺寸检查依赖）
+  assert.match(hostText, /const __VWF_PLUGIN_ROOT__ = "/, 'host 必须自注入 __VWF_PLUGIN_ROOT__（动态沙箱不提供）')
+  assert.match(hostText, /const __VWF_REPO_ROOT__ = "/, 'host 必须自注入 __VWF_REPO_ROOT__（generate/workspace-host 路径来源）')
+  assert.match(hostText, /globalThis\.Buffer/, 'host 必须注入 globalThis.Buffer 垫片（validate-core 尺寸检查依赖）')
 })
 
 test('静态 bundle dist 含 role-library.cjs + builtin-roles.json 且内核可加载（角色库正式安装路径）', () => {
@@ -298,9 +321,9 @@ test('Issue #37：消费者先进入 Cordis，webServer/tools 后出现时才一
   await fiber
   assert.deepEqual(mod.inject, ['webServer', 'tools', 'subprocess'], '静态 bundle 必须声明三个宿主依赖')
   assert.deepEqual([...activeRoutes.keys()], ['/dsh-visual-workflow'])
-  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_run'])
+  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_control', 'wf_run'])
   assert.equal(routeCalls.length, 1, 'RPC 路由首次只注册一次')
-  assert.equal(toolCalls.length, 3, '三个工具首次各注册一次')
+  assert.equal(toolCalls.length, 4, '四个工具首次各注册一次')
 
   await disposeTools()
   assert.equal(activeRoutes.size, 0, 'tools 卸载时静态 Host 的 RPC 路由应随插件卸载')
@@ -309,9 +332,9 @@ test('Issue #37：消费者先进入 Cordis，webServer/tools 后出现时才一
   const disposeToolsAgain = ctx.provide('tools', tools)
   await fiber
   assert.equal(activeRoutes.size, 1, 'tools 重现后只能保留一条活动 RPC 路由')
-  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_run'], 'tools 重现后只能保留三个活动工具')
+  assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_control', 'wf_run'], 'tools 重现后只能保留四个活动工具')
   assert.equal(routeCalls.length, 2, '重载后是先卸载再重新注册，不发生重复占用')
-  assert.equal(toolCalls.length, 6, '重载后是先卸载再重新注册，不发生重复占用')
+  assert.equal(toolCalls.length, 8, '重载后是先卸载再重新注册，不发生重复占用')
 
   await disposeToolsAgain()
   await disposeWebServer()

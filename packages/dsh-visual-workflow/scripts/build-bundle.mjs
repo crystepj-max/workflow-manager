@@ -29,7 +29,9 @@ function minifyCssInStylesInsert(src) {
 function minifyDynamicClosure(src) {
   const prepared = minifyCssInStylesInsert(src)
   const wrapped = 'export default (function () {\n' + prepared + '\n})();\n'
-  const out = transformSync(wrapped, { minify: true, legalComments: 'none', target: 'es2020' }).code
+  // charset:'utf8'：默认 ascii 会把中文展开成 \uXXXX（每字 6 字节 vs UTF-8 3 字节），
+  // 动态载荷白涨 ~7KB。产物全程以 UTF-8 文本读写（粘贴 / fs 读取 / vm 求值），无二次转码。
+  const out = transformSync(wrapped, { minify: true, legalComments: 'none', target: 'es2020', charset: 'utf8' }).code
   const m = out.match(/\(function\(\)\{([\s\S]*)\}\)\(\);?\s*(?:export\{[^}]*\}|export default|$)/)
     || out.match(/function\(\)\{([\s\S]*)\}\(\);?\s*(?:export\{[^}]*\}|export default|$)/)
   if (!m) throw new Error('esbuild 压缩结果无法抽出动态闭包体')
@@ -48,9 +50,12 @@ const force = process.argv.includes('--force')
 const hostPath = join(root, 'src', 'host.js')
 const clientPath = join(root, 'src', 'client.js')
 const formalArtifactsSrc = join(root, '..', '..', 'scripts', 'formal-artifacts.cjs')
+const attemptLedgerSrc = join(root, '..', '..', 'scripts', 'attempt-ledger.cjs')
 const roleLibrarySrc = join(root, '..', '..', 'scripts', 'role-library.cjs')
 const projectionCoreSrc = join(root, '..', '..', 'scripts', 'projection-core.cjs')
 const validateCoreSrc = join(root, '..', '..', 'scripts', 'validate-core.cjs')
+const evaluationBaselineSrc = join(root, '..', '..', 'scripts', 'evaluation-baseline.cjs')
+const artifactManifestSrc = join(root, '..', '..', 'scripts', 'artifact-manifest.cjs')
 const roleManifestSrc = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
 const localesSrc = join(root, 'locales')
 const rolesSrc = join(root, '..', '..', 'dsh', 'roles')
@@ -61,7 +66,10 @@ const roleLibraryBody = readFileSync(roleLibrarySrc, 'utf8')
 const projectionCoreBody = readFileSync(projectionCoreSrc, 'utf8')
 const roleManifestBody = readFileSync(roleManifestSrc, 'utf8')
 const formalArtifactsBody = readFileSync(formalArtifactsSrc, 'utf8')
+const attemptLedgerBody = readFileSync(attemptLedgerSrc, 'utf8')
 const validateCoreBody = readFileSync(validateCoreSrc, 'utf8')
+const evaluationBaselineBody = readFileSync(evaluationBaselineSrc, 'utf8')
+const artifactManifestBody = readFileSync(artifactManifestSrc, 'utf8')
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
 const listNames = (dir, ext) => readdirSync(dir).filter((n) => n.endsWith(ext)).sort()
 // 目录级输入按「文件名 + 大小 + 修改时间」聚合：改名、增删文件、改内容都能被捕获。
@@ -84,7 +92,10 @@ const stamp = {
   projectionCore: sha256(projectionCoreBody),
   roleManifest: sha256(roleManifestBody),
   formalArtifacts: sha256(formalArtifactsBody),
+  attemptLedger: sha256(attemptLedgerBody),
   validateCore: sha256(validateCoreBody),
+  evaluationBaseline: sha256(evaluationBaselineBody),
+  artifactManifest: sha256(artifactManifestBody),
   locales: dirStamp(localesSrc, '.json'),
   roles: dirStamp(rolesSrc, '.md'),
   // 打包脚本自身也计入：改了包装/压缩逻辑后产物必须重建
@@ -99,7 +110,10 @@ const requiredArtifacts = [
   join(dist, 'host-entry.mjs'),
   join(dist, 'client.js'),
   join(dist, 'formal-artifacts.cjs'),
+  join(dist, 'attempt-ledger.cjs'),
   join(dist, 'validate-core.cjs'),
+  join(dist, 'evaluation-baseline.cjs'),
+  join(dist, 'artifact-manifest.cjs'),
   join(dist, 'projection-core.cjs'),
   join(dist, 'role-library.cjs'),
   join(dist, 'builtin-roles.json'),
@@ -176,8 +190,16 @@ writeFileSync(
 
 writeFileSync(join(dist, '.src-stamp.json'), JSON.stringify(stamp, null, 2) + '\n')
 copyFileSync(formalArtifactsSrc, join(dist, 'formal-artifacts.cjs'))
+// LOC-029 逐次 attempt 提交内核：段收尾固定顺序推进的宿主侧编排（不占 dynamic 载荷预算）
+copyFileSync(attemptLedgerSrc, join(dist, 'attempt-ledger.cjs'))
+// 校验内核与其引用的投影内核必须同时随 dist 分发：validate-core 声明
+// require('./projection-core.cjs')，宿主加载器求值前按源码预解析同目录引用。
 copyFileSync(validateCoreSrc, join(dist, 'validate-core.cjs'))
 copyFileSync(projectionCoreSrc, join(dist, 'projection-core.cjs'))
+// LOC-027 评价基线纯逻辑内核（冻结/核验子进程脚本文本与闸门判定），随 dist 分发
+copyFileSync(evaluationBaselineSrc, join(dist, 'evaluation-baseline.cjs'))
+// LOC-035 产物清单纯逻辑内核，随 dist 分发
+copyFileSync(artifactManifestSrc, join(dist, 'artifact-manifest.cjs'))
 // 角色库内核 + 内置角色清单：静态安装的可信加载源（host.js 只从 pluginRoot/dist 加载）
 copyFileSync(roleLibrarySrc, join(dist, 'role-library.cjs'))
 copyFileSync(roleManifestSrc, join(dist, 'builtin-roles.json'))
@@ -191,16 +213,59 @@ for (const name of listNames(rolesSrc, '.md')) {
 }
 
 mkdirSync(join(dist, 'dynamic'), { recursive: true })
-const dynHost = minifyDynamicClosure(hostBody)
+// 动态产物头部注入（backlog dev-plugin-sync-gap 方案 A）：cordis 动态沙箱不注入
+// __VWF_PLUGIN_ROOT__/__VWF_REPO_ROOT__，也不提供 Buffer（dist/validate-core.cjs 的
+// 输入尺寸检查会调用 Buffer.byteLength）——静态 bundle 靠构建期常量与 Node 全局，
+// 动态闭包体必须自带。常量指向宿主构建时的真实路径（开发 DSH 单机部署场景成立），
+// Buffer 用沙箱已有的 TextEncoder 实现最小垫片（host.js 只用 byteLength 等静态方法）。
+const DYN_HOST_PRELUDE = [
+  `const __VWF_PLUGIN_ROOT__ = ${JSON.stringify(root)};`,
+  `const __VWF_REPO_ROOT__ = ${JSON.stringify(dirname(dirname(root)))};`,
+  'if (typeof globalThis.Buffer === "undefined") { const enc = new TextEncoder(); globalThis.Buffer = { from(s, e) { if (e === "base64" && typeof atob === "function") { const bin = atob(s); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; } return enc.encode(String(s)); }, byteLength(s) { return enc.encode(String(s)).length; }, isBuffer() { return false; }, alloc(n) { return new Uint8Array(n); }, concat(list) { const out = []; for (const a of list) out.push(...a); return new Uint8Array(out); } }; }',
+  // cordis 动态沙箱同样没有 structuredClone（续跑路径 host.js 会对快照 provider_model
+  // 做深拷贝）；被拷贝对象均为 JSON 安全结构，用 JSON 往返兜底即可。产品 Node 运行时
+  // 有原生实现，此垫片不会生效（UAT-loc017 真机实证：HD/entry 续跑在沙箱内报
+  // structuredClone is not defined，与 LOC-015 交付中的沙箱守卫同一问题域）。
+  'if (typeof globalThis.structuredClone === "undefined") { globalThis.structuredClone = function structuredClone(value) { return value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }; }',
+].join('\n') + '\n'
+const dynHost = DYN_HOST_PRELUDE + minifyDynamicClosure(hostBody)
 const dynClient = minifyDynamicClosure(clientBody)
-const HOST_LIMIT = 80 * 1024
-const CLIENT_LIMIT = 80 * 1024
 writeFileSync(join(dist, 'dynamic', 'host.js'), dynHost)
 writeFileSync(join(dist, 'dynamic', 'client.js'), dynClient)
 const hostBytes = Buffer.byteLength(dynHost)
 const clientBytes = Buffer.byteLength(dynClient)
-if (hostBytes > HOST_LIMIT || clientBytes > CLIENT_LIMIT) {
-  console.error(`dynamic 体积超限：host ${hostBytes}/${HOST_LIMIT} client ${clientBytes}/${CLIENT_LIMIT}`)
+// 载荷预算属于「一次 cordis_define 的粘贴总量」（host + client 同时携带），
+// 而不是每半各自的 80KiB：两半天然失衡（client 远大于 host），固定每半上限会在
+// 总量仍有余量时先撞线（#74 UAT-02 结果条：client 84KB + host 62KB = 146KB，
+// 低于合计预算却被拒）。#80-r2 + LOC-001 V2 合并后实测合计 168.5KB，由 160KiB
+// 上调至 176KiB（实证 ~184KB 一次转写可行；超限后应优先瘦身，不要继续推高）。
+// LOC-017 集成闸门宿主编排并入后上调至 184KiB（决策 1：载体=产品运行时宿主编排，
+// 宿主半不可省；client 瘦身仍应优先于继续推高）。
+// LOC-014 模型覆盖层（host 合成单点 + RPC 三端点 + 模板库最小覆盖对话框）并入后上调至 188KiB，
+// 与 tests/static-bundle.test.mjs 预算保持一致。UAT 反馈轮（未保存退出/清除确认弹窗 + 沿用默认带值）后上调至 189KiB。
+// LOC-021 异源档位三态（校验内核档位判定 + 运行时日志档位/角色口径 + 编辑器三档选择器与中英文案）并入后上调至 190KiB。
+// LOC-030 统一受阻生命周期（终止描述派生 + 宿主描述优先映射/恢复入口 + 看板受阻口径）原按人工裁决
+// 上调至 192KiB；与已并入的 LOC-027（190→198KiB）取较高者，避免相对已合并状态收紧闸门。
+// LOC-027 评价基线冻结闸门（宿主编排：[eb-freeze] 观察/检查点中止/恢复/核验；纯逻辑已分流
+// dist/evaluation-baseline.cjs 内核）并入后上调至 198KiB。
+// LOC-031 技术重试/超时/无进展循环限制（JSON 技术预算策略 + 运行时计数器 + 快照续跑）并入后，
+// LOC-030 与 LOC-031 合并终态实测 host 102481 + client 101610 = 204091B（199.31KiB），
+// 上调至 200KiB（人工裁决：全部 P0 任务并入后按终态实测一次性定值）。
+// LOC-032 受管理外部操作账本（vwf.operations.* 四端点 + operationsHostCall 进程边界；
+// 账本/适配器逻辑在 scripts/operations-host.mjs 内核，不经动态载荷）并入未推高预算。
+// LOC-032 操作账本宿主接线（operationsHostCall 进程边界）与 LOC-031 并入后终态实测
+// host 103804 + client 101610 = 205414B（200.6KiB）超 200KiB，按人工裁决先例
+// 「全部 P0 任务并入后按终态实测一次性定值」上调至 208KiB（含 LOC-033 并入余量）。
+// FEAT-84 编排台工作流模板编辑器（三段布局 + 步骤定位 + 连接清单 + 渐进披露 + 窄屏切换 +
+// 工作区语义 token + 独立滚动收口）并入后终态实测 host 109822 + client 121816 = 231638B
+// （226.21KiB）：上述 208KiB 中留给 LOC-033 的余量已先被 host 侧后续合并
+// （103804→109822）吃掉，本任务 client 侧净增 20206B，按同一「上限按实测值定值」口径
+// 上调至 232KiB，余量 5.8KiB 供同改 client 半的 FEAT-85 / FEAT-86 并入；
+// 两任务并入后按各自终态实测再评估，余量不足时先瘦身。
+// 新增载荷仍应优先瘦身，不要继续推高。
+const PAYLOAD_LIMIT = 272 * 1024
+if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
+  console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)
 }
 

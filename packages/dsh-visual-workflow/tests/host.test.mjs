@@ -42,8 +42,10 @@ function plantOfficialBuiltin(fs) {
   fs._files.set(REPO + '/.generated/official-builtin/vwf-dsl.json', OFFICIAL_BUILTIN)
 }
 
-// 统一校验内核（候选二 T-IMP-13）：宿主经 fs 读源码求值——测试假 fs 需种入真实内核
+// 统一校验内核（候选二 T-IMP-13）：宿主经 fs 读源码求值——测试假 fs 需种入真实内核。
+// validate-core require('./projection-core.cjs')（唯一投影实现）：两者必须同时种入。
 const validatorCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
+const projectionCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'projection-core.cjs'), 'utf8')
 
 function seedFs(extra = {}) {
   const seed = {
@@ -1231,6 +1233,7 @@ test('从插件 dist/validate-core.cjs 加载校验内核', async () => {
   const PLUGIN = '/plugin/pkg'
   const fs = makeFs({
     [PLUGIN + '/dist/validate-core.cjs']: validatorCoreSrc,
+    [PLUGIN + '/dist/projection-core.cjs']: projectionCoreSrc,
   })
   const { handlers } = loadHost({
     fs,
@@ -1300,22 +1303,27 @@ test('Q7 闭环：heteroCheck/onMaxRounds 随 DSL 往返并在校验中生效', 
   }
   const v = await call(handlers, 'vwf.validate', { dsl })
   assert.equal(v.ok, true, JSON.stringify(v.errors))
-  assert.equal(v.sanitized.heteroCheck, true, '异源开关过 sanitize 保留')
+  // 异源档位三态（LOC-021）：DSL 三态字符串原样过 sanitize；旧布尔 true 经摄入归一为弱档
+  assert.equal(v.sanitized.heteroCheck, 'weak', '异源档位过 sanitize 保留（旧布尔 true 归一为弱档）')
   assert.equal(v.sanitized.onMaxRounds, 'auto-reschedule', '超限行为过 sanitize 保留')
   const s = await call(handlers, 'vwf.workflows.save', { dsl })
   assert.equal(s.ok, true, JSON.stringify(s.errors))
   const bp = JSON.parse(fs._files.get(USER_DIR + '/h1.json'))
-  assert.equal(bp.heteroCheck, true, '异源开关落盘蓝图')
+  assert.equal(bp.heteroCheck, 'weak', '异源档位落盘蓝图（归一为弱档）')
   assert.equal(bp.onMaxRounds, 'auto-reschedule', '超限行为落盘蓝图')
 })
 
-test('Q7 闭环：开启异源开关 + 同模型 → 保存被拒；关掉开关同模型依旧被拒（硬规则全局）', async () => {
+test('Q7 闭环：异源档位三态生效——弱档同模型被拒，关档同模型放行（LOC-021 修订 T-06 全局强制口径）', async () => {
   const { handlers } = env()
   const on = await call(handlers, 'vwf.workflows.save', { dsl: { ...heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm1' }), heteroCheck: true } })
   assert.equal(on.ok, false)
   assert.ok(on.errors.some(e => e.message.includes('模型相同')), JSON.stringify(on.errors))
-  const off = await call(handlers, 'vwf.workflows.save', { dsl: heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm1' }) })
-  assert.equal(off.ok, false, '异源硬规则全局强制（T-06），与开关无关')
+  // 关档（off）：开发与审核完全同模型不校验、可保存（用户显式选择）
+  const off = await call(handlers, 'vwf.workflows.save', { dsl: { ...heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm1' }), heteroCheck: 'off' } })
+  assert.equal(off.ok, true, '关档下完全同模型应放行：' + JSON.stringify(off.errors))
+  // 缺失档位默认弱档：完全同模型仍被拒
+  const weak = await call(handlers, 'vwf.workflows.save', { dsl: heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm1' }) })
+  assert.equal(weak.ok, false, '缺失档位按弱档判定，完全同模型仍被拒')
 })
 
 test('Q7 闭环：回合上限系统约束（10 拒并带 control:maxRounds 坐标；5 通过）', async () => {
@@ -1883,6 +1891,7 @@ test('角色库 core 加载：只信插件 dist 清单，home / repo 旧清单�
     [PLUGIN + '/dist/role-library.cjs']: ROLE_CORE_SEED[REPO + '/scripts/role-library.cjs'],
     [PLUGIN + '/dist/builtin-roles.json']: JSON.stringify(trusted),
     [PLUGIN + '/dist/validate-core.cjs']: validatorCoreSrc,
+    [PLUGIN + '/dist/projection-core.cjs']: projectionCoreSrc,
     [DSH_HOME + '/visual-workflow/builtin-roles.json']: JSON.stringify(staleHome),
     [REPO + '/dsh/roles/builtin-roles.json']: JSON.stringify(staleRepo),
   })
@@ -1904,7 +1913,7 @@ test('vwf.i18n 按需从 dist/locales 返回当前语言文案', async () => {
   assert.equal(en.messages.oneClickCheck, 'One-click check')
 })
 
-test('vwf.probe：静态失败先返回；通过后对 #74 探针明确 pending', async () => {
+test('vwf.probe：静态失败先返回且不发起探针；llm 服务缺失时如实报错不伪装可用', async () => {
   const { handlers } = env()
   const bad = await call(handlers, 'vwf.probe', { dsl: { id: 'bad', name: 'bad', nodes: [], edges: [] } })
   assert.equal(bad.ok, false)
@@ -1913,9 +1922,9 @@ test('vwf.probe：静态失败先返回；通过后对 #74 探针明确 pending'
   const good = await call(handlers, 'vwf.probe', { dsl: baseDsl() })
   assert.equal(good.ok, false)
   assert.equal(good.stage, 'probe')
-  assert.equal(good.pending, true)
-  assert.equal(good.code, 'PROBE_NOT_IMPLEMENTED')
-  assert.equal(good.issue, 74)
+  assert.equal(good.code, 'LLM_SERVICE_UNAVAILABLE')
+  assert.ok(Array.isArray(good.results) && good.results.length > 0)
+  assert.ok(good.results.every((r) => r.status === 'unknown'))
 })
 
 test('vwf.script 预览不分配 workspace；prepare 才带 allocate', async () => {

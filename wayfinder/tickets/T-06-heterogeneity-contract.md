@@ -32,3 +32,15 @@ HITL：grilling 票；无阻塞、已可决策（v2 执行时落地）。依赖 
 **错误契约（Q4）**：沿用 `errors[]` 结构（at=`bindings.models`，消息含实际 provider/model + 修复指引）；缺绑定单独文案。
 **测试用例（Q5，AC-8 细化 6 例）**：T1 完全同模型拒 / T2 弱异源过+警告 / T3 真异源过 / T4 缺绑定拒 / T5 无 dev/review 跳过 / T6 update 同 save。
 **联动**：blueprint-schema.md §2.1 heteroCheck 语义更新 + §3.1 新增规则 7（异源硬规则，v2 生效）；地图 fog「CI 细化」剩余项 = 多模板回归（异源校验集成已随本票落定）。
+
+## Supersession（2026-09-14，LOC-021 修订）
+
+本票 Resolution 中 **Q2/Q3 的「全局强制」口径已被 LOC-021「异源档位三态可配置」修订**（规格 `docs/tasks/archive/LOC-021/task-spec-V1.md` V1；决策 D1/D1-b/D2/D6）：
+
+- **判定粒度（Q1）**：保留——关/弱两档语义与本票一致（弱档 = 弱异源过 + 完全同模型拒）。
+- **强制范围（Q3）**：**由「全局强制」改为按蓝图 `heteroCheck` 档位生效**——`"off"` 不校验、`"weak"`（默认）为本票原口径、`"strong"` 要求 provider 必须不同。档位缺失或旧布尔 `true` → 弱档（存量蓝图行为不变）；旧布尔 `false` → 关档。
+- **强制点（Q2）**：保留 save / update / validate 三处；engine start 仍不拦（由三处校验前置保证）。
+- **heteroCheck 语义（Q1/Q2 附带结论）**：**不再是「退化为运行时陈述性日志」**——异源档位是蓝图属性，同时驱动 save/validate 校验强度与运行时日志；运行时日志识别口径统一为按节点 `id` 或 `profile`（修复诊断模板开发节点 id=`fix` 时日志不触发）。
+- **配对范围**：保留——仍只 `dev↔review` 一对，`dev↔test`、`execute↔evaluate` 不纳入。
+
+权威契约现以 `docs/design/blueprint-schema.md` 字段语义行 + §3.1 规则 4/7 为准（已同步修订）。本票保留为历史决策记录。

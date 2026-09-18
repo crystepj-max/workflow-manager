@@ -1,0 +1,17 @@
+{
+  "task_id": "LOC-036",
+  "run_id": "loc-036-r1",
+  "task_name": "WR-010 落实探索覆盖度与定向补充规则",
+  "branch": "dev-loc-036-r1",
+  "status": "等待验收",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-036-r1",
+    "file_count": 10,
+    "total_bytes": 14281
+  },
+  "generated_at": "2026-09-17T04:31:51.651Z"
+}

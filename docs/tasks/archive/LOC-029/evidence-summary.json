@@ -1,0 +1,16 @@
+{
+  "task_id": "LOC-029",
+  "task_name": "WR-006 逐次持久化节点执行与成果提交",
+  "status": "已合并",
+  "archive_form": "lightweight-remote",
+  "remote_ref": "cnb#47",
+  "merge": {
+    "commit": "4a4f1296117caa912874880c66c8e3188ffd222e",
+    "merged_at": "2026-09-15T23:40:00.549Z"
+  },
+  "branch": "dev-loc-029-r1",
+  "branch_retained": false,
+  "generated_by": "FIX-72（fix-72-r1）轻量归档回填",
+  "generated_at": "2026-09-16T10:05:11.420Z",
+  "note": "远程收口任务：经 CNB 合并请求合入，本地未走收口流程。规格正文与任务详情以远端 issue 为源（本存根仅记指针与凭据，不复制正文）；若远端 issue 被清理，该部分历史不可恢复——此风险已在 FIX-72 规格已知限制中声明。"
+}

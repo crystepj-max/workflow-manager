@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
- * M2 机械验收：单任务交付主链文档/入口/三态/返工上限/实施前检查。
- * 用法：node scripts/ai-task-deliver-m2-check.mjs
+ * M2 机械验收：单任务交付主链文档/入口/三态/返工上限/实施前检查/验收项执行时机。
+ * 用法：node scripts/ai-task-deliver-m2-check.mjs [--root <目录>]
+ *   --root 用于指定被检查的根目录（默认 = 本脚本所在仓库根）；测试借它构造临时根，
+ *   验证「模板缺字段时检查必须失败」。
  */
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -9,7 +11,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const root = path.resolve(__dirname, '..')
+const rootArgIndex = process.argv.indexOf('--root')
+const root = rootArgIndex >= 0 ? path.resolve(process.argv[rootArgIndex + 1]) : path.resolve(__dirname, '..')
 const errors = []
 function fail(msg) { errors.push(msg) }
 function ok(cond, msg) { if (!cond) fail(msg) }
@@ -26,7 +29,11 @@ ok(/conditional_pass|有条件通过/.test(m2), 'M2 须含有条件通过')
 ok(/定义外置|已定义/.test(m2), 'M2 须声明定义外置/已定义开工')
 
 read('docs/design/ai-task-define-delivery/preflight-check.md')
-read('docs/design/ai-task-define-delivery/uat-card-template.md')
+const uatCard = read('docs/design/ai-task-define-delivery/uat-card-template.md')
+// 验收项执行时机规则（CHORE-36）：卡片模板必须带「执行时机」字段。缺了它，收口后项会与
+// 裁决清单混排，交付操作者照单执行即得到假红灯（2026-09-15 LOC-023 实测）。
+// 只断言字段存在性，不解析自由文本——语义正确性由 Definition Check 的人工项与 UAT 演示兜底。
+ok(/执行时机/.test(uatCard), 'UAT 卡模板须含「执行时机」字段（验收项执行时机规则，CHORE-36）')
 read('docs/design/ai-task-define-delivery/construction-bridge-m2.md')
 read('docs/design/ai-task-define-delivery/task-workspace-env.md')
 

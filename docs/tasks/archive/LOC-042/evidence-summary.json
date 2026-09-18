@@ -1,0 +1,17 @@
+{
+  "task_id": "LOC-042",
+  "run_id": "loc-042-r1",
+  "task_name": "WR-019 建立四模板的消费方契约与代表性端到端验收",
+  "branch": "dev-loc-042-r1",
+  "status": "等待验收",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-042-r1",
+    "file_count": 11,
+    "total_bytes": 29292
+  },
+  "generated_at": "2026-09-17T14:26:12.962Z"
+}

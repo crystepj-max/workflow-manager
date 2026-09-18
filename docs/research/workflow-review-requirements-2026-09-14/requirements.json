@@ -1,0 +1,491 @@
+{
+  "version": "suggested-v1",
+  "date": "2026-09-14",
+  "source_baseline": "8e38d74955c67f0f196c93eb880cfef7cce71cbd",
+  "requirements": [
+    {
+      "id": "WR-001",
+      "title": "显式交接节点输入与返工反馈",
+      "priority": "P0",
+      "origin": "F1；最小通用协议：系统交接信息",
+      "dependencies": [],
+      "modules": [
+        "scripts/generate.mjs",
+        "scripts/validate-core.cjs",
+        "scripts/projection-core.cjs",
+        "templates/wf-optimize.json",
+        "templates/wf-diagnose.json",
+        "templates/wf-construction-full-feature.json"
+      ],
+      "acceptance": [
+        "优化首轮执行正常；评估返回带唯一标记的 OPTIMIZE 后，第二次执行收到该标记、评价契约引用和当前成果引用。",
+        "诊断修复收到对应 diagnosis 的根因和证据；建设返工收到触发本次返工的 review/test 反馈，而非另一轮的旧报告。",
+        "缺必需引用时消费节点调用数为 0，错误包含 node、binding 和原因；可选输入未产生时按声明处理。",
+        "两轮反馈同时存在时仅选择本次流转对应版本；蓝图编辑、投影往返、生成脚本均保留输入声明。"
+      ],
+      "file": "WR-001.md",
+      "impact": "四模板的节点调用上下文、返工路径与蓝图编辑/生成；现有未声明输入的旧模板保持可识别兼容。"
+    },
+    {
+      "id": "WR-002",
+      "title": "阻止互相矛盾的裁决进入下一质量关口",
+      "priority": "P0",
+      "origin": "F2：裁决与路由一致性",
+      "dependencies": [],
+      "modules": [
+        "templates/wf-construction-full-feature.json",
+        "scripts/generate.mjs",
+        "scripts/validate-core.cjs",
+        "dsh/roles/review.md",
+        "dsh/roles/test.md"
+      ],
+      "acceptance": [
+        "列出的 6 个合法组合均走预期边；其余 route/verdict 或 route/result 组合全部被拒绝。",
+        "对复现中的两种矛盾分别测试，UAT、人工等待与收口调用数均为 0。",
+        "拒绝原因能区分“契约矛盾”与专业判断“需要修改”；不把矛盾结果存成有效通过证明。",
+        "角色、模板 Schema 和运行时校验对这 6 个组合表述一致；旧字段仍可读取。"
+      ],
+      "file": "WR-002.md",
+      "impact": "建设审核、测试、UAT 的放行行为，以及角色输出与错误提示。"
+    },
+    {
+      "id": "WR-003",
+      "title": "将审核与测试证明绑定到真实候选成果",
+      "priority": "P0",
+      "origin": "F2：当前成果证明",
+      "dependencies": [],
+      "modules": [
+        "scripts/generate.mjs",
+        "packages/dsh-visual-workflow/src/host.js",
+        "scripts/workspace-isolation.mjs",
+        "templates/wf-construction-full-feature.json",
+        "templates/wf-diagnose.json"
+      ],
+      "acceptance": [
+        "审核旧 HEAD、测试另一旧 HEAD、当前新 HEAD 时不进入 UAT/收口，并指出具体不匹配证明。",
+        "同一 HEAD 下受审文件发生未提交修改也被发现；不相关且已声明排除的临时证据文件不会使源码候选失效。",
+        "非 Git 文档集合任一纳入文件修改、增删或更名均改变候选标识；排序变化不改变摘要。",
+        "审核期间被审成果变化时不签发有效证明；对完全相同候选的正常审核、测试可通过。"
+      ],
+      "file": "WR-003.md",
+      "impact": "建设和诊断的候选快照、审核/测试证明、UAT 放行；本地非 Git 文件型成果同样适用。"
+    },
+    {
+      "id": "WR-004",
+      "title": "系统冻结并核验优化评价契约",
+      "priority": "P0",
+      "origin": "F2：contract_digest 漂移",
+      "dependencies": [],
+      "modules": [
+        "templates/wf-optimize.json",
+        "scripts/generate.mjs",
+        "packages/dsh-visual-workflow/src/host.js"
+      ],
+      "acceptance": [
+        "模型上报与真实文件不同摘要时不放行；A/B 漂移复现无法完成。",
+        "评价文件缺失或读取失败时不进入执行；冻结后被改写时保留原副本并显示基线冲突。",
+        "重新确认产生 V2 后，执行、评估均指向 V2，且不能沿用 V1 的 PASS。",
+        "未发生变更的文档优化可正常自动评估完成，不额外增加人工确认节点。"
+      ],
+      "file": "WR-004.md",
+      "impact": "优化的确认、执行、评估与重新确认路径，以及评价文件的保存方式。"
+    },
+    {
+      "id": "WR-005",
+      "title": "人工接受完成必须具备真实决定与版本来源",
+      "priority": "P0",
+      "origin": "F2：人工完成来源；F4：完成类型",
+      "dependencies": [
+        "WR-003"
+      ],
+      "modules": [
+        "scripts/generate.mjs",
+        "packages/dsh-visual-workflow/src/host.js",
+        "templates/wf-optimize.json",
+        "templates/wf-construction-full-feature.json"
+      ],
+      "acceptance": [
+        "无决定、其他 Run 决定、旧候选决定、模型自报人工接受四种情况均不能生成有效 USER_ACCEPTED。",
+        "优化 PASS 正常自动收口；真实 ACCEPT 对应同一成果时正确生成 USER_ACCEPTED。",
+        "建设三态各走原定路径，无操作继续等待；CONDITIONAL_PASS 的后续意见不修改本轮基线。",
+        "同一决定重复恢复不重复收口；成果在决定后变化时必须重新获得针对新版本的验收。"
+      ],
+      "file": "WR-005.md",
+      "impact": "优化人工接受、建设人工三态、决定恢复及完成摘要展示。"
+    },
+    {
+      "id": "WR-006",
+      "title": "逐次持久化节点执行与成果提交",
+      "priority": "P0",
+      "origin": "F3：attempt 丢失；工程实践：可恢复执行",
+      "dependencies": [],
+      "modules": [
+        "scripts/generate.mjs",
+        "packages/dsh-visual-workflow/src/host.js",
+        "scripts/records-host.mjs",
+        "scripts/formal-records.mjs"
+      ],
+      "acceptance": [
+        "复现的 8 次调用留下 8 个完成 attempts；3 次评估各有可读结果和正式 Revision，最新索引指向第 3 次。",
+        "同一节点跨 segment 再次执行也追加记录；fanout 不同专家与轮次不会碰撞。",
+        "在结果落盘后、确认前及索引更新前分别注入中断，恢复后已确认结果不丢失且不重复生成 Revision。",
+        "模拟写盘失败、重复提交和并发提交，均不能显示“证据有效且完成”却缺少记录；失败可恢复。"
+      ],
+      "file": "WR-006.md",
+      "impact": "全部模板的逐次调用记录、宿主存储、结果查询与中断恢复。"
+    },
+    {
+      "id": "WR-007",
+      "title": "按实际输入版本维护依赖与证明失效",
+      "priority": "P1",
+      "origin": "F3：精确依赖；最小通用协议",
+      "dependencies": [
+        "WR-001",
+        "WR-006"
+      ],
+      "modules": [
+        "scripts/records-host.mjs",
+        "scripts/formal-records.mjs",
+        "packages/dsh-visual-workflow/src/host.js"
+      ],
+      "acceptance": [
+        "A→B→Proof 更新 A 后，B 与 Proof 失效；独立 C 仍有效。更新 C 不影响该 Proof。",
+        "同一成果有两版时消费者仍能读取其绑定旧版；新执行明确使用新版，不悄悄改写历史引用。",
+        "并行专家一人补充只使实际读取其旧结果的综合/终评失效，不使无关专家报告失效。",
+        "缺失引用、临时引用用于正式 Proof、循环依赖均被拒绝；恢复后依赖集合不扩大为所有当前记录。"
+      ],
+      "file": "WR-007.md",
+      "impact": "正式成果/证明的版本引用、失效提示与重验证范围。"
+    },
+    {
+      "id": "WR-008",
+      "title": "声明、核验并索引实际交付产物",
+      "priority": "P1",
+      "origin": "F3/F5；推进次序：缺产物不得签发完成证明",
+      "dependencies": [
+        "WR-006"
+      ],
+      "modules": [
+        "scripts/generate.mjs",
+        "scripts/validate-core.cjs",
+        "scripts/formal-artifacts.cjs",
+        "packages/dsh-visual-workflow/src/host.js",
+        "templates/wf-explore.json"
+      ],
+      "acceptance": [
+        "缺失建设 UAT 必需卡片时不能宣称验收材料就绪；补齐后可继续同一 Run。",
+        "同一专家两轮报告形成两个可读版本；综合明确收到本轮及声明保留的历史结果，不混入无关文件。",
+        "错误摘要、越界路径、符号链接越出授权根、重复产物 ID 均被拦截。",
+        "可选报告缺失不误阻断；必需/可选状态与产物校验结果在记录中可见。"
+      ],
+      "file": "WR-008.md",
+      "impact": "四模板声明文件的核验、探索动态报告交接和完成材料完整性。"
+    },
+    {
+      "id": "WR-009",
+      "title": "统一受阻、恢复与完成的生命周期语义",
+      "priority": "P0",
+      "origin": "F4；额度耗尽与 Bootstrap 兼容",
+      "dependencies": [],
+      "modules": [
+        "scripts/generate.mjs",
+        "packages/dsh-visual-workflow/src/host.js",
+        "packages/dsh-visual-workflow/src/client.js",
+        "templates",
+        "dsh/skills/construction-bootstrap",
+        "docs/design/ai-task-define-delivery/single-task-delivery-m2.md"
+      ],
+      "acceptance": [
+        "诊断“环境暂不可用”得到 BLOCKED、terminal=false；环境恢复后继续同一 Run，而非新建假成功记录。",
+        "建设第 3 次业务返工后仍失败时按 M2 受阻；人工退回后正确重置业务额度。",
+        "DONE 但无有效业务完成映射时不记 COMPLETED；合法 PASS、人工接受及探索 INSUFFICIENT 能形成各自明确结果。",
+        "宿主状态、生成 Skill、Bootstrap 与用户界面对同一事件给出一致解释；恢复后不重复已确认节点。"
+      ],
+      "file": "WR-009.md",
+      "impact": "四模板终止状态、宿主恢复入口、并发名额释放及生成操作说明。"
+    },
+    {
+      "id": "WR-010",
+      "title": "落实探索覆盖度与定向补充规则",
+      "priority": "P1",
+      "origin": "F5；复杂度建议：按缺口分配专家",
+      "dependencies": [],
+      "modules": [
+        "templates/wf-explore.json",
+        "scripts/validate-core.cjs",
+        "scripts/generate.mjs",
+        "dsh/roles/orchestrator.md",
+        "dsh/roles/researcher.md",
+        "dsh/roles/synthesizer.md"
+      ],
+      "acceptance": [
+        "首轮 0/2/6 人、重复 ID、空任务或完全相同任务被拒绝；合法 3–5 人进入研究。",
+        "仅有一个明确缺口时下一轮可以只调 1 名专家；空 research_targets 不能进入 NEEDS_RESEARCH 回路。",
+        "部分失败传递到综合和终评；必需问题无覆盖不能 PASS，全失败不能伪造研究成果。",
+        "终评裁决与完成类型严格一致；两次补充耗尽仍有缺口时给出 INSUFFICIENT 和未解决清单。"
+      ],
+      "file": "WR-010.md",
+      "impact": "探索统筹、专家调用、综合、补充研究与终评；通用 fanout 不受模板专属人数约束。"
+    },
+    {
+      "id": "WR-011",
+      "title": "限制技术重试、超时与无进展循环",
+      "priority": "P0",
+      "origin": "F6：有限重试和失败分类",
+      "dependencies": [],
+      "modules": [
+        "scripts/generate.mjs",
+        "scripts/validate-core.cjs",
+        "packages/dsh-visual-workflow/src/host.js",
+        "templates"
+      ],
+      "acceptance": [
+        "持续无效输出最多调用 3 次即停止；内部格式修复和技术自环不能各自偷偷获得额外 3 次。",
+        "暂时错误按可控时钟验证退避；不可重试错误最多调用 1 次即停止；超时后停止发起新调用并尽力取消当前调用。",
+        "业务返工计数不因技术重试增加；同一受阻 Run 恢复不重置已耗预算，人工明确新技术额度后才能继续。",
+        "相同目标的无进展重新确认连续 2 次后受阻；真正的新目标/新基线不被误判。",
+        "用户可查看冻结的次数/时间限制及实际消耗；无法强制终止的外部调用标明取消能力限制。"
+      ],
+      "file": "WR-011.md",
+      "impact": "四模板自动调用次数、技术失败等待、运行时间、恢复预算及用户受阻提示。"
+    },
+    {
+      "id": "WR-012",
+      "title": "恢复执行时防止重复外部动作",
+      "priority": "P0",
+      "origin": "F6；工程实践：稳定操作 ID 与幂等",
+      "dependencies": [],
+      "modules": [
+        "packages/dsh-visual-workflow/src/host.js",
+        "scripts/generate.mjs",
+        "dsh/roles/closeout.md"
+      ],
+      "acceptance": [
+        "在外部成功但本地确认前注入崩溃，恢复先查询原目标，不重复创建第二个 PR/动作。",
+        "重复请求同键、同参数返回同一结果；同键不同目标/参数拒绝。",
+        "未知结果且查询不可用时进入待核查受阻，不再次执行；确认未执行后可安全重试。",
+        "输出格式修复只修复结果，不重新执行已确认动作；账本包含授权、操作、回读与恢复记录。"
+      ],
+      "file": "WR-012.md",
+      "impact": "宿主管理的交付动作、外部服务回读、本地动作记录与崩溃恢复。"
+    },
+    {
+      "id": "WR-013",
+      "title": "收敛内置角色职责并由节点提供场景信息",
+      "priority": "P0",
+      "origin": "复杂度表：角色耦合与内部冲突；四模板角色绑定",
+      "dependencies": [],
+      "modules": [
+        "dsh/roles/builtin-roles.json",
+        "dsh/roles",
+        "templates",
+        "scripts/generate.mjs",
+        "scripts/test/role-library.test.mjs"
+      ],
+      "acceptance": [
+        "形成全部 12 角色的职责矩阵与 4 模板节点绑定对照，无 dev 自测禁令与 TDD 要求并存。",
+        "非 Git 文档优化能收到完整执行要求，不要求 dispatch-result、创建 worktree 或 PR 才能完成。",
+        "建设 accept 产物与模板一致，三态不被二态指令覆盖；诊断 test 使用节点声明的回归产物。",
+        "角色加载/编译快照测试验证实际注入文本，不只对 Markdown 做关键词检查；人工抽查四模板各一次代表性角色交接。"
+      ],
+      "file": "WR-013.md",
+      "impact": "12 个内置角色文本、四模板节点目标和新运行的编译提示；旧运行继续使用冻结文本。"
+    },
+    {
+      "id": "WR-014",
+      "title": "将收口事实整理与授权交付动作分离",
+      "priority": "P1",
+      "origin": "复杂度表：收口职责过宽",
+      "dependencies": [
+        "WR-012"
+      ],
+      "modules": [
+        "dsh/roles/closeout.md",
+        "templates/wf-optimize.json",
+        "templates/wf-diagnose.json",
+        "templates/wf-construction-full-feature.json",
+        "packages/dsh-visual-workflow/src/host.js",
+        "scripts/cwf-env-recycle.mjs"
+      ],
+      "acceptance": [
+        "非 Git 优化正常收口，无 Git/PR 调用；已授权 GitHub 交付通过动作接口执行且回读确认。",
+        "缺必要授权时先完成可交付材料并准确等待该动作授权；既有有效授权不重复询问。",
+        "必须合并却合并失败时不得 DELIVERED；可选清理失败保留成果状态并列出待清理资源。",
+        "收口前后候选内容一致；含未保全改动的工作区不被强删；同组环境遵守全部成员完成后回收。"
+      ],
+      "file": "WR-014.md",
+      "impact": "交付动作选择、收口报告、必要外部动作状态与环境清理结果。"
+    },
+    {
+      "id": "WR-015",
+      "title": "建设实施前检查复用现有确定性判定",
+      "priority": "P1",
+      "origin": "复杂度表：机械 preflight 重复判断",
+      "dependencies": [],
+      "modules": [
+        "scripts/ai-task-preflight-check.mjs",
+        "templates/wf-construction-full-feature.json",
+        "dsh/skills/construction-bootstrap",
+        "packages/dsh-visual-workflow/src/host.js"
+      ],
+      "acceptance": [
+        "同一输入从 Bootstrap、正式 wf_run 和测试适配入口获得相同可开工结论及原因码。",
+        "已完成依赖的合法同组成员、合法本地已定义任务通过；未完成依赖、版本冲突、缺许可均受阻且 dev 未调用。",
+        "模型输出 PASS 不能覆盖机械失败，机械通过的常规场景不再额外消耗一次模型资格判断调用。",
+        "不覆盖既有模型连接探测；任务资格检查与服务就绪检查可分别定位失败。"
+      ],
+      "file": "WR-015.md",
+      "impact": "建设开工入口、任务资格校验及阻塞原因，不改变后续专业质量门。"
+    },
+    {
+      "id": "WR-016",
+      "title": "声明协议版本与可执行的 Schema 能力",
+      "priority": "P1",
+      "origin": "工程实践：契约优先与版本兼容；最小通用协议",
+      "dependencies": [],
+      "modules": [
+        "scripts/validate-core.cjs",
+        "scripts/generate.mjs",
+        "scripts/projection-core.cjs",
+        "scripts/cwf-validate.mjs",
+        "docs/design/blueprint-schema.md"
+      ],
+      "acceptance": [
+        "对全部声明支持关键字提供至少一个合法和一个非法值，静态/运行时结论一致。",
+        "未知关键字、未来主版本、缺少必需能力均在代理调用前拒绝并给出路径；注释字段不误阻断。",
+        "四模板生成、投影往返及 Portable 样例分别按其真实契约验证，不把不同 Schema 体系误当同一协议。",
+        "旧 Run 恢复仍用原快照；新增协议字段可追溯生产者和消费方，领域 payload 没有被统一成大而全结构。"
+      ],
+      "file": "WR-016.md",
+      "impact": "蓝图导入/编辑、编译校验、运行兼容与模板作者收到的诊断。"
+    },
+    {
+      "id": "WR-017",
+      "title": "收敛 Current、Target、Legacy 文档与生成运行指南",
+      "priority": "P1",
+      "origin": "复杂度表：兼容与文档状态",
+      "dependencies": [],
+      "modules": [
+        "CONTEXT.md",
+        "docs/design/construction-workflow-portable-contract.md",
+        "docs/design/workflow-manager-v0.1-final-product-spec.md",
+        "scripts/generate.mjs",
+        "dsh/skills/construction-bootstrap"
+      ],
+      "acceptance": [
+        "能力索引逐项提供源码或测试链接，无已实现能力仍被无版本标注地列作“尚未实现”。",
+        "四模板生成指南各经检查：人工关口、产物、完成类型与模板一致；探索/非 Git 优化没有强制合并要求。",
+        "M2 与 Portable 旧七阶段关系一处明确解释并被其他文档引用，无两套互相矛盾的当前主链。",
+        "旧运行恢复说明与新建流程说明可区分；生成一致性检查能发现指南与模板漂移。"
+      ],
+      "file": "WR-017.md",
+      "impact": "接手者阅读的能力索引、建设兼容说明和四模板生成 Skill。"
+    },
+    {
+      "id": "WR-018",
+      "title": "由宿主落实节点权限与独立证明边界",
+      "priority": "P1",
+      "origin": "工程实践：最小权限与独立证明",
+      "dependencies": [],
+      "modules": [
+        "packages/dsh-visual-workflow/src/host.js",
+        "scripts/workspace-isolation.mjs",
+        "templates",
+        "dsh/roles"
+      ],
+      "acceptance": [
+        "review 写候选、test 写业务源码、researcher 写源树均被实际文件/工具层拒绝，而不只是模型遵守。",
+        "review/test 能在证据区写报告，test 能运行所需测试与缓存；合法行为不因只读候选全部失效。",
+        "无发布授权节点无法调用发布动作，已授权适配动作仍按原流程执行。",
+        "路径穿越、符号链接和直接 shell 绕过尝试均按支持的宿主边界验证；不支持强制隔离的环境明确标注能力缺失。"
+      ],
+      "file": "WR-018.md",
+      "impact": "节点工具可见性、源码/测试/证据目录权限与正式独立证明资格。"
+    },
+    {
+      "id": "WR-019",
+      "title": "建立四模板的消费方契约与代表性端到端验收",
+      "priority": "P1",
+      "origin": "工程实践：消费方测试、发布一致性与 E2E",
+      "dependencies": [],
+      "modules": [
+        "scripts/test",
+        "packages/dsh-visual-workflow/tests",
+        "scripts/release-verify.mjs",
+        "dsh/skills/construction-bootstrap"
+      ],
+      "acceptance": [
+        "原基线 7 个复现与至少缺文件、旧输入版本、错误类型的负例能被测试体系观察，不因只断言最终路由而漏掉。",
+        "四模板消费方接收到的输入、成果和证明都有可追溯断言；含返工、人工等待、受阻恢复与探索部分失败。",
+        "报告分列自动契约检查、真实安装 DSH E2E、真实模型行为、人工验收及未执行原因。",
+        "测试入口、固定夹具与复跑步骤入库，输出失败能定位到接口和需求 ID；不新增必须部署的 Pact 服务。"
+      ],
+      "file": "WR-019.md",
+      "impact": "开发者和验收者使用的四模板测试夹具、运行报告与发布证据清单。"
+    },
+    {
+      "id": "WR-020",
+      "title": "提供按 Run、节点和尝试关联的质量成本记录",
+      "priority": "P1",
+      "origin": "工程实践：质量与成本可观测性",
+      "dependencies": [
+        "WR-006"
+      ],
+      "modules": [
+        "packages/dsh-visual-workflow/src/host.js",
+        "packages/dsh-visual-workflow/src/client.js",
+        "scripts/generate.mjs",
+        "scripts/formal-records.mjs"
+      ],
+      "acceptance": [
+        "8 次调用的优化样例展示 8 次 attempts 的时间/状态，并分别显示业务返工、技术重试与人工等待。",
+        "用量缺失、价格缺失、取消及崩溃恢复均有明确状态；汇总与底层明细一致，不重复累计重放事件。",
+        "人工验收来源、成果版本和质量指标可追溯；凭据与提示全文不进入默认指标文件。",
+        "本地报告可比较四模板的调用、自动耗时、等待与结果质量，并提示样本量/证据不足。"
+      ],
+      "file": "WR-020.md",
+      "impact": "Run 明细查询、本地用量/耗时导出、人工介入和质量证据关联。"
+    },
+    {
+      "id": "WR-021",
+      "title": "提炼状态与恢复核心，减少跨生成器和宿主的重复维护",
+      "priority": "P2",
+      "origin": "复杂度分析：纯逻辑提炼与适配边界",
+      "dependencies": [],
+      "modules": [
+        "scripts/generate.mjs",
+        "packages/dsh-visual-workflow/src/host.js",
+        "scripts/projection-core.cjs"
+      ],
+      "acceptance": [
+        "状态/恢复的权威规则只有一处实现，生成器和宿主不再各自维护相同转换表或条件分支。",
+        "正常、返工、人工等待、受阻恢复、取消及旧快照兼容的行为对照用例一致。",
+        "Node 环境可直接测试纯逻辑；实际 DSH 打包入口仍加载成功，VM/子进程边界无新增宿主依赖泄漏。",
+        "提交清单列出被消除的重复规则与调用方，未混入新的业务行为或未经本需求包约定的状态改名。"
+      ],
+      "file": "WR-021.md",
+      "impact": "生成器与宿主的内部状态/恢复维护方式；对外行为应保持一致。"
+    },
+    {
+      "id": "WR-022",
+      "title": "用代表任务度量模板复杂度并形成简化决策",
+      "priority": "P2",
+      "origin": "复杂度分析：模型调用成本与真实收益",
+      "dependencies": [],
+      "modules": [
+        "templates",
+        "scripts/test/fixtures",
+        "docs/research",
+        "dsh/roles"
+      ],
+      "acceptance": [
+        "提供 12 个任务的固定输入、验收判据与 3 次重复原始记录；未执行真实模型时只能交实验准备，不能宣称收益成立。",
+        "每个候选对照使用相同模型设置与任务，比较验收质量、证据完整度、调用、中位自动耗时、人工介入和已知费用。",
+        "建议逐项说明适用任务、未覆盖场景及是否满足门槛；失败实验和没有收益的结果同样保留。",
+        "报告没有将降低关口或降低质量当作收益，生产模板未被实验配置覆盖。"
+      ],
+      "file": "WR-022.md",
+      "impact": "模板投入评估方法与后续简化决策；当前生产流程不因实验自动改变。"
+    }
+  ]
+}

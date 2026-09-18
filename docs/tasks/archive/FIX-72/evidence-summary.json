@@ -1,0 +1,75 @@
+{
+  "task_id": "FIX-72",
+  "run_id": "fix-72-r1",
+  "task_name": "编号迁移收尾：工作区命名核心与闸门认新前缀（FEAT/FIX/CHORE）",
+  "branch": "dev-fix-72-r1",
+  "status": "等待验收",
+  "decision": "accept",
+  "decided_by": "松哥",
+  "decided_at": "2026-09-16T08:29:17.202Z",
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-16T06:17:00.747Z",
+      "produced_by": "workbuddy-fix72-requirements",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-16T06:17:00.858Z",
+      "produced_by": "workbuddy-fix72-requirements"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": "2026-09-16T06:32:30.518Z",
+      "produced_by": "workbuddy-fix72-dev",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a1.json",
+      "created_at": "2026-09-16T06:41:57.412Z",
+      "produced_by": "workbuddy-fix72-review",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a2.json",
+      "created_at": "2026-09-16T07:02:26.887Z",
+      "produced_by": "workbuddy-fix72-test",
+      "summary": {
+        "verdict": "pass",
+        "environment": "独立测试会话（workbuddy-fix72-test）实测 12 项（原聚合映射留档 payloads/test_proof-aggregated-12items.json）：V-1~V-10 全 pass、UAT-01 pass、边界 2 项 pass。本 attempt 仅为把 acceptance_mapping 规范化为基线 10 条逐字文本（证据链 ⑧），证据内容未变（同一会话同一 HEAD 84db6f8）。"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a2.json",
+      "created_at": "2026-09-16T08:29:17.548Z",
+      "produced_by": "workbuddy-fix72-uat",
+      "summary": {
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "松哥",
+        "decided_at": "2026-09-16T08:29:17.202Z",
+        "verified_branch": "dev-fix-72-r1",
+        "verified_head": "84db6f8d8078cc15d0be4218993dccbbd80abb86"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/fix-72-r1",
+    "file_count": 22,
+    "total_bytes": 70277
+  },
+  "generated_at": "2026-09-16T08:30:59.169Z"
+}

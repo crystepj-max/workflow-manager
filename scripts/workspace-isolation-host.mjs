@@ -14,9 +14,11 @@ import {
   recordSourceSync, workerScratchPath, assembleWorkerContext, writeWorkerFile, readWorkerFile,
   writeSourceFile, readSourceFile, buildAttemptProvenance, assertProofBinding,
   computeIntegrationCheckpointFromRepo, observeTargetHead,
+  captureCandidate, compareCandidate,
   acquireLock, releaseLock, activeLockFor, cleanupWorkspace, recoverStale,
-  resolveWorkspacePolicy,
+  resolveWorkspacePolicy, TEMPLATE_REGISTRY, LIFECYCLE,
 } from './workspace-isolation.mjs'
+import { planTargetSync, mergeTarget, buildSyncRecordEntry } from './integration-gate.mjs'
 import {
   mkdirSync, writeFileSync, readFileSync, existsSync,
   unlinkSync, renameSync, linkSync,
@@ -165,6 +167,9 @@ function saveRegistry(workRoot, registry) {
 // 并发写的中途状态。
 // A1-2（Codex Round 2）：事务开始前先递归创建 workRoot——全新 DSH Home
 // 尚无 ~/.dsh*/workspaces 时，锁文件与注册表目录的父目录必须存在。
+// LOC-009：事务落盘后按 #79 目录组织把每 Run 事件切片写入
+// records/<logical_run_id>/events.json（cleanup 保留 records，事件因此
+// 在 workspace 清理后仍可追溯；state.json 仍是恢复用的注册表索引）。
 function withRegistryTx(workRoot, fn) {
   const lp = lockPath(workRoot)
   mkdirSync(workRoot, { recursive: true })
@@ -173,9 +178,41 @@ function withRegistryTx(workRoot, fn) {
     const registry = loadRegistry(workRoot)
     const result = fn(registry)
     saveRegistry(workRoot, registry)
+    persistRunEvents(registry)
     return result
   } finally {
     releaseFileLock(lp, token)
+  }
+}
+
+// 每 Run 事件切片：timeline 按 logical_run_id 归属；lock_released /
+// lock_refreshed 不带 logical_run_id，用 lock_acquired 建立的 lock_id → Run
+// 归属补齐。逐 Run best-effort 写入，不使注册表事务失败。
+function persistRunEvents(registry) {
+  const lockOwner = new Map()
+  for (const e of registry.timeline) {
+    if (e && e.type === 'lock_acquired' && e.lock_id && e.logical_run_id) lockOwner.set(e.lock_id, e.logical_run_id)
+  }
+  const byRun = new Map()
+  for (const e of registry.timeline) {
+    if (!e) continue
+    const run = e.logical_run_id || (e.lock_id && lockOwner.get(e.lock_id)) || null
+    if (!run) continue
+    if (!byRun.has(run)) byRun.set(run, [])
+    byRun.get(run).push(e)
+  }
+  const roots = new Map()
+  for (const ws of registry.workspaces.values()) roots.set(ws.logical_run_id, ws.records_path)
+  for (const [run, rec] of registry.archived.entries()) {
+    const p = rec && rec.identity && rec.identity.records_path
+    if (p && !roots.has(run)) roots.set(run, p)
+  }
+  for (const [run, path] of roots.entries()) {
+    try {
+      mkdirSync(path, { recursive: true })
+      const data = { schema: 1, logical_run_id: run, events: byRun.get(run) || [] }
+      writeFileSync(path + '/events.json', JSON.stringify(data, null, 2) + '\n')
+    } catch { /* 事件切片落盘失败不阻塞注册表事务（state.json 仍含全量 timeline） */ }
   }
 }
 
@@ -277,6 +314,25 @@ try {
       out({ ok: true, valid: ok })
       break
     }
+    case 'captureCandidate': {
+      // LOC-026 候选证明：workspace 从注册表解析（A4）。范围选项缺省时由本侧取默认
+      //（排除 Run 产物目录 .agent-runs/<run_id>），保证 Proof 签发与闸门两侧捕获同口径
+      const { work_root, logical_run_id, workspace_id, options } = INPUT
+      const runId = logical_run_id || workspace_id
+      if (!work_root || !runId) err('缺少参数')
+      const ws = resolveWorkspaceFromRegistry(work_root, runId)
+      const scope = options && Object.keys(options).length ? options : { exclude: ['.agent-runs/' + String(runId)] }
+      const candidate = captureCandidate(ws, scope)
+      out({ ok: true, candidate })
+      break
+    }
+    case 'compareCandidate': {
+      // LOC-026：候选标识比较（纯函数），mismatch 明细供关口指出具体不匹配证明
+      const { current, expected } = INPUT
+      if (!current || !expected) err('缺少 current / expected 候选标识')
+      out({ ok: true, compare: compareCandidate(current, expected) })
+      break
+    }
     case 'acquireLock': {
       const { work_root, logical_run_id, resource_key, owner, ttl_ms } = INPUT
       if (!work_root || !logical_run_id || !resource_key || !owner) err('缺少参数')
@@ -303,6 +359,33 @@ try {
       if (!work_root || !logical_run_id) err('缺少参数')
       const audit = withRegistryTx(work_root, (registry) => cleanupWorkspace(registry, logical_run_id, opts || {}))
       out({ ok: true, audit })
+      break
+    }
+    case 'gatePlan': {
+      // LOC-017 集成闸门只读观测：workspace 解析 / 脏检查 / 目标观测 / 锁键 / 同步记录 id。
+      const { work_root, logical_run_id, target_ref } = INPUT
+      if (!work_root || !logical_run_id) err('缺少参数')
+      out(withRegistryRead(work_root, (registry) => planTargetSync(registry, logical_run_id, target_ref)))
+      break
+    }
+    case 'gateSyncEntry': {
+      // LOC-017：同步证据 entry 构造（宿主只传事实，provenance 拼装委托内核助手）
+      const { work_root, logical_run_id, target_head, previous_synced_head, integrated_before, merge_result, attempt, snapshot_revision } = INPUT
+      if (!work_root || !logical_run_id) err('缺少参数')
+      out({ ok: true, entry: buildSyncRecordEntry({ logicalRunId: logical_run_id, target_head, previous_synced_head, integrated_before, merge_result, attempt, snapshot_revision }) })
+      break
+    }
+    case 'syncTarget': {
+      // LOC-017 集成闸门：目标同步编排（效果执行委托 integration-gate.mjs 内核助手）。
+      // 三段式：plan（读）→ merge（无登记簿文件锁）→ recordSourceSync（写，只信实况）。
+      const { work_root, logical_run_id, target_ref } = INPUT
+      if (!work_root || !logical_run_id) err('缺少参数')
+      const plan = withRegistryRead(work_root, (registry) => planTargetSync(registry, logical_run_id, target_ref))
+      if (!plan.ok) { out(plan); break }
+      const merged = mergeTarget(plan)
+      if (!merged.ok) { out(merged); break }
+      const ws = withRegistryTx(work_root, (registry) => recordSourceSync(registry, logical_run_id, {}))
+      out({ ok: true, target_head: merged.target_head, integrated_before: merged.integrated_before, merge_result: merged.merge_result, current_head: ws.current_head, source_revision: ws.source_revision, resource_key: plan.resource_key })
       break
     }
     case 'writeSourceFile': {
@@ -361,6 +444,54 @@ try {
       if (!template_id) err('缺少 template_id')
       const policy = resolveWorkspacePolicy(template_id, input || {})
       out({ ok: true, policy })
+      break
+    }
+    case 'templateRegistry': {
+      // LOC-009：四类正式模板的策略声明权威（Core 导出），host 侧模板映射
+      // 以本表键为权威，不再按 id 名字猜测。
+      out({ ok: true, registry: TEMPLATE_REGISTRY })
+      break
+    }
+    case 'recoverStale': {
+      // LOC-009：恢复扫描（产品 DSH 重启后调用）。过期锁先释放；输出可识别恢复的
+      // workspace 清单（含 WAITING_HUMAN/PAUSED/BLOCKED 保留态）与未释放的活动锁。
+      const { work_root } = INPUT
+      if (!work_root) err('缺少 work_root')
+      const scan = withRegistryTx(work_root, (registry) => {
+        const result = recoverStale(registry)
+        const retained = []
+        const workspaces = []
+        const active_locks = []
+        for (const ws of registry.workspaces.values()) {
+          workspaces.push({ logical_run_id: ws.logical_run_id, workspace_id: ws.workspace_id, lifecycle: ws.lifecycle, workspace_path: ws.workspace_path, source_path: ws.source_path, abandoned: ws.abandoned === true })
+          if ([LIFECYCLE.WAITING_HUMAN, LIFECYCLE.PAUSED, LIFECYCLE.BLOCKED].includes(ws.lifecycle)) {
+            retained.push({ logical_run_id: ws.logical_run_id, workspace_id: ws.workspace_id, lifecycle: ws.lifecycle })
+          }
+        }
+        for (const lock of registry.locks.values()) {
+          if (!lock.released_at) active_locks.push({ lock_id: lock.lock_id, logical_run_id: lock.logical_run_id, resource_key: lock.resource_key, owner: lock.owner, acquired_at: lock.acquired_at, expires_at: lock.expires_at })
+        }
+        return { ...result, workspaces, retained_workspaces: retained, active_locks }
+      })
+      out({ ok: true, scan })
+      break
+    }
+    case 'context': {
+      // LOC-009：Run 工作区上下文（host refreshWorkspaceContext / #79 摘要入档）。
+      // workspace 已清理时回落 archived 身份 + 清理审计；事件沿 timeline 归属切片。
+      const { work_root, logical_run_id } = INPUT
+      if (!work_root || !logical_run_id) err('缺少 work_root 或 logical_run_id')
+      const ctx = withRegistryRead(work_root, (registry) => {
+        const ws = registry.workspaces.get(logical_run_id) || null
+        const archived = registry.archived.get(logical_run_id) || null
+        const lockOwner = new Map()
+        for (const e of registry.timeline) {
+          if (e && e.type === 'lock_acquired' && e.lock_id && e.logical_run_id === logical_run_id) lockOwner.set(e.lock_id, true)
+        }
+        const events = registry.timeline.filter((e) => e && (e.logical_run_id === logical_run_id || (e.lock_id && lockOwner.has(e.lock_id))))
+        return { workspace: ws, cleanup: archived ? archived.audit : null, events }
+      })
+      out({ ok: true, ...ctx })
       break
     }
     default:

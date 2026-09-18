@@ -177,7 +177,7 @@ test('write：非 git 工作区 fail closed（不得绑定未观察的 HEAD）',
   }))
   const r = run(['write', runDir, 'requirements_baseline', payload, '--produced-by', 'test-suite'])
   assert.equal(r.code, 1)
-  assert.match(r.out, /真实 HEAD|中止/)
+  assert.match(r.out, /无法解析 run\.work_branch|拒绝变更 run 状态/)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
 })
 
@@ -264,7 +264,7 @@ test('budget：畸形调额拒绝（4junk / 负数 / 空串）', () => {
   assert.equal(runState.rollback_budget, 3) // 未被污染
 })
 
-test('write：分支切换后拒绝写入（lineage 不一致）', () => {
+test('write：主检出切走且无一致 worktree 检出时拒绝写入（lineage fail closed）', () => {
   const { root, runDir } = makeRunDir()
   execFileSync('git', ['checkout', '-q', '-b', 'other-branch'], { cwd: root })
   const payload = join(runDir, 'payload.json')
@@ -274,8 +274,28 @@ test('write：分支切换后拒绝写入（lineage 不一致）', () => {
   }))
   const r = run(['write', runDir, 'requirements_baseline', payload, '--produced-by', 'test-suite'])
   assert.equal(r.code, 1)
-  assert.match(r.out, /与 run\.work_branch.*不一致/)
+  assert.match(r.out, /无法解析 run\.work_branch.*不一致|拒绝变更 run 状态/)
   assert.equal(existsSync(join(runDir, 'requirements_baseline.a1.json')), false)
+})
+
+test('write：主检出切走但 work_branch 有相邻容器 worktree 检出时放行（P2 主检出锚定）', () => {
+  const { root, runDir } = makeRunDir()
+  // 主检出切走（模拟交付期 main 检出停在别的分支），work_branch 检出在约定 worktree 容器
+  execFileSync('git', ['checkout', '-q', '-b', 'other-branch'], { cwd: root })
+  const wt = join(join(root, '..'), `${root.split('/').pop()}-worktrees`, 'dev-cwf-test-01')
+  mkdirSync(wt, { recursive: true })
+  execFileSync('git', ['worktree', 'add', wt, 'dev-cwf-test-01'], { cwd: root })
+  const payload = join(runDir, 'payload.json')
+  writeFileSync(payload, JSON.stringify({
+    goal: '测试', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'],
+    gaps: [], outcome: 'baseline_ready', status: 'draft',
+  }))
+  const r = run(['write', runDir, 'requirements_baseline', payload, '--produced-by', 'test-suite', '--stage', 'requirements'])
+  assert.equal(r.code, 0, r.out)
+  const written = JSON.parse(readFileSync(join(runDir, 'requirements_baseline.a1.json'), 'utf-8'))
+  // HEAD 必须来自 work_branch 的实际检出（worktree HEAD），不得绑主检出的 other-branch HEAD
+  const wtHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: wt, encoding: 'utf-8' }).trim()
+  assert.equal(written.run.current_head, wtHead)
 })
 
 test('write：过期 --attempt 拒绝（不得回退 attempt 覆盖旧 proof）', () => {

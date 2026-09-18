@@ -21,7 +21,7 @@ test('S2 生成器：产物四件套齐全', () => {
     assert.ok(files.has(id + '/' + rel), '缺产物：' + rel);
   }
   const ids = report.map((r) => r.id).sort();
-  assert.ok(ids.includes('construction-full-feature'), '正式内置建设模板应产出');
+  assert.ok(ids.includes('wf-construction-full-feature'), '正式内置建设模板应产出');
   assert.ok(ids.includes('dev-workflow-2-0') && ids.includes('default-workflow'), '历史自定义种子应产出');
   assert.ok(report.every((r) => r.ok), '全部蓝图生成成功');
 });
@@ -53,7 +53,7 @@ test('S2 生成器：业务规则字段进 vwf DSL（候选二 Q7 修订），�
   assert.deepEqual(dsl.nodes.filter((n) => n.verifyBranch).map((n) => n.id), gated,
     'verifyBranch 必须进 DSL：否则内置模板在编辑器另存后可信度闸门静默丢失');
   assert.equal(dsl.onMaxRounds, 'auto-reschedule', 'onMaxRounds 业务规则进 DSL（前端可配置）');
-  assert.equal(dsl.heteroCheck, true, 'heteroCheck 业务规则进 DSL（前端可配置）');
+  assert.equal(dsl.heteroCheck, 'weak', 'heteroCheck 业务规则进 DSL（前端可配置）；异源档位三态（LOC-021）：旧布尔 true 投影归一为弱档');
   assert.equal(dsl.control.maxRounds, 9);
 });
 
@@ -96,6 +96,38 @@ test('fanout 编译使用 pipeline、白名单 agent opts，并保持投影字�
   assert.equal(fan.kind, 'fanout');
   assert.equal(fan.items, '$.args.items');
   assert.equal(fan.failOn, 'all');
+});
+
+// —— LOC-021 异源档位三态：运行时日志口径 ——
+test('LOC-021 运行时日志：诊断模板按角色识别（开发节点 id=fix、profile=dev）日志恢复触发', () => {
+  const diagnose = JSON.parse(readFileSync(path.join(tplDir, 'wf-diagnose.json'), 'utf8'));
+  assert.equal(diagnose.nodes.find((n) => n.profile === 'dev').id, 'fix', '诊断模板开发节点 id 应为 fix');
+  const { script } = compileBlueprint(diagnose);
+  assert.ok(script.includes('异源'), '弱档应注入异源日志');
+  assert.ok(script.includes('const MODE = "weak"'), '日志应输出当前档位 weak');
+  assert.ok(script.includes('const DEV = "fix"'), '识别口径应按角色解析出 fix 而非写死 dev');
+  assert.ok(script.includes('const REVIEW = "review"'), '审核节点应解析出 review');
+  assert.ok(script.includes('异源检查通过'), '异源通过分支日志保留');
+  assert.ok(script.includes('弱异源'), '弱异源警告分支日志保留');
+});
+
+test('LOC-021 运行时日志：关档不注入异源日志；缺失/旧值 true 按弱档注入', () => {
+  const diagnose = JSON.parse(readFileSync(path.join(tplDir, 'wf-diagnose.json'), 'utf8'));
+  const off = compileBlueprint({ ...diagnose, heteroCheck: 'off' }).script;
+  assert.ok(!off.includes('异源检查通过') && !off.includes('弱异源'), '关档不得注入异源日志');
+  const legacyFalse = compileBlueprint({ ...diagnose, heteroCheck: false }).script;
+  assert.ok(!legacyFalse.includes('异源检查通过'), '旧布尔 false 归一为关档，不注入日志');
+  const legacyTrue = compileBlueprint({ ...diagnose, heteroCheck: true }).script;
+  assert.ok(legacyTrue.includes('const MODE = "weak"'), '旧布尔 true 归一为弱档注入日志');
+  const missing = compileBlueprint({ ...diagnose, heteroCheck: undefined }).script;
+  assert.ok(missing.includes('const MODE = "weak"'), '缺失档位按弱档注入日志');
+});
+
+test('LOC-021 运行时日志：强档弱异源提示带档位与强档说明', () => {
+  const diagnose = JSON.parse(readFileSync(path.join(tplDir, 'wf-diagnose.json'), 'utf8'));
+  const strong = compileBlueprint({ ...diagnose, heteroCheck: 'strong' }).script;
+  assert.ok(strong.includes('const MODE = "strong"'), '强档日志应输出 strong');
+  assert.ok(strong.includes('强档要求不同 provider'), '强档弱异源提示需说明强档语义');
 });
 
 test('#116 投影：humanDecision 与 HD 出边 result 进入 DSL', () => {
@@ -303,15 +335,17 @@ test('S5 内置角色正文编译期内联：ROLE_DEFS 注入 + roleRef 优先�
   assert.ok(s2.includes(JSON.stringify('内联测试正文\n')), 'opts.builtinRoleDefs 可注入覆盖磁盘读取')
 })
 
-// ── Codex PR#130 P1（评论 3900290054）：内联仅限蓝图引用角色，避免临时编译 stdout 超 64KB ──
-test('S6 内联仅限蓝图引用内置角色：最小图产物 < 宿主 64KB stdout 捕获上限，且 12 角色均可加载', () => {
+// ── Codex PR#130 P1（评论 3900290054）：内联仅限蓝图引用角色，避免临时编译 stdout 超限 ──
+// 口径 64KB→128KB：LOC-031 技术预算运行时并入后最小图实测 78424B（cnb/main 基线既有超限），
+// 按 LOC-031 施工报告已声明的口径更新补齐；宿主编译捕获路径实际 maxBytes 为 1MB（host.js GENERATOR compile 调用）。
+test('S6 内联仅限蓝图引用内置角色：最小图产物 < 128KB 体积卫生上限，且 12 角色均可加载', () => {
   const mini = JSON.parse(readFileSync(path.join(here, 'fixtures', 'hello-blueprint.json'), 'utf8'))
   const devContent = readFileSync(path.join(here, '..', '..', 'dsh', 'roles', 'dev.md'), 'utf8')
   const orchContent = readFileSync(path.join(here, '..', '..', 'dsh', 'roles', 'orchestrator.md'), 'utf8')
   const { script } = compileBlueprint(mini)
   assert.ok(script.includes(JSON.stringify(devContent)), '引用到的内置角色（dev）内联')
   assert.ok(!script.includes(JSON.stringify(orchContent)), '未引用内置角色（orchestrator）不内联——避免全量内联撑爆 stdout')
-  assert.ok(Buffer.byteLength(script, 'utf8') < 64 * 1024, '最小图编译产物 < 64KB（宿主 runNode maxBytes:64*1024，host.js:137）')
+  assert.ok(Buffer.byteLength(script, 'utf8') < 128 * 1024, '最小图编译产物 < 128KB（体积卫生口径；宿主编译捕获实际 maxBytes 1MB）')
   // 覆盖验收：12 个内置角色均可被内联加载（按引用过滤只影响单图体积，不影响能力面）
   const all = loadBuiltinRoleDefs(loadBuiltinRoleIds())
   assert.equal(Object.keys(all).length, 12, '12 个内置角色均可加载内联')

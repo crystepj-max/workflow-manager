@@ -22,6 +22,17 @@ const { createRoot } = await import('react-dom/client')
 const { act } = React
 
 const flush = () => new Promise((resolve) => setImmediate(resolve))
+// 防抖实时校验（VALIDATE_DEBOUNCE_MS=350）在默认桩下永不触发——因此内核 warnings 的
+// 编辑器出口此前完全没有测试覆盖。仅在需要验证防抖通道的用例里打开真实定时器，
+// 其余用例保持原语义（delay=0 同步执行、非零丢弃）。
+let realDebounceTimer = false
+function makeTimeout(fn, delay) {
+  if (typeof fn !== 'function') return () => {}
+  if (delay === 0) { fn(); return () => {} }
+  if (!realDebounceTimer) return () => {}
+  const t = setTimeout(fn, delay)
+  return () => clearTimeout(t)
+}
 async function mountPage(targetRoot, el) {
   await act(async () => {
     targetRoot.render(React.createElement(Page))
@@ -35,6 +46,18 @@ function byText(root, text) {
 }
 function byClass(root, cls) {
   return root.querySelector('.' + cls)
+}
+
+// FEAT-84 渐进披露（V-11）：技术词（节点类型 / AI 服务与模型 / JSON 结构）收进第三档，
+// 默认停在业务词档。需要操作这些字段的用例先切到对应档——切换本身也是被测行为之一
+// （见 editor-workbench.test.mjs 的 V-11 用例）。
+async function openSection(root, id) {
+  const tab = root.querySelector('.vwf-wb-tab[data-vwf-tab="' + id + '"]')
+  assert.ok(tab, '存在 ' + id + ' 配置档')
+  if (tab.getAttribute('aria-selected') !== 'true') {
+    await act(async () => { tab.click(); await flush() })
+  }
+  return tab
 }
 
 const SEED_DSL = {
@@ -66,15 +89,220 @@ const ROLE_USAGE = {
 }
 
 // ── 组装动态客户端运行环境 ─────────────────────────────────────────────────
+
+// ── FEAT-85 运行列表与 Logical Run 详情夹具 ────────────────────────────────
+// 覆盖：两个工作空间 + 一个未归属旧记录；同一 Logical Run 两段（含被接管的第 1 段）；
+// 返工（实现第 1/2 次、检查退回）；扇出（3 个子任务，2 完成 1 未完成）；受阻运行；
+// 逻辑运行读取失败运行；以及 12 条历史运行用于分页。
+const RUN_DSL = {
+  id: 'wf-runs',
+  name: '完整功能开发',
+  entry: 'dev',
+  control: { maxRounds: 3 },
+  nodes: [
+    { id: 'dev', label: '实现', profile: 'dev' },
+    { id: 'review', label: '检查', profile: 'review' },
+    { id: 'test', label: '测试', profile: 'test' },
+    { id: 'uat', label: '验收', profile: 'uat' },
+    { id: 'explore', label: '多视角研究', profile: 'researcher', kind: 'fanout', items: ['技术可行性', '用户需求', '风险与反证'] },
+    { id: 'synth', label: '汇总发现', profile: 'researcher' },
+  ],
+  edges: [
+    { from: 'dev', to: 'review', outcome: 'READY' },
+    { from: 'review', to: 'dev', outcome: 'RETURN_DEV', countRound: true },
+    { from: 'review', to: 'test', outcome: 'APPROVE' },
+    { from: 'test', to: 'dev', outcome: 'RETURN_DEV', countRound: true },
+    { from: 'test', to: 'uat', outcome: 'PASS' },
+    { from: 'uat', to: '$end', outcome: 'ACCEPT' },
+    { from: 'explore', to: 'synth', outcome: 'success' },
+  ],
+}
+
+const WS_A = { workspace_id: '工作空间A', mode: 'ISOLATED_WRITE', workspace_path: '/tmp/ws-a', source_path: 'crystepj-max/workflow-manager', source_revision: 'r1', work_branch: 'dev-t-a1', current_head: 'aaaa1111bbbb2222', base_commit: 'cccc3333dddd4444', lifecycle: 'ACTIVE', allocated_at: 900, events: [], resource_locks: [{ type: 'lock_acquired' }], integration_checkpoints: [], cleanup: null, refreshed_at: 4100 }
+const WS_B = { workspace_id: '工作空间B', mode: 'READ_ONLY', workspace_path: '/tmp/ws-b', source_path: 'crystepj-max/side-project', source_revision: 'r2', work_branch: 'dev-t-b1', current_head: 'eeee5555ffff6666', base_commit: 'aaaa7777bbbb8888', lifecycle: 'ACTIVE', allocated_at: 910, events: [], resource_locks: [], integration_checkpoints: [{ type: 'integration_checkpoint' }], cleanup: { state: 'pending' }, refreshed_at: 5100 }
+
+function attemptRec(logicalRunId, v, rev) {
+  return { record_id: 'attempt:' + logicalRunId + ':' + v.attempt_id, record_revision: rev || 1, body: { media_type: 'application/json', value: v }, provenance: { node: v.node, attempt: v.segment, snapshot_revision: v.snapshot_revision, provider: v.provider, model: v.model } }
+}
+function logicalAttempt(id, node, segment, opts) {
+  const o = opts || {}
+  return attemptRec(id, {
+    schema: 1, attempt_id: o.attempt_id, kind: 'logical', node: node, round: o.round || 0, segment: segment,
+    status: o.status || 'completed', snapshot_revision: String(o.revision || segment), provider: 'p1', model: 'm' + segment,
+    ended_at: o.ended_at || '2026-09-17T10:00:00Z',
+    ...(o.outcome === undefined ? {} : { outcome: o.outcome }),
+    ...(o.outcomePath === undefined ? {} : { outcome_path: o.outcomePath }),
+    ...(o.result === undefined ? {} : { result: o.result }),
+  })
+}
+
+const runState = {
+  states: {},
+  logical: {},
+  records: {},
+  logicalUnavailable: '',
+  recordsFail: false,
+  controlCalls: [],
+  controlFail: false,
+  runs: [],
+}
+
+// ── Logical Run lr-a：两段 + 返工（实现 2 次 / 检查退回 1 次）──
+runState.runs.push(
+  { id: 'run-a1', taskId: 'T-A1', name: '完整功能开发', workflowId: 'wf-runs', status: 'running', phase: '实现', startedAt: 3000, supersededBy: 'run-a2', logical_run_id: 'lr-a', segment: 1, segment_count: 2, logical_state: 'RUNNING' },
+  { id: 'run-a2', taskId: 'T-A1', name: '完整功能开发', workflowId: 'wf-runs', status: 'WAITING_HUMAN', phase: '验收', startedAt: 4000, decision_id: 'T-A1:review:1:1', reason: 'HUMAN_ACCEPTANCE', logical_run_id: 'lr-a', segment: 2, segment_count: 2, logical_state: 'WAITING_HUMAN' },
+)
+runState.logical['lr-a'] = {
+  logical_run_id: 'lr-a', schema: 1, task_id: 'T-A1', template_id: 'wf-runs', title: '工作流界面改版', created_at: 2900, updated_at: 4200,
+  lifecycle: { state: 'WAITING_HUMAN', reason: { code: 'HUMAN_ACCEPTANCE' } }, terminal: false, completion: null,
+  segments: [
+    { index: 1, run_id: 'run-a1', trigger: 'start', started_at: 3000, ended_at: 3200, status: 'DONE', active: false },
+    { index: 2, run_id: 'run-a2', trigger: 'human_decision', started_at: 4000, status: 'running', active: true, decision_id: 'T-A1:review:1:1' },
+  ],
+  snapshots: [
+    { revision: 1, created_at: 2900, active: false, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { dev: { provider: 'p1', model: 'm1' } } },
+    { revision: 2, created_at: 3900, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { dev: { provider: 'p1', model: 'm2' }, review: { provider: 'p1', model: 'm2' } } },
+  ],
+  node_attempts: [
+    { node: 'dev', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY', completed_at: 3100 },
+    { node: 'review', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'RETURN_DEV', completed_at: 3150 },
+    { node: 'test', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'PASS', completed_at: 3180 },
+    { node: 'dev', segment: 2, snapshot_revision: 2, provider: 'p1', model: 'm2', outcome: 'READY', completed_at: 4100 },
+    { node: 'review', segment: 2, snapshot_revision: 2, provider: 'p1', model: 'm2', outcome: 'APPROVE', completed_at: 4150 },
+  ],
+  business_outcomes: {
+    dev: { outcome: 'READY', path: '$.status', segment: 2, snapshot_revision: 2, at: 4100 },
+    review: { outcome: 'APPROVE', path: '$.verdict', segment: 2, snapshot_revision: 2, at: 4150 },
+    test: { outcome: 'PASS', path: '$.verdict', segment: 1, snapshot_revision: 1, at: 3180 },
+  },
+  guidance: [], control_events: [{ type: 'pause_requested', at: 4300, run_id: 'run-a2' }], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null,
+  evaluation_baseline: null, evaluation_baselines: [], formal_records: null, workspace: WS_A,
+  human_decisions: [{ decision_id: 'T-A1:review:1:1', user_choice: 'ADD_BUDGET', at: 2800 }], consumed_decisions: {},
+}
+runState.records['lr-a'] = {
+  ok: true, found: true, logical_run_id: 'lr-a',
+  records: [
+    logicalAttempt('lr-a', 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', outcomePath: '$.status', result: { summary: '第 1 次实现成果' } }),
+    logicalAttempt('lr-a', 'review', 1, { attempt_id: 'a1k2', round: 1, outcome: 'RETURN_DEV', outcomePath: '$.verdict', result: { issues: '配置滚动后主要操作离开视口，需要修改' } }),
+    logicalAttempt('lr-a', 'test', 1, { attempt_id: 'a1k3', outcome: 'PASS', result: { note: '第 1 轮测试通过' } }),
+    logicalAttempt('lr-a', 'dev', 2, { attempt_id: 'a2k1', outcome: 'READY', outcomePath: '$.status', result: { summary: '第 2 次实现成果' } }),
+    logicalAttempt('lr-a', 'review', 2, { attempt_id: 'a2k2', round: 1, outcome: 'APPROVE', result: { note: '检查通过' } }),
+    { record_id: 'node:lr-a:dev', record_revision: 2, body: { media_type: 'application/json', value: { summary: '第 2 次实现成果' } }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY' }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY', resolved_inputs_snapshot: { mode: 'record', items: [{ binding: 'from_preflight', producer: 'preflight' }] } } },
+  ], attempts: [],
+}
+
+// ── Logical Run lr-b：扇出（3 子任务，2 完成 1 未完成）+ 完成类型 ──
+runState.runs.push({ id: 'run-b1', taskId: 'T-B1', name: '完整功能开发', workflowId: 'wf-runs', status: 'DONE', phase: '收口', startedAt: 5000, logical_run_id: 'lr-b', segment: 1, segment_count: 1, logical_state: 'COMPLETED' })
+runState.logical['lr-b'] = {
+  logical_run_id: 'lr-b', schema: 1, task_id: 'T-B1', template_id: 'wf-runs', title: '多视角探索', created_at: 4900, updated_at: 5200,
+  lifecycle: { state: 'COMPLETED', reason: null }, terminal: true, completion: { type: 'DELIVERED', node: 'uat', path: '$.completion.type' },
+  segments: [{ index: 1, run_id: 'run-b1', trigger: 'start', started_at: 5000, ended_at: 5200, status: 'DONE', active: false }],
+  snapshots: [{ revision: 1, created_at: 4900, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { explore: { provider: 'p1', model: 'm1' } } }],
+  node_attempts: [
+    { node: 'explore', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'success', completed_at: 5100 },
+    { node: 'synth', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'SYNTHESIS_READY', completed_at: 5150 },
+  ],
+  business_outcomes: { synth: { outcome: 'SYNTHESIS_READY', path: '$.status', segment: 1, snapshot_revision: 1, at: 5150 } },
+  guidance: [], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_B, human_decisions: [], consumed_decisions: {},
+}
+runState.records['lr-b'] = {
+  ok: true, found: true, logical_run_id: 'lr-b',
+  records: [
+    attemptRec('lr-b', { attempt_id: 'a1k10', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 0, item: '技术可行性', result: { finding: '技术上可行' }, ended_at: '2026-09-17T10:01:00Z' }),
+    attemptRec('lr-b', { attempt_id: 'a1k11', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 1, item: '用户需求', result: { finding: '需求集中在位置感' }, ended_at: '2026-09-17T10:02:00Z' }),
+    attemptRec('lr-b', { attempt_id: 'a1k12', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'running', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 2, item: '风险与反证', started_at: '2026-09-17T10:03:00Z' }),
+    logicalAttempt('lr-b', 'synth', 1, { attempt_id: 'a1k20', outcome: 'SYNTHESIS_READY', result: { summary: '汇总了 2 份研究' } }),
+    { record_id: 'node:lr-b:synth', record_revision: 1, body: { media_type: 'application/json', value: { summary: '汇总了 2 份研究' } }, provenance: { node: 'synth', attempt: 1, snapshot_revision: '1', provider: 'p1', model: 'm1', resolved_inputs_snapshot: { mode: 'record', items: [{ binding: 'from_explore', producer: 'explore' }, { binding: 'from_note', producer: 'note' }] } } },
+  ], attempts: [],
+}
+
+// ── Logical Run lr-c：受阻（BLOCKED，可恢复）──
+runState.runs.push({ id: 'run-c2', taskId: 'T-C2', name: '完整功能开发', workflowId: 'wf-runs', status: 'BLOCKED', reason: 'EVALUATION_BASELINE_CONFLICT', node: 'dev', phase: '实现', startedAt: 3500, logical_run_id: 'lr-c', segment: 1, segment_count: 1, logical_state: 'BLOCKED' })
+runState.logical['lr-c'] = {
+  logical_run_id: 'lr-c', schema: 1, task_id: 'T-C2', template_id: 'wf-runs', title: '受阻任务', created_at: 3400, updated_at: 3600,
+  lifecycle: { state: 'BLOCKED', reason: { code: 'EVALUATION_BASELINE_CONFLICT' } }, terminal: false, completion: null,
+  segments: [{ index: 1, run_id: 'run-c2', trigger: 'start', started_at: 3500, status: 'running', active: true }],
+  snapshots: [{ revision: 1, created_at: 3400, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { dev: { provider: 'deepseek-official', model: 'deepseek-v4-pro' }, review: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } } }],
+  node_attempts: [], business_outcomes: {}, guidance: [], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_A, human_decisions: [], consumed_decisions: {},
+}
+runState.records['lr-c'] = { ok: true, found: true, logical_run_id: 'lr-c', records: [], attempts: [] }
+
+// ── Logical Run lr-p：PAUSED（指导提交走 vwf.run.control）──
+runState.runs.push({ id: 'run-p1', taskId: 'T-P1', name: '完整功能开发', workflowId: 'wf-runs', status: 'PAUSED', reason: 'USER_PAUSE', startedAt: 3300, logical_run_id: 'lr-p', segment: 1, segment_count: 1, logical_state: 'PAUSED' })
+runState.logical['lr-p'] = {
+  logical_run_id: 'lr-p', schema: 1, task_id: 'T-P1', template_id: 'wf-runs', title: '暂停任务', created_at: 3200, updated_at: 3400,
+  lifecycle: { state: 'PAUSED', reason: { code: 'USER_PAUSE' } }, terminal: false, completion: null,
+  segments: [{ index: 1, run_id: 'run-p1', trigger: 'start', started_at: 3300, status: 'running', active: true }],
+  snapshots: [{ revision: 1, created_at: 3200, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { dev: { provider: 'p1', model: 'm1' } } }],
+  node_attempts: [{ node: 'dev', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY', completed_at: 3350 }],
+  business_outcomes: {}, guidance: [{ seq: 1, mode: 'coach', text: '先补测试再继续', at: 3380 }], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: { action: 'pause', requested_at: 3390 }, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_A, human_decisions: [], consumed_decisions: {},
+}
+runState.records['lr-p'] = { ok: true, found: true, logical_run_id: 'lr-p', records: [logicalAttempt('lr-p', 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', result: { summary: '暂停前成果' } })], attempts: [] }
+
+// ── Logical Run lr-r：运行中（控制面 pause / interrupt 可用）──
+runState.runs.push({ id: 'run-r1', taskId: 'T-R1', name: '完整功能开发', workflowId: 'wf-runs', status: 'running', phase: '实现', startedAt: 4500, logical_run_id: 'lr-r', segment: 1, segment_count: 1, logical_state: 'RUNNING' })
+runState.logical['lr-r'] = {
+  logical_run_id: 'lr-r', schema: 1, task_id: 'T-R1', template_id: 'wf-runs', title: '运行中任务', created_at: 4400, updated_at: 4600,
+  lifecycle: { state: 'RUNNING', reason: null }, terminal: false, completion: null,
+  segments: [{ index: 1, run_id: 'run-r1', trigger: 'start', started_at: 4500, status: 'running', active: true }],
+  snapshots: [{ revision: 1, created_at: 4400, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { dev: { provider: 'p1', model: 'm1' } } }],
+  node_attempts: [{ node: 'dev', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY', completed_at: 4550 }],
+  business_outcomes: { dev: { outcome: 'READY', path: '$.status', segment: 1, snapshot_revision: 1, at: 4550 } },
+  guidance: [], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_B, human_decisions: [], consumed_decisions: {},
+}
+runState.records['lr-r'] = { ok: true, found: true, logical_run_id: 'lr-r', records: [logicalAttempt('lr-r', 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', result: { summary: '运行中成果' } })], attempts: [] }
+runState.states['run-r1'] = { status: 'running', phase: '实现', logs: ['[段1] 正在实现'], agents: [], formalRecords: [] }
+
+// ── 逻辑运行读取失败（工作空间未知）+ 旧记录（无逻辑归属）+ 历史分页 ──
+runState.logicalUnavailable = 'lr-err'
+runState.runs.push({ id: 'run-err1', taskId: 'T-E1', name: '读取失败任务', workflowId: 'wf-runs', status: 'running', startedAt: 2500, logical_run_id: 'lr-err', segment: 1, segment_count: 1, logical_state: 'RUNNING' })
+// 看板 agents 回归用例的诊断运行：走 runId 直查默认 vwf.state（逐项处理 #1–#3）
+runState.runs.push({ id: 'run-1', taskId: 'T-DASH', name: '看板回归', workflowId: 'wf-history', status: 'running', phase: '逐项处理', startedAt: 6000 })
+runState.runs.push({ id: 'run-c1', taskId: 'T-C1', name: '诊断与修复', workflowId: 'wf-history', status: 'running', phase: '诊断', startedAt: 2000 })
+for (let i = 1; i <= 12; i++) {
+  runState.runs.push({ id: 'run-x' + i, taskId: 'T-X' + i, name: '历史任务', workflowId: 'wf-history', status: 'DONE', phase: '收口', startedAt: 1000 + i })
+}
+
+// 运行现况（vwf.state）：决策包 / 受阻现场 / 完成类型
+runState.states['run-a2'] = {
+  status: 'WAITING_HUMAN', phase: '验收', logs: ['[段2] 实现完成', '[段2] 检查通过'],
+  decision_id: 'T-A1:review:1:1', reason: 'HUMAN_ACCEPTANCE', node: 'uat',
+  decision_package: {
+    why: '材料齐备，交给你验收。',
+    current_state: '实现与检查均已完成，等待人工决定。',
+    options: [{ id: 'USER_ACCEPTED' }, { id: 'ADD_BUDGET' }, { id: 'STOP' }],
+    subsequent_effects: { USER_ACCEPTED: '按模板完成类型结束本次运行', ADD_BUDGET: '增加 1 轮自动返工额度后继续', STOP: '停止本 Run，保留已有成果' },
+    cost: 'UNKNOWN', benefit: 'UNKNOWN', risk: 'UNKNOWN', recommendation: 'UNKNOWN',
+  },
+  blocked_edge: null,
+  agents: [{ seq: 1, label: '实现', phase: '实现', outcome: 'completed' }, { seq: 2, label: '检查', phase: '检查', outcome: 'completed' }],
+  formalRecords: [{ record_id: 'node:lr-a:dev', record_revision: 2, body: { media_type: 'application/json', value: { summary: '第 2 次实现成果' } }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY' } }],
+}
+runState.states['run-c2'] = { status: 'BLOCKED', reason: 'EVALUATION_BASELINE_CONFLICT', node: 'dev', phase: '实现', logs: ['[段1] 评价基线冲突，停止推进'], agents: [], formalRecords: [] }
+runState.states['run-b1'] = { status: 'DONE', phase: '收口', logs: ['[段1] 收口完成'], agents: [{ seq: 1, label: '多视角研究 #1', phase: '研究', outcome: 'completed' }, { seq: 2, label: '多视角研究 #2', phase: '研究', outcome: 'completed' }, { seq: 3, label: '多视角研究 #3', phase: '研究', outcome: 'failed' }], formalRecords: [] }
+runState.states['run-p1'] = { status: 'PAUSED', reason: 'USER_PAUSE', logs: ['[段1] 已暂停'], agents: [], formalRecords: [] }
+
 function makeRuntime() {
-  const state = { failSave: false, failUsage: false, saved: [] }
+  // wfList：FEAT-100 流程库子页签用例需要「内置 + 我的」混合清单（默认单条自定义）
+  const state = { failSave: false, failUsage: false, failRoles: false, saved: [], validateWarning: null, wfList: null }
   const rpc = async (method, args) => {
     switch (method) {
       case 'vwf.workflows.list':
-        return [{ id: 'wf1', name: '测试流', description: 'seed', builtin: false, dsl: JSON.parse(JSON.stringify(SEED_DSL)) }]
+        return state.wfList || [{ id: 'wf1', name: '测试流', description: 'seed', builtin: false, dsl: JSON.parse(JSON.stringify(SEED_DSL)) }]
       case 'vwf.models':
         return { providers: [{ id: 'deepseek-official', models: ['deepseek-v4-pro', 'deepseek-v4-flash'] }] }
       case 'vwf.roles':
+        // FEAT-86：读取失败必须与「没有角色」区分（规格 §11 边界）
+        if (state.failRoles) return { ok: false, errors: [{ at: '$', message: '角色服务不可用' }] }
         return { roles: roleState.roles.map(r => ({ id: r.id, name: r.name, summary: r.summary, builtin: r.builtin })) }
       case 'vwf.roles.get': {
         const role = roleState.roles.find(r => r.id === args.id)
@@ -137,6 +365,8 @@ function makeRuntime() {
             fieldErrors: { 'node:node-2:profile': ['测试错误：节点未关联角色'] },
           }
         }
+        // LOC-021：内核 warnings 必须有编辑器出口（此前零消费，警示用户完全不可见）
+        if (state.validateWarning) return { ok: true, errors: [], fieldErrors: {}, warnings: [state.validateWarning] }
         return { ok: true, errors: [], fieldErrors: {} }
       case 'vwf.workflows.save':
         state.saved.push(args.dsl)
@@ -146,17 +376,34 @@ function makeRuntime() {
       case 'vwf.script':
         return { ok: true, engineAvailable: false, script: '// compiled' }
       case 'vwf.probe':
+        if (state.probe) return state.probe
         return {
-          ok: false,
+          ok: true,
           stage: 'probe',
-          pending: true,
-          code: 'PROBE_NOT_IMPLEMENTED',
-          issue: 74,
-          errors: [{ path: '$', message: 'probe pending' }],
+          results: [
+            { key: 'p1\u0000m1', provider: 'p1', model: 'm1', nodes: ['node-1'], status: 'available', code: 'OK', message: '', cached: false },
+          ],
+          cached: false,
         }
       case 'vwf.runs.list':
-        return { runs: [] }
-      case 'vwf.state':
+        return { runs: runState.runs }
+      case 'vwf.logicalRuns.get': {
+        const id = String((args && args.logical_run_id) || '')
+        if (runState.logicalUnavailable === id) return { found: false, record: null }
+        const rec = runState.logical[id]
+        return rec ? { found: true, record: rec } : { found: false, record: null }
+      }
+      case 'vwf.records.list': {
+        if (runState.recordsFail) return { ok: false, error: 'records-host.mjs 未找到（LOC-008 运行时集成未部署）' }
+        return runState.records[String((args && args.logical_run_id) || '')] || { ok: true, found: true, logical_run_id: String((args && args.logical_run_id) || ''), records: [], attempts: [] }
+      }
+      case 'vwf.run.control':
+        runState.controlCalls.push({ action: String((args && args.action) || ''), logical_run_id: String((args && args.logical_run_id) || ''), text: args && args.text })
+        if (runState.controlFail) return { ok: false, error: '仅 PAUSED 的逻辑运行可提交 Guidance；当前为 RUNNING' }
+        return { ok: true, action: String((args && args.action) || ''), logical_run_id: String((args && args.logical_run_id) || '') }
+      case 'vwf.state': {
+        const id = String((args && args.runId) || '')
+        if (runState.states[id]) return { found: true, state: runState.states[id] }
         return {
           found: true,
           state: {
@@ -168,6 +415,7 @@ function makeRuntime() {
             ],
           },
         }
+      }
       default:
         throw new Error('unexpected rpc: ' + method)
     }
@@ -189,7 +437,7 @@ function makeRuntime() {
   }
   const ctxFake = {
     get: (name) => (name === 'slots' ? slotsFake : undefined),
-    timeout: (fn, delay) => { if (delay === 0 && typeof fn === 'function') fn(); return () => {} },
+    timeout: (fn, delay) => makeTimeout(fn, delay),
     interval: () => () => {},
   }
   const harnessTrap = {}
@@ -201,7 +449,7 @@ function makeRuntime() {
 const { plugin, slotsFake, state, styleText } = makeRuntime()
 plugin.apply({
   get: (n) => (n === 'slots' ? slotsFake : undefined),
-  timeout: (fn, delay) => { if (delay === 0 && typeof fn === 'function') fn(); return () => {} },
+  timeout: (fn, delay) => makeTimeout(fn, delay),
   interval: () => () => {},
 })
 
@@ -422,23 +670,40 @@ test('重置视图：内容超出小画布时纵横居中', async () => {
   wrap.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600 })
 })
 
-test('拖拽连线：从节点右把手拖到结束节点创建新边', async () => {
+test('拖拽连线：从节点下把手拖到结束节点创建新边', async () => {
   const wrap = container.querySelector('.vwf-canvas-wrap')
   Object.defineProperty(wrap, 'clientWidth', { value: 1000, configurable: true })
   Object.defineProperty(wrap, 'clientHeight', { value: 600, configurable: true })
   wrap.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600 })
   // fitView 已在首帧调用（clientWidth 0 时 scale=0.3）；重新触发一次 fit 以对齐坐标假设
   const before = container.querySelectorAll('.vwf-edge-flow').length
+  // 拖动目标：$end 节点的实际屏幕坐标（纵向布局下它在源节点下方，位置随布局变化，按 DOM 实测算）
+  const targetCenter = () => {
+    const svg = container.querySelector('svg.vwf-svg')
+    const rect = svg.getBoundingClientRect()
+    const g = container.querySelector('g[data-node-id="$end"]')
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    const box = g.querySelector('rect')
+    const scale = Number(svg.getAttribute('width')) / Number(svg.getAttribute('viewBox').split(' ')[2])
+    return {
+      x: rect.left + (Number(m[1]) + Number(box.getAttribute('width')) / 2) * scale,
+      y: rect.top + (Number(m[2]) + Number(box.getAttribute('height')) / 2) * scale,
+    }
+  }
+  const dest = targetCenter()
   await act(async () => {
     const fitBtn = container.querySelector('.vwf-zoom button[title="适配视图"]')
     if (fitBtn) fitBtn.click()
     await flush()
+  })
+  const dest2 = targetCenter()
+  await act(async () => {
     const handles = container.querySelectorAll('.vwf-handle-src')
     assert.ok(handles.length >= 2, '存在源把手（node-1、node-2）')
     const srcHandle = handles[0]
     srcHandle.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 200, clientY: 80 }))
-    // 拖到 $end 节点位置（rank=1：图形坐标 x∈[392,532]；scale=1.2 → clientX 500 → 416.7）
-    dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 500, clientY: 200 }))
+    // 拖到 $end 节点实际中心
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: dest2.x, clientY: dest2.y }))
     await flush()
   })
   // act 结束后 React 已提交：拖线指向的目标节点应带高亮标记
@@ -446,7 +711,7 @@ test('拖拽连线：从节点右把手拖到结束节点创建新边', async ()
   assert.ok(targetHit, '拖线指向目标节点时高亮标记出现')
   assert.equal(targetHit.closest('g').getAttribute('data-node-id'), '$end', '高亮目标为拖动指向的节点')
   await act(async () => {
-    dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 480, clientY: 200 }))
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: dest2.x, clientY: dest2.y }))
     await flush()
   })
   const after = container.querySelectorAll('.vwf-edge-flow').length
@@ -489,7 +754,7 @@ test('画布任意非把手区域支持四向拖动且不修改工作流内容',
 
 test('点击边：成功/失败/选中颜色区分且边配置面板出现', async () => {
   const firstEdge = container.querySelectorAll('.vwf-edge-flow')[0]
-  assert.equal(firstEdge.getAttribute('stroke'), '#2563eb', '默认 success 边使用固定蓝色，不随品牌色变黑')
+  assert.equal(firstEdge.getAttribute('stroke'), 'var(--vwf-accent)', '默认 success 边使用强调语义色（不随品牌色变黑）')
   await act(async () => {
     const hit = container.querySelector('.vwf-edge-hit')
     assert.ok(hit, '存在边命中路径')
@@ -498,13 +763,13 @@ test('点击边：成功/失败/选中颜色区分且边配置面板出现', asy
   })
   assert.ok(byText(container, '边配置'), '边配置面板渲染')
   assert.ok(byText(container, '删除边'), '边面板含删除按钮')
-  assert.equal(firstEdge.getAttribute('stroke'), '#111827', '选中边使用黑色')
+  assert.equal(firstEdge.getAttribute('stroke'), 'var(--vwf-text)', '选中边使用主文字语义色')
   assert.equal(firstEdge.getAttribute('stroke-width'), '4.2', '选中边加粗')
-  const selectedLabel = Array.from(container.querySelectorAll('text')).find((el) => el.textContent.includes('成功') && el.getAttribute('fill') === '#111827')
+  const selectedLabel = Array.from(container.querySelectorAll('text')).find((el) => el.textContent.includes('成功') && el.getAttribute('fill') === 'var(--vwf-text)')
   assert.ok(selectedLabel, '选中边标签同步使用主文字色')
   assert.equal(selectedLabel.getAttribute('font-weight'), '700', '选中边标签加粗')
-  assert.equal(selectedLabel.style.stroke, 'rgba(255,255,255,.82)', '黑色选中标签在深色画布上保留浅色描边')
-  assert.equal(container.querySelector('#vwf-arrow-sel path').getAttribute('fill'), '#111827', '选中边箭头同步使用黑色')
+  assert.equal(selectedLabel.style.stroke, 'var(--vwf-surface)', '选中标签描边取表面语义色（两主题都与画布底成对）')
+  assert.equal(container.querySelector('#vwf-arrow-sel path').getAttribute('fill'), 'var(--vwf-text)', '选中边箭头同步使用主文字语义色')
 })
 
 test('删除节点：选中节点被移除且画布消失', async () => {
@@ -543,6 +808,7 @@ test('JSON tab：双 tab 切换与 JSON 编辑区', async () => {
 })
 
 test('fanout 编辑器：类型切换显示专属字段，画布卡片同步类型', async () => {
+  await openSection(container, 'advanced')
   const kindLabel = byText(container, '节点类型')
   assert.ok(kindLabel, '存在节点类型字段')
   const kindSelect = kindLabel.closest('.vwf-field').querySelector('select')
@@ -551,8 +817,11 @@ test('fanout 编辑器：类型切换显示专属字段，画布卡片同步类�
     kindSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
     await flush()
   })
+  await openSection(container, 'advanced')
   assert.ok(byText(container, 'items 来源'), 'fanout 显示 items 来源')
-  assert.ok(byText(container, '失败阈值'), 'fanout 显示失败阈值')
+  await openSection(container, 'outcome')
+  assert.ok(byText(container, '失败阈值'), 'fanout 显示失败阈值（结果与去向档）')
+  await openSection(container, 'advanced')
   assert.ok(container.querySelector('.vwf-help[title*="该 Schema 校验每个子代理"]'), 'fanout 显示 per-item schema 说明')
   const kinds = Array.from(container.querySelectorAll('text.vwf-node-kind')).map((el) => el.textContent)
   assert.ok(kinds.includes('fanout'), '画布卡片显示 fanout')
@@ -560,11 +829,14 @@ test('fanout 编辑器：类型切换显示专属字段，画布卡片同步类�
 
 test('fanout 看板：按节点归组展示三项并保留失败状态', async () => {
   await act(async () => {
-    const dashboardTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '运行看板')
-    assert.ok(dashboardTab)
+    const dashboardTab = container.querySelector('[data-vwf-nav="dashboard"]')
+    assert.ok(dashboardTab, '顶部导航有运行页签（FEAT-100 V-1）')
     dashboardTab.click()
     await flush()
+    await flush()
+    await flush()
   })
+  // FEAT-85：详情入口收敛为唯一出口——runId 输入框 + 「详情」按钮打开该运行详情工作区
   const input = container.querySelector('input[placeholder^="runId"]')
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
@@ -573,17 +845,23 @@ test('fanout 看板：按节点归组展示三项并保留失败状态', async (
     await flush()
   })
   await act(async () => {
-    const refresh = input.parentElement.querySelector('button')
-    refresh.click()
+    const openBtn = Array.from(input.parentElement.querySelectorAll('button')).find((b) => b.textContent === '详情')
+    assert.ok(openBtn, '详情按钮存在')
+    openBtn.click()
+    await flush()
+    await flush()
     await flush()
   })
+  assert.ok(container.querySelector('.vwf-rd-main'), '进入详情工作区')
   assert.ok(byText(container, '逐项处理 · fanout · 3 items'), '看板显示 fanout 组标题')
   assert.ok(byText(container, '逐项处理 #1'))
   assert.ok(byText(container, '逐项处理 #2'))
-  const failed = Array.from(container.querySelectorAll('.vwf-badge')).find((el) => el.textContent === 'failed')
-  assert.ok(failed && failed.getAttribute('style').includes('error'), '失败项使用失败色')
+  const failed = Array.from(container.querySelectorAll('.vwf-badge')).find((el) => el.textContent.includes('failed'))
+  assert.ok(failed && failed.textContent === '✕ failed', '失败项状态同时有形状与文字（V-4 双通道）')
+  assert.ok(failed.getAttribute('style').includes('var(--vwf-err)'), '失败项使用失败语义 token')
   await act(async () => {
-    const templatesTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '模板库')
+    const templatesTab = container.querySelector('[data-vwf-nav="templates"]')
+    assert.ok(templatesTab, '顶部导航有流程库页签（FEAT-100 V-1）')
     templatesTab.click()
     await flush()
   })
@@ -625,6 +903,37 @@ test('保存成功路径：调用 save RPC', async () => {
   })
   assert.ok(state.saved.length >= 1, 'save RPC 被调用')
   assert.equal(state.saved[0].id, 'wf1')
+})
+
+test('LOC-021 校验警示在编辑器可见（内核 warnings 有用户出口）', async () => {
+  // A-1 回归：内核 warnings 此前在编辑器零消费——「无配对时警示即可」的定案会对用户不可见。
+  // 走真实防抖实时校验通道（打开编辑器即触发），断言警示渲染到状态区。
+  state.validateWarning = '异源档位 strong 已声明，但该蓝图没有开发与审核节点，强档要求无从执行'
+  realDebounceTimer = true
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  try {
+    await act(async () => {
+      freshRoot.render(React.createElement(Page))
+      await flush()
+      await flush()
+    })
+    await act(async () => {
+      const editBtn = byText(fresh, '编辑')
+      assert.ok(editBtn, '存在编辑按钮')
+      editBtn.click()
+      await flush()
+    })
+    await act(async () => { await new Promise((r) => setTimeout(r, 600)) })
+    assert.ok(byText(fresh, '异源档位 strong 已声明'), '警示文案必须渲染到编辑器（否则定案对用户不可见）')
+    assert.ok(byText(fresh, '条校验提示'), '警示以提示计数呈现')
+  } finally {
+    state.validateWarning = null
+    realDebounceTimer = false
+    await act(async () => { freshRoot.unmount() })
+    fresh.remove()
+  }
 })
 
 test('防重叠：跨节点边与回边路走外围车道，标签避开中间节点', async () => {
@@ -703,41 +1012,51 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
     }
   }
 
-  // 规则 6：所有边终点落在目标节点左边框垂直居中（不做目标锚点间隔）
-  const endYOf = (d) => Number(d.trim().split(/[\s,]+/).pop())
-  const nodeCenterY = (g) => {
-    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-    const h = Number(g.querySelector('rect').getAttribute('height'))
-    return Number(m[2]) + h / 2
+  // 规则 6（V-12 纵向布局）：所有边终点落在目标节点上边框水平居中（不做目标锚点间隔）
+  const endPointOf = (d) => {
+    const nums = d.trim().split(/[\s,]+/).map(Number)
+    return { x: nums[nums.length - 2], y: nums[nums.length - 1] }
   }
-  // 规则 6：每条边的终点都落在目标节点左边框垂直居中（数据驱动，取自 dsl 与 DOM 实测高度）
+  const nodeCenterX = (g) => {
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    const w = Number(g.querySelector('rect').getAttribute('width'))
+    return Number(m[1]) + w / 2
+  }
+  const nodeTopY = (g) => {
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return Number(m[2])
+  }
+  // 规则 6：每条边的终点都落在目标节点上边框水平居中（数据驱动，取自 dsl 与 DOM 实测宽度）
   complexDsl.edges.forEach((e, i) => {
     const g = svg.querySelector('g[data-node-id="' + e.to + '"]')
     assert.ok(g, '画布存在目标节点 ' + e.to)
-    assert.equal(endYOf(paths[i].getAttribute('d')), nodeCenterY(g), '边 ' + i + ' 终点在 ' + e.to + ' 左边框垂直居中')
+    const end = endPointOf(paths[i].getAttribute('d'))
+    assert.equal(end.x, nodeCenterX(g), '边 ' + i + ' 终点在 ' + e.to + ' 上边框水平居中')
+    assert.equal(end.y, nodeTopY(g), '边 ' + i + ' 终点落在 ' + e.to + ' 上边框')
   })
-  // 规则 5：同源起点按「上绕 → 直连 → 下绕」自上而下间隔，与边在 dsl 中的出现顺序无关；
-  // 所有起点圆点与对应边同色，且精确落在源节点右边框（transform.x + rect.width）。
+  // 规则 5（V-12 纵向布局）：同源起点按「左绕(上绕) → 直连 → 右绕(下绕)」自左而右间隔，
+  // 与边在 dsl 中的出现顺序无关；起点圆点与对应边同色，且精确落在源节点下边框。
   const starts = Array.from(svg.querySelectorAll('circle.vwf-edge-start'))
   assert.equal(starts.length, paths.length, '每条边有一个起点圆点')
-  const nodeRightX = (id) => {
+  const nodeBottomY = (id) => {
     const g = svg.querySelector('g[data-node-id="' + id + '"]')
     const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-    return Number(m[1]) + Number(g.querySelector('rect').getAttribute('width'))
+    return Number(m[2]) + Number(g.querySelector('rect').getAttribute('height'))
   }
   complexDsl.edges.forEach((e, i) => {
     assert.equal(starts[i].getAttribute('fill'), paths[i].getAttribute('stroke'), '边 ' + i + ' 起点圆点与边同色')
-    assert.equal(Number(starts[i].getAttribute('cx')), nodeRightX(e.from), '边 ' + i + ' 起点落在 ' + e.from + ' 右边框')
+    assert.equal(Number(starts[i].getAttribute('cy')), nodeBottomY(e.from), '边 ' + i + ' 起点落在 ' + e.from + ' 下边框')
   })
   const rankOf = { up: 0, direct: 1, down: 2 }
-  // 路径类型判定：命令字母 + 数字序列解析（与空格/逗号格式无关）；直连为 C 曲线，绕行为 L 折线
+  // 路径类型判定：命令字母 + 数字序列解析（与空格/逗号格式无关）；直连为 C 曲线，绕行为 L 折线。
+  // 纵向布局里转置后的路径是 'M 起点x 起点y L 起点x … L 车道x …'，起点槽位与车道都落在横轴上。
   const kindOf = (i) => {
     const d = paths[i].getAttribute('d')
     if (/C/.test(d)) return 'direct'
     const nums = d.match(/-?[\d.]+/g).map(Number)
-    const yStart = nums[1]
-    const laneY = nums[5]
-    return laneY < yStart ? 'up' : 'down'
+    const startX = nums[0]
+    const laneX = nums[4]
+    return laneX < startX ? 'up' : 'down'
   }
   const perSource = new Map()
   complexDsl.edges.forEach((e, i) => {
@@ -746,24 +1065,24 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
     perSource.set(e.from, list)
   })
   for (const [src, list] of perSource) {
-    const cyOf = (idx) => Number(starts[idx].getAttribute('cy'))
+    const cxOf = (idx) => Number(starts[idx].getAttribute('cx'))
     const sorted = list.slice().sort((a, b) => rankOf[a.kind] - rankOf[b.kind] || a.idx - b.idx)
     for (let k = 1; k < sorted.length; k += 1) {
-      // 优化 3：固定三槽位——同类边共享槽位（相等），跨类严格上升（上<直连<下）
-      assert.ok(cyOf(sorted[k].idx) >= cyOf(sorted[k - 1].idx),
-        '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 自下而下不降')
+      // 优化 3：固定三槽位——同类边共享槽位（相等），跨类严格右移（左绕<直连<右绕）
+      assert.ok(cxOf(sorted[k].idx) >= cxOf(sorted[k - 1].idx),
+        '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 自左而右不左移')
       if (sorted[k].kind !== sorted[k - 1].kind) {
-        assert.ok(cyOf(sorted[k].idx) > cyOf(sorted[k - 1].idx),
-          '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 跨类严格上升')
+        assert.ok(cxOf(sorted[k].idx) > cxOf(sorted[k - 1].idx),
+          '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 跨类严格右移')
       }
     }
-    // 直连槽位 = 节点右边框垂直居中（与连线源把手位置一致）
+    // 直连槽位 = 节点下边框水平居中（与连线源把手位置一致）
     for (const item of sorted) {
       if (item.kind === 'direct') {
         const g = svg.querySelector('g[data-node-id="' + src + '"]')
         const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-        const center = Number(m[2]) + Number(g.querySelector('rect').getAttribute('height')) / 2
-        assert.equal(cyOf(item.idx), center, '源 ' + src + ' 直连起点与节点右框垂直居中一致')
+        const center = Number(m[1]) + Number(g.querySelector('rect').getAttribute('width')) / 2
+        assert.equal(cxOf(item.idx), center, '源 ' + src + ' 直连起点与节点下框水平居中一致')
       }
     }
   }
@@ -798,15 +1117,17 @@ test('防重叠：入口变化会触发画布布局重算', async () => {
     canvasTab.click()
     await flush()
   }
-  const yOf = (id) => {
+  const xyOf = (id) => {
     const g = container.querySelector('g[data-node-id="' + id + '"]')
     const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-    return Number(match[2])
+    return { x: Number(match[1]), y: Number(match[2]) }
   }
+  // V-12 纵向布局：A、B 同属主序号 0（同一行），入口决定谁排在左侧
   await act(async () => { await setDsl(makeDsl('a')) })
-  assert.ok(yOf('a') < yOf('b'), 'entry=a 时 A 排在 B 上方')
+  assert.equal(xyOf('a').y, xyOf('b').y, '同一主序号的两个节点排在同一行')
+  assert.ok(xyOf('a').x < xyOf('b').x, 'entry=a 时 A 排在 B 左侧')
   await act(async () => { await setDsl(makeDsl('b')) })
-  assert.ok(yOf('b') < yOf('a'), 'entry 改为 b 后 B 排在 A 上方')
+  assert.ok(xyOf('b').x < xyOf('a').x, 'entry 改为 b 后 B 排在 A 左侧')
 })
 
 test('两级序号：HD 透传后收口主序号在 UAT 右侧，不再与入口同列', async () => {
@@ -863,14 +1184,15 @@ test('两级序号：HD 透传后收口主序号在 UAT 右侧，不再与入口
   }
   const pre = xyOf('preflight')
   const close = xyOf('closeout')
-  assert.ok(close.x > pre.x + 50, '收口应在实施前检查右侧（HD 透传后主序号前进），got pre.x=' + pre.x + ' close.x=' + close.x)
+  // V-12 纵向布局：主序号前进 = 在画布上更靠下
+  assert.ok(close.y > pre.y + 50, '收口应在实施前检查下方（HD 透传后主序号前进），got pre.y=' + pre.y + ' close.y=' + close.y)
   assert.equal(seqOf('preflight'), '0')
   assert.equal(seqOf('dev'), '1')
   assert.equal(seqOf('uat'), '2')
   assert.equal(seqOf('closeout'), '3')
 })
 
-test('两级序号：同列多节点显示 m.1 / m.2 且上小下大', async () => {
+test('两级序号：同级多节点显示 m.1 / m.2 且左右并排（V-12 纵向布局）', async () => {
   const parallelDsl = {
     id: 'parallel-seq',
     name: '同列序号',
@@ -901,19 +1223,21 @@ test('两级序号：同列多节点显示 m.1 / m.2 且上小下大', async () 
     canvasTab.click()
     await flush()
   })
-  const yOf = (id) => {
+  const xyOf = (id) => {
     const g = container.querySelector('g[data-node-id="' + id + '"]')
     const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-    return Number(match[2])
+    return { x: Number(match[1]), y: Number(match[2]) }
   }
   const seqOf = (id) => container.querySelector('g[data-node-id="' + id + '"] [data-node-seq]').getAttribute('data-node-seq')
   assert.equal(seqOf('a'), '0')
   assert.equal(seqOf('b1'), '1.1')
   assert.equal(seqOf('b2'), '1.2')
-  assert.ok(yOf('b1') < yOf('b2'), '同列 1.1 应在 1.2 上方')
+  // V-12 纵向布局：同一主序号的兄弟左右并排，1.1 在 1.2 左侧
+  assert.ok(Math.abs(xyOf('b1').y - xyOf('b2').y) < 2, '同级兄弟同一行')
+  assert.ok(xyOf('b1').x < xyOf('b2').x, '同列 1.1 应在 1.2 左侧')
 })
 
-test('自环边：布局不进入死循环，终点仍在节点左边框垂直居中', async () => {
+test('自环边：布局不进入死循环，终点仍在节点上边框水平居中', async () => {
   const selfLoopDsl = {
     id: 'self-loop',
     name: '自环测试',
@@ -944,11 +1268,17 @@ test('自环边：布局不进入死循环，终点仍在节点左边框垂直�
   const svg = container.querySelector('svg.vwf-svg')
   const paths = Array.from(svg.querySelectorAll('path.vwf-edge-flow'))
   assert.equal(paths.length, 2, '自环边正常渲染不崩溃')
-  const endYOf = (d) => Number(d.trim().split(/[\s,]+/).pop())
+  const endPointOf = (d) => {
+    const nums = d.trim().split(/[\s,]+/).map(Number)
+    return { x: nums[nums.length - 2], y: nums[nums.length - 1] }
+  }
   const aG = container.querySelector('g[data-node-id="a"]')
   const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(aG.getAttribute('transform'))
-  const aCenterY = Number(m[2]) + Number(aG.querySelector('rect').getAttribute('height')) / 2
-  assert.equal(endYOf(paths[1].getAttribute('d')), aCenterY, '自环边终点仍在节点左边框垂直居中')
+  // V-12 纵向布局：终点落在目标节点上边框水平居中
+  const aCenterX = Number(m[1]) + Number(aG.querySelector('rect').getAttribute('width')) / 2
+  const end = endPointOf(paths[1].getAttribute('d'))
+  assert.equal(end.x, aCenterX, '自环边终点仍在节点上边框水平居中')
+  assert.equal(end.y, Number(m[2]), '自环边终点落在目标节点上边框')
 })
 
 test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async () => {
@@ -989,8 +1319,10 @@ test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async ()
   const confirmMask = fresh.querySelector('.vwf-confirm-mask')
   assert.ok(confirmMask, '未保存关闭时显示统一样式确认弹窗')
   assert.ok(confirmMask.querySelector('.vwf-confirm'), '确认层含产品样式对话框')
-  assert.ok(byText(fresh, '我再想想'), '存在「我再想想」按钮')
-  assert.ok(byText(fresh, '不改了'), '存在「不改了」按钮')
+  // FEAT-84：未保存关闭为三选一（继续编辑 / 放弃修改 / 保存并返回）
+  assert.ok(byText(fresh, '继续编辑'), '存在「继续编辑」按钮')
+  assert.ok(byText(fresh, '放弃修改'), '存在「放弃修改」按钮')
+  assert.ok(byText(fresh, '保存并返回'), '存在「保存并返回」按钮')
   const maskRect = confirmMask.getBoundingClientRect ? confirmMask.getBoundingClientRect() : null
   if (maskRect && maskRect.width) {
     // jsdom 无法布局时跳过位置断言；真实 Chromium 证据另在 docs 中采集
@@ -998,11 +1330,11 @@ test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async ()
     assert.ok(Math.abs((maskRect.left + maskRect.width / 2) - (window.innerWidth / 2)) < 2, '确认弹窗横向居中')
   }
   await act(async () => {
-    byText(fresh, '我再想想').click()
+    byText(fresh, '继续编辑').click()
     await flush()
   })
   assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '点击我再想想后编辑器仍打开')
-  assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '我再想想关闭确认弹窗')
+  assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '继续编辑关闭确认弹窗')
   // 再次取消 → 点击遮罩空白关闭（编辑器保留）
   await act(async () => {
     fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
@@ -1015,14 +1347,14 @@ test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async ()
   })
   assert.ok(fresh.querySelector('dialog.vwf-editor-dialog'), '点击遮罩后编辑器仍打开')
   assert.ok(!fresh.querySelector('.vwf-confirm-mask'), '点击遮罩关闭确认弹窗')
-  // 再次取消 → 点击「不改了」关闭
+  // 再次取消 → 点击「放弃修改」关闭
   await act(async () => {
     fresh.querySelector('dialog.vwf-editor-dialog').dispatchEvent(new dom.window.Event('cancel', { bubbles: true, cancelable: true }))
     await flush()
-    byText(fresh, '不改了').click()
+    byText(fresh, '放弃修改').click()
     await flush()
   })
-  assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '点击不改了后编辑器关闭')
+  assert.equal(fresh.querySelector('dialog.vwf-editor-dialog'), null, '点击放弃修改后编辑器关闭')
   assert.equal(nativeConfirmCalls, 0, '全程未调用 window.confirm')
   dom.window.confirm = origConfirm
   // 干净状态（无未保存改动）直接关闭，不询问
@@ -1053,34 +1385,20 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
     await flush()
     await flush()
   })
-  // 打开编辑器（画布右上角「角色库」常驻区含 管理角色/新增角色）
+  // FEAT-100 V-1：角色库入口是设置页的独立「角色」页签，不再嵌在模板编辑画布区域。
+  assert.equal(fresh.querySelector('.vwf-role-zone'), null, '画布不再有角色库常驻区')
+  assert.ok(fresh.querySelector('[data-vwf-nav="roles"]'), '顶部导航提供「角色」页签')
+  // 流程库记录仍可按「编辑」进入模板工作区；工作区内不再有角色库入口
   await act(async () => {
     const editBtn = byText(fresh, '编辑')
     assert.ok(editBtn, '存在编辑按钮')
     editBtn.click()
     await flush()
   })
-  const roleZone = fresh.querySelector('.vwf-role-zone')
-  assert.ok(roleZone, '画布工具栏渲染角色库常驻区')
-  assert.ok(byText(roleZone, '角色库'), '角色库区域有可感知标识')
-  const zoneBtns = Array.from(roleZone.querySelectorAll('button')).map((b) => b.textContent)
-  assert.ok(zoneBtns.some(s => s.includes('管理角色')), '管理角色入口常驻')
-  assert.ok(zoneBtns.some(s => s.includes('新增角色')), '新增角色入口常驻（不随自定义角色数量消失）')
-  // 常驻区「新增角色」直达创建表单（不依赖分区列表中的按钮）
-  await act(async () => {
-    Array.from(roleZone.querySelectorAll('button')).find(b => b.textContent.includes('新增角色')).click()
-    await flush()
-  })
-  const createMgr = fresh.querySelector('.vwf-role-mgr')
-  assert.ok(createMgr, '新增角色打开创建表单')
-  assert.ok(createMgr.querySelector('input.vwf-input'), '创建表单提供名称输入')
-  assert.ok(byText(createMgr, '保存角色'), '创建表单提供保存')
-  await act(async () => {
-    Array.from(createMgr.querySelectorAll('button')).find(b => b.textContent === '关闭').click()
-    await flush()
-  })
-  assert.ok(!fresh.querySelector('.vwf-role-mgr'), '关闭后创建浮层消失')
-  // 节点配置不再提供角色管理/新增入口（仅保留角色下拉分组）
+  const editorDlg = fresh.querySelector('dialog.vwf-editor-dialog[open]')
+  assert.ok(editorDlg, '模板工作区已打开')
+  assert.equal(byText(editorDlg, '管理角色'), undefined, '模板编辑画布区域不再嵌角色库入口')
+  // 节点配置不提供角色管理/新增入口（仅保留角色下拉分组）
   await act(async () => {
     fresh.querySelector('.vwf-node-card').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
     await flush()
@@ -1090,17 +1408,36 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
   const inspectorBtns = Array.from(inspector.querySelectorAll('button')).map((b) => b.textContent)
   assert.ok(!inspectorBtns.some(s => s.includes('管理角色')), '节点配置不提供管理角色入口')
   assert.ok(!inspectorBtns.some(s => s.includes('新增角色')), '节点配置不提供新增角色入口')
-  // 打开角色管理：内置/自定义分区
+  // 关闭工作区回到设置页，再进入角色页签：内置/自定义分区
   await act(async () => {
-    Array.from(roleZone.querySelectorAll('button')).find(b => b.textContent.includes('管理角色')).click()
+    Array.from(editorDlg.querySelectorAll('button')).find(b => b.textContent === '关闭').click()
+    await flush()
     await flush()
   })
-  const mgr = fresh.querySelector('.vwf-role-mgr')
-  assert.ok(mgr, '角色管理浮层打开')
+  assert.equal(fresh.querySelector('dialog.vwf-editor-dialog[open]'), null, '工作区已关闭')
+  const mgr = await openRolesTab(fresh)
+  assert.ok(mgr, '角色页签渲染角色库列表')
+  // 新增角色入口在列表层常驻（不依赖分区列表中的按钮）
+  const newRoleBtn = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '＋ 新增角色')
+  assert.ok(newRoleBtn, '新增角色入口常驻（不随自定义角色数量消失）')
+  await act(async () => {
+    newRoleBtn.click()
+    await flush()
+  })
+  const createMgr = fresh.querySelector('.vwf-role-mgr')
+  assert.ok(createMgr, '新增角色打开创建表单浮层')
+  assert.ok(createMgr.querySelector('input.vwf-input'), '创建表单提供名称输入')
+  assert.ok(byText(createMgr, '保存角色'), '创建表单提供保存')
+  await act(async () => {
+    Array.from(createMgr.querySelectorAll('button')).find(b => b.textContent === '关闭').click()
+    await flush()
+  })
+  assert.ok(!fresh.querySelector('.vwf-role-mgr'), '关闭后创建浮层消失')
+  assert.ok(fresh.querySelector('[data-vwf-roles-tab]'), '关闭浮层后仍留在角色页签')
   assert.ok(byText(mgr, '内置角色'), '内置角色分区渲染')
   assert.ok(byText(mgr, '自定义角色'), '自定义角色分区渲染')
   assert.ok(byText(mgr, '需求分析师'), '自定义角色列出')
-  const viewBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '查看')
+  const viewBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '查看详情')
   assert.ok(viewBtns.length >= 1, '内置角色提供查看入口')
   const editBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '编辑')
   // issue-81 后自定义角色为 dispatcher + 需求分析师两个；内置仅剩 dev，不提供编辑入口
@@ -1167,10 +1504,16 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
     await flush()
   })
   assert.ok(!byText(mgr, '调度变体'), '确认后角色从列表消失')
-  // 关闭角色管理：角色选择器随角色库刷新（分区 optgroup + 自定义项）
+  // 角色库变更后，节点角色选择器随之刷新（分区 optgroup + 自定义项）：
+  // FEAT-100 V-1 起角色库是页签，切回流程库再打开模板工作区验证这条既有能力
   await act(async () => {
-    const close = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '关闭')
-    close.click()
+    fresh.querySelector('[data-vwf-nav="templates"]').click()
+    await flush()
+  })
+  await act(async () => {
+    const editBtn = byText(fresh, '编辑')
+    assert.ok(editBtn, '存在编辑按钮')
+    editBtn.click()
     await flush()
   })
   const roleSelect = Array.from(fresh.querySelectorAll('select.vwf-select')).find(s => Array.from(s.options).some(o => o.textContent.includes('需求分析师')))
@@ -1195,18 +1538,7 @@ test('角色库：自定义角色「基于此创建」克隆 + usage 失败时�
     await flush()
     await flush()
   })
-  await act(async () => {
-    const editBtn = byText(fresh, '编辑')
-    assert.ok(editBtn, '存在编辑按钮')
-    editBtn.click()
-    await flush()
-  })
-  const roleZone = fresh.querySelector('.vwf-role-zone')
-  await act(async () => {
-    Array.from(roleZone.querySelectorAll('button')).find(b => b.textContent.includes('管理角色')).click()
-    await flush()
-  })
-  const mgr = fresh.querySelector('.vwf-role-mgr')
+  const mgr = await openRolesTab(fresh)
   // 自定义行提供「基于此创建」
   const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, '需求分析师'))
   const cloneBtn = Array.from(row.querySelectorAll('button')).find(b => b.textContent === '基于此创建')
@@ -1282,13 +1614,8 @@ test('角色库 UX 收紧：首尾点/Windows 保留名保存时被 Host 权威�
     await flush()
     await flush()
   })
-  await act(async () => { byText(fresh, '编辑').click(); await flush() })
-  const roleZone = fresh.querySelector('.vwf-role-zone')
-  await act(async () => {
-    Array.from(roleZone.querySelectorAll('button')).find(b => b.textContent.includes('管理角色')).click()
-    await flush()
-  })
-  const mgr = fresh.querySelector('.vwf-role-mgr')
+  await openRolesTab(fresh)
+  const mgr = fresh.querySelector('[data-vwf-roles-tab]')
   await act(async () => { byText(mgr, '新增角色').click(); await flush() })
   const nameInput = mgr.querySelector('input.vwf-input')
   const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
@@ -1332,13 +1659,8 @@ test('角色库删除 fail-closed：usage 返回 ok:false 时不弹出删除确�
     await flush()
     await flush()
   })
-  await act(async () => { byText(fresh, '编辑').click(); await flush() })
-  const roleZone = fresh.querySelector('.vwf-role-zone')
-  await act(async () => {
-    Array.from(roleZone.querySelectorAll('button')).find(b => b.textContent.includes('管理角色')).click()
-    await flush()
-  })
-  const mgr = fresh.querySelector('.vwf-role-mgr')
+  await openRolesTab(fresh)
+  const mgr = fresh.querySelector('[data-vwf-roles-tab]')
   // 用零引用的 dispatcher 行：usage 服务故障（ok:false 解析）时点删除
   state.failUsage = 'resolved'
   const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, 'dispatcher'))
@@ -1354,9 +1676,9 @@ test('角色库删除 fail-closed：usage 返回 ok:false 时不弹出删除确�
   await act(async () => { freshRoot.unmount(); fresh.remove() })
 })
 
-test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链从左到右', async () => {
+test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链自上而下', async () => {
   const blueprint = {
-    id: 'construction-full-feature',
+    id: 'wf-construction-full-feature',
     displayName: '完整功能开发',
     entry: 'requirements',
     bindings: {
@@ -1395,13 +1717,14 @@ test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链从左到右
   const nameInput = Array.from(container.querySelectorAll('input.vwf-input')).find((el) => el.getAttribute('placeholder') === '模板名称' || el.value === '完整功能开发')
   assert.ok(nameInput, '模板名称从 displayName 摄入')
   assert.equal(nameInput.value, '完整功能开发')
-  const xOf = (id) => {
+  const yOf = (id) => {
     const g = container.querySelector('g[data-node-id="' + id + '"]')
     const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-    return Number(match[1])
+    return Number(match[2])
   }
-  assert.ok(xOf('requirements') < xOf('design'), '需求在设计左侧')
-  assert.ok(xOf('design') < xOf('dev'), '设计在开发左侧')
+  // V-12 自上而下：需求 → 设计 → 开发依次向下
+  assert.ok(yOf('requirements') < yOf('design'), '需求在设计上方')
+  assert.ok(yOf('design') < yOf('dev'), '设计在开发上方')
   const badges = Array.from(container.querySelectorAll('.vwf-entry-badge-text')).map((el) => {
     const g = el.closest('g[data-node-id]')
     return g && g.getAttribute('data-node-id')
@@ -1411,10 +1734,841 @@ test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链从左到右
     container.querySelector('g[data-node-id="requirements"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
     await flush()
   })
+  await openSection(container, 'advanced')
   const selects = Array.from(container.querySelectorAll('.vwf-inspector select.vwf-select'))
   const values = selects.map((s) => s.value)
   assert.ok(values.includes('kimi-coding'), '节点 provider 从 bindings.models 投影：' + JSON.stringify(values))
   assert.ok(values.includes('k3'), '节点 model 从 bindings.models 投影：' + JSON.stringify(values))
+})
+
+test('一键检测结果条：整体结论 + 一级节点 + 同列二级节点三级呈现（无 ## / ### 标记）', async () => {
+  const blueprint = {
+    id: 'probe-report',
+    displayName: '探针结果条',
+    entry: 'a',
+    bindings: {
+      models: {
+        a: { provider: 'kimi-coding', model: 'k3' },
+        b1: { provider: 'kimi-coding', model: 'k3' },
+        b2: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+        c: { provider: 'kimi-coding', model: 'k3' },
+      },
+    },
+    nodes: [
+      { id: 'a', label: '需求分析', profile: 'dispatcher', goal: 'g' },
+      { id: 'b1', label: '开发1', profile: 'dispatcher', goal: 'g' },
+      { id: 'b2', label: '开发2', profile: 'dispatcher', goal: 'g' },
+      { id: 'c', label: '收口', profile: 'dispatcher', goal: 'g' },
+    ],
+    edges: [
+      { from: 'a', to: 'b1', on: 'success' },
+      { from: 'a', to: 'b2', on: 'success' },
+      { from: 'b1', to: 'c', on: 'success' },
+      { from: 'b2', to: 'c', on: 'success' },
+      { from: 'c', to: '$end', on: 'success' },
+    ],
+  }
+  await act(async () => {
+    const jsonTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'JSON')
+    jsonTab.click()
+    await flush()
+    const textarea = container.querySelector('textarea.vwf-json-edit')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(textarea, JSON.stringify(blueprint, null, 2))
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    const canvasTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '画布')
+    canvasTab.click()
+    await flush()
+  })
+  // 画布两级序号：a=0；b1/b2 同列 → 1.1/1.2（二级节点）；c=2（一级节点）
+  state.probe = {
+    ok: false,
+    stage: 'probe',
+    results: [
+      { key: 'kimi-coding\u0000k3', provider: 'kimi-coding', model: 'k3', nodes: ['a', 'b1', 'c'], status: 'available', code: 'OK', message: '', cached: false },
+      { key: 'deepseek-official\u0000deepseek-v4-pro', provider: 'deepseek-official', model: 'deepseek-v4-pro', nodes: ['b2'], status: 'model_not_configured', code: 'MODEL_NOT_CONFIGURED', message: '模型「deepseek-v4-pro」不在 Provider「deepseek-official」当前已配置的模型目录中（可能已删除或改名）：请重新选择该节点的模型。', cached: false },
+    ],
+    cached: false,
+  }
+  await act(async () => {
+    byText(container, '一键检测').click()
+    await flush()
+    await flush()
+  })
+  const block = container.querySelector('.vwf-editor-msg .vwf-code')
+  assert.ok(block, '结果条渲染在编辑器内')
+  const rowOf = (el) => ({ cls: el.className, text: el.textContent })
+  const rows = Array.from(block.querySelectorAll('.vwf-msg-line')).map(rowOf)
+  assert.equal(rows.length, 5, '整体结论 1 行 + 4 个节点各 1 行：' + JSON.stringify(rows.map((r) => r.text)))
+  for (const r of rows) assert.ok(r.text.indexOf('##') < 0, '不写 markdown 标记：' + r.text)
+  // 一级：整体结论
+  assert.match(rows[0].cls, /l1/, '整体结论为一级：' + rows[0].cls)
+  assert.ok(rows[0].text.indexOf('❌') === 0 && rows[0].text.includes('4 个节点') && rows[0].text.includes('1 个不可用'), '整体结论文案：' + rows[0].text)
+  // 二级：一级节点（按画布序号排序，单列节点）
+  assert.match(rows[1].cls, /l2/, '一级节点为二级层级：' + rows[1].cls)
+  assert.ok(rows[1].text.indexOf('✅ 0 需求分析（a）') === 0 && rows[1].text.includes('kimi-coding/k3'), '序号 0 的需求分析可用：' + rows[1].text)
+  assert.match(rows[2].cls, /l3/, '同列并行节点为三级层级：' + rows[2].cls)
+  assert.ok(rows[2].text.indexOf('✅ 1.1 开发1（b1）') === 0, '二级节点 1.1：' + rows[2].text)
+  assert.match(rows[3].cls, /l3/, '二级节点 1.2 同为三级：' + rows[3].cls)
+  assert.ok(rows[3].text.indexOf('❌ 1.2 开发2（b2）') === 0 && rows[3].text.includes('模型未配置') && rows[3].text.includes('deepseek-v4-pro'), '二级节点 1.2 失败并带原因：' + rows[3].text)
+  assert.match(rows[4].cls, /l2/, '收口回到二级层级：' + rows[4].cls)
+  assert.ok(rows[4].text.indexOf('✅ 2 收口（c）') === 0, '序号 2 的收口可用：' + rows[4].text)
+  const css = styleText.join('\n')
+  assert.match(css, /\.vwf-msg-line\.l1/, '一级行有独立样式')
+  assert.match(css, /\.vwf-msg-line\.l2/, '二级行有独立样式')
+  assert.match(css, /\.vwf-msg-line\.l3/, '三级行有独立样式')
+  assert.match(css, /\.vwf-msg-line\.bad/, '失败行有独立色调')
+  state.probe = null
+})
+
+test('角色库收口：来源双重可辨识、长摘要两行收敛、详情独立滚动、Escape 回收焦点（FEAT-86）', async () => {
+  // 与原型同一形态的长职责：摘要本身很长（连续长串），完整职责 4,500+ 字
+  const longSummary = '无空格连续长串'.repeat(30)
+  const longContent = '职责说明：'.repeat(40) + 'x'.repeat(600)
+  roleState.roles.push({ id: '长职责角色', name: '长职责角色', summary: longSummary, builtin: false, content: longContent })
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+  // FEAT-100 V-1：角色库入口改为设置页「角色」页签（不再从模板编辑画布进入）
+  const mgr = await openRolesTab(fresh)
+  // 详情/表单浮层容器（.vwf-role-mgr）只承载内层，列表本身内联在页签里
+  const ovPanel = () => fresh.querySelector('.vwf-role-mgr')
+  const rows = () => Array.from(fresh.querySelectorAll('.vwf-role-row'))
+  // V-1 来源在标题与行内双重可识别，按 builtin 字段判定
+  assert.ok(byText(mgr, '内置角色'), '内置分区标题')
+  assert.ok(byText(mgr, '自定义角色'), '自定义分区标题')
+  const row = rows().find(r => byText(r, '长职责角色'))
+  assert.equal(row.getAttribute('data-vwf-role-origin'), 'custom', '行内来源按 builtin 字段判定')
+  assert.ok(Array.from(row.querySelectorAll('.vwf-badge')).some(b => b.textContent === '自定义角色'), '行内来源 badge')
+  // V-2 列表摘要：行内只承载摘要（两行由 .vwf-role-summary 的 line-clamp 收敛，
+  // 见 role-theme.test.mjs），不承载完整职责 → 行高不随全文增长
+  const sum = row.querySelector('.vwf-role-summary')
+  assert.ok(sum, '行内显示摘要')
+  assert.equal(sum.textContent, longSummary, '显式 summary 优先，连续长串原样交给样式层断词')
+  assert.ok(!row.textContent.includes(longContent), '列表行不承载完整职责')
+  // V-6 筛选（键盘可达按钮）：切换后分区收敛；FEAT-100 起按原型带上分段计数（内置 N / 自定义 N）
+  const filterBtn = (label) => Array.from(mgr.querySelectorAll('button')).find(b => b.textContent.includes(label))
+  await act(async () => { filterBtn('内置').click(); await flush() })
+  assert.ok(!rows().some(r => byText(r, '长职责角色')), '内置筛选隐藏自定义角色')
+  await act(async () => { filterBtn('自定义').click(); await flush() })
+  assert.ok(!rows().some(r => byText(r, 'dev')), '自定义筛选隐藏内置角色')
+  await act(async () => { filterBtn('全部').click(); await flush() })
+  assert.ok(rows().some(r => byText(r, 'dev')) && rows().some(r => byText(r, '长职责角色')), '全部筛选恢复两个分区')
+  // V-2 查看详情：完整职责在独立滚动区，键盘可进入
+  const backRow = rows().find(r => byText(r, '长职责角色'))
+  const detailBtn = Array.from(backRow.querySelectorAll('button')).find(b => b.textContent === '查看详情')
+  await act(async () => { detailBtn.click(); await flush() })
+  const content = fresh.querySelector('.vwf-role-content')
+  assert.ok(content, '详情提供完整职责区')
+  assert.equal(content.textContent, longContent, '详情展示完整职责原文')
+  assert.equal(content.getAttribute('tabindex'), '0', '详情滚动区键盘可进入')
+  assert.ok(dom.window.document.activeElement === ovPanel(), '打开详情后焦点进入详情浮层容器')
+  // V-6 Escape 关闭详情并把焦点回收到触发元素
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  assert.ok(!fresh.querySelector('.vwf-role-content'), 'Escape 关闭详情回到列表')
+  // 焦点回收到触发元素：行按钮是返回列表后重新渲染的节点，按角色重新取当次元素
+  const viewBtnBack = Array.from(rows().find(r => byText(r, '长职责角色')).querySelectorAll('button')).find(b => b.textContent === '查看详情')
+  assert.ok(dom.window.document.activeElement === viewBtnBack, 'Escape 关闭详情后焦点回收到触发元素')
+  // 摘要生成不写回原文（规格 §9）：查看前后角色字段逐字不变
+  assert.equal(roleState.roles.find(r => r.id === '长职责角色').content, longContent, '职责原文未被改写')
+  assert.equal(roleState.roles.find(r => r.id === '长职责角色').summary, longSummary, '摘要字段未被写回')
+  // V-6 真实 label：表单字段用 label[for] 绑定
+  const newBtn = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '＋ 新增角色')
+  assert.ok(newBtn, '列表层常驻新增角色入口（不随自定义角色数量消失）')
+  await act(async () => { newBtn.click(); await flush() })
+  const formPanel = ovPanel()
+  assert.ok(formPanel, '新增角色打开创建表单浮层')
+  assert.ok(formPanel.querySelector('label[for="vwf-role-name"]') && formPanel.querySelector('#vwf-role-name'), '角色名称使用真实 label 绑定')
+  assert.ok(formPanel.querySelector('label[for="vwf-role-content"]') && formPanel.querySelector('#vwf-role-content'), '角色配置使用真实 label 绑定')
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  assert.ok(!fresh.querySelector('#vwf-role-name'), 'Escape 关闭表单回到列表')
+  // 焦点回收（V-6）：取消新建没有对应行，焦点归位到列表层的「新增角色」（重新渲染后的当次节点），
+  // 不掉到 body
+  const newBtnBack = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '＋ 新增角色')
+  assert.ok(dom.window.document.activeElement === newBtnBack, '关闭表单后焦点回到列表层新增角色')
+  // V-6 逐层 Escape 止于列表层：列表层不再是自己的一层浮层（角色=设置页签，FEAT-100 V-1），
+  // 该层不能再吞掉 Escape——否则宿主设置面板按 Escape 关不上。
+  let escaped = null
+  await act(async () => {
+    escaped = dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flush()
+  })
+  assert.ok(fresh.querySelector('[data-vwf-roles-tab]'), '列表层 Escape 不关闭角色页签')
+  assert.equal(escaped, true, '列表层 Escape 放行给宿主（未 preventDefault / stopPropagation）')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+  roleState.roles = roleState.roles.filter(r => r.id !== '长职责角色')
+})
+
+test('角色库：内置角色只读可查看可复制，不提供编辑/删除（V-1 权限边界）', async () => {
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+  await openRolesTab(fresh)
+  const mgr = fresh.querySelector('[data-vwf-roles-tab]')
+  const builtinRow = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => r.getAttribute('data-vwf-role-origin') === 'builtin')
+  const builtinBtns = Array.from(builtinRow.querySelectorAll('button')).map(b => b.textContent)
+  assert.deepEqual(builtinBtns, ['查看详情'], '内置角色只有查看入口，无编辑/复制/删除')
+  await act(async () => { Array.from(builtinRow.querySelectorAll('button'))[0].click(); await flush() })
+  const viewBtns = Array.from(fresh.querySelectorAll('.vwf-role-mgr button')).map(b => b.textContent)
+  assert.ok(viewBtns.includes('基于此角色创建自定义角色'), '内置详情提供复制为自定义')
+  assert.ok(!viewBtns.includes('编辑'), '内置详情无编辑入口')
+  assert.ok(byText(mgr, '开发角色正文'), '内置详情展示完整内容')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+})
+
+test('角色库：读取失败显示明确失败态，不把空列表当作「没有角色」（规格 §11）', async () => {
+  state.failRoles = true
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+  await openRolesTab(fresh)
+  const mgr = fresh.querySelector('[data-vwf-roles-tab]')
+  assert.ok(byText(mgr, '角色服务不可用'), '展示失败原因')
+  assert.ok(!byText(mgr, '暂无自定义角色'), '失败态不得显示为空列表')
+  assert.ok(!mgr.querySelector('.vwf-role-row'), '失败态不渲染任何角色行')
+  state.failRoles = false
+  // 失败态不是终态：关闭后重开可恢复（roles 重新拉取）
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+})
+
+
+
+// FEAT-100 V-1：角色库从编辑器画布迁移到设置页的独立「角色」页签。
+// 入口形态变了，角色库能力用例本身不变——只换进入方式（V-7 允许修订入口选择器）。
+async function openRolesTab(root) {
+  const tab = root.querySelector('[data-vwf-nav="roles"]')
+  assert.ok(tab, '设置页存在「角色」页签')
+  await act(async () => { tab.click(); await flush() })
+  const panel = root.querySelector('[data-vwf-roles-tab]')
+  assert.ok(panel, '角色页签渲染角色库列表')
+  return panel
+}
+
+// ── FEAT-85：多工作空间运行列表与 Logical Run 详情 ────────────────────────
+function runRows() { return Array.from(container.querySelectorAll('.vwf-run-row')) }
+function groupHeads() { return Array.from(container.querySelectorAll('.vwf-run-group-head')).map((el) => (el.textContent || '').trim()) }
+function runRowWith(text) { return runRows().find((r) => (r.textContent || '').includes(text)) }
+function nodeDirRows() { return Array.from(container.querySelectorAll('.vwf-node-dir-row')) }
+function detailTabs() { return Array.from(container.querySelectorAll('.vwf-rd-body .vwf-tab')) }
+function attemptSelect() { return container.querySelector('.vwf-rd-body select') }
+
+async function clickEl(el, times) {
+  assert.ok(el, '待点击元素存在')
+  await act(async () => {
+    el.click()
+    for (let i = 0; i < (times || 3); i++) await flush()
+  })
+}
+async function selectValue(sel, value) {
+  assert.ok(sel, '待选择控件存在')
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set
+    setter.call(sel, value)
+    sel.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush()
+    await flush()
+  })
+}
+// 关闭当前打开的工作区层（模板编辑 / 运行详情）。FEAT-100 V-4 起运行详情也在大工作区层里，
+// 列表留在下层继续挂载——用例之间必须显式关掉它，否则前一条的详情会带进下一条的断言。
+async function closeWorkspace() {
+  const dlg = container.querySelector('dialog.vwf-editor-dialog[open]')
+  if (!dlg) return
+  const closeBtn = Array.from(dlg.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '关闭')
+  const back = closeBtn || Array.from(dlg.querySelectorAll('button')).find((b) => (b.textContent || '').includes('返回列表'))
+  if (back) await clickEl(back)
+  // 未保存草稿走三选一确认：放弃修改（'不改了' 是另一个弹窗的按钮文案，写错会静默留下一个打开的编辑器）
+  const discard = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '放弃修改')
+  if (discard) await clickEl(discard)
+}
+// 打开运行页签：先收掉工作区层，避免其文案混入断言
+// （FEAT-100 V-1：顶部导航为 流程库 / 运行 / 角色，页签用 data-vwf-nav 定位，不再靠文案）
+async function openRunsTab() {
+  await closeWorkspace()
+  await clickEl(container.querySelector('[data-vwf-nav="dashboard"]'), 6)
+  await resetFilters()
+}
+// 四类筛选复位：避免前一条用例的筛选残留影响后续断言
+async function resetFilters() {
+  for (let i = 0; i < 4; i++) {
+    const sel = filterSelect(i)
+    if (sel && sel.value !== 'all') await selectValue(sel, 'all')
+  }
+}
+function filterSelect(index) { return container.querySelectorAll('.vwf-filter select')[index] }
+async function backToList() {
+  const btn = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').includes('返回列表'))
+  await clickEl(btn)
+}
+
+test('FEAT-85 列表：同一 Logical Run 折叠为一条任务、按工作空间分组、superseded 段不另起一行', async () => {
+  await openRunsTab()
+  await act(async () => { await flush(); await flush(); await flush() })
+  const rows = runRows()
+  assert.ok(rows.length > 0, '运行列表渲染')
+  // 同一 Logical Run 的两段只呈现为一条任务（T-A1 只出现一次）
+  const a1Rows = rows.filter((r) => (r.textContent || '').includes('T-A1'))
+  assert.equal(a1Rows.length, 1, '多 segment 折叠为一条用户任务：' + a1Rows.length)
+  // 被续跑接管的第 1 段不再单独占一行：列表里不出现「已由续跑接管」行
+  assert.ok(!container.querySelector('.vwf-run-row') || !container.textContent.includes('已由续跑接管'), 'superseded 段不作为新用户任务展示')
+  // 多段任务显示段位
+  assert.ok(a1Rows[0].textContent.includes('第 2/2 段'), '多段任务显示当前段/总段数：' + a1Rows[0].textContent)
+  // 按工作空间分组（两个空间 + 未归属旧记录）
+  const heads = groupHeads()
+  assert.ok(heads.some((x) => x.includes('工作空间A')), '按工作空间 A 分组：' + JSON.stringify(heads))
+  assert.ok(heads.some((x) => x.includes('工作空间B')), '按工作空间 B 分组：' + JSON.stringify(heads))
+  assert.ok(heads.some((x) => x.includes('未归属工作空间')), '无逻辑归属的旧记录有独立分组：' + JSON.stringify(heads))
+  // 返工次数与最近更新时间
+  assert.ok(a1Rows[0].textContent.includes('返工 1 次'), '返工次数来自节点重复执行：' + a1Rows[0].textContent)
+  assert.ok(a1Rows[0].textContent.includes('最近更新'), '显示最近更新时间：' + a1Rows[0].textContent)
+  // 折叠说明可见（用户不会误以为分段是新任务）
+  assert.ok(container.textContent.includes('同一 Logical Run 的多段折叠为一条任务'), '列表给出折叠说明')
+  // 界面不拼接让用户复制的命令
+  assert.ok(!container.textContent.includes('wf_run {'), '界面不出现可复制的 wf_run 命令')
+  assert.ok(!container.textContent.includes('USER_ACCEPTED|ADD_BUDGET|STOP'), '界面不出现占位枚举命令行')
+})
+
+test('FEAT-85 列表：空间/状态/结果/完成类型四类筛选与分页', async () => {
+  await openRunsTab()
+  const total = Array.from(container.querySelectorAll('.vwf-muted-sm')).map((e) => e.textContent).join(' ')
+  assert.ok(total.includes('共 20 条'), '任务总数为折叠后的 20：' + total.slice(0, 200))
+  assert.ok(container.textContent.includes('第 1/2 页'), '分页按任务数计算')
+  // 空间筛选：只剩工作空间 A 的三条
+  await selectValue(filterSelect(0), '工作空间A')
+  let rows = runRows()
+  assert.equal(rows.length, 3, '按空间筛选后只剩该空间任务：' + rows.length)
+  assert.ok(!rows.some((r) => (r.textContent || '').includes('T-B1')), '其它空间任务被筛掉')
+  await selectValue(filterSelect(0), 'all')
+  // 状态筛选：待处理 = WAITING_HUMAN + BLOCKED + PAUSED
+  await selectValue(filterSelect(1), 'attention')
+  rows = runRows()
+  assert.equal(rows.length, 3, '待处理筛选命中三个可恢复/待裁决运行：' + rows.length)
+  await selectValue(filterSelect(1), 'done')
+  assert.ok(container.textContent.includes('共 13 条'), '已完成筛选按 DONE 计：' + rows.length)
+  await selectValue(filterSelect(1), 'all')
+  // 业务结果筛选：READY 只命中 lr-a
+  await selectValue(filterSelect(2), 'READY')
+  rows = runRows()
+  assert.equal(rows.length, 2, '业务结果筛选按节点业务结果取值：' + rows.length)
+  await selectValue(filterSelect(2), 'all')
+  // 完成类型筛选：DELIVERED 只命中 lr-b
+  await selectValue(filterSelect(3), 'DELIVERED')
+  rows = runRows()
+  assert.equal(rows.length, 1, '完成类型筛选按 completion.type：' + rows.length)
+  assert.ok((rows[0].textContent || '').includes('T-B1'), '完成类型命中 T-B1：' + rows[0].textContent)
+  await selectValue(filterSelect(3), 'all')
+})
+
+test('FEAT-85 列表：进入详情再返回后保留筛选与列表位置', async () => {
+  await openRunsTab()
+  await selectValue(filterSelect(1), 'done')
+  // 翻到第 2 页并记住位置
+  const nextBtn = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '下一页')
+  await clickEl(nextBtn)
+  assert.ok(container.textContent.includes('第 2/2 页'), '翻到第 2 页')
+  await openTask('T-X1')
+  assert.ok(container.querySelector('.vwf-rd-main'), '进入详情工作区')
+  assert.ok(container.textContent.includes('保留筛选与列表位置'), '详情给出返回后位置保留提示')
+  await backToList()
+  assert.ok(container.textContent.includes('第 2/2 页'), '返回后保留分页位置')
+  const doneSel = filterSelect(1)
+  assert.equal(doneSel.value, 'done', '返回后保留状态筛选')
+  await selectValue(filterSelect(1), 'all')
+})
+
+async function openTask(taskId) {
+  // 前一个用例可能停在详情视图：先关掉详情工作区，保证每条用例独立可重复
+  // （V-4 起列表在详情打开时仍挂载，不能再靠「列表为空」判断是否停在详情）
+  await closeWorkspace()
+  const row = runRowWith(taskId)
+  assert.ok(row, '列表中找到任务行：' + taskId)
+  await clickEl(row, 6)
+}
+
+test('FEAT-85 详情：唯一选中节点结果出口 + 结果/检查/活动三页签', async () => {
+  await openRunsTab()
+  await selectValue(filterSelect(0), 'all')
+  await selectValue(filterSelect(1), 'all')
+  await openTask('T-A1')
+  assert.ok(container.querySelector('.vwf-rd-main'), '详情为左侧定位 + 单一结果出口布局')
+  assert.equal(nodeDirRows().length, 6, '节点目录列出全部节点：' + nodeDirRows().length)
+  assert.equal(container.querySelectorAll('.vwf-rd-body .vwf-card').length, 1, '正文只有一个选中节点详情卡（不上下重复）')
+  assert.equal(container.querySelectorAll('.vwf-tab-panel').length, 1, '同一时刻只有一个页签面板')
+  assert.equal(container.querySelectorAll('.vwf-rd-body select').length, 0, '未执行节点不渲染 attempt 选择器')
+  await clickEl(nodeDirRows().find((r) => (r.textContent || '').includes('实现')))
+  assert.equal(container.querySelectorAll('.vwf-rd-body select').length, 1, '唯一 attempt 选择器')
+  // 页签切换：同一区域内容切换，不叠加
+  const labels = detailTabs().map((t) => (t.textContent || '').trim())
+  assert.deepEqual(labels, ['结果', '检查', '活动'], '三个页签：' + JSON.stringify(labels))
+  await clickEl(detailTabs().find((t) => t.textContent.trim() === '检查'))
+  assert.equal(container.querySelectorAll('.vwf-tab-panel').length, 1, '切换后仍只有一个面板')
+  const checksPanel = container.querySelector('.vwf-tab-panel').textContent
+  // 当前选中「实现」的第 2 次执行（第 2 段）：该段检查已通过，因此如实显示没有退回意见
+  assert.ok(checksPanel.includes('本次执行没有记录退回意见'), '检查页签按所选执行如实显示：' + checksPanel.slice(0, 140))
+  assert.ok(!checksPanel.includes('第 1 次实现成果'), '检查页签不重复展示结果页签正文（不叠加）')
+  await clickEl(detailTabs().find((t) => t.textContent.trim() === '活动'))
+  const actPanel = container.querySelector('.vwf-tab-panel').textContent
+  assert.ok(actPanel.includes('活动记录'), '活动页签渲染：' + actPanel.slice(0, 120))
+  assert.ok(!actPanel.includes('本次执行没有记录退回意见'), '切换页签后不再显示检查页签内容（不叠加）')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('[段 2]'), '运行日志标注来源分段')
+  await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))
+})
+
+test('FEAT-85 详情：返工 attempt 切换、退回意见跟随审查轮次、旧下游结果标为上一轮成果', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  // 目录：测试节点只有第 1 段尝试 → 上一轮成果
+  const testRow = nodeDirRows().find((r) => (r.textContent || '').includes('测试'))
+  assert.ok(testRow.textContent.includes('上一轮成果'), '旧下游结果在目录标注上一轮成果：' + testRow.textContent)
+  await clickEl(testRow)
+  assert.ok(container.querySelector('.vwf-note.warn') && container.querySelector('.vwf-note.warn').textContent.includes('这是返工前的成果'), '选中旧下游节点给出上一轮成果说明')
+  // 实现节点有两次执行
+  const devRow = nodeDirRows().find((r) => (r.textContent || '').includes('实现'))
+  await clickEl(devRow)
+  const sel = attemptSelect()
+  assert.equal(sel.options.length, 2, '实现节点有两次执行记录：' + sel.options.length)
+  assert.ok(sel.options[0].textContent.includes('第 1 次') && sel.options[0].textContent.includes('退回修改'), '第 1 次标为退回修改：' + sel.options[0].textContent)
+  assert.ok(sel.options[1].textContent.includes('最新'), '第 2 次标为最新：' + sel.options[1].textContent)
+  // 切到第 1 次 → 历史执行 + 该轮成果
+  await selectValue(sel, '1')
+  assert.ok(container.querySelector('.vwf-rd-body').textContent.includes('历史执行'), '切到历史执行有明确标注')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第 1 次实现成果'), '第 1 次成果与选择对应')
+  // 检查页签：退回意见跟随第 1 段审查轮次
+  await clickEl(detailTabs().find((t) => t.textContent.trim() === '检查'))
+  const checks = container.querySelector('.vwf-tab-panel').textContent
+  assert.ok(checks.includes('需要修改的问题'), '检查页签显示退回意见：' + checks.slice(0, 200))
+  assert.ok(checks.includes('配置滚动后主要操作离开视口'), '退回意见内容来自该段记录：' + checks.slice(0, 200))
+  assert.ok(checks.includes('退回意见 · 第 1 次审查'), '退回意见跟随触发它的审查轮次：' + checks.slice(0, 200))
+  // 回最新执行
+  await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))
+  await selectValue(attemptSelect(), '2')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第 2 次实现成果'), '回到第 2 次成果')
+})
+
+test('FEAT-85 详情：扇出子任务独立结果与汇总输入来源，未完成不冒充完成', async () => {
+  await openRunsTab()
+  await openTask('T-B1')
+  const fanRow = nodeDirRows().find((r) => (r.textContent || '').includes('多视角研究'))
+  assert.ok(fanRow, '目录有并行组节点')
+  await clickEl(fanRow)
+  const panel = container.querySelector('.vwf-tab-panel').textContent
+  assert.ok(panel.includes('并行组 · 3 个子任务'), '并行组显示子任务数：' + panel.slice(0, 200))
+  assert.ok(panel.includes('技术可行性') && panel.includes('用户需求') && panel.includes('风险与反证'), '三个子任务各自可辨识')
+  assert.ok(panel.includes('技术上可行') && panel.includes('需求集中在位置感'), '每个子任务有独立结果')
+  assert.ok(panel.includes('未完成'), '未完成子任务有明确状态')
+  assert.ok(panel.includes('汇总节点等待'), '未完成时汇总节点显示等待：' + panel.slice(0, 300))
+  assert.ok(panel.includes('不冒充完成'), '给出不冒充完成的说明')
+  // 汇总节点输入来源
+  const synthRow = nodeDirRows().find((r) => (r.textContent || '').includes('汇总发现'))
+  await clickEl(synthRow)
+  const synthPanel = container.querySelector('.vwf-tab-panel').textContent
+  assert.ok(synthPanel.includes('汇总输入来源'), '汇总节点显示输入来源')
+  assert.ok(synthPanel.includes('来自 explore'), '输入来源列出生产者：' + synthPanel.slice(0, 300))
+})
+
+test('FEAT-85 详情：WAITING_HUMAN 决策卡（选项/理由/影响/锁定 + DT-01 受阻字段映射）', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  const card = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('需要你的决定'))
+  assert.ok(card, 'WAITING_HUMAN 显示结构化决策卡')
+  const text = card.textContent
+  assert.ok(text.includes('材料齐备，交给你验收'), '决策卡显示为什么需要决定')
+  assert.ok(text.includes('实现与检查均已完成'), '决策卡显示当前状态')
+  for (const opt of ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP']) {
+    assert.ok(text.includes(opt), '决策卡含选项 ' + opt)
+    assert.ok(text.includes('选择后效果'), '决策卡含选择后效果')
+  }
+  assert.ok(text.includes('增加 1 轮自动返工额度后继续'), '选择后效果来自决策包')
+  assert.ok(text.includes('未知'), '可选四项显式未知被本地化')
+  assert.ok(!text.includes('UNKNOWN'), '不出现英文 UNKNOWN 哨兵')
+  assert.ok(card.querySelector('textarea'), '决策卡含理由输入')
+  assert.ok(text.includes('提交前影响说明'), '决策卡含提交前影响说明')
+  const submit = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('提交决定'))
+  assert.ok(submit && submit.disabled, 'DT-01 未裁定：提交按钮锁定，不伪造成功')
+  assert.ok(text.includes('DT-01-ui-resume-attribution') && text.includes('不会发起续跑'), '决策卡写明提交路径受阻及其原因')
+  assert.ok(text.includes('字段映射'), '决策卡附字段映射（交给会话执行）')
+  assert.ok(text.includes('T-A1:review:1:1'), '字段映射含真实 decision_id')
+  // 点选选项后映射更新
+  const addBudget = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === 'ADD_BUDGET')
+  await clickEl(addBudget)
+  assert.ok(card.textContent.includes('增加 1 轮自动返工额度后继续'), '点选选项后影响说明可读')
+  assert.ok(container.textContent.includes('提交中，按钮已锁定') || container.textContent.includes('按钮锁定'), '给出提交后锁定与续跑中状态说明')
+  assert.ok(!container.textContent.includes('wf_run {'), '决策卡不拼接让用户复制的命令')
+})
+
+test('FEAT-85 详情：BLOCKED 恢复卡（原因 / Provider·Model 前后值 / 新修订与旧修订保留）', async () => {
+  await openRunsTab()
+  await openTask('T-C2')
+  const card = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('阻塞原因'))
+  assert.ok(card, 'BLOCKED 显示恢复卡')
+  const text = card.textContent
+  assert.ok(text.includes('EVALUATION_BASELINE_CONFLICT'), '恢复卡显示阻塞原因')
+  assert.ok(text.includes('恢复入口：dev'), '恢复卡显示恢复入口节点')
+  assert.ok(text.includes('deepseek-official / deepseek-v4-pro'), '恢复卡显示当前 Provider / Model')
+  assert.ok(card.querySelectorAll('select').length >= 2, '恢复卡提供 Provider / Model 修改入口')
+  assert.ok(text.includes('恢复后产生新的 Snapshot Revision，历史修订仍可查'), '恢复卡说明新修订与旧修订保留')
+  assert.ok(text.includes('model_overrides'), '恢复卡附 model_overrides 字段映射')
+  const submit = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('恢复并继续'))
+  assert.ok(submit && submit.disabled, 'DT-01 未裁定：恢复提交按钮锁定')
+  // 修订表同时保留旧修订
+  const snaps = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('快照修订'))
+  assert.ok(snaps && snaps.textContent.includes('R1'), '快照修订表可查')
+})
+
+test('FEAT-85 详情：工作空间面板字段齐全、读取失败显示未知与重试；节点成果不可用不冒充内容', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  const wsCard = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('工作空间信息'))
+  assert.ok(wsCard, '详情含工作空间面板')
+  const ws = wsCard.textContent
+  for (const field of ['模式', '仓库', '工作分支', '当前 HEAD', 'base HEAD', '集成状态', '活动锁', '清理状态']) {
+    assert.ok(ws.includes(field), '工作空间面板含 ' + field)
+  }
+  assert.ok(ws.includes('ISOLATED_WRITE'), '模式取值来自注册表')
+  assert.ok(ws.includes('dev-t-a1'), '工作分支来自注册表')
+  assert.ok(ws.includes('aaaa1111bb'), '当前 HEAD 显示短哈希：' + ws.slice(0, 400))
+  assert.ok(ws.includes('lock_acquired'), '活动锁可见')
+  assert.ok(ws.includes('未知 / 不可用'), '缺值字段显示未知，不用空白冒充')
+  // 逻辑运行读取失败：显式错误 + 重试入口，不把缓存当事实
+  await backToList()
+  await openTask('T-E1')
+  assert.ok(container.textContent.includes('逻辑运行摘要读取失败'), '读取失败有可见错误：' + container.textContent.slice(0, 300))
+  const errWs = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('工作空间信息'))
+  assert.ok(errWs.textContent.includes('工作空间信息读取失败'), '工作空间面板显示读取失败')
+  assert.ok(Array.from(errWs.querySelectorAll('button')).some((b) => (b.textContent || '').includes('重试读取')), '提供重试入口')
+  assert.ok(errWs.textContent.includes('不把过时缓存当作当前事实'), '写明不把缓存当事实')
+  // 正式记录通道不可用：只显示尝试元数据，不冒充成果正文
+  runState.recordsFail = true
+  const refreshBtn = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '刷新列表')
+  await clickEl(refreshBtn, 6)
+  assert.ok(container.textContent.includes('节点成果正文不可用'), '记录通道不可用时给出明确降级说明')
+  assert.ok(container.textContent.includes('不冒充成果内容'), '写明不冒充成果内容')
+  runState.recordsFail = false
+  await backToList()
+})
+
+test('FEAT-85 详情：PAUSED 指导经 vwf.run.control 提交；控制按钮名对应实际 action', async () => {
+  await openRunsTab()
+  await openTask('T-P1')
+  const card = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('提交指导'))
+  assert.ok(card, 'PAUSED 显示暂停卡')
+  assert.ok(card.textContent.includes('USER_PAUSE'), '暂停卡显示暂停原因')
+  assert.ok(card.textContent.includes('先补测试再继续'), '暂停卡显示已有指导')
+  assert.ok(card.textContent.includes('暂停指导不属人工业务结果'), '不把暂停指导误标为人工业务结果')
+  // 已有指导时提交按钮因空输入禁用
+  const submit = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('提交指导'))
+  assert.ok(submit && submit.disabled, '无输入时指导提交禁用')
+  // 输入后提交 → 走 vwf.run.control guidance
+  const ta = card.querySelector('textarea')
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(ta, '补测试再继续')
+    ta.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+  })
+  const submit2 = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('提交指导'))
+  assert.ok(!submit2.disabled, '有输入后指导提交可用')
+  await clickEl(submit2, 6)
+  assert.equal(runState.controlCalls.length, 1, '指导提交走控制通道：' + JSON.stringify(runState.controlCalls))
+  assert.equal(runState.controlCalls[0].action, 'guidance', '指导 action = guidance')
+  assert.equal(runState.controlCalls[0].logical_run_id, 'lr-p', '指导按逻辑运行提交')
+  assert.equal(runState.controlCalls[0].text, '补测试再继续', '指导正文随请求提交')
+  assert.ok(card.textContent.includes('恢复入口'), '暂停卡含恢复入口')
+  assert.ok(card.textContent.includes('resume_paused'), '恢复参数映射含 resume_paused')
+  assert.ok(card.textContent.includes('DT-01-ui-resume-attribution'), '恢复提交路径受阻有明确标注')
+  await backToList()
+  // 控制按钮名对应实际 action（RUNNING 运行才可用暂停/立即中断）
+  await openTask('T-R1')
+  const ctl = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行控制'))
+  assert.ok(ctl, '运行控制卡渲染')
+  const ctlText = ctl.textContent
+  assert.ok(ctlText.includes('暂停在最近完成节点的检查点后生效'), '暂停说明对应检查点语义')
+  assert.ok(ctlText.includes('立即中断不等检查点'), '立即中断说明对应即时中止语义')
+  const pauseBtn = Array.from(ctl.querySelectorAll('button')).find((b) => (b.textContent || '').includes('暂停'))
+  const intBtn = Array.from(ctl.querySelectorAll('button')).find((b) => (b.textContent || '').includes('立即中断'))
+  assert.ok(pauseBtn && !pauseBtn.disabled, 'RUNNING 可暂停')
+  assert.ok(intBtn && !intBtn.disabled, 'RUNNING 可立即中断')
+  await backToList()
+})
+
+test('FEAT-85 详情：结果 / Lifecycle / 完成类型分层显示（不塌缩为成功失败徽标）', async () => {
+  await openRunsTab()
+  await openTask('T-B1')
+  const locator = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行定位'))
+  assert.ok(locator, '运行定位卡渲染')
+  const text = locator.textContent
+  assert.ok(text.includes('生命周期'), '生命周单独成层：' + text.slice(0, 300))
+  assert.ok(text.includes('COMPLETED'), '生命周期取值可见')
+  assert.ok(text.includes('完成类型'), '完成类型单独成层')
+  assert.ok(text.includes('DELIVERED'), '完成类型取值来自 completion.type')
+  await backToList()
+  // 未声明完成类型时如实标注
+  await openTask('T-C2')
+  const locator2 = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行定位'))
+  assert.ok(locator2.textContent.includes('未声明完成类型'), '无完成类型时如实标注而非留白')
+  await backToList()
+})
+
+test('FEAT-85 窄屏与键盘：详情在同页切换、控件可聚焦、窄屏折行样式存在', async () => {
+  const css = styleText.join('\n')
+  assert.match(css, /\.vwf-rd-main[^`]*grid-template-columns/, '详情为定位 + 出口的网格布局')
+  assert.match(css, /@media \(max-width: 560px\)[^`]*\.vwf-rd-main[^}]*grid-template-columns:1fr/, '窄屏下详情折为单列')
+  assert.match(css, /\.vwf-run-row:focus-visible[^`]*outline/, '列表行有可见键盘焦点')
+  assert.match(css, /\.vwf-node-dir-row:focus-visible/, '节点目录有可见键盘焦点')
+  assert.match(css, /\.vwf-tab:focus-visible/, '页签有可见键盘焦点')
+  assert.match(css, /prefers-reduced-motion/, '尊重减少动态效果设置')
+  // 详情与列表在同一页面切换（不是弹窗），返回按钮可聚焦
+  await openRunsTab()
+  await openTask('T-A1')
+  const back = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').includes('返回列表'))
+  assert.equal(back.tagName, 'BUTTON', '返回控件是原生按钮（键盘可达）')
+  assert.ok(!container.querySelector('.vwf-rd-main[role="dialog"]'), '详情不是模态层，避免焦点被困')
+  await backToList()
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FEAT-100 设置页信息架构对齐原型（V-1~V-6）
+// 原型基准：packages/dsh-visual-workflow/prototypes/ui-workbench/prototype-v2.js
+//   · 顶部导航 3 页签 流程库 / 运行 / 角色
+//   · 流程库子页签 全部 / 内置 / 我的
+//   · 运行列表按工作空间分组，组内 需处理 → 进行中 → 已完成，人工门禁队列并入列表
+//   · 运行记录点击后在同级大工作区层打开详情
+//   · 两页同一套语义 token（浅色不出现灰白混用）
+//   · 内置记录操作 查看流程 / 模型设置，无删除按钮
+// ═══════════════════════════════════════════════════════════════════════════
+
+// 待处理项在列表行上仍带的人工门禁位次（原型保留「一次裁决一张」这条信息）
+test('FEAT-100 V-1：顶部导航为 流程库 / 运行 / 角色 三个页签，角色库有独立入口', async () => {
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush(); await flush()
+  })
+  const navs = Array.from(fresh.querySelectorAll('.vwf-tabs [data-vwf-nav]'))
+  assert.deepEqual(navs.map((b) => b.getAttribute('data-vwf-nav')), ['templates', 'dashboard', 'roles'], '导航为三个页签')
+  const labels = navs.map((b) => (b.textContent || '').replace(/\s*\d+\s*$/, '').trim())
+  assert.deepEqual(labels, ['流程库', '运行', '角色'], '页签文案与原型一致：' + JSON.stringify(labels))
+  // 页面归属：每个页签切到各自的内容
+  for (const [key, marker] of [['templates', '[data-vwf-lib-filter]'], ['dashboard', '.vwf-run-list'], ['roles', '[data-vwf-roles-tab]']]) {
+    await act(async () => { fresh.querySelector(`[data-vwf-nav="${key}"]`).click(); await flush() })
+    assert.ok(fresh.querySelector(marker), key + ' 页签渲染对应内容：' + marker)
+  }
+  // 角色库与模板编辑画布互不耦合：工作区里没有角色库入口（V-1 的「不再嵌于」）
+  await act(async () => {
+    fresh.querySelector('[data-vwf-nav="templates"]').click()
+    await flush()
+    byText(fresh, '编辑').click()
+    await flush()
+  })
+  const dialog = fresh.querySelector('dialog.vwf-editor-dialog[open]')
+  assert.ok(dialog, '模板工作区已打开')
+  assert.equal(fresh.querySelector('.vwf-role-zone'), null, '画布工具栏没有角色库常驻区')
+  assert.equal(byText(dialog, '管理角色'), undefined, '模板编辑画布区域不再嵌角色库入口')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+})
+
+test('FEAT-100 V-2：流程库子页签 全部 / 内置 / 我的，默认全部且过滤正确、键盘可达', async () => {
+  state.wfList = [
+    { id: 'wf-builtin-1', name: '内置流程一', description: '', builtin: true, dsl: JSON.parse(JSON.stringify(SEED_DSL)) },
+    { id: 'wf-builtin-2', name: '内置流程二', description: '', builtin: true, dsl: JSON.parse(JSON.stringify(SEED_DSL)) },
+    { id: 'wf-mine-1', name: '我的流程一', description: '', builtin: false, dsl: JSON.parse(JSON.stringify(SEED_DSL)) },
+  ]
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush(); await flush()
+  })
+  const segs = () => Array.from(fresh.querySelectorAll('[data-vwf-lib-filter]'))
+  assert.deepEqual(segs().map((b) => b.getAttribute('data-vwf-lib-filter')), ['all', 'builtin', 'mine'], '三个子页签')
+  assert.deepEqual(segs().map((b) => (b.textContent || '').trim()), ['全部 3', '内置 2', '我的 1'], '标签带分段计数：' + JSON.stringify(segs().map((b) => b.textContent)))
+  const names = () => Array.from(fresh.querySelectorAll('.vwf-list-name')).map((el) => el.textContent)
+  // 默认「全部」
+  assert.equal(segs().find((b) => b.getAttribute('aria-selected') === 'true').getAttribute('data-vwf-lib-filter'), 'all', '默认停在全部')
+  assert.equal(names().length, 3, '全部显示三条')
+  // 内置：只剩内置记录
+  await act(async () => { segs()[1].click(); await flush() })
+  assert.deepEqual(names().sort(), ['内置流程一', '内置流程二'], '内置子页签只留内置记录：' + JSON.stringify(names()))
+  // 我的：只剩自定义记录
+  await act(async () => { segs()[2].click(); await flush() })
+  assert.deepEqual(names(), ['我的流程一'], '我的子页签只留自定义记录：' + JSON.stringify(names()))
+  // 键盘可达：真按钮，可用 Enter/Space 触发（原生 button 语义即可用键盘到达）
+  for (const b of segs()) assert.equal(b.tagName, 'BUTTON', '子页签是原生按钮（键盘可达）')
+  // 子页签与搜索词叠加
+  await act(async () => { segs()[0].click(); await flush() })
+  await act(async () => {
+    const input = fresh.querySelector('input[aria-label]')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    setter.call(input, '内置')
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+  })
+  assert.deepEqual(names().sort(), ['内置流程一', '内置流程二'], '搜索在子页签范围内生效')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+  state.wfList = null
+})
+
+test('FEAT-100 V-3：运行列表按工作空间分组，组内 需处理 → 进行中 → 已完成；人工门禁队列并入列表且不丢项', async () => {
+  // 「需处理 → 进行中」的排序只有在混合档位的分组里才真正被检验。既有样本里工作空间A 恰好
+  // 三条全是待处理（无法区分），因此临时补一条同空间、时间更新的进行中任务：按时间倒序它会
+  // 排在最前，只有按组内档位排序才会落到三条待处理之后。
+  runState.logical['lr-a-mix'] = {
+    logical_run_id: 'lr-a-mix', schema: 1, task_id: 'T-A1MIX', template_id: 'wf-runs', title: '混合档位运行', created_at: 8900, updated_at: 9000,
+    lifecycle: { state: 'RUNNING' }, terminal: false, completion: null,
+    segments: [{ index: 1, run_id: 'run-a-mix', trigger: 'start', started_at: 9000, status: 'running', active: true }],
+    snapshots: [{ revision: 1, created_at: 8900, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: {} }],
+    node_attempts: [], business_outcomes: {}, guidance: [], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+    last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [], formal_records: null,
+    workspace: WS_A, human_decisions: [], consumed_decisions: {},
+  }
+  runState.runs.push({ id: 'run-a-mix', taskId: 'T-A1MIX', name: '完整功能开发', workflowId: 'wf-runs', status: 'running', phase: '实现', startedAt: 9000, logical_run_id: 'lr-a-mix', segment: 1, segment_count: 1, logical_state: 'RUNNING' })
+  // 测试桩不跑轮询，列表只在挂载时取一次：先离开运行页签再进来，让新样本进入本轮取数
+  await clickEl(container.querySelector('[data-vwf-nav="templates"]'), 3)
+  await openRunsTab()
+  await act(async () => { await flush(); await flush(); await flush(); await flush() })
+  // 原独立的人工门禁队列卡（标题「人工门禁队列（一次裁决一张）」）不再单独占一块
+  assert.ok(!container.textContent.includes('人工门禁队列'), '原独立的人工门禁队列卡已并入列表')
+  const badgeTextOf = (row) => {
+    const t = row.textContent || ''
+    if (t.includes('等待人工') || t.includes('受阻') || t.includes('PAUSED')) return 0
+    if (t.includes('running')) return 1
+    if (t.includes('DONE')) return 2
+    return 3
+  }
+  // 一页看全量任务，才能对「组内顺序」做整组断言（默认每页 10 条会截断分组）
+  const sizeSel = Array.from(container.querySelectorAll('select')).find((s) => Array.from(s.options).map((o) => o.value).join() === '10,20,50,100')
+  await selectValue(sizeSel, '100')
+  const groups = Array.from(container.querySelectorAll('.vwf-run-group'))
+  assert.ok(groups.length >= 2, '列表按工作空间分组：' + groups.length + ' 组')
+  let mixed = 0
+  for (const g of groups) {
+    const ranks = Array.from(g.querySelectorAll('.vwf-run-row')).map(badgeTextOf)
+    assert.deepEqual(ranks, ranks.slice().sort((a, b) => a - b), '组内为 需处理 → 进行中 → 已完成：' + (g.querySelector('.vwf-run-group-head').textContent || ''))
+    if (ranks.length > 1 && ranks[0] === 0 && ranks.some((x) => x > 0)) mixed++
+  }
+  assert.ok(mixed >= 1, '至少有一个分组把需处理项排在进行中/已完成之前（顺序断言不是空过）')
+  // 决定性证据：混合档位分组内，最后开始的进行中任务仍排在待处理任务之后
+  const groupOf = (label) => groups.find((g) => (g.querySelector('.vwf-run-group-head').textContent || '').includes(label))
+  const rankListOf = (g) => Array.from(g.querySelectorAll('.vwf-run-row')).map(badgeTextOf)
+  assert.deepEqual(rankListOf(groupOf('工作空间A')), [0, 0, 0, 1], '工作空间A：三条待处理在前，最新开始的进行中任务在后（按时间倒序它会排到最前）')
+  assert.deepEqual(rankListOf(groupOf('工作空间B')), [1, 2], '工作空间B：进行中在已完成之前')
+  // 待处理项一个不少：页签计数与「待处理」筛选同口径，且原队列里的项都在
+  const badge = container.querySelector('[data-vwf-nav="dashboard"] .vwf-badge')
+  assert.ok(badge, '运行页签常驻待处理计数')
+  await selectValue(filterSelect(1), 'attention')
+  const attRows = runRows()
+  assert.equal(attRows.length, Number(badge.textContent), '页签计数与待处理筛选同口径')
+  const attText = attRows.map((r) => r.textContent || '').join('\n')
+  for (const id of ['T-A1', 'T-C2', 'T-P1']) assert.ok(attText.includes(id), '待处理项 ' + id + ' 并入列表后仍可见')
+  // 人工门禁位次信息保留（原队列卡上的「裁决中 / 排队 #n」）
+  const a1 = attRows.find((r) => (r.textContent || '').includes('T-A1'))
+  const c2 = attRows.find((r) => (r.textContent || '').includes('T-C2'))
+  assert.ok((a1.textContent || '').includes('裁决中'), '裁决中的运行在列表行上标出：' + a1.textContent)
+  assert.ok((c2.textContent || '').includes('排队 #'), '排队位次在列表行上标出：' + c2.textContent)
+  await selectValue(filterSelect(1), 'all')
+  await selectValue(sizeSel, '10')
+})
+
+test('FEAT-100 V-4：点击运行记录在同级大工作区层打开详情，关闭后回到列表并保留筛选与位置', async () => {
+  await openRunsTab()
+  const sizeSelV4 = Array.from(container.querySelectorAll('select')).find((s) => Array.from(s.options).map((o) => o.value).join() === '10,20,50,100')
+  await selectValue(sizeSelV4, '10')
+  await selectValue(filterSelect(1), 'done')
+  const nextBtn = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '下一页')
+  await clickEl(nextBtn)
+  const beforePage = container.textContent.includes('第 2/2 页')
+  assert.ok(beforePage, '先翻到第 2 页')
+  const target = runRowWith('T-X1')
+
+  await clickEl(target, 6)
+  // 与模板编辑同级：同一 .vwf-editor-dialog 工作区层承载
+  const dialog = container.querySelector('dialog.vwf-editor-dialog[open]')
+  assert.ok(dialog, '详情在原生 top-layer 工作区层里打开')
+  assert.ok(dialog.querySelector('.vwf-rd-main'), '工作区层内是 Logical Run 详情')
+  assert.equal(dialog.querySelector('.vwf-rd-main').getAttribute('role'), null, '详情本身不再自建对话框语义')
+  assert.ok(dialog.querySelector('button'), '工作区层提供关闭操作')
+  // 列表仍在（未卸载）：关闭后回到原筛选与位置，不需要重建
+  assert.ok(runRows().length > 0, '详情打开时列表仍在挂载（关掉即回原位）')
+  await backToList()
+  assert.equal(container.querySelector('dialog.vwf-editor-dialog[open]'), null, '关闭后工作区层收起')
+  assert.ok(container.textContent.includes('第 2/2 页'), '返回后保留分页位置')
+  assert.equal(filterSelect(1).value, 'done', '返回后保留状态筛选')
+  assert.ok(runRowWith('T-X1'), '返回后列表可用')
+  await selectValue(filterSelect(1), 'all')
+})
+
+test('FEAT-100 V-5：流程库与运行页共用同一套语义 token（浅色下不出现灰白混用）', async () => {
+  const css = styleText.join('\n')
+  // 运行列表（设置面板内，与流程库同表面）只引用 --vwf-*
+  const runListRules = ['\\.vwf-run-row\\s*\\{[^}]*\\}', '\\.vwf-run-group-head\\s*\\{[^}]*\\}', '\\.vwf-run-row-note\\s*\\{[^}]*\\}', '\\.vwf-filter\\s*\\{[^}]*\\}', '\\.vwf-empty\\s*\\{[^}]*\\}']
+  for (const re of runListRules) {
+    const m = new RegExp(re).exec(css)
+    assert.ok(m, '取到规则：' + re)
+    assert.ok(!/--dsw-alias-/.test(m[0]), '设置面板内的运行页规则不得引用宿主 alias：' + m[0].slice(0, 90))
+    assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(m[0]), '设置面板内的运行页规则不得写死颜色：' + m[0].slice(0, 90))
+  }
+  // 运行详情（大工作区层内，与模板编辑同表面）只引用 --vwf-wb-*
+  for (const re of ['\\.vwf-node-dir-row\\s*\\{[^}]*\\}', '\\.vwf-note\\s*\\{[^}]*\\}', '\\.vwf-sec\\s*\\{[^}]*\\}', '\\.vwf-rd-scroll\\s*\\{[^}]*\\}']) {
+    const m = new RegExp(re).exec(css)
+    assert.ok(m, '取到规则：' + re)
+    assert.ok(!/--dsw-alias-/.test(m[0]), '工作区内的详情规则走 --vwf-wb-*，不直写宿主 alias：' + m[0].slice(0, 90))
+    assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(m[0]), '工作区内的详情规则不得写死颜色：' + m[0].slice(0, 90))
+  }
+  // 两页共用同一组浅色底（画布 / 表面成对定义，深浅各有取值）
+  assert.match(css, /--vwf-canvas:\s*#F1F4FA/, '浅色画布 token 就位')
+  assert.match(css, /--vwf-surface:\s*#FFFFFF/, '浅色表面 token 就位')
+  // 运行详情与模板编辑同层：同一 .vwf-editor-dialog 承载（V-4 + V-5 同源）
+  assert.match(css, /\.vwf-editor-dialog \{[^}]*--vwf-wb-canvas/, '工作区层自带成对语义 token')
+})
+
+test('FEAT-100 V-6：内置记录只提供 查看流程 / 模型设置（无删除与置灰删除），自定义记录不回退', async () => {
+  state.wfList = [
+    { id: 'wf-builtin-1', name: '内置流程', description: 'builtin', builtin: true, dsl: JSON.parse(JSON.stringify(SEED_DSL)) },
+    { id: 'wf-mine-1', name: '我的流程', description: 'mine', builtin: false, dsl: JSON.parse(JSON.stringify(SEED_DSL)) },
+  ]
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush(); await flush()
+  })
+  const rowOf = (name) => Array.from(fresh.querySelectorAll('.vwf-list-item')).find((r) => (r.textContent || '').includes(name))
+  const btnsOf = (row) => Array.from(row.querySelectorAll('button')).map((b) => (b.textContent || '').trim())
+  const builtinRow = rowOf('内置流程')
+  assert.deepEqual(btnsOf(builtinRow), ['查看流程', '模型设置'], '内置记录只有 查看流程 / 模型设置：' + JSON.stringify(btnsOf(builtinRow)))
+  assert.ok(!btnsOf(builtinRow).some((x) => x.includes('删除')), '内置记录不提供删除按钮（含置灰态）')
+  assert.equal(builtinRow.querySelectorAll('button:disabled').length, 0, '内置记录没有置灰按钮')
+  // 自定义记录不回退：编辑 + 删除
+  const mineRow = rowOf('我的流程')
+  assert.deepEqual(btnsOf(mineRow), ['编辑', '删除'], '自定义记录仍为 编辑 / 删除：' + JSON.stringify(btnsOf(mineRow)))
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+  state.wfList = null
 })
 
 test('清理：卸载冒烟测试根节点', async () => {

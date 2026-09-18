@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "confirmed_at": "2026-09-14T10:05:31Z",
+  "tasks": 10,
+  "existing_tasks_unchanged": 23,
+  "spec_sections_each": 19,
+  "acceptance_criteria": 41,
+  "local_links": 166,
+  "errors": [],
+  "definition_check": "10/10 通过；未决产品事项 0；V1 基线与无人值守许可已确认",
+  "source": "本批 LOC-024 至 LOC-033 定义材料"
+}

@@ -389,6 +389,168 @@ function testProofBinding() {
   return true
 }
 
+// ── 测试 5：产品 DSH 重启后恢复扫描与保留态清理拒绝（LOC-009）────────────
+function testRestartRecoveryScan() {
+  console.log('\n━━ 测试 5：重启后恢复扫描与保留态清理拒绝（LOC-009）━━')
+  const repo = initRepo()
+  const workRoot = mkdtempSync(join(fixtureRoot, 'recover-'))
+  const hostScript = join(dirname(fileURLToPath(import.meta.url)), '..', 'workspace-isolation-host.mjs')
+
+  const alloc = runNode([hostScript, 'allocate', JSON.stringify({
+    logical_run_id: 'run-rec', template_id: 'construction',
+    repository_path: repo, repository: 'org/demo',
+    work_root: workRoot, task_identity: 'loc-009-recovery',
+  })])
+  if (!alloc.ok) { console.error('allocate 失败:', alloc.stderr); return false }
+
+  // Run 进入 WAITING_HUMAN（人工决策挂起），写未提交文件，取 integration 锁不释放
+  const lc = runNode([hostScript, 'setLifecycle', JSON.stringify({ logical_run_id: 'run-rec', lifecycle: 'WAITING_HUMAN', work_root: workRoot })])
+  if (!lc.ok) { console.error('setLifecycle 失败:', lc.stderr); return false }
+  const ws = JSON.parse(alloc.stdout).workspace
+  writeFileSync(join(ws.source_path, 'wip.txt'), 'run in progress\n')
+  const lock = runNode([hostScript, 'acquireLock', JSON.stringify({
+    logical_run_id: 'run-rec', resource_key: 'repo:org/demo:target:main:integration', owner: 'run-rec', work_root: workRoot,
+  })])
+  if (!lock.ok) { console.error('acquireLock 失败:', lock.stderr); return false }
+  console.log('  ✓ Run 进入 WAITING_HUMAN 且持有未释放锁')
+
+  // 另外两个保留态（PAUSED / BLOCKED）同样必须被恢复扫描识别且不被清理
+  for (const [runId, lifecycle] of [['run-paused', 'PAUSED'], ['run-blocked', 'BLOCKED']]) {
+    const a2 = runNode([hostScript, 'allocate', JSON.stringify({
+      logical_run_id: runId, template_id: 'construction',
+      repository_path: repo, repository: 'org/demo',
+      work_root: workRoot, task_identity: 'loc-009-' + runId,
+    })])
+    if (!a2.ok) { console.error(runId + ' allocate 失败:', a2.stderr); return false }
+    const l2 = runNode([hostScript, 'setLifecycle', JSON.stringify({ logical_run_id: runId, lifecycle, work_root: workRoot })])
+    if (!l2.ok) { console.error(runId + ' setLifecycle 失败:', l2.stderr); return false }
+  }
+
+  // 「重启」：恢复扫描在全新进程中执行（每次 runNode 都是独立进程，等价重启后首调）
+  const scan = runNode([hostScript, 'recoverStale', JSON.stringify({ work_root: workRoot })])
+  if (!scan.ok) { console.error('recoverStale 失败:', scan.stderr); return false }
+  const report = JSON.parse(scan.stdout).scan
+  const retained = (report.retained_workspaces || []).find((w) => w.logical_run_id === 'run-rec')
+  if (!retained || retained.lifecycle !== 'WAITING_HUMAN') {
+    console.error('恢复扫描未识别 WAITING_HUMAN workspace:', JSON.stringify(report.retained_workspaces)); return false
+  }
+  for (const [runId, lifecycle] of [['run-paused', 'PAUSED'], ['run-blocked', 'BLOCKED']]) {
+    const hit = (report.retained_workspaces || []).find((w) => w.logical_run_id === runId && w.lifecycle === lifecycle)
+    if (!hit) { console.error('恢复扫描未识别 ' + lifecycle + ' workspace'); return false }
+  }
+  const active = (report.active_locks || []).find((l) => l.logical_run_id === 'run-rec' && l.resource_key === 'repo:org/demo:target:main:integration')
+  if (!active) {
+    console.error('恢复扫描未识别未释放锁:', JSON.stringify(report.active_locks)); return false
+  }
+  console.log('  ✓ 重启后 recoverStale 识别三保留态 workspace（WAITING_HUMAN/PAUSED/BLOCKED）与未释放锁')
+
+  // 保留态清理必须被拒（包装脚本业务失败 = 进程 ok + 输出 ok:false）
+  const clean = runNode([hostScript, 'cleanup', JSON.stringify({ logical_run_id: 'run-rec', work_root: workRoot, opts: {} })])
+  if (!clean.ok) { console.error('cleanup 调用失败:', clean.stderr); return false }
+  if (JSON.parse(clean.stdout).ok) { console.error('WAITING_HUMAN workspace 不应被清理'); return false }
+  if (!existsSync(join(ws.source_path, 'wip.txt'))) {
+    console.error('WAITING_HUMAN 工作区文件被破坏'); return false
+  }
+  console.log('  ✓ WAITING_HUMAN 工作区清理被拒，现场文件完好')
+
+  // context：身份 + 事件切片；每 Run 事件按 #79 目录组织落盘 records/
+  const ctx = runNode([hostScript, 'context', JSON.stringify({ logical_run_id: 'run-rec', work_root: workRoot })])
+  if (!ctx.ok) { console.error('context 失败:', ctx.stderr); return false }
+  const ctxData = JSON.parse(ctx.stdout)
+  if (!ctxData.workspace || ctxData.workspace.lifecycle !== 'WAITING_HUMAN') {
+    console.error('context 未返回 workspace 身份'); return false
+  }
+  const evTypes = (ctxData.events || []).map((e) => e.type)
+  if (!evTypes.includes('workspace_allocated') || !evTypes.includes('lock_acquired')) {
+    console.error('context 事件切片缺失:', evTypes.join(',')); return false
+  }
+  const eventsFile = join(ws.records_path, 'events.json')
+  if (!existsSync(eventsFile)) {
+    console.error('每 Run 事件切片未落盘:', eventsFile); return false
+  }
+  const persisted = JSON.parse(readFileSync(eventsFile, 'utf8'))
+  const persistedTypes = (persisted.events || []).map((e) => e.type)
+  if (!persistedTypes.includes('lock_acquired')) {
+    console.error('events.json 缺 lock_acquired 事件:', persistedTypes.join(',')); return false
+  }
+  console.log('  ✓ context 提供身份+事件切片，records/<run>/events.json 已按 #79 目录组织落盘')
+
+  console.log('  ✅ 测试 5 通过')
+  return true
+}
+
+// ── 测试 6：模板策略注册表与 optimize resource_kind 解析（LOC-009）───────
+function testTemplatePolicyRegistry() {
+  console.log('\n━━ 测试 6：模板策略注册表与 resource_kind 解析（LOC-009）━━')
+  const repo = initRepo()
+  const workRoot = mkdtempSync(join(fixtureRoot, 'policy-'))
+  const hostScript = join(dirname(fileURLToPath(import.meta.url)), '..', 'workspace-isolation-host.mjs')
+
+  // 注册表权威：四类正式模板身份与声明
+  const reg = runNode([hostScript, 'templateRegistry', JSON.stringify({})])
+  if (!reg.ok) { console.error('templateRegistry 失败:', reg.stderr); return false }
+  const registry = JSON.parse(reg.stdout).registry
+  const expectedKeys = ['construction', 'optimize', 'diagnose', 'explore']
+  for (const k of expectedKeys) {
+    if (!registry || !registry[k]) { console.error('注册表缺少模板身份: ' + k); return false }
+  }
+  if (registry.construction.mode !== 'ISOLATED_WRITE' || registry.explore.mode !== 'ISOLATED_READ' || registry.diagnose.freeze_from !== 'diagnose') {
+    console.error('注册表声明与契约不一致:', JSON.stringify(registry)); return false
+  }
+  if (registry.optimize.resource_kinds.git !== 'ISOLATED_WRITE' || registry.optimize.resource_kinds.document !== 'SANDBOX') {
+    console.error('optimize resource_kinds 声明与契约不一致'); return false
+  }
+  console.log('  ✓ templateRegistry 返回四类身份与策略声明（id 猜测退役的权威来源）')
+
+  // optimize + files → ISOLATED_WRITE（git worktree）
+  const allocFiles = runNode([hostScript, 'allocate', JSON.stringify({
+    logical_run_id: 'run-opt-files', template_id: 'optimize', resource_kind: 'files',
+    repository_path: repo, repository: 'org/demo',
+    work_root: workRoot, task_identity: 'loc-009-opt-files',
+  })])
+  if (!allocFiles.ok) { console.error('optimize/files allocate 失败:', allocFiles.stderr); return false }
+  const wsFiles = JSON.parse(allocFiles.stdout).workspace
+  if (wsFiles.workspace_mode !== 'ISOLATED_WRITE' || wsFiles.provider_id !== 'GitWorktreeWorkspace') {
+    console.error('optimize/files 应解析为 ISOLATED_WRITE git 工作区:', wsFiles.workspace_mode, wsFiles.provider_id); return false
+  }
+  console.log('  ✓ optimize + resource_kind=files → ISOLATED_WRITE（独立 branch + worktree）')
+
+  // optimize + document → SANDBOX（目录沙箱，无 git）
+  const allocDoc = runNode([hostScript, 'allocate', JSON.stringify({
+    logical_run_id: 'run-opt-doc', template_id: 'optimize', resource_kind: 'document',
+    work_root: workRoot, task_identity: 'loc-009-opt-doc',
+  })])
+  if (!allocDoc.ok) { console.error('optimize/document allocate 失败:', allocDoc.stderr); return false }
+  const wsDoc = JSON.parse(allocDoc.stdout).workspace
+  if (wsDoc.workspace_mode !== 'SANDBOX' || wsDoc.provider_id !== 'DirectorySandboxWorkspace') {
+    console.error('optimize/document 应解析为 SANDBOX:', wsDoc.workspace_mode, wsDoc.provider_id); return false
+  }
+  console.log('  ✓ optimize + resource_kind=document → SANDBOX（目录沙箱）')
+
+  // optimize 缺 resource_kind → fail closed（不再缺省猜测）
+  const allocMissing = runNode([hostScript, 'allocate', JSON.stringify({
+    logical_run_id: 'run-opt-missing', template_id: 'optimize',
+    work_root: workRoot, task_identity: 'loc-009-opt-missing',
+  })])
+  if (!allocMissing.ok) { console.error('allocate 调用失败:', allocMissing.stderr); return false }
+  const missingOut = JSON.parse(allocMissing.stdout)
+  if (missingOut.ok) { console.error('optimize 缺 resource_kind 不应分配成功'); return false }
+  if (!String(missingOut.error || '').includes('resource_kind')) {
+    console.error('缺 resource_kind 错误信息不明确:', missingOut.error); return false
+  }
+  console.log('  ✓ optimize 缺 resource_kind 时 fail closed 并给出明确错误')
+
+  // 清理两个成功分配（WAITING_HUMAN 语义不适用，直接终态后清理）
+  runNode([hostScript, 'setLifecycle', JSON.stringify({ logical_run_id: 'run-opt-files', lifecycle: 'COMPLETED', work_root: workRoot })])
+  runNode([hostScript, 'setLifecycle', JSON.stringify({ logical_run_id: 'run-opt-doc', lifecycle: 'COMPLETED', work_root: workRoot })])
+  const c1 = runNode([hostScript, 'cleanup', JSON.stringify({ logical_run_id: 'run-opt-files', work_root: workRoot, opts: {} })])
+  const c2 = runNode([hostScript, 'cleanup', JSON.stringify({ logical_run_id: 'run-opt-doc', work_root: workRoot, opts: {} })])
+  if (!c1.ok || !c2.ok) { console.error('清理失败:', c1.stderr || c2.stderr); return false }
+
+  console.log('  ✅ 测试 6 通过')
+  return true
+}
+
 // ── 主程序 ──────────────────────────────────────────────────────────────
 console.log('═══════════════════════════════════════════════════════════════')
 console.log('#93 DSH Runtime Integration 真机验收')
@@ -398,7 +560,7 @@ console.log('══════════════════════�
 let pass = 0
 let fail = 0
 
-for (const fn of [testDualRunIsolation, testIntegrationLock, testConcurrentLock, testLockInitNotStale, testSnapshotUpdate, testProofBinding]) {
+for (const fn of [testDualRunIsolation, testIntegrationLock, testConcurrentLock, testLockInitNotStale, testSnapshotUpdate, testProofBinding, testRestartRecoveryScan, testTemplatePolicyRegistry]) {
   try {
     const r = fn()
     // async 测试（并发场景）返回 Promise：await 后按真实结果计分

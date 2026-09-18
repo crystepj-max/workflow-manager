@@ -474,11 +474,29 @@ test('fanout ITEM_CAP 与 AGENT_CAP 均在任何 agent() 前返回可读终态',
 })
 
 // ---------- 候选五 C5 规则 B：角色文件文件名 ⊆ 模板声明（契约一致性，repo 级） ----------
-test('T8 契约一致性：dsh/roles/*.md 反引号文件名 ⊆ 模板 output.files ∪ {STATE.md}', () => {
-  const declared = new Set(['STATE.md'])
-  tpl.nodes.forEach((n) => {
-    if (n.output && n.output.files && typeof n.output.files === 'object') Object.keys(n.output.files).forEach((p) => declared.add(p))
-  })
+test('T8 契约一致性：dsh/roles/*.md 反引号文件名 ⊆ 全部模板 output.files ∪ 运行时公共文件', () => {
+  // 运行时公共文件：由 run 引导脚本（cwf-run-init）产出、所有角色按 run.json 引用，
+  // 不属于任何节点的产物契约，与 STATE.md 同类豁免。
+  const declared = new Set(['STATE.md', 'run.json'])
+  // 声明集合 = 全部内置模板与自定义种子的 output.files 并集（LOC-033：角色可按
+  // 「以节点契约为准」示例引用任一模板声明的产物名，如建设 uat-card.md、诊断
+  // regression-report.md；跨模板未被任何节点声明的文件名仍会被拦截）。
+  const tplDir = path.join(here, '../../templates')
+  const tplFiles = []
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (e.name.endsWith('.json')) tplFiles.push(p)
+    }
+  }
+  walk(tplDir)
+  for (const f of tplFiles) {
+    const bp = JSON.parse(readFileSync(f, 'utf8'))
+    ;(bp.nodes || []).forEach((n) => {
+      if (n.output && n.output.files && typeof n.output.files === 'object') Object.keys(n.output.files).forEach((p) => declared.add(p))
+    })
+  }
   // 角色（#81）只表达能力，不声明产物契约：具体产物文件名由所在模板的
   // output.files 提供。探索模板（#82）落地其蓝图时再引入自己的产物名。
   const rolesDir = path.join(here, '../../dsh/roles')

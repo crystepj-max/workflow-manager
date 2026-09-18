@@ -1,0 +1,75 @@
+{
+  "task_id": "LOC-019",
+  "run_id": "loc-019-r1",
+  "task_name": "内置模板默认模型 DeepSeek 化",
+  "branch": "dev-loc-019-r1",
+  "status": "等待验收",
+  "decision": "accept",
+  "decided_by": "松哥",
+  "decided_at": "2026-09-13T14:23:28.000Z",
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-13T11:54:38.094Z",
+      "produced_by": "workbuddy-loc019-requirements",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-13T11:54:38.157Z",
+      "produced_by": "workbuddy-loc019-design"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": "2026-09-13T12:11:02.415Z",
+      "produced_by": "workbuddy-loc019-dev",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a1.json",
+      "created_at": "2026-09-13T12:21:53.815Z",
+      "produced_by": "review-agent-dc23e649",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a3.json",
+      "created_at": "2026-09-13T13:44:47.029Z",
+      "produced_by": "test-agent-2cc67f79",
+      "summary": {
+        "verdict": "pass",
+        "environment": "worktree dev-loc-019-r1 @ f410900aeb83135257f02d06806fb148361281e7；node v24.14.1；macOS 26；无头独立会话（UI 模板库可视化核对与真实点击发起运行属 UAT，未验证）。独立重跑：npm run generate、builtin-template-model-defaults 4/4、四套 projectToVwf→合成现存覆盖→validateBlueprint 全 ok=true、npm test 477/477、validate.mjs 绿、release:verify 完整执行 4m6s；未改动实现文件、未提交"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a3.json",
+      "created_at": "2026-09-13T14:26:09.409Z",
+      "produced_by": "workbuddy-loc019-accept",
+      "summary": {
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "松哥",
+        "decided_at": "2026-09-13T14:23:28.000Z",
+        "verified_branch": "dev-loc-019-r1",
+        "verified_head": "f410900aeb83135257f02d06806fb148361281e7"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-019-r1",
+    "file_count": 20,
+    "total_bytes": 62872
+  },
+  "generated_at": "2026-09-13T14:28:29.275Z"
+}

@@ -24,14 +24,19 @@
   临时图与编辑器实时查看走 CLI `generate.mjs compile` 兜底（DSL 逆投影回蓝图后编译，
   行为由蓝图内容决定）。磁盘产物有「改蓝图未重生成 → 跑旧产物」的 staleness 特性（与 DSH 入口一致，
   validate 步骤②兜底）。
-- **校验器（校验内核）**：唯一规则集 = `scripts/validate-core.cjs`（候选二 T-IMP-13，CJS 单文件）。
+- **校验器（校验内核）**：唯一规则集 = `scripts/validate-core.cjs`（候选二 T-IMP-13，规则集
+  CJS 单文件；蓝图 ↔ DSL 投影不在其中——委托「投影内核」只转发导出）。
   双层：**结构层** `validateStructure`（走通性 / 节点边定义 / 入口唯一 / 环 / 条件与 schema 路径 /
   保留 id / maxRounds ∈ [1,9] 系统上限——框架保证，与业务无关）与**业务规则层** `validateBlueprint`
-  （蓝图声明的规则：异源硬规则、verifyBranch 联动、onMaxRounds 枚举、output.files、单标识、
+  （蓝图声明的规则：异源档位、verifyBranch 联动、onMaxRounds 枚举、output.files、单标识、
   requireModels 产品收紧选项）。引擎 ESM import；宿主经 fs 读源码、vm 内求值缓存（热路径内存执行）。
   原 `validate-blueprint.mjs` 与宿主 `validateDsl`/`heteroCheck`/拓扑推导/COND_RE 已删除。
   错误统一带坐标键 fieldKey（node:<id>:<field> / edge:<i>:<field> / control:<field> / heteroCheck /
   onMaxRounds）；**前端文案翻译 = 优化任务**（MAP Not yet specified）。
+- **投影内核（projection core）**：蓝图 ↔ 编辑器 DSL 形态映射的唯一实现 =
+  `scripts/projection-core.cjs`（纯函数、深拷贝、无副作用）。生成器直接 import；
+  校验内核只转发导出（禁止再内嵌第二份投影——历史上双实现曾各自漂移）；宿主经插件
+  dist 加载，加载器预解析校验内核声明的内核引用。往返无损（round-trip）的权威实现在这里。
 - **布局拓扑（client）**：client 的 `successTopologyOrder`/`deriveEntryCandidates` 服务于画布分层、
   入口徽标与保存前归一——UI 关注点，插件无法 import 共享文件（vm 沙箱），保留为独立实现；
   入口唯一性的**权威判定**在校验内核（保存时宿主 sanitize 依内核拓扑重新归一）。
@@ -57,7 +62,7 @@
   （T-IMP-12 后 vwf 运行层同样折叠；编辑器图仍保留 route 节点展示）。折叠转发源 = when 路径的
   schema 声明节点（候选三修复：原取入边来源导致跳测试环节）。
 - **可信度闸门（verifyBranch）**：验证节点开工分支自检 + `verified_branch`/`verified_head` 硬校验。
-- **异源（heteroCheck）**：dev↔review 模型绑定必须不同（save/validate 层强制；运行时日志）。
+- **异源（heteroCheck）**：dev↔review 模型异源按蓝图档位（关/弱/强，默认弱）生效——save/validate 层按档位校验，运行时日志按节点 id 或角色识别并输出当前档位（LOC-021）。
 - **人工门禁（manualCheck）**：节点产出后挂起（`AWAITING_HUMAN_<节点id>` + resume 载荷），人工裁决后续跑。
 - **扇出（fanout）**：受限并行子任务节点。`items` 仅从 `$.args` 或 success 路径上的前序
   `$.results.<节点id>` 读取数组；`goal` 用 `{{item}}` 注入当前项，`output.schema` 是 per-item
@@ -125,17 +130,26 @@
   校验端与运行期对同一边取不同 id 身份）；归一化 choice id 命中 `toString`/`constructor`/`__proto__`
   等 `Object.prototype` 保留键时校验期显式拒绝（运行期普通对象 `subsequent_effects` 无法承载，否则
   该出边被静默丢弃）——两类均报真实边坐标（#159 A1/A2 复核）。
-- **执行路径（D5 正式化）**：编辑器「获取脚本」→ 粘贴主会话 → 平台 `workflow` 工具执行；
-  `wf_run` 仅在引擎可达时条件注册。**推论：脚本返回值只回到主会话，插件进程拿不到**——
-  看板只能看到事件流（阶段 / 子代理 / 日志）。
+- **执行路径（D5 正式化；LOC-015 口径修正）**：**首选**由插件工具 `wf_run` 起跑——会话给
+  `templateId` + `taskId`，插件自行编译并交给引擎，**不需要传递脚本全文**；插件是发起方，
+  脚本返回值回到插件，本次运行即一条完整 Logical Run（分段 / 任务归属 / 完成类型），
+  看板可续跑 / 暂停 / 指导。**回退**：`wf_run` 条件注册（引擎可达才注册，`host.js:2155`），
+  不可用时才改用内置 `workflow` 工具执行编译产物——**此时脚本返回值只回到主会话、插件进程
+  拿不到**，看板只能看到事件流（阶段 / 子代理 / 日志），运行记录退化为单段且 `completion=null`；
+  runbook 要求此时必须如实提示用户记录退化（`dsh/skill/SKILL.md` 运行步骤 3）。
+  注：编辑器「获取脚本」按钮已不在当前界面（`host.js:1534`：面板不再暴露预览/准备运行按钮）。
 - **`runs`**：`host.js` 里订阅 `workflow/*` 事件积累的运行记录。内存 Map + 落盘
   `~/.dsh/visual-workflow/runs/<runId>.json`（#40 起持久化）：事件驱动合并写（每 run 至多一个
   飞行中写入、尾写补最新态）、启动回载最近 20 条、磁盘容量上限 50 淘汰最旧（子进程 rm）、
   `vwf.state` 内存 miss 回落磁盘并水合；落盘内容以事件流为界（状态/阶段/日志/子代理
   label+outcome + runTag 元数据 taskId/workflowId/supersededBy），落盘失败仅终端留痕。
-- **回灌（未实现）**：让主会话把脚本最终返回值送回插件的假想通道；无此通道即无法在看板展示结果正文。
+- **回灌（未实现，本版本决策不采纳）**：让主会话把脚本最终返回值送回插件的假想通道；无此通道即无法在看板展示结果正文。
+  LOC-015 已定：不建回灌通道，正式入口统一走 `wf_run`（插件自身发起即可拿到返回值），
+  内置 `workflow` 工具直起的运行保持如实提示的退化态。
 
-## 扇出（fanout · 规划中 #18，语义已拍板未实现）
+## 扇出（fanout · Current）
+
+> **Current（main 已实现）**：受限并行 fanout 节点已在编译器与运行时落地；详细证据见 [`docs/design/workflow-capability-index.md`](docs/design/workflow-capability-index.md)。下文为 Current 语义（原 #18 规划中表述已过时，勿再引用）。
 
 - **扇出（fan-out）**：一个节点按运行时数组展开为 N 个并行子任务，聚合结果后交给下游；
   与「AI 自由拆解」相对（D1 选方案 B 受限并行，方案 C 保留扩展位）。
@@ -172,7 +186,9 @@
 > `scheduled-trigger-m4.md`。  
 > 工程真源在本仓；`my-agent-skills` 为通用 skill 集副本。  
 > 定义入口 = `requirements-analysis`；单任务交付 = 内置蓝图 + `construction-bootstrap`；  
-> 批量调度 = `execution-plan`；到点开跑 = `scripts/ai-task-scheduled-trigger.mjs`（唤起同一执行计划，不另建 Skill）。
+> 批量调度 = `execution-plan`；到点开跑 = `scripts/ai-task-scheduled-trigger.mjs`（唤起同一执行计划，不另建 Skill）。  
+> **M2 与 Portable 旧七阶段关系（唯一权威）**：[`docs/design/m2-vs-portable-delivery.md`](docs/design/m2-vs-portable-delivery.md)。  
+> **能力 Current/Target/Legacy 索引**：[`docs/design/workflow-capability-index.md`](docs/design/workflow-capability-index.md)。
 
 - **已定义（DEFINED）**：Definition Check 通过、未决产品事项为 0、人工确认基线、Issue 基本信息与本地任务规格版本一致后的状态；交付应从这里开工。
 - **Definition Check（定义完成检查）**：进入「待确认」前的门禁清单（目标范围/规则边界/决策完整性/任务组织/验收/无人值守）。

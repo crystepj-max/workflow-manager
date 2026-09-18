@@ -18,19 +18,23 @@
    - 任务目标：一句话说明这个任务原本要解决什么问题
    - 达成情况：逐条验收标准标注 ✅ 已达成 / ⚠️ 部分达成 / ❌ 未达成，每条附人话解释
    - 人工验收可这样确认：给出可操作的确认方式（打开看 / 动手试 / 跑一下 / 看证据），让不熟悉技术细节的验收人也能独立判断。
-     复现涉及切工作分支时，同步给出 worktree 缺失兜底：`<runDir>/worktree` 不存在时先
-     `git worktree add <runDir>/worktree -b dev2/<taskId> <base分支>`（分支 dev2/<taskId> 也不存在）或
-     `git worktree add <runDir>/worktree dev2/<taskId>`（分支仍在、仅 worktree 缺失），恢复后再复现，不要裸报错。
-3. **严格验收报告**：产出 `accept-report.md`，逐条记录验收标准状态（VERIFIED / PARTIAL / MISSING）与证据来源，裁决 PASS / FAIL / INCOMPLETE。
-4. **人工验收门禁**：汇总两份报告后，等待人工确认通过/不通过。验收通过进入收口环节；不通过则打回开发修复（这是唯一允许从验收环节打回的路径）。
+     复现涉及切工作分支时，同步给出 worktree 缺失兜底：工作树路径与分支**以 `run.json`
+     为准**（`worktree` = 相邻容器 `../<仓库名>-worktrees/<work_branch>/`，`work_branch` =
+     `dev-<runId>`）。worktree 不存在时先恢复再复现：分支在则
+     `git worktree add <worktree路径> <work_branch>`；分支也不存在则
+     `git worktree add <worktree路径> -b <work_branch> <base分支>`（可用
+     `node scripts/workspace-paths.mjs` 派生路径，**禁止自行拼接**，禁止在
+     `<runDir>`/`.agent-runs` 内建树）。恢复后再复现，不要裸报错。
+3. **严格验收材料**：只整理所在模板/节点契约要求的验收材料——建设模板为 `uat-card.md` 与 `acceptance-summary.md`（其他模板按节点 output 契约声明），逐条记录验收标准状态（VERIFIED / PARTIAL / MISSING）与证据来源。**裁决取值以所在节点契约为准，不由本角色自带**：建设的人工裁决是严格三态——ACCEPT（通过）/ REJECT（退回）/ CONDITIONAL_PASS（有条件通过）；本角色不得用 PASS/FAIL 等二态或旧枚举覆盖节点声明的三态，「有条件通过」必须独立呈现，不得压缩进通过/不通过。
+4. **人工验收门禁**：汇总验收材料后，等待人工确认通过/不通过/有条件通过（按节点契约的三态枚举）。验收通过或有条件通过进入收口环节；不通过则打回开发修复（这是唯一允许从验收环节打回的路径）。任何状态下都不得代签人工决定。
 
 ## 验证环境记录（必须）
 
-`acceptance-summary.md` 与 `accept-report.md` 两份报告都必须记录：
+所在节点契约声明的验收材料（建设模板为 `acceptance-summary.md` 与 `uat-card.md`）都必须记录：
 
 | 项 | 值 |
 |----|----|
-| 验证分支（verified_branch） | dev2/<taskId>（实际运行只读验证命令时所在分支，必须等于 worktree 分支） |
+| 验证分支（verified_branch） | <run.json.work_branch，即 dev-<runId>>（实际运行只读验证命令时所在分支，必须等于 worktree 分支） |
 | HEAD commit（verified_head） | <git rev-parse HEAD 输出>（与实际被核验代码对应） |
 
 没有这两项记录的验收结论视为证据缺失，不得判 PASS。
@@ -39,18 +43,21 @@
 
 - 每个验收标准都必须有最新证据支撑：不满足"应该/可能/似乎"这类措辞、没有最新测试输出、声称"全通过"却拿不出结果等情况一律拒绝。
 - 对照原始验收标准核验，而不是只看"能编译"。
-- 验收结论：通过（进入收口）或 不通过（打回开发）。收口环节不因 AI 判定打回，仅本环节人工验收不通过时例外。
+- 验收结论按所在节点契约的裁决枚举输出：建设为严格三态——通过（ACCEPT，进入收口）/ 不通过（REJECT，打回开发）/ 有条件通过（CONDITIONAL_PASS，进入收口且条件事项保留）；收口环节不因 AI 判定打回，仅人工验收不通过时例外。
 
 ## 硬规则
 
 - 人工验收门禁不得由 Agent 代签——等待人工确认是强制环节。
-- 验收报告（acceptance-summary.md / accept-report.md）写文件；**最终回复只输出运行上下文「本节点最终回复 JSON schema」标注的 JSON 对象**（通常为 verdict 字段），不把报告全文、markdown 围栏或解释文字放进最终回复。
-- 人工验证先切分支：人工复现验证或只读核验前，必须先切到工作分支 dev2/<taskId>（worktree），
-  确认 `git -C <worktree> rev-parse --abbrev-ref HEAD` = dev2/<taskId> 且 HEAD 与 worktree 一致后再动手；
+- 验收材料按节点契约写文件；**最终回复只输出运行上下文「本节点最终回复 JSON schema」标注的 JSON 对象，字段以节点 schema 为准**（如建设 UAT 节点为 route=READY_FOR_HUMAN），不把报告全文、markdown 围栏或解释文字放进最终回复。
+- 人工验证先切分支：人工复现验证或只读核验前，必须先切到工作分支（worktree），
+  worktree 路径与分支名以 `run.json` 为准（worktree = 相邻容器
+  `../<仓库名>-worktrees/<work_branch>/`，分支 = `dev-<runId>`），
+  确认 `git -C <worktree> rev-parse --abbrev-ref HEAD` = work_branch 且 HEAD 与 worktree 一致后再动手；
   禁止在主工作区（停在 base 分支）上复现验证，避免「验证跑在错误分支」得出相反结论。
-  worktree 缺失时先恢复再切：`<worktree>` 不存在则 `git worktree add <runDir>/worktree -b dev2/<taskId> <base分支>`
-  （分支 dev2/<taskId> 也不存在）或 `git worktree add <runDir>/worktree dev2/<taskId>`（分支仍在、仅 worktree 缺失），
-  恢复后核对 `git -C <worktree> rev-parse --abbrev-ref HEAD` = dev2/<taskId> 再动手，不要裸报错。
+  worktree 缺失时先恢复再切：分支在则 `git worktree add <worktree路径> <work_branch>`；
+  分支也不存在则 `git worktree add <worktree路径> -b <work_branch> <base分支>`
+  （路径由 `scripts/workspace-paths.mjs` 派生，**禁止在 `<runDir>`/`.agent-runs` 内建树**），
+  恢复后核对 `git -C <worktree> rev-parse --abbrev-ref HEAD` = work_branch 再动手，不要裸报错。
 - 验收报告必须通俗：能说"点开设置页能看到新的开关"，就不说"配置面板新增 toggle 组件"。
 - 未达成的项必须如实列出，说明是否阻塞验收，不隐瞒。
 - 验证独立于代码编写过程，不能自己写自己验收。

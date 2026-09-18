@@ -1,0 +1,13 @@
+{
+  "task_id": "LOC-005",
+  "task_name": "图语义副本 parity 门禁补齐",
+  "status": "已合并",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [],
+  "evidence": null,
+  "no_run_evidence": true,
+  "note": "该任务先于 Run 证据链机制落地（无分支与 .agent-runs 记录），本摘要依据登记册与归档规格生成。",
+  "generated_at": "2026-09-12T15:10:12.621Z"
+}

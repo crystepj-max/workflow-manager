@@ -22,9 +22,11 @@
 | `entry` | ✅ | 节点 id | 首次运行入口；**必须等于拓扑推导的唯一入口**（与 validateDsl 严格一致） |
 | `control.maxRounds` | 可选 | 正整数，默认 9 | **新模式（#73）**：自动回退额度（仅 `countRound=true` 的业务边消耗；初次执行不计）。**旧模式**：failure 边打回上限。系统约定上限 9（候选二 Q7：1-9，超限拒绝） |
 | `onMaxRounds` | 可选 | `'return'`（默认）\| `'auto-reschedule'` | DSH 增强：超限自动回调度做失败归因（D4）；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
-| `heteroCheck` | 可选 | 布尔，默认 false | DSH 增强：注入 dev↔review 异源运行日志（T-06 定稿后：v2 起异源由 save/validate 全局强制，本字段退化为运行时日志开关）；置 true 时须存在 dev 与 review 节点；**v1.1（候选二 Q7）起进 vwf DSL、编辑器可配置** |
+| `heteroCheck` | 可选 | 三态枚举 `"off"` \| `"weak"` \| `"strong"`，默认 `"weak"`（**v1.2 起，LOC-021**；旧布尔值兼容读入：`true` → `"weak"`、`false` → `"off"`） | 异源档位：控制 dev↔review 模型校验强度并注入运行时日志（**v1.2 起校验随档位生效，不再全局强制**——见 §3.1 规则 7 修订）。`"weak"`（默认）= 同 provider 不同 model 通过 + 弱异源警告，完全相同拒；`"strong"` = provider 必须不同；`"off"` = 不校验。非法值按弱档处理并报错。编辑器工作流控制区为三档选择器（v1.1 起的 ON/OFF 开关已升级） |
 | `bindings.models` | 可选 | 对象：`{ <nodeId>: {provider?, model?} }` | 模型绑定（D2 节点粒度）；键必须都是节点 id；缺省 = 宿主默认 |
 | `humanDecision.maxRoundsReachedOptions` | 可选 | 非空数组，元素 ∈ `USER_ACCEPTED` \| `ADD_BUDGET` \| `STOP` | 额度耗尽时展示的控制类 Result；**缺省 = 三项全开**；可覆盖为非空子集，**删到零则拒**（#116 校验；#119 运行时同样 fail-closed，不得挂起空目录） |
+| `workspace.template_id` | 可选（整个 `workspace` 字段）；**`workspace` 给出时必填** | `construction` \| `optimize` \| `diagnose` \| `explore` | LOC-009：模板对隔离策略类型的**正式声明**。运行时 workspace 分配不再按模板 id 名字猜测：先查 Core `TEMPLATE_REGISTRY` 精确身份，其次读本声明，缺省按 `construction`（ISOLATED_WRITE git 工作区）。权威集合 = `scripts/workspace-isolation.mjs` 的 `TEMPLATE_REGISTRY` 键 |
+| `workspace.resource_kind` | 可选 | `git` \| `files` \| `document` \| `config` \| `other` | LOC-009：optimize 类模板的输入资源类型声明；`git`/`files` → `ISOLATED_WRITE`（git 工作区），`document`/`config`/`other` → `SANDBOX`。运行参数显式传入的 `resource_kind` 优先于本声明；两者都缺省时 optimize 分配 fail closed（拒启动） |
 | `nodes` | ✅ | 数组，≥1 | 见 2.2 |
 | `edges` | ✅ | 数组 | 见 2.3 |
 
@@ -110,10 +112,10 @@
 1. `id` 匹配 kebab-case；`displayName` 非空；无 `name` 字段（单标识，D1）。
 2. `onMaxRounds ∈ {return, auto-reschedule}`。
 3. `bindings.models` 的每个键都必须是已声明节点 id。
-4. `heteroCheck=true` 时存在 `dev` 与 `review` 节点。
+4. `heteroCheck` 为 `"strong"` 而无 `dev` / `review` 配对时，输出警示「强档要求无从执行」但**不拦**（三档均跳过异源模型比对；LOC-021 定案：无配对时警示即可）。`"weak"` 是默认档，显式声明但无配对不提示；`"off"` 不校验。旧布尔兼容读入：`true` → `"weak"`、`false` → `"off"`。
 5. `verifyBranch=true` 节点：`output.schema.required` 含 `verified_branch`/`verified_head`。
 6. `output.files`（若给）：键为合法相对路径（非空、不以 `/` 开头或结尾、不含 `..`、不覆盖保留文件 `STATE.md`）；值为 `json|markdown|text|html|canvas|flowchart|diagram` 枚举。
-7. **异源硬规则（v2 生效，T-06）**：凡含 `dev` 与 `review` 节点的蓝图（按节点 `id` 或 `profile` 识别——编辑器新建节点默认 id 为 node-N，以角色表达 dev/review 时同样纳入），save/update/validate 一律校验其 `bindings.models`——任一缺失 → 拒（「无法证明异源，请显式配置」）；完全同模型（provider+model 相同）→ 拒；同 provider 不同 model（弱异源）→ 通过 + warning；不同 provider → 通过。无 dev/review 节点的蓝图跳过。错误消息沿用 `errors[]` 结构（at=`bindings.models`，含实际 provider/model 与修复指引）。
+7. **异源规则（v1.2 起按档位生效，LOC-021 修订 T-06 的「全局强制」口径）**：凡含 `dev` 与 `review` 节点的蓝图（按节点 `id` 或 `profile` 识别——编辑器新建节点默认 id 为 node-N，以角色表达 dev/review 时同样纳入），save/update/validate 按蓝图 `heteroCheck` 档位校验其 `bindings.models`——**关（`"off"`）**：不校验（完全同模型属用户显式选择，不提示）；**弱（`"weak"`，默认）**：任一缺失 → 拒（「无法证明异源」）；完全同模型（provider+model 相同）→ 拒；同 provider 不同 model → 通过 + warning；不同 provider → 通过；**强（`"strong"`）**：provider 必须不同，同 provider（即使 model 不同）→ 拒。无 dev/review 节点的蓝图三档均跳过。档位缺失或旧布尔 `true` → 弱档（旧蓝图行为不变）；旧布尔 `false` → 关档；非法值按弱档处理并报错。错误消息沿用 `errors[]` 结构（at=`bindings.models`，含档位、实际 provider/model 与修复指引）。配对范围仅 `dev↔review` 一对——`dev↔test`、`execute↔evaluate` 不纳入。
 8. `control.maxRounds`（若给）：**1-9 的整数（系统约定上限 9，候选二 Q7）**——0/负数/小数/非数/超 9 一律拒绝（坐标键 `control:maxRounds`）。
 9. **fanout 专属规则**：`kind ∈ {worker, fanout}`；fanout 必须有合法 `items`、含 `{{item}}` 的 `goal` 和 failure 出边，禁止 `output.successCondition` / `manualCheck` / `verifyBranch` / 升级到 `$human-decision`；`failOn` 仅接受 `any` / `all` / 非负整数。`$.results.<节点id>` 引用必须存在且沿 success 边先于当前节点。worker 出现 `items` / `failOn` 拒绝。所有错误携带对应 `node:<id>:<field>` 坐标。
 10. **Human Decision（#116）**：`$human-decision` 为保留 id（可作边的 `to`/`from`，不得作节点 id）。走通性把该点当透明跳点。旧模式 HD 出边必填互异的业务 `result`。新模式 HD 出边用 `outcome`。`humanDecision.maxRoundsReachedOptions` 若给则非空且 ⊆ 控制类三元组。使用 HD 的蓝图拒绝 `approved` 与 `manualCheck`。有入边才要求 ≥1 条出边；孤儿 HD 出边拒绝。
@@ -121,6 +123,7 @@
 12. **完整性（#91）**：新模式 `outcomePath` 叶子必须可穷举；每个枚举值恰好一条 `outcome` 出边（JSON 等值），边取值必须落在枚举内。自由 `string` 拒绝。
 13. **Completion Mapping（#92）**：`completionPath` 须为 `$.field`、在 schema 内、叶子 `string`；该节点须有结构边到 `$end`。
 14. **fanout 禁区（#89）**：禁止 `outcomePath` / `completionPath` / `outcome` 边 / `on: technical`；`failOn` 仍走旧 failure。
+15. **workspace 声明（LOC-009）**：`workspace`（若给）必须是对象；`template_id` 必填且 ∈ `construction|optimize|diagnose|explore`；`resource_kind`（若给）∈ `git|files|document|config|other`（坐标键 `workspace:<field>`）。该字段经投影双向同步（蓝图 ↔ vwf DSL）。
 
 ### 3.2 DSL 结构规则（与校验内核结构层对齐；原 host `validateDsl` 已删除）
 
@@ -153,7 +156,7 @@ fanout 节点的 `kind` / `items` / `failOn` 必须双向透传；新模式边�
 - **分流折叠**：识别「单节点、恰两路 success 出边、全带 when、条件为同一路径的 `== true` / `== false`」→ 编译为脚本内 `if`（无 LLM 调用，严格转发上游判定）；vwf 侧保持 route 节点（一次 LLM 转发，行为差异显式化）。
 - **超限归因**：`onMaxRounds = 'auto-reschedule'` → 超限时注入归因 agent（产出 reschedule：归因/拆分/人工介入建议）。
 - **可信度闸门**：`verifyBranch=true` 节点 → 注入开工分支自检 + `verified_branch`/`verified_head` 硬校验（失败即 TECHNICAL_FAILURE；新模式可走 `on: technical`）。
-- **异源警告**：`heteroCheck=true` → 注入 dev↔review 模型比对 warning（v1 不拦截，v2 由 T-06 升级为 enforcement）。
+- **异源警告**：`heteroCheck` 非 `"off"` 且存在 dev↔review 配对 → 注入模型比对日志，输出当前档位与比对结论（**v1.2 起，LOC-021**：识别口径按节点 `id` 或 `profile`——诊断模板开发节点 id=fix 也纳入；关档不注入日志）。
 - **业务结果路由（#77）+ 自动回退额度（#73）+ Human Decision 翻译（#118）**：有 `outcomePath` 的节点按路径等值匹配 `outcome` 出边；命中 `$human-decision` → 引擎段 `ROUTE_HALTED`（`reason=HUMAN_DECISION`），由 #118 翻译为 `WAITING_HUMAN` 并装配 Decision Package。缺匹配 → `ENDED_NO_OUTCOME_EDGE`。`countRound=true` 的业务边消耗 `control.maxRounds`；耗尽则 `WAITING_HUMAN` + `MAX_ROUNDS_REACHED`，不改写 `results[node]`。`countRound=false` 与技术边不计额度。旧蓝图 failure 边仍 `round++`，超限仍 `FAILED_MAX_ROUNDS`。走进 `$end` 时 `DONE.completion = { type, node, path } | null`（仅终态节点声明了 `completionPath` 且读到非空字符串才有对象）。`ADD_BUDGET` 续跑必须把额度变更写入 `control_event`（`budget_delta` / `max_rounds_after` / `budget_used`）；再次耗尽必须分配新的 `decision_id`（单调 `decisionSeq`），不得复用前次 Decision Record 身份。
 
 ### 4.3 角色与运行上下文

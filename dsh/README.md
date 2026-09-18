@@ -11,7 +11,7 @@
    │
    ▼
 主会话（调度台 + 人工门禁）
-   │  ① gh issue view 拉取 issue  ② 装配 args 调 workflow 工具（角色文件由节点 agent 自读）
+   │  ① gh issue view 拉取 issue  ② 装配 args 调 wf_run（插件起跑；角色文件由节点 agent 自读）
    ▼
 workflow 编排脚本（.generated/dev-workflow-2-0/script.mjs——单一编译器产物，含折叠/闸门/归因）
    │
@@ -38,8 +38,8 @@ workflow 编排脚本（.generated/dev-workflow-2-0/script.mjs——单一编译
 - **人工门禁**：脚本不等人。跑到验收点返回，主会话发人工确认卡，裁决后以对应
   `entry` 续跑。全过程状态落在 run 目录文件中，天然支持断点续跑。
 - **角色异源**：模型绑定在**编译时固化**（蓝图 `bindings.models`，见「异源配置」）；
-  开发与审核绑定不同 provider 即满足「异源异模型」硬规则（校验内核全局强制，
-  运行日志提示弱异源）。
+  开发与审核的异源强度由蓝图 `heteroCheck` 档位控制（关/弱/强，默认弱；弱档下同 provider
+  不同模型即可，强档要求 provider 必须不同，关档不校验——LOC-021；运行日志按档位输出比对结论）。
 
 ## 文件清单
 
@@ -74,11 +74,15 @@ gh issue view <N> --json title,body,comments
 六个角色提示词不进 args：各节点 agent 开工时按 `args.roleDir`（缺省 `dsh/roles`）
 自行读取对应 `<role>.md` 并严格遵循——单一事实源，改角色只改文件。
 
-### 3. 调用 workflow 工具
+### 3. 调用 wf_run 工具起跑
 
-- `script`：`.generated/dev-workflow-2-0/script.mjs` 全文（生成物，勿手改；改蓝图后 `npm run generate` 重建）；
-- `meta`：`.generated/dev-workflow-2-0/meta.json`（name/phases 已由生成器按蓝图组装，直接引用）；
+- `templateId`：`dev-workflow-2-0`（插件自行编译并交给引擎，**不需要传脚本全文**）；
 - `args`：见下表。**不传 `models`**（模型绑定编译时固化于蓝图 `bindings.models`）。
+
+回退（仅当 `wf_run` 不可用、报错无法访问 workflowEngine）：才改用内置 `workflow` 工具——
+`script` = `.generated/dev-workflow-2-0/script.mjs` 全文（生成物，勿手改；改蓝图后 `npm run generate` 重建）、
+`meta` = `.generated/dev-workflow-2-0/meta.json`（name/phases 已由生成器按蓝图组装，直接引用）；
+并须如实提示用户本次运行记录将退化（单段、无完成类型、不可从看板续跑）。
 
 ```jsonc
 {
@@ -138,19 +142,19 @@ gh issue view <N> --json title,body,comments
 
 | 节点 | 工作区 |
 |------|--------|
-| 开发 / 测试 / 审核 | `<runDir>/worktree`（分支 `dev2/<taskId>`），只读写该 worktree |
+| 开发 / 测试 / 审核 | 相邻容器 worktree `../<仓库名>-worktrees/<分支名>/`（分支 `dev-<runId>`），只读写该 worktree |
 | 收口（push/pr/merge/close） | 主工作区（编排区，始终停在 base 分支） |
 
-- 开发节点用 `git worktree add <runDir>/worktree -b dev2/<taskId> <base>` 建立
-  （续跑时复用已有 worktree），施工与提交都在 worktree 内完成；
-- 收口节点合并后用 `git worktree remove <runDir>/worktree` 原子清理，残留本地分支
-  用 `git branch -D dev2/<taskId>` 删除；
-- 主工作区全程不切换分支、保持干净，只承担 `git push` / `gh pr create` /
-  `gh pr merge` / `gh issue close`。
+- worktree 由 `cwf-run-init` 开工时统一建立（产物锚定主检出 `.agent-runs/<runId>/`，
+  续跑时复用已有 worktree），施工与提交都在 worktree 内完成；
+- 收口按**两阶段口径**清理（`docs/design/workspace-directory-convention.md` §1.7）：
+  阶段一（托管不可用）删工作区、留分支；阶段二（远端已有完整记录）才 `git branch -D dev-<runId>`；
+  删工作区后追加 `git worktree prune` 兜底；
+- 主工作区全程不切换分支、保持干净，只承担 push / PR / issue 操作。
 - 验证结论可信度闸门：test/review/accept 三节点开工先自检 worktree 分支 =
-  `dev2/<taskId>`、不在则先恢复，且三节点 schema 必填 `verified_branch`（实际验证分支）
-  与 `verified_head`（实际 HEAD commit），杜绝「验证跑在错误分支 → 结论不可信、
-  验收指引复现相反结果」。
+  `run.json.work_branch`（`dev-<runId>`）、不在则先恢复，且三节点 schema 必填
+  `verified_branch`（实际验证分支）与 `verified_head`（实际 HEAD commit），
+  杜绝「验证跑在错误分支 → 结论不可信、验收指引复现相反结果」。
 
 ## 与 gold-band DSL 概念对照
 
@@ -167,6 +171,8 @@ gh issue view <N> --json title,body,comments
 | `session: new/continue` | 每个节点都是新 subagent；上下文经 run 目录文件 + args 传递 |
 
 ## 异源配置（已实测验证，2026-08-16）
+
+> 异源校验强度由蓝图 `heteroCheck` 档位控制（LOC-021）：**关 / 弱（默认）/ 强**——弱档下同 provider 不同模型即通过（给弱异源警告），强档要求 provider 必须不同，关档不校验。下列分配以「真异源（不同 provider）」为准，可满足强档要求。
 
 当前宿主实测可用路由（workflow `agent()` 的 provider/model 覆盖）：
 
@@ -241,7 +247,8 @@ kimi 额度恢复后改回上面的推荐分配（跨 provider 真异源）。
 
 1. 改真源文件（如 `dsh/skills/requirements-analysis/SKILL.md`）；
 2. 跑安装脚本部署公共池（`./dsh/install-requirements-analysis.sh`），并 diff 校验真源与线上生效版逐字节一致；
-3. 开分支 `dev2/<issue>` 提交推送 → PR → 合并 main（对齐本仓库历史约定，见「试跑发现与修复记录」第 5 条）。
+3. 开分支 `dev-<runId>` 提交推送 → PR → 合并 main（分支命名派生规则见
+   `docs/design/workspace-directory-convention.md` §1.3）。
 
 **requirements-analysis 为何是自洽（内联）版**：其编排依赖的 `triage` / `grill-with-docs` / `wayfinder` /
 `to-tickets` 是「仅限用户调用」的命令型 skill（frontmatter `disable-model-invocation: true`，刻意设计），
@@ -254,8 +261,9 @@ issue #22 的持久修复，真源即内联自洽版。
 
 注意事项：目标仓库需 `gh` 已登录（无远端可跑，收口退化为本地 commit 清单）；
 模型分配宿主级共享（kimi 额度不足时用 DeepSeek 双模型兜底，见「异源配置」节）；
-多任务并行 = 每个 issue 一个会话 + 一个独立 git worktree（分支 `dev2/<taskId>` + 作业目录
-`.agent-runs/<taskId>/worktree`），物理隔离互不阻塞。
+多任务并行 = 每个 issue 一个会话 + 一个独立 git worktree（`cwf-run-init` 自动创建：
+分支 `dev-<runId>` + worktree 在相邻容器 `../<仓库名>-worktrees/<分支名>/`，
+产物锚定主检出 `.agent-runs/<runId>/`），物理隔离互不阻塞。
 
 ## 已知缺口（P0 基线）
 
@@ -298,8 +306,8 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
 ## 可视化插件（vwf）使用说明
 
 「可视化工作流」（Visual Workflow，下文 vwf）把同一套「开发工作流 2.0」状态机做成图形化
-入口：在 Web UI 里选内置/用户模板 → 图形化编辑或直接查看流程图 → 点「获取脚本」，
-再把插件由 DSL 图编译出的脚本交给平台 `workflow` 工具执行。这是所有部署均可用的正式执行路径。
+入口：Skill / Chat 入口首选 `wf_run` 工具直接起跑——由插件自身发起，不需要传递脚本；
+`wf_run` 不可用时才回退内置 `workflow` 工具执行编译产物，并如实提示运行记录将退化。
 需求基线见
 `.scratch/dsh-visual-workflow-p0/requirements-analysis.md`；实现说明见 `docs/design/plugin-layer.md`。
 
@@ -310,19 +318,29 @@ P0 试跑（issue #1，2026-08-16）发现的问题：
   Client 半在 settings.section 注册「工作流」页（模板库 + 大抽屉可视化编辑器 + 运行看板）。
   **模板数据已持久化**：内置模板只读（`.generated/<id>/`），用户模板落盘
   `~/.dsh/visual-workflow/templates/<id>.json`，保存即同步编译
-  `~/.dsh/skills/<id>/` 技能（save 即闭环）。
+  `~/.dsh/skills/<id>/` 技能（save 即闭环）。**内置模板不走保存闭环**：改模板或换机后须执行
+  `npm run install:builtin-skills`，把四套正式内置的自包含技能包装到 `~/.dsh/skills/<id>/`，
+  否则会话里按触发词调不到内置工作流（幂等，可重复执行）。
+  要同时分发到跨 agent 共享技能池用 `npm run install:builtin-skills:pool`
+  （即在上述命令后加 `--pool`，默认池 `~/.agents/skills`，可用 `--pool=<目录>` 指定）；
+  池内新增后需补建各 agent 软链（kimi / opencode 原生读池，无需软链）。
 - **动态插件（开发迭代形态）**：动态 Cordis 插件，host + client 两半、plain JS
   （无打包器/JSX/import）。
   运行时用 `cordis_define` / `cordis_run` 定义并激活（重启需重新激活）。Host 半承载 DSL 校验器、
   DSL→script 编译器、双根模板库与运行状态；Client 半在 settings.section 注册「工作流」页
   （模板库 + 大抽屉可视化编辑器 + 运行看板）。
 
-### wf_run 增强路径：调用方式与参数表
+### wf_run：正式起跑通道（调用方式与参数表）
 
-宿主 `agents` 可用时，Host 半才会把 `wf_run` 条件注册为模型工具，主会话可直接用工具调用完成
-「DSL 图编译 + 执行」。`workflowEngine` 推迟到 execute 阶段解析；若解析失败，工具会明确报错，
-此时仍可回到正式路径：点「获取脚本」，再用平台 `workflow` 工具执行。首次运行从
-`entry=dispatch` 起，跑到人工门禁节点即返回，裁决后再以对应 `entry` 续跑。
+宿主 `agents` 可用时，Host 半把 `wf_run` 注册为模型工具，主会话可直接用工具调用完成
+「DSL 图编译 + 执行」——**这是 Skill / Chat 入口的正式起跑通道**（LOC-015）：由插件自身发起，
+本次运行即同一条 Logical Run（执行分段 / 任务归属 / 完成类型齐全，看板可续跑、暂停、指导）。
+
+`workflowEngine` 推迟到 execute 阶段解析；若解析失败（工具明确报错，无法访问 workflowEngine），
+才回退到内置 `workflow` 工具执行编译产物——该路径下脚本返回值只回到会话，插件只能旁观事件流，
+运行记录会退化为单段且无完成类型，**回退时必须如实提示用户记录将退化**（见
+`dsh/skill/SKILL.md` 运行步骤 3）。首次运行从 `entry=dispatch` 起，跑到人工门禁节点即返回，
+裁决后再以对应 `entry` 续跑。
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
@@ -382,4 +400,6 @@ vwf 插件走图形触发（模板 → DSL 校验 → 磁盘产物或 CLI 编译
 技能包读生成产物（`.generated/` 或安装时的技能目录），vwf 内置模板读 `.generated/`、
 用户模板读 save 闭环产物、临时图走 CLI 编译。vwf 编辑器保存用户模板时会同步生成
 自包含技能到 `~/.dsh/skills/<id>/`，该技能即可像 `dev-workflow-2-0` 一样按触发词调用
-（save 即闭环）。
+（save 即闭环）；**内置模板的同一份技能包由 `npm run install:builtin-skills` 安装**
+（`scripts/install-builtin-skills.mjs`，与 save 闭环共用 `writeUserSkill`，产物形态一致，
+含 SKILL.md / script.mjs / meta.json / 蓝图引用的角色）。两类技能包都首选 `wf_run` 起跑。

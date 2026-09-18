@@ -1,0 +1,821 @@
+TAP version 13
+# Subtest: M2 机械验收脚本通过
+ok 1 - M2 机械验收脚本通过
+  ---
+  duration_ms: 308.902417
+  type: 'test'
+  ...
+# Subtest: 契约示例链全部通过校验
+ok 2 - 契约示例链全部通过校验
+  ---
+  duration_ms: 20.516167
+  type: 'test'
+  ...
+# Subtest: 负例：关键约束类各拒一例
+ok 3 - 负例：关键约束类各拒一例
+  ---
+  duration_ms: 3.167292
+  type: 'test'
+  ...
+# Subtest: 正例探针：design 门两态翻转
+ok 4 - 正例探针：design 门两态翻转
+  ---
+  duration_ms: 0.2315
+  type: 'test'
+  ...
+# Subtest: 正例探针：conditional_pass 有条件通过通道
+ok 5 - 正例探针：conditional_pass 有条件通过通道
+  ---
+  duration_ms: 0.127292
+  type: 'test'
+  ...
+# Subtest: 负例探针：user_accepted 已废弃
+ok 6 - 负例探针：user_accepted 已废弃
+  ---
+  duration_ms: 3.943084
+  type: 'test'
+  ...
+# Subtest: LOC-012 diagnose 蓝图通过校验：maxRounds=3、双回退边耗额度、默认无人工验收节点
+ok 7 - LOC-012 diagnose 蓝图通过校验：maxRounds=3、双回退边耗额度、默认无人工验收节点
+  ---
+  duration_ms: 3.051667
+  type: 'test'
+  ...
+# Subtest: 正常路径：诊断 → 修复 → 审核 → 回归 → 收口，不耗额度
+ok 8 - 正常路径：诊断 → 修复 → 审核 → 回归 → 收口，不耗额度
+  ---
+  duration_ms: 10.911333
+  type: 'test'
+  ...
+# Subtest: 修复问题回修复：消耗 1 点额度后通过
+ok 9 - 修复问题回修复：消耗 1 点额度后通过
+  ---
+  duration_ms: 17.23
+  type: 'test'
+  ...
+# Subtest: 证据推翻根因回诊断：消耗 1 点额度后通过
+ok 10 - 证据推翻根因回诊断：消耗 1 点额度后通过
+  ---
+  duration_ms: 1.726459
+  type: 'test'
+  ...
+# Subtest: 额度耗尽：WAITING_HUMAN + MAX_ROUNDS_REACHED，审核原结果保留
+ok 11 - 额度耗尽：WAITING_HUMAN + MAX_ROUNDS_REACHED，审核原结果保留
+  ---
+  duration_ms: 15.22875
+  type: 'test'
+  ...
+# Subtest: 回归失败退修复：消耗 1 点额度，修改后重新审核并回归
+ok 12 - 回归失败退修复：消耗 1 点额度，修改后重新审核并回归
+  ---
+  duration_ms: 3.3125
+  type: 'test'
+  ...
+# Subtest: 诊断受阻：证据不足直接结束，不猜根因不进入修复
+ok 13 - 诊断受阻：证据不足直接结束，不猜根因不进入修复
+  ---
+  duration_ms: 0.957583
+  type: 'test'
+  ...
+# Subtest: workspace 策略：diagnose 默认 ISOLATED_WRITE 且 freeze_from=diagnose（同一 lineage 兜底）
+ok 14 - workspace 策略：diagnose 默认 ISOLATED_WRITE 且 freeze_from=diagnose（同一 lineage 兜底）
+  ---
+  duration_ms: 5.0775
+  type: 'test'
+  ...
+# Subtest: LOC-013 蓝图通过内核校验，轮次预算按锁定口径声明
+ok 15 - LOC-013 蓝图通过内核校验，轮次预算按锁定口径声明
+  ---
+  duration_ms: 5.246584
+  type: 'test'
+  ...
+# Subtest: LOC-013 正常路径：统筹→专家 fanout→综合→PASS，完成类型 EVALUATION_PASSED
+ok 16 - LOC-013 正常路径：统筹→专家 fanout→综合→PASS，完成类型 EVALUATION_PASSED
+  ---
+  duration_ms: 8.839708
+  type: 'test'
+  ...
+# Subtest: LOC-013 NEEDS_RESEARCH 自动回退 2 次后 PASS（初次 BROAD 不计额度）
+ok 17 - LOC-013 NEEDS_RESEARCH 自动回退 2 次后 PASS（初次 BROAD 不计额度）
+  ---
+  duration_ms: 1.878834
+  type: 'test'
+  ...
+# Subtest: LOC-013 第 3 轮仍 NEEDS_RESEARCH：保留原结论，WAITING_HUMAN + MAX_ROUNDS_REACHED
+ok 18 - LOC-013 第 3 轮仍 NEEDS_RESEARCH：保留原结论，WAITING_HUMAN + MAX_ROUNDS_REACHED
+  ---
+  duration_ms: 5.650708
+  type: 'test'
+  ...
+# Subtest: LOC-013 ADD_BUDGET 续跑：显式入账后沿被拦边再走一轮
+ok 19 - LOC-013 ADD_BUDGET 续跑：显式入账后沿被拦边再走一轮
+  ---
+  duration_ms: 2.058042
+  type: 'test'
+  ...
+# Subtest: LOC-013 INSUFFICIENT 是合法完成：DONE + completion.type=INSUFFICIENT
+ok 20 - LOC-013 INSUFFICIENT 是合法完成：DONE + completion.type=INSUFFICIENT
+  ---
+  duration_ms: 0.627541
+  type: 'test'
+  ...
+# Subtest: LOC-013 技术失败沿 on:technical 自环重试，不消耗回退额度
+ok 21 - LOC-013 技术失败沿 on:technical 自环重试，不消耗回退额度
+  ---
+  duration_ms: 0.651375
+  type: 'test'
+  ...
+# Subtest: LOC-013 fanout 注入独立 scratch 与隔离禁令（有 workspace 现场）
+ok 22 - LOC-013 fanout 注入独立 scratch 与隔离禁令（有 workspace 现场）
+  ---
+  duration_ms: 0.582958
+  type: 'test'
+  ...
+# Subtest: LOC-013 无 workspace 现场时 fanout 不注入 scratch（安全降级）
+ok 23 - LOC-013 无 workspace 现场时 fanout 不注入 scratch（安全降级）
+  ---
+  duration_ms: 1.403375
+  type: 'test'
+  ...
+# Subtest: LOC-013 内核级隔离反例：readWorkerFile 拒绝 ../ 逃逸到兄弟 scratch
+ok 24 - LOC-013 内核级隔离反例：readWorkerFile 拒绝 ../ 逃逸到兄弟 scratch
+  ---
+  duration_ms: 9.923292
+  type: 'test'
+  ...
+# Subtest: LOC-013 E2：worker 提示不下发 Run 级 capability（RPC 面无凭据可冒用）
+ok 25 - LOC-013 E2：worker 提示不下发 Run 级 capability（RPC 面无凭据可冒用）
+  ---
+  duration_ms: 1.626833
+  type: 'test'
+  ...
+# Subtest: LOC-013 E4：fanout 部分失败不伪装业务结果，默认 failOn=all 继续聚合
+ok 26 - LOC-013 E4：fanout 部分失败不伪装业务结果，默认 failOn=all 继续聚合
+  ---
+  duration_ms: 1.108
+  type: 'test'
+  ...
+# Subtest: LOC-013 E4：fanout 全部失败走 failure 边，FAILED_AT_research 而非业务路由
+ok 27 - LOC-013 E4：fanout 全部失败走 failure 边，FAILED_AT_research 而非业务路由
+  ---
+  duration_ms: 2.230667
+  type: 'test'
+  ...
+# Subtest: LOC-013 B7 targeted 重算：新证据只让依赖它的 Synthesis/Evaluation 标 stale（真实 \#78 通道）
+ok 28 - LOC-013 B7 targeted 重算：新证据只让依赖它的 Synthesis/Evaluation 标 stale（真实 \#78 通道）
+  ---
+  duration_ms: 3.620709
+  type: 'test'
+  ...
+# Subtest: \#69 parseArtifactBody：JSON 类缺 content 或非法 JSON 应拒绝
+ok 29 - \#69 parseArtifactBody：JSON 类缺 content 或非法 JSON 应拒绝
+  ---
+  duration_ms: 2.434875
+  type: 'test'
+  ...
+# Subtest: \#69 ingestArtifacts：JSON 类缺 content 不产生非法 Record
+ok 30 - \#69 ingestArtifacts：JSON 类缺 content 不产生非法 Record
+  ---
+  duration_ms: 5.075333
+  type: 'test'
+  ...
+# Subtest: A1 不可覆盖 Revision：同 id 新写入产生新 revision，旧版内容不变
+ok 31 - A1 不可覆盖 Revision：同 id 新写入产生新 revision，旧版内容不变
+  ---
+  duration_ms: 18.050875
+  type: 'test'
+  ...
+# Subtest: A2 Node Result 可产生一条或多条 Record，Outcome 不迁入信封
+ok 32 - A2 Node Result 可产生一条或多条 Record，Outcome 不迁入信封
+  ---
+  duration_ms: 0.951292
+  type: 'test'
+  ...
+# Subtest: A3 依赖指向 record_id + revision，禁止悬挂引用
+ok 33 - A3 依赖指向 record_id + revision，禁止悬挂引用
+  ---
+  duration_ms: 1.610625
+  type: 'test'
+  ...
+# Subtest: A4/A5 Proof 覆盖当前目标；上游新 Revision 后旧 Proof 保留且 stale
+ok 34 - A4/A5 Proof 覆盖当前目标；上游新 Revision 后旧 Proof 保留且 stale
+  ---
+  duration_ms: 0.691833
+  type: 'test'
+  ...
+# Subtest: A6 Fan-out 多依赖：只让依赖变化子集的下游 stale，兄弟不机械失效
+ok 35 - A6 Fan-out 多依赖：只让依赖变化子集的下游 stale，兄弟不机械失效
+  ---
+  duration_ms: 0.844708
+  type: 'test'
+  ...
+# Subtest: A7 Decision Record 不可覆盖；后续流转不得改写
+ok 36 - A7 Decision Record 不可覆盖；后续流转不得改写
+  ---
+  duration_ms: 0.672209
+  type: 'test'
+  ...
+# Subtest: A8 Guidance 与 Baseline：普通 Guidance 不改版本；改范围必须关联新 Baseline
+ok 37 - A8 Guidance 与 Baseline：普通 Guidance 不改版本；改范围必须关联新 Baseline
+  ---
+  duration_ms: 0.990166
+  type: 'test'
+  ...
+# Subtest: A9 每条 Record 可追溯 snapshot / provider+model / node+attempt / Outcome
+ok 38 - A9 每条 Record 可追溯 snapshot / provider+model / node+attempt / Outcome
+  ---
+  duration_ms: 0.286708
+  type: 'test'
+  ...
+# Subtest: A10 Runtime 控制状态不得回写 Outcome 或 Record
+ok 39 - A10 Runtime 控制状态不得回写 Outcome 或 Record
+  ---
+  duration_ms: 0.595667
+  type: 'test'
+  ...
+# Subtest: A11 覆盖判定只读结构化依赖，不解析 Markdown/自由文本
+ok 40 - A11 覆盖判定只读结构化依赖，不解析 Markdown/自由文本
+  ---
+  duration_ms: 0.661125
+  type: 'test'
+  ...
+# Subtest: A12 Markdown / Text / JSON 载体可保存与读取
+ok 41 - A12 Markdown / Text / JSON 载体可保存与读取
+  ---
+  duration_ms: 1.023208
+  type: 'test'
+  ...
+# Subtest: A13 Portable 七类可映射；刷新产生新 Revision；历史标识可追溯
+ok 42 - A13 Portable 七类可映射；刷新产生新 Revision；历史标识可追溯
+  ---
+  duration_ms: 1.008458
+  type: 'test'
+  ...
+# Subtest: schema 可加载；夹具拒绝未知 kind 与额外信封字段
+ok 43 - schema 可加载；夹具拒绝未知 kind 与额外信封字段
+  ---
+  duration_ms: 0.166833
+  type: 'test'
+  ...
+# Subtest: 仓库内 Portable 示例外壳可映射（不要求本测试解析 payload 文本）
+ok 44 - 仓库内 Portable 示例外壳可映射（不要求本测试解析 payload 文本）
+  ---
+  duration_ms: 0.203375
+  type: 'test'
+  ...
+# Subtest: \#69 多格式 Formal Artifact：html/canvas/flowchart 与 Revision 追加
+ok 45 - \#69 多格式 Formal Artifact：html/canvas/flowchart 与 Revision 追加
+  ---
+  duration_ms: 0.776042
+  type: 'test'
+  ...
+# Subtest: \#118 夹具卫生：HD 蓝图通过校验
+ok 46 - \#118 夹具卫生：HD 蓝图通过校验
+  ---
+  duration_ms: 2.214875
+  type: 'test'
+  ...
+# Subtest: \#118 命中 $human-decision 翻译为 WAITING_HUMAN，带可渲染 Package 与控制面事件
+ok 47 - \#118 命中 $human-decision 翻译为 WAITING_HUMAN，带可渲染 Package 与控制面事件
+  ---
+  duration_ms: 8.602875
+  type: 'test'
+  ...
+# Subtest: \#118 Package 缺硬必填不得挂起；显式 UNKNOWN 仍可挂起
+ok 48 - \#118 Package 缺硬必填不得挂起；显式 UNKNOWN 仍可挂起
+  ---
+  duration_ms: 2.553041
+  type: 'test'
+  ...
+# Subtest: \#118 Package 畸形 options / subsequent_effects 不得挂起
+ok 49 - \#118 Package 畸形 options / subsequent_effects 不得挂起
+  ---
+  duration_ms: 0.869375
+  type: 'test'
+  ...
+# Subtest: \#118 无蓝图声明时运行时拒绝自行升级；残留 manualCheck 仍发 AWAITING_HUMAN_<id>
+ok 50 - \#118 无蓝图声明时运行时拒绝自行升级；残留 manualCheck 仍发 AWAITING_HUMAN_<id>
+  ---
+  duration_ms: 3.172458
+  type: 'test'
+  ...
+# Subtest: \#118 测试注入 ROUTE_HALTED 同样翻译为 WAITING_HUMAN
+ok 51 - \#118 测试注入 ROUTE_HALTED 同样翻译为 WAITING_HUMAN
+  ---
+  duration_ms: 2.132833
+  type: 'test'
+  ...
+# Subtest: \#118 新模式 outcomePath 命中 $human-decision 翻译为 WAITING_HUMAN（不靠 injectHalt）
+ok 52 - \#118 新模式 outcomePath 命中 $human-decision 翻译为 WAITING_HUMAN（不靠 injectHalt）
+  ---
+  duration_ms: 4.14975
+  type: 'test'
+  ...
+# Subtest: \#119 选择写入追加控制面事件且不改原 decision_id
+ok 53 - \#119 选择写入追加控制面事件且不改原 decision_id
+  ---
+  duration_ms: 41.827417
+  type: 'test'
+  ...
+# Subtest: \#119 STOP 后本 Run 不再执行；不派生新 Run
+ok 54 - \#119 STOP 后本 Run 不再执行；不派生新 Run
+  ---
+  duration_ms: 18.579291
+  type: 'test'
+  ...
+# Subtest: \#119 USER_ACCEPTED 完成且不把原 Outcome 改成 PASS
+ok 55 - \#119 USER_ACCEPTED 完成且不把原 Outcome 改成 PASS
+  ---
+  duration_ms: 1.065375
+  type: 'test'
+  ...
+# Subtest: \#119 ADD_BUDGET 保留原 Outcome 并从被拦边续跑
+ok 56 - \#119 ADD_BUDGET 保留原 Outcome 并从被拦边续跑
+  ---
+  duration_ms: 1.461042
+  type: 'test'
+  ...
+# Subtest: \#119 运行时禁止把默认控制选项删光
+ok 57 - \#119 运行时禁止把默认控制选项删光
+  ---
+  duration_ms: 3.500667
+  type: 'test'
+  ...
+# Subtest: \#121 业务 Result 沿蓝图 $human-decision 出边续跑且不改写原 Outcome
+ok 58 - \#121 业务 Result 沿蓝图 $human-decision 出边续跑且不改写原 Outcome
+  ---
+  duration_ms: 2.550125
+  type: 'test'
+  ...
+# Subtest: \#121 无对应出边的业务选择被拒绝并保持等待
+ok 59 - \#121 无对应出边的业务选择被拒绝并保持等待
+  ---
+  duration_ms: 1.827208
+  type: 'test'
+  ...
+# Subtest: \#121 无 results 快照时拒绝非法选项仍可序列化
+ok 60 - \#121 无 results 快照时拒绝非法选项仍可序列化
+  ---
+  duration_ms: 2.375708
+  type: 'test'
+  ...
+# Subtest: \#149 新模式 outcome 出边业务选择可续跑
+ok 61 - \#149 新模式 outcome 出边业务选择可续跑
+  ---
+  duration_ms: 3.080458
+  type: 'test'
+  ...
+# Subtest: \#149 outcome 出边无匹配选择仍保持等待
+ok 62 - \#149 outcome 出边无匹配选择仍保持等待
+  ---
+  duration_ms: 1.059834
+  type: 'test'
+  ...
+# Subtest: \#159 归一化冲突蓝图无法通过校验进入运行时（无静默态）
+ok 63 - \#159 归一化冲突蓝图无法通过校验进入运行时（无静默态）
+  ---
+  duration_ms: 0.5535
+  type: 'test'
+  ...
+# Subtest: \#159 A1/A2 原型键与混合字段出边无法通过校验进入运行时（无静默态）
+ok 64 - \#159 A1/A2 原型键与混合字段出边无法通过校验进入运行时（无静默态）
+  ---
+  duration_ms: 0.400167
+  type: 'test'
+  ...
+# Subtest: LOC-011 optimize 蓝图通过校验且为全量新语义
+ok 65 - LOC-011 optimize 蓝图通过校验且为全量新语义
+  ---
+  duration_ms: 3.288583
+  type: 'test'
+  ...
+# Subtest: 正常路径：PASS → 收口 EVALUATION_PASSED，不耗额度
+ok 66 - 正常路径：PASS → 收口 EVALUATION_PASSED，不耗额度
+  ---
+  duration_ms: 4.806
+  type: 'test'
+  ...
+# Subtest: OPTIMIZE → 执行消耗 1 点额度，随后 PASS 收口
+ok 67 - OPTIMIZE → 执行消耗 1 点额度，随后 PASS 收口
+  ---
+  duration_ms: 1.694541
+  type: 'test'
+  ...
+# Subtest: 额度耗尽：WAITING_HUMAN + MAX_ROUNDS_REACHED，评估原结果不被改写
+ok 68 - 额度耗尽：WAITING_HUMAN + MAX_ROUNDS_REACHED，评估原结果不被改写
+  ---
+  duration_ms: 4.272291
+  type: 'test'
+  ...
+# Subtest: RECONFIRM_REQUIRED 回目标确认：不消耗额度且 history 记录
+ok 69 - RECONFIRM_REQUIRED 回目标确认：不消耗额度且 history 记录
+  ---
+  duration_ms: 2.448167
+  type: 'test'
+  ...
+# Subtest: CONFIRM 升人工决策（含冻结契约摘要材料），ACCEPT 续跑后 USER_ACCEPTED 收口
+ok 70 - CONFIRM 升人工决策（含冻结契约摘要材料），ACCEPT 续跑后 USER_ACCEPTED 收口
+  ---
+  duration_ms: 4.170167
+  type: 'test'
+  ...
+# Subtest: 目标确认 BLOCKED：直达结束，不进入执行
+ok 71 - 目标确认 BLOCKED：直达结束，不进入执行
+  ---
+  duration_ms: 0.526834
+  type: 'test'
+  ...
+# Subtest: workspace 策略：Git 代码修改 → ISOLATED_WRITE；非 Git 文档/配置 → SANDBOX
+ok 72 - workspace 策略：Git 代码修改 → ISOLATED_WRITE；非 Git 文档/配置 → SANDBOX
+  ---
+  duration_ms: 2.488417
+  type: 'test'
+  ...
+# Subtest: 投影内核：字段映射保留 verifyBranch、模型、业务边和 false 值
+ok 73 - 投影内核：字段映射保留 verifyBranch、模型、业务边和 false 值
+  ---
+  duration_ms: 1.055292
+  type: 'test'
+  ...
+# Subtest: 投影内核：DSL 逆投影保持可保存字段且不制造未知字段
+ok 74 - 投影内核：DSL 逆投影保持可保存字段且不制造未知字段
+  ---
+  duration_ms: 0.209459
+  type: 'test'
+  ...
+# Subtest: 投影内核：缺省控制字段使用稳定默认值
+ok 75 - 投影内核：缺省控制字段使用稳定默认值
+  ---
+  duration_ms: 31.55925
+  type: 'test'
+  ...
+# 用法: node scripts/records-host.mjs <commit|list|get> '<json>'
+# Subtest: R1 节点结果追加成 Record；同节点重复完成形成 Revision 链（I1 → I2）
+ok 76 - R1 节点结果追加成 Record；同节点重复完成形成 Revision 链（I1 → I2）
+  ---
+  duration_ms: 134.437375
+  type: 'test'
+  ...
+# Subtest: R2 verifyBranch Proof 签发：绑定 verified_* / workspace，依赖当前节点 Revision
+ok 77 - R2 verifyBranch Proof 签发：绑定 verified_* / workspace，依赖当前节点 Revision
+  ---
+  duration_ms: 110.186167
+  type: 'test'
+  ...
+# Subtest: R3 产生 I2 后，依赖 I1 的 RV1 判 not_covering_current（stale，保留不删）
+ok 78 - R3 产生 I2 后，依赖 I1 的 RV1 判 not_covering_current（stale，保留不删）
+  ---
+  duration_ms: 176.5095
+  type: 'test'
+  ...
+# Subtest: R3b 审核后再测试：T1 直接依赖 I，I2 后 T1 同判 stale（契约典型链）
+ok 79 - R3b 审核后再测试：T1 直接依赖 I，I2 后 T1 同判 stale（契约典型链）
+  ---
+  duration_ms: 179.154084
+  type: 'test'
+  ...
+# Subtest: R4 E2E 反例：另一 HEAD 的 Proof 不为当前 Revision 背书
+ok 80 - R4 E2E 反例：另一 HEAD 的 Proof 不为当前 Revision 背书
+  ---
+  duration_ms: 173.524333
+  type: 'test'
+  ...
+# Subtest: R5 artifact 条目：\#69 record_id 约定 + parseArtifactBody 定 body
+ok 81 - R5 artifact 条目：\#69 record_id 约定 + parseArtifactBody 定 body
+  ---
+  duration_ms: 116.939667
+  type: 'test'
+  ...
+# Subtest: R6 与运行摘要互相引用：logical_run_ref 内嵌并随提交刷新
+ok 82 - R6 与运行摘要互相引用：logical_run_ref 内嵌并随提交刷新
+  ---
+  duration_ms: 73.169625
+  type: 'test'
+  ...
+# Subtest: R7 CLI 边界：未知命令 exit 2；业务错误 exit 1 且 stdout 为 { ok:false }
+ok 83 - R7 CLI 边界：未知命令 exit 2；业务错误 exit 1 且 stdout 为 { ok:false }
+  ---
+  duration_ms: 101.216542
+  type: 'test'
+  ...
+# Subtest: validateManifest：合法清单通过
+ok 84 - validateManifest：合法清单通过
+  ---
+  duration_ms: 0.558333
+  type: 'test'
+  ...
+# Subtest: validateManifest：非法清单一律抛错（fail-closed）
+ok 85 - validateManifest：非法清单一律抛错（fail-closed）
+  ---
+  duration_ms: 0.34225
+  type: 'test'
+  ...
+# Subtest: list：无目录事实时 12 内置常驻、按清单顺序、带 manifest 摘要
+ok 86 - list：无目录事实时 12 内置常驻、按清单顺序、带 manifest 摘要
+  ---
+  duration_ms: 2.424166
+  type: 'test'
+  ...
+# Subtest: list：内置在前、工作区自定义按 id 序居中、打包回退排最后且不重复
+ok 87 - list：内置在前、工作区自定义按 id 序居中、打包回退排最后且不重复
+  ---
+  duration_ms: 0.664667
+  type: 'test'
+  ...
+# Subtest: list：内置摘要优先取打包快照（与工作区旧文件脱钩）
+ok 88 - list：内置摘要优先取打包快照（与工作区旧文件脱钩）
+  ---
+  duration_ms: 0.304708
+  type: 'test'
+  ...
+# Subtest: get：内置详情来源优先级 快照 > 工作区 > 占位
+ok 89 - get：内置详情来源优先级 快照 > 工作区 > 占位
+  ---
+  duration_ms: 0.401042
+  type: 'test'
+  ...
+# Subtest: get：自定义读工作区；打包回退只读可见；未知 id 报「角色不存在」
+ok 90 - get：自定义读工作区；打包回退只读可见；未知 id 报「角色不存在」
+  ---
+  duration_ms: 0.505166
+  type: 'test'
+  ...
+# Subtest: usage：跨内置+用户模板统计；profile 大小写/规范化不敏感
+ok 91 - usage：跨内置+用户模板统计；profile 大小写/规范化不敏感
+  ---
+  duration_ms: 1.511084
+  type: 'test'
+  ...
+# Subtest: usage：草稿取代同 id 持久化版本；无 id 草稿独立计入；失败 fail-closed
+ok 92 - usage：草稿取代同 id 持久化版本；无 id 草稿独立计入；失败 fail-closed
+  ---
+  duration_ms: 0.321083
+  type: 'test'
+  ...
+# Subtest: validateName：完整规则集（含首尾点与 Windows 保留名）+ 唯一性
+ok 93 - validateName：完整规则集（含首尾点与 Windows 保留名）+ 唯一性
+  ---
+  duration_ms: 1.511125
+  type: 'test'
+  ...
+# Subtest: change create：能力/名称/内容/唯一性检查顺序与线上一致，成功产出 write 意图
+ok 94 - change create：能力/名称/内容/唯一性检查顺序与线上一致，成功产出 write 意图
+  ---
+  duration_ms: 0.480875
+  type: 'test'
+  ...
+# Subtest: change update：只读/存在性/重命名保护顺序与线上一致
+ok 95 - change update：只读/存在性/重命名保护顺序与线上一致
+  ---
+  duration_ms: 0.267916
+  type: 'test'
+  ...
+# Subtest: change remove：只读/引用阻止（含草稿提示）/打包回退不可删/成功意图
+ok 96 - change remove：只读/引用阻止（含草稿提示）/打包回退不可删/成功意图
+  ---
+  duration_ms: 0.515042
+  type: 'test'
+  ...
+# Subtest: execute：未知操作 fail-closed
+ok 97 - execute：未知操作 fail-closed
+  ---
+  duration_ms: 0.280917
+  type: 'test'
+  ...
+# Subtest: buildSnapshot：清单 + 内置角色正文同步读取；非法路径注入被拒绝
+ok 98 - buildSnapshot：清单 + 内置角色正文同步读取；非法路径注入被拒绝
+  ---
+  duration_ms: 0.478291
+  type: 'test'
+  ...
+# Subtest: readRoleFileSafe：路径穿越返回 null，不读目录外文件
+ok 99 - readRoleFileSafe：路径穿越返回 null，不读目录外文件
+  ---
+  duration_ms: 0.042334
+  type: 'test'
+  ...
+# Subtest: collectReferencedRoleFiles：打包被引用且文件存在的角色（含自定义 dispatcher）
+ok 100 - collectReferencedRoleFiles：打包被引用且文件存在的角色（含自定义 dispatcher）
+  ---
+  duration_ms: 0.11125
+  type: 'test'
+  ...
+# Subtest: \#73 夹具通过校验
+ok 101 - \#73 夹具通过校验
+  ---
+  duration_ms: 1.973166
+  type: 'test'
+  ...
+# Subtest: \#73 OPTIMIZE 计数：一次回退消耗 1 点额度，未达上限仍可 PASS
+ok 102 - \#73 OPTIMIZE 计数：一次回退消耗 1 点额度，未达上限仍可 PASS
+  ---
+  duration_ms: 2.979291
+  type: 'test'
+  ...
+# Subtest: \#73 OPTIMIZE 达到额度：保留 OPTIMIZE，WAITING_HUMAN + MAX_ROUNDS_REACHED
+ok 103 - \#73 OPTIMIZE 达到额度：保留 OPTIMIZE，WAITING_HUMAN + MAX_ROUNDS_REACHED
+  ---
+  duration_ms: 2.497709
+  type: 'test'
+  ...
+# Subtest: \#73 RECONFIRM 不计数：超过 maxRounds 次仍完整记录且不耗尽
+ok 104 - \#73 RECONFIRM 不计数：超过 maxRounds 次仍完整记录且不耗尽
+  ---
+  duration_ms: 1.507625
+  type: 'test'
+  ...
+# Subtest: \#73 探索第 3 轮 NEEDS_RESEARCH：保留结果并转人工（自动补充研究额度=2）
+ok 105 - \#73 探索第 3 轮 NEEDS_RESEARCH：保留结果并转人工（自动补充研究额度=2）
+  ---
+  duration_ms: 2.463333
+  type: 'test'
+  ...
+# Subtest: \#73 技术重试不计额度
+ok 106 - \#73 技术重试不计额度
+  ---
+  duration_ms: 3.763917
+  type: 'test'
+  ...
+# Subtest: \#73 ADD_BUDGET 显式 +1 额度并沿被拦边继续，写入 Control Record
+ok 107 - \#73 ADD_BUDGET 显式 +1 额度并沿被拦边继续，写入 Control Record
+  ---
+  duration_ms: 2.154667
+  type: 'test'
+  ...
+# Subtest: \#73 ADD_BUDGET 后再耗尽须新 decision_id，不得覆盖前次 Decision Record
+ok 108 - \#73 ADD_BUDGET 后再耗尽须新 decision_id，不得覆盖前次 Decision Record
+  ---
+  duration_ms: 2.644583
+  type: 'test'
+  ...
+# Subtest: \#73 旧蓝图 failure 边仍走 FAILED_MAX_ROUNDS（兼容）
+ok 109 - \#73 旧蓝图 failure 边仍走 FAILED_MAX_ROUNDS（兼容）
+  ---
+  duration_ms: 4.732
+  type: 'test'
+  ...
+# Subtest: \#127 夹具通过校验
+ok 110 - \#127 夹具通过校验
+  ---
+  duration_ms: 5.644209
+  type: 'test'
+  ...
+# Subtest: \#127 PASS 走进 $end：DONE 带 completion，不改写节点结果
+ok 111 - \#127 PASS 走进 $end：DONE 带 completion，不改写节点结果
+  ---
+  duration_ms: 2.831958
+  type: 'test'
+  ...
+# Subtest: \#73 OPTIMIZE 回执行后 PASS：countRound 消耗 1 点额度（未达上限）
+ok 112 - \#73 OPTIMIZE 回执行后 PASS：countRound 消耗 1 点额度（未达上限）
+  ---
+  duration_ms: 1.683291
+  type: 'test'
+  ...
+# Subtest: \#127 CONFIRM → 翻译为 WAITING_HUMAN，保留 results，不把 ROUTE_HALTED 对外返回
+ok 113 - \#127 CONFIRM → 翻译为 WAITING_HUMAN，保留 results，不把 ROUTE_HALTED 对外返回
+  ---
+  duration_ms: 3.3845
+  type: 'test'
+  ...
+# Subtest: \#127 缺匹配业务边：ENDED_NO_OUTCOME_EDGE，不改写 results
+ok 114 - \#127 缺匹配业务边：ENDED_NO_OUTCOME_EDGE，不改写 results
+  ---
+  duration_ms: 2.372959
+  type: 'test'
+  ...
+# Subtest: \#127 新模式 agent 返回 null：无匹配则 TECHNICAL_FAILURE
+ok 115 - \#127 新模式 agent 返回 null：无匹配则 TECHNICAL_FAILURE
+  ---
+  duration_ms: 0.680334
+  type: 'test'
+  ...
+# Subtest: \#127 旧 hello 蓝图仍可 DONE
+ok 116 - \#127 旧 hello 蓝图仍可 DONE
+  ---
+  duration_ms: 6.24075
+  type: 'test'
+  ...
+# Subtest: \#127 投影透传 outcome / countRound / completionPath；skill 覆盖新状态
+ok 117 - \#127 投影透传 outcome / countRound / completionPath；skill 覆盖新状态
+  ---
+  duration_ms: 0.633916
+  type: 'test'
+  ...
+# Subtest: \#126 旧蓝图零迁移：内置模板与既有 HD/fanout 夹具仍通过
+ok 118 - \#126 旧蓝图零迁移：内置模板与既有 HD/fanout 夹具仍通过
+  ---
+  duration_ms: 6.269167
+  type: 'test'
+  ...
+# Subtest: \#126 L1 优化评估：三枚举三边 + 技术自环 + HD 出边合法
+ok 119 - \#126 L1 优化评估：三枚举三边 + 技术自环 + HD 出边合法
+  ---
+  duration_ms: 1.411084
+  type: 'test'
+  ...
+# Subtest: \#126 L2 自定义 $.decision 合法
+ok 120 - \#126 L2 自定义 $.decision 合法
+  ---
+  duration_ms: 0.549041
+  type: 'test'
+  ...
+# Subtest: \#126 L4 boolean 两边合法
+ok 121 - \#126 L4 boolean 两边合法
+  ---
+  duration_ms: 0.562042
+  type: 'test'
+  ...
+# Subtest: \#126 工作流内新旧节点并存合法
+ok 122 - \#126 工作流内新旧节点并存合法
+  ---
+  duration_ms: 0.323
+  type: 'test'
+  ...
+# Subtest: \#126 同一节点禁止新旧混用
+ok 123 - \#126 同一节点禁止新旧混用
+  ---
+  duration_ms: 0.497459
+  type: 'test'
+  ...
+# Subtest: \#126 缺枚举边 / 多余边取值拒绝
+ok 124 - \#126 缺枚举边 / 多余边取值拒绝
+  ---
+  duration_ms: 0.217333
+  type: 'test'
+  ...
+# Subtest: \#126 自由 string 的 outcomePath 拒绝
+ok 125 - \#126 自由 string 的 outcomePath 拒绝
+  ---
+  duration_ms: 0.09725
+  type: 'test'
+  ...
+# Subtest: \#126 无入边的 HD 出边拒绝
+ok 126 - \#126 无入边的 HD 出边拒绝
+  ---
+  duration_ms: 0.116417
+  type: 'test'
+  ...
+# Subtest: \#163 新式 outcome 出边占用框架控制名拒绝（USER_ACCEPTED / ADD_BUDGET / STOP）
+ok 127 - \#163 新式 outcome 出边占用框架控制名拒绝（USER_ACCEPTED / ADD_BUDGET / STOP）
+  ---
+  duration_ms: 0.251875
+  type: 'test'
+  ...
+# Subtest: \#126 有入边的 HD 缺出边拒绝
+ok 128 - \#126 有入边的 HD 缺出边拒绝
+  ---
+  duration_ms: 0.10325
+  type: 'test'
+  ...
+# Subtest: \#126 无出口业务自环拒绝；有 PASS 出口的环合法
+ok 129 - \#126 无出口业务自环拒绝；有 PASS 出口的环合法
+  ---
+  duration_ms: 0.096042
+  type: 'test'
+  ...
+# Subtest: \#126 旧 success 环仍拒绝
+ok 130 - \#126 旧 success 环仍拒绝
+  ---
+  duration_ms: 0.209917
+  type: 'test'
+  ...
+# Subtest: \#126 countRound 不参与走通性：false 的环只要有出口就合法
+ok 131 - \#126 countRound 不参与走通性：false 的环只要有出口就合法
+  ---
+  duration_ms: 0.239541
+  type: 'test'
+  ...
+# Subtest: \#126 completionPath：无结构边到 $end 拒绝；叶子非 string 拒绝
+ok 132 - \#126 completionPath：无结构边到 $end 拒绝；叶子非 string 拒绝
+  ---
+  duration_ms: 0.357958
+  type: 'test'
+  ...
+# Subtest: \#126 fanout 禁止 outcomePath / completionPath / outcome 边 / technical
+ok 133 - \#126 fanout 禁止 outcomePath / completionPath / outcome 边 / technical
+  ---
+  duration_ms: 0.323958
+  type: 'test'
+  ...
+# Subtest: \#126 同一 outcome 取值两条出边拒绝
+ok 134 - \#126 同一 outcome 取值两条出边拒绝
+  ---
+  duration_ms: 0.109875
+  type: 'test'
+  ...
+# Subtest: 回退 outcome 不计入入口入边：建设主链唯一入口仍是 requirements
+ok 135 - 回退 outcome 不计入入口入边：建设主链唯一入口仍是 requirements
+  ---
+  duration_ms: 0.646625
+  type: 'test'
+  ...
+1..135
+# tests 135
+# suites 0
+# pass 135
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1398.740709

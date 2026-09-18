@@ -1,0 +1,16 @@
+{
+  "task_id": "FIX-65",
+  "task_name": "S6 回归：最小图编译产物超出宿主 64KB 捕获上限",
+  "status": "已合并",
+  "archive_form": "lightweight-remote",
+  "remote_ref": "cnb#65",
+  "merge": {
+    "commit": "51739d6b3e3556888ad9cda0d03072b77f19d090",
+    "merged_at": "2026-09-16T08:54:56.448Z"
+  },
+  "branch": null,
+  "branch_retained": null,
+  "generated_by": "FIX-72 后续数据回填（CHORE-36 重入期间锚点漂移治理）",
+  "generated_at": "2026-09-16T10:05:15.991Z",
+  "note": "远程收口任务：经 CNB 合并请求合入。规格正文以远端 issue 为源；凭据与登记册逐字一致。"
+}

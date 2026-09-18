@@ -22,9 +22,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { reconcilePlan, apply as reconcileApply } from './registry-reconcile.mjs'
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
-const planScript = path.join(root, 'scripts/ai-task-execution-plan.mjs')
+const planScript = path.join(__dirname, 'ai-task-execution-plan.mjs')
 
 const argv = process.argv.slice(2)
 if (argv.length < 1 || argv[0].startsWith('-')) {
@@ -105,6 +107,33 @@ if (!forceNow && checkedAt.getTime() < runAt.getTime()) {
 }
 
 const invokedAt = new Date().toISOString()
+
+// CHORE-73：夜间批次开头先跑对账——以主干合并事实回写登记册，消除调度判据滞后
+// （LOC-028 被跳过根因：登记册状态回写滞后于实际合并，调度按旧账误判依赖未完成）。
+// 对账失败不阻塞批次（按现有登记册继续），可疑差异只提示人工核对。
+const repoRoot = path.resolve(__dirname, '..')
+const reconcileLines = []
+try {
+  const audit = reconcilePlan(repoRoot, 'main')
+  if (audit.toMerge.length > 0) {
+    const changed = reconcileApply(repoRoot, 'main')
+    reconcileLines.push(
+      `对账：自动回写 ${changed.length} 条（登记册已更新，收口/提交时一并入库）`,
+      ...changed.map((c) => `  - ${c}`),
+    )
+  } else {
+    reconcileLines.push('对账：账实一致，无需回写')
+  }
+  if (audit.suspicious.length) {
+    reconcileLines.push(
+      `⚠️ 可疑差异 ${audit.suspicious.length} 条（登记记已合并但主干无痕迹，须人工核对）：`,
+      ...audit.suspicious.map((s) => `  - ${s.task_id}｜${s.note}`),
+    )
+  }
+} catch (e) {
+  reconcileLines.push(`对账失败（不阻塞批次）：${e.message}`)
+}
+
 const planArgs = [planScript, batchPath]
 if (simulatePath) planArgs.push('--simulate', simulatePath)
 
@@ -129,6 +158,9 @@ const nightReport = [
   `预约到点时刻：${runAt.toISOString()}`,
   `实际启动时间：${invokedAt}`,
   `强制到点对照：${forceNow ? '是' : '否'}`,
+  '',
+  '【批次前对账（CHORE-73）】',
+  ...reconcileLines,
   '',
   planOut.summaryText || '(无汇总文本)',
   '',

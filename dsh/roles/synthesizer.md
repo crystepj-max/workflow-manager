@@ -132,6 +132,9 @@
 - 关键分歧
 - 关键假设
 - 证据评估
+- 问题覆盖表（coverage：`question_id` / `status` / `evidence_refs` / `reason`）
+- 专家失败清单（research_failures）
+- 来源重合（source_overlaps）
 - 未解决问题
 - 结论敏感点
 

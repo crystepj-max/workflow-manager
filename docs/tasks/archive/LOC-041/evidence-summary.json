@@ -1,0 +1,17 @@
+{
+  "task_id": "LOC-041",
+  "run_id": "loc-041-r1",
+  "task_name": "WR-018 由宿主落实节点权限与独立证明边界",
+  "branch": "dev-loc-041-r1",
+  "status": "等待验收",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-041-r1",
+    "file_count": 15,
+    "total_bytes": 15637
+  },
+  "generated_at": "2026-09-17T14:05:15.789Z"
+}

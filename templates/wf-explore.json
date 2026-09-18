@@ -1,0 +1,455 @@
+{
+  "id": "wf-explore",
+  "displayName": "探索 · 多视角探索",
+  "description": "复杂开放问题的多视角研究：统筹拆解 → 3-5 名专家独立研究（第一轮认知隔离、共享只读现场 + 独立 scratch）→ 综合分析（共识/分歧/证据地图，不多数投票）→ 结论评估（PASS / NEEDS_RESEARCH / INSUFFICIENT）。最多 2 次自动补充研究（总轮次 ≤3 含首次 BROAD）；第 3 轮仍 NEEDS_RESEARCH 时保留原评估裁决并由宿主收口为 INSUFFICIENT；INSUFFICIENT 是合法完成类型。",
+  "entry": "orchestrate",
+  "control": {
+    "maxRounds": 2,
+    "maxRoundsExhausted": "INSUFFICIENT",
+    "retryPolicy": {
+      "max_attempts": 3,
+      "backoff_ms": [
+        1000,
+        2000
+      ],
+      "attempt_timeout_ms": 1800000,
+      "run_auto_time_ms": 14400000,
+      "no_progress_repeats": 2
+    }
+  },
+  "workspace": {
+    "template_id": "wf-explore"
+  },
+  "nodes": [
+    {
+      "id": "orchestrate",
+      "profile": "orchestrator",
+      "label": "探索统筹",
+      "goal": "你是本轮探索的统筹。读取【任务输入】中的研究问题；若 run 产物目录已存在 `evaluation.md`（上一轮评估结论），必须先读取并只针对其中的 research_targets 与未解决缺口组织本轮补充研究。\n要求：\n1. 产出 questions[{id,required}] 必需问题清单（ID 唯一、至少一项 required=true）；\n2. 产出 3-5 名专家的独立研究任务书（expert_briefs）：视角互不重叠，每份含 expert_id（kebab-case）、focus、brief、question_ids（关联至少一个 question_id）；首轮 round_type=BROAD；后续 TARGETED 轮每项还须非空 research_targets 映射当前 open_gaps 的 question_id；\n3. 禁止 focus+brief 完全相同的两份任务（去首尾空白、折叠连续空白后比对）；\n4. 把研究方案写入 run 产物目录的 `research-plan.md`；\n5. 最终回复只输出本节点 schema 的 JSON（route=PLAN_READY）。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": [
+                "PLAN_READY"
+              ]
+            },
+            "round_type": {
+              "type": "string",
+              "enum": [
+                "BROAD",
+                "TARGETED"
+              ]
+            },
+            "research_question": {
+              "type": "string"
+            },
+            "questions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "required"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "expert_briefs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "expert_id": {
+                    "type": "string"
+                  },
+                  "focus": {
+                    "type": "string"
+                  },
+                  "brief": {
+                    "type": "string"
+                  },
+                  "question_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "research_targets": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "expert_id",
+                  "focus",
+                  "brief"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "plan_summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "route",
+            "round_type",
+            "research_question",
+            "questions",
+            "expert_briefs",
+            "plan_summary"
+          ],
+          "additionalProperties": false
+        },
+        "files": {
+          "research-plan.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "research",
+      "profile": "researcher",
+      "label": "专家研究",
+      "kind": "fanout",
+      "items": "$.results.orchestrate.expert_briefs",
+      "goal": "你是被独立指派的一名研究专家。你的任务书（JSON）：{{item}}\n要求：\n1. 按任务书的 focus 与 brief 独立取证：区分事实 / 推断 / 未知，必须同时给出支持证据（evidence）与反证（counter_evidence），列出假设（assumptions）与不确定性（uncertainties），并给出置信度（confidence）；\n2. 只读方式使用共享 source 现场（运行上下文给出时）取证，禁止写入；工作笔记与中间产出只写入运行上下文注入的你的专属 scratch 目录；\n3. 禁止读取其他专家的 scratch 目录或研究报告，不得参考其他专家的结论（保持第一轮认知独立）；\n4. 正式研究报告写入 run 产物目录，文件名为 research-<你的 expert_id>.md（含证据、反证、假设、不确定性与置信度说明）；\n5. 最终回复只输出本节点 per-item schema 的 JSON。",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "expert_id": {
+              "type": "string"
+            },
+            "findings": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "counter_evidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assumptions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "uncertainties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "confidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            }
+          },
+          "required": [
+            "expert_id",
+            "findings",
+            "evidence",
+            "counter_evidence",
+            "assumptions",
+            "uncertainties",
+            "confidence"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "synthesize",
+      "profile": "synthesizer",
+      "label": "综合分析",
+      "goal": "读取 run 产物目录下的 `research-plan.md` 与全部专家研究报告（文件名形如 research-<expert_id>.md），并接收专家 fanout 聚合结果（含成功项与失败项索引），做综合分析：\n1. 构建共识（consensus）、分歧（disagreements）与证据地图（evidence_map）；\n2. 不做多数投票：分歧必须如实保留；\n3. 输出 coverage[{question_id,status,evidence_refs,reason}]，必需问题只有带可读证据的回答或有证据支撑的未知/不可得结论才算已处理；\n4. 汇总仍未解决的缺口（open_gaps）与来源重合（source_overlaps）；\n5. 写入 run 产物目录的 `synthesis.md`；\n6. 最终回复只输出本节点 schema 的 JSON（route=SYNTHESIS_READY）。",
+      "output": {
+        "outcomePath": "$.route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": [
+                "SYNTHESIS_READY"
+              ]
+            },
+            "consensus": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "disagreements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "evidence_map": {
+              "type": "string"
+            },
+            "coverage": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "question_id": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "answered",
+                      "unknown_with_evidence",
+                      "unavailable_with_evidence",
+                      "uncovered",
+                      "missing_evidence",
+                      "blocked"
+                    ]
+                  },
+                  "evidence_refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "question_id",
+                  "status"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "source_overlaps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "research_failures": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "expert_id": {
+                    "type": "string"
+                  },
+                  "index": {
+                    "type": "number"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "index"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "open_gaps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "synthesis_summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "route",
+            "consensus",
+            "disagreements",
+            "evidence_map",
+            "coverage",
+            "source_overlaps",
+            "research_failures",
+            "open_gaps",
+            "synthesis_summary"
+          ],
+          "additionalProperties": false
+        },
+        "files": {
+          "synthesis.md": "markdown"
+        }
+      }
+    },
+    {
+      "id": "evaluate",
+      "profile": "evaluator",
+      "label": "结论评估",
+      "goal": "对照研究问题、`synthesis.md` 与 coverage 表做结论评估：\n1. verdict 三选一：PASS / NEEDS_RESEARCH / INSUFFICIENT；\n2. verdict=PASS 时 completion_type=EVALUATION_PASSED，且所有必需问题须在 coverage 中有证据或证据支撑的未知/不可得；verdict=INSUFFICIENT 时 completion_type=INSUFFICIENT；NEEDS_RESEARCH 时必须给出非空 research_targets 且不得填 completion_type；\n3. 始终填写 why / summary_for_human / current_state；\n4. 把评估结论写入 run 产物目录的 `evaluation.md`；\n5. 最终回复只输出本节点 schema 的 JSON。",
+      "output": {
+        "outcomePath": "$.verdict",
+        "completionPath": "$.completion_type",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "verdict": {
+              "type": "string",
+              "enum": [
+                "PASS",
+                "NEEDS_RESEARCH",
+                "INSUFFICIENT"
+              ]
+            },
+            "completion_type": {
+              "type": "string",
+              "enum": [
+                "EVALUATION_PASSED",
+                "INSUFFICIENT"
+              ]
+            },
+            "confidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            },
+            "why": {
+              "type": "string"
+            },
+            "summary_for_human": {
+              "type": "string"
+            },
+            "current_state": {
+              "type": "string"
+            },
+            "research_targets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "open_gaps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "verdict",
+            "why",
+            "summary_for_human",
+            "current_state"
+          ],
+          "additionalProperties": false
+        },
+        "files": {
+          "evaluation.md": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "orchestrate",
+      "to": "research",
+      "outcome": "PLAN_READY"
+    },
+    {
+      "from": "orchestrate",
+      "to": "orchestrate",
+      "on": "technical"
+    },
+    {
+      "from": "research",
+      "to": "synthesize",
+      "on": "success"
+    },
+    {
+      "from": "research",
+      "to": "$end",
+      "on": "failure"
+    },
+    {
+      "from": "synthesize",
+      "to": "evaluate",
+      "outcome": "SYNTHESIS_READY"
+    },
+    {
+      "from": "synthesize",
+      "to": "synthesize",
+      "on": "technical"
+    },
+    {
+      "from": "evaluate",
+      "to": "$end",
+      "outcome": "PASS"
+    },
+    {
+      "from": "evaluate",
+      "to": "$end",
+      "outcome": "INSUFFICIENT"
+    },
+    {
+      "from": "evaluate",
+      "to": "orchestrate",
+      "outcome": "NEEDS_RESEARCH",
+      "countRound": true
+    },
+    {
+      "from": "evaluate",
+      "to": "evaluate",
+      "on": "technical"
+    }
+  ],
+  "bindings": {
+    "models": {
+      "orchestrate": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "research": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "synthesize": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash"
+      },
+      "evaluate": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash"
+      }
+    }
+  },
+  "heteroCheck": "weak"
+}

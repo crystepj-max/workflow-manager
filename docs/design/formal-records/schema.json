@@ -88,6 +88,10 @@
         "produced_by": { "$ref": "#/definitions/nonEmptyText" },
         "node_business_outcome": true,
         "lifecycle_event": { "$ref": "#/definitions/nonEmptyText" },
+        "input_mode": { "$ref": "#/definitions/nonEmptyText" },
+        "dependency_source": { "$ref": "#/definitions/nonEmptyText" },
+        "dependency_coverage": { "$ref": "#/definitions/nonEmptyText" },
+        "resolved_inputs_snapshot": { "type": "object" },
         "related_decision": { "$ref": "#/definitions/recordRef" },
         "related_guidance": { "$ref": "#/definitions/recordRef" },
         "portable": {

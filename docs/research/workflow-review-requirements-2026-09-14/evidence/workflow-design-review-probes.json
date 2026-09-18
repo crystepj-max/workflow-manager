@@ -1,0 +1,94 @@
+{
+  "baseline": "8e38d74955c67f0f196c93eb880cfef7cce71cbd",
+  "method": "真实编译器与宿主代码；代理、文件系统和引擎传输使用既有测试替身；不调用真实模型或外部服务",
+  "probes": [
+    {
+      "id": "technical-retry",
+      "status": "FAILED_AGENT_CAP",
+      "calls": 1000,
+      "budgetUsed": null
+    },
+    {
+      "id": "recoverable-blocked",
+      "engine_status": "DONE",
+      "node_outcome": "BLOCKED",
+      "lifecycle": {
+        "state": "COMPLETED",
+        "reason": null
+      },
+      "terminal": true
+    },
+    {
+      "id": "zero-experts",
+      "status": "DONE",
+      "expert_calls": 0,
+      "research": {
+        "total": 0,
+        "okCount": 0,
+        "failedCount": 0,
+        "items": []
+      }
+    },
+    {
+      "id": "contradictory-verdict-and-head",
+      "status": "WAITING_HUMAN",
+      "called": [
+        "实施前检查",
+        "开发",
+        "收敛审查",
+        "测试",
+        "UAT 准备"
+      ],
+      "review": {
+        "route": "APPROVE",
+        "verdict": "REQUEST_CHANGES",
+        "summary": "阻断项未解决",
+        "blockers": "存在阻断项",
+        "verified_branch": "dev-probe",
+        "verified_head": "old-head"
+      },
+      "test": {
+        "route": "PASS",
+        "result": "FAILED",
+        "reason": "仍失败",
+        "evidence": "",
+        "verified_branch": "dev-probe",
+        "verified_head": "different-old-head"
+      }
+    },
+    {
+      "id": "contract-and-completion-drift",
+      "status": "DONE",
+      "contract_a": "contract-A",
+      "contract_b": "contract-B",
+      "completion": {
+        "type": "USER_ACCEPTED",
+        "node": "closeout",
+        "path": "$.completion_type"
+      },
+      "decision": null
+    },
+    {
+      "id": "loop-attempt-loss",
+      "actual_calls": 8,
+      "actual_evaluations": 3,
+      "retained_evaluation": {
+        "route": "PASS",
+        "summary": "评估版本3",
+        "contract_digest": "contract-A",
+        "gaps": ""
+      },
+      "logical_attempts": 4,
+      "logical_evaluations": 1,
+      "stored_evaluation_revisions": 1,
+      "record_dir": "/tmp/wf-review-records-qxKCBO"
+    },
+    {
+      "id": "feedback-handoff",
+      "execute_calls": 2,
+      "evaluation_gap_in_second_execute_prompt": false,
+      "explicit_evaluation_report_reference_in_second_execute_prompt": false,
+      "status": "DONE"
+    }
+  ]
+}
