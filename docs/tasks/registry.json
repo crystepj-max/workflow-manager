@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 69,
+  "revision": 71,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -1823,9 +1823,38 @@
       "source": "集成真机验收差距第四批（松哥逐条给出，原型<>现状六条）",
       "source_ref": "docs/tasks/specs/FEAT-103-role-row-create-run-chain-dialog/task-spec-V1.md",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "等待验收",
       "priority": "P1",
       "env_group": "FEAT-103",
+      "env_role": "独立",
+      "deps": [],
+      "branch": "dev-feat-103-r1",
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-18T15:28:58.144Z",
+      "updated_at": "2026-09-18T16:04:41.862Z",
+      "spec_path": "docs/tasks/specs/FEAT-103-role-row-create-run-chain-dialog/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-104",
+      "type": "CHORE",
+      "remote": "cnb#104",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "VWF 动态载荷瘦身专项（目标回到 272KiB 以内或定健康长期上限）",
+      "slug": "vwf-payload-slimming",
+      "source": "FEAT-103 载荷闸门裁决的兜底纪律卡（总控立卡）",
+      "source_ref": "cnb#104 issue 正文",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P2",
+      "env_group": "CHORE-104",
       "env_role": "独立",
       "deps": [],
       "branch": null,
@@ -1836,10 +1865,10 @@
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
-      "created_at": "2026-09-18T15:28:58.144Z",
-      "updated_at": "2026-09-18T15:28:58.144Z",
-      "spec_path": "docs/tasks/specs/FEAT-103-role-row-create-run-chain-dialog/task-spec-V1.md"
+      "created_at": "2026-09-18T16:13:32.448Z",
+      "updated_at": "2026-09-18T16:13:32.448Z",
+      "spec_path": "cnb#104 issue 正文（轻量卡，暂不落独立规格）"
     }
   ],
-  "updated_at": "2026-09-18T15:28:58.144Z"
+  "updated_at": "2026-09-18T16:13:32.448Z"
 }
