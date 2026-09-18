@@ -2533,7 +2533,8 @@ test('FEAT-85 详情：工作空间字段齐全、读取失败显示未知与重
   assert.ok(container.textContent.includes('暂时读不到这一步的成果内容'), '记录通道不可用时给出明确降级说明')
   assert.ok(container.textContent.includes('只显示基本信息'), '写明只显示基本信息、不冒充内容')
   // B8：降级说明就地保留重试入口（重试即重取摘要与记录，不隐藏失败也不新增 RPC）
-  const recNote = container.querySelector('.vwf-note.warn')
+  const recNote = Array.from(container.querySelectorAll('.vwf-note.warn'))
+    .find((n) => (n.textContent || '').includes('暂时读不到这一步的成果内容'))
   assert.ok(recNote && Array.from(recNote.querySelectorAll('button')).some((b) => (b.textContent || '').includes('重试读取')), '降级说明旁保留重试读取入口')
   runState.recordsFail = false
   await backToList()
