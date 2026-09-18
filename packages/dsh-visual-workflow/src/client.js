@@ -166,6 +166,8 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-tabs { display:flex; gap:4px; border-bottom:1px solid var(--vwf-border); }
 .vwf-tab { padding:7px 14px; border:1px solid transparent; border-radius:8px 8px 0 0; cursor:pointer; color:var(--vwf-text-2); font-size:13px; background:transparent; }
 .vwf-tab.on { color:var(--vwf-accent); border-color:var(--vwf-border); border-bottom-color:transparent; background:var(--vwf-surface); }
+/* 页签计数（原型 nav-tab .count）：待处理运行数不随筛选与分页消失 */
+.vwf-tab .vwf-badge { margin-left:6px; }
 .vwf-card { border:1px solid var(--vwf-border); border-radius:12px; background:var(--vwf-surface); overflow:hidden; }
 .vwf-card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; border-bottom:1px solid var(--vwf-border); flex-wrap:wrap; }
 .vwf-card-title { font-size:14px; font-weight:600; color:var(--vwf-text); }
@@ -270,9 +272,6 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-history-group { display:inline-flex; border:1px solid var(--vwf-border-ctl); border-radius:999px; background:var(--vwf-canvas); overflow:hidden; }
 .vwf-history-group .vwf-history-btn { border:0; border-radius:0; background:transparent; font-size:14px; min-width:28px; padding:3px 8px; color:var(--vwf-text); }
 .vwf-history-group .vwf-history-btn:disabled { opacity:.45; cursor:not-allowed; }
-/* 角色库常驻区（issue-58 反馈）：画布右上角胶囊区；管理/新增入口不再依赖自定义角色数量 */
-.vwf-role-zone { margin-left:auto; display:inline-flex; align-items:center; gap:2px; padding:3px 6px 3px 12px; border:1px solid var(--vwf-accent); border-radius:999px; background:var(--vwf-canvas); flex:0 0 auto; max-width:100%; flex-wrap:wrap; }
-.vwf-role-zone-label { font-size:11px; font-weight:700; letter-spacing:.08em; color:var(--vwf-accent); margin-right:8px; white-space:nowrap; }
 .vwf-svg { display:block; user-select:none; touch-action:none; }
 .vwf-menu { position:absolute; z-index:20; min-width:160px; padding:4px; border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-surface); box-shadow:0 8px 28px rgba(0,0,0,.4); }
 .vwf-menu-item { display:block; width:100%; text-align:left; padding:7px 10px; border:0; border-radius:7px; background:transparent; color:var(--vwf-text); font-size:12px; cursor:pointer; }
@@ -315,8 +314,11 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
     --vwf-wb-border-control:var(--dsw-alias-border-l3, #8E9CB8);
   }
 }
-/* 工作区键盘焦点：焦点可见且不被滚动容器裁掉（WCAG 2.2 焦点不被遮挡） */
-.vwf-editor-dialog :focus-visible { outline:2px solid var(--vwf-wb-accent); outline-offset:2px; }
+/* 工作区键盘焦点：焦点可见且不被滚动容器裁掉（WCAG 2.2 焦点不被遮挡）。
+   第二个选择器用 :is() 提起优先级：工作区内的页签/按钮/目录行等元素选择器在本文件末尾
+   的通用焦点规则里带上了类，若不提权会被那条规则按顺序覆盖成设置面板的强调色。 */
+.vwf-editor-dialog :focus-visible,
+.vwf-editor-dialog :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible { outline:2px solid var(--vwf-wb-accent); outline-offset:2px; }
 /* 右侧节点配置栏：网格项自身滚动（不再 position:sticky + height:100% 依附父级滚动） */
 .vwf-inspector { grid-area:config; min-width:0; min-height:0; overflow:auto; padding:12px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 .vwf-nav-col { grid-area:nav; min-width:0; min-height:0; display:flex; flex-direction:column; gap:12px; }
@@ -386,18 +388,23 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 /* 工作区固定小节：画布与配置栏内部不再出现页面级滚动条 */
 .vwf-wb-pane-tab { padding:6px 14px; border:1px solid var(--vwf-wb-border-control); border-radius:999px; background:var(--vwf-wb-surface); color:var(--vwf-wb-text); cursor:pointer; font:inherit; font-size:12px; }
 .vwf-wb-pane-tab.on { border-color:var(--vwf-wb-accent); background:var(--vwf-wb-accent-soft); font-weight:600; }
-.vwf-empty { display:grid; place-items:center; min-height:120px; border:1px dashed var(--dsw-alias-border-l2, #333); border-radius:10px; color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:12px; padding:16px; text-align:center; }
-.vwf-dialog-mask { position:fixed; inset:0; z-index:950; background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.45)); display:flex; align-items:center; justify-content:center; }
-.vwf-dialog { width:min(520px, 92vw); max-height:80vh; display:flex; flex-direction:column; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:14px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:10px; }
-.vwf-confirm-mask { position:fixed; inset:0; z-index:960; background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.45)); display:flex; align-items:center; justify-content:center; }
-.vwf-confirm { width:min(360px, 90vw); display:flex; flex-direction:column; gap:14px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:14px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:18px; }
-.vwf-confirm-title { font-size:14px; font-weight:600; color:var(--dsw-alias-label-primary, #e8e8e8); }
+/* V-5：空态与浮层表面同样只引用语义 token —— 原先的宿主 alias + 深色兜底
+   （#1e1e1e / #9a9a9a）会在浅色页面上落成一块深灰，正是「一灰一白」的第二个来源。 */
+.vwf-empty { display:grid; place-items:center; min-height:120px; border:1px dashed var(--vwf-border-strong); border-radius:10px; color:var(--vwf-text-2); font-size:12px; padding:16px; text-align:center; }
+.vwf-dialog-mask { position:fixed; inset:0; z-index:950; background:var(--vwf-mask); display:flex; align-items:center; justify-content:center; }
+.vwf-dialog { width:min(520px, 92vw); max-height:80vh; display:flex; flex-direction:column; border:1px solid var(--vwf-border); border-radius:14px; background:var(--vwf-surface); color:var(--vwf-text); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:10px; }
+.vwf-confirm-mask { position:fixed; inset:0; z-index:960; background:var(--vwf-mask); display:flex; align-items:center; justify-content:center; }
+.vwf-confirm { width:min(360px, 90vw); display:flex; flex-direction:column; gap:14px; border:1px solid var(--vwf-border); border-radius:14px; background:var(--vwf-surface); color:var(--vwf-text); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:18px; }
+.vwf-confirm-title { font-size:14px; font-weight:600; color:var(--vwf-text); }
 .vwf-confirm-actions { display:flex; justify-content:flex-end; gap:8px; }
 .vwf-dialog-title { font-size:15px; font-weight:600; }
 .vwf-dialog-desc { font-size:12px; color:var(--vwf-text-2); overflow-wrap:anywhere; }
 .vwf-dialog-issues { max-height:300px; overflow:auto; display:flex; flex-direction:column; gap:6px; border:1px solid var(--vwf-border); border-radius:10px; padding:10px; background:var(--vwf-canvas); }
 .vwf-dialog-issue { padding:6px 10px; border-radius:8px; background:var(--vwf-surface); color:var(--vwf-err); font-size:12px; }
 /* ── 角色库管理（issue-58；FEAT-86 收口：来源可辨识 / 两行摘要 / 独立滚动详情 / 窄屏）── */
+/* FEAT-100 V-1：角色库成为设置页的独立页签，列表内联在页签里（.vwf-role-tab）；
+   .vwf-role-mgr 只承载详情 / 表单浮层，因此弹层安全边距与内部滚动约束不变。 */
+.vwf-role-tab { display:flex; flex-direction:column; gap:10px; }
 .vwf-role-mgr { width:min(780px, 94vw); max-height:calc(100vh - 2 * var(--vwf-safe-gap)); display:flex; flex-direction:column; border:1px solid var(--vwf-border); border-radius:14px; background:var(--vwf-surface); color:var(--vwf-text); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:12px; overflow:hidden; }
 .vwf-role-mgr-body { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:10px; overscroll-behavior:contain; }
 .vwf-role-section-title { font-size:13px; font-weight:600; color:var(--vwf-accent); margin-top:6px; }
@@ -428,7 +435,7 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
   .vwf-role-mgr { width:100%; padding:12px; }
   .vwf-role-row-main, .vwf-role-actions { flex:1 1 100%; margin-left:0; }
   .vwf-role-actions .vwf-btn { flex:1 1 auto; min-height:28px; }
-  .vwf-canvas-toolbar .vwf-btn, .vwf-role-zone .vwf-btn { flex:1 1 auto; }
+  .vwf-canvas-toolbar .vwf-btn, .vwf-role-tab > .vwf-row .vwf-btn { flex:1 1 auto; }
 }
 /* ── SVG 画布 ── */
 .vwf-edge-flow { stroke-dasharray:3 17; animation:vwf-dash 3.6s linear infinite; }
@@ -455,34 +462,41 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 .vwf-canvas-wrap::-webkit-scrollbar-track, .vwf-editor-body::-webkit-scrollbar-track, .vwf-inspector::-webkit-scrollbar-track, .vwf-wb-steps-body::-webkit-scrollbar-track, .vwf-wb-conn-body::-webkit-scrollbar-track, .vwf-dialog-issues::-webkit-scrollbar-track { background:transparent; }
 /* ── FEAT-85 运行列表与 Logical Run 详情 ──────────────────────────────────
    排版基线对齐 DESIGN.md 的 A 编排台：正文 14px、说明 12px、圆角 8/12、
-   间距 4/8/12/16；状态同时给语义色与文字（不靠颜色单独承载含义）。 */
+   间距 4/8/12/16；状态同时给语义色与文字（不靠颜色单独承载含义）。
+   V-5 主题一致：运行列表与流程库同处设置面板，一律引用 --vwf-*；运行详情与模板
+   编辑同处大工作区层，一律引用 --vwf-wb-*（宿主 alias 优先，见 .vwf-editor-dialog）。
+   原先列表/详情直接写宿主 alias + 深色兜底（#1e1e1e / #9a9a9a / #4d9fff），在浅色
+   页面上会落成深灰底或不可见文字——这就是两页「一灰一白」的来源。 */
 .vwf-filters { display:flex; flex-wrap:wrap; gap:8px 12px; padding:10px 14px 4px; }
 .vwf-filter { display:flex; flex-direction:column; gap:2px; min-width:150px; flex:1 1 150px; }
 .vwf-filter .vwf-input { width:100%; }
 .vwf-run-list { max-height:460px; overflow-y:auto; padding:4px 14px 8px; }
 .vwf-run-group { margin-top:10px; }
-.vwf-run-group-head { display:flex; align-items:center; gap:8px; margin:0 0 6px; font-size:12px; font-weight:600; color:var(--dsw-alias-label-secondary, #9a9a9a); }
-.vwf-run-row { display:block; width:100%; text-align:left; font-size:14px; cursor:pointer; margin-bottom:8px; padding:10px 12px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:12px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); color:var(--dsw-alias-label-primary, #e8e8e8); }
-.vwf-run-row:hover { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.06)); }
+.vwf-run-group-head { display:flex; align-items:center; gap:8px; margin:0 0 6px; font-size:12px; font-weight:600; color:var(--vwf-text-2); }
+.vwf-run-row { display:block; width:100%; text-align:left; font-size:14px; cursor:pointer; margin-bottom:8px; padding:10px 12px; border:1px solid var(--vwf-border); border-radius:12px; background:var(--vwf-canvas); color:var(--vwf-text); }
+.vwf-run-row:hover { border-color:var(--vwf-accent); background:var(--vwf-accent-surface); }
 .vwf-run-row p { margin:4px 0; }
-.vwf-run-row-note { font-size:12px; color:var(--dsw-alias-label-secondary, #9a9a9a); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.vwf-run-row small { font-size:12px; color:var(--dsw-alias-label-secondary, #9a9a9a); }
+.vwf-run-row-note { font-size:12px; color:var(--vwf-text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vwf-run-row small { font-size:12px; color:var(--vwf-text-2); }
+/* 详情在大工作区层内：外层只定高与裁剪，正文自身滚动（与编辑器三个滚动区同口径）。 */
+.vwf-rd-scroll { position:absolute; inset:12px 16px; overflow:auto; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 .vwf-rd-main { display:grid; grid-template-columns:minmax(170px, 220px) 1fr; gap:12px; align-items:start; margin-top:8px; }
 .vwf-rd-side { display:flex; flex-direction:column; gap:12px; }
 .vwf-rd-body { min-width:0; }
 .vwf-rd-kv { margin-top:4px; font-size:12px; }
-.vwf-node-dir-row { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; cursor:pointer; padding:6px 8px; margin-top:4px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--dsw-alias-label-primary, #e8e8e8); font-size:13px; }
-.vwf-node-dir-row:hover { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.06)); }
-.vwf-node-dir-row.selected { border-color:var(--dsw-alias-brand-primary, #4d9fff); background:var(--dsw-alias-bg-layer-2, #242424); }
+.vwf-node-dir-row { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; cursor:pointer; padding:6px 8px; margin-top:4px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--vwf-wb-text); font-size:13px; }
+.vwf-node-dir-row:hover { background:var(--vwf-wb-accent-soft); }
+.vwf-node-dir-row.selected { border-color:var(--vwf-wb-accent); background:var(--vwf-wb-accent-soft); }
 .vwf-node-dir-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.vwf-sec { font-size:12px; font-weight:600; color:var(--dsw-alias-label-primary, #e8e8e8); margin-top:8px; }
-.vwf-note { margin-top:6px; padding:6px 10px; border-radius:8px; font-size:12px; border:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-layer-1, #1e1e1e); color:var(--dsw-alias-label-secondary, #9a9a9a); }
-.vwf-note.warn { border-color:var(--dsw-alias-state-warn-primary, #f59e0b); color:var(--dsw-alias-label-primary, #e8e8e8); }
+.vwf-sec { font-size:12px; font-weight:600; color:var(--vwf-wb-text); margin-top:8px; }
+.vwf-note { margin-top:6px; padding:6px 10px; border-radius:8px; font-size:12px; border:1px solid var(--vwf-wb-border); background:var(--vwf-wb-surface-2); color:var(--vwf-wb-text-2); }
+.vwf-note.warn { border-color:var(--vwf-warn); color:var(--vwf-wb-text); }
 .vwf-tab-panel { padding:10px 2px 4px; font-size:14px; }
-.vwf-fanout-item { margin-top:8px; padding:8px 10px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; }
-/* 键盘焦点可见（窄屏与键盘同等考虑） */
+.vwf-fanout-item { margin-top:8px; padding:8px 10px; border:1px solid var(--vwf-wb-border); border-radius:8px; }
+/* 键盘焦点可见（窄屏与键盘同等考虑）。工作区层内的同类元素由前面 .vwf-editor-dialog
+   的 :is() 提权规则接管，用工作区自己的强调色；这里只服务设置面板。 */
 .vwf-run-row:focus-visible, .vwf-node-dir-row:focus-visible, .vwf-tab:focus-visible, .vwf-btn:focus-visible,
-.vwf-input:focus-visible, .vwf-textarea:focus-visible, .vwf-filter select:focus-visible { outline:2px solid var(--dsw-alias-brand-primary, #4d9fff); outline-offset:2px; }
+.vwf-input:focus-visible, .vwf-textarea:focus-visible, .vwf-filter select:focus-visible { outline:2px solid var(--vwf-focus); outline-offset:2px; }
 @media (max-width: 560px) {
   .vwf-rd-main { grid-template-columns:1fr; }
   .vwf-filter { flex:1 1 100%; }
@@ -2150,8 +2164,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const viewBtnRefs = React.useRef({}) // 角色 id → 「查看详情」按钮（返回列表后回收焦点）
       const returnFocusRef = React.useRef(null) // 待回收焦点的角色 id
       const confirmReturnRef = React.useRef(null) // 关闭二次确认后要回收焦点的元素
-      // 打开角色管理的入口按钮：关闭（含 Escape）后把焦点还回去（V-6 焦点回收）。
-      const triggerRef = React.useRef(props.trigger || null)
+      const newBtnRef = React.useRef(null) // 列表层「新增角色」：关闭浮层后没有指定行的兜底焦点
+      const mountedRef = React.useRef(false)
       const refetch = React.useCallback(() => {
         host.call('vwf.roles').then((r) => {
           if (r && r.ok === false) {
@@ -2165,16 +2179,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         }).catch((e) => { setRoles(null); setLoadError(t('roleLoadFailed') + String(e)) })
       }, [])
       React.useEffect(() => { refetch() }, [])
-      // 焦点回收（V-6）：打开详情/表单时焦点进入对话框容器；Escape/返回回到列表时，
+      // 焦点回收（V-6）：打开详情/表单时焦点进入浮层容器；Escape/返回回到列表时，
       // 焦点归位到该角色的「查看详情」按钮（行按钮是重新渲染的新节点，故按 id 取当次元素）；
-      // 浮层卸载（关闭）时归位到入口按钮。
+      // 没有指定行时（取消新建等）归位到列表层的「新增角色」，不让焦点掉到 body。
+      // 首次挂载即列表层（角色=设置页签），不抢焦点。
       React.useEffect(() => {
+        if (!mountedRef.current) { mountedRef.current = true; return }
         const id = view === 'list' ? returnFocusRef.current : null
         if (view === 'list') returnFocusRef.current = null
-        const el = id ? viewBtnRefs.current[id] : dialogRef.current
+        const el = id ? viewBtnRefs.current[id] : (view === 'list' ? newBtnRef.current : dialogRef.current)
         if (el && el.focus) el.focus()
       }, [view])
-      React.useEffect(() => () => { const el = triggerRef.current; if (el && el.focus) el.focus() }, [])
       const fmt = (tpl, vars) => {
         let s = String(tpl || '')
         for (const k of Object.keys(vars || {})) s = s.split('{' + k + '}').join(String(vars[k]))
@@ -2192,10 +2207,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       React.useEffect(() => {
         const onKeyDown = (ev) => {
           if (!ev || ev.key !== 'Escape') return
-          ev.preventDefault(); ev.stopPropagation()
-          if (confirm) closeConfirm()
-          else if (view !== 'list') backToList()
-          else props.onClose()
+          // 逐层关闭（FEAT-86 V-6）：二次确认 → 详情/表单。列表层已不再是浮层（角色=设置页签），
+          // 该层没有可收的内容，必须放行给宿主——否则 Escape 被吞掉，设置面板关不上。
+          if (confirm) { ev.preventDefault(); ev.stopPropagation(); closeConfirm() }
+          else if (view !== 'list') { ev.preventDefault(); ev.stopPropagation(); backToList() }
         }
         document.addEventListener('keydown', onKeyDown, true)
         return () => document.removeEventListener('keydown', onKeyDown, true)
@@ -2358,12 +2373,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const showBuiltin = filter !== 'custom'
       const showCustom = filter !== 'builtin'
       const sectionTitle = (label) => h('div', { className: 'vwf-role-section-title' }, h('span', null, label))
-      const filterBtn = (key, label) => h('button', {
+      // 来源筛选：与原型一致带上分段计数，页签内一眼看出内置/自定义各有多少
+      const filterBtn = (key, label, n) => h('button', {
         type: 'button',
         'aria-pressed': filter === key ? 'true' : 'false',
         className: 'vwf-btn sm' + (filter === key ? ' primary' : ''),
         onClick: () => setFilter(key),
-      }, label)
+      }, label + ' ' + n)
 
       let body = null
       if (roles === null) {
@@ -2371,10 +2387,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       } else if (view === 'list') {
         body = h('div', null,
           h('div', { className: 'vwf-muted-sm' }, t('roleMgmtHint')),
-          h('div', { className: 'vwf-row' },
-            filterBtn('all', t('roleFilterAll')),
-            filterBtn('builtin', t('builtinRoles')),
-            filterBtn('custom', t('customRoles'))
+          h('div', { className: 'vwf-row', role: 'group', 'aria-label': t('roleLibrary') },
+            filterBtn('all', t('roleFilterAll'), allRows.length),
+            filterBtn('builtin', t('roleBuiltinShort'), builtinRows.length),
+            filterBtn('custom', t('roleCustomShort'), customRows.length)
           ),
           showBuiltin ? h('div', null,
             sectionTitle(t('builtinRoles')),
@@ -2495,26 +2511,42 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         }
       }
 
-      return h('div', { className: 'vwf-dialog-mask', onClick: props.onClose },
-        h('div', {
-          className: 'vwf-role-mgr',
-          ref: dialogRef,
-          tabIndex: -1,
-          role: 'dialog',
-          'aria-modal': 'true',
-          'aria-label': t('roleManager'),
-          onClick: (ev) => ev.stopPropagation(),
-        },
-          h('div', { className: 'vwf-row' },
-            h('div', { className: 'vwf-dialog-title' }, t('roleManager')),
-            h('span', { className: 'vwf-spacer' }),
-            h('button', { className: 'vwf-btn sm primary', onClick: () => openCreate(null) }, '＋ ' + t('newRole')),
-            h('button', { className: 'vwf-btn sm', onClick: props.onClose }, t('close'))
-          ),
-          error ? h('div', { className: 'vwf-err-line', role: 'alert' }, error) : null,
-          h('div', { className: 'vwf-role-mgr-body' }, body),
-          overlay
-        )
+      // V-1：角色库是设置页的独立页签——列表直接内联在页签里（不再嵌在模板编辑画布区域，
+      // 也不再套一层自己的浮层）；详情 / 表单 / 二次确认仍走同页的浮层，因此「完整职责独立
+      // 滚动、逐层 Escape、焦点回收」三条能力原样保留（FEAT-86 V-2/V-6）。浮层留在页签容器内，
+      // 页签本身不随浮层开合而消失。
+      return h('div', { className: 'vwf-role-tab', 'data-vwf-roles-tab': '' },
+        view === 'list'
+          ? h('div', { className: 'vwf-row' },
+              h('button', {
+                className: 'vwf-btn sm primary', ref: newBtnRef,
+                onClick: () => openCreate(null),
+              }, '＋ ' + t('newRole')),
+              h('button', { className: 'vwf-btn sm', onClick: refetch }, t('refresh'))
+            )
+          : null,
+        error ? h('div', { className: 'vwf-err-line', role: 'alert' }, error) : null,
+        view === 'list'
+          ? body
+          : h('div', { className: 'vwf-dialog-mask', onClick: backToList },
+              h('div', {
+                className: 'vwf-role-mgr',
+                ref: dialogRef,
+                tabIndex: -1,
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-label': t('roleManager'),
+                onClick: (ev) => ev.stopPropagation(),
+              },
+                h('div', { className: 'vwf-row' },
+                  h('div', { className: 'vwf-dialog-title' }, t('roleManager')),
+                  h('span', { className: 'vwf-spacer' }),
+                  h('button', { className: 'vwf-btn sm', onClick: backToList }, t('close'))
+                ),
+                h('div', { className: 'vwf-role-mgr-body' }, body)
+              )
+            ),
+        overlay
       )
     }
 
@@ -2537,7 +2569,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // 校验警示（LOC-021）：内核 warnings 此前无编辑器出口——强档缺配对、弱异源等提示
       // 用户在配置时完全看不到。与 errors 同源同生命周期，在状态行下方以警示色展示。
       const [liveWarnings, setLiveWarnings] = React.useState([])
-      const [roleUI, setRoleUI] = React.useState(null) // 角色管理浮层：null | {mode:'list'|'create', trigger:入口按钮}
       const [connOpen, setConnOpen] = React.useState(false) // 连接信息弹窗（V-13）
       const validateTimerRef = React.useRef(null)
       const validateSeqRef = React.useRef(0)
@@ -2694,8 +2725,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (props.registerSave) props.registerSave(() => { void handleSave() })
       })
       // Escape 分层关闭：先关最上层（连接弹窗 / 校验弹窗），都不在时才让宿主关闭整个工作区。
-      // 角色库不在此拦截：RoleManager 自带「二次确认 → 详情/表单 → 管理」逐层关闭（含列表层
-      // 自关 + 焦点回收），这里抢先把整个管理器收掉会跳过它的内部分层（FEAT-86 V-6）。
+      // 角色库已迁到设置页签（V-1），不再经过工作区，分层关闭由 RoleManager 自己承担。
       React.useEffect(() => {
         const onKey = (ev) => {
           if (ev.key !== 'Escape') return
@@ -3033,12 +3063,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                     h('span', { className: 'vwf-toolbar-action-label' }, t('wbViewConnections') + '（' + (wf.edges || []).length + '）')
                   )
                 ),
-                h('span', { className: 'vwf-muted-sm vwf-toolbar-hint' }, t('connectHint')),
-                h('div', { className: 'vwf-role-zone', title: t('roleMgmtHint') },
-                  h('span', { className: 'vwf-role-zone-label' }, '🎭 ' + t('roleLibrary')),
-                  h('button', { className: 'vwf-btn sm', onClick: (ev) => setRoleUI({ mode: 'list', trigger: ev.currentTarget }) }, t('manageRoles')),
-                  h('button', { className: 'vwf-btn sm primary', onClick: (ev) => setRoleUI({ mode: 'create', trigger: ev.currentTarget }) }, '＋ ' + t('newRole'))
-                )
+                h('span', { className: 'vwf-muted-sm vwf-toolbar-hint' }, t('connectHint'))
               ) : null,
               tab === 'canvas'
                 ? h(Canvas, {
@@ -3132,14 +3157,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             !selectedNode && !selectedEdge ? h('div', { className: 'vwf-empty', style: { marginTop: 10 } }, t('selectHint')) : null
           )
         ),
-        roleUI ? h(RoleManager, {
-          initialCreate: roleUI.mode === 'create',
-          trigger: roleUI.trigger || null,
-          onClose: () => setRoleUI(null),
-          onChanged: () => { if (props.onRolesChanged) props.onRolesChanged() },
-          // 开放草稿（本编辑器未保存的 wf）：删除/重命名前把草稿引用一并计入保护
-          draftDsl: wf,
-        }) : null
       )
     }
 
@@ -3211,6 +3228,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const label = s === 'WAITING_HUMAN' ? t('dashWaitHuman') : s === 'BLOCKED' ? t('dashBlocked') : s.indexOf('AWAITING_HUMAN_') === 0 ? t('dashHumanGate') : (s || '—')
       return h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + label)
     }
+    // FEAT-100 V-3：待处理（人工门禁）任务数 = 列表「待处理」筛选同一口径（bucket=attention，
+    // 含 PAUSED），同一 Logical Run 的多段折叠为一条，已被续跑接管的段不计。
+    // 页签计数与列表筛选共用它，避免两处口径漂移。
+    function attentionTaskCount(runs) {
+      const seen = new Set()
+      for (const run of runs || []) {
+        if (!run || run.supersededBy || runBucketOf(run.status) !== 'attention') continue
+        seen.add(run.logical_run_id || run.id)
+      }
+      return seen.size
+    }
     function isActiveRunStatus(status) {
       const s = String(status || '')
       return s === 'running' || s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED'
@@ -3237,6 +3265,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       return s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED' || s === 'BLOCKED'
     }
     // 列表状态分桶：待处理 / 进行中 / 已完成 / 已结束（非完成终态，如 STOPPED、FAILED_*）
+    // FEAT-100 V-3 组内顺序：需处理（人工门禁）→ 进行中 → 已完成；ended（已结束）排在
+    // 末档，既不抢前三档的位置，也不因为改排序而从列表里消失。
+    function runOrderOf(bucket) {
+      return bucket === 'attention' ? 0 : bucket === 'running' ? 1 : bucket === 'done' ? 2 : 3
+    }
     function runBucketOf(status) {
       const s = String(status || '')
       if (isAttentionStatus(s)) return 'attention'
@@ -3393,8 +3426,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       }, [runs])
       const tasks = React.useMemo(() => foldRunsIntoTasks(allRuns), [allRuns])
       const activeCount = allRuns.filter((r) => !r.supersededBy && isActiveRunStatus(r.status)).length
-      // 门禁队列：一次裁决一张（人工门禁 / WAITING_HUMAN / BLOCKED 同入队列）
+      // 人工门禁待处理项（一次裁决一张）：不再单独成卡，而是并入下面的分组列表——
+      // 组内按「需处理 → 进行中 → 已完成」排序，行上保留裁决位次（V-3）。
       const gates = allRuns.filter((r) => !r.supersededBy && isAttentionStatus(r.status) && r.status !== 'PAUSED')
+      // 页签计数与列表筛选同源（见 attentionTaskCount）
+      const attentionCount = React.useMemo(() => attentionTaskCount(allRuns), [allRuns])
+      React.useEffect(() => { if (props.onAttention) props.onAttention(attentionCount) }, [attentionCount])
       // 工作空间分组数据源：vwf.runs.list 摘要不含 workspace，按 logical_run_id 惰性补齐并缓存
       // （规格 §11 首选：客户端缓存 + 惰性补齐，不新增 RPC）。读取失败只标注该行未知，不冒充事实。
       const PREFETCH_LIMIT = 6
@@ -3475,10 +3512,23 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const totalPages = Math.max(1, Math.ceil(visible.length / pageSize))
       const safePage = Math.min(page, totalPages - 1)
       const pageModels = visible.slice(safePage * pageSize, safePage * pageSize + pageSize)
-      // 返回位置保留：离开列表前记住滚动位置与分页，返回时还原（筛选与分页本身留在组件态里）
-      const openDetail = (key) => {
+      // 待处理任务的队列位次（一次裁决一张）：按列表同一数据源折叠 Logical Run 后定位次，
+      // 并入列表的行上仍然能看出「谁在裁决、谁在排队」。
+      const gateIdx = React.useMemo(() => {
+        const m = new Map()
+        for (const r of allRuns) {
+          if (r.supersededBy || !isAttentionStatus(r.status) || r.status === 'PAUSED') continue
+          const key = r.logical_run_id || r.id
+          if (!m.has(key)) m.set(key, m.size)
+        }
+        return m
+      }, [allRuns])
+      // 返回位置保留：详情在浮层里打开，列表没有卸载，筛选/分页/滚动本来就留在原处；
+      // 这里只额外记住打开详情的那一行，关闭后把焦点还回去。
+      const openDetail = (key, rowEl) => {
         const el = listScrollRef.current
         savedScrollRef.current = el ? el.scrollTop : 0
+        detailReturnRef.current = rowEl || null
         setTaskKey(key)
         setView('detail')
       }
@@ -3495,45 +3545,33 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const lrHit = tasks.find((task) => task.logicalRunId === id)
         if (lrHit) openDetail(lrHit.key)
       }
-      if (view === 'detail') {
-        const task = tasks.find((x) => x.key === taskKey) || null
-        if (!task) { /* 任务在刷新后消失（记录被清理）：回列表，不显示假详情 */ }
-        else {
-          return h('div', { className: 'vwf-root' },
-            h(RunDetail, {
-              key: task.key,
-              task,
-              tplMap,
-              lrInitial: task.logicalRunId ? lrMap[task.logicalRunId] : null,
-              lrError: task.logicalRunId ? (lrErr[task.logicalRunId] || '') : '',
-              tick,
-              onBack: () => setView('list'),
-              onRefresh: refresh,
-            })
-          )
-        }
-      }
+      // V-4：详情在与模板编辑同级的大工作区层里打开（原生 top-layer dialog）。
+      // 列表留在下层继续挂载——关闭详情就回到原来的筛选、分页与滚动位置，
+      // 不需要另存状态再还原；焦点回收到打开它的那一行。
+      const detailTask = view === 'detail' ? (tasks.find((x) => x.key === taskKey) || null) : null
+      const detailOpen = !!detailTask
+      const detailDialogRef = React.useRef(null)
+      const detailReturnRef = React.useRef(null)
+      React.useEffect(() => {
+        const dialog = detailDialogRef.current
+        if (!dialog) return undefined
+        try {
+          if (detailOpen && !dialog.open && typeof dialog.showModal === 'function') dialog.showModal()
+        } catch (e) { /* 无 showModal 的对照环境由样式层兜底 */ }
+        // 卸载 / 关闭时由 cleanup 收掉：节点被 React 摘掉后再读 ref 已经拿不到对话框，
+        // 不在这里关就会留下一个仍带 open 的游离 dialog。
+        return () => { try { if (dialog.open && typeof dialog.close === 'function') dialog.close() } catch (e) { /* 同上 */ } }
+      }, [detailOpen])
+      React.useEffect(() => {
+        if (detailOpen) return
+        const el = detailReturnRef.current
+        detailReturnRef.current = null
+        if (el && el.isConnected && el.focus) el.focus()
+      }, [detailOpen])
       return h('div', { className: 'vwf-root' },
         activeCount >= 2 ? h('div', { className: 'vwf-code', style: { borderColor: STATUS_COLOR.human, marginBottom: 8 } },
           t('dashParallel', { n: activeCount })) : null,
         listErr ? h('div', { className: 'vwf-err-line' }, t('dashIntegrityFailed', { err: listErr })) : null,
-        gates.length ? h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
-          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('dashGateQueue'))),
-          h('div', { style: { padding: '4px 14px 10px' } },
-            gates.map((g, i) => h('div', { key: g.id, style: { padding: '8px 0', borderTop: i ? '1px solid var(--vwf-border)' : 'none' } },
-              h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap' } },
-                h('span', { className: 'vwf-badge accent' }, i === 0 ? t('dashDeciding') : t('dashQueued', { n: i + 1 })),
-                h('strong', null, g.taskId || g.id),
-                h('span', { className: 'vwf-muted-sm' }, (g.name || g.workflowId || '') + ' · ' + (String(g.status) === 'WAITING_HUMAN' ? t('dashHumanDecision', { reason: g.reason || '' }) : String(g.status) === 'BLOCKED' ? t('dashBlockedReason', { reason: g.reason || '' }) : t('dashGateNode', { node: String(g.status).replace('AWAITING_HUMAN_', '') }))),
-                statusBadge(g.status)
-              ),
-              h('div', { className: 'vwf-row', style: { marginTop: 4 } },
-                h('button', { className: 'vwf-btn sm', onClick: () => openDetail('lr:' + String(g.logical_run_id || '')) }, t('dashDetails')),
-                // 界面不拼接让用户复制的命令：结构化选项与字段映射在详情内呈现
-                h('span', { className: 'vwf-muted-sm' }, t('rdDecisionNotYetLocked'))
-              )))
-          )
-        ) : null,
         h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
           h('div', { className: 'vwf-card-head' },
             h('div', { className: 'vwf-card-title' }, t('dashRunList')),
@@ -3577,7 +3615,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             )
           ),
           h('div', { className: 'vwf-run-list', ref: listScrollRef },
-            pageModels.length ? groupTaskRows(pageModels, openDetail) : h('div', { className: 'vwf-empty' }, t('dashNoMatch'))
+            pageModels.length ? groupTaskRows(pageModels, openDetail, gateIdx) : h('div', { className: 'vwf-empty' }, t('dashNoMatch'))
           ),
           h('div', { className: 'vwf-muted-sm', style: { padding: '6px 14px 0' } }, t('dashSupersededFolded')),
           h('div', { className: 'vwf-row', style: { marginTop: 8, padding: '0 14px 12px', flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
@@ -3599,12 +3637,44 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('input', { className: 'vwf-input', style: { flex: 1 }, placeholder: t('dashRunIdPlaceholder'), value: runId, onChange: (ev) => setRunId(ev.target.value) }),
           h('button', { className: 'vwf-btn', onClick: openByRunId }, t('dashDetails')),
           h('button', { className: 'vwf-btn', onClick: refresh }, t('refresh'))
-        )
+        ),
+        // 任务在刷新后消失（记录被清理）时不渲染假详情，回列表
+        detailTask ? h('dialog', {
+          className: 'vwf-editor-dialog',
+          ref: detailDialogRef,
+          'aria-label': t('dashRunDetailTitle', { id: detailTask.head.taskId || detailTask.head.id }),
+          onClick: (ev) => { if (ev.target === ev.currentTarget) setView('list') },
+          onCancel: (ev) => { ev.preventDefault(); setView('list') },
+          onClose: () => { if (view === 'detail') setView('list') },
+        },
+          h('div', { className: 'vwf-editor-head' },
+            h('strong', null, detailTask.head.taskId || detailTask.head.id),
+            statusBadge(detailTask.head.status),
+            h('span', { className: 'vwf-muted-sm' }, t('dashListRestored')),
+            h('span', { className: 'vwf-spacer' }),
+            h('button', { className: 'vwf-btn sm', onClick: () => setView('list') }, t('dashBackToList'))
+          ),
+          h('div', { className: 'vwf-editor-body' },
+            h('div', { className: 'vwf-rd-scroll' },
+              h(RunDetail, {
+                key: detailTask.key,
+                task: detailTask,
+                tplMap,
+                lrInitial: detailTask.logicalRunId ? lrMap[detailTask.logicalRunId] : null,
+                lrError: detailTask.logicalRunId ? (lrErr[detailTask.logicalRunId] || '') : '',
+                tick,
+                onRefresh: refresh,
+              })
+            )
+          )
+        ) : null
       )
     }
 
-    // 列表分组渲染：按工作空间分组，组标题带条目数；行只显示任务级摘要，详情一律经唯一出口
-    function groupTaskRows(models, openDetail) {
+    // 列表分组渲染：按工作空间分组，组标题带条目数；组内按「需处理 → 进行中 → 已完成」排序
+    // （V-3，同档保持原来的时间倒序——sort 稳定）；行只显示任务级摘要，详情一律经唯一出口。
+    // gateIdx：待处理任务在人工门禁队列中的位次（一次裁决一张），并入列表后仍在行上可见。
+    function groupTaskRows(models, openDetail, gateIdx) {
       const order = []
       const byWs = new Map()
       for (const m of models) {
@@ -3624,16 +3694,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('span', null, labelOf(key)),
           h('span', { className: 'vwf-badge' }, String(byWs.get(key).length))
         ),
-        byWs.get(key).map((m) => h('button', {
-          key: m.task.key,
-          className: 'vwf-run-row',
-          onClick: () => openDetail(m.task.key),
-          'aria-label': (m.head.taskId || m.head.id) + ' ' + t('dashDetails'),
-        },
-          h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
-            h('strong', null, m.head.taskId || m.head.id),
-            statusBadge(m.head.status)
-          ),
+        byWs.get(key).slice().sort((a, b) => runOrderOf(a.bucket) - runOrderOf(b.bucket)).map((m) => {
+          const gi = m.task.logicalRunId ? (gateIdx || new Map()).get(m.task.logicalRunId) : undefined
+          return h('button', {
+            key: m.task.key,
+            className: 'vwf-run-row',
+            onClick: (ev) => openDetail(m.task.key, ev.currentTarget),
+            'aria-label': (m.head.taskId || m.head.id) + ' ' + t('dashDetails'),
+          },
+            h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
+              h('strong', null, m.head.taskId || m.head.id),
+              h('div', { className: 'vwf-row', style: { gap: 6 } },
+                // 人工门禁位次（一次裁决一张）：并入列表后不丢这条信息
+                gi === undefined ? null : h('span', { className: 'vwf-badge accent' }, gi === 0 ? t('dashDeciding') : t('dashQueued', { n: gi + 1 })),
+                statusBadge(m.head.status)
+              )
+            ),
           h('p', { className: 'vwf-run-row-note' }, m.lr && m.lr.title ? String(m.lr.title) : (m.head.name || m.head.workflowId || '—')),
           h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
             h('small', null, (m.head.name || m.head.workflowId || '—') + ' · ' + (m.rework === null ? t('dashRuntimeLabel') : (m.rework > 0 ? t('dashReworkCount', { n: m.rework }) : t('dashFirstRun')))),
@@ -3644,7 +3720,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('small', { className: 'vwf-muted-sm' }, m.completionType ? m.completionType : '')
           ),
           m.wsError ? h('small', { className: 'vwf-muted-sm' }, t('dashIntegrityLabel') + '：' + m.wsError) : null
-        ))
+          )
+        })
       ))
     }
 
@@ -3787,12 +3864,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         h('tbody', null, rows.map((r) => h('tr', { key: r.k }, h('td', null, r.k), h('td', null, r.v))))
       )
       return h('div', { className: 'vwf-root' },
-        h('div', { className: 'vwf-row', style: { justifyContent: 'space-between', flexWrap: 'wrap' } },
-          h('button', { className: 'vwf-btn sm', onClick: props.onBack }, t('dashBackToList')),
-          h('div', { className: 'vwf-row', style: { gap: 8 } },
-            h('span', { className: 'vwf-muted-sm' }, t('dashListRestored')),
-            h('button', { className: 'vwf-btn sm', onClick: () => { setWsTick((n) => n + 1) } }, t('refresh'))
-          )
+        // 返回列表与位置提示在承载本详情的工作区标题栏上（V-4），正文只保留刷新
+        h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
+          h('button', { className: 'vwf-btn sm', onClick: () => { setWsTick((n) => n + 1) } }, t('refresh'))
         ),
         lrError ? h('div', { className: 'vwf-err-line' }, t('dashIntegrityFailed', { err: lrError })) : null,
         recErr ? h('div', { className: 'vwf-note warn' }, t('rdRecordsUnavailable')) : null,
@@ -4395,6 +4469,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const editorSaveRef = React.useRef(null)
       // 流程库筛选（V-1：关闭工作区后回到原列表、筛选与滚动位置）
       const [tplFilter, setTplFilter] = React.useState('')
+      // V-2：流程库子页签 全部 / 内置 / 我的（默认全部）
+      const [libFilter, setLibFilter] = React.useState('all')
+      // V-3：运行页签上的待处理计数。待处理项并入运行列表后，这个计数是「不丢失」的兜底
+      // 可见性——列表页未挂载时自己取一次摘要，进入运行页后由 Dashboard 的轮询结果接管。
+      const [attention, setAttention] = React.useState(0)
+      React.useEffect(() => {
+        host.call('vwf.runs.list')
+          .then((r) => setAttention(attentionTaskCount((r && r.runs) || [])))
+          .catch(() => {})
+      }, [])
       const editorDialogRef = React.useRef(null)
       const editorOpen = !!wf
 
@@ -4687,9 +4771,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       }
 
       const editingBuiltin = !!(list || []).find(x => x.id === editId && x.builtin)
-      // 流程库筛选：按名称 / ID / 摘要匹配（找模板），筛选词随页面状态保留
+      // 流程库筛选：先按子页签（全部 / 内置 / 我的）收范围，再按名称 / ID / 摘要匹配，两者叠加
+      const mineCount = (list || []).filter(w => !w.builtin).length
+      const builtinCount = (list || []).length - mineCount
+      const scopedList = libFilter === 'all' ? (list || []) : (list || []).filter(w => (libFilter === 'builtin') === !!w.builtin)
       const tplFilterNorm = tplFilter.trim().toLowerCase()
-      const filteredList = !tplFilterNorm ? (list || []) : (list || []).filter(w => {
+      const filteredList = !tplFilterNorm ? scopedList : scopedList.filter(w => {
         const hay = [w.name, w.id, w.description].map(x => String(x == null ? '' : x).toLowerCase()).join(' ')
         return hay.indexOf(tplFilterNorm) >= 0
       })
@@ -4748,9 +4835,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       if (!i18nReady) return h('div', { className: 'vwf-muted' }, t('i18nLoading'))
 
       return h('div', { className: 'vwf-root' },
-        h('div', { className: 'vwf-tabs' },
-          h('button', { className: 'vwf-tab' + (tab === 'templates' ? ' on' : ''), onClick: () => setTab('templates') }, t('templates')),
-          h('button', { className: 'vwf-tab' + (tab === 'dashboard' ? ' on' : ''), onClick: () => setTab('dashboard') }, t('dashboard'))
+        // V-1：顶部导航为 流程库 / 运行 / 角色 三个页签；角色库有独立入口，
+        // 不再嵌在模板编辑画布区域。运行页签常驻待处理计数（V-3，不随筛选与分页消失）。
+        h('div', { className: 'vwf-tabs', role: 'tablist' },
+          h('button', { className: 'vwf-tab' + (tab === 'templates' ? ' on' : ''), 'data-vwf-nav': 'templates', role: 'tab', 'aria-selected': tab === 'templates' ? 'true' : 'false', onClick: () => setTab('templates') }, t('templates')),
+          h('button', { className: 'vwf-tab' + (tab === 'dashboard' ? ' on' : ''), 'data-vwf-nav': 'dashboard', role: 'tab', 'aria-selected': tab === 'dashboard' ? 'true' : 'false', onClick: () => setTab('dashboard') },
+            t('dashboard'),
+            attention ? h('span', { className: 'vwf-badge accent', 'aria-label': t('dashFilterAttention') + ' ' + attention }, String(attention)) : null
+          ),
+          h('button', { className: 'vwf-tab' + (tab === 'roles' ? ' on' : ''), 'data-vwf-nav': 'roles', role: 'tab', 'aria-selected': tab === 'roles' ? 'true' : 'false', onClick: () => setTab('roles') }, t('rolesTab'))
         ),
         tab === 'templates' ? h('div', { className: 'vwf-root' },
           h('div', { className: 'vwf-row' },
@@ -4763,6 +4856,19 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             }),
             !providers.length ? h('span', { className: 'vwf-muted-sm' }, t('noModels')) : null
           ),
+          // V-2：流程库子页签 全部 / 内置 / 我的（默认全部）；真按钮，键盘可达
+          h('div', { className: 'vwf-row', role: 'tablist', 'aria-label': t('templates') },
+            [['all', t('libFilterAll'), (list || []).length],
+              ['builtin', t('libFilterBuiltin'), builtinCount],
+              ['mine', t('libFilterMine'), mineCount]].map(([key, label, n]) => h('button', {
+                key: key,
+                role: 'tab',
+                'data-vwf-lib-filter': key,
+                'aria-selected': libFilter === key ? 'true' : 'false',
+                className: 'vwf-btn sm' + (libFilter === key ? ' primary' : ''),
+                onClick: () => setLibFilter(key),
+              }, label + ' ' + n))
+          ),
           h('div', { className: 'vwf-list' },
             filteredList.map(w => h('div', { key: w.id, className: 'vwf-list-item' },
               h('div', { style: { minWidth: 0, flex: 1 } },
@@ -4774,15 +4880,19 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 ),
                 w.description ? h('div', { className: 'vwf-list-desc' }, w.description) : null
               ),
-              h('button', { className: 'vwf-btn sm', onClick: () => openEditor(w.id) }, t(w.builtin ? 'viewAndAccept' : 'editTemplate')),
-              w.builtin ? h('button', { className: 'vwf-btn sm', onClick: () => openOv(w) }, t('modelOverride')) : null,
-              h('button', { className: 'vwf-btn sm danger', disabled: !!w.builtin, title: w.builtin ? t('builtinReadonly') : '', onClick: () => onRemove(w.id) }, t('deleteTemplate'))
+              // V-6：内置记录只有「查看流程 / 模型设置」，不提供删除（含置灰态）；
+              // 自定义记录仍是「编辑 / 删除」，不回退。
+              h('button', { className: 'vwf-btn sm', onClick: () => openEditor(w.id) }, t(w.builtin ? 'viewFlow' : 'editTemplate')),
+              w.builtin
+                ? h('button', { className: 'vwf-btn sm', onClick: () => openOv(w) }, t('modelOverride'))
+                : h('button', { className: 'vwf-btn sm danger', onClick: () => onRemove(w.id) }, t('deleteTemplate'))
             )),
             list && !list.length ? h('div', { className: 'vwf-empty' }, '—') : null,
             list && list.length && !filteredList.length ? h('div', { className: 'vwf-empty' }, t('wbLibraryFilterEmpty')) : null
           )
         ) : null,
-        tab === 'dashboard' ? h(Dashboard, { wf }) : null,
+        tab === 'dashboard' ? h(Dashboard, { wf, onAttention: setAttention }) : null,
+        tab === 'roles' ? h(RoleManager, { onChanged: refetchRoles }) : null,
         msg ? renderMsg(msg) : null,
         wf ? h('dialog', {
           className: 'vwf-editor-dialog',

@@ -165,7 +165,8 @@ function byText(root, text) {
 
 async function openEditor(container, label) {
   await act(async () => {
-    const btn = byText(container, label || '编辑') || byText(container, '查看并验收')
+    // FEAT-100 V-6：内置记录入口文案为「查看流程」，自定义为「编辑」
+    const btn = byText(container, label || '编辑') || byText(container, '查看流程')
     assert.ok(btn, '存在打开大工作区的入口')
     btn.click()
     await flush(); await flush()
@@ -403,7 +404,7 @@ test('V-4 已声明但缺少去向的业务结果给出缺项提示，且不删�
 test('V-4 扇出后汇总模板：并行组与汇总可辨认，连接信息不漏边且三类分类正确', async () => {
   const dsl = JSON.parse(JSON.stringify(EXPLORE_DSL))
   const { container } = await mountPage({ dsl, list: [{ id: dsl.id, name: dsl.id, description: '', builtin: true, dsl }] })
-  await openEditor(container, '查看并验收')
+  await openEditor(container, '查看流程')
 
   // 步骤定位区：扇出节点标「并行组」，其下游汇总节点标「汇总」
   const stepRows = Array.from(container.querySelectorAll('.vwf-wb-step'))
@@ -507,8 +508,8 @@ test('V-5 回环与调用重试在边配置中使用不同标签', async () => {
 // ═══════════════════════════════════════════════════════════════════════════
 test('V-7 内置模板：结构控件不可用并给出只读说明，另存为仍可用', async () => {
   const { container } = await mountPage({ dsl: BUILTIN_DSL, list: [{ id: 'wf-builtin', name: '内置流程', description: '', builtin: true, dsl: JSON.parse(JSON.stringify(BUILTIN_DSL)) }] })
-  // 内置模板入口文案为「查看并验收」
-  await openEditor(container, '查看并验收')
+  // 内置模板入口文案为「查看流程」（FEAT-100 V-6）
+  await openEditor(container, '查看流程')
 
   const dialog = container.querySelector('dialog.vwf-editor-dialog')
   assert.ok(dialog.textContent.indexOf('内置模板的步骤与连接只读') >= 0, '工作区给出只读说明')
@@ -533,7 +534,7 @@ test('V-7 内置模板：结构控件不可用并给出只读说明，另存为�
   assert.equal(kindSelect.disabled, true, '内置模板技术档字段同样不可编辑')
 
   // 模型默认 / 覆盖入口不在自定义模板口径里扩展：流程库行内入口保持存在
-  assert.ok(container.textContent.indexOf('模型覆盖') >= 0, '内置模板保留流程库「模型覆盖」入口')
+  assert.ok(container.textContent.indexOf('模型设置') >= 0, '内置模板保留流程库「模型设置」入口')
 })
 
 test('V-7 自定义模板无模型默认 / 覆盖入口，节点结构可编辑', async () => {
@@ -544,7 +545,7 @@ test('V-7 自定义模板无模型默认 / 覆盖入口，节点结构可编辑'
   const saveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '保存工作流')
   assert.equal(saveBtn.disabled, false, '自定义模板可保存')
   assert.ok(!container.querySelector('.vwf-inspector .vwf-wb-readonly'), '自定义模板无只读说明')
-  assert.ok(container.textContent.indexOf('模型覆盖') < 0, '自定义模板不出现模型覆盖入口')
+  assert.ok(container.textContent.indexOf('模型设置') < 0, '自定义模板不出现模型设置入口')
 })
 
 
@@ -553,13 +554,13 @@ test('V-7 自定义模板无模型默认 / 覆盖入口，节点结构可编辑'
 // ═══════════════════════════════════════════════════════════════════════════
 test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / 全部还原四步可走通', async () => {
   const { container, state } = await mountPage({ dsl: BUILTIN_DSL, list: [{ id: 'wf-builtin', name: '内置流程', description: '', builtin: true, dsl: JSON.parse(JSON.stringify(BUILTIN_DSL)) }] })
-  // 流程库行内的「模型覆盖」是既有入口，本任务不重新设计它
+  // 流程库行内的「模型设置」是既有入口（FEAT-100 V-6 命名对齐），本任务不重新设计它
   await act(async () => {
-    byText(container, '模型覆盖').click()
+    byText(container, '模型设置').click()
     await flush(); await flush()
   })
-  const ovDialog = Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型覆盖') >= 0)
-  assert.ok(ovDialog, '模型覆盖对话框已打开')
+  const ovDialog = Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型设置') >= 0)
+  assert.ok(ovDialog, '模型设置对话框已打开')
 
   // ① 默认：未覆盖时每个节点显示「默认」徽标
   const rows = () => Array.from(ovDialog.querySelectorAll('.vwf-list-item'))
@@ -595,10 +596,10 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
 
   // ③ 单节点还原：该行「还原」使覆盖行消失
   await act(async () => {
-    byText(container, '模型覆盖').click()
+    byText(container, '模型设置').click()
     await flush(); await flush()
   })
-  const ovDialog2 = Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型覆盖') >= 0)
+  const ovDialog2 = Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型设置') >= 0)
   const overriddenRow = Array.from(ovDialog2.querySelectorAll('.vwf-list-item')).find((r) => r.textContent.indexOf('已覆盖') >= 0)
   assert.ok(overriddenRow, '覆盖保存后重新打开显示「已覆盖」徽标')
   await act(async () => {
@@ -623,11 +624,11 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
   // ④ 全部还原：清除该模板的全部覆盖（需二次确认）
   // 上一步「保存覆盖」成功后对话框会关闭，这里重新打开（保存成功即关闭是既有行为）
   await act(async () => {
-    byText(container, '模型覆盖').click()
+    byText(container, '模型设置').click()
     await flush(); await flush()
   })
-  const ovDialog3 = Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型覆盖') >= 0)
-  assert.ok(ovDialog3, '再次打开模型覆盖对话框')
+  const ovDialog3 = Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型设置') >= 0)
+  assert.ok(ovDialog3, '再次打开模型设置对话框')
   assert.ok(ovDialog3.textContent.indexOf('已覆盖') >= 0, '保存后重新打开仍显示已覆盖')
   await act(async () => {
     byText(ovDialog3, '清除恢复默认').click()
@@ -651,7 +652,7 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
 
 test('V-7 结构锁：内置模板可选中节点与连接（定位 / 查看），但不能改结构', async () => {
   const { container } = await mountPage({ dsl: BUILTIN_DSL, list: [{ id: 'wf-builtin', name: '内置流程', description: '', builtin: true, dsl: JSON.parse(JSON.stringify(BUILTIN_DSL)) }] })
-  await openEditor(container, '查看并验收')
+  await openEditor(container, '查看流程')
 
   // 可选中节点：点画布节点后右侧显示该节点详情
   await act(async () => {
@@ -684,7 +685,7 @@ test('V-7 结构锁：内置模板可选中节点与连接（定位 / 查看）�
 
 test('V-7 编辑器结构锁与运行看板只读画布互不影响', async () => {
   const { container } = await mountPage({ dsl: BUILTIN_DSL, list: [{ id: 'wf-builtin', name: '内置流程', description: '', builtin: true, dsl: JSON.parse(JSON.stringify(BUILTIN_DSL)) }] })
-  await openEditor(container, '查看并验收')
+  await openEditor(container, '查看流程')
   // 编辑器：结构锁（不是 readOnly）——把手不渲染但节点可点
   assert.equal(container.querySelectorAll('.vwf-editor-dialog .vwf-handle').length, 0, '编辑器内无连线把手')
   await act(async () => {
@@ -694,8 +695,8 @@ test('V-7 编辑器结构锁与运行看板只读画布互不影响', async () =
   })
   // 运行看板仍走 readOnly：连节点点击都不进入编辑态（本轮不改变看板行为）
   await act(async () => {
-    const dashTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '运行看板')
-    assert.ok(dashTab, '运行看板 tab 存在')
+    const dashTab = container.querySelector('[data-vwf-nav="dashboard"]')
+    assert.ok(dashTab, '运行页签存在（FEAT-100 V-1）')
     dashTab.click()
     await flush()
   })
@@ -852,17 +853,12 @@ test('V-9 Escape 分层关闭：先关最上层，不把整个工作区一起带
   assert.equal(container.querySelector('.vwf-conn-dialog'), null, 'Escape 关闭连接弹窗')
   assert.ok(container.querySelector('dialog.vwf-editor-dialog'), 'Escape 未关闭整个工作区')
 
-  // 打开角色库浮层
-  await act(async () => {
-    byText(container, '管理角色').click()
-    await flush()
-  })
-  assert.ok(container.querySelector('.vwf-role-mgr'), '角色管理浮层已打开')
-  await act(async () => {
-    document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    await flush()
-  })
-  assert.equal(container.querySelector('.vwf-role-mgr'), null, 'Escape 关闭角色浮层')
+  // FEAT-100 V-1：角色库已迁到设置页的独立「角色」页签，不再嵌在模板编辑画布区域。
+  // 因此工作区里既没有角色库入口，也没有它自己的浮层；入口消失而工作区不受影响。
+  // 角色库自身的逐层 Escape 断言随入口一起迁到 client.smoke.mjs 的角色页签用例。
+  assert.equal(byText(container, '管理角色'), undefined, '编辑器内不再提供角色库入口')
+  assert.equal(container.querySelector('.vwf-role-zone'), null, '画布工具栏不再有角色库常驻区')
+  assert.ok(container.querySelector('[data-vwf-nav="roles"]'), '角色库改为设置页页签入口（FEAT-100 V-1）')
   assert.ok(container.querySelector('dialog.vwf-editor-dialog'), 'Escape 未关闭整个工作区')
 
   // 有未保存改动时：Escape 弹确认层，再按 Escape 只关确认层
