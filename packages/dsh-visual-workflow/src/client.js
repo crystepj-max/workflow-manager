@@ -65,6 +65,10 @@ return {
   isRollbackEdge: isRollbackEdge,
   deriveEntryCandidates: deriveEntryCandidates,
   ingestEditorJson: ingestEditorJson,
+  // 角色来源与显示摘要（FEAT-86）：纯函数、只读，导出供单测锁定
+  // 「按 builtin 字段判定来源」与「摘要不写回原文」两条业务规则。
+  roleOriginOf: roleOriginOf,
+  roleSummaryOf: roleSummaryOf,
   apply(ctx) {
     const slots = ctx.get('slots')
     if (slots === undefined) return
@@ -87,7 +91,68 @@ return {
     }
 
     styles.insert(`
-.vwf-root { display:flex; flex-direction:column; gap:12px; font-size:13px; color:var(--dsw-alias-label-primary, inherit); }
+/* ── A 编排台语义 token（FEAT-86）──────────────────────────────────────────
+   契约来源：prototypes/ui-workbench/DESIGN.md「视觉系统 · A · 雾蓝编排台」六色
+   基础色表 + 状态/边框/焦点/遮罩语义。浅色为默认值，深色在
+   body[data-ds-dark-theme] 成对覆盖（与 DSH 自身主题机制同源，不另造开关）。
+   组件样式只引用 --vwf-*：不再各自书写 DSH alias + 单一主题兜底色——那正是
+   「深色背景配深色字」的成因（alias 缺失时落到只对一种主题成立的硬编码值）。
+   对比度口径：正文 ≥ 4.5:1，非文本控件边界与焦点 ≥ 3:1；采样点与实测见
+   tests/theme-token.test.mjs 与 .agent-runs/feat-86-r1 的对比度证据。 */
+/* @vwf-token-light */
+:root {
+  --vwf-canvas: #F1F4FA;
+  --vwf-surface: #FFFFFF;
+  --vwf-text: #1D2B43;
+  --vwf-text-2: #58677E;
+  --vwf-text-3: #5F6E85;
+  --vwf-accent: #3D53B6;
+  --vwf-accent-on: #FFFFFF;
+  --vwf-accent-surface: #E8ECFF;
+  --vwf-border: rgba(29, 43, 67, 0.14);
+  --vwf-border-strong: rgba(29, 43, 67, 0.30);
+  --vwf-border-ctl: #7C8BA3;
+  --vwf-focus: #3D53B6;
+  --vwf-mask: rgba(16, 24, 39, 0.32);
+  --vwf-ok: #1F7A4D;
+  --vwf-err: #B3261E;
+  --vwf-warn: #8A5A00;
+  --vwf-info: #2F5CA8;
+}
+/* @vwf-token-light-end */
+/* @vwf-token-dark */
+body[data-ds-dark-theme], :root[data-ds-dark-theme] {
+  --vwf-canvas: #101827;
+  --vwf-surface: #182338;
+  --vwf-text: #EDF2FF;
+  --vwf-text-2: #ACB9D1;
+  --vwf-text-3: #93A2BD;
+  --vwf-accent: #B3C1FF;
+  --vwf-accent-on: #101827;
+  --vwf-accent-surface: #293759;
+  --vwf-border: rgba(237, 242, 255, 0.14);
+  --vwf-border-strong: rgba(237, 242, 255, 0.30);
+  --vwf-border-ctl: #7E8FAE;
+  --vwf-focus: #B3C1FF;
+  --vwf-mask: rgba(0, 0, 0, 0.56);
+  --vwf-ok: #6FD19A;
+  --vwf-err: #FF938C;
+  --vwf-warn: #F0B84E;
+  --vwf-info: #8FB8FF;
+}
+/* @vwf-token-dark-end */
+/* 非颜色 token（间距 / 尺寸）：与主题无关，单处定义 */
+:root { --vwf-safe-gap:clamp(12px, 3vw, 32px); }
+.vwf-root { display:flex; flex-direction:column; gap:12px; font-size:13px; color:var(--vwf-text); }
+/* 画布与嵌入层的滚动条统一由本作用域承担（原按容器逐个列举；角色详情、引用位置
+   与角色管理滚动区一并纳入，不新增分叉规则）。 */
+.vwf-root ::-webkit-scrollbar { width:10px; height:10px; }
+.vwf-root ::-webkit-scrollbar-thumb { background:var(--vwf-border-strong); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
+.vwf-root ::-webkit-scrollbar-track { background:transparent; }
+/* 可见焦点（V-6 / WCAG 2.2 焦点不被遮挡）：键盘到达的控件都必须有可见焦点环。
+   作用域限本插件根节点，不外溢到宿主其它界面。 */
+.vwf-root :focus-visible { outline:2px solid var(--vwf-focus); outline-offset:2px; }
+.vwf-input:focus-visible, .vwf-select:focus-visible, .vwf-textarea:focus-visible { outline-offset:0; border-color:var(--vwf-focus); }
 .vwf-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 /* 业务结果取值行（LOC-001 V2）：取值 / 状态图标 / 操作必须在同一行。
    .vwf-input 默认 width:100%，在 flex 行里会把后两者挤到下一行，这里改为可伸缩宽度。 */
@@ -96,50 +161,52 @@ return {
 .vwf-routing-row .vwf-btn, .vwf-routing-badge { flex:0 0 auto; white-space:nowrap; }
 .vwf-routing-badge { cursor:help; font-size:12px; line-height:1; }
 .vwf-spacer { flex:1; }
-.vwf-muted { color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:12px; }
-.vwf-muted-sm { color:var(--dsw-alias-label-tertiary, #8a8a8a); font-size:11px; }
-.vwf-tabs { display:flex; gap:4px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); }
-.vwf-tab { padding:7px 14px; border:1px solid transparent; border-radius:8px 8px 0 0; cursor:pointer; color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:13px; background:transparent; }
-.vwf-tab.on { color:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #4d9fff)); border-color:var(--dsw-alias-border-l2, #333); border-bottom-color:transparent; background:var(--dsw-alias-bg-layer-2, #242424); }
-.vwf-card { border:1px solid var(--dsw-alias-border-l2, #333); border-radius:12px; background:var(--dsw-alias-bg-layer-2, #242424); overflow:hidden; }
-.vwf-card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); flex-wrap:wrap; }
-.vwf-card-title { font-size:14px; font-weight:600; color:var(--dsw-alias-label-primary, #e8e8e8); }
-.vwf-btn { padding:6px 12px; border-radius:8px; border:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-button-tool-bar-fill, transparent); color:var(--dsw-alias-label-primary, #e8e8e8); cursor:pointer; font-size:12px; line-height:1.4; }
-.vwf-btn:hover:not(:disabled) { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.06)); }
+.vwf-muted { color:var(--vwf-text-2); font-size:12px; }
+.vwf-muted-sm { color:var(--vwf-text-3); font-size:11px; }
+.vwf-tabs { display:flex; gap:4px; border-bottom:1px solid var(--vwf-border); }
+.vwf-tab { padding:7px 14px; border:1px solid transparent; border-radius:8px 8px 0 0; cursor:pointer; color:var(--vwf-text-2); font-size:13px; background:transparent; }
+.vwf-tab.on { color:var(--vwf-accent); border-color:var(--vwf-border); border-bottom-color:transparent; background:var(--vwf-surface); }
+.vwf-card { border:1px solid var(--vwf-border); border-radius:12px; background:var(--vwf-surface); overflow:hidden; }
+.vwf-card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; border-bottom:1px solid var(--vwf-border); flex-wrap:wrap; }
+.vwf-card-title { font-size:14px; font-weight:600; color:var(--vwf-text); }
+/* 控件边界（按钮 / 输入 / 下拉）用 ≥3:1 的 --vwf-border-ctl；卡片、分隔线等
+   装饰性边界用 --vwf-border，避免整屏描边过重（V-4 非文本对比度）。 */
+.vwf-btn { padding:6px 12px; border-radius:8px; border:1px solid var(--vwf-border-ctl); background:transparent; color:var(--vwf-text); cursor:pointer; font-size:12px; line-height:1.4; }
+.vwf-btn:hover:not(:disabled) { background:var(--vwf-accent-surface); border-color:var(--vwf-accent); }
 .vwf-btn:disabled { opacity:.45; cursor:not-allowed; }
-.vwf-btn.primary { border-color:var(--dsw-alias-brand-primary, #4d9fff); background:var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary, #4d9fff)); color:var(--dsw-alias-label-primary-foreground, #fff); }
-.vwf-btn.danger { color:var(--dsw-alias-state-error-primary, #e5484d); }
-.vwf-btn.danger:hover:not(:disabled) { background:var(--dsw-alias-interactive-bg-hover-danger, rgba(229,72,77,.12)); }
+.vwf-btn.primary { border-color:var(--vwf-accent); background:var(--vwf-accent); color:var(--vwf-accent-on); }
+.vwf-btn.danger { color:var(--vwf-err); }
+.vwf-btn.danger:hover:not(:disabled) { background:var(--vwf-err); border-color:var(--vwf-err); color:var(--vwf-accent-on); }
 /* 画布顶部删除操作保持完整红色；禁用态不用透明度混色，避免在深色画布上发黑。 */
 .vwf-canvas-toolbar .vwf-btn.danger,
-.vwf-canvas-toolbar .vwf-btn.danger:disabled { color:var(--dsw-alias-state-error-primary, #e5484d); opacity:1; -webkit-text-fill-color:currentColor; }
+.vwf-canvas-toolbar .vwf-btn.danger:disabled { color:var(--vwf-err); opacity:1; -webkit-text-fill-color:currentColor; }
 .vwf-btn.ghost { border-color:transparent; background:transparent; }
 .vwf-btn.sm { padding:3px 10px; font-size:12px; border-radius:99px; }
-.vwf-badge { display:inline-block; padding:1px 8px; border-radius:99px; font-size:10px; border:1px solid var(--dsw-alias-border-l3, #444); color:var(--dsw-alias-label-secondary, #9a9a9a); }
-.vwf-badge.accent { color:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #4d9fff)); border-color:currentColor; }
+.vwf-badge { display:inline-block; padding:1px 8px; border-radius:99px; font-size:10px; border:1px solid var(--vwf-border-strong); color:var(--vwf-text-2); }
+.vwf-badge.accent { color:var(--vwf-accent); border-color:currentColor; }
 .vwf-list { display:flex; flex-direction:column; gap:8px; }
-.vwf-list-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); }
-.vwf-list-item:hover { border-color:var(--dsw-alias-border-l3, #444); }
+.vwf-list-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-canvas); }
+.vwf-list-item:hover { border-color:var(--vwf-border-strong); }
 .vwf-list-name { font-weight:600; font-size:13px; }
-.vwf-list-desc { color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:11px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:520px; }
+.vwf-list-desc { color:var(--vwf-text-2); font-size:11px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:520px; }
 .vwf-field { display:flex; flex-direction:column; gap:4px; margin-top:10px; }
-.vwf-field-label { display:flex; align-items:center; gap:5px; font-size:12px; font-weight:500; color:var(--dsw-alias-label-secondary, #9a9a9a); }
-.vwf-field-label .req { color:var(--dsw-alias-state-error-primary, #e5484d); }
-.vwf-field-label.err { color:var(--dsw-alias-state-error-primary, #e5484d); }
-.vwf-help { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:99px; border:1px solid var(--dsw-alias-border-l3, #555); color:var(--dsw-alias-label-tertiary, #8a8a8a); font-size:9px; cursor:help; }
-.vwf-input, .vwf-select, .vwf-textarea { padding:6px 9px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); color:var(--dsw-alias-label-primary, #e8e8e8); font:inherit; font-size:12px; width:100%; box-sizing:border-box; }
+.vwf-field-label { display:flex; align-items:center; gap:5px; font-size:12px; font-weight:500; color:var(--vwf-text-2); }
+.vwf-field-label .req { color:var(--vwf-err); }
+.vwf-field-label.err { color:var(--vwf-err); }
+.vwf-help { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:99px; border:1px solid var(--vwf-border-strong); color:var(--vwf-text-3); font-size:9px; cursor:help; }
+.vwf-input, .vwf-select, .vwf-textarea { padding:6px 9px; border:1px solid var(--vwf-border-ctl); border-radius:8px; background:var(--vwf-surface); color:var(--vwf-text); font:inherit; font-size:12px; width:100%; box-sizing:border-box; }
 .vwf-select { appearance:auto; }
 .vwf-textarea { resize:vertical; line-height:1.5; }
 .vwf-mono { font-family:var(--dsw-font-family-mono, ui-monospace, SFMono-Regular, Consolas, monospace); }
-.vwf-input.err, .vwf-select.err, .vwf-textarea.err { border-color:var(--dsw-alias-state-error-primary, #e5484d); }
-.vwf-err-line { color:var(--dsw-alias-state-error-primary, #e5484d); font-size:11px; margin-top:2px; }
-.vwf-ok-line { color:var(--dsw-alias-state-success-primary, #34d399); font-size:11px; margin-top:2px; }
-.vwf-section { border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); padding:10px 12px; margin-top:10px; }
-.vwf-subsection { border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; background:var(--dsw-alias-bg-layer-2, #242424); padding:10px 12px; margin-top:10px; }
-.vwf-editor-dialog { --vwf-editor-safe-gap:clamp(12px, 3vw, 32px); position:fixed; inset:var(--vwf-editor-safe-gap); z-index:900; width:min(1440px, calc(100vw - var(--vwf-editor-safe-gap) - var(--vwf-editor-safe-gap))); height:min(920px, calc(100vh - var(--vwf-editor-safe-gap) - var(--vwf-editor-safe-gap))); max-width:none; max-height:none; margin:auto; padding:0; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:18px; background:var(--dsw-alias-bg-layer-1, #1b1b1b); color:var(--dsw-alias-label-primary, #e8e8e8); box-shadow:0 24px 80px rgba(0,0,0,.48); overflow:hidden; }
+.vwf-input.err, .vwf-select.err, .vwf-textarea.err { border-color:var(--vwf-err); }
+.vwf-err-line { color:var(--vwf-err); font-size:11px; margin-top:2px; overflow-wrap:anywhere; }
+.vwf-ok-line { color:var(--vwf-ok); font-size:11px; margin-top:2px; }
+.vwf-section { border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-surface); padding:10px 12px; margin-top:10px; }
+.vwf-subsection { border:1px solid var(--vwf-border); border-radius:8px; background:var(--vwf-canvas); padding:10px 12px; margin-top:10px; }
+.vwf-editor-dialog { --vwf-editor-safe-gap:var(--vwf-safe-gap); position:fixed; inset:var(--vwf-editor-safe-gap); z-index:900; width:min(1440px, calc(100vw - var(--vwf-editor-safe-gap) - var(--vwf-editor-safe-gap))); height:min(920px, calc(100vh - var(--vwf-editor-safe-gap) - var(--vwf-editor-safe-gap))); max-width:none; max-height:none; margin:auto; padding:0; border:1px solid var(--vwf-border); border-radius:18px; background:var(--vwf-surface); color:var(--vwf-text); box-shadow:0 24px 80px rgba(0,0,0,.48); overflow:hidden; }
 .vwf-editor-dialog[open] { display:flex; flex-direction:column; }
-.vwf-editor-dialog::backdrop { background:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.56)); backdrop-filter:blur(2px); }
-.vwf-editor-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); flex:0 0 auto; }
+.vwf-editor-dialog::backdrop { background:var(--vwf-mask); backdrop-filter:blur(2px); }
+.vwf-editor-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--vwf-border); flex:0 0 auto; }
 .vwf-editor-msg { flex:0 0 auto; max-height:min(320px, 38vh); margin:10px 16px 0; white-space:pre-wrap; }
 /* 结果条分级呈现（UAT-02 反馈）：## 一级=整体结论，### 二级=逐节点一行；✅/❌/⚠️/➖ 决定色调 */
 .vwf-msg-line.l1 { font-weight:600; font-size:13px; margin:2px 0 3px; }
@@ -186,32 +253,32 @@ return {
 .vwf-canvas-stage { flex:0 0 auto; width:max-content; height:max-content; box-sizing:border-box; margin:auto; padding:24px; cursor:grab; }
 .vwf-canvas-stage:active { cursor:grabbing; }
 /* 画布工具栏：文档流内一行（不再悬浮遮挡入口节点）；窄屏允许提示换行增高 */
-.vwf-canvas-toolbar { display:flex; gap:8px; row-gap:6px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-layer-2, #242424); }
+.vwf-canvas-toolbar { display:flex; gap:8px; row-gap:6px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--vwf-border); background:var(--vwf-surface); }
 .vwf-canvas-toolbar .vwf-btn { flex:0 0 auto; min-height:28px; white-space:nowrap; }
 .vwf-toolbar-hint { flex:1 1 240px; min-width:180px; margin-left:2px; line-height:1.45; overflow-wrap:anywhere; }
 /* 画布顶部操作按钮组：图标圆形 + 文案，与 Gold-Band 交互形态一致 */
-.vwf-toolbar-actions { display:inline-flex; align-items:stretch; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:999px; background:var(--dsw-alias-bg-layer-2, #242424); overflow:hidden; }
-.vwf-toolbar-action { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border:0; background:transparent; color:var(--dsw-alias-label-primary, #e8e8e8); cursor:pointer; font-size:12px; white-space:nowrap; }
-.vwf-toolbar-action + .vwf-toolbar-action { border-left:1px solid var(--dsw-alias-border-l2, #333); }
-.vwf-toolbar-action:hover:not(:disabled) { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.06)); }
-.vwf-toolbar-action .vwf-toolbar-action-icon { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:999px; background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); color:inherit; font-size:13px; }
+.vwf-toolbar-actions { display:inline-flex; align-items:stretch; border:1px solid var(--vwf-border-ctl); border-radius:999px; background:var(--vwf-canvas); overflow:hidden; }
+.vwf-toolbar-action { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border:0; background:transparent; color:var(--vwf-text); cursor:pointer; font-size:12px; white-space:nowrap; }
+.vwf-toolbar-action + .vwf-toolbar-action { border-left:1px solid var(--vwf-border); }
+.vwf-toolbar-action:hover:not(:disabled) { background:var(--vwf-accent-surface); }
+.vwf-toolbar-action .vwf-toolbar-action-icon { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:999px; background:var(--vwf-accent-surface); color:var(--vwf-accent); font-size:13px; }
 .vwf-toolbar-action.danger,
-.vwf-toolbar-action.danger:disabled { color:var(--dsw-alias-state-error-primary, #e5484d); opacity:1; -webkit-text-fill-color:currentColor; }
-.vwf-toolbar-action.danger:hover:not(:disabled) { background:rgba(229,72,77,.1); }
+.vwf-toolbar-action.danger:disabled { color:var(--vwf-err); opacity:1; -webkit-text-fill-color:currentColor; }
+.vwf-toolbar-action.danger:hover:not(:disabled) { background:var(--vwf-accent-surface); }
 .vwf-toolbar-action:disabled { cursor:not-allowed; }
 /* 显示名历史撤销/重做按钮组 */
-.vwf-history-group { display:inline-flex; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:999px; background:var(--dsw-alias-bg-layer-2, #242424); overflow:hidden; }
-.vwf-history-group .vwf-history-btn { border:0; border-radius:0; background:transparent; font-size:14px; min-width:28px; padding:3px 8px; }
+.vwf-history-group { display:inline-flex; border:1px solid var(--vwf-border-ctl); border-radius:999px; background:var(--vwf-canvas); overflow:hidden; }
+.vwf-history-group .vwf-history-btn { border:0; border-radius:0; background:transparent; font-size:14px; min-width:28px; padding:3px 8px; color:var(--vwf-text); }
 .vwf-history-group .vwf-history-btn:disabled { opacity:.45; cursor:not-allowed; }
 /* 角色库常驻区（issue-58 反馈）：画布右上角胶囊区；管理/新增入口不再依赖自定义角色数量 */
-.vwf-role-zone { margin-left:auto; display:inline-flex; align-items:center; gap:2px; padding:3px 6px 3px 12px; border:1px solid var(--dsw-alias-brand-primary, #4d9fff); border-radius:999px; background:var(--dsw-alias-bg-layer-2, #242424); flex:0 0 auto; }
-.vwf-role-zone-label { font-size:11px; font-weight:700; letter-spacing:.08em; color:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #4d9fff)); margin-right:8px; white-space:nowrap; }
+.vwf-role-zone { margin-left:auto; display:inline-flex; align-items:center; gap:2px; padding:3px 6px 3px 12px; border:1px solid var(--vwf-accent); border-radius:999px; background:var(--vwf-canvas); flex:0 0 auto; max-width:100%; flex-wrap:wrap; }
+.vwf-role-zone-label { font-size:11px; font-weight:700; letter-spacing:.08em; color:var(--vwf-accent); margin-right:8px; white-space:nowrap; }
 .vwf-svg { display:block; user-select:none; touch-action:none; }
-.vwf-menu { position:absolute; z-index:20; min-width:160px; padding:4px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-overlay, #2d2d2d); box-shadow:0 8px 28px rgba(0,0,0,.4); }
-.vwf-menu-item { display:block; width:100%; text-align:left; padding:7px 10px; border:0; border-radius:7px; background:transparent; color:var(--dsw-alias-label-primary, #e8e8e8); font-size:12px; cursor:pointer; }
-.vwf-menu-item:hover { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); }
-.vwf-zoom { position:absolute; right:10px; bottom:10px; z-index:5; display:flex; flex-direction:column; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; overflow:hidden; background:var(--dsw-alias-bg-layer-2, #242424); }
-.vwf-zoom button { width:30px; height:30px; border:0; border-bottom:1px solid var(--dsw-alias-border-l2, #333); background:transparent; color:var(--dsw-alias-label-secondary, #9a9a9a); cursor:pointer; font-size:14px; }
+.vwf-menu { position:absolute; z-index:20; min-width:160px; padding:4px; border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-surface); box-shadow:0 8px 28px rgba(0,0,0,.4); }
+.vwf-menu-item { display:block; width:100%; text-align:left; padding:7px 10px; border:0; border-radius:7px; background:transparent; color:var(--vwf-text); font-size:12px; cursor:pointer; }
+.vwf-menu-item:hover { background:var(--vwf-accent-surface); }
+.vwf-zoom { position:absolute; right:10px; bottom:10px; z-index:5; display:flex; flex-direction:column; border:1px solid var(--vwf-border-ctl); border-radius:10px; overflow:hidden; background:var(--vwf-surface); }
+.vwf-zoom button { width:30px; height:30px; border:0; border-bottom:1px solid var(--vwf-border); background:transparent; color:var(--vwf-text-2); cursor:pointer; font-size:14px; }
 .vwf-zoom button:last-child { border-bottom:0; }
 .vwf-zoom button:hover { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); }
 /* 大工作区语义 token（FEAT-84 共享契约冻结在 prototypes/ui-workbench/DESIGN.md 的 A 编排台）：
@@ -327,44 +394,57 @@ return {
 .vwf-confirm-title { font-size:14px; font-weight:600; color:var(--dsw-alias-label-primary, #e8e8e8); }
 .vwf-confirm-actions { display:flex; justify-content:flex-end; gap:8px; }
 .vwf-dialog-title { font-size:15px; font-weight:600; }
-.vwf-dialog-desc { font-size:12px; color:var(--dsw-alias-label-secondary, #9a9a9a); }
-.vwf-dialog-issues { max-height:300px; overflow:auto; display:flex; flex-direction:column; gap:6px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; padding:10px; background:var(--dsw-alias-bg-base, #181818); }
-.vwf-dialog-issue { padding:6px 10px; border-radius:8px; background:var(--dsw-alias-bg-layer-2, #242424); color:var(--dsw-alias-state-error-primary, #e5484d); font-size:12px; }
-/* ── 角色库管理（issue-58）── */
-.vwf-role-mgr { width:min(780px, 94vw); max-height:88vh; display:flex; flex-direction:column; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:14px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:12px; overflow:hidden; }
-.vwf-role-mgr-body { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:10px; }
-.vwf-role-section-title { font-size:13px; font-weight:600; color:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #4d9fff)); margin-top:6px; }
-.vwf-role-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:10px; background:var(--dsw-alias-bg-layer-2, #242424); flex-wrap:wrap; }
-.vwf-role-row .vwf-role-name { font-weight:600; font-size:13px; }
-.vwf-role-row .vwf-role-summary { color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:400px; min-width:0; }
-.vwf-role-content { white-space:pre-wrap; font-size:11px; line-height:1.55; max-height:340px; overflow:auto; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; padding:10px; background:var(--dsw-alias-bg-base, #181818); }
-.vwf-role-refs { display:flex; flex-direction:column; gap:6px; max-height:200px; overflow:auto; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; padding:8px 10px; background:var(--dsw-alias-bg-base, #181818); font-size:11px; }
-.vwf-role-ref-line { color:var(--dsw-alias-label-secondary, #9a9a9a); }
-.vwf-role-empty { padding:14px; border:1px dashed var(--dsw-alias-border-l2, #333); border-radius:10px; color:var(--dsw-alias-label-secondary, #9a9a9a); font-size:12px; text-align:center; }
+.vwf-dialog-desc { font-size:12px; color:var(--vwf-text-2); overflow-wrap:anywhere; }
+.vwf-dialog-issues { max-height:300px; overflow:auto; display:flex; flex-direction:column; gap:6px; border:1px solid var(--vwf-border); border-radius:10px; padding:10px; background:var(--vwf-canvas); }
+.vwf-dialog-issue { padding:6px 10px; border-radius:8px; background:var(--vwf-surface); color:var(--vwf-err); font-size:12px; }
+/* ── 角色库管理（issue-58；FEAT-86 收口：来源可辨识 / 两行摘要 / 独立滚动详情 / 窄屏）── */
+.vwf-role-mgr { width:min(780px, 94vw); max-height:calc(100vh - 2 * var(--vwf-safe-gap)); display:flex; flex-direction:column; border:1px solid var(--vwf-border); border-radius:14px; background:var(--vwf-surface); color:var(--vwf-text); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:12px; overflow:hidden; }
+.vwf-role-mgr-body { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:10px; overscroll-behavior:contain; }
+.vwf-role-section-title { font-size:13px; font-weight:600; color:var(--vwf-accent); margin-top:6px; }
+.vwf-role-count { color:var(--vwf-text-3); font-weight:400; font-size:11px; }
+.vwf-role-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:8px 10px; border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-canvas); }
+.vwf-role-row-main { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; flex:1 1 auto; }
+.vwf-role-row .vwf-role-name { font-weight:600; font-size:13px; color:var(--vwf-text); overflow-wrap:anywhere; }
+/* 列表摘要最多两行（V-2）：行高与列表高度不随职责全文增长；连续长串断词或换行，
+   不产生横向溢出。摘要为显示层生成，不写回角色原文（规格 §9）。 */
+.vwf-role-summary { flex:1 1 100%; min-width:0; color:var(--vwf-text-2); font-size:11px; line-height:1.5; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; word-break:break-word; }
+.vwf-role-actions { display:flex; flex-wrap:wrap; gap:6px; margin-left:auto; }
+/* 完整职责的独立滚动区：列表之外单独滚动，键盘可进入（tabindex=0） */
+.vwf-role-content { white-space:pre-wrap; font-size:11px; line-height:1.55; max-height:min(340px, 40vh); overflow:auto; overscroll-behavior:contain; border:1px solid var(--vwf-border); border-radius:8px; padding:10px; background:var(--vwf-canvas); overflow-wrap:anywhere; word-break:break-word; }
+.vwf-role-refs { display:flex; flex-direction:column; gap:6px; max-height:min(200px, 28vh); overflow:auto; border:1px solid var(--vwf-border); border-radius:8px; padding:8px 10px; background:var(--vwf-canvas); font-size:11px; }
+.vwf-role-ref-line { color:var(--vwf-text-2); overflow-wrap:anywhere; }
+.vwf-role-empty { padding:14px; border:1px dashed var(--vwf-border-strong); border-radius:10px; color:var(--vwf-text-2); font-size:12px; text-align:center; overflow-wrap:anywhere; }
 .vwf-status { font-size:11px; }
-.vwf-status.ok { color:var(--dsw-alias-state-success-primary, #34d399); }
-.vwf-status.err { color:var(--dsw-alias-state-error-primary, #e5484d); }
-.vwf-status.warn { color:var(--dsw-alias-state-warning-primary, #f5a524); }
-.vwf-code { white-space:pre-wrap; font-family:var(--dsw-font-family-mono, ui-monospace, monospace); font-size:11px; opacity:.9; max-height:320px; overflow:auto; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; padding:10px; background:var(--dsw-alias-bg-base, #181818); }
+.vwf-status.ok { color:var(--vwf-ok); }
+.vwf-status.err { color:var(--vwf-err); }
+.vwf-status.warn { color:var(--vwf-warn); }
+.vwf-code { white-space:pre-wrap; font-family:var(--dsw-font-family-mono, ui-monospace, monospace); font-size:11px; opacity:.9; max-height:320px; overflow:auto; border:1px solid var(--vwf-border); border-radius:8px; padding:10px; background:var(--vwf-canvas); overflow-wrap:anywhere; }
 .vwf-table { width:100%; border-collapse:collapse; font-size:11px; }
-.vwf-table th, .vwf-table td { text-align:left; padding:4px 8px; border-bottom:1px solid var(--dsw-alias-border-l2, #333); }
-.vwf-table .vwf-fanout-group td { padding-top:9px; font-weight:600; color:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #4d9fff)); background:var(--dsw-alias-bg-layer-2, #242424); }
+.vwf-table th, .vwf-table td { text-align:left; padding:4px 8px; border-bottom:1px solid var(--vwf-border); overflow-wrap:anywhere; }
+.vwf-table .vwf-fanout-group td { padding-top:9px; font-weight:600; color:var(--vwf-accent); background:var(--vwf-canvas); }
 .vwf-json-edit { width:100%; height:520px; box-sizing:border-box; resize:none; font-family:var(--dsw-font-family-mono, ui-monospace, monospace); font-size:11px; line-height:1.6; }
+/* ── 窄屏（V-5）：弹层安全边距、按钮折行、详情内部滚动；不缩字号、不隐文字 ── */
+@media (max-width: 480px) {
+  .vwf-role-mgr { width:100%; padding:12px; }
+  .vwf-role-row-main, .vwf-role-actions { flex:1 1 100%; margin-left:0; }
+  .vwf-role-actions .vwf-btn { flex:1 1 auto; min-height:28px; }
+  .vwf-canvas-toolbar .vwf-btn, .vwf-role-zone .vwf-btn { flex:1 1 auto; }
+}
 /* ── SVG 画布 ── */
 .vwf-edge-flow { stroke-dasharray:3 17; animation:vwf-dash 3.6s linear infinite; }
 @keyframes vwf-dash { to { stroke-dashoffset:-20; } }
 .vwf-edge-hit { stroke:transparent; stroke-width:16; fill:none; }
-.vwf-node-card { fill:var(--dsw-alias-bg-layer-2, #242424); stroke:var(--dsw-alias-border-l2, #333); stroke-width:1; }
-.vwf-node-kind { fill:var(--dsw-alias-label-tertiary, #8a8a8a); font-size:10px; letter-spacing:.14em; text-transform:uppercase; }
-.vwf-node-label { fill:var(--dsw-alias-label-primary, #e8e8e8); font-size:13px; font-weight:500; }
-.vwf-node-seq { fill:var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary, #4d9fff)); font-size:11px; font-weight:700; font-variant-numeric:tabular-nums; }
-.vwf-node-seq-badge { fill:var(--dsw-alias-bg-layer-1, #1e1e1e); stroke:var(--dsw-alias-brand-primary, #4d9fff); stroke-width:1; }
-.vwf-handle { fill:var(--dsw-alias-label-tertiary, #8a8a8a); stroke:var(--dsw-alias-bg-layer-2, #242424); stroke-width:2; }
+.vwf-node-card { fill:var(--vwf-surface); stroke:var(--vwf-border-strong); stroke-width:1; }
+.vwf-node-kind { fill:var(--vwf-text-3); font-size:10px; letter-spacing:.14em; text-transform:uppercase; }
+.vwf-node-label { fill:var(--vwf-text); font-size:13px; font-weight:500; }
+.vwf-node-seq { fill:var(--vwf-accent); font-size:11px; font-weight:700; font-variant-numeric:tabular-nums; }
+.vwf-node-seq-badge { fill:var(--vwf-surface); stroke:var(--vwf-accent); stroke-width:1; }
+.vwf-handle { fill:var(--vwf-text-3); stroke:var(--vwf-surface); stroke-width:2; }
 /* 节点左右连接把手（拖出/落入连线的源与目标指示）：默认隐藏，节点悬停时显示，
    避免没有对应边的节点右侧出现无意义灰点（验收反馈）。 */
 .vwf-handle { opacity:0; pointer-events:none; transition:opacity .12s ease; }
-/* 悬停高亮：把手以品牌色圆环醒目显示，避免与边起点圆点（同类槽位）混淆而不可见 */
-g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-brand-primary, #4d9fff); stroke:var(--dsw-alias-bg-layer-2, #242424); stroke-width:3; filter:drop-shadow(0 0 4px var(--dsw-alias-brand-primary, #4d9fff)); }
+/* 悬停高亮：把手以强调色圆环醒目显示，避免与边起点圆点（同类槽位）混淆而不可见 */
+g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); stroke:var(--vwf-surface); stroke-width:3; filter:drop-shadow(0 0 4px var(--vwf-accent)); }
 .vwf-handle-src { cursor:crosshair; }
 .vwf-handle-src:hover { fill:var(--dsw-alias-brand-primary, #4d9fff); }
 .vwf-entry-badge { fill:var(--dsw-alias-bg-layer-1, #1e1e1e); stroke:var(--dsw-alias-border-l3, #444); }
@@ -396,12 +476,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     const CANVAS_PAD = 24
     const END_NODE = '$end'
     const HUMAN_DECISION_ID = '$human-decision'
-    const STATUS_COLOR = { running: 'var(--dsw-alias-brand-primary, #60a5fa)', pass: 'var(--dsw-alias-state-success-primary, #22c55e)', fail: 'var(--dsw-alias-state-error-primary, #ef4444)', human: 'var(--dsw-alias-state-warn-primary, #f59e0b)' }
-    const EDGE_OK = '#2563eb'
-    const EDGE_FAIL = 'var(--dsw-alias-state-error-primary, #f87171)'
-    const EDGE_TECH = 'var(--dsw-alias-label-tertiary, #8a8a8a)'
-    const EDGE_SELECTED = '#111827'
-    const ACCENT = 'var(--dsw-alias-brand-primary, #60a5fa)'
+    const STATUS_COLOR = { running: 'var(--vwf-accent)', pass: 'var(--vwf-ok)', fail: 'var(--vwf-err)', human: 'var(--vwf-warn)' }
+    // 状态双通道（FEAT-86 / V-4）：形状与文字同时表达状态，不只用颜色。
+    // 形状冗余编码色调分组——✓ 终态通过 / ✕ 终态失败 / ● 进行中 /
+    // ! 等待人工或受阻（可恢复等待态）；灰度或色觉差异下仍可读出状态。
+    const STATUS_SHAPE = { ok: '✓', err: '✕', run: '●', wait: '!' }
+    const EDGE_OK = 'var(--vwf-accent)'
+    const EDGE_FAIL = 'var(--vwf-err)'
+    const EDGE_TECH = 'var(--vwf-text-3)'
+    const EDGE_SELECTED = 'var(--vwf-text)'
+    const ACCENT = 'var(--vwf-accent)'
     const SCHEMA_DEBOUNCE_MS = 2000
     const VALIDATE_DEBOUNCE_MS = 350
 
@@ -1051,7 +1135,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         labelEls.push(h('text', {
           key: 'lb' + idx, x: labelX, y: labelY - 6, textAnchor: 'middle', fontSize: 11, fontWeight: selected ? 700 : 600,
           fill: selected ? EDGE_SELECTED : color,
-          style: { paintOrder: 'stroke', stroke: selected ? 'rgba(255,255,255,.82)' : 'var(--dsw-alias-bg-base, #181818)', strokeWidth: 3 },
+          style: { paintOrder: 'stroke', stroke: selected ? 'var(--vwf-surface)' : 'var(--vwf-canvas)', strokeWidth: 3 },
         }, e.when ? h('title', null, e.when) : null, lbl))
       })
 
@@ -1078,7 +1162,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           ))
           return
         }
-        const stroke = isConnectTarget ? ACCENT : selected ? ACCENT : invalid ? 'var(--dsw-alias-state-error-primary, #e5484d)' : status ? STATUS_COLOR[status] : 'var(--dsw-alias-border-l2, #333)'
+        const stroke = isConnectTarget ? ACCENT : selected ? ACCENT : invalid ? 'var(--vwf-err)' : status ? STATUS_COLOR[status] : 'var(--vwf-border-strong)'
         const seq = seqLabels[id]
         const seqW = seq ? Math.max(22, 8 + String(seq).length * 7) : 0
         nodeEls.push(h('g', {
@@ -1090,7 +1174,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             className: 'vwf-node-card', width: p.w, height: p.h, rx: 14,
             stroke: stroke, strokeWidth: isConnectTarget ? 3 : (selected || invalid ? 2 : 1),
             ...(isConnectTarget ? { 'data-vwf-connect-target': 'true' } : {}),
-            style: isConnectTarget ? { filter: 'drop-shadow(0 0 10px ' + ACCENT + ')' } : selected ? { filter: 'drop-shadow(0 0 8px ' + ACCENT + ')' } : invalid ? { filter: 'drop-shadow(0 0 6px var(--dsw-alias-state-error-primary, #e5484d))' } : undefined,
+            style: isConnectTarget ? { filter: 'drop-shadow(0 0 10px ' + ACCENT + ')' } : selected ? { filter: 'drop-shadow(0 0 8px ' + ACCENT + ')' } : invalid ? { filter: 'drop-shadow(0 0 6px var(--vwf-err))' } : undefined,
           }),
           candidates.indexOf(id) >= 0 ? h('g', { key: 'eb' },
             h('rect', { className: 'vwf-entry-badge', x: -6, y: -9, width: 34, height: 16, rx: 8 }),
@@ -1147,7 +1231,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             },
               h('defs', null,
                 h('pattern', { id: 'vwf-dots', width: 28, height: 28, patternUnits: 'userSpaceOnUse' },
-                  h('circle', { cx: 1, cy: 1, r: 1, fill: 'var(--dsw-alias-border-l2, #333)' })),
+                  h('circle', { cx: 1, cy: 1, r: 1, fill: 'var(--vwf-border)' })),
                 h('marker', { id: 'vwf-arrow', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_OK })),
                 h('marker', { id: 'vwf-arrow-fail', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_FAIL })),
                 h('marker', { id: 'vwf-arrow-tech', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }, h('path', { d: 'M0,0 L8,4 L0,8 z', fill: EDGE_TECH })),
@@ -1193,7 +1277,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const mt = record && record.body && record.body.media_type
       const val = record && record.body && record.body.value
       if (mt === 'text/html') {
-        return h('iframe', { sandbox: '', title: record.record_id, srcDoc: String(val || ''), style: { width: '100%', height: 220, border: '1px solid var(--dsw-alias-border-l2, #333)', borderRadius: 6, background: '#fff' } })
+        // iframe 底色是产物自身的内容画布（HTML 未声明背景时浏览器默认白底），
+        // 不参与主题 token：换成深色表面会让未声明背景的浅色产物变成不可读的深底浅字。
+        return h('iframe', { sandbox: '', title: record.record_id, srcDoc: String(val || ''), style: { width: '100%', height: 220, border: '1px solid var(--vwf-border)', borderRadius: 6, background: '#fff' } })
       }
       if (mt === 'text/markdown' || mt === 'text/plain') {
         return h('pre', { className: 'vwf-code', style: { maxHeight: 220, overflow: 'auto' } }, String(val ?? ''))
@@ -1592,13 +1678,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       if (curModel && modelOpts.indexOf(curModel) < 0) modelOpts.push(curModel)
 
       const roles = props.roles || []
-      // 角色选择区分内置/自定义（issue-58）：分组下拉 + 空自定义提示 + 管理入口
-      const builtinRoles = roles.filter(r => r.builtin)
-      const customRoles = roles.filter(r => !r.builtin)
-      const roleLabel = (role) => (role && role.summary ? role.id + ' — ' + role.summary.slice(0, 24) : (role ? role.id : ''))
+      // 角色选择区分内置/自定义（issue-58）：分组下拉 + 空自定义提示 + 管理入口。
+      // 来源与摘要复用角色库的同一套判定与生成规则（roleOriginOf / roleSummaryOf），
+      // 避免节点角色选择与角色库对同一角色给出不同含义（FEAT-86 收口）。
+      const builtinRoles = roles.filter(r => roleOriginOf(r).builtin)
+      const customRoles = roles.filter(r => !roleOriginOf(r).builtin)
+      const roleLabel = (role) => (role ? (roleSummaryOf(role, 24) ? role.id + ' — ' + roleSummaryOf(role, 24) : role.id) : '')
+      const roleTitle = (role) => roleSummaryOf(role, 120)
       const roleOptions = [{ value: '', label: t('selectProfile') }]
-        .concat(builtinRoles.map(role => ({ value: role.id, label: roleLabel(role), title: role.summary || '', group: t('builtinRoles') })))
-        .concat(customRoles.map(role => ({ value: role.id, label: roleLabel(role), title: role.summary || '', group: t('customRoles') })))
+        .concat(builtinRoles.map(role => ({ value: role.id, label: roleLabel(role), title: roleTitle(role), group: t('builtinRoles') })))
+        .concat(customRoles.map(role => ({ value: role.id, label: roleLabel(role), title: roleTitle(role), group: t('customRoles') })))
       // 当前值不在清单（旧工作流/宿主脏数据）时兜底保留展示
       if (node.profile && !roles.some(r => r.id === node.profile)) roleOptions.push({ value: node.profile, label: node.profile, title: '' })
 
@@ -1999,13 +2088,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       )
     }
 
-    // ── 角色库管理（issue-58）─────────────────────────────────────────────
-    // 从节点配置的「管理角色」进入：列表（内置/自定义分区）→ 查看内置（只读 +
-    // 基于此角色创建）→ 编辑/创建表单（名称唯一校验、被引用角色保存前影响范围
+    // ── 角色库管理（issue-58；FEAT-86 收口）────────────────────────────────
+    // 从画布「角色库」进入：列表（来源筛选 + 内置/自定义分区）→ 查看详情（只读 +
+    // 独立滚动完整职责）→ 编辑/创建表单（名称唯一校验、被引用角色保存前影响范围
     // 确认、重命名仅零引用放行）→ 删除（零引用二次确认 / 有引用阻止并展示引用
     // 位置）。覆盖在编辑器之上（fixed 遮罩），节点未提交的草稿状态不受影响。
+    //
+    // FEAT-86 收口点：①来源按 builtin 字段判定，分区标题与行内 badge 双重可识别；
+    // ②列表摘要最多两行（显式 summary 优先，缺失时由职责生成、不写回原文）；
+    // ③完整职责在独立滚动区，列表高度不随全文增长；④Escape 逐层关闭并把焦点
+    // 回收到触发元素；⑤来源筛选、查看、编辑、复制、删除、关闭、保存全部键盘可达。
     function RoleManager(props) {
       const [roles, setRoles] = React.useState(null)
+      const [loadError, setLoadError] = React.useState(null)
+      const [filter, setFilter] = React.useState('all') // 来源筛选：all | builtin | custom
       const [view, setView] = React.useState(props.initialCreate ? 'form' : 'list')
       const [formMode, setFormMode] = React.useState(props.initialCreate ? 'create' : 'edit')
       const [current, setCurrent] = React.useState(null) // 查看/编辑中的角色详情（创建来源）
@@ -2014,17 +2110,63 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const [error, setError] = React.useState(null)
       const [confirm, setConfirm] = React.useState(null) // {kind:'delete'|'blocked'|'impact', role?, usage?, name?, content?}
       const [saving, setSaving] = React.useState(false)
+      const dialogRef = React.useRef(null)
+      const viewBtnRefs = React.useRef({}) // 角色 id → 「查看详情」按钮（返回列表后回收焦点）
+      const returnFocusRef = React.useRef(null) // 待回收焦点的角色 id
+      const confirmReturnRef = React.useRef(null) // 关闭二次确认后要回收焦点的元素
+      // 打开角色管理的入口按钮：关闭（含 Escape）后把焦点还回去（V-6 焦点回收）。
+      const triggerRef = React.useRef(props.trigger || null)
       const refetch = React.useCallback(() => {
-        host.call('vwf.roles').then(r => setRoles((r && r.roles) || [])).catch(() => setRoles([]))
+        host.call('vwf.roles').then((r) => {
+          if (r && r.ok === false) {
+            // 读取失败必须与「没有角色」区分（规格 §11）：保持未知态并给出重试入口
+            setRoles(null)
+            setLoadError((r.errors && r.errors[0] && r.errors[0].message) || t('roleLoadFailed'))
+            return
+          }
+          setLoadError(null)
+          setRoles((r && r.roles) || [])
+        }).catch((e) => { setRoles(null); setLoadError(t('roleLoadFailed') + String(e)) })
       }, [])
       React.useEffect(() => { refetch() }, [])
+      // 焦点回收（V-6）：打开详情/表单时焦点进入对话框容器；Escape/返回回到列表时，
+      // 焦点归位到该角色的「查看详情」按钮（行按钮是重新渲染的新节点，故按 id 取当次元素）；
+      // 浮层卸载（关闭）时归位到入口按钮。
+      React.useEffect(() => {
+        const id = view === 'list' ? returnFocusRef.current : null
+        if (view === 'list') returnFocusRef.current = null
+        const el = id ? viewBtnRefs.current[id] : dialogRef.current
+        if (el && el.focus) el.focus()
+      }, [view])
+      React.useEffect(() => () => { const el = triggerRef.current; if (el && el.focus) el.focus() }, [])
       const fmt = (tpl, vars) => {
         let s = String(tpl || '')
         for (const k of Object.keys(vars || {})) s = s.split('{' + k + '}').join(String(vars[k]))
         return s
       }
+      const backToList = () => { setError(null); setView('list'); setCurrent(null) }
+      const closeConfirm = () => {
+        setConfirm(null)
+        const el = confirmReturnRef.current
+        confirmReturnRef.current = null
+        if (el && typeof el.focus === 'function') { try { el.focus() } catch (e) { /* 同上 */ } }
+      }
+      // Escape 逐层关闭（V-6）：二次确认 → 详情/表单 → 角色管理。捕获阶段拦截，
+      // 避免同层编辑器 dialog 的原生 Escape 关闭把整层一起收掉。
+      React.useEffect(() => {
+        const onKeyDown = (ev) => {
+          if (!ev || ev.key !== 'Escape') return
+          ev.preventDefault(); ev.stopPropagation()
+          if (confirm) closeConfirm()
+          else if (view !== 'list') backToList()
+          else props.onClose()
+        }
+        document.addEventListener('keydown', onKeyDown, true)
+        return () => document.removeEventListener('keydown', onKeyDown, true)
+      })
 
       const openView = (id) => {
+        returnFocusRef.current = id
         setCurrent(null); setError(null); setView('view')
         host.call('vwf.roles.get', { id }).then((r) => {
           if (r && r.ok) setCurrent(r.role)
@@ -2032,6 +2174,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         }).catch((e) => setError(String(e)))
       }
       const openEdit = (id) => {
+        returnFocusRef.current = null
         setCurrent(null); setError(null)
         host.call('vwf.roles.get', { id }).then((r) => {
           if (r && r.ok) {
@@ -2044,6 +2187,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         }).catch((e) => setError(String(e)))
       }
       const openCreate = (source) => {
+        returnFocusRef.current = null
         setCurrent(source || null)
         setDraftName(source ? t('customRoleSuffix', { src: source.id }) : '')
         setDraftContent(source ? (source.content || '') : '')
@@ -2051,10 +2195,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setError(null)
         setView('form')
       }
-      // 自定义角色克隆：与内置「基于此角色创建」同路径（详情预填 + 走 create），
+      // 自定义角色复制：与内置「基于此角色创建」同路径（详情预填 + 走 create），
       // 但 current 保持 null —— create 分支用 current.builtin===false 判定编辑，
-      // 克隆自定义角色必须走新建，否则会被当作 update 修改原角色。
+      // 复制自定义角色必须走新建，否则会被当作 update 修改原角色。
       const openCloneCustom = (role) => {
+        returnFocusRef.current = null
         setCurrent(null); setError(null); setView('form'); setFormMode('create')
         host.call('vwf.roles.get', { id: role.id }).then((r) => {
           if (r && r.ok) {
@@ -2110,7 +2255,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             setError(fmt(t('roleRenameBlocked'), { n: u.count }))
             return
           }
-          if (used) setConfirm({ kind: 'impact', usage: u, name: name, content: draftContent })
+          if (used) { confirmReturnRef.current = dialogRef.current; setConfirm({ kind: 'impact', usage: u, name: name, content: draftContent }) }
           else submitForm(name, draftContent)
         }).catch((e) => {
           // fail-closed：引用统计失败时保持表单打开并展示错误，禁止绕过影响确认保存。
@@ -2123,7 +2268,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         setConfirm(null)
         submitForm(c.name, c.content)
       }
-      const askDelete = (role) => {
+      const askDelete = (role, trigger) => {
+        confirmReturnRef.current = trigger || null
         host.call('vwf.roles.usage', { id: role.id, draftDsl: props.draftDsl }).then((u) => {
           if (!u || u.ok !== true) {
             // fail-closed：引用统计失败时绝不进入删除确认（修复 fail-open：ok:false 曾被
@@ -2146,64 +2292,100 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         }).catch((e) => setError(t('roleDeleteFailed') + String(e))).then(() => setSaving(false))
       }
 
-      const roleRow = (role) => h('div', { key: role.id, className: 'vwf-role-row' },
-        h('span', { className: 'vwf-role-name' }, role.id),
-        h('span', { className: 'vwf-badge' + (role.builtin ? ' accent' : '') }, role.builtin ? t('builtinRoleBadge') : t('customRoleBadge')),
-        role.summary ? h('span', { className: 'vwf-role-summary' }, role.summary) : null,
-        h('span', { className: 'vwf-spacer' }),
-        role.builtin
-          ? h('button', { className: 'vwf-btn sm', onClick: () => openView(role.id) }, t('viewRole'))
-          : h('button', { className: 'vwf-btn sm', onClick: () => openEdit(role.id) }, t('editRole')),
-        !role.builtin ? h('button', { className: 'vwf-btn sm', onClick: () => openCloneCustom(role) }, t('cloneFromRole')) : null,
-        !role.builtin ? h('button', { className: 'vwf-btn sm danger', onClick: () => askDelete(role) }, t('deleteRole')) : null
-      )
-      const builtinRows = (roles || []).filter(r => r.builtin)
-      const customRows = (roles || []).filter(r => !r.builtin)
+      const originBadge = (role) => {
+        const origin = roleOriginOf(role)
+        return h('span', { className: 'vwf-badge' + (origin.builtin ? ' accent' : '') },
+          origin.builtin ? t('builtinRoleBadge') : t('customRoleBadge'))
+      }
+      // 列表行：名称 + 来源 badge + 最多两行摘要 + 折行的操作组。摘要为显示层生成，
+      // 不写回角色原文（规格 §9）；行高不随职责全文增长（V-2）。
+      const roleRow = (role) => {
+        const origin = roleOriginOf(role)
+        const summary = roleSummaryOf(role)
+        return h('div', { key: role.id, className: 'vwf-role-row', 'data-vwf-role-origin': origin.key },
+          h('div', { className: 'vwf-role-row-main' },
+            h('span', { className: 'vwf-role-name' }, role.id),
+            originBadge(role)
+          ),
+          summary ? h('div', { className: 'vwf-role-summary', title: summary }, summary) : null,
+          h('div', { className: 'vwf-role-actions' },
+            h('button', { className: 'vwf-btn sm', ref: (el) => { viewBtnRefs.current[role.id] = el }, onClick: () => openView(role.id) }, t('viewRoleDetail')),
+            origin.builtin ? null : h('button', { className: 'vwf-btn sm', onClick: () => openEdit(role.id) }, t('editRole')),
+            origin.builtin ? null : h('button', { className: 'vwf-btn sm', onClick: () => openCloneCustom(role) }, t('cloneFromRole')),
+            origin.builtin ? null : h('button', { className: 'vwf-btn sm danger', onClick: () => askDelete(role) }, t('deleteRole'))
+          )
+        )
+      }
+      const allRows = roles || []
+      const builtinRows = allRows.filter(r => !!r.builtin)
+      const customRows = allRows.filter(r => !r.builtin)
+      const showBuiltin = filter !== 'custom'
+      const showCustom = filter !== 'builtin'
+      const sectionTitle = (label) => h('div', { className: 'vwf-role-section-title' }, h('span', null, label))
+      const filterBtn = (key, label) => h('button', {
+        type: 'button',
+        'aria-pressed': filter === key ? 'true' : 'false',
+        className: 'vwf-btn sm' + (filter === key ? ' primary' : ''),
+        onClick: () => setFilter(key),
+      }, label)
 
       let body = null
-      if (view === 'list') {
+      if (roles === null) {
+        body = h('div', { className: 'vwf-role-empty', role: 'alert' }, loadError || t('roleLoading'))
+      } else if (view === 'list') {
         body = h('div', null,
           h('div', { className: 'vwf-muted-sm' }, t('roleMgmtHint')),
-          h('div', { className: 'vwf-role-section-title' }, t('builtinRoles')),
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 } },
-            builtinRows.map(roleRow),
-            !builtinRows.length ? h('div', { className: 'vwf-role-empty' }, t('roleLoading')) : null
+          h('div', { className: 'vwf-row' },
+            filterBtn('all', t('roleFilterAll')),
+            filterBtn('builtin', t('builtinRoles')),
+            filterBtn('custom', t('customRoles'))
           ),
-          h('div', { className: 'vwf-role-section-title' }, t('customRoles')),
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 } },
-            customRows.map(roleRow),
-            !customRows.length ? h('div', { className: 'vwf-role-empty' }, t('noCustomRoles')) : null
-          ),
-          h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', marginTop: 8 } },
-            h('button', { className: 'vwf-btn primary', onClick: () => openCreate(null) }, '＋ ' + t('newRole'))
-          )
+          showBuiltin ? h('div', null,
+            sectionTitle(t('builtinRoles')),
+            h('div', { className: 'vwf-list', style: { marginTop: 6 } },
+              builtinRows.map(roleRow),
+              !builtinRows.length ? h('div', { className: 'vwf-role-empty' }, t('noBuiltinRoles')) : null
+            )
+          ) : null,
+          showCustom ? h('div', null,
+            sectionTitle(t('customRoles')),
+            h('div', { className: 'vwf-list', style: { marginTop: 6 } },
+              customRows.map(roleRow),
+              !customRows.length ? h('div', { className: 'vwf-role-empty' }, t('noCustomRoles')) : null
+            )
+          ) : null
         )
       } else if (view === 'view') {
         body = current
           ? h('div', null,
               h('div', { className: 'vwf-row' },
                 h('span', { className: 'vwf-dialog-title' }, current.name || current.id),
-                h('span', { className: 'vwf-badge accent' }, t('builtinRoleBadge'))
+                originBadge(current)
               ),
-              h('div', { className: 'vwf-muted-sm' }, t('roleViewBuiltin')),
-              h('div', { className: 'vwf-role-section-title' }, t('roleContent')),
-              h('div', { className: 'vwf-role-content' }, current.content || ''),
+              h('div', { className: 'vwf-muted-sm' },
+                roleOriginOf(current).builtin ? t('roleViewBuiltin') : t('roleViewCustom')),
+              h('div', { className: 'vwf-role-section-title' }, h('span', null, t('roleContent'))),
+              // 独立滚动区 + 键盘可进入：完整职责再长也不撑高列表或弹层
+              h('div', { className: 'vwf-role-content', tabIndex: 0 }, current.content || ''),
               h('div', { className: 'vwf-row', style: { marginTop: 8, gap: 8 } },
                 h('button', { className: 'vwf-btn primary', onClick: () => openCreate(current) }, t('createFromRole')),
-                h('button', { className: 'vwf-btn sm', onClick: () => { setError(null); setView('list'); setCurrent(null) } }, t('back'))
+                !roleOriginOf(current).builtin ? h('button', { className: 'vwf-btn', onClick: () => openEdit(current.id) }, t('editRole')) : null,
+                h('button', { className: 'vwf-btn sm', onClick: backToList }, t('back'))
               )
             )
-          : h('div', { className: 'vwf-role-empty' }, t('roleLoading'))
+          : h('div', { className: 'vwf-role-empty' }, error || t('roleLoading'))
       } else {
+        const editingCustom = !!(current && current.builtin === false)
         body = h('div', null,
           h('div', { className: 'vwf-row' },
             h('span', { className: 'vwf-dialog-title' }, formMode === 'edit' ? t('editRole') + ' · ' + (current ? current.id : '') : t('newRole')),
-            current && current.builtin === false ? h('span', { className: 'vwf-badge' }, t('customRoleBadge')) : null
+            current ? originBadge(current) : h('span', { className: 'vwf-badge' }, t('customRoleBadge'))
           ),
-          current && current.builtin === false ? h('div', { className: 'vwf-muted-sm' }, fmt(t('roleFromSource'), { src: current.id })) : null,
+          editingCustom ? h('div', { className: 'vwf-muted-sm' }, fmt(t('roleFromSource'), { src: current.id })) : null,
           h('div', { className: 'vwf-field' },
-            h('div', { className: 'vwf-field-label' }, t('roleName'), h('span', { className: 'req' }, '*')),
+            h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-name' }, t('roleName'), h('span', { className: 'req' }, '*')),
             h('input', {
+              id: 'vwf-role-name',
               className: 'vwf-input', value: draftName, placeholder: t('roleNamePlaceholder'),
               onChange: (ev) => setDraftName(ev.target.value),
               onBlur: () => {
@@ -2216,14 +2398,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             })
           ),
           h('div', { className: 'vwf-field' },
-            h('div', { className: 'vwf-field-label' }, t('roleContent'), h(HelpDot, { text: t('roleContentHelp') }), h('span', { className: 'req' }, '*')),
+            h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-content' }, t('roleContent'), h(HelpDot, { text: t('roleContentHelp') }), h('span', { className: 'req' }, '*')),
             h('textarea', {
+              id: 'vwf-role-content',
               className: 'vwf-textarea vwf-mono', rows: 12, value: draftContent, placeholder: t('roleContentPlaceholder'),
               onChange: (ev) => setDraftContent(ev.target.value),
             })
           ),
           h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8 } },
-            h('button', { className: 'vwf-btn', onClick: () => { setError(null); setView('list'); setCurrent(null) } }, t('cancelRole')),
+            h('button', { className: 'vwf-btn', onClick: backToList }, t('cancelRole')),
             h('button', { className: 'vwf-btn primary', disabled: saving, onClick: save }, t('saveRole'))
           )
         )
@@ -2237,7 +2420,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               h('div', { className: 'vwf-dialog-title' }, t('roleDeleteTitle') + confirm.role.id + t('roleDeleteTitleSuffix')),
               h('div', { className: 'vwf-dialog-desc' }, t('roleDeleteDesc')),
               h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8 } },
-                h('button', { className: 'vwf-btn', onClick: () => setConfirm(null) }, t('cancelRole')),
+                h('button', { className: 'vwf-btn', onClick: closeConfirm }, t('cancelRole')),
                 h('button', { className: 'vwf-btn danger', disabled: saving, onClick: doDelete }, t('deleteRole'))
               )
             )
@@ -2250,7 +2433,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               h('div', { className: 'vwf-dialog-desc' }, fmt(t('roleDeleteBlocked'), { name: confirm.role.id, n: usage.count })),
               (usage.refs || []).length ? h('div', null,
                 h('div', { className: 'vwf-muted-sm', style: { marginBottom: 4 } }, t('roleRefs')),
-                h('div', { className: 'vwf-role-refs' },
+                h('div', { className: 'vwf-role-refs', tabIndex: 0 },
                   usage.refs.map((w, wi) => h('div', { key: 'wf' + wi, className: 'vwf-role-ref-line' },
                     (w.workflowName || w.workflowId) + (w.builtin ? '（' + t('builtinRoleBadge') + '）' : '') + '：' +
                     w.nodes.map(n => n.label + '（' + n.id + '）').join('、')
@@ -2258,7 +2441,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 )
               ) : null,
               h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
-                h('button', { className: 'vwf-btn primary', onClick: () => setConfirm(null) }, t('close'))
+                h('button', { className: 'vwf-btn primary', onClick: closeConfirm }, t('close'))
               )
             )
           )
@@ -2268,7 +2451,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               h('div', { className: 'vwf-dialog-title' }, t('roleUsageTitle')),
               h('div', { className: 'vwf-dialog-desc' }, fmt(t('roleUsageConfirm'), { n: confirm.usage.count })),
               h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8 } },
-                h('button', { className: 'vwf-btn', onClick: () => setConfirm(null) }, t('cancelRole')),
+                h('button', { className: 'vwf-btn', onClick: closeConfirm }, t('cancelRole')),
                 h('button', { className: 'vwf-btn primary', onClick: confirmSave }, t('confirmSaveRole'))
               )
             )
@@ -2277,13 +2460,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
 
       return h('div', { className: 'vwf-dialog-mask', onClick: props.onClose },
-        h('div', { className: 'vwf-role-mgr', onClick: (ev) => ev.stopPropagation() },
+        h('div', {
+          className: 'vwf-role-mgr',
+          ref: dialogRef,
+          tabIndex: -1,
+          role: 'dialog',
+          'aria-modal': 'true',
+          'aria-label': t('roleManager'),
+          onClick: (ev) => ev.stopPropagation(),
+        },
           h('div', { className: 'vwf-row' },
             h('div', { className: 'vwf-dialog-title' }, t('roleManager')),
             h('span', { className: 'vwf-spacer' }),
+            h('button', { className: 'vwf-btn sm primary', onClick: () => openCreate(null) }, '＋ ' + t('newRole')),
             h('button', { className: 'vwf-btn sm', onClick: props.onClose }, t('close'))
           ),
-          error ? h('div', { className: 'vwf-err-line' }, error) : null,
+          error ? h('div', { className: 'vwf-err-line', role: 'alert' }, error) : null,
           h('div', { className: 'vwf-role-mgr-body' }, body),
           overlay
         )
@@ -2309,7 +2501,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       // 校验警示（LOC-021）：内核 warnings 此前无编辑器出口——强档缺配对、弱异源等提示
       // 用户在配置时完全看不到。与 errors 同源同生命周期，在状态行下方以警示色展示。
       const [liveWarnings, setLiveWarnings] = React.useState([])
-      const [roleUI, setRoleUI] = React.useState(null) // 角色管理浮层：null | 'list' | 'create'
+      const [roleUI, setRoleUI] = React.useState(null) // 角色管理浮层：null | {mode:'list'|'create', trigger:入口按钮}
       const [connOpen, setConnOpen] = React.useState(false) // 连接信息弹窗（V-13）
       const validateTimerRef = React.useRef(null)
       const validateSeqRef = React.useRef(0)
@@ -2807,8 +2999,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 h('span', { className: 'vwf-muted-sm vwf-toolbar-hint' }, t('connectHint')),
                 h('div', { className: 'vwf-role-zone', title: t('roleMgmtHint') },
                   h('span', { className: 'vwf-role-zone-label' }, '🎭 ' + t('roleLibrary')),
-                  h('button', { className: 'vwf-btn sm', onClick: () => setRoleUI('list') }, t('manageRoles')),
-                  h('button', { className: 'vwf-btn sm primary', onClick: () => setRoleUI('create') }, '＋ ' + t('newRole'))
+                  h('button', { className: 'vwf-btn sm', onClick: (ev) => setRoleUI({ mode: 'list', trigger: ev.currentTarget }) }, t('manageRoles')),
+                  h('button', { className: 'vwf-btn sm primary', onClick: (ev) => setRoleUI({ mode: 'create', trigger: ev.currentTarget }) }, '＋ ' + t('newRole'))
                 )
               ) : null,
               tab === 'canvas'
@@ -2830,7 +3022,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     onConnect: handleConnect,
                     onAddTerminal: (id) => setVisibleTerminals(cur => cur.indexOf(id) >= 0 ? cur : cur.concat([id])),
                   })
-                : h('div', { style: { padding: 12, borderTop: '1px solid var(--dsw-alias-border-l2, #333)' } },
+                : h('div', { style: { padding: 12, borderTop: '1px solid var(--vwf-border)' } },
                     h('textarea', { className: 'vwf-textarea vwf-json-edit', value: jsonDraft, spellCheck: false, onChange: (ev) => onJsonChange(ev.target.value) }),
                     jsonError ? h('div', { className: 'vwf-err-line' }, jsonError) : null
                   )
@@ -2904,7 +3096,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           )
         ),
         roleUI ? h(RoleManager, {
-          initialCreate: roleUI === 'create',
+          initialCreate: roleUI.mode === 'create',
+          trigger: roleUI.trigger || null,
           onClose: () => setRoleUI(null),
           onChanged: () => { if (props.onRolesChanged) props.onRolesChanged() },
           // 开放草稿（本编辑器未保存的 wf）：删除/重命名前把草稿引用一并计入保护
@@ -2946,10 +3139,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         }
         byGroup[match[1]].push({ ...a, itemIndex: Number(match[2]) })
       }
-      const statusBadge = (a) => h('span', {
-        className: 'vwf-badge',
-        style: { color: a.outcome === 'completed' ? STATUS_COLOR.pass : a.outcome === 'failed' ? STATUS_COLOR.fail : STATUS_COLOR.running },
-      }, a.outcome)
+      // 节点执行结果同样是双通道（V-4）：形状 + outcome 文字，不只靠颜色。
+      const statusBadge = (a) => {
+        const tone = a.outcome === 'completed' ? 'ok' : a.outcome === 'failed' ? 'err' : 'run'
+        return h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : 'running'] } }, STATUS_SHAPE[tone] + ' ' + a.outcome)
+      }
       const rows = regular.map(a => h('tr', { key: 'agent-' + a.seq },
         h('td', null, String(a.seq)),
         h('td', null, a.label),
@@ -2976,9 +3170,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       const s = String(status || '')
       // #80：PAUSED 用人工关注色（可恢复等待态），不落 fail 色
       // LOC-030：BLOCKED 同为可恢复等待态（统一受阻生命周期，非终态），不落 fail 色
-      const color = s === 'DONE' ? STATUS_COLOR.pass : s === 'running' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED' || s === 'BLOCKED') ? STATUS_COLOR.human : STATUS_COLOR.fail
+      const tone = s === 'DONE' ? 'ok' : s === 'running' ? 'run' : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED' || s === 'BLOCKED') ? 'wait' : 'err'
       const label = s === 'WAITING_HUMAN' ? t('dashWaitHuman') : s === 'BLOCKED' ? t('dashBlocked') : s.indexOf('AWAITING_HUMAN_') === 0 ? t('dashHumanGate') : (s || '—')
-      return h('span', { className: 'vwf-badge', style: { color: color } }, label)
+      return h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + label)
     }
     function isActiveRunStatus(status) {
       const s = String(status || '')
@@ -3058,7 +3252,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         gates.length ? h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
           h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('dashGateQueue'))),
           h('div', { style: { padding: '4px 14px 10px' } },
-            gates.map((g, i) => h('div', { key: g.id, style: { padding: '8px 0', borderTop: i ? '1px solid var(--dsw-alias-border-l2, #333)' : 'none' } },
+            gates.map((g, i) => h('div', { key: g.id, style: { padding: '8px 0', borderTop: i ? '1px solid var(--vwf-border)' : 'none' } },
               h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap' } },
                 h('span', { className: 'vwf-badge accent' }, i === 0 ? t('dashDeciding') : t('dashQueued', { n: i + 1 })),
                 h('strong', null, g.taskId || g.id),
@@ -3129,12 +3323,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                     h('span', { className: 'vwf-muted' }, t('dashPhaseLabel', { phase: snap.state.phase || '—' })),
                     snap.state.taskId ? h('span', { className: 'vwf-muted' }, t('dashTaskIdLabel', { taskId: snap.state.taskId })) : null
                   ),
-                  h('div', { className: 'vwf-row', style: { borderTop: '1px solid var(--dsw-alias-border-l2, #333)', marginTop: 6, paddingTop: 6 } },
+                  h('div', { className: 'vwf-row', style: { borderTop: '1px solid var(--vwf-border)', marginTop: 6, paddingTop: 6 } },
                     h('span', { className: 'vwf-muted', style: { fontSize: 10 } }, t('dashLegend')),
-                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.running } }, 'running'),
-                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, 'pass'),
-                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.fail } }, 'fail'),
-                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('dashHumanGate'))
+                    // 图例本身承担状态语义：形状与文字成对出现（V-4），不只靠颜色
+                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.running } }, STATUS_SHAPE.run + ' running'),
+                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, STATUS_SHAPE.ok + ' pass'),
+                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.fail } }, STATUS_SHAPE.err + ' fail'),
+                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, STATUS_SHAPE.wait + ' ' + t('dashHumanGate'))
                   ),
                   lrState ? h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 6, flexWrap: 'wrap' } },
                     lrState === 'RUNNING' ? h('button', { className: 'vwf-btn sm', onClick: () => sendControl('pause') }, t('ctlPause')) : null,
@@ -3156,7 +3351,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                   return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
                     h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('formalArtifacts'))),
                     h('div', { style: { padding: '8px 14px 12px' } },
-                      arts.length ? arts.map((rec) => h('div', { key: rec.record_id + '@' + rec.record_revision, style: { marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--dsw-alias-border-l2, #333)' } },
+                      arts.length ? arts.map((rec) => h('div', { key: rec.record_id + '@' + rec.record_revision, style: { marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--vwf-border)' } },
                         h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
                           h('strong', null, artifactPathFromRecordId(rec.record_id)),
                           h('span', { className: 'vwf-badge accent' }, t('artifactRevision') + ' R' + rec.record_revision),
@@ -3518,7 +3713,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                 h('span', null, isOver ? '🔵' : '⚪'),
                 h('span', { className: 'vwf-list-name' }, (n.label || n.id) + '（' + n.id + '）'),
                 isOver
-                  ? h('span', { className: 'vwf-badge', style: { color: 'var(--dsw-alias-state-info-primary, #3b82f6)' } }, t('modelOverrideBadge'))
+                  ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge'))
                   : h('span', { className: 'vwf-badge' }, t('modelOverrideDefaultBadge')),
                 h('span', { className: 'vwf-muted-sm vwf-mono' }, t('modelOverrideCurrent') + (eff ? eff.provider + ' / ' + eff.model : t('modelOverrideInherit')))
               )
@@ -3569,7 +3764,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                   h('span', { className: 'vwf-list-name' }, w.name || w.id),
                   h('span', { className: 'vwf-badge' }, w.id),
                   w.builtin ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null,
-                  w.modelOverridden ? h('span', { className: 'vwf-badge', style: { color: 'var(--dsw-alias-state-info-primary, #3b82f6)' } }, t('modelOverrideBadge')) : null
+                  w.modelOverridden ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge')) : null
                 ),
                 w.description ? h('div', { className: 'vwf-list-desc' }, w.description) : null
               ),
@@ -3595,7 +3790,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
             h('strong', null, (wf.name || wf.id) + ''),
             editId ? h('span', { className: 'vwf-badge' }, editId) : h('span', { className: 'vwf-badge accent' }, t('newTemplate')),
             editingBuiltin ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null,
-            dirty ? h('span', { className: 'vwf-badge', style: { color: 'var(--dsw-alias-state-warn-primary, #f59e0b)' } }, t('unsavedDraft')) : null,
+            dirty ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-warn)' } }, t('unsavedDraft')) : null,
             h('span', { className: 'vwf-spacer' }),
             h('button', { className: 'vwf-btn sm', onClick: requestCloseEditor }, t('close'))
           ),
@@ -3751,6 +3946,35 @@ function ingestEditorJson(raw) {
   if (raw.bundleRoles) next.bundleRoles = true
   if (raw.humanDecision !== undefined) next.humanDecision = raw.humanDecision
   return next
+}
+
+// ── 角色来源与显示摘要（FEAT-86 收口）────────────────────────────────────────
+// 来源按 `builtin` 布尔字段判定（规格 §9：不得通过角色名猜来源）；缺字段时按
+// 布尔语义映射为自定义，与角色列表分区、节点角色选择器分组共用同一判定。
+function roleOriginOf(role) {
+  const builtin = !!(role && role.builtin)
+  return { key: builtin ? 'builtin' : 'custom', builtin: builtin }
+}
+
+// 列表摘要（显示层）：显式 summary 优先；缺失时从职责 content 生成一段可读文本，
+// 仅用于展示，不写回、不覆盖角色原文（规格 §9「摘要不写回原文」）。截断按字符
+// 计数（Array.from 切分，不切断代理对）；两行显示上限由 CSS line-clamp 收敛，
+// 连续长串靠 overflow-wrap:anywhere 换行，不产生横向溢出。
+function roleSummaryOf(role, maxChars) {
+  const limit = typeof maxChars === 'number' && maxChars > 0 ? maxChars : 120
+  const explicit = role && typeof role.summary === 'string' ? role.summary.trim() : ''
+  if (explicit) return explicit
+  const raw = role && typeof role.content === 'string' ? role.content : ''
+  const text = raw
+    .replace(/```[\s\S]*?```/g, ' ')        // 代码块不参与摘要
+    .replace(/^[ \t]{0,3}#{1,6}[ \t]*/gm, '') // 标题符号
+    .replace(/^[ \t]{0,3}[-*+][ \t]+/gm, '')  // 列表符号
+    .replace(/^[ \t]{0,3}>[ \t]?/gm, '')      // 引用符号
+    .replace(/[ \t\r\n]+/g, ' ')
+    .trim()
+  if (!text) return ''
+  const chars = Array.from(text)
+  return chars.length > limit ? chars.slice(0, limit).join('') + '…' : text
 }
 
 // ── 基础 Schema 模板生成（独立纯函数，供 beautifySchema 空字段分支与单测复用）──

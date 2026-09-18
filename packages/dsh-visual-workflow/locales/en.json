@@ -351,5 +351,10 @@
   "wbFieldTask": "Task (what this step does)",
   "wbFieldRole": "Responsible role",
   "wbFieldDeliverable": "Deliverables (what this step produces)",
-  "wbPaneSwitch": "Workbench pane switch"
+  "wbPaneSwitch": "Workbench pane switch",
+  "viewRoleDetail": "View details",
+  "roleViewCustom": "Custom roles are workspace role assets: view, edit, clone or delete them; references are listed before deletion.",
+  "roleLoadFailed": "Failed to load roles: ",
+  "roleFilterAll": "All",
+  "noBuiltinRoles": "No built-in roles"
 }

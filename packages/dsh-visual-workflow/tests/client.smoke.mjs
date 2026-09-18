@@ -90,7 +90,7 @@ const ROLE_USAGE = {
 
 // ── 组装动态客户端运行环境 ─────────────────────────────────────────────────
 function makeRuntime() {
-  const state = { failSave: false, failUsage: false, saved: [], validateWarning: null }
+  const state = { failSave: false, failUsage: false, failRoles: false, saved: [], validateWarning: null }
   const rpc = async (method, args) => {
     switch (method) {
       case 'vwf.workflows.list':
@@ -98,6 +98,8 @@ function makeRuntime() {
       case 'vwf.models':
         return { providers: [{ id: 'deepseek-official', models: ['deepseek-v4-pro', 'deepseek-v4-flash'] }] }
       case 'vwf.roles':
+        // FEAT-86：读取失败必须与「没有角色」区分（规格 §11 边界）
+        if (state.failRoles) return { ok: false, errors: [{ at: '$', message: '角色服务不可用' }] }
         return { roles: roleState.roles.map(r => ({ id: r.id, name: r.name, summary: r.summary, builtin: r.builtin })) }
       case 'vwf.roles.get': {
         const role = roleState.roles.find(r => r.id === args.id)
@@ -532,7 +534,7 @@ test('画布任意非把手区域支持四向拖动且不修改工作流内容',
 
 test('点击边：成功/失败/选中颜色区分且边配置面板出现', async () => {
   const firstEdge = container.querySelectorAll('.vwf-edge-flow')[0]
-  assert.equal(firstEdge.getAttribute('stroke'), '#2563eb', '默认 success 边使用固定蓝色，不随品牌色变黑')
+  assert.equal(firstEdge.getAttribute('stroke'), 'var(--vwf-accent)', '默认 success 边使用强调语义色（不随品牌色变黑）')
   await act(async () => {
     const hit = container.querySelector('.vwf-edge-hit')
     assert.ok(hit, '存在边命中路径')
@@ -541,13 +543,13 @@ test('点击边：成功/失败/选中颜色区分且边配置面板出现', asy
   })
   assert.ok(byText(container, '边配置'), '边配置面板渲染')
   assert.ok(byText(container, '删除边'), '边面板含删除按钮')
-  assert.equal(firstEdge.getAttribute('stroke'), '#111827', '选中边使用黑色')
+  assert.equal(firstEdge.getAttribute('stroke'), 'var(--vwf-text)', '选中边使用主文字语义色')
   assert.equal(firstEdge.getAttribute('stroke-width'), '4.2', '选中边加粗')
-  const selectedLabel = Array.from(container.querySelectorAll('text')).find((el) => el.textContent.includes('成功') && el.getAttribute('fill') === '#111827')
+  const selectedLabel = Array.from(container.querySelectorAll('text')).find((el) => el.textContent.includes('成功') && el.getAttribute('fill') === 'var(--vwf-text)')
   assert.ok(selectedLabel, '选中边标签同步使用主文字色')
   assert.equal(selectedLabel.getAttribute('font-weight'), '700', '选中边标签加粗')
-  assert.equal(selectedLabel.style.stroke, 'rgba(255,255,255,.82)', '黑色选中标签在深色画布上保留浅色描边')
-  assert.equal(container.querySelector('#vwf-arrow-sel path').getAttribute('fill'), '#111827', '选中边箭头同步使用黑色')
+  assert.equal(selectedLabel.style.stroke, 'var(--vwf-surface)', '选中标签描边取表面语义色（两主题都与画布底成对）')
+  assert.equal(container.querySelector('#vwf-arrow-sel path').getAttribute('fill'), 'var(--vwf-text)', '选中边箭头同步使用主文字语义色')
 })
 
 test('删除节点：选中节点被移除且画布消失', async () => {
@@ -627,8 +629,9 @@ test('fanout 看板：按节点归组展示三项并保留失败状态', async (
   assert.ok(byText(container, '逐项处理 · fanout · 3 items'), '看板显示 fanout 组标题')
   assert.ok(byText(container, '逐项处理 #1'))
   assert.ok(byText(container, '逐项处理 #2'))
-  const failed = Array.from(container.querySelectorAll('.vwf-badge')).find((el) => el.textContent === 'failed')
-  assert.ok(failed && failed.getAttribute('style').includes('error'), '失败项使用失败色')
+  const failed = Array.from(container.querySelectorAll('.vwf-badge')).find((el) => el.textContent.includes('failed'))
+  assert.ok(failed && failed.textContent === '✕ failed', '失败项状态同时有形状与文字（V-4 双通道）')
+  assert.ok(failed.getAttribute('style').includes('var(--vwf-err)'), '失败项使用失败语义 token')
   await act(async () => {
     const templatesTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '模板库')
     templatesTab.click()
@@ -1201,7 +1204,7 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
   assert.ok(byText(mgr, '内置角色'), '内置角色分区渲染')
   assert.ok(byText(mgr, '自定义角色'), '自定义角色分区渲染')
   assert.ok(byText(mgr, '需求分析师'), '自定义角色列出')
-  const viewBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '查看')
+  const viewBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '查看详情')
   assert.ok(viewBtns.length >= 1, '内置角色提供查看入口')
   const editBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '编辑')
   // issue-81 后自定义角色为 dispatcher + 需求分析师两个；内置仅剩 dev，不提供编辑入口
@@ -1599,6 +1602,137 @@ test('一键检测结果条：整体结论 + 一级节点 + 同列二级节点�
   assert.match(css, /\.vwf-msg-line\.l3/, '三级行有独立样式')
   assert.match(css, /\.vwf-msg-line\.bad/, '失败行有独立色调')
   state.probe = null
+})
+
+test('角色库收口：来源双重可辨识、长摘要两行收敛、详情独立滚动、Escape 回收焦点（FEAT-86）', async () => {
+  // 与原型同一形态的长职责：摘要本身很长（连续长串），完整职责 4,500+ 字
+  const longSummary = '无空格连续长串'.repeat(30)
+  const longContent = '职责说明：'.repeat(40) + 'x'.repeat(600)
+  roleState.roles.push({ id: '长职责角色', name: '长职责角色', summary: longSummary, builtin: false, content: longContent })
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+  await act(async () => { byText(fresh, '编辑').click(); await flush() })
+  const openBtn = Array.from(fresh.querySelectorAll('.vwf-role-zone button')).find(b => b.textContent.includes('管理角色'))
+  await act(async () => { openBtn.click(); await flush() })
+  const mgr = fresh.querySelector('.vwf-role-mgr')
+  const rows = () => Array.from(fresh.querySelectorAll('.vwf-role-row'))
+  // V-1 来源在标题与行内双重可识别，按 builtin 字段判定
+  assert.ok(byText(mgr, '内置角色'), '内置分区标题')
+  assert.ok(byText(mgr, '自定义角色'), '自定义分区标题')
+  const row = rows().find(r => byText(r, '长职责角色'))
+  assert.equal(row.getAttribute('data-vwf-role-origin'), 'custom', '行内来源按 builtin 字段判定')
+  assert.ok(Array.from(row.querySelectorAll('.vwf-badge')).some(b => b.textContent === '自定义角色'), '行内来源 badge')
+  // V-2 列表摘要：行内只承载摘要（两行由 .vwf-role-summary 的 line-clamp 收敛，
+  // 见 role-theme.test.mjs），不承载完整职责 → 行高不随全文增长
+  const sum = row.querySelector('.vwf-role-summary')
+  assert.ok(sum, '行内显示摘要')
+  assert.equal(sum.textContent, longSummary, '显式 summary 优先，连续长串原样交给样式层断词')
+  assert.ok(!row.textContent.includes(longContent), '列表行不承载完整职责')
+  // V-6 筛选（键盘可达按钮）：切换后分区收敛
+  const filterBtn = (label) => Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === label)
+  await act(async () => { filterBtn('内置角色').click(); await flush() })
+  assert.ok(!rows().some(r => byText(r, '长职责角色')), '内置筛选隐藏自定义角色')
+  await act(async () => { filterBtn('自定义角色').click(); await flush() })
+  assert.ok(!rows().some(r => byText(r, 'dev')), '自定义筛选隐藏内置角色')
+  await act(async () => { filterBtn('全部').click(); await flush() })
+  assert.ok(rows().some(r => byText(r, 'dev')) && rows().some(r => byText(r, '长职责角色')), '全部筛选恢复两个分区')
+  // V-2 查看详情：完整职责在独立滚动区，键盘可进入
+  const backRow = rows().find(r => byText(r, '长职责角色'))
+  const detailBtn = Array.from(backRow.querySelectorAll('button')).find(b => b.textContent === '查看详情')
+  await act(async () => { detailBtn.click(); await flush() })
+  const content = fresh.querySelector('.vwf-role-content')
+  assert.ok(content, '详情提供完整职责区')
+  assert.equal(content.textContent, longContent, '详情展示完整职责原文')
+  assert.equal(content.getAttribute('tabindex'), '0', '详情滚动区键盘可进入')
+  assert.ok(dom.window.document.activeElement === mgr, '打开详情后焦点进入对话框容器')
+  // V-6 Escape 关闭详情并把焦点回收到触发元素
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  assert.ok(!fresh.querySelector('.vwf-role-content'), 'Escape 关闭详情回到列表')
+  // 焦点回收到触发元素：行按钮是返回列表后重新渲染的节点，按角色重新取当次元素
+  const viewBtnBack = Array.from(rows().find(r => byText(r, '长职责角色')).querySelectorAll('button')).find(b => b.textContent === '查看详情')
+  assert.ok(dom.window.document.activeElement === viewBtnBack, 'Escape 关闭详情后焦点回收到触发元素')
+  // 摘要生成不写回原文（规格 §9）：查看前后角色字段逐字不变
+  assert.equal(roleState.roles.find(r => r.id === '长职责角色').content, longContent, '职责原文未被改写')
+  assert.equal(roleState.roles.find(r => r.id === '长职责角色').summary, longSummary, '摘要字段未被写回')
+  // V-6 真实 label：表单字段用 label[for] 绑定
+  const newBtn = Array.from(mgr.querySelectorAll('button')).find(b => b.textContent === '＋ 新增角色')
+  await act(async () => { newBtn.click(); await flush() })
+  assert.ok(mgr.querySelector('label[for="vwf-role-name"]') && mgr.querySelector('#vwf-role-name'), '角色名称使用真实 label 绑定')
+  assert.ok(mgr.querySelector('label[for="vwf-role-content"]') && mgr.querySelector('#vwf-role-content'), '角色配置使用真实 label 绑定')
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  assert.ok(!fresh.querySelector('#vwf-role-name'), 'Escape 关闭表单回到列表')
+  assert.ok(dom.window.document.activeElement === mgr, '关闭表单后焦点回到对话框容器')
+  // V-6 Escape 在列表层关闭角色管理并回收到入口按钮
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  assert.ok(!fresh.querySelector('.vwf-role-mgr'), 'Escape 关闭角色管理')
+  assert.ok(dom.window.document.activeElement === openBtn, '关闭后焦点回到入口按钮')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+  roleState.roles = roleState.roles.filter(r => r.id !== '长职责角色')
+})
+
+test('角色库：内置角色只读可查看可复制，不提供编辑/删除（V-1 权限边界）', async () => {
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+  await act(async () => { byText(fresh, '编辑').click(); await flush() })
+  await act(async () => {
+    Array.from(fresh.querySelectorAll('.vwf-role-zone button')).find(b => b.textContent.includes('管理角色')).click()
+    await flush()
+  })
+  const mgr = fresh.querySelector('.vwf-role-mgr')
+  const builtinRow = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => r.getAttribute('data-vwf-role-origin') === 'builtin')
+  const builtinBtns = Array.from(builtinRow.querySelectorAll('button')).map(b => b.textContent)
+  assert.deepEqual(builtinBtns, ['查看详情'], '内置角色只有查看入口，无编辑/复制/删除')
+  await act(async () => { Array.from(builtinRow.querySelectorAll('button'))[0].click(); await flush() })
+  const viewBtns = Array.from(fresh.querySelectorAll('.vwf-role-mgr button')).map(b => b.textContent)
+  assert.ok(viewBtns.includes('基于此角色创建自定义角色'), '内置详情提供复制为自定义')
+  assert.ok(!viewBtns.includes('编辑'), '内置详情无编辑入口')
+  assert.ok(byText(mgr, '开发角色正文'), '内置详情展示完整内容')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+})
+
+test('角色库：读取失败显示明确失败态，不把空列表当作「没有角色」（规格 §11）', async () => {
+  state.failRoles = true
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+  await act(async () => { byText(fresh, '编辑').click(); await flush() })
+  await act(async () => {
+    Array.from(fresh.querySelectorAll('.vwf-role-zone button')).find(b => b.textContent.includes('管理角色')).click()
+    await flush()
+  })
+  const mgr = fresh.querySelector('.vwf-role-mgr')
+  assert.ok(byText(mgr, '角色服务不可用'), '展示失败原因')
+  assert.ok(!byText(mgr, '暂无自定义角色'), '失败态不得显示为空列表')
+  assert.ok(!mgr.querySelector('.vwf-role-row'), '失败态不渲染任何角色行')
+  state.failRoles = false
+  // 失败态不是终态：关闭后重开可恢复（roles 重新拉取）
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
 })
 
 test('清理：卸载冒烟测试根节点', async () => {
