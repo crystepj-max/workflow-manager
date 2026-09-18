@@ -133,6 +133,15 @@ const RUN_DSL = {
   ],
 }
 
+// FIX-105：把 uat 改走人工裁决门（与 templates/wf-construction-full-feature.json 同形）——
+// 覆盖「人工裁决已裁决」这一状态：门已收束、运行已越过它。
+const RUN_DSL_HD = Object.assign({}, RUN_DSL, {
+  edges: RUN_DSL.edges.filter((e) => e.from !== 'uat').concat([
+    { from: 'uat', to: '$human-decision', outcome: 'READY_FOR_HUMAN' },
+    { from: '$human-decision', to: '$end', outcome: 'ACCEPT' },
+  ]),
+})
+
 const WS_A = { workspace_id: '工作空间A', mode: 'ISOLATED_WRITE', workspace_path: '/tmp/ws-a', source_path: 'crystepj-max/workflow-manager', source_revision: 'r1', work_branch: 'dev-t-a1', current_head: 'aaaa1111bbbb2222', base_commit: 'cccc3333dddd4444', lifecycle: 'ACTIVE', allocated_at: 900, events: [], resource_locks: [{ type: 'lock_acquired' }], integration_checkpoints: [], cleanup: null, refreshed_at: 4100 }
 const WS_B = { workspace_id: '工作空间B', mode: 'READ_ONLY', workspace_path: '/tmp/ws-b', source_path: 'crystepj-max/side-project', source_revision: 'r2', work_branch: 'dev-t-b1', current_head: 'eeee5555ffff6666', base_commit: 'aaaa7777bbbb8888', lifecycle: 'ACTIVE', allocated_at: 910, events: [], resource_locks: [], integration_checkpoints: [{ type: 'integration_checkpoint' }], cleanup: { state: 'pending' }, refreshed_at: 5100 }
 
@@ -148,6 +157,8 @@ function logicalAttempt(id, node, segment, opts) {
     ...(o.outcome === undefined ? {} : { outcome: o.outcome }),
     ...(o.outcomePath === undefined ? {} : { outcome_path: o.outcomePath }),
     ...(o.result === undefined ? {} : { result: o.result }),
+    // FIX-105：回退性质由宿主写进记录（normal / business_rework / technical_retry）
+    ...(o.retry_kind === undefined ? {} : { retry_kind: o.retry_kind }),
   })
 }
 
@@ -198,11 +209,13 @@ runState.logical['lr-a'] = {
 runState.records['lr-a'] = {
   ok: true, found: true, logical_run_id: 'lr-a',
   records: [
-    logicalAttempt('lr-a', 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', outcomePath: '$.status', result: { summary: '第 1 次实现成果' } }),
-    logicalAttempt('lr-a', 'review', 1, { attempt_id: 'a1k2', round: 1, outcome: 'RETURN_DEV', outcomePath: '$.verdict', result: { issues: '配置滚动后主要操作离开视口，需要修改' } }),
-    logicalAttempt('lr-a', 'test', 1, { attempt_id: 'a1k3', outcome: 'PASS', result: { note: '第 1 轮测试通过' } }),
-    logicalAttempt('lr-a', 'dev', 2, { attempt_id: 'a2k1', outcome: 'READY', outcomePath: '$.status', result: { summary: '第 2 次实现成果' } }),
-    logicalAttempt('lr-a', 'review', 2, { attempt_id: 'a2k2', round: 1, outcome: 'APPROVE', result: { note: '检查通过' } }),
+    // FIX-105 V-1：逐次记录带真实发生时刻——链路必须按这个时序排，而不是按模板节点顺序。
+    // 真实运转顺序：实现① → 检查①（退回）→ 测试① → 实现②（业务返工）→ 检查②。
+    logicalAttempt('lr-a', 'dev', 1, { attempt_id: 'a1k1', ended_at: '2026-09-17T10:00:00Z', outcome: 'READY', outcomePath: '$.status', result: { summary: '第 1 次实现成果' } }),
+    logicalAttempt('lr-a', 'review', 1, { attempt_id: 'a1k2', ended_at: '2026-09-17T10:05:00Z', round: 1, outcome: 'RETURN_DEV', outcomePath: '$.verdict', result: { issues: '配置滚动后主要操作离开视口，需要修改' } }),
+    logicalAttempt('lr-a', 'test', 1, { attempt_id: 'a1k3', ended_at: '2026-09-17T10:10:00Z', outcome: 'PASS', result: { note: '第 1 轮测试通过' } }),
+    logicalAttempt('lr-a', 'dev', 2, { attempt_id: 'a2k1', ended_at: '2026-09-17T10:20:00Z', retry_kind: 'business_rework', outcome: 'READY', outcomePath: '$.status', result: { summary: '第 2 次实现成果' } }),
+    logicalAttempt('lr-a', 'review', 2, { attempt_id: 'a2k2', ended_at: '2026-09-17T10:25:00Z', round: 1, outcome: 'APPROVE', result: { note: '检查通过' } }),
     { record_id: 'node:lr-a:dev', record_revision: 2, body: { media_type: 'application/json', value: { summary: '第 2 次实现成果' } }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY' }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY', resolved_inputs_snapshot: { mode: 'record', items: [{ binding: 'from_preflight', producer: 'preflight' }] } } },
   ], attempts: [],
 }
@@ -213,7 +226,7 @@ runState.logical['lr-b'] = {
   logical_run_id: 'lr-b', schema: 1, task_id: 'T-B1', template_id: 'wf-runs', title: '多视角探索', created_at: 4900, updated_at: 5200,
   lifecycle: { state: 'COMPLETED', reason: null }, terminal: true, completion: { type: 'DELIVERED', node: 'uat', path: '$.completion.type' },
   segments: [{ index: 1, run_id: 'run-b1', trigger: 'start', started_at: 5000, ended_at: 5200, status: 'DONE', active: false }],
-  snapshots: [{ revision: 1, created_at: 4900, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { explore: { provider: 'p1', model: 'm1' } } }],
+  snapshots: [{ revision: 1, created_at: 4900, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL_HD }, provider_model: { explore: { provider: 'p1', model: 'm1' } } }],
   node_attempts: [
     { node: 'explore', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'success', completed_at: 5100 },
     { node: 'synth', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'SYNTHESIS_READY', completed_at: 5150 },
@@ -229,7 +242,9 @@ runState.records['lr-b'] = {
     attemptRec('lr-b', { attempt_id: 'a1k10', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 0, item: '技术可行性', result: { finding: '技术上可行' }, ended_at: '2026-09-17T10:01:00Z' }),
     attemptRec('lr-b', { attempt_id: 'a1k11', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 1, item: '用户需求', result: { finding: '需求集中在位置感' }, ended_at: '2026-09-17T10:02:00Z' }),
     attemptRec('lr-b', { attempt_id: 'a1k12', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'running', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 2, item: '风险与反证', started_at: '2026-09-17T10:03:00Z' }),
-    logicalAttempt('lr-b', 'synth', 1, { attempt_id: 'a1k20', outcome: 'SYNTHESIS_READY', result: { summary: '汇总了 2 份研究' } }),
+    logicalAttempt('lr-b', 'synth', 1, { attempt_id: 'a1k20', ended_at: '2026-09-17T10:10:00Z', outcome: 'SYNTHESIS_READY', result: { summary: '汇总了 2 份研究' } }),
+    // 人工裁决门已收束（运行已越过 uat）→ 链路显示「人工裁决已完成」
+    logicalAttempt('lr-b', 'uat', 1, { attempt_id: 'a1k21', ended_at: '2026-09-17T10:30:00Z', outcome: 'READY_FOR_HUMAN', result: { route: 'READY_FOR_HUMAN' } }),
     { record_id: 'node:lr-b:synth', record_revision: 1, body: { media_type: 'application/json', value: { summary: '汇总了 2 份研究' } }, provenance: { node: 'synth', attempt: 1, snapshot_revision: '1', provider: 'p1', model: 'm1', resolved_inputs_snapshot: { mode: 'record', items: [{ binding: 'from_explore', producer: 'explore' }, { binding: 'from_note', producer: 'note' }] } } },
   ], attempts: [],
 }
@@ -274,7 +289,8 @@ runState.logical['lr-r'] = {
   last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
   formal_records: null, workspace: WS_B, human_decisions: [], consumed_decisions: {},
 }
-runState.records['lr-r'] = { ok: true, found: true, logical_run_id: 'lr-r', records: [logicalAttempt('lr-r', 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', result: { summary: '运行中成果' } })], attempts: [] }
+// retry_kind=technical_retry：这一次是被技术重试重新拉起的执行（FIX-105 回退的第二种形态）
+runState.records['lr-r'] = { ok: true, found: true, logical_run_id: 'lr-r', records: [logicalAttempt('lr-r', 'dev', 1, { attempt_id: 'a1k1', ended_at: '2026-09-17T11:00:00Z', retry_kind: 'technical_retry', outcome: 'READY', result: { summary: '运行中成果' } })], attempts: [] }
 runState.states['run-r1'] = { status: 'running', phase: '实现', logs: ['[段1] 正在实现'], agents: [], formalRecords: [] }
 
 // ── 逻辑运行读取失败（工作空间未知）+ 旧记录（无逻辑归属）+ 历史分页 ──
@@ -892,10 +908,12 @@ test('fanout 看板：按节点归组展示三项并保留失败状态', async (
   assert.ok(failed && failed.textContent === '✕ failed', '失败项状态同时有形状与文字（V-4 双通道）')
   const failedEntry = failed.closest('.vwf-chain-entry')
   assert.ok(failedEntry && failedEntry.className.includes('tone-failed'), '失败项在链路里落到失败语义样式类')
-  // 失败（err）与退回修改（warn）在链路上仍是两种语义色，不只靠形状与文字
+  // 失败（err）与回退（warn）在链路上仍是两种语义色，不只靠形状与文字。
+  // FIX-105 起链路色调先落到条目上的 --c，再由 .vwf-chain-dot 消费；语义 token 不变。
   const chainCss = styleText.join('\n')
-  assert.match(chainCss, /\.vwf-chain-entry\.tone-failed \.vwf-chain-dot \{[^}]*var\(--vwf-err\)/, '失败项用失败语义 token')
-  assert.match(chainCss, /\.vwf-chain-entry\.tone-returned \.vwf-chain-dot \{[^}]*var\(--vwf-warn\)/, '退回项用注意语义 token')
+  assert.match(chainCss, /\.tone-failed \{[^}]*--c:var\(--vwf-err\)/, '失败项用失败语义 token')
+  assert.match(chainCss, /\.tone-returned \{[^}]*--c:var\(--vwf-warn\)/, '回退项用注意语义 token')
+  assert.match(chainCss, /\.vwf-chain-dot \{[^}]*color:var\(--c,var\(--vwf-text-2\)\)/, '链路圆点消费条目色调（成对表达的另一半）')
   // Escape 逐层：链路弹窗是详情之上的一层，先关它（不把整个工作区带走）
   await act(async () => {
     dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
@@ -2597,8 +2615,8 @@ test('FEAT-103 V-3/V-4/V-6：完整经过链路弹窗点选联动右侧结果；
   const entry = (node, attempt) => chain.querySelector('[data-vwf-chain-node="' + node + '"][data-vwf-chain-attempt="' + attempt + '"]')
   const labels = Array.from(chain.querySelectorAll('.vwf-chain-entry')).map((e) => e.textContent)
   assert.ok(labels.length >= 6, '链路铺开全部节点（未执行的也占位）：' + labels.length)
-  assert.ok(labels.some((x) => x.includes('实现') && x.includes('第 1 次 · 退回修改')), '链路含返工前的第 1 次执行')
-  assert.ok(labels.some((x) => x.includes('实现') && x.includes('第 2 次 · 已通过') && x.includes('最新')), '链路含最新一次执行并标最新')
+  assert.ok(labels.some((x) => x.includes('实现') && x.includes('第 1 次 · 已通过')), '链路含返工前的第 1 次执行')
+  assert.ok(labels.some((x) => x.includes('实现') && x.includes('第 2 次 · 业务返工') && x.includes('最新')), '链路含最新一次执行、标注返工性质并标最新')
   assert.ok(labels.some((x) => x.includes('尚未开始')), '未执行的节点在链路里明确标注')
   // 点选第 1 次实现 → 关闭弹窗，右侧切到该节点该次执行
   await clickEl(entry('dev', '1'))
@@ -2612,6 +2630,159 @@ test('FEAT-103 V-3/V-4/V-6：完整经过链路弹窗点选联动右侧结果；
   assert.equal(attemptSelect().value, '2', '切回最新一次执行')
   assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第 2 次实现成果'), '右侧正文回到最新成果')
   assert.ok(!container.querySelector('.vwf-rd-body').textContent.includes('历史执行'), '最新一次不标历史执行')
+  await backToList()
+})
+
+// FIX-105：完整经过链路按实际运转时序排列，每个节点/段用「图标 + 颜色」成对区分结果状态。
+// 语义基准：原型 prototypes/ui-workbench/prototype-v2.js 的 executionHistory（按发生顺序展示）
+// 与 docs/tasks/handoffs/H2-run-detail.md §3.2.4 的读法：
+//   实现第 1 次 → 审查退回 → 实现第 2 次 → 审查通过 → 测试 → UAT → 等待人工决定。
+test('FIX-105 V-1/V-2：链路按真实运转时序排列；状态以 图标+颜色 成对表达，覆盖六类以上', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  const openChain = async () => {
+    await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过')))
+    return container.querySelector('.vwf-chain')
+  }
+  const chain = await openChain()
+  const pick = (c, node, attempt) => c.querySelector('[data-vwf-chain-node="' + node + '"][data-vwf-chain-attempt="' + attempt + '"]')
+  const seqOf = (c) => Array.from(c.querySelectorAll('.vwf-chain-entry')).map((e) => e.dataset.vwfChainNode + '#' + e.dataset.vwfChainAttempt)
+  const toneOf = (c, node, attempt) => {
+    const el = pick(c, node, attempt)
+    const cls = (el.className.match(/\btone-\w+/) || [''])[0]
+    return { cls, glyph: el.querySelector('.vwf-chain-dot').textContent, text: el.textContent }
+  }
+  // V-1：链路顺序 = attempt 记录里的真实发生时刻（段 1 实现/检查/测试 → 段 2 实现/检查），
+  // 不是模板节点顺序。差别在测试节点：节点顺序会把它排到最后，真实时序里它在返工之前。
+  const seq = seqOf(chain)
+  assert.deepEqual(seq, ['dev#1', 'review#1', 'test#1', 'dev#2', 'review#2', 'uat#0', 'explore#0', 'synth#0'],
+    '链路按实际运转时序排列（含退回后的重做轮次）：' + seq.join(' → '))
+  assert.ok(chain.parentElement.textContent.includes('下方按实际运转顺序列出每一次执行'), '链路说明写明按实际运转顺序')
+  // V-2：六类以上状态各自的「图形 + 颜色」成对表达（颜色由 tone-* 落到语义 token，见下）
+  assert.deepEqual(toneOf(chain, 'dev', '1'), { cls: 'tone-pass', glyph: '✓', text: toneOf(chain, 'dev', '1').text }, '第 1 次实现：通过 ✓')
+  assert.ok(toneOf(chain, 'dev', '1').text.includes('已通过'), '通过有文字，不只靠图形')
+  assert.equal(toneOf(chain, 'review', '1').cls, 'tone-returned', '检查第 1 次退回：回退色调')
+  assert.equal(toneOf(chain, 'review', '1').glyph, '↩', '退回用回退图形')
+  assert.ok(toneOf(chain, 'review', '1').text.includes('退回修改'), '退回有文字：' + toneOf(chain, 'review', '1').text)
+  assert.equal(toneOf(chain, 'dev', '2').cls, 'tone-returned', '第 2 次实现：业务返工同属回退')
+  assert.ok(toneOf(chain, 'dev', '2').text.includes('业务返工'), '业务返工与退回不同文案：' + toneOf(chain, 'dev', '2').text)
+  assert.equal(toneOf(chain, 'uat', '0').cls, 'tone-hwait', '验收节点：人工裁决等待中')
+  assert.equal(toneOf(chain, 'uat', '0').glyph, '!', '等待人工裁决用等待图形')
+  assert.ok(toneOf(chain, 'uat', '0').text.includes('等待人工裁决'), '等待人工裁决有文字')
+  assert.equal(toneOf(chain, 'explore', '0').cls, 'tone-todo', '未执行节点：尚未开始')
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  // 受阻（可恢复）：T-C2 卡在 dev，链路如实标注而不是「尚未开始」
+  await backToList()
+  await openTask('T-C2')
+  const blocked = await openChain()
+  assert.equal(toneOf(blocked, 'dev', '0').cls, 'tone-blocked', '受阻节点在链路里落到受阻色调')
+  assert.equal(toneOf(blocked, 'dev', '0').glyph, '⊘', '受阻用独立图形（不落失败色，LOC-030）')
+  assert.ok(toneOf(blocked, 'dev', '0').text.includes('阻塞'), '受阻有文字')
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  // 人工裁决已裁决 + 进行中 + 技术重试：分别在已收束/运行中/技术重建的执行上出现
+  await backToList()
+  await openTask('T-B1')
+  const done = await openChain()
+  assert.equal(toneOf(done, 'uat', '1').cls, 'tone-hdone', '人工裁决门已收束：已裁决色调')
+  assert.equal(toneOf(done, 'uat', '1').glyph, '◆', '人工裁决用自己的图形')
+  assert.ok(toneOf(done, 'uat', '1').text.includes('人工裁决已完成'), '已裁决有文字：' + toneOf(done, 'uat', '1').text)
+  const running = Array.from(done.querySelectorAll('.vwf-chain-entry')).find((e) => e.className.includes('tone-running'))
+  assert.ok(running && running.querySelector('.vwf-chain-dot').textContent === '●', '进行中：● + 进行中色调')
+  assert.ok(running.textContent.includes('进行中'), '进行中有文字')
+  // 同一批并行组在链路里保持连续（取批首时刻成组，不被其它节点的时刻打散）
+  const bseq = seqOf(done)
+  assert.deepEqual(bseq, ['explore#0', 'explore#0', 'explore#0', 'synth#1', 'uat#1', 'dev#0', 'review#0', 'test#0'],
+    '并行组整批成组、按各自真实时刻落位，未执行节点排末：' + bseq.join(' → '))
+  const kids = Array.from(done.children).map((el) => (el.className.includes('vwf-chain-group') ? 'G' : el.dataset.vwfChainNode))
+  assert.deepEqual(kids.slice(0, 4), ['G', 'explore', 'explore', 'explore'], '并行组标题与它的子任务相邻成组：' + kids.join(' '))
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  await backToList()
+  await openTask('T-R1')
+  const retried = await openChain()
+  assert.equal(toneOf(retried, 'dev', '1').cls, 'tone-retry', '技术重试与业务返工分开')
+  assert.equal(toneOf(retried, 'dev', '1').glyph, '↻', '技术重试用与回退不同的图形')
+  assert.ok(toneOf(retried, 'dev', '1').text.includes('技术重试'), '技术重试有文字')
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  await backToList()
+})
+
+test('FIX-105 V-2/V-3/V-4：链路图例给全状态词汇；色调只复用已实测语义 token；点选联动保持', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过')))
+  const chain = container.querySelector('.vwf-chain')
+  // 图例：每个状态都给「图形 + 文案」，用户不必猜图形含义
+  const legend = Array.from(container.querySelectorAll('.vwf-chain-legend span')).map((s) => s.textContent)
+  assert.ok(legend.length >= 6, '图例覆盖六类以上状态：' + legend.length)
+  for (const need of ['通过', '业务返工', '技术重试', '阻塞', '等待人工裁决', '人工裁决已完成', '进行中']) {
+    assert.ok(legend.some((x) => x.includes(need)), '图例含状态：' + need)
+  }
+  const glyphs = legend.map((x) => x.trim().split(/\s+/)[0])
+  assert.deepEqual(glyphs.slice(0, 7), ['✓', '↩', '↻', '⊘', '!', '◆', '●'], '七个状态的图形两两不同：' + JSON.stringify(glyphs))
+  assert.equal(new Set(glyphs).size, glyphs.length, '图例图形不重复')
+  // V-4：链路状态色只复用既有语义 token（深浅两主题的对比度口径原样成立，无新增颜色）
+  const css = styleText.join('\n')
+  const toneRules = Array.from(css.matchAll(/\.tone-([\w-]+)\s*\{([^}]*)\}/g)).map((m) => [m[1], m[2]])
+  assert.equal(toneRules.length, 8, '每个有颜色的状态各有一处色调定义：' + toneRules.map((r) => r[0]).join(','))
+  for (const [tone, body] of toneRules) {
+    assert.match(body, /--c:var\(--vwf-(ok|warn|accent|err)\)/, '状态色取既有语义 token：' + tone + ' → ' + body)
+  }
+  assert.match(css, /\.tone-hwait \{[^}]*--vwf-warn/, '等待人工裁决用注意色（与详情页 WAITING_HUMAN 同口径）')
+  assert.match(css, /\.tone-hdone \{[^}]*--vwf-ok/, '已裁决用通过色')
+  // 色调作用域限链路弹窗，不外溢到宿主页面
+  for (const [tone] of toneRules) {
+    assert.ok(css.includes('.vwf-chain-dialog .tone-' + tone + ' {'), '状态色作用域限链路弹窗：' + tone)
+  }
+  // 图例的图形吃状态色（成对表达的另一半），文字保持次要正文色
+  assert.match(css, /\.vwf-chain-legend b \{[^}]*color:var\(--c,var\(--vwf-text-2\)\)/, '图例图形吃状态色')
+  assert.ok(container.querySelectorAll('.vwf-chain-legend b').length >= 6, '图例每条都有图形元素')
+  // V-2：状态色在浅深两主题下都可辨识——图形与图例都是文字级呈现，按 4.5:1 取样核对
+  // （采样点 = 链路圆点底 --vwf-canvas 与图例底 --vwf-surface；token 值未新增，与 FEAT-86 同源）
+  const srgb = (v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) }
+  const relLum = (hex) => {
+    const m = hex.replace('#', '')
+    return 0.2126 * srgb(parseInt(m.slice(0, 2), 16)) + 0.7152 * srgb(parseInt(m.slice(2, 4), 16)) + 0.0722 * srgb(parseInt(m.slice(4, 6), 16))
+  }
+  const contrast = (a, b) => { const la = relLum(a), lb = relLum(b); return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05) }
+  const tokenBlock = (name) => {
+    const m = new RegExp('/\\* @vwf-token-' + name + ' \\*/([\\s\\S]*?)/\\* @vwf-token-' + name + '-end \\*/').exec(css)
+    assert.ok(m, '取到 ' + name + ' token 块')
+    const out = {}
+    for (const d of m[1].matchAll(/(--vwf-[\w-]+)\s*:\s*(#[0-9a-fA-F]{6})/g)) out[d[1]] = d[2]
+    return out
+  }
+  const toneTokens = ['pass', 'returned', 'retry', 'blocked', 'hwait', 'hdone', 'running', 'failed'].map((tone) => {
+    const body = toneRules.find((r) => r[0] === tone)[1]
+    const rule = css.slice(css.indexOf('.vwf-chain-dialog .tone-' + tone))
+    return [tone, /--c:var\((--vwf-\w+)\)/.exec(rule)[1]]
+  })
+  for (const theme of ['light', 'dark']) {
+    const t = tokenBlock(theme)
+    for (const [tone, token] of toneTokens) {
+      const color = t[token]
+      assert.ok(color, theme + ' 定义了 ' + token)
+      assert.ok(contrast(color, t['--vwf-canvas']) >= 4.5, theme + ' 下 ' + tone + ' 在链路圆点底上 ≥4.5:1：' + contrast(color, t['--vwf-canvas']).toFixed(2))
+      assert.ok(contrast(color, t['--vwf-surface']) >= 4.5, theme + ' 下 ' + tone + ' 在图例底上 ≥4.5:1：' + contrast(color, t['--vwf-surface']).toFixed(2))
+    }
+  }
+  // V-3：点选链路节点仍联动右侧当前结果（FEAT-103 V-3 不回退），这里点的是历史下游节点
+  await clickEl(chain.querySelector('[data-vwf-chain-node="test"][data-vwf-chain-attempt="1"]'))
+  assert.ok(!container.querySelector('.vwf-chain'), '点选后弹窗关闭回到详情页')
+  assert.ok(container.querySelector('.vwf-rd-body').textContent.includes('测试'), '右侧切到点选节点')
+  assert.equal(container.querySelectorAll('.vwf-rd-body .vwf-card').length, 1, '右侧仍只有一个选中节点详情卡')
+  assert.ok(container.querySelector('.vwf-rd-body').textContent.includes('这是返工前的成果'), '点选历史下游节点如实标注上一轮成果')
   await backToList()
 })
 

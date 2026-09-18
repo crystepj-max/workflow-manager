@@ -511,11 +511,21 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 .vwf-chain { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; display:flex; flex-direction:column; }
 .vwf-chain-entry { display:flex; gap:10px; width:100%; text-align:left; cursor:pointer; padding:10px 8px; border:0; border-bottom:1px solid var(--vwf-border); background:transparent; color:var(--vwf-text); font-size:12px; }
 .vwf-chain-entry:hover { background:var(--vwf-wb-accent-soft); }
-.vwf-chain-dot { flex:0 0 auto; width:22px; height:22px; border-radius:50%; display:grid; place-items:center; background:var(--vwf-canvas); color:var(--vwf-text-2); }
-.vwf-chain-entry.tone-done .vwf-chain-dot { color:var(--vwf-ok); }
-.vwf-chain-entry.tone-failed .vwf-chain-dot { color:var(--vwf-err); }
-.vwf-chain-entry.tone-returned .vwf-chain-dot { color:var(--vwf-warn); }
-.vwf-chain-entry.tone-running .vwf-chain-dot { color:var(--vwf-accent); }
+.vwf-chain-dot { flex:0 0 auto; width:22px; height:22px; border-radius:50%; display:grid; place-items:center; background:var(--vwf-canvas); color:var(--c,var(--vwf-text-2)); font-size:13px; }
+/* 状态色调由条目上的 --c 一处定义（作用域限链路弹窗，不外溢到宿主）：新增状态只加一行，
+   形状取自 CHAIN_STATE。语义色沿用 STATUS_COLOR 分组，深浅两主题的对比度口径原样成立。 */
+.vwf-chain-dialog .tone-pass { --c:var(--vwf-ok); }
+.vwf-chain-dialog .tone-hdone { --c:var(--vwf-ok); }
+.vwf-chain-dialog .tone-returned { --c:var(--vwf-warn); }
+.vwf-chain-dialog .tone-retry { --c:var(--vwf-warn); }
+.vwf-chain-dialog .tone-blocked { --c:var(--vwf-warn); }
+.vwf-chain-dialog .tone-hwait { --c:var(--vwf-warn); }
+.vwf-chain-dialog .tone-running { --c:var(--vwf-accent); }
+.vwf-chain-dialog .tone-failed { --c:var(--vwf-err); }
+/* 图例：图形按状态色，文字用次要正文色——用户不必猜图形含义 */
+.vwf-chain-legend { display:flex; flex-wrap:wrap; gap:4px 12px; padding:2px 2px 8px; font-size:11px; color:var(--vwf-text-2); }
+.vwf-chain-legend span { white-space:nowrap; }
+.vwf-chain-legend b { color:var(--c,var(--vwf-text-2)); font-weight:600; }
 .vwf-chain-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
 .vwf-chain-group { padding:8px 8px 2px; font-size:11px; font-weight:600; color:var(--vwf-accent); }
 .vwf-chain-head { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
@@ -572,6 +582,27 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     // 形状冗余编码色调分组——✓ 终态通过 / ✕ 终态失败 / ● 进行中 /
     // ! 等待人工或受阻（可恢复等待态）；灰度或色觉差异下仍可读出状态。
     const STATUS_SHAPE = { ok: '✓', err: '✕', run: '●', wait: '!' }
+    // 完整经过链路的状态双通道（FIX-105）：每条执行给「图形 + 文案」成对表达，颜色由
+    // 条目上的 --c 落到对应语义 token。形状冗余编码状态：✓ / ✕ / ● 直接取既有
+    // STATUS_SHAPE（通过 / 失败 / 进行中），! 取 STATUS_SHAPE.wait（等人工），回退两类用
+    // 不同形状区分业务返工与技术重试（↩ / ↻），阻塞与人工裁决另有形状（⊘ / ◆）——
+    // 不靠颜色单独承载语义，灰度或色觉差异下仍可读出。色调沿用 STATUS_COLOR 分组：
+    // 通过与已裁决取 pass，进行中取 running，失败取 fail，其余（回退 / 阻塞 / 待裁决）取
+    // human（可恢复等待态，LOC-030 不落 fail 色）。键即链路上的 tone-<键> 样式类。
+    const CHAIN_STATE = {
+      pass: [STATUS_SHAPE.ok, 'rdAttemptPassed'],
+      returned: ['↩', 'rdAttemptRework'],
+      retry: ['↻', 'rdAttemptRetry'],
+      blocked: ['⊘', 'rdAttemptBlocked'],
+      hwait: [STATUS_SHAPE.wait, 'rdAttemptHumanWait'],
+      hdone: ['◆', 'rdAttemptHumanDone'],
+      running: [STATUS_SHAPE.run, 'rdAttemptRunning'],
+      failed: [STATUS_SHAPE.err, 'rdAttemptFailed'],
+      todo: ['—', 'rdNotStarted'],
+    }
+    // 链路时序哨兵：从未执行的节点与取不到时间的事件排在链路末尾（批次内仍按模板顺序稳定）
+    const CHAIN_SEG_END = 1e6
+    const CHAIN_T_END = 864e13
     const EDGE_OK = 'var(--vwf-accent)'
     const EDGE_FAIL = 'var(--vwf-err)'
     const EDGE_TECH = 'var(--vwf-text-3)'
@@ -3895,24 +3926,109 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const items = snap && snap.items
         return Array.isArray(items) ? items : []
       }
-      // ── 完整工作链路（FEAT-103 V-3/V-4）────────────────────────────────────
-      // 按实际执行顺序铺开链路：每条 = 一次执行。记录通道可用时按节点的每次尝试 / 返工轮次
-      // 铺开（并行组再展开子任务）；记录通道没有的节点，则用宿主 agents 行补位（含并行组
-      // 归组与形状 + 文字双通道的状态），模板取不到时它就是链路的全部内容。原页面底部
-      // 「节点 / 结果」区域与它是同一信息的一体两面，并入本链路后删掉——链路弹窗铺开全貌，
-      // 右侧当前结果承接选中那一条的成果，两者合起来不丢信息。
+      // ── 完整工作链路（FEAT-103 V-3/V-4；FIX-105 实际运转时序 + 状态图形）──────────
+      // 每条 = 一次执行。排列按实际运转时序：先比段（续跑才追加新段，段之间时间不交叉），
+      // 再比那一次执行真实的 started_at / ended_at；记录通道缺该节点时退回段末扫描
+      // （node_attempts）的 completed_at 定位，从未执行的排到链路末尾。返工轮次因此落在
+      // 它真正发生的位置，链路可以直接读成「任务怎么走过来的」。记录通道可用时按每次尝试
+      // 铺开（并行组再展开子任务，整批取批首时刻保持成组）；记录通道没有的节点用宿主
+      // agents 行补位（含并行组归组与形状 + 文字双通道的状态），模板取不到时它就是链路的
+      // 全部内容。原页面底部「节点 / 结果」区域与它是一体两面，并入本链路后删掉——链路
+      // 弹窗铺开全貌，右侧当前结果承接选中那一条的成果，两者合起来不丢信息。
+      // 状态用「图形 + 颜色」成对表达（CHAIN_STATE），覆盖 通过 / 回退（业务返工与技术
+      // 重试区分）/ 阻塞 / 人工裁决（等待中、已裁决）/ 进行中 / 失败 / 尚未开始。事实全部
+      // 取自既有 run 数据（attempt 的真实时间与 retry_kind、段末扫描、lifecycle、
+      // blocked_edge、human_decisions、DSL 的 countRound 出边与 $human-decision 出边），
+      // 不新增后端与 RPC。
       const agentLabelOf = (label) => String(label || '').replace(/ R\d+$/, '')
       const agentGroupOf = (label) => /^(.*) #(\d+)$/.exec(agentLabelOf(label))
       const agentNameOf = (label) => { const g = agentGroupOf(label); return g ? g[1] : agentLabelOf(label) }
       const agents = (snapState && snapState.agents) || []
       const takenAgents = []
+      // 人工裁决门：DSL 里指向 $human-decision 的节点与它在出边上声明的等待结果
+      const humanGate = new Map()
+      for (const e of ((dsl && dsl.edges) || [])) {
+        if (!e || String(e.to) !== HUMAN_DECISION_ID || !e.outcome) continue
+        const k = String(e.from)
+        if (!humanGate.has(k)) humanGate.set(k, new Set())
+        humanGate.get(k).add(String(e.outcome))
+      }
+      // 段末扫描（node_attempts）逐节点最早一次：记录通道缺该节点时用它把节点放回真实时序
+      const scanAt = new Map()
+      for (const a of ((lr && lr.node_attempts) || [])) {
+        if (!a || !a.node) continue
+        const k = String(a.node)
+        const seg = Number(a.segment) || 0
+        const ms = Number(a.completed_at) || CHAIN_T_END
+        const cur = scanAt.get(k)
+        if (!cur || seg < cur[0] || (seg === cur[0] && ms < cur[1])) scanAt.set(k, [seg, ms])
+      }
+      const headStatus = String(head.status || '')
+      const humanWaiting = headStatus === 'WAITING_HUMAN' || headStatus.indexOf('AWAITING_HUMAN_') === 0
+      // 运行现况指名的节点：等人工裁决的那一步 / 卡住的那一步（都用 head.node，缺失时退回状态现况）
+      const waitNode = String(head.node || (snapState && snapState.node) || '')
+      const humanWaitAt = humanWaiting ? waitNode : ''
+      const blockedAt = (headStatus === 'BLOCKED' || String((lr && lr.lifecycle && lr.lifecycle.state) || '') === 'BLOCKED')
+        ? waitNode : ''
+      // 这一步是不是正在等人工裁决：运行在等待态、且指名的就是它（指不出节点时按「人工裁决门」
+      // 保守认定——宁可选「等待中」，也不把还在等的门说成已裁决）
+      const waitingAt = (nodeId) => !!humanWaiting && (!humanWaitAt || humanWaitAt === nodeId)
+      // 一次执行的状态：[色调, 文案键]。判定顺序 = 事实优先级：未收束 → 收束异常 →
+      // 回退性质（技术重试 / 业务返工 / 退回边）→ 阻塞 → 人工裁决 → 通过。
+      const attemptState = (v, latest) => {
+        const st = String(v.status || '')
+        if (st === 'running') return ['running', 'rdAttemptRunning']
+        if (st === 'failed' || st === 'rejected' || st === 'interrupted') return ['failed', 'rdAttemptFailed']
+        const rk = String(v.retry_kind || '')
+        if (rk === 'technical_retry') return ['retry', 'rdAttemptRetry']
+        if (rk === 'business_rework') return ['returned', 'rdAttemptRework']
+        const node = String(v.node)
+        const oc = v.outcome == null ? '' : String(v.outcome)
+        if (oc && returnOutcomes.has(oc)) return ['returned', 'rdAttemptReturned']
+        // 受阻：这一条的结果就是 BLOCKED，或运行此刻正卡在这个节点上（恢复卡指名的同一步）
+        if (oc === 'BLOCKED' || (latest && blockedAt === node)) return ['blocked', 'rdAttemptBlocked']
+        // 人工裁决门：DSL 声明了门结果就按声明比；DSL 没声明（自定义 / 旧模板）时，
+        // 运行正等人工裁决的那一步就是门——不把等待中的一步说成「尚未开始」。
+        const gate = humanGate.get(node)
+        const w = (gate ? oc && gate.has(oc) : waitingAt(node)) ? waitingAt(node) : null
+        if (w !== null) return [w ? 'hwait' : 'hdone', w ? 'rdAttemptHumanWait' : 'rdAttemptHumanDone']
+        return ['pass', 'rdAttemptPassed']
+      }
+      // 未执行节点的占位状态：正等人工裁决 / 正受阻 / 正在执行 都要如实标注，不能一律「尚未开始」
+      const pendingState = (nodeId) => {
+        if (waitingAt(nodeId)) return ['hwait', 'rdAttemptHumanWait']
+        if (blockedAt && blockedAt === nodeId) return ['blocked', 'rdAttemptBlocked']
+        if (headStatus === 'running' && nodeId === phaseNodeId) return ['running', 'rdAttemptRunning']
+        return ['todo', 'rdNotStarted']
+      }
       const chainEntries = () => {
         const out = []
+        // 时序键 [段, 毫秒]：时间取不到时落到 CHAIN_END（链路末尾）。排序用 Array#sort 的
+        // 稳定语义（ES2019 起有规范保证）作次级次序——同一批并行组的孩子共享批首时刻，
+        // 发出时相邻即保持成组；同刻事件则保持模板顺序，不出现随机翻转。
+        const CHAIN_END = [1e6, CHAIN_T_END]
+        const at = (seg, ms) => [seg, ms]
+        const whereOf = (nodeId) => scanAt.get(String(nodeId)) || CHAIN_END
+        // 一次尝试的时序点：段号 + 它真实的开始（或结束）时刻；时刻取不到就落到链路末尾
+        const atOf = (v) => {
+          const m = Date.parse(String(v.started_at || v.ended_at || ''))
+          return [Number(v.segment) || 0, Number.isFinite(m) ? m : CHAIN_T_END]
+        }
+        // 整批取批首时序点，让一个并行组在链路里始终是连续的一块
+        const batchOf = (rows) => {
+          let w = null
+          for (const a of rows) {
+            const c = atOf(a.value)
+            if (!w || c[0] < w[0] || (c[0] === w[0] && c[1] < w[1])) w = c
+          }
+          return w
+        }
         // agents 行 → 链路条目：并行组先出组标题，再逐项列出（标签原样，形状 + outcome 文字双通道）
         const pushAgents = (rows, keyBase, label, nodeId) => {
           if (!rows.length) return
           rows.forEach((a) => takenAgents.push(a))
-          if (rows.length > 1) out.push({ key: 'g' + keyBase, group: label + ' · fanout · ' + rows.length + ' items' })
+          const w = whereOf(nodeId)
+          if (rows.length > 1) out.push({ key: 'g' + keyBase, group: label + ' · fanout · ' + rows.length + ' items', o: at(w[0], w[1]) })
           rows.forEach((a, i) => out.push({
             key: 'r' + keyBase + i,
             id: nodeId,
@@ -3920,7 +4036,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             label: agentLabelOf(a.label),
             child: 0,
             attempt: 0,
-            tone: a.outcome === 'completed' ? 'done' : (a.outcome === 'failed' ? 'failed' : 'running'),
+            o: at(w[0], w[1]),
+            tone: a.outcome === 'completed' ? 'pass' : (a.outcome === 'failed' ? 'failed' : 'running'),
             state: STATUS_SHAPE[a.outcome === 'completed' ? 'ok' : a.outcome === 'failed' ? 'err' : 'run'] + ' ' + String(a.outcome || '—'),
             note: '',
             meta: String(a.phase || ''),
@@ -3933,41 +4050,47 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             seq: String(ni + 1).padStart(2, '0'),
             label,
             prev: nodeLatestSegment(n.id) > 0 && nodeLatestSegment(n.id) < activeSeg,
-            current: n.id === phaseNodeId,
           }
           const rows = agents.filter((a) => takenAgents.indexOf(a) < 0 && agentNameOf(a.label) === String(label))
           const list = logicalAttemptsOf(n.id)
           const items = n.kind === 'fanout' ? itemsOf(n.id) : []
           if (!list.length && !items.length) {
             if (rows.length) { pushAgents(rows, n.id, label, n.id); return }
-            out.push(Object.assign({ key: 'p' + n.id, attempt: 0, tone: 'todo', state: t('rdNotStarted'), note: t('rdNotStartedNote'), meta: '' }, base))
+            const ph = pendingState(n.id)
+            const w = whereOf(n.id)
+            out.push(Object.assign({ key: 'p' + n.id, attempt: 0, o: at(w[0], w[1]), tone: ph[0], state: t(ph[1]), note: ph[0] === 'todo' ? t('rdNotStartedNote') : '', meta: '' }, base))
             return
           }
           // 记录通道优先：该节点已有逐次尝试，agents 行只用于去重，不再重复展开一遍
           rows.forEach((a) => takenAgents.push(a))
-          // 并行组：记录通道下也给出组标题（原「节点 / 结果」表在 agents 行 >1 时的口径）
-          if (items.length > 1) out.push({ key: 'g' + n.id, group: label + ' · fanout · ' + items.length + ' items' })
           list.forEach((a, i) => {
             const v = a.value
-            const last = i + 1 === list.length
+            const st = attemptState(v, i + 1 === list.length)
             out.push(Object.assign({
               key: 'a' + n.id + i,
               attempt: i + 1,
-              tone: v.status === 'failed' ? 'failed' : (last ? (v.status === 'completed' ? 'done' : 'running') : 'returned'),
-              state: v.status === 'failed' ? t('rdAttemptReturned') : (last ? (v.status === 'completed' ? t('rdAttemptPassed') : t('rdAttemptRunning')) : t('rdAttemptReturned')),
+              o: at.apply(null, atOf(v)),
+              tone: st[0],
+              state: t(st[1]),
               note: String(v.error || ''),
               meta: t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }),
-              latest: last,
+              latest: i + 1 === list.length,
             }, base))
           })
+          // 并行组：记录通道下也给出组标题（原「节点 / 结果」表在 agents 行 >1 时的口径），
+          // 紧挨它的孩子发出，整批取批首时刻——一个并行组在链路里始终是连续的一块。
+          let iw = items.length ? batchOf(items) : null
+          if (iw && iw[1] === CHAIN_T_END) iw = whereOf(n.id)
+          if (items.length > 1) out.push({ key: 'g' + n.id, group: label + ' · fanout · ' + items.length + ' items', o: at(iw[0], iw[1]) })
           items.forEach((a, i) => {
             const v = a.value
             out.push(Object.assign({
               key: 'i' + n.id + i,
               attempt: 0,
               child: i + 1,
-              tone: v.status === 'completed' ? 'done' : (v.status === 'failed' ? 'failed' : 'running'),
-              state: v.status === 'completed' ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptReturned') : t('rdFanoutIncomplete')),
+              o: at(iw[0], iw[1]),
+              tone: v.status === 'completed' ? 'pass' : (v.status === 'failed' ? 'failed' : 'running'),
+              state: v.status === 'completed' ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptFailed') : t('rdAttemptRunning')),
               note: String(v.error || '') || (v.item ? String(v.item).slice(0, 80) : ''),
               meta: t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }),
             }, base))
@@ -3979,7 +4102,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           const name = agentNameOf(a.label)
           pushAgents(agents.filter((x) => takenAgents.indexOf(x) < 0 && agentNameOf(x.label) === name), 'u' + name, name, '')
         }
-        return out
+        return out.sort((x, y) => x.o[0] - y.o[0] || x.o[1] - y.o[1] || x.o[2] - y.o[2])
       }
       // 点选链路一条：关闭弹窗 → 定位到该节点 → 右侧当前结果切到这一次执行（V-3）
       const pickChain = (e) => {
@@ -4177,6 +4300,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('div', { className: 'vwf-dialog vwf-chain-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('rdFullHistory') },
             h('div', { className: 'vwf-dialog-title' }, t('rdFullHistory') + ' · ' + (lr && lr.title ? String(lr.title) : (head.taskId || head.id || '—'))),
             h('div', { className: 'vwf-dialog-desc' }, t('rdChainNote')),
+            // 状态图例：链路用的是「图形 + 颜色」成对表达，图例把这对记号一次讲清（V-2）
+            h('div', { className: 'vwf-chain-legend' }, Object.keys(CHAIN_STATE).map((k) =>
+              h('span', { key: k, className: 'tone-' + k }, h('b', null, CHAIN_STATE[k][0]), ' ' + t(CHAIN_STATE[k][1])))),
             h('div', { className: 'vwf-chain' }, chainEntries().map((e) => (e.group
               ? h('div', { key: e.key, className: 'vwf-chain-group' }, e.group)
               : h('button', {
@@ -4186,7 +4312,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 'data-vwf-chain-attempt': String(e.attempt),
                 onClick: () => pickChain(e),
               },
-                h('span', { className: 'vwf-chain-dot' }, e.tone === 'done' ? '✓' : e.tone === 'failed' ? '✕' : e.tone === 'returned' ? '↩' : e.tone === 'running' ? '·' : '—'),
+                h('span', { className: 'vwf-chain-dot' }, (CHAIN_STATE[e.tone] || CHAIN_STATE.todo)[0]),
                 h('span', { className: 'vwf-chain-main' },
                   h('span', { className: 'vwf-chain-head' },
                     h('strong', null, (e.seq ? e.seq + ' ' : '') + e.label + (e.child ? ' · ' + t('rdFanoutChild', { n: e.child }) : '')),
