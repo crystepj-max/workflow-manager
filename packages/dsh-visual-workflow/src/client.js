@@ -4601,6 +4601,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         closeOv()
       }
       const ovSet = (k, field, v) => setOvDraft((d) => ({ ...d, [k]: { ...(d[k] || {}), [field]: v } }))
+      // 「还原本节点默认」（FEAT-101 V-7，原型 reset-node-model）＝删掉该节点的草稿项。
+      // 不能写成「两列同时留空」：留空列的口径是「沿用该行当前默认」，节点有预设时会被
+      // 解析回预设值，于是行仍算覆盖、保存反而把预设固化成了显式覆盖（还原不生效）。
+      const ovClearRow = (k) => setOvDraft((d) => { const next = { ...d }; delete next[k]; return next })
       const reloadOvView = () => {
         // 清除后留在覆盖窗口（UAT 反馈 #5）：刷新清单并就地更新当前查看的模板数据
         return host.call('vwf.workflows.list').then((l) => {
@@ -4626,7 +4630,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const saveOv = () => {
         if (!ovId || ovBusy) return
         const overrides = ovResolvedOf(ovW, ovDraft)
-        if (!Object.keys(overrides).length) { setMsg(t('modelOverrideEmpty')); return }
+        if (!Object.keys(overrides).length) {
+          // 各节点都已还原成默认、模板上却还留着已保存覆盖：保存即清空该模板的覆盖，
+          // 走既有的 clear 通道（与「全部还原默认」同一路径，仍需一次确认）。
+          if (ovSaved !== '{}') { setOvConfirm('clear'); return }
+          setMsg(t('modelOverrideEmpty'))
+          return
+        }
         setOvBusy(true)
         host.call('vwf.workflows.modelOverride.save', { id: ovId, overrides }).then((r) => {
           setOvBusy(false)
@@ -4872,7 +4882,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h(Field, { label: t('modelOverrideProvider') }, provCtl),
               h(Field, { label: t('modelOverrideModel') }, modelCtl)
             ),
-            h('button', { className: 'vwf-btn sm', disabled: ovBusy || !isOver, onClick: () => ovSet(n.id, 'provider', '') || ovSet(n.id, 'model', '') }, t('modelOverrideResetRow'))
+            h('button', { className: 'vwf-btn sm', disabled: ovBusy || !isOver, onClick: () => ovClearRow(n.id) }, t('modelOverrideResetRow'))
           )
         })
       }

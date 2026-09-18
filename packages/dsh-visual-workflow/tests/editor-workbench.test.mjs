@@ -706,6 +706,61 @@ test('V-7 内置模板模型设置兼容：默认 / 覆盖 / 单节点还原 / �
 })
 
 
+test('FEAT-101 V-7 单节点还原：节点自带预设时「还原本节点默认」真还原，不把预设固化成覆盖', async () => {
+  // 与真实模板同形：节点带 bindings.models 预设（templates/*.json 四套均如此）
+  const dsl = JSON.parse(JSON.stringify(BUILTIN_DSL))
+  dsl.bindings = { models: { [BUILTIN_DSL.nodes[0].id]: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } } }
+  const { container, state } = await mountPage({ dsl, list: [{ id: 'wf-builtin', name: '内置流程', description: '', builtin: true, dsl }] })
+  const openOvDialog = async () => {
+    await act(async () => {
+      byText(container, '模型设置').click()
+      await flush(); await flush()
+    })
+    return Array.from(container.querySelectorAll('dialog.vwf-editor-dialog')).find((d) => d.textContent.indexOf('模型设置') >= 0)
+  }
+  let dialog = await openOvDialog()
+  const rows = () => Array.from(dialog.querySelectorAll('.vwf-model-row'))
+  const target = () => rows()[0]
+  assert.ok(target().textContent.indexOf('默认') >= 0, '未覆盖时该行是默认徽标')
+  // 覆盖首节点
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set
+    const selects = Array.from(target().querySelectorAll('select'))
+    setter.call(selects[1], 'deepseek-v4-flash')
+    selects[1].dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush()
+  })
+  assert.ok(target().textContent.indexOf('已覆盖') >= 0, '选择非预设模型后该行变为已覆盖')
+  await act(async () => {
+    byText(dialog, '保存节点设置').click()
+    await flush(); await flush()
+  })
+  assert.equal(state.overrides[BUILTIN_DSL.nodes[0].id].model, 'deepseek-v4-flash', '覆盖写入持久化层')
+
+  // 重新打开 → 还原本节点默认 → 保存：该节点必须真的回到「没有覆盖」
+  dialog = await openOvDialog()
+  assert.ok(target().textContent.indexOf('已覆盖') >= 0, '重开后该行显示已覆盖')
+  await act(async () => {
+    byText(target(), '还原本节点默认').click()
+    await flush()
+  })
+  assert.ok(target().textContent.indexOf('默认') >= 0, '还原后回到默认徽标')
+  assert.equal(target().querySelector('button:last-of-type').disabled, true, '还原后按钮置灰（无覆盖可还原）')
+  await act(async () => {
+    byText(dialog, '保存节点设置').click()
+    await flush()
+  })
+  // 单节点是唯一覆盖 → 保存等于清空该模板的覆盖：走既有 clear 通道并要求一次确认
+  const confirm = container.querySelector('.vwf-confirm-mask')
+  assert.ok(confirm, '还原唯一覆盖后保存进入清空确认')
+  await act(async () => {
+    Array.from(confirm.querySelectorAll('button')).find((b) => b.textContent === '全部还原默认').click()
+    await flush(); await flush()
+  })
+  assert.ok(state.overrideCalls.some((c) => c.op === 'clear'), '清空走 vwf.workflows.modelOverride.clear')
+  assert.deepEqual(state.overrides, {}, '回读持久化层：已无任何覆盖')
+})
+
 test('V-7 结构锁：内置模板可选中节点与连接（定位 / 查看），但不能改结构', async () => {
   const { container } = await mountPage({ dsl: BUILTIN_DSL, list: [{ id: 'wf-builtin', name: '内置流程', description: '', builtin: true, dsl: JSON.parse(JSON.stringify(BUILTIN_DSL)) }] })
   await openEditor(container, '查看流程')
