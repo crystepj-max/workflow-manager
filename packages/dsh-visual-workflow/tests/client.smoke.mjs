@@ -216,6 +216,14 @@ runState.records['lr-a'] = {
     logicalAttempt('lr-a', 'test', 1, { attempt_id: 'a1k3', ended_at: '2026-09-17T10:10:00Z', outcome: 'PASS', result: { note: '第 1 轮测试通过' } }),
     logicalAttempt('lr-a', 'dev', 2, { attempt_id: 'a2k1', ended_at: '2026-09-17T10:20:00Z', retry_kind: 'business_rework', outcome: 'READY', outcomePath: '$.status', result: { summary: '第 2 次实现成果' } }),
     logicalAttempt('lr-a', 'review', 2, { attempt_id: 'a2k2', ended_at: '2026-09-17T10:25:00Z', round: 1, outcome: 'APPROVE', result: { note: '检查通过' } }),
+    // 并行组的两轮（同一段内 round 递进 = 业务返工把 research 重跑了一遍，与内置 wf-explore 的
+    // evaluate → orchestrate NEEDS_RESEARCH 同形）：第二轮必须落在它真正发生的时刻，
+    // 不能被折回第一轮的位置。
+    attemptRec('lr-a', { attempt_id: 'a1k30', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 0, item: '技术可行性', result: { finding: '技术上可行' }, ended_at: '2026-09-17T09:55:00Z' }),
+    attemptRec('lr-a', { attempt_id: 'a1k31', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 1, item: '用户需求', result: { finding: '需求集中在位置感' }, ended_at: '2026-09-17T09:55:20Z' }),
+    attemptRec('lr-a', { attempt_id: 'a1k32', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 2, item: '风险与反证', result: { finding: '未发现阻断风险' }, ended_at: '2026-09-17T09:55:40Z' }),
+    attemptRec('lr-a', { attempt_id: 'a1k33', kind: 'item', node: 'explore', round: 1, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 0, item: '技术可行性（返工轮）', result: { finding: '补了反证' }, ended_at: '2026-09-17T10:15:00Z' }),
+    attemptRec('lr-a', { attempt_id: 'a1k34', kind: 'item', node: 'explore', round: 1, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 1, item: '风险与反证（返工轮）', result: { finding: '补了反证' }, ended_at: '2026-09-17T10:15:20Z' }),
     { record_id: 'node:lr-a:dev', record_revision: 2, body: { media_type: 'application/json', value: { summary: '第 2 次实现成果' } }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY' }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY', resolved_inputs_snapshot: { mode: 'record', items: [{ binding: 'from_preflight', producer: 'preflight' }] } } },
   ], attempts: [],
 }
@@ -260,7 +268,11 @@ runState.logical['lr-c'] = {
   last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
   formal_records: null, workspace: WS_A, human_decisions: [], consumed_decisions: {},
 }
-runState.records['lr-c'] = { ok: true, found: true, logical_run_id: 'lr-c', records: [], attempts: [] }
+// 受阻两条路径都要能读出来：节点自己跑出 BLOCKED 结果（记录通道），与运行卡在某一步
+// 但那一步还没有执行记录（运行现况通道）。
+runState.records['lr-c'] = { ok: true, found: true, logical_run_id: 'lr-c', records: [
+  logicalAttempt('lr-c', 'test', 1, { attempt_id: 'a1k9', ended_at: '2026-09-17T12:00:00Z', outcome: 'BLOCKED', outcomePath: '$.verdict', result: { verdict: 'BLOCKED' } }),
+], attempts: [] }
 
 // ── Logical Run lr-p：PAUSED（指导提交走 vwf.run.control）──
 runState.runs.push({ id: 'run-p1', taskId: 'T-P1', name: '完整功能开发', workflowId: 'wf-runs', status: 'PAUSED', reason: 'USER_PAUSE', startedAt: 3300, logical_run_id: 'lr-p', segment: 1, segment_count: 1, logical_state: 'PAUSED' })
@@ -2660,8 +2672,17 @@ test('FIX-105 V-1/V-2：链路按真实运转时序排列；状态以 图标+颜
   // V-1：链路顺序 = attempt 记录里的真实发生时刻（段 1 实现/检查/测试 → 段 2 实现/检查），
   // 不是模板节点顺序。差别在测试节点：节点顺序会把它排到最后，真实时序里它在返工之前。
   const seq = seqOf(chain)
-  assert.deepEqual(seq, ['dev#1', 'review#1', 'test#1', 'dev#2', 'review#2', 'uat#0', 'explore#0', 'synth#0'],
-    '链路按实际运转时序排列（含退回后的重做轮次）：' + seq.join(' → '))
+  assert.deepEqual(seq, ['explore#0', 'explore#0', 'explore#0', 'dev#1', 'review#1', 'test#1', 'explore#0', 'explore#0', 'dev#2', 'review#2', 'uat#0', 'synth#0'],
+    '链路按实际运转时序排列（含退回后的重做轮次与并行组两轮）：' + seq.join(' → '))
+  // 并行组按「段 + 轮次」分批：第一轮 3 项在最前、返工轮 2 项落在测试①之后（真实时刻
+  // 10:15），不能被折回第一轮的位置（10:55 → 09:55）。两批各自带自己的组标题。
+  const groups = Array.from(chain.querySelectorAll('.vwf-chain-group')).map((g) => g.textContent)
+  assert.deepEqual(groups, ['多视角研究 · fanout · 3 items', '多视角研究 · fanout · 2 items'],
+    '并行组两轮各成一块并有各自组标题：' + JSON.stringify(groups))
+  assert.deepEqual(Array.from(chain.children).map((el) => (el.className.includes('vwf-chain-group') ? 'G' : el.dataset.vwfChainNode)).slice(0, 4),
+    ['G', 'explore', 'explore', 'explore'], '第一轮：组标题与三个子任务相邻成组')
+  assert.deepEqual(Array.from(chain.children).map((el) => (el.className.includes('vwf-chain-group') ? 'G' : el.dataset.vwfChainNode)).slice(6, 10),
+    ['test', 'G', 'explore', 'explore'], '返工轮：组标题紧跟测试①、且与它的两个子任务相邻')
   // 用例模板的返工/人工裁决声明与内置「完整功能开发」同形：真实模板跑出来的链路同样会有
   // 回退（countRound 边）与人工裁决门（$human-decision 出边），不是只对着人造夹具成立。
   const builtin = JSON.parse(readFileSync(join(here, '..', '..', '..', 'templates', 'wf-construction-full-feature.json'), 'utf8'))
@@ -2686,7 +2707,9 @@ test('FIX-105 V-1/V-2：链路按真实运转时序排列；状态以 图标+颜
   assert.equal(toneOf(chain, 'uat', '0').cls, 'tone-hwait', '验收节点：人工裁决等待中')
   assert.equal(toneOf(chain, 'uat', '0').glyph, '!', '等待人工裁决用等待图形')
   assert.ok(toneOf(chain, 'uat', '0').text.includes('等待人工裁决'), '等待人工裁决有文字')
-  assert.equal(toneOf(chain, 'explore', '0').cls, 'tone-todo', '未执行节点：尚未开始')
+  assert.equal(toneOf(chain, 'synth', '0').cls, 'tone-todo', '未执行节点：尚未开始')
+  assert.ok(!pick(chain, 'synth', '0').textContent.includes('查看当时的成果'), '未执行节点不提示查看成果')
+  assert.ok(pick(chain, 'explore', '0').textContent.includes('子任务 1'), '并行组子任务在链路里逐项列出')
   await act(async () => {
     dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await flush()
@@ -2698,6 +2721,8 @@ test('FIX-105 V-1/V-2：链路按真实运转时序排列；状态以 图标+颜
   assert.equal(toneOf(blocked, 'dev', '0').cls, 'tone-blocked', '受阻节点在链路里落到受阻色调')
   assert.equal(toneOf(blocked, 'dev', '0').glyph, '⊘', '受阻用独立图形（不落失败色，LOC-030）')
   assert.ok(toneOf(blocked, 'dev', '0').text.includes('阻塞'), '受阻有文字')
+  assert.equal(toneOf(blocked, 'test', '1').cls, 'tone-blocked', '节点自己跑出 BLOCKED 结果同样落受阻色调')
+  assert.ok(toneOf(blocked, 'test', '1').text.includes('阻塞'), '跑出 BLOCKED 的那一步有文字')
   await act(async () => {
     dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await flush()
@@ -2737,8 +2762,12 @@ test('FIX-105 V-1/V-2：链路按真实运转时序排列；状态以 图标+颜
   await openTask('T-P1')
   const paused = await openChain()
   const stopped = toneOf(paused, 'review', '1')
+  assert.equal(stopped.cls, 'tone-interrupted', '中断有自己的色调')
+  assert.equal(stopped.glyph, '○', '中断有自己的图形（不借用失败的 ✕）')
   assert.ok(stopped.text.includes('已中断（未完成）'), '中断的执行如实标注：' + stopped.text)
   assert.ok(!stopped.text.includes('执行失败'), '中断不等于执行失败')
+  const legend2 = Array.from(container.querySelectorAll('.vwf-chain-legend span')).map((s) => s.textContent)
+  assert.ok(legend2.some((x) => x.includes('已中断')), '图例给出中断的含义：' + JSON.stringify(legend2))
   await act(async () => {
     dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await flush()
@@ -2758,17 +2787,18 @@ test('FIX-105 V-2/V-3/V-4：链路图例给全状态词汇；色调只复用已�
     assert.ok(legend.some((x) => x.includes(need)), '图例含状态：' + need)
   }
   const glyphs = legend.map((x) => x.trim().split(/\s+/)[0])
-  assert.deepEqual(glyphs.slice(0, 7), ['✓', '↩', '↻', '⊘', '!', '◆', '●'], '七个状态的图形两两不同：' + JSON.stringify(glyphs))
+  assert.deepEqual(glyphs.slice(0, 8), ['✓', '↩', '↻', '⊘', '○', '!', '◆', '●'], '八个可执行状态的图形两两不同：' + JSON.stringify(glyphs))
   assert.equal(new Set(glyphs).size, glyphs.length, '图例图形不重复')
   // V-4：链路状态色只复用既有语义 token（深浅两主题的对比度口径原样成立，无新增颜色）
   const css = styleText.join('\n')
-  const toneRules = Array.from(css.matchAll(/\.tone-([\w-]+)\s*\{([^}]*)\}/g)).map((m) => [m[1], m[2]])
-  assert.equal(toneRules.length, 8, '每个有颜色的状态各有一处色调定义：' + toneRules.map((r) => r[0]).join(','))
-  for (const [tone, body] of toneRules) {
-    assert.match(body, /--c:var\(--vwf-(ok|warn|accent|err)\)/, '状态色取既有语义 token：' + tone + ' → ' + body)
-  }
-  assert.match(css, /\.tone-hwait \{[^}]*--vwf-warn/, '等待人工裁决用注意色（与详情页 WAITING_HUMAN 同口径）')
-  assert.match(css, /\.tone-hdone \{[^}]*--vwf-ok/, '已裁决用通过色')
+  const toneRules = Array.from(css.matchAll(/\.tone-([\w-]+)\s*\{([^}]*)\}/g)).map((m) => [m[1], m[2].trim()])
+  // 逐个状态钉到它该用的语义 token（只允许「是既有 token」太松：把 ok 写成 err 也能通过）
+  assert.deepEqual(Object.fromEntries(toneRules), {
+    pass: '--c:var(--vwf-ok);', hdone: '--c:var(--vwf-ok);',
+    returned: '--c:var(--vwf-warn);', retry: '--c:var(--vwf-warn);', blocked: '--c:var(--vwf-warn);',
+    interrupted: '--c:var(--vwf-warn);', hwait: '--c:var(--vwf-warn);',
+    running: '--c:var(--vwf-accent);', failed: '--c:var(--vwf-err);',
+  }, '状态色逐项落到既有语义 token（通过/已裁决→ok，进行中→accent，失败→err，其余→warn）')
   // 色调作用域限链路弹窗，不外溢到宿主页面
   for (const [tone] of toneRules) {
     assert.ok(css.includes('.vwf-chain-dialog .tone-' + tone + ' {'), '状态色作用域限链路弹窗：' + tone)
@@ -2791,7 +2821,7 @@ test('FIX-105 V-2/V-3/V-4：链路图例给全状态词汇；色调只复用已�
     for (const d of m[1].matchAll(/(--vwf-[\w-]+)\s*:\s*(#[0-9a-fA-F]{6})/g)) out[d[1]] = d[2]
     return out
   }
-  const toneTokens = ['pass', 'returned', 'retry', 'blocked', 'hwait', 'hdone', 'running', 'failed'].map((tone) => {
+  const toneTokens = ['pass', 'returned', 'retry', 'blocked', 'interrupted', 'hwait', 'hdone', 'running', 'failed'].map((tone) => {
     const body = toneRules.find((r) => r[0] === tone)[1]
     const rule = css.slice(css.indexOf('.vwf-chain-dialog .tone-' + tone))
     return [tone, /--c:var\((--vwf-\w+)\)/.exec(rule)[1]]

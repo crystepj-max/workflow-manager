@@ -519,6 +519,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 .vwf-chain-dialog .tone-returned { --c:var(--vwf-warn); }
 .vwf-chain-dialog .tone-retry { --c:var(--vwf-warn); }
 .vwf-chain-dialog .tone-blocked { --c:var(--vwf-warn); }
+.vwf-chain-dialog .tone-interrupted { --c:var(--vwf-warn); }
 .vwf-chain-dialog .tone-hwait { --c:var(--vwf-warn); }
 .vwf-chain-dialog .tone-running { --c:var(--vwf-accent); }
 .vwf-chain-dialog .tone-failed { --c:var(--vwf-err); }
@@ -594,14 +595,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       returned: ['↩', 'rdAttemptRework'],
       retry: ['↻', 'rdAttemptRetry'],
       blocked: ['⊘', 'rdAttemptBlocked'],
+      interrupted: ['○', 'rdAttemptInterrupted'],
       hwait: [STATUS_SHAPE.wait, 'rdAttemptHumanWait'],
       hdone: ['◆', 'rdAttemptHumanDone'],
       running: [STATUS_SHAPE.run, 'rdAttemptRunning'],
       failed: [STATUS_SHAPE.err, 'rdAttemptFailed'],
       todo: ['—', 'rdNotStarted'],
     }
-    // 链路时序哨兵：从未执行的节点与取不到时间的事件排在链路末尾（批次内仍按模板顺序稳定）
-    const CHAIN_SEG_END = 1e6
+    // 链路时序哨兵：取不到时间的事件与从未执行的节点排在链路末尾（批次内保持模板顺序稳定）
     const CHAIN_T_END = 864e13
     const EDGE_OK = 'var(--vwf-accent)'
     const EDGE_FAIL = 'var(--vwf-err)'
@@ -3968,18 +3969,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // 运行现况指名的节点：等人工裁决的那一步 / 卡住的那一步（都用 head.node，缺失时退回状态现况）
       const waitNode = String(head.node || (snapState && snapState.node) || '')
       const humanWaitAt = humanWaiting ? waitNode : ''
+      // 受阻节点：运行现况指名的优先；评价基线冲突那条 BLOCKED 路径不写 node（host.js 里
+      // 只落 status/reason/decision_id），退回「当前阶段」定位卡住的那一步；两者都取不到时
+      // 不铺开标注（不猜哪一步受阻）。
       const blockedAt = (headStatus === 'BLOCKED' || String((lr && lr.lifecycle && lr.lifecycle.state) || '') === 'BLOCKED')
-        ? waitNode : ''
+        ? String(waitNode || phaseNodeId || '') : ''
       // 这一步是不是正在等人工裁决：运行在等待态、且指名的就是它（指不出节点时按「人工裁决门」
       // 保守认定——宁可选「等待中」，也不把还在等的门说成已裁决）
-      const waitingAt = (nodeId) => !!humanWaiting && (!humanWaitAt || humanWaitAt === nodeId)
+      const waitingAt = (nodeId) => humanWaiting && (!humanWaitAt || humanWaitAt === nodeId)
       // 一次执行的状态：[色调, 文案键]。判定顺序 = 事实优先级：未收束 → 收束异常 →
       // 回退性质（技术重试 / 业务返工 / 退回边）→ 阻塞 → 人工裁决 → 通过。
       const attemptState = (v, latest) => {
         const st = String(v.status || '')
         if (st === 'running') return ['running', 'rdAttemptRunning']
-        // 中断（宿主收尾时把遗留 running 记终态）不是「执行失败」，如实说是被中断未完成
-        if (st === 'interrupted') return ['failed', 'rdAttemptInterrupted']
+        // 中断（宿主收尾时把遗留 running 记终态）不是「执行失败」：用自己的图形，别让
+        // ✕ 同时背「失败」和「中断」两种意思，图例才说得清。
+        if (st === 'interrupted') return ['interrupted', 'rdAttemptInterrupted']
         if (st === 'failed' || st === 'rejected') return ['failed', 'rdAttemptFailed']
         const rk = String(v.retry_kind || '')
         if (rk === 'technical_retry') return ['retry', 'rdAttemptRetry']
@@ -3999,7 +4004,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // 未执行节点的占位状态：正等人工裁决 / 正受阻 / 正在执行 都要如实标注，不能一律「尚未开始」
       const pendingState = (nodeId) => {
         if (waitingAt(nodeId)) return ['hwait', 'rdAttemptHumanWait']
-        if (blockedAt && blockedAt === nodeId) return ['blocked', 'rdAttemptBlocked']
+        if (blockedAt === nodeId) return ['blocked', 'rdAttemptBlocked']
         if (headStatus === 'running' && nodeId === phaseNodeId) return ['running', 'rdAttemptRunning']
         return ['todo', 'rdNotStarted']
       }
@@ -4080,23 +4085,35 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             }, base))
           })
           // 并行组：记录通道下也给出组标题（原「节点 / 结果」表在 agents 行 >1 时的口径），
-          // 紧挨它的孩子发出，整批取批首时刻——一个并行组在链路里始终是连续的一块。
-          let iw = items.length ? batchOf(items) : null
-          if (iw && iw[1] === CHAIN_T_END) iw = whereOf(n.id)
-          if (items.length > 1) out.push({ key: 'g' + n.id, group: label + ' · fanout · ' + items.length + ' items', o: at(iw[0], iw[1]) })
-          items.forEach((a, i) => {
+          // 紧挨它的孩子发出、整批取批首时刻——同一轮并行组在链路里始终是连续的一块。
+          // 按「段 + 轮次」分批而不是把该节点的全部子项并成一批：返工后重跑出来的新一轮
+          // 是独立一批（内置 wf-explore 的 evaluate → orchestrate NEEDS_RESEARCH 就会重跑
+          // fanout 的 research），必须落在它真正发生的时刻，不能被折回第一轮的位置。
+          const batches = new Map()
+          for (const a of items) {
             const v = a.value
-            out.push(Object.assign({
-              key: 'i' + n.id + i,
-              attempt: 0,
-              child: i + 1,
-              o: at(iw[0], iw[1]),
-              tone: v.status === 'completed' ? 'pass' : (v.status === 'failed' ? 'failed' : 'running'),
-              state: v.status === 'completed' ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptFailed') : t('rdAttemptRunning')),
-              note: String(v.error || '') || (v.item ? String(v.item).slice(0, 80) : ''),
-              meta: t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }),
-            }, base))
-          })
+            const k = (Number(v.segment) || 0) + ':' + (Number(v.round) || 0)
+            if (!batches.has(k)) batches.set(k, [])
+            batches.get(k).push(a)
+          }
+          for (const [k, rows] of batches) {
+            let w = batchOf(rows)
+            if (w[1] === CHAIN_T_END) w = whereOf(n.id)
+            if (rows.length > 1) out.push({ key: 'g' + n.id + k, group: label + ' · fanout · ' + rows.length + ' items', o: at(w[0], w[1]) })
+            rows.forEach((a, i) => {
+              const v = a.value
+              out.push(Object.assign({
+                key: 'i' + n.id + k + i,
+                attempt: 0,
+                child: i + 1,
+                o: at(w[0], w[1]),
+                tone: v.status === 'completed' ? 'pass' : (v.status === 'failed' ? 'failed' : 'running'),
+                state: v.status === 'completed' ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptFailed') : t('rdAttemptRunning')),
+                note: String(v.error || '') || (v.item ? String(v.item).slice(0, 80) : ''),
+                meta: t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }),
+              }, base))
+            })
+          }
         })
         // 当前节点表未覆盖的 agents 行（模板取不到、或状态里多出节点）：按名归组如实追加
         for (const a of agents) {
@@ -4104,7 +4121,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           const name = agentNameOf(a.label)
           pushAgents(agents.filter((x) => takenAgents.indexOf(x) < 0 && agentNameOf(x.label) === name), 'u' + name, name, '')
         }
-        return out.sort((x, y) => x.o[0] - y.o[0] || x.o[1] - y.o[1] || x.o[2] - y.o[2])
+        return out.sort((x, y) => x.o[0] - y.o[0] || x.o[1] - y.o[1])
       }
       // 点选链路一条：关闭弹窗 → 定位到该节点 → 右侧当前结果切到这一次执行（V-3）
       const pickChain = (e) => {
