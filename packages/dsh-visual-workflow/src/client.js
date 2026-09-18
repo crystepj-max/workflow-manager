@@ -4362,7 +4362,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (br.length) {
           rt.push(h('div', { key: 'br', style: { marginTop: 6 } },
             h('div', { className: 'vwf-muted-sm' }, t('rdActivityBaseline')),
-            h('div', null, br.map((x, i) => h('div', { key: 'br' + i, className: 'vwf-muted-sm' }, 'R' + (x.revision || i + 1) + ' · ' + fmtAt(x.at))))))
+            h('div', null, br.map((x, i) => h('div', { key: 'br' + i, className: 'vwf-muted-sm' }, t('rdVersionShort', { n: x.revision || i + 1 }) + ' · ' + fmtAt(x.at))))))
         }
         const logs = (snapState && snapState.logs) || []
         rt.push(h('div', { key: 'lg', style: { marginTop: 6 } },
