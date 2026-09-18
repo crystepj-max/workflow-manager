@@ -4321,7 +4321,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   ),
                   e.note ? h('span', { className: 'vwf-chain-note' }, e.note) : null,
                   e.meta ? h('span', { className: 'vwf-muted-sm' }, e.meta) : null,
-                  e.tone === 'todo' || !e.id ? null : h('span', { className: 'vwf-muted-sm' }, t('rdChainOpenResult'))
+                  // 只有真有一次执行（或一个子任务）才提示「查看当时的成果」：
+                  // 占位行（等人工 / 受阻 / 未执行）没有成果可看，不给出空承诺。
+                  !e.id || !(e.attempt || e.child) ? null : h('span', { className: 'vwf-muted-sm' }, t('rdChainOpenResult'))
                 )
               )))),
             h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
