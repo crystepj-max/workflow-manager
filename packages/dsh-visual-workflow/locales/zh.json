@@ -359,6 +359,7 @@
   "rdBusinessOutcomeNone": "该节点未声明业务结果路径",
   "rdGoLatest": "回到最新执行",
   "rdFanoutGroup": "并行组 · {n} 个子任务",
+  "rdFanoutRound": "第 {n} 轮",
   "rdFanoutChild": "子任务 {n}",
   "rdFanoutIndependent": "子任务各自独立完成，不会相互覆盖结果。",
   "rdFanoutIncomplete": "未完成",

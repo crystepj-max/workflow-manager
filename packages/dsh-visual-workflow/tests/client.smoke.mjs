@@ -2677,8 +2677,8 @@ test('FIX-105 V-1/V-2：链路按真实运转时序排列；状态以 图标+颜
   // 并行组按「段 + 轮次」分批：第一轮 3 项在最前、返工轮 2 项落在测试①之后（真实时刻
   // 10:15），不能被折回第一轮的位置（10:55 → 09:55）。两批各自带自己的组标题。
   const groups = Array.from(chain.querySelectorAll('.vwf-chain-group')).map((g) => g.textContent)
-  assert.deepEqual(groups, ['多视角研究 · fanout · 3 items', '多视角研究 · fanout · 2 items'],
-    '并行组两轮各成一块并有各自组标题：' + JSON.stringify(groups))
+  assert.deepEqual(groups, ['多视角研究 · fanout · 3 items · 第 1 轮', '多视角研究 · fanout · 2 items · 第 2 轮'],
+    '并行组两轮各成一块、组标题带轮次可分辨：' + JSON.stringify(groups))
   assert.deepEqual(Array.from(chain.children).map((el) => (el.className.includes('vwf-chain-group') ? 'G' : el.dataset.vwfChainNode)).slice(0, 4),
     ['G', 'explore', 'explore', 'explore'], '第一轮：组标题与三个子任务相邻成组')
   assert.deepEqual(Array.from(chain.children).map((el) => (el.className.includes('vwf-chain-group') ? 'G' : el.dataset.vwfChainNode)).slice(6, 10),

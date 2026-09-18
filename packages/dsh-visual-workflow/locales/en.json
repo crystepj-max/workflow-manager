@@ -359,6 +359,7 @@
   "rdBusinessOutcomeNone": "This node declares no business outcome path",
   "rdGoLatest": "Back to latest attempt",
   "rdFanoutGroup": "Parallel group · {n} subtasks",
+  "rdFanoutRound": "round {n}",
   "rdFanoutChild": "Subtask {n}",
   "rdFanoutIndependent": "Subtasks complete independently and never overwrite each other's results.",
   "rdFanoutIncomplete": "Not finished",

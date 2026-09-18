@@ -4096,10 +4096,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             if (!batches.has(k)) batches.set(k, [])
             batches.get(k).push(a)
           }
+          // 同一节点有不止一批时在组标题上标出轮次：两轮的标题与子任务名会一样，
+          // 不标就容易被读成重复的一块。
+          const multi = batches.size > 1
           for (const [k, rows] of batches) {
             let w = batchOf(rows)
             if (w[1] === CHAIN_T_END) w = whereOf(n.id)
-            if (rows.length > 1) out.push({ key: 'g' + n.id + k, group: label + ' · fanout · ' + rows.length + ' items', o: at(w[0], w[1]) })
+            const tag = multi ? ' · ' + t('rdFanoutRound', { n: (Number(rows[0].value.round) || 0) + 1 }) : ''
+            if (rows.length > 1) out.push({ key: 'g' + n.id + k, group: label + ' · fanout · ' + rows.length + ' items' + tag, o: at(w[0], w[1]) })
             rows.forEach((a, i) => {
               const v = a.value
               out.push(Object.assign({
