@@ -2784,6 +2784,18 @@ test('FIX-105 V-2/V-3/V-4：链路图例给全状态词汇；色调只复用已�
   assert.equal(container.querySelectorAll('.vwf-rd-body .vwf-card').length, 1, '右侧仍只有一个选中节点详情卡')
   assert.ok(container.querySelector('.vwf-rd-body').textContent.includes('这是返工前的成果'), '点选历史下游节点如实标注上一轮成果')
   await backToList()
+  // 边界：逻辑运行读不到（T-E1）时链路仍要能打开，不因缺 lr 报错或留白
+  await openTask('T-E1')
+  await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过')))
+  const noLr = container.querySelector('.vwf-chain')
+  assert.ok(noLr, '逻辑运行读不到时链路仍渲染')
+  assert.ok(noLr.querySelectorAll('.vwf-chain-entry').length >= 1, '缺记录时链路按模板节点占位：' + noLr.querySelectorAll('.vwf-chain-entry').length)
+  assert.ok(container.querySelector('.vwf-chain-legend'), '图例照常可见')
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  await backToList()
 })
 
 test('FEAT-85 详情：结果 / Lifecycle / 完成类型分层显示（不塌缩为成功失败徽标）', async () => {
