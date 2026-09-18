@@ -22,6 +22,7 @@ import {
   STATUS_MERGED,
 } from './local-task-registry.mjs'
 import { runsRoot } from './workspace-paths.mjs'
+import { collectMergeFacts } from './registry-reconcile.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -73,6 +74,14 @@ export function collectLocalCandidates({ repo, blacklist = [] }) {
   const byId = new Map(tasks.map((t) => [t.task_id, t]))
   const openRuns = scanOpenRuns(repo)
   const blacklistSet = new Set(blacklist)
+  // 合并事实：以主干 git 历史为权威源，覆盖登记册状态同步滞后（FIX-76 / LOC-028 复现风险）
+  // 非 git 仓库（如测试夹具）无主干历史时降级为空 Map，仅以登记册状态为准，不阻断采集
+  let mergeFacts
+  try {
+    mergeFacts = collectMergeFacts(repo, 'main')
+  } catch {
+    mergeFacts = new Map()
+  }
 
   const candidates = []
   const excluded = []
@@ -98,10 +107,13 @@ export function collectLocalCandidates({ repo, blacklist = [] }) {
     }
     const unmetDep = (record.deps || []).find((d) => {
       const dep = byId.get(d)
-      return !dep || dep.status !== STATUS_MERGED
+      const gitMerged = mergeFacts.has(d)
+      if (gitMerged) return false // 主干有合并痕迹 → 覆盖登记册同步滞后，放行
+      if (!dep) return true // 登记册无此依赖且无 git 事实 → 未满足
+      return dep.status !== STATUS_MERGED // 否则以登记册状态为准
     })
     if (unmetDep) {
-      exclude(`依赖未满足（${unmetDep} 登记册未记合并）`)
+      exclude(`依赖未满足（${unmetDep} 登记册未记合并且主干无合并痕迹）`)
       continue
     }
     if (record.env_role === '成员') {
