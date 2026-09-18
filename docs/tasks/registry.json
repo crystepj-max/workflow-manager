@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 68,
+  "revision": 69,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -1810,7 +1810,36 @@
       "created_at": "2026-09-17T15:01:28.603Z",
       "updated_at": "2026-09-17T15:04:13.836Z",
       "spec_path": "docs/tasks/specs/FIX-97-vwf-run-host-fix/task-spec-V1.md"
+    },
+    {
+      "task_id": "FEAT-103",
+      "type": "FEAT",
+      "remote": "cnb#103",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "角色列表行创建入口与内置角色简介 + 运行详情链路弹窗与信息整合",
+      "slug": "role-row-create-run-chain-dialog",
+      "source": "集成真机验收差距第四批（松哥逐条给出，原型<>现状六条）",
+      "source_ref": "docs/tasks/specs/FEAT-103-role-row-create-run-chain-dialog/task-spec-V1.md",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P1",
+      "env_group": "FEAT-103",
+      "env_role": "独立",
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-18T15:28:58.144Z",
+      "updated_at": "2026-09-18T15:28:58.144Z",
+      "spec_path": "docs/tasks/specs/FEAT-103-role-row-create-run-chain-dialog/task-spec-V1.md"
     }
   ],
-  "updated_at": "2026-09-18T13:49:40.551Z"
+  "updated_at": "2026-09-18T15:28:58.144Z"
 }
