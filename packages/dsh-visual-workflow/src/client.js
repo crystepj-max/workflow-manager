@@ -4069,7 +4069,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         h('div', { className: 'vwf-rd-scroll' },
         h('div', { className: 'vwf-root' },
         lrError ? h('div', { className: 'vwf-err-line' }, t('dashIntegrityFailed', { err: lrError })) : null,
-        recErr ? h('div', { className: 'vwf-note warn' }, t('rdRecordsUnavailable')) : null,
+        // B8（FIX-107）：降级说明读用户语言的文案，并保留就地重试入口——
+        // 重试即重取逻辑运行摘要与记录（reload → wsTick），不新增 RPC、不改读取口径。
+        recErr ? h('div', { className: 'vwf-note warn' },
+          h('div', { className: 'vwf-row', style: { gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+            h('span', null, t('rdRecordsUnavailable')),
+            h('button', { className: 'vwf-btn sm', onClick: reload }, t('rdRecordsRetry'))
+          )
+        ) : null,
         controlErr ? h('div', { className: 'vwf-err-line' }, controlErr) : null,
         h('div', { className: 'vwf-rd-main' },
           // 左栏：运行定位（工作空间 / 模板 / 当前阶段 / 状态）+ 节点目录（只用于定位）
