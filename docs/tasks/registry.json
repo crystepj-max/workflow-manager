@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 79,
+  "revision": 80,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -1929,7 +1929,38 @@
       "branch_retained": null,
       "created_at": "2026-09-18T18:05:53.882Z",
       "updated_at": "2026-09-18T18:05:53.882Z"
+    },
+    {
+      "task_id": "FIX-107",
+      "type": "FIX",
+      "remote": "cnb#107",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "运行列表/详情页技术名词全面用户化",
+      "slug": "jargon-free-run-surfaces",
+      "source": "集成验收缺陷第二批（松哥确认清单，cnb#107）",
+      "source_ref": "docs/tasks/specs/FIX-107-jargon-free-run-surfaces/task-spec-V1.md",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P1",
+      "env_group": "FIX-107",
+      "env_role": "独立",
+      "deps": [
+        "FIX-105"
+      ],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-18T18:08:09.672Z",
+      "updated_at": "2026-09-18T18:08:09.672Z",
+      "spec_path": "docs/tasks/specs/FIX-107-jargon-free-run-surfaces/task-spec-V1.md"
     }
   ],
-  "updated_at": "2026-09-18T17:56:19.243Z"
+  "updated_at": "2026-09-18T18:08:09.672Z"
 }
