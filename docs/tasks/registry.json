@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 66,
+  "revision": 68,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -1736,9 +1736,38 @@
       "source": "集成真机验收差距第二批（松哥逐条给出，原型<>现状三条）",
       "source_ref": "docs/tasks/specs/FEAT-101-role-actions-canvas-defaults/task-spec-V1.md",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "等待验收",
       "priority": "P1",
       "env_group": "FEAT-101",
+      "env_role": "独立",
+      "deps": [],
+      "branch": "dev-feat-101-r1",
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-18T07:05:16.269Z",
+      "updated_at": "2026-09-18T07:38:47.448Z",
+      "spec_path": "docs/tasks/specs/FEAT-101-role-actions-canvas-defaults/task-spec-V1.md"
+    },
+    {
+      "task_id": "FEAT-102",
+      "type": "FEAT",
+      "remote": "cnb#102",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "角色简介选填属性、内置基于此角色创建、运行详情布局照原型",
+      "slug": "role-summary-run-detail-layout",
+      "source": "集成真机验收差距第三批（松哥逐条给出，原型<>现状）",
+      "source_ref": "docs/tasks/specs/FEAT-102-role-summary-run-detail-layout/task-spec-V1.md",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P1",
+      "env_group": "FEAT-102",
       "env_role": "独立",
       "deps": [],
       "branch": null,
@@ -1749,10 +1778,10 @@
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
-      "created_at": "2026-09-18T07:05:16.269Z",
-      "updated_at": "2026-09-18T07:05:16.269Z",
-      "spec_path": "docs/tasks/specs/FEAT-101-role-actions-canvas-defaults/task-spec-V1.md"
+      "created_at": "2026-09-18T13:49:40.551Z",
+      "updated_at": "2026-09-18T13:49:40.551Z",
+      "spec_path": "docs/tasks/specs/FEAT-102-role-summary-run-detail-layout/task-spec-V1.md"
     }
   ],
-  "updated_at": "2026-09-18T07:05:16.269Z"
+  "updated_at": "2026-09-18T13:49:40.551Z"
 }
