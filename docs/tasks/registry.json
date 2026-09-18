@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 76,
+  "revision": 79,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -59,12 +59,12 @@
         "commit": "2f2fc550e8655a42d756b16c1d456097ea6f76f9",
         "merged_at": "2026-09-17T15:21:57.001Z"
       },
-      "github_sync": "pending",
+      "github_sync": "synced#203",
       "evidence_expires_at": "2026-09-24T15:21:57.001Z",
       "evidence_cleared_at": null,
       "branch_retained": true,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-17T15:21:57.202Z",
+      "updated_at": "2026-09-18T18:05:48.699Z",
       "spec_path": "docs/tasks/archive/CHORE-37/task-spec-V1.md"
     },
     {
@@ -91,12 +91,12 @@
         "commit": "f42c829c0d0b349aa76985e4c3f46101a40aa300",
         "merged_at": "2026-09-18T17:32:22.445Z"
       },
-      "github_sync": "pending",
+      "github_sync": "synced#204",
       "evidence_expires_at": "2026-09-25T17:32:22.445Z",
       "evidence_cleared_at": null,
       "branch_retained": true,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-18T17:32:22.736Z",
+      "updated_at": "2026-09-18T18:05:48.703Z",
       "spec_path": "docs/tasks/archive/CHORE-38/task-spec-V1.md"
     },
     {
@@ -1901,6 +1901,34 @@
       "created_at": "2026-09-18T17:56:19.243Z",
       "updated_at": "2026-09-18T17:56:19.243Z",
       "spec_path": "docs/tasks/specs/FIX-105-execution-chain-order-status/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-106",
+      "type": "CHORE",
+      "remote": "cnb#106",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "收口交付动作 close-task 实现：合并后关闭远端 issue 并落账",
+      "slug": "close-task-issue",
+      "source": "会话录入",
+      "source_ref": "",
+      "baseline": "V1",
+      "status": "定义中",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-18T18:05:53.882Z",
+      "updated_at": "2026-09-18T18:05:53.882Z"
     }
   ],
   "updated_at": "2026-09-18T17:56:19.243Z"
