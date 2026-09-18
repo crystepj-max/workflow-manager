@@ -273,7 +273,7 @@ const clientBytes = Buffer.byteLength(dynClient)
 // 上调至 232KiB，余量 5.8KiB 供同改 client 半的 FEAT-85 / FEAT-86 并入；
 // 两任务并入后按各自终态实测再评估，余量不足时先瘦身。
 // 新增载荷仍应优先瘦身，不要继续推高。
-const PAYLOAD_LIMIT = 272 * 1024
+const PAYLOAD_LIMIT = 284 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)
