@@ -1,0 +1,8 @@
+{
+  "version": "2026-09-01",
+  "currency": "USD",
+  "source": "explicit-test-config",
+  "models": {
+    "p1/m1": { "input_per_1k": 0.01, "output_per_1k": 0.03 }
+  }
+}

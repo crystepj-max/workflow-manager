@@ -13,8 +13,11 @@ import projectionCore from './projection-core.cjs';
 // 角色库内核（候选二深化）：内置角色清单唯一事实源 = dsh/roles/builtin-roles.json；
 // 正文安全读取与「被引用角色文件打包」共享内核实现（含自定义角色——dispatcher 等）。
 import roleLibrary from './role-library.cjs';
+import { createRequire } from 'node:module';
 import exploreCoverageCore from './explore-coverage.cjs';
 import { runtimeHelpersSource } from './human-completion.mjs';
+
+const nodeRequire = createRequire(import.meta.url);
 
 const { buildSnapshot, readRoleFileSafe, collectReferencedRoleFiles } = roleLibrary;
 const { projectToVwf } = projectionCore;
@@ -22,6 +25,16 @@ const { projectToVwf } = projectionCore;
 const { validateBlueprint, compileInputSizeViolation, COND_RE, HUMAN_DECISION_ID, HD_CONTROL_RESULTS, HD_PACKAGE_REQUIRED, HD_UNKNOWN, HD_EVENT_RECORD_KIND, HD_EVENT_TRIGGER, effectiveHeteroMode, RETRY_POLICY_DEFAULTS, RETRY_POLICY_LIMITS, validateRetryPolicy } = validatorCore;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const STATE_RECOVERY_CORE_PATH = path.join(__dirname, 'state-recovery-core.cjs');
+
+// LOC-044：编译期内联 state-recovery-core 函数体（自包含脚本，禁止手写副本）
+function stateRecoveryCoreSourceLines() {
+  let src = fs.readFileSync(STATE_RECOVERY_CORE_PATH, 'utf8');
+  src = src.replace(/^'use strict'\s*\n/, '');
+  src = src.replace(/\nmodule\.exports\s*=\s*\{[\s\S]*\}\s*;?\s*$/, '');
+  // 去掉注释行：内联进沙箱脚本后不得含 require/process 等字样（generate.test 白名单门禁）
+  return src.trim().split('\n').filter((line) => !/^\s*\/\//.test(line));
+}
 const DEFAULT_TPL_DIR = path.join(__dirname, '..', 'templates');
 const DEFAULT_OUT_DIR = path.join(__dirname, '..', '.generated');
 const DEFAULT_MANIFEST_PATH = path.join(__dirname, '..', 'dsh', 'roles', 'builtin-roles.json');
@@ -153,6 +166,44 @@ function evaluationBaselineDecl(bp) {
   return { artifact: artifact, digestField: digestField, producer: producerNode }
 }
 
+let _schemaProtocolEmbedCache = null
+function schemaProtocolRuntimeSource() {
+  if (!_schemaProtocolEmbedCache) {
+    const raw = fs.readFileSync(path.join(__dirname, 'schema-protocol-core.cjs'), 'utf8')
+    _schemaProtocolEmbedCache = raw.replace(/module\.exports[\s\S]*$/, '').trim()
+  }
+  return _schemaProtocolEmbedCache
+}
+
+function buildSchemaProtocolEmbedLines(bp) {
+  const body = schemaProtocolRuntimeSource()
+  return [
+    'const __SP__ = (function(){',
+    ...body.split('\n').map((line) => '  ' + line),
+    '  return { validateInstanceSimple, instanceValid, legacyInstanceValid, resolveProtocol, checkProtocolGate, buildRuntimeEnvelope, freezeProtocolSnapshot, PROTOCOL_VERSION };',
+    '})();',
+    'const __BP_PROTOCOL__ = ' + JSON.stringify(bp.protocol || null),
+    'const __SCRIPT_DIGEST__ = __digest({ id: ' + JSON.stringify(bp.id) + ', protocol: __BP_PROTOCOL__ })',
+    'function schemaInstanceMode() { return (PROTOCOL_SNAPSHOT && PROTOCOL_SNAPSHOT.mode === \'legacy-unversioned\') ? \'legacy\' : \'1.0\' }',
+    'function validateNodeInstance(stage, value) {',
+    '  const sch = BYID[stage] && BYID[stage].output && BYID[stage].output.schema',
+    '  if (!sch) return null',
+    '  const mode = schemaInstanceMode()',
+    '  const ok = mode === \'legacy\' ? __SP__.legacyInstanceValid(sch, value) : __SP__.instanceValid(sch, value, mode)',
+    '  if (ok) return null',
+    '  const errs = __SP__.validateInstanceSimple(sch, value, mode)',
+    '  return errs.length ? errs[0] : \'schema 校验失败\'',
+    '}',
+    'function schemaGateBeforeAgent(stage) {',
+    '  const snap = PROTOCOL_SNAPSHOT || {}',
+    '  const decl = snap.mode === \'legacy-unversioned\' ? null : { version: snap.protocol_version, required_capabilities: snap.required_capabilities || [] }',
+    '  const gate = __SP__.checkProtocolGate(__SP__.resolveProtocol({ protocol: decl }))',
+    '  if (gate.length) return gate[0].message',
+    '  return null',
+    '}',
+  ]
+}
+
 export function compileBlueprint(bp, opts = {}) {
   // 编译输入尺寸闸门（#131）：CLI compile 不做蓝图校验，vwf.script / wf_run 的临时图
   // 直达此处——主闸必须在编译器入口，保证任何进入编译的文档响应必小于通道上限。
@@ -223,6 +274,8 @@ export function compileBlueprint(bp, opts = {}) {
     'const SOURCE_REVISION = A.source_revision || null',
     // LOC-013：宿主经 args.workspace_mode 注入 #93 隔离模式（ISOLATED_READ 时 source 只读）
     'const WS_MODE = A.workspace_mode || null',
+    // LOC-041：宿主探测的节点隔离保证（enforced | unavailable）
+    'const ISOLATION_GUARANTEE = A.isolation_guarantee || \'unavailable\'',
     'const NODES = ' + JSON.stringify(bp.nodes),
     'const EDGES = ' + JSON.stringify(bp.edges),
     // #79：续跑快照修订仅允许更换 Provider/Model——宿主经 args.model_overrides 注入
@@ -299,16 +352,22 @@ export function compileBlueprint(bp, opts = {}) {
     'const ROLE_DEFS = ' + JSON.stringify(builtinRoleDefs),
     'const BYID = {}',
     'for (const n of NODES) BYID[n.id] = n',
+    ...buildSchemaProtocolEmbedLines(bp),
+    // LOC-044：状态/恢复纯逻辑内核（state-recovery-core.cjs 编译期内联）
+    ...stateRecoveryCoreSourceLines(),
     // #80 暂停/中断恢复现场：每个节点完成路由后输出检查点行（current/results/history 全量）。
     // 引擎取消后脚本返回值被强制丢弃（value=null），宿主据此行重建 resume 载荷；
     // 解析失败或缺失时宿主诚实降级（要求人工指定 entry，不猜现场）。
     // LOC-031：检查点保留已耗技术预算（tb）与跨节点激活接续键（carry）——恢复不重置已耗用量。
-    'function pwCk(next) { try { log(\'[pw-ckpt]\' + JSON.stringify({ c: next, r: results, h: history, rd: round, fb: feedback, bu: budgetUsed, mr: maxRounds, ds: decisionSeq, tb: { u: actUsed, g: actGrants, m: autoUsed(), mg: autoMsGrant, p: RETRY_POLICY, carry: carryKey ? { stage: carryStage, key: carryKey } : null } })) } catch (e) { /* 检查点失败不影响运行 */ } }',
+    'function pwCk(next) { try { log(formatCheckpointLogLine(buildCheckpointCompact({ entry: next, results: results, history: history, round: round, feedback: feedback, budgetUsed: budgetUsed, maxRounds: maxRounds, decisionSeq: decisionSeq, technicalBudget: { u: actUsed, g: actGrants, m: autoUsed(), mg: autoMsGrant, p: RETRY_POLICY, carry: carryKey ? { stage: carryStage, key: carryKey } : null }, protocolSnapshot: PROTOCOL_SNAPSHOT }))) } catch (e) { /* 检查点失败不影响运行 */ } }',
     // LOC-029 逐次 attempt 事件：每次真实调用（含 fanout item 与技术重试）在调用前后输出
     // [vwf-attempt] 行，宿主据此向 Formal Records Store 提交独立、可恢复且不重复的执行
     // 记录（attempt_id 由宿主按段号+序号分配并持久化；同键同内容重放幂等）。逻辑步骤
     // （折叠/聚合）以 a:'l' 单独标识，不与真实调用混淆。旧宿主忽略未知行，不影响运行。
     'let AWK = 0',
+    // LOC-043：下一节点首次调用的 retry_kind（业务返工由 countRound 边写入；技术重试由 visitCalls 内循环判定）
+    'const pendingRetryKind = {}',
+    'let lastAttRk = \'normal\'',
     'function attLog(ev) { try { log(\'[vwf-attempt]\' + JSON.stringify(ev)) } catch (e) { /* 证据事件失败不影响编排 */ } }',
     'function attEnd(n, r, t, s, x, extra) { attLog(Object.assign({ a: \'e\', k: AWK, n: n, r: r, t: t, s: s }, x === undefined ? {} : { x: String(x).slice(0, 500) }, extra || {})) }',
     // LOC-035 产物清单：节点完成时声明 output.files（及 fanout 动态条目）供宿主核验
@@ -510,6 +569,9 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (WS) s += \'\\n- workspace 路径：\' + WS + \'（#93 隔离工作区，其下 source=业务源码、records=Formal Records、tmp/build/cache=按 Run 隔离资源）\'',
     '  if (RECORDS) s += \'\\n- records 路径：\' + RECORDS + \'（Formal Records 证据记录目录，业务证据写入此目录）\'',
     '  if (A.workspace_capability && !(opts && opts.hideCapability)) s += \'\\n- workspace RPC 能力令牌（调用 vwf.workspace.* / vwf_workspace 时必须原样携带）：\' + A.workspace_capability + \'（仅限本 Run 使用，禁止用于其他 Run 的 taskId）\'',
+    '  if (ISOLATION_GUARANTEE) s += \'\\n- 节点隔离保证等级（LOC-041）：\' + ISOLATION_GUARANTEE + (ISOLATION_GUARANTEE === \'enforced\' ? \'（宿主已落实文件/进程边界，可参与正式独立 Proof）\' : \'（强制隔离不可用：不得签发正式独立 Proof，只能查看非独立结果）\')',
+    '  const _nc = n.node_capabilities',
+    '  if (_nc && typeof _nc === \'object\') s += \'\\n- 本节点声明能力（node_capabilities，已由宿主裁剪）：\' + JSON.stringify(_nc)',
     '  if (A.guidance_text) s += \'\\n【用户指导（用户暂停期间补充的执行指导，必须遵循）】\\n\' + A.guidance_text + \'\\n\'',
     ...(ebDecl ? ['  if (EB && ebRef && nodeId !== EB.producer) s += ebNote(nodeId)'] : []),
     '  s += \'\\n- 当前节点：\' + (n.label || nodeId) + \'\\n- 完成本节点后更新 \' + RUNDIR + \'/STATE.md（stage / round / status / updated，时间用 date -u +%FT%TZ）\\n\'',
@@ -638,9 +700,7 @@ export function compileBlueprint(bp, opts = {}) {
     // LOC-030：受阻返回体（status=BLOCKED 非终态）：termination 显式描述 + blocked 现场
     //（原因码/失败节点/已耗额度/未解决问题原样保留），不冒充成功也不挂人工决策。
     'function blockedRun(term, failedNode, lastOutcome, extra) {',
-    '  const b = { reason_code: term.reason_code, business_outcome: term.business_outcome, resumable: term.resumable === true, resume_node: term.resume_node, failed_node: failedNode || null, last_outcome: lastOutcome === undefined ? null : lastOutcome }',
-    '  if (extra && typeof extra === \'object\') Object.assign(b, extra)',
-    '  return { status: \'BLOCKED\', taskId: TASK, round: round, results: results, history: history, completion: null, budgetUsed: budgetUsed, maxRounds: maxRounds, termination: term, blocked: b }',
+    '  return buildBlockedRunBody({ termination: term, failedNode: failedNode, lastOutcome: lastOutcome, blockedExtra: extra, taskId: TASK, round: round, results: results, history: history, budgetUsed: budgetUsed, maxRounds: maxRounds })',
     '}',
     'const HD_ID = ' + JSON.stringify(HUMAN_DECISION_ID),
     'const HD_CONTROL = ' + JSON.stringify(HD_CONTROL_RESULTS),
@@ -754,7 +814,7 @@ export function compileBlueprint(bp, opts = {}) {
     '    decision_package: pkg, control_event: ev, blocked_edge: blockedEdge || null,',
     '    result: outcome == null ? null : outcome, results: results, history: history, round: round,',
     '    budgetUsed: budgetUsed, maxRounds: maxRounds,',
-    '    resume: { entry: nodeId, decision_id: decisionId, startRound: round, history: history, feedback: feedback, results: results, blocked_edge: blockedEdge || null, budgetUsed: budgetUsed, maxRounds: maxRounds, decisionSeq: decisionSeq }',
+    '    resume: buildHumanWaitResume({ entry: nodeId, decisionId: decisionId, round: round, history: history, feedback: feedback, results: results, blockedEdge: blockedEdge || null, budgetUsed: budgetUsed, maxRounds: maxRounds, decisionSeq: decisionSeq, technicalBudget: null })',
     '  }',
     '  halt.technical_budget = technicalBudgetSnapshot(extra && extra.activation_key)',
     '  halt.resume.technical_budget = halt.technical_budget',
@@ -771,6 +831,7 @@ export function compileBlueprint(bp, opts = {}) {
     '  const npQualifies = !!e && !countsBudget(e) && (e.to === fromId || Object.prototype.hasOwnProperty.call(results, e.to))',
     '  const entry = { round: round, stage: fromId, from: fromId, to: e ? e.to : null, outcome: e ? e.outcome : undefined, countRound: countsBudget(e) }',
     '  if (npQualifies) entry.nps = noProgressBase(fromId, e.outcome === undefined ? null : e.outcome)',
+    '  if (e && countsBudget(e) && e.to) pendingRetryKind[e.to] = \'business_rework\'',
     '  history.push(entry)',
     '}',
     'function consumeOrHalt(fromId, outcome, e) {',
@@ -828,6 +889,7 @@ export function compileBlueprint(bp, opts = {}) {
     '  if (res && res.verified_branch === expectedBranch && headOk && candOk) return null',
     '  let detail = stage + \' 结论校验失败：verified_branch=\' + JSON.stringify(res && res.verified_branch) + \'（应为 \' + expectedBranch + \'），verified_head=\' + JSON.stringify(head)',
     '  if (A.workspace_capability && !candOk) detail += \'，candidate_sha256=\' + JSON.stringify(cand === undefined ? null : cand) + \'（须先经 vwf_workspace op=captureCandidate 获取宿主候选证明，禁止自报）\'',
+    '  if (ISOLATION_GUARANTEE !== \'enforced\') detail += \'，isolation_guarantee=\' + JSON.stringify(ISOLATION_GUARANTEE) + \'（强制隔离不可用，不能签发正式独立 Proof）\'',
     '  return detail',
     '}',
     // ── LOC-031 技术预算运行时 ──
@@ -887,14 +949,26 @@ export function compileBlueprint(bp, opts = {}) {
     'async function visitCalls(stage, key, round, entryFb, retryLogText) {',
     '  let fb = entryFb',
     '  let formatUsed = false',
+    '  let visitTry = 0',
     '  for (;;) {',
     '    phase(BYID[stage].label || stage)',
     // LOC-029：每次真实调用前后输出 attempt 事件（k 与调用方 attEnd 的 AWK 配对）
     '    const __k = ++AWK',
-    '    attLog({ a: \'s\', k: __k, n: stage, r: round, t: \'call\' })',
+    '    const __rk = visitTry === 0 ? (pendingRetryKind[stage] || \'normal\') : \'technical_retry\'',
+    '    if (visitTry === 0) delete pendingRetryKind[stage]',
+    '    visitTry++',
+    '    lastAttRk = __rk',
+    '    attLog({ a: \'s\', k: __k, n: stage, r: round, t: \'call\', rk: __rk })',
+    '    const __gate = schemaGateBeforeAgent(stage)',
+    '    if (__gate) return { failure: { cls: \'fatal_error\', code: \'SCHEMA_PROTOCOL_BLOCKED\', detail: __gate } }',
     '    const r = await modelCall(key, nodePrompt(stage, fb), nodeCallOpts(stage, round))',
     '    if (r.stop) return r',
-    '    if (r.value !== undefined) return { value: coerceStructured(r.value, BYID[stage].output && BYID[stage].output.schema) }',
+    '    if (r.value !== undefined) {',
+    '      const coerced = coerceStructured(r.value, BYID[stage].output && BYID[stage].output.schema)',
+    '      const vErr = validateNodeInstance(stage, coerced)',
+    '      if (vErr) return { failure: { cls: \'invalid_output\', code: \'INVALID_OUTPUT\', detail: vErr } }',
+    '      return { value: coerced }',
+    '    }',
     '    const f = r.failure',
     '    if (f.cls === \'fatal_error\' || f.cls === \'timeout\') return r',
     '    if (actRemain(key) <= 0) return r',
@@ -1047,6 +1121,9 @@ export function compileBlueprint(bp, opts = {}) {
     'let visitSeq = 0',
     'let tbAttachKey = (TB_SNAP && typeof TB_SNAP.activation_key === \'string\' && TB_SNAP.activation_key) ? TB_SNAP.activation_key : null',
     'let tbResumeDigest = (TB_SNAP && typeof TB_SNAP.resume_digest === \'string\' && TB_SNAP.resume_digest) ? TB_SNAP.resume_digest : null',
+    'let PROTOCOL_SNAPSHOT = (A.protocol_snapshot && typeof A.protocol_snapshot === \'object\') ? A.protocol_snapshot : __SP__.freezeProtocolSnapshot({ protocol: __BP_PROTOCOL__ }, __SCRIPT_DIGEST__)',
+    'if (PROTOCOL_SNAPSHOT.mode === \'legacy-unversioned\') log(\'[schema-protocol] legacy-unversioned\')',
+    'else log(\'[schema-protocol] \' + JSON.stringify({ version: PROTOCOL_SNAPSHOT.protocol_version, capabilities: PROTOCOL_SNAPSHOT.required_capabilities, script_digest: PROTOCOL_SNAPSHOT.script_digest }))',
     // 历史兜底重建（未带快照的旧式续跑也不至于清零已耗技术预算）
     // LOC-030：终局命中的 outcome → $end 终止描述（循环内记录，finishRun 统一收束）
     'let endTerm = null',
@@ -1225,6 +1302,8 @@ export function compileBlueprint(bp, opts = {}) {
     '      const itemKey = fanKey + \'-i\' + (entry.index + 1)',
     '      let __out',
     '      for (;;) {',
+    '        const __fg = schemaGateBeforeAgent(current)',
+    '        if (__fg) { attLog({ a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'failed\', x: __fg }); return null }',
     '        const ir = await modelCall(itemKey, prompt, itemOpts)',
     '        if (ir.stop || ir.failure) {',
     '          if (ir.failure && ir.failure.cls === \'transient_error\' && actRemain(itemKey) > 0) {',
@@ -1235,6 +1314,7 @@ export function compileBlueprint(bp, opts = {}) {
     '          return null',
     '        }',
     '        __out = ir.value === null ? null : coerceStructured(ir.value, n.output && n.output.schema)',
+    '        if (__out !== null) { const __ve = validateNodeInstance(current, __out); if (__ve) { attLog({ a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'failed\', x: __ve }); return null } }',
     '        attLog(__out === null ? { a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'failed\', x: \'item 未返回有效结果\' } : { a: \'e\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, s: \'completed\', q: __out })',
     '        if (__out && typeof __out === \'object\' && __out.expert_id) emitArtifactSubmit(current, round, __out.expert_id, __ik, [{ logical_name: \'research-\' + __out.expert_id + \'.md\', relative_path: \'research-\' + __out.expert_id + \'.md\', media_type: \'text/markdown\', required: true }])',
     '        return __out',
@@ -1245,6 +1325,23 @@ export function compileBlueprint(bp, opts = {}) {
     '    res = { total: source.length, okCount: source.length - failedCount, failedCount: failedCount, items: itemResults }',
     '    ok = !fanoutFailed(n.failOn, res.total, res.failedCount)',
     '    attLog(Object.assign({ a: \'l\', k: ++AWK, n: current, r: round, t: \'logical\', q: res }, attOf(current, res)))',
+    '  } else if (n.mechanical) {',
+    '    // LOC-038：机械节点——零 LLM；宿主可预填 results（wf_run 子进程 gate），排练厅用 mechanical 钩子',
+    '    phase(n.label || current)',
+    '    if (results[current] && results[current].mechanical) {',
+    '      res = results[current]',
+    '    } else if (typeof mechanical === \'function\') {',
+    '      const mechCtx = { nodeId: current, args: A, runDir: RUNDIR, workBranch: WORK_BRANCH, taskId: TASK }',
+    '      const mechOut = await mechanical(String(n.mechanical), mechCtx)',
+    '      res = (mechOut && mechOut.result && typeof mechOut.result === \'object\') ? mechOut.result : mechOut',
+    '      if (!res || typeof res !== \'object\') return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, detail: \'机械节点 \' + current + \' 未返回有效结果\', results: results, history: history }',
+    '      results[current] = res',
+    '      markExec(current, res)',
+    '    } else {',
+    '      return { status: \'TECHNICAL_FAILURE\', stage: current, round: round, detail: \'机械节点 \' + current + \' 需要 mechanical 钩子或预填 results（\' + n.mechanical + \')\', results: results, history: history }',
+    '    }',
+    '    attLog(Object.assign({ a: \'l\', k: ++AWK, n: current, r: round, t: \'mechanical\', q: res }, attOf(current, res)))',
+    '    ok = n.output && n.output.outcomePath ? (readPath(res, String(n.output.outcomePath).replace(/^\\$\\./, \'\')) === \'PASS\') : true',
     '  } else {',
     '    const irMain = resolveNodeInputs(current)',
     '    if (irMain.errors.length) return { status: \'ERROR\', reason: \'INPUT_RESOLUTION_FAILED\', stage: current, node: current, round: round, errors: irMain.errors, detail: \'节点输入解析失败：\' + irMain.errors.map(function (e) { return e.binding + \'：\' + e.reason }).join(\'；\'), results: results, history: history, resolved_inputs: RESOLVED_INPUTS, input_mode: INPUT_MODE }',
@@ -1368,7 +1465,7 @@ export function compileBlueprint(bp, opts = {}) {
     ] : []),
     '  results[current] = res',
     '  markExec(current, res)',
-    '  attEnd(current, round, \'call\', \'completed\', undefined, Object.assign({ q: res }, attOf(current, res), n.verifyBranch ? { w: { b: res.verified_branch, h: res.verified_head } } : {}, RESOLVED_INPUTS[current] ? { ri: RESOLVED_INPUTS[current] } : {}))',
+    '  attEnd(current, round, \'call\', \'completed\', undefined, Object.assign({ q: res, rk: lastAttRk }, attOf(current, res), n.verifyBranch ? { w: { b: res.verified_branch, h: res.verified_head } } : {}, RESOLVED_INPUTS[current] ? { ri: RESOLVED_INPUTS[current] } : {}))',
     '  if (ok) emitArtifactSubmit(current, round, null, AWK)',
     '  log((n.label || current) + \' → \' + (ok ? \'通过\' : \'未通过\'))',
     '  if (A.injectHalt && A.injectHalt.node === current) {',

@@ -16,6 +16,16 @@
       "no_progress_repeats": 2
     }
   },
+  "protocol": {
+    "version": "1.0",
+    "required_capabilities": [
+      "additionalProperties",
+      "enum",
+      "properties",
+      "required",
+      "type"
+    ]
+  },
   "nodes": [
     {
       "id": "confirm",
@@ -56,6 +66,14 @@
     {
       "id": "execute",
       "profile": "dev",
+      "node_capabilities": {
+        "candidate": { "read": true, "write": true },
+        "source": { "read": true, "write": true },
+        "evidence": { "read": true, "write": true },
+        "test_overlay": { "read": true, "write": true },
+        "publish": false,
+        "independent_proof": false
+      },
       "label": "执行",
       "goal": "只依据冻结的 evaluation contract 施工：运行时已把确认节点的契约保存为不可变副本（活动评价基线冻结副本，路径与 SHA-256 摘要见运行上下文的评价基线注入），原路径 `evaluation-contract.md` 不再是权威。采用最小必要修改达成未满足目标，显式保护已满足部分不被回归。场景契约：本节点不设 Git 前置——无特殊声明时不要求 dispatch-result，不要求创建 worktree/分支/PR，写入位置与交付方式以运行上下文为准，纯文档等非 Git 任务同样可完整执行。发现活动评价基线因新事实、约束或环境变化已不再可执行时，输出 RECONFIRM_REQUIRED（这不是评估裁决，返回目标确认重新确认或修订契约；重新确认将产生显式新版本基线，旧版本基线的 PASS 不再适用）；外部条件无法安全继续时输出 BLOCKED；否则输出 READY。将执行交接写入 `execute-report.md`；最终回复只输出本节点 schema 对应 JSON。",
       "inputs": [

@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Node Isolation (LOC-041)",
+  "definitions": {
+    "isolationGuarantee": {
+      "type": "string",
+      "enum": ["enforced", "unavailable"]
+    },
+    "accessLevel": {
+      "type": "string",
+      "enum": ["read", "write", "deny"]
+    },
+    "zoneAccess": {
+      "type": "object",
+      "properties": {
+        "read": { "type": "boolean" },
+        "write": { "type": "boolean" }
+      },
+      "required": ["read", "write"],
+      "additionalProperties": false
+    },
+    "nodeCapabilities": {
+      "type": "object",
+      "properties": {
+        "candidate": { "$ref": "#/definitions/zoneAccess" },
+        "source": { "$ref": "#/definitions/zoneAccess" },
+        "evidence": { "$ref": "#/definitions/zoneAccess" },
+        "test_overlay": { "$ref": "#/definitions/zoneAccess" },
+        "publish": { "type": "boolean" },
+        "independent_proof": { "type": "boolean" }
+      },
+      "required": ["candidate", "source", "evidence", "test_overlay", "publish", "independent_proof"],
+      "additionalProperties": false
+    },
+    "nodeExecutionContext": {
+      "type": "object",
+      "properties": {
+        "node_id": { "type": "string" },
+        "profile": { "type": "string" },
+        "capabilities": { "$ref": "#/definitions/nodeCapabilities" },
+        "isolation_guarantee": { "$ref": "#/definitions/isolationGuarantee" },
+        "candidate_path": { "type": "string" },
+        "evidence_path": { "type": "string" },
+        "test_overlay_path": { "type": "string" },
+        "scratch_path": { "type": "string" },
+        "agent_cwd": { "type": "string" },
+        "writable_roots": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "candidate_digest": { "type": "string" }
+      },
+      "required": ["node_id", "profile", "capabilities", "isolation_guarantee", "evidence_path", "scratch_path", "agent_cwd", "writable_roots"],
+      "additionalProperties": false
+    },
+    "probeResult": {
+      "type": "object",
+      "properties": {
+        "probe": { "type": "string" },
+        "allowed": { "type": "boolean" },
+        "detail": { "type": "string" },
+        "error": { "type": ["string", "null"] }
+      },
+      "required": ["probe", "allowed", "detail"],
+      "additionalProperties": false
+    }
+  }
+}

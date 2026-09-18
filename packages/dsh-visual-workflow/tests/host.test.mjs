@@ -45,12 +45,24 @@ function plantOfficialBuiltin(fs) {
 // 统一校验内核（候选二 T-IMP-13）：宿主经 fs 读源码求值——测试假 fs 需种入真实内核。
 // validate-core require('./projection-core.cjs')（唯一投影实现）：两者必须同时种入。
 const validatorCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
+const schemaProtocolCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'schema-protocol-core.cjs'), 'utf8')
 const projectionCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'projection-core.cjs'), 'utf8')
+const stateRecoveryCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'state-recovery-core.cjs'), 'utf8')
+
+const VALIDATOR_KERNEL_SEED = {
+  [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+  [REPO + '/scripts/schema-protocol-core.cjs']: schemaProtocolCoreSrc,
+  [REPO + '/scripts/projection-core.cjs']: projectionCoreSrc,
+}
+
+function nonProtocolWarnings(r) {
+  return (r.warnings || []).filter((w) => !String(w).includes('legacy-unversioned'))
+}
 
 function seedFs(extra = {}) {
   const seed = {
     [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: existsSync(realGenerated) ? readFileSync(realGenerated, 'utf8') : MINIMAL_BUILTIN,
-    [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+    ...VALIDATOR_KERNEL_SEED,
   }
   Object.assign(seed, extra)
   return makeFs(seed)
@@ -348,18 +360,18 @@ test('异源 T2：同 provider 不同 model → 通过 + 弱异源警告', async
   const { handlers } = env()
   const s = await call(handlers, 'vwf.workflows.save', { dsl: heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm2' }) })
   assert.equal(s.ok, true, JSON.stringify(s.errors))
-  assert.equal(s.warnings.length, 1)
-  assert.ok(s.warnings[0].includes('弱异源'))
+  assert.equal(nonProtocolWarnings(s).length, 1)
+  assert.ok(nonProtocolWarnings(s)[0].includes('弱异源'))
   const v = await call(handlers, 'vwf.validate', { dsl: heteroDsl({ provider: 'p1', model: 'm1' }, { provider: 'p1', model: 'm2' }) })
   assert.equal(v.ok, true)
-  assert.equal(v.warnings.length, 1)
+  assert.equal(nonProtocolWarnings(v).length, 1)
 })
 
 test('异源 T3：不同 provider → 通过无警告', async () => {
   const { handlers } = env()
   const s = await call(handlers, 'vwf.workflows.save', { dsl: heteroDsl({ provider: 'deepseek-official', model: 'v4-pro' }, { provider: 'kimi-coding', model: 'k3' }) })
   assert.equal(s.ok, true, JSON.stringify(s.errors))
-  assert.deepEqual(s.warnings, [])
+  assert.deepEqual(nonProtocolWarnings(s), [])
 })
 
 test('异源 T4：dev/review 缺模型绑定 → 拒（模型必填或无法证明异源）', async () => {
@@ -374,7 +386,7 @@ test('异源 T5：无 dev/review 节点的模板跳过检查', async () => {
   const { handlers } = env()
   const s = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl() })
   assert.equal(s.ok, true, JSON.stringify(s.errors))
-  assert.deepEqual(s.warnings, [])
+  assert.deepEqual(nonProtocolWarnings(s), [])
 })
 
 test('异源 T6：违规蓝图 save 两次（第二次=更新自身）均被拒', async () => {
@@ -1233,7 +1245,9 @@ test('从插件 dist/validate-core.cjs 加载校验内核', async () => {
   const PLUGIN = '/plugin/pkg'
   const fs = makeFs({
     [PLUGIN + '/dist/validate-core.cjs']: validatorCoreSrc,
+    [PLUGIN + '/dist/schema-protocol-core.cjs']: schemaProtocolCoreSrc,
     [PLUGIN + '/dist/projection-core.cjs']: projectionCoreSrc,
+    [PLUGIN + '/dist/state-recovery-core.cjs']: stateRecoveryCoreSrc,
   })
   const { handlers } = loadHost({
     fs,
@@ -1891,7 +1905,9 @@ test('角色库 core 加载：只信插件 dist 清单，home / repo 旧清单�
     [PLUGIN + '/dist/role-library.cjs']: ROLE_CORE_SEED[REPO + '/scripts/role-library.cjs'],
     [PLUGIN + '/dist/builtin-roles.json']: JSON.stringify(trusted),
     [PLUGIN + '/dist/validate-core.cjs']: validatorCoreSrc,
+    [PLUGIN + '/dist/schema-protocol-core.cjs']: schemaProtocolCoreSrc,
     [PLUGIN + '/dist/projection-core.cjs']: projectionCoreSrc,
+    [PLUGIN + '/dist/state-recovery-core.cjs']: stateRecoveryCoreSrc,
     [DSH_HOME + '/visual-workflow/builtin-roles.json']: JSON.stringify(staleHome),
     [REPO + '/dsh/roles/builtin-roles.json']: JSON.stringify(staleRepo),
   })

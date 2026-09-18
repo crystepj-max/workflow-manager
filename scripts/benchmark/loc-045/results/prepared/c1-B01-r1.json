@@ -1,0 +1,41 @@
+{
+  "trial_id": "c1-B01-r1",
+  "task_id": "B01",
+  "arm": "c1",
+  "repeat": 1,
+  "pairing_order": "AB",
+  "status": "NOT_EXECUTED",
+  "fixture_digest": "7de4a112669c39aedda68467ee377abaee92f6b4b4b29336b330fc1fd4e46d7c",
+  "template_digest": {
+    "wf-construction-full-feature": "43a7d72a17ad91909000168cd7cbe2aef03df20cb98a3f1b9d002a0a2bdd3491",
+    "wf-optimize": "0d3f46ca5a9341f706838a8f2f3b8501e99b212c751edee0d26b1a40c7f75ab7",
+    "wf-diagnose": "907c5bd834c4e54c3b40db8e466f95e7be7a4e23e57c36be2cfc4f9fcca6b419",
+    "wf-explore": "e065d32fd4598a8a73cea007dfd92762d5ac240fb40bbab7429aad1d3c41e725"
+  },
+  "script_digest": "fc0940dbe850f618b2c7ec643db0f8dc49af7fd4e0c3f0040286df61849a7c71",
+  "baseline_digest": "1d0296de6b64c1b20d7253bc9fb10f433d337e6ee16fd9b88fe544eb8f651b75",
+  "model_settings": {
+    "model_config_ref": "GLM-5.3-Flash",
+    "budget_authorization_ref": "100000000 tokens",
+    "budget_enforcement": "per-run token check before each logical run",
+    "profile_frozen": false,
+    "confirmed_at": "2026-09-16",
+    "confirmed_by": "用户（D-EXP）"
+  },
+  "model_calls": [],
+  "auto_wall_clock_ms": null,
+  "human_wait_ms": null,
+  "quality_checks": [],
+  "evidence_refs": [],
+  "human_events": [],
+  "usage": {
+    "tokens": null,
+    "cost": "unavailable",
+    "source": null
+  },
+  "failure_reason": null,
+  "started_at": null,
+  "ended_at": null,
+  "created_at": "2026-09-16T16:56:27.102Z",
+  "record_id": "f5d2ca7f-7f89-4c6b-91b6-e07f7f0ec624"
+}

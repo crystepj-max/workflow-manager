@@ -20,6 +20,17 @@
   "workspace": {
     "template_id": "wf-explore"
   },
+  "protocol": {
+    "version": "1.0",
+    "required_capabilities": [
+      "additionalProperties",
+      "enum",
+      "items",
+      "properties",
+      "required",
+      "type"
+    ]
+  },
   "nodes": [
     {
       "id": "orchestrate",
@@ -126,6 +137,14 @@
     {
       "id": "research",
       "profile": "researcher",
+      "node_capabilities": {
+        "candidate": { "read": true, "write": false },
+        "source": { "read": true, "write": false },
+        "evidence": { "read": true, "write": true },
+        "test_overlay": { "read": false, "write": false },
+        "publish": false,
+        "independent_proof": false
+      },
       "label": "专家研究",
       "kind": "fanout",
       "items": "$.results.orchestrate.expert_briefs",

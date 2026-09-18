@@ -21,6 +21,13 @@ const SPEC = `# 任务规格 V1
 已确认的关键决策：无
 `
 
+const DEF_CHECK = `# Definition Check
+
+| 未决产品事项 | 0 |
+
+- [x] 全部通过
+`
+
 function writeBasics(dir, fields) {
   const rows = Object.entries(fields)
     .map(([k, v]) => `| ${k} | ${v} |`)
@@ -35,6 +42,7 @@ ${rows}
   const specPath = path.join(dir, 'task-spec-V1.md')
   fs.writeFileSync(basicsPath, basics)
   fs.writeFileSync(specPath, SPEC)
+  fs.writeFileSync(path.join(dir, 'definition-check.md'), DEF_CHECK)
   return { basicsPath, specPath }
 }
 
@@ -53,8 +61,9 @@ const BASE = {
 }
 
 function run(basicsPath, specPath, extra = []) {
+  const repo = path.dirname(basicsPath)
   try {
-    const out = execFileSync(process.execPath, [script, basicsPath, specPath, ...extra], {
+    const out = execFileSync(process.execPath, [script, basicsPath, specPath, '--repo', repo, ...extra], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
