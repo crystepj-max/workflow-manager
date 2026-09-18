@@ -334,6 +334,11 @@ test('V-11 配置栏三档 tab：默认停在业务词档，节点 ID / JSON 结
   assert.ok(byText(container, '任务（这一步要做什么）'), '第一档有「任务」')
   assert.ok(byText(container, '负责角色'), '第一档有「负责角色」')
   assert.ok(byText(container, '交付内容（这一步产出什么）'), '第一档有「交付内容」')
+  // FIX-107 D1：正式交付物声明帮助文案用户化（不再出现 Formal Artifact / runDir / kind / Record Revision）
+  const helpTexts = Array.from(container.querySelector('.vwf-inspector').querySelectorAll('.vwf-help'))
+    .map((el) => el.getAttribute('title') || '')
+  assert.ok(helpTexts.some((x) => x.includes('正式交付物')), '交付内容帮助文案已用户化：' + JSON.stringify(helpTexts))
+  assert.ok(!/Formal Artifact|runDir|Record Revision|格式 kind/.test(helpTexts.join('\n')), '帮助文案不含实现层术语：' + JSON.stringify(helpTexts))
 
   // 未切到第三档前，技术词不得出现（字段名 / JSON 只出现在高级档）
   const beforeText = container.querySelector('.vwf-inspector').textContent

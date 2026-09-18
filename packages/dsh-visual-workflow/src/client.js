@@ -3285,8 +3285,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // #80：PAUSED 用人工关注色（可恢复等待态），不落 fail 色
       // LOC-030：BLOCKED 同为可恢复等待态（统一受阻生命周期，非终态），不落 fail 色
       const tone = s === 'DONE' ? 'ok' : s === 'running' ? 'run' : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED' || s === 'BLOCKED') ? 'wait' : 'err'
-      const label = s === 'WAITING_HUMAN' ? t('dashWaitHuman') : s === 'BLOCKED' ? t('dashBlocked') : s.indexOf('AWAITING_HUMAN_') === 0 ? t('dashHumanGate') : (s || '—')
+      const label = s === 'WAITING_HUMAN' ? t('dashWaitHuman') : s === 'BLOCKED' ? t('dashBlocked') : s.indexOf('AWAITING_HUMAN_') === 0 ? t('dashHumanGate') : (displayWord(s) || '—')
       return h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + label)
+    }
+    // FIX-107（B5 状态词 / C2 结束方式）：raw 取值到用户语言的展示映射——状态机取值、筛选口径
+    // 与数据契约都不变，只换用户的读法；形状（STATUS_SHAPE）与颜色（STATUS_COLOR）编码也不变。
+    // 表外的取值原样透出，不臆造中文。
+    const DISPLAY_WORDS = {
+      running: 'rdStatusRunning', pass: 'rdStatusPassed', fail: 'rdStatusFailed',
+      DELIVERED: 'rdCompletionDelivered', EVALUATION_PASSED: 'rdCompletionEvaluated',
+      USER_ACCEPTED: 'rdCompletionAccepted', INSUFFICIENT: 'rdCompletionInsufficient',
+    }
+    function displayWord(v) {
+      const s = String(v === undefined || v === null ? '' : v)
+      return DISPLAY_WORDS[s] ? t(DISPLAY_WORDS[s]) : s
     }
     // FEAT-100 V-3：待处理（人工门禁）任务数 = 列表「待处理」筛选同一口径（bucket=attention，
     // 含 PAUSED），同一 Logical Run 的多段折叠为一条，已被续跑接管的段不计。
@@ -3669,7 +3681,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h('span', { className: 'vwf-muted-sm' }, t('dashCompletionFilterLabel')),
               h('select', { className: 'vwf-input', value: completionFilter, onChange: (ev) => setCompletionFilter(ev.target.value) },
                 [h('option', { key: 'all', value: 'all' }, t('dashCompletionAll'))]
-                  .concat(completionOptions.map((o) => h('option', { key: o, value: o }, o)))
+                  .concat(completionOptions.map((o) => h('option', { key: o, value: o }, displayWord(o))))
                   .concat([h('option', { key: '__none__', value: '__none__' }, t('dashCompletionNone'))])
               )
             )
@@ -3768,7 +3780,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           ),
           h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
             h('small', { className: 'vwf-muted-sm' }, t('dashUpdatedAt', { at: fmtAt(m.updatedAt) })),
-            h('small', { className: 'vwf-muted-sm' }, m.completionType ? m.completionType : '')
+            h('small', { className: 'vwf-muted-sm' }, m.completionType ? displayWord(m.completionType) : '')
           ),
           m.wsError ? h('small', { className: 'vwf-muted-sm' }, t('dashIntegrityLabel') + '：' + m.wsError) : null
           )
@@ -4076,7 +4088,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdTemplateLabel') + '：' + (head.name || head.workflowId || '—'))),
               h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('dashPhaseLabel', { phase: snapState ? (snapState.phase || '—') : '—' }))),
               h('div', { className: 'vwf-rd-kv vwf-row', style: { gap: 6 } }, h('span', { className: 'vwf-muted-sm' }, t('rdLifecycleLabel')), tierBadgeOf(lr && lr.lifecycle ? lr.lifecycle.state : '')),
-              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdCompletionLabel') + '：' + (lr && lr.completion && lr.completion.type ? String(lr.completion.type) : t('dashCompletionNone')))),
+              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdCompletionLabel') + '：' + (lr && lr.completion && lr.completion.type ? displayWord(lr.completion.type) : t('dashCompletionNone')))),
               h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdReworkLabel') + '：' + (lr ? (reworkCountOf(lr) > 0 ? t('dashReworkCount', { n: reworkCountOf(lr) }) : t('dashFirstRun')) : '—'))),
               // 读取失败不藏进「详细」：定位本身已不可信，必须默认可见并给出重试
               lrError ? h('div', { key: 'wse' },
@@ -4108,7 +4120,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   h('span', { className: 'vwf-row', style: { gap: 4 } },
                     list.length ? h('span', { className: 'vwf-badge' }, t('rdAttemptPicker') + ' ' + list.length) : null,
                     prev ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null,
-                    st[n.id] ? h('span', { className: 'vwf-badge', style: { color: st[n.id] === 'pass' ? STATUS_COLOR.pass : st[n.id] === 'fail' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, st[n.id]) : null,
+                    st[n.id] ? h('span', { className: 'vwf-badge', style: { color: st[n.id] === 'pass' ? STATUS_COLOR.pass : st[n.id] === 'fail' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, displayWord(st[n.id])) : null,
                     n.id === phaseNodeId ? h('span', { className: 'vwf-badge accent' }, t('rdCurrentNode')) : null
                   )
                 )
@@ -4120,6 +4132,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: 'vwf-rd-pane-head' },
               h('div', { className: 'vwf-card-title' }, t('rdRunFlow')),
               dsl ? h('span', { className: 'vwf-muted-sm' }, t('wbConnCount', { n: ((dsl.edges || []).length) })) : null
+            ),
+            // 图例（FIX-107 B5）：中文与形状成对，颜色只作辅助；与画布 / 目录的状态编码同源
+            h('div', { className: 'vwf-rd-legend', style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '0 14px 6px' } },
+              h('span', { className: 'vwf-muted-sm' }, t('dashLegend')),
+              [['ok', 'rdStatusPassed'], ['err', 'rdStatusFailed'], ['run', 'rdStatusRunning'], ['wait', 'dashWaitHuman']].map(([tone, key]) =>
+                h('span', { key: tone, className: 'vwf-badge', style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + t(key)))
             ),
             dsl ? h(Canvas, { dsl, readOnly: true, statusMap: st }) : h('div', { className: 'vwf-muted-sm' }, t('rdNoRecords'))
           ),
@@ -4356,7 +4374,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: 'vwf-card-title' }, t('rdControlTitle')),
             badge
           ),
-          h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('dashStatusLabel', { status: head.status }) + ' · ' + t('rdLifecycleLabel') + '：' + (lstate || '—')),
+          h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('dashStatusLabel', { status: displayWord(head.status) }) + ' · ' + t('rdLifecycleLabel') + '：' + (lstate || '—')),
           terminal ? h('div', { className: 'vwf-note warn' }, t('rdControlTerminal', { state: lstate || head.status })) : null,
           !terminal && lstate === 'RUNNING' ? h('div', null,
             h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 6 } },
@@ -4574,7 +4592,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h('tbody', null, segs.map((s) => h('tr', { key: 'seg' + (s.index || s.id) },
                 h('td', null, String(s.index !== undefined ? s.index : (s.segment || '—')) + (s.active ? ' · ' + t('rdSegmentActive') : '')),
                 h('td', null, String(s.trigger || '—')),
-                h('td', null, String(s.status || head.status || '—')),
+                h('td', null, displayWord(String(s.status || head.status || '—'))),
                 h('td', null, fmtAt(s.started_at || s.startedAt)),
                 h('td', null, fmtAt(s.ended_at || s.endedAt)),
                 h('td', null, String(s.decision_id || '—'))
@@ -4595,7 +4613,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('th', null, t('rdColRevision')), h('th', null, t('rdColActive')), h('th', null, t('rdColTime')), h('th', null, t('rdColProviderModel'))
               )),
               h('tbody', null, snaps.map((s) => h('tr', { key: 'snap' + s.revision },
-                h('td', null, 'R' + String(s.revision)),
+                h('td', null, t('rdVersionShort', { n: s.revision })),
                 h('td', null, s.active ? t('rdSegmentActive') : '—'),
                 h('td', null, fmtAt(s.created_at)),
                 h('td', null, h('div', { className: 'vwf-muted-sm' }, Object.keys(s.provider_model || {}).map((nid) => nid + '=' + String((s.provider_model[nid] || {}).provider || 'default') + '/' + String((s.provider_model[nid] || {}).model || 'default')).join(' · ') || '—'))
@@ -4640,7 +4658,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           arts.length ? arts.map((rec) => h('div', { key: rec.record_id + '@' + rec.record_revision, style: { marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--vwf-border)' } },
             h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
               h('strong', null, artifactPathFromRecordId(rec.record_id)),
-              h('span', { className: 'vwf-badge accent' }, t('artifactRevision') + ' R' + rec.record_revision),
+              h('span', { className: 'vwf-badge accent' }, t('artifactRevision') + ' ' + rec.record_revision),
               h('span', { className: 'vwf-muted-sm' }, rec.body && rec.body.media_type ? rec.body.media_type : ''),
               rec.provenance && rec.provenance.node ? h('span', { className: 'vwf-muted-sm' }, t('dashArtifactNode', { node: rec.provenance.node })) : null
             ),

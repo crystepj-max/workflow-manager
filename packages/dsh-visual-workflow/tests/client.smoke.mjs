@@ -857,8 +857,8 @@ test('fanout 看板：按节点归组展示三项并保留失败状态', async (
     await flush()
     await flush()
   })
-  // FEAT-85：详情入口收敛为唯一出口——runId 输入框 + 「详情」按钮打开该运行详情工作区
-  const input = container.querySelector('input[placeholder^="runId"]')
+  // FEAT-85：详情入口收敛为唯一出口——运行编号输入框 + 「详情」按钮打开该运行详情工作区
+  const input = container.querySelector('input[placeholder^="运行编号"]')
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
     setter.call(input, 'run-1')
@@ -2272,18 +2272,18 @@ async function backToList() {
   await clickEl(btn)
 }
 
-test('FEAT-85 列表：同一 Logical Run 折叠为一条任务、按工作空间分组、superseded 段不另起一行', async () => {
+test('FEAT-85 列表：同一任务的多次执行合并为一条、按工作空间分组、superseded 段不另起一行', async () => {
   await openRunsTab()
   await act(async () => { await flush(); await flush(); await flush() })
   const rows = runRows()
   assert.ok(rows.length > 0, '运行列表渲染')
-  // 同一 Logical Run 的两段只呈现为一条任务（T-A1 只出现一次）
+  // 同一次运行的两段只呈现为一条任务（T-A1 只出现一次）
   const a1Rows = rows.filter((r) => (r.textContent || '').includes('T-A1'))
   assert.equal(a1Rows.length, 1, '多 segment 折叠为一条用户任务：' + a1Rows.length)
-  // 被续跑接管的第 1 段不再单独占一行：列表里不出现「已由续跑接管」行
-  assert.ok(!container.querySelector('.vwf-run-row') || !container.textContent.includes('已由续跑接管'), 'superseded 段不作为新用户任务展示')
-  // 多段任务显示段位
-  assert.ok(a1Rows[0].textContent.includes('第 2/2 段'), '多段任务显示当前段/总段数：' + a1Rows[0].textContent)
+  // 被恢复的运行接续的第 1 段不再单独占一行：列表里不出现「已由恢复的运行接续」行
+  assert.ok(!container.querySelector('.vwf-run-row') || !container.textContent.includes('已由恢复的运行接续'), 'superseded 段不作为新用户任务展示')
+  // 多段任务显示轮次
+  assert.ok(a1Rows[0].textContent.includes('第 2/2 轮'), '多段任务显示当前轮/总轮数：' + a1Rows[0].textContent)
   // 按工作空间分组（两个空间 + 未归属旧记录）
   const heads = groupHeads()
   assert.ok(heads.some((x) => x.includes('工作空间A')), '按工作空间 A 分组：' + JSON.stringify(heads))
@@ -2292,14 +2292,14 @@ test('FEAT-85 列表：同一 Logical Run 折叠为一条任务、按工作空�
   // 返工次数与最近更新时间
   assert.ok(a1Rows[0].textContent.includes('返工 1 次'), '返工次数来自节点重复执行：' + a1Rows[0].textContent)
   assert.ok(a1Rows[0].textContent.includes('最近更新'), '显示最近更新时间：' + a1Rows[0].textContent)
-  // 折叠说明可见（用户不会误以为分段是新任务）
-  assert.ok(container.textContent.includes('同一 Logical Run 的多段折叠为一条任务'), '列表给出折叠说明')
+  // 合并说明可见（用户不会误以为多轮执行是新任务）
+  assert.ok(container.textContent.includes('同一次任务的多次执行合并为一条'), '列表给出合并说明')
   // 界面不拼接让用户复制的命令
   assert.ok(!container.textContent.includes('wf_run {'), '界面不出现可复制的 wf_run 命令')
   assert.ok(!container.textContent.includes('USER_ACCEPTED|ADD_BUDGET|STOP'), '界面不出现占位枚举命令行')
 })
 
-test('FEAT-85 列表：空间/状态/结果/完成类型四类筛选与分页', async () => {
+test('FEAT-85 列表：空间/状态/结果/结束方式四类筛选与分页', async () => {
   await openRunsTab()
   const total = Array.from(container.querySelectorAll('.vwf-muted-sm')).map((e) => e.textContent).join(' ')
   assert.ok(total.includes('共 20 条'), '任务总数为折叠后的 20：' + total.slice(0, 200))
@@ -2322,11 +2322,13 @@ test('FEAT-85 列表：空间/状态/结果/完成类型四类筛选与分页', 
   rows = runRows()
   assert.equal(rows.length, 2, '业务结果筛选按节点业务结果取值：' + rows.length)
   await selectValue(filterSelect(2), 'all')
-  // 完成类型筛选：DELIVERED 只命中 lr-b
+  // 结束方式筛选：DELIVERED（raw 值仍是筛选口径，展示为「独立完成」）只命中 lr-b
   await selectValue(filterSelect(3), 'DELIVERED')
   rows = runRows()
-  assert.equal(rows.length, 1, '完成类型筛选按 completion.type：' + rows.length)
-  assert.ok((rows[0].textContent || '').includes('T-B1'), '完成类型命中 T-B1：' + rows[0].textContent)
+  assert.equal(rows.length, 1, '结束方式筛选按 completion.type：' + rows.length)
+  assert.ok((rows[0].textContent || '').includes('T-B1'), '结束方式命中 T-B1：' + rows[0].textContent)
+  assert.ok(container.textContent.includes('结束方式') && container.textContent.includes('独立完成'), '结束方式筛选与取值展示为用户语言')
+  assert.ok(!container.textContent.includes('完成类型'), '旧文案「完成类型」不再出现')
   await selectValue(filterSelect(3), 'all')
 })
 
@@ -2381,7 +2383,7 @@ test('FEAT-85 详情：唯一选中节点结果出口 + 结果/检查/活动三�
   const actPanel = container.querySelector('.vwf-tab-panel').textContent
   assert.ok(actPanel.includes('活动记录'), '活动页签渲染：' + actPanel.slice(0, 120))
   assert.ok(!actPanel.includes('本次执行没有记录退回意见'), '切换页签后不再显示检查页签内容（不叠加）')
-  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('[段 2]'), '运行日志标注来源分段')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('[第 2 轮]'), '运行日志标注来源轮次')
   await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))
 })
 
@@ -2467,7 +2469,7 @@ test('FEAT-85 详情：WAITING_HUMAN 决策卡（选项/理由/影响/锁定 + D
   assert.ok(!container.textContent.includes('wf_run {'), '决策卡不拼接让用户复制的命令')
 })
 
-test('FEAT-85 详情：BLOCKED 恢复卡（原因 / Provider·Model 前后值 / 新修订与旧修订保留）', async () => {
+test('FEAT-85 详情：BLOCKED 恢复卡（原因 / 服务商·模型前后值 / 新版本与旧版本保留）', async () => {
   await openRunsTab()
   await openTask('T-C2')
   const card = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('阻塞原因'))
@@ -2475,15 +2477,18 @@ test('FEAT-85 详情：BLOCKED 恢复卡（原因 / Provider·Model 前后值 / 
   const text = card.textContent
   assert.ok(text.includes('EVALUATION_BASELINE_CONFLICT'), '恢复卡显示阻塞原因')
   assert.ok(text.includes('恢复入口：dev'), '恢复卡显示恢复入口节点')
-  assert.ok(text.includes('deepseek-official / deepseek-v4-pro'), '恢复卡显示当前 Provider / Model')
-  assert.ok(card.querySelectorAll('select').length >= 2, '恢复卡提供 Provider / Model 修改入口')
-  assert.ok(text.includes('恢复后产生新的 Snapshot Revision，历史修订仍可查'), '恢复卡说明新修订与旧修订保留')
+  assert.ok(text.includes('deepseek-official / deepseek-v4-pro'), '恢复卡显示当前服务商 / 模型')
+  assert.ok(card.querySelectorAll('select').length >= 2, '恢复卡提供服务商 / 模型修改入口')
+  assert.ok(text.includes('恢复后会生成新的版本存档，历史版本仍可查'), '恢复卡说明新版本与旧版本保留')
   assert.ok(text.includes('model_overrides'), '恢复卡附 model_overrides 字段映射')
   const submit = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('恢复并继续'))
   assert.ok(submit && submit.disabled, 'DT-01 未裁定：恢复提交按钮锁定')
-  // 修订表同时保留旧修订
-  const snaps = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('快照修订'))
-  assert.ok(snaps && snaps.textContent.includes('R1'), '快照修订表可查')
+  // 版本表同时保留旧版本（按卡片标题定位，避免与恢复卡里的同词说明混淆）
+  const snaps = Array.from(container.querySelectorAll('.vwf-card')).find((c) => {
+    const title = c.querySelector('.vwf-card-title')
+    return title && (title.textContent || '').trim() === '历史版本'
+  })
+  assert.ok(snaps && snaps.textContent.includes('第 1 版'), '历史版本表可查')
 })
 
 test('FEAT-85 详情：工作空间字段齐全、读取失败显示未知与重试；节点成果不可用不冒充内容', async () => {
@@ -2513,20 +2518,20 @@ test('FEAT-85 详情：工作空间字段齐全、读取失败显示未知与重
     await flush()
   })
   assert.ok(!locator.textContent.includes('工作分支'), '收起后回到概要')
-  // 逻辑运行读取失败：显式错误 + 重试入口，不把缓存当事实（失败不藏在展开层后面）
+  // 运行记录读取失败：显式错误 + 重试入口，不把缓存当事实（失败不藏在展开层后面）
   await backToList()
   await openTask('T-E1')
-  assert.ok(container.textContent.includes('逻辑运行摘要读取失败'), '读取失败有可见错误：' + container.textContent.slice(0, 300))
+  assert.ok(container.textContent.includes('记录摘要暂时读不到'), '读取失败有可见错误：' + container.textContent.slice(0, 300))
   const errLoc = locatorOf()
   assert.ok(errLoc.textContent.includes('工作空间信息读取失败'), '运行定位显示读取失败')
   assert.ok(Array.from(errLoc.querySelectorAll('button')).some((b) => (b.textContent || '').includes('重试读取')), '提供重试入口')
   assert.ok(errLoc.textContent.includes('不把过时缓存当作当前事实'), '写明不把缓存当事实')
-  // 正式记录通道不可用：只显示尝试元数据，不冒充成果正文
+  // 正式记录通道不可用：只显示基本信息，不冒充成果正文
   runState.recordsFail = true
   const refreshBtn = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '刷新列表')
   await clickEl(refreshBtn, 6)
-  assert.ok(container.textContent.includes('节点成果正文不可用'), '记录通道不可用时给出明确降级说明')
-  assert.ok(container.textContent.includes('不冒充成果内容'), '写明不冒充成果内容')
+  assert.ok(container.textContent.includes('暂时读不到这一步的成果内容'), '记录通道不可用时给出明确降级说明')
+  assert.ok(container.textContent.includes('只显示基本信息'), '写明只显示基本信息、不冒充内容')
   runState.recordsFail = false
   await backToList()
 })
@@ -2582,13 +2587,13 @@ test('FEAT-103 V-3/V-4/V-6：完整经过链路弹窗点选联动右侧结果；
   await openRunsTab()
   await openTask('T-A1')
   const body = container.querySelector('.vwf-rd-body')
-  // V-6：正式产物默认落在「结果」页签内，工件路径 / 修订 / 来源节点齐全
-  assert.ok(body.textContent.includes('Formal Artifacts'), '结果页签内有 Formal Artifacts')
+  // V-6：正式产物默认落在「结果」页签内，工件路径 / 版本 / 来源节点齐全
+  assert.ok(body.textContent.includes('正式交付物'), '结果页签内有正式交付物')
   assert.ok(body.textContent.includes('node:lr-a:dev'), '工件清单来自 run 的 formalRecords')
-  assert.ok(body.textContent.includes('R2'), '工件修订可见')
+  assert.ok(body.textContent.includes('版本 2'), '工件版本可见')
   assert.ok(body.textContent.includes('节点 dev'), '工件来源节点可见')
   const belowCards = Array.from(container.querySelectorAll('.vwf-root > .vwf-card')).map((c) => c.textContent || '')
-  assert.ok(!belowCards.some((x) => x.includes('Formal Artifacts')), '页面底部不再有独立的 Formal Artifacts 区块')
+  assert.ok(!belowCards.some((x) => x.includes('正式交付物')), '页面底部不再有独立的正式交付物区块')
   assert.ok(!belowCards.some((x) => x.includes('节点 / 结果')), '页面底部不再有独立的节点 / 结果区域')
   // V-3：打开链路弹窗
   await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过')))
@@ -2615,21 +2620,22 @@ test('FEAT-103 V-3/V-4/V-6：完整经过链路弹窗点选联动右侧结果；
   await backToList()
 })
 
-test('FEAT-85 详情：结果 / Lifecycle / 完成类型分层显示（不塌缩为成功失败徽标）', async () => {
+test('FEAT-85 详情：结果 / 当前进展 / 结束方式分层显示（不塌缩为成功失败徽标）', async () => {
   await openRunsTab()
   await openTask('T-B1')
   const locator = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行定位'))
   assert.ok(locator, '运行定位卡渲染')
   const text = locator.textContent
-  assert.ok(text.includes('生命周期'), '生命周单独成层：' + text.slice(0, 300))
-  assert.ok(text.includes('COMPLETED'), '生命周期取值可见')
-  assert.ok(text.includes('完成类型'), '完成类型单独成层')
-  assert.ok(text.includes('DELIVERED'), '完成类型取值来自 completion.type')
+  assert.ok(text.includes('当前进展'), '当前进展单独成层：' + text.slice(0, 300))
+  assert.ok(text.includes('COMPLETED'), '当前进展取值可见')
+  assert.ok(text.includes('结束方式'), '结束方式单独成层')
+  assert.ok(text.includes('独立完成'), '结束方式取值来自 completion.type 且展示为用户语言')
+  assert.ok(!text.includes('DELIVERED'), '结束方式不再显示 raw 机器词')
   await backToList()
-  // 未声明完成类型时如实标注
+  // 未声明结束方式时如实标注
   await openTask('T-C2')
   const locator2 = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行定位'))
-  assert.ok(locator2.textContent.includes('未声明完成类型'), '无完成类型时如实标注而非留白')
+  assert.ok(locator2.textContent.includes('未声明结束方式'), '无结束方式时如实标注而非留白')
   await backToList()
 })
 
@@ -2758,7 +2764,7 @@ test('FEAT-100 V-3：运行列表按工作空间分组，组内 需处理 → �
   const badgeTextOf = (row) => {
     const t = row.textContent || ''
     if (t.includes('等待人工') || t.includes('受阻') || t.includes('PAUSED')) return 0
-    if (t.includes('running')) return 1
+    if (t.includes('进行中')) return 1
     if (t.includes('DONE')) return 2
     return 3
   }
