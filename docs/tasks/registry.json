@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 58,
+  "revision": 63,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -1617,12 +1617,12 @@
       "source": "Codex UI 原型 handoff",
       "source_ref": "docs/tasks/handoffs/H1-editor-workbench.md",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "等待验收",
       "priority": "P1",
       "env_group": "FEAT-84",
       "env_role": "独立",
       "deps": [],
-      "branch": null,
+      "branch": "dev-feat-84-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
@@ -1631,7 +1631,7 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-17T13:02:10.962Z",
-      "updated_at": "2026-09-17T13:06:33.314Z",
+      "updated_at": "2026-09-18T02:29:41.332Z",
       "spec_path": "docs/tasks/specs/FEAT-84-vwf-editor-workbench/task-spec-V1.md"
     },
     {
@@ -1646,7 +1646,7 @@
       "source": "Codex UI 原型 handoff",
       "source_ref": "docs/tasks/handoffs/H2-run-detail.md",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FEAT-85",
       "env_role": "独立",
@@ -1654,13 +1654,16 @@
       "branch": null,
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "d72b6b253b89ff4b31f0503d1f168a60e3ed23a6",
+        "merged_at": "2026-09-18T00:40:58+08:00"
+      },
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-17T13:02:16.696Z",
-      "updated_at": "2026-09-17T13:06:33.330Z",
+      "updated_at": "2026-09-18T03:13:43.338Z",
       "spec_path": "docs/tasks/specs/FEAT-85-vwf-run-detail/task-spec-V1.md"
     },
     {
@@ -1675,12 +1678,12 @@
       "source": "Codex UI 原型 handoff",
       "source_ref": "docs/tasks/handoffs/H3-role-theme-responsive.md",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "等待验收",
       "priority": "P2",
       "env_group": "FEAT-86",
       "env_role": "独立",
       "deps": [],
-      "branch": null,
+      "branch": "dev-feat-86-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
@@ -1689,7 +1692,7 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-17T13:02:21.580Z",
-      "updated_at": "2026-09-17T13:06:33.333Z",
+      "updated_at": "2026-09-17T17:02:02.316Z",
       "spec_path": "docs/tasks/specs/FEAT-86-vwf-role-theme-responsive/task-spec-V1.md"
     }
   ],
