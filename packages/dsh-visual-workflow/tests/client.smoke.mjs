@@ -2086,6 +2086,13 @@ test('FEAT-102 V-2/V-3：一句话简介（选填）显式优先展示、留空�
   roleState.roles = roleState.roles.filter((r) => r.id !== '体验检查员')
 })
 
+test('FEAT-102 V-2：载荷未带 summary 时，回退生成先摘掉「一句话简介」前置块', () => {
+  // 正常 list/get 由内核 explicitSummary 给出显式值；这里锁住客户端回退路径：
+  // 没有 summary 字段时不得把前置块里的键当成职责正文。
+  assert.equal(plugin.roleSummaryOf({ content: '---\nsummary: 检查一致性。\n---\n\n职责正文首行\n第二行\n' }), '职责正文首行 第二行')
+  assert.equal(plugin.roleSummaryOf({ content: '职责正文首行\n' }), '职责正文首行', '无前置块时口径不变')
+})
+
 test('FEAT-102 V-1：内置详情「基于此角色创建」在固定页脚（原型 modal-foot 单一主操作）', async () => {
   const fresh = document.createElement('div')
   document.body.appendChild(fresh)

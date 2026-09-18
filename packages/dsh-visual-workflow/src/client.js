@@ -2474,7 +2474,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       } else if (view === 'view') {
         body = current
           ? h('div', null,
-              // V-4：详情展示一句话简介；缺失时由职责生成展示（roleSummaryOf），不写回角色原文
+              // FEAT-101 V-4：详情展示一句话简介；缺失时由职责生成展示（roleSummaryOf），不写回角色原文
               h('div', { className: 'vwf-role-summary', title: roleSummaryOf(current) }, roleSummaryOf(current)),
               h('div', { className: 'vwf-muted-sm' }, t('roleViewBuiltin')),
               h('div', { className: 'vwf-role-section-title' }, h('span', null, t('roleContent'))),
@@ -5195,14 +5195,15 @@ function roleOriginOf(role) {
 }
 
 // 列表摘要（显示层）：显式 summary 优先；缺失时从职责 content 生成一段可读文本，
-// 仅用于展示，不写回、不覆盖角色原文（规格 §9「摘要不写回原文」）。截断按字符
-// 计数（Array.from 切分，不切断代理对）；两行显示上限由 CSS line-clamp 收敛，
+// 仅用于展示，不写回、不覆盖角色原文（规格 §9「摘要不写回原文」）。生成前先摘掉
+// 「一句话简介」前置块（roleBodyOf）——否则载荷没带 summary 时会拿块里的键当正文。
+// 截断按字符计数（Array.from 切分，不切断代理对）；两行显示上限由 CSS line-clamp 收敛，
 // 连续长串靠 overflow-wrap:anywhere 换行，不产生横向溢出。
 function roleSummaryOf(role, maxChars) {
   const limit = typeof maxChars === 'number' && maxChars > 0 ? maxChars : 120
   const explicit = role && typeof role.summary === 'string' ? role.summary.trim() : ''
   if (explicit) return explicit
-  const raw = role && typeof role.content === 'string' ? role.content : ''
+  const raw = roleBodyOf(role && typeof role.content === 'string' ? role.content : '')
   const text = raw
     .replace(/```[\s\S]*?```/g, ' ')        // 代码块不参与摘要
     .replace(/^[ \t]{0,3}#{1,6}[ \t]*/gm, '') // 标题符号
