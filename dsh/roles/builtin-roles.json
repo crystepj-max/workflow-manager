@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
   "builtins": [
-    { "id": "requirements", "name": "需求分析", "summary": "需求分析角色：三要素门禁，产出需求基线", "definition": "dsh/roles/requirements.md", "builtin": true, "readonly": true },
-    { "id": "designer", "name": "方案设计", "summary": "方案设计角色：实施路径、关键取舍与风险", "definition": "dsh/roles/designer.md", "builtin": true, "readonly": true },
-    { "id": "dev", "name": "开发", "summary": "开发角色：测试驱动施工，满足质量闸门", "definition": "dsh/roles/dev.md", "builtin": true, "readonly": true },
-    { "id": "review", "name": "审核", "summary": "审核角色：规范与需求符合性、代码质量双轴审查", "definition": "dsh/roles/review.md", "builtin": true, "readonly": true },
-    { "id": "test", "name": "测试", "summary": "测试角色：运行态验证，证据驱动判定", "definition": "dsh/roles/test.md", "builtin": true, "readonly": true },
-    { "id": "evaluator", "name": "评估", "summary": "评估角色：按节点评价契约独立评估，场景差异由节点表达", "definition": "dsh/roles/evaluator.md", "builtin": true, "readonly": true },
-    { "id": "accept", "name": "验收助手", "summary": "验收助手角色：对照验收标准最终核验并等待人工签字", "definition": "dsh/roles/accept.md", "builtin": true, "readonly": true },
-    { "id": "closeout", "name": "收口", "summary": "收口角色：一致性收口与交接产物汇总", "definition": "dsh/roles/closeout.md", "builtin": true, "readonly": true },
-    { "id": "diagnose", "name": "缺陷诊断", "summary": "缺陷诊断角色：先取证后结论，收敛到根因", "definition": "dsh/roles/diagnose.md", "builtin": true, "readonly": true },
-    { "id": "orchestrator", "name": "探索统筹", "summary": "探索统筹角色：设计研究方案与专家任务书", "definition": "dsh/roles/orchestrator.md", "builtin": true, "readonly": true },
-    { "id": "researcher", "name": "专家研究", "summary": "专家研究角色：按任务书独立取证，含反证", "definition": "dsh/roles/researcher.md", "builtin": true, "readonly": true },
-    { "id": "synthesizer", "name": "综合分析", "summary": "综合分析角色：把独立判断整合为可决策的观点地图", "definition": "dsh/roles/synthesizer.md", "builtin": true, "readonly": true }
+    { "id": "requirements", "name": "需求分析", "summary": "把原始诉求加工成可直接执行的需求：任务目标、涉及范围、验收标准三要素齐全、不含歧义。", "definition": "dsh/roles/requirements.md", "builtin": true, "readonly": true },
+    { "id": "designer", "name": "方案设计", "summary": "把已确认的需求转化为可实施方案：拆解实施路径、明确关键取舍、指出风险与验证方式。", "definition": "dsh/roles/designer.md", "builtin": true, "readonly": true },
+    { "id": "dev", "name": "开发", "summary": "按任务目标、涉及范围和验收标准实现需求，并做必要的自测与实现相关测试。独立测试证明交由独立会话出具。", "definition": "dsh/roles/dev.md", "builtin": true, "readonly": true },
+    { "id": "review", "name": "审核", "summary": "对实现做规范与需求符合性、代码质量的双轴并行审查并给出明确结论。不实施修复、不写测试。", "definition": "dsh/roles/review.md", "builtin": true, "readonly": true },
+    { "id": "test", "name": "测试", "summary": "对实现做运行态验证，用证据判定通过或失败。不修改业务代码、不做验收。", "definition": "dsh/roles/test.md", "builtin": true, "readonly": true },
+    { "id": "evaluator", "name": "评估", "summary": "依据所在节点给出的评价契约对当前成果做独立评估，回答是否足够以及是否需要再来一轮。", "definition": "dsh/roles/evaluator.md", "builtin": true, "readonly": true },
+    { "id": "accept", "name": "验收助手", "summary": "在审核通过后对照验收标准做最终核验，产出验收报告并等待人工确认。", "definition": "dsh/roles/accept.md", "builtin": true, "readonly": true },
+    { "id": "closeout", "name": "收口", "summary": "验收通过后做合并前收口：先只读整理交付事实，再按已授权的必要动作完成交付。", "definition": "dsh/roles/closeout.md", "builtin": true, "readonly": true },
+    { "id": "diagnose", "name": "缺陷诊断", "summary": "动手修复之前先还原现象、收集证据并收敛到根因，再交棒给开发角色去修。", "definition": "dsh/roles/diagnose.md", "builtin": true, "readonly": true },
+    { "id": "orchestrator", "name": "探索统筹", "summary": "为问题设计研究方案：明确核心问题、判断研究条件、选择互补视角并形成专家任务书。", "definition": "dsh/roles/orchestrator.md", "builtin": true, "readonly": true },
+    { "id": "researcher", "name": "专家研究", "summary": "严格按专家任务书指定的视角独立研究，形成有证据、有反证、有边界的明确观点。", "definition": "dsh/roles/researcher.md", "builtin": true, "readonly": true },
+    { "id": "synthesizer", "name": "综合分析", "summary": "把多份相互独立的专业判断整合成一张可支持决策的观点地图，不掩盖真实分歧。", "definition": "dsh/roles/synthesizer.md", "builtin": true, "readonly": true }
   ],
   "compatibilityRoles": [
     { "id": "dispatcher", "builtin": false, "visibility": "workspace-or-bundle" }

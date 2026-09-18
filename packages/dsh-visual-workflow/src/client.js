@@ -440,7 +440,6 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-code { white-space:pre-wrap; font-family:var(--dsw-font-family-mono, ui-monospace, monospace); font-size:11px; opacity:.9; max-height:320px; overflow:auto; border:1px solid var(--vwf-border); border-radius:8px; padding:10px; background:var(--vwf-canvas); overflow-wrap:anywhere; }
 .vwf-table { width:100%; border-collapse:collapse; font-size:11px; }
 .vwf-table th, .vwf-table td { text-align:left; padding:4px 8px; border-bottom:1px solid var(--vwf-border); overflow-wrap:anywhere; }
-.vwf-table .vwf-fanout-group td { padding-top:9px; font-weight:600; color:var(--vwf-accent); background:var(--vwf-canvas); }
 .vwf-json-edit { width:100%; height:520px; box-sizing:border-box; resize:none; font-family:var(--dsw-font-family-mono, ui-monospace, monospace); font-size:11px; line-height:1.6; }
 /* ── 窄屏（V-5）：弹层安全边距、按钮折行、详情内部滚动；不缩字号、不隐文字 ── */
 @media (max-width: 480px) {
@@ -507,6 +506,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 .vwf-rd-pane-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; flex-wrap:wrap; padding:8px 12px; border-bottom:1px solid var(--vwf-border); background:var(--vwf-wb-surface-2); }
 .vwf-rd-body { min-width:0; min-height:0; overflow:auto; overscroll-behavior:contain; }
 .vwf-rd-kv { margin-top:4px; font-size:12px; }
+/* 完整经过弹窗（原型 modal + v2-history）：链路逐条列出，条目本身是按钮（键盘可达） */
+.vwf-chain-dialog { width:min(620px, 94vw); }
+.vwf-chain { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; display:flex; flex-direction:column; }
+.vwf-chain-entry { display:flex; gap:10px; width:100%; text-align:left; cursor:pointer; padding:10px 8px; border:0; border-bottom:1px solid var(--vwf-border); background:transparent; color:var(--vwf-text); font-size:12px; }
+.vwf-chain-entry:hover { background:var(--vwf-wb-accent-soft); }
+.vwf-chain-dot { flex:0 0 auto; width:22px; height:22px; border-radius:50%; display:grid; place-items:center; background:var(--vwf-canvas); color:var(--vwf-text-2); }
+.vwf-chain-entry.tone-done .vwf-chain-dot { color:var(--vwf-ok); }
+.vwf-chain-entry.tone-failed .vwf-chain-dot { color:var(--vwf-err); }
+.vwf-chain-entry.tone-returned .vwf-chain-dot { color:var(--vwf-warn); }
+.vwf-chain-entry.tone-running .vwf-chain-dot { color:var(--vwf-accent); }
+.vwf-chain-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.vwf-chain-group { padding:8px 8px 2px; font-size:11px; font-weight:600; color:var(--vwf-accent); }
+.vwf-chain-head { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.vwf-chain-note { color:var(--vwf-text-2); overflow-wrap:anywhere; }
 .vwf-node-dir-row { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; cursor:pointer; padding:6px 8px; margin-top:4px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--vwf-wb-text); font-size:13px; }
 .vwf-node-dir-row:hover { background:var(--vwf-wb-accent-soft); }
 .vwf-node-dir-row.selected { border-color:var(--vwf-wb-accent); background:var(--vwf-wb-accent-soft); }
@@ -2299,9 +2312,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         setError(null)
         setView('form')
       }
-      // 自定义角色复制：与内置「基于此角色创建」同路径（详情预填 + 走 create），
-      // 但 current 保持 null —— create 分支用 current.builtin===false 判定编辑，
-      // 复制自定义角色必须走新建，否则会被当作 update 修改原角色。
+      // 行内「基于此角色创建」（内置与自定义同一入口）：与详情页同路径——先取该角色
+      // 全文，再进 create 表单。current 保持 null —— create 分支用 current.builtin===false
+      // 判定编辑，复制必须走新建，否则会被当作 update 改写原角色（内置角色只读）。
       const openCloneCustom = (role) => {
         returnFocusRef.current = null
         setCurrent(null); setError(null); setView('form'); setFormMode('create')
@@ -2410,6 +2423,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // FEAT-101 V-3（原型 roleRow）：每行只有一个「进入」入口——内置「查看」、自定义「编辑」，
       // 不再并列查看 + 编辑；「基于此角色创建」按原型承载复制语义，删除是既有动作而非并列入口，
       // 两者能力保持（FEAT-86 权限边界：内置不可编辑/删除，自定义可复制/删除）。
+      // FEAT-103 V-1：内置行也提供「基于此角色创建」，与自定义行同文案同行为（进新建表单、
+      // 落成自定义角色、不写回原内置角色）；行内主入口仍是唯一的「查看」。
       const roleRow = (role) => {
         const origin = roleOriginOf(role)
         const summary = roleSummaryOf(role)
@@ -2425,7 +2440,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               ref: (el) => { rowBtnRefs.current[role.id] = el },
               onClick: () => { if (origin.builtin) openView(role.id); else openEdit(role.id) },
             }, origin.builtin ? t('viewRole') : t('editRole')),
-            origin.builtin ? null : h('button', { className: 'vwf-btn sm', onClick: () => openCloneCustom(role) }, t('createFromRole')),
+            h('button', { className: 'vwf-btn sm', onClick: () => openCloneCustom(role) }, t('createFromRole')),
             origin.builtin ? null : h('button', { className: 'vwf-btn sm danger', onClick: () => askDelete(role) }, t('deleteRole'))
           )
         )
@@ -3265,47 +3280,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       return m
     }
 
-    function dashboardAgentRows(agents) {
-      const regular = []
-      const groups = []
-      const byGroup = {}
-      for (const a of agents || []) {
-        const clean = String(a.label || '').replace(/ R\d+$/, '')
-        const match = /^(.*) #(\d+)$/.exec(clean)
-        if (!match) { regular.push(a); continue }
-        if (!byGroup[match[1]]) {
-          byGroup[match[1]] = []
-          groups.push(match[1])
-        }
-        byGroup[match[1]].push({ ...a, itemIndex: Number(match[2]) })
-      }
-      // 节点执行结果同样是双通道（V-4）：形状 + outcome 文字，不只靠颜色。
-      const statusBadge = (a) => {
-        const tone = a.outcome === 'completed' ? 'ok' : a.outcome === 'failed' ? 'err' : 'run'
-        return h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : 'running'] } }, STATUS_SHAPE[tone] + ' ' + a.outcome)
-      }
-      const rows = regular.map(a => h('tr', { key: 'agent-' + a.seq },
-        h('td', null, String(a.seq)),
-        h('td', null, a.label),
-        h('td', null, a.phase || '—'),
-        h('td', null, statusBadge(a))
-      ))
-      for (const name of groups) {
-        rows.push(h('tr', { key: 'group-' + name, className: 'vwf-fanout-group' },
-          h('td', { colSpan: 4 }, name + ' · fanout · ' + byGroup[name].length + ' items')
-        ))
-        byGroup[name].sort((a, b) => a.itemIndex - b.itemIndex).forEach((a) => {
-          rows.push(h('tr', { key: 'fanout-' + a.seq },
-            h('td', null, '#' + a.itemIndex),
-            h('td', null, a.label),
-            h('td', null, a.phase || '—'),
-            h('td', null, statusBadge(a))
-          ))
-        })
-      }
-      return rows
-    }
-
     function statusBadge(status) {
       const s = String(status || '')
       // #80：PAUSED 用人工关注色（可恢复等待态），不落 fail 色
@@ -3818,6 +3792,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const [tab, setTab] = React.useState('result')
       const [attemptSel, setAttemptSel] = React.useState({})
       const [wsTick, setWsTick] = React.useState(0)
+      const [chainOpen, setChainOpen] = React.useState(false)
+      const [locDetail, setLocDetail] = React.useState(false)
       const [providers, setProviders] = React.useState(null)
       const [modelDraft, setModelDraft] = React.useState({})
       const [decisionChoice, setDecisionChoice] = React.useState('')
@@ -3919,6 +3895,114 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const items = snap && snap.items
         return Array.isArray(items) ? items : []
       }
+      // ── 完整工作链路（FEAT-103 V-3/V-4）────────────────────────────────────
+      // 按实际执行顺序铺开链路：每条 = 一次执行。记录通道可用时按节点的每次尝试 / 返工轮次
+      // 铺开（并行组再展开子任务）；记录通道没有的节点，则用宿主 agents 行补位（含并行组
+      // 归组与形状 + 文字双通道的状态），模板取不到时它就是链路的全部内容。原页面底部
+      // 「节点 / 结果」区域与它是同一信息的一体两面，并入本链路后删掉——链路弹窗铺开全貌，
+      // 右侧当前结果承接选中那一条的成果，两者合起来不丢信息。
+      const agentLabelOf = (label) => String(label || '').replace(/ R\d+$/, '')
+      const agentGroupOf = (label) => /^(.*) #(\d+)$/.exec(agentLabelOf(label))
+      const agentNameOf = (label) => { const g = agentGroupOf(label); return g ? g[1] : agentLabelOf(label) }
+      const agents = (snapState && snapState.agents) || []
+      const takenAgents = []
+      const chainEntries = () => {
+        const out = []
+        // agents 行 → 链路条目：并行组先出组标题，再逐项列出（标签原样，形状 + outcome 文字双通道）
+        const pushAgents = (rows, keyBase, label, nodeId) => {
+          if (!rows.length) return
+          rows.forEach((a) => takenAgents.push(a))
+          if (rows.length > 1) out.push({ key: 'g' + keyBase, group: label + ' · fanout · ' + rows.length + ' items' })
+          rows.forEach((a, i) => out.push({
+            key: 'r' + keyBase + i,
+            id: nodeId,
+            seq: '',
+            label: agentLabelOf(a.label),
+            child: 0,
+            attempt: 0,
+            tone: a.outcome === 'completed' ? 'done' : (a.outcome === 'failed' ? 'failed' : 'running'),
+            state: STATUS_SHAPE[a.outcome === 'completed' ? 'ok' : a.outcome === 'failed' ? 'err' : 'run'] + ' ' + String(a.outcome || '—'),
+            note: '',
+            meta: String(a.phase || ''),
+          }))
+        }
+        nodes.forEach((n, ni) => {
+          const label = n.label || n.id
+          const base = {
+            id: n.id,
+            seq: String(ni + 1).padStart(2, '0'),
+            label,
+            prev: nodeLatestSegment(n.id) > 0 && nodeLatestSegment(n.id) < activeSeg,
+            current: n.id === phaseNodeId,
+          }
+          const rows = agents.filter((a) => takenAgents.indexOf(a) < 0 && agentNameOf(a.label) === String(label))
+          const list = logicalAttemptsOf(n.id)
+          const items = n.kind === 'fanout' ? itemsOf(n.id) : []
+          if (!list.length && !items.length) {
+            if (rows.length) { pushAgents(rows, n.id, label, n.id); return }
+            out.push(Object.assign({ key: 'p' + n.id, attempt: 0, tone: 'todo', state: t('rdNotStarted'), note: t('rdNotStartedNote'), meta: '' }, base))
+            return
+          }
+          // 记录通道优先：该节点已有逐次尝试，agents 行只用于去重，不再重复展开一遍
+          rows.forEach((a) => takenAgents.push(a))
+          // 并行组：记录通道下也给出组标题（原「节点 / 结果」表在 agents 行 >1 时的口径）
+          if (items.length > 1) out.push({ key: 'g' + n.id, group: label + ' · fanout · ' + items.length + ' items' })
+          list.forEach((a, i) => {
+            const v = a.value
+            const last = i + 1 === list.length
+            out.push(Object.assign({
+              key: 'a' + n.id + i,
+              attempt: i + 1,
+              tone: v.status === 'failed' ? 'failed' : (last ? (v.status === 'completed' ? 'done' : 'running') : 'returned'),
+              state: v.status === 'failed' ? t('rdAttemptReturned') : (last ? (v.status === 'completed' ? t('rdAttemptPassed') : t('rdAttemptRunning')) : t('rdAttemptReturned')),
+              note: String(v.error || ''),
+              meta: t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }),
+              latest: last,
+            }, base))
+          })
+          items.forEach((a, i) => {
+            const v = a.value
+            out.push(Object.assign({
+              key: 'i' + n.id + i,
+              attempt: 0,
+              child: i + 1,
+              tone: v.status === 'completed' ? 'done' : (v.status === 'failed' ? 'failed' : 'running'),
+              state: v.status === 'completed' ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptReturned') : t('rdFanoutIncomplete')),
+              note: String(v.error || '') || (v.item ? String(v.item).slice(0, 80) : ''),
+              meta: t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }),
+            }, base))
+          })
+        })
+        // 当前节点表未覆盖的 agents 行（模板取不到、或状态里多出节点）：按名归组如实追加
+        for (const a of agents) {
+          if (takenAgents.indexOf(a) >= 0) continue
+          const name = agentNameOf(a.label)
+          pushAgents(agents.filter((x) => takenAgents.indexOf(x) < 0 && agentNameOf(x.label) === name), 'u' + name, name, '')
+        }
+        return out
+      }
+      // 点选链路一条：关闭弹窗 → 定位到该节点 → 右侧当前结果切到这一次执行（V-3）
+      const pickChain = (e) => {
+        setChainOpen(false)
+        if (!e.id) return // 未匹配到模板节点的 agents 行：只作如实呈现，无处可定位
+        setSelNode(e.id)
+        setAttemptSel(Object.assign({}, attemptSel, { [e.id]: e.attempt }))
+        setTab('result')
+      }
+      // Escape 逐层：链路弹窗是详情之上的一层，先关它并放行焦点回收，不把整个工作区带走
+      const chainBtnRef = React.useRef(null)
+      React.useEffect(() => {
+        if (!chainOpen) return undefined
+        const onKey = (ev) => {
+          if (!ev || ev.key !== 'Escape') return
+          ev.preventDefault(); ev.stopPropagation()
+          setChainOpen(false)
+          const el = chainBtnRef.current
+          if (el && el.focus) { try { el.focus() } catch (e) { /* 元素已卸载则跳过 */ } }
+        }
+        document.addEventListener('keydown', onKey, true)
+        return () => document.removeEventListener('keydown', onKey, true)
+      }, [chainOpen])
       const sendControl = (action, extra) => {
         if (!lrId) return
         if (action === 'interrupt' && !window.confirm(t('ctlConfirmInterrupt'))) return
@@ -3967,7 +4051,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         h('div', { className: 'vwf-rd-strip' },
           h('span', null, (reworkN > 0 ? t('dashReworkCount', { n: reworkN }) : t('dashFirstRun'))
             + ' · ' + t('dashPhaseLabel', { phase: snapState ? (snapState.phase || '—') : '—' })),
-          h('button', { className: 'vwf-btn sm', onClick: () => { if (selected) setTab('activity') } }, t('rdFullHistory'))
+          h('button', { className: 'vwf-btn sm', ref: chainBtnRef, 'aria-haspopup': 'dialog', onClick: () => setChainOpen(true) }, t('rdFullHistory'))
         ),
         h('div', { className: 'vwf-editor-body' },
         h('div', { className: 'vwf-rd-scroll' },
@@ -3978,15 +4062,35 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         h('div', { className: 'vwf-rd-main' },
           // 左栏：运行定位（工作空间 / 模板 / 当前阶段 / 状态）+ 节点目录（只用于定位）
           h('div', { className: 'vwf-rd-side' },
+            // 运行定位（FEAT-103 V-5）：默认只给概要（定位用的基本事实）；「详细」展开全量，
+            // 原页面底部的「工作空间信息」区块并入这里，两处不再各说一遍。
             h('div', { className: 'vwf-card', style: { padding: '10px 12px' } },
-              h('div', { className: 'vwf-card-title' }, t('rdLocator')),
+              h('div', { className: 'vwf-row', style: { justifyContent: 'space-between', alignItems: 'center' } },
+                h('div', { className: 'vwf-card-title' }, t('rdLocator')),
+                h('button', {
+                  className: 'vwf-btn sm', 'aria-expanded': locDetail ? 'true' : 'false',
+                  onClick: () => setLocDetail(!locDetail),
+                }, locDetail ? t('rdCollapse') : t('rdDetail'))
+              ),
               h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdWorkspaceLabel', { ws: (lr && lr.workspace && workspaceLabelOf(lr.workspace)) || '—' }))),
               h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdTemplateLabel') + '：' + (head.name || head.workflowId || '—'))),
               h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('dashPhaseLabel', { phase: snapState ? (snapState.phase || '—') : '—' }))),
-              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('dashTaskIdLabel', { taskId: head.taskId || '—' }))),
               h('div', { className: 'vwf-rd-kv vwf-row', style: { gap: 6 } }, h('span', { className: 'vwf-muted-sm' }, t('rdLifecycleLabel')), tierBadgeOf(lr && lr.lifecycle ? lr.lifecycle.state : '')),
               h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdCompletionLabel') + '：' + (lr && lr.completion && lr.completion.type ? String(lr.completion.type) : t('dashCompletionNone')))),
-              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdReworkLabel') + '：' + (lr ? (reworkCountOf(lr) > 0 ? t('dashReworkCount', { n: reworkCountOf(lr) }) : t('dashFirstRun')) : '—')))
+              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdReworkLabel') + '：' + (lr ? (reworkCountOf(lr) > 0 ? t('dashReworkCount', { n: reworkCountOf(lr) }) : t('dashFirstRun')) : '—'))),
+              // 读取失败不藏进「详细」：定位本身已不可信，必须默认可见并给出重试
+              lrError ? h('div', { key: 'wse' },
+                h('div', { className: 'vwf-note warn' }, t('rdWsReadFailed', { err: lrError })),
+                h('div', { className: 'vwf-row' },
+                  h('button', { className: 'vwf-btn sm', onClick: () => { setWsTick((n) => n + 1) } }, t('rdWsRetry')),
+                  h('span', { className: 'vwf-muted-sm' }, t('rdWsStaleNote'))
+                )
+              ) : null,
+              locDetail ? h('div', { 'data-vwf-locator-detail': '' },
+                h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('dashTaskIdLabel', { taskId: head.taskId || '—' }))),
+                h('div', { className: 'vwf-sec', style: { marginTop: 6 } }, t('rdWsPanel')),
+                workspaceFields()
+              ) : null
             ),
             h('div', { className: 'vwf-card', style: { padding: '10px 12px' } },
               h('div', { className: 'vwf-card-title' }, t('rdNodeDirectory')),
@@ -4065,11 +4169,40 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         renderDecisionCard(),
         renderRecoveryCard(),
         renderSegmentsCard(),
-        renderSnapshotsCard(),
-        renderAgentsCard(),
-        renderArtifactsCard(),
-        renderWorkspaceCard()
-        )))
+        renderSnapshotsCard()
+        ))),
+        // 完整经过弹窗（原型 executionHistory + modal）：链路铺开全貌，点一条回到详情并
+        // 把那一次的成果放到右侧当前结果；不在页面里再留一份重复的节点 / 结果清单。
+        chainOpen ? h('div', { className: 'vwf-dialog-mask', style: { zIndex: 970 } },
+          h('div', { className: 'vwf-dialog vwf-chain-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('rdFullHistory') },
+            h('div', { className: 'vwf-dialog-title' }, t('rdFullHistory') + ' · ' + (lr && lr.title ? String(lr.title) : (head.taskId || head.id || '—'))),
+            h('div', { className: 'vwf-dialog-desc' }, t('rdChainNote')),
+            h('div', { className: 'vwf-chain' }, chainEntries().map((e) => (e.group
+              ? h('div', { key: e.key, className: 'vwf-chain-group' }, e.group)
+              : h('button', {
+                key: e.key,
+                className: 'vwf-chain-entry tone-' + e.tone + (e.id && e.id === effectiveSel ? ' on' : ''),
+                'data-vwf-chain-node': e.id,
+                'data-vwf-chain-attempt': String(e.attempt),
+                onClick: () => pickChain(e),
+              },
+                h('span', { className: 'vwf-chain-dot' }, e.tone === 'done' ? '✓' : e.tone === 'failed' ? '✕' : e.tone === 'returned' ? '↩' : e.tone === 'running' ? '·' : '—'),
+                h('span', { className: 'vwf-chain-main' },
+                  h('span', { className: 'vwf-chain-head' },
+                    h('strong', null, (e.seq ? e.seq + ' ' : '') + e.label + (e.child ? ' · ' + t('rdFanoutChild', { n: e.child }) : '')),
+                    e.attempt ? h('span', { className: 'vwf-badge' }, t('rdAttemptOption', { n: e.attempt, state: e.state }) + (e.latest ? t('rdAttemptLatest') : '')) : h('span', { className: 'vwf-badge' }, e.state),
+                    e.prev ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
+                  ),
+                  e.note ? h('span', { className: 'vwf-chain-note' }, e.note) : null,
+                  e.meta ? h('span', { className: 'vwf-muted-sm' }, e.meta) : null,
+                  e.tone === 'todo' || !e.id ? null : h('span', { className: 'vwf-muted-sm' }, t('rdChainOpenResult'))
+                )
+              )))),
+            h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
+              h('button', { className: 'vwf-btn', onClick: () => setChainOpen(false) }, t('close'))
+            )
+          )
+        ) : null
       )
 
       // 结果页签：本次执行的成果（含扇出子任务独立结果与汇总输入来源）
@@ -4142,6 +4275,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             )
           ))
         }
+        // 正式产物：结果页签的最后一段（V-6）
+        rt.push(artifactsSection())
         return h('div', { className: 'vwf-tab-panel' }, rt)
       }
 
@@ -4470,82 +4605,51 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         )
       }
 
-      // 节点表：既有 agents 行渲染（含 fanout 子项归组），本段来源标注
-      function renderAgentsCard() {
-        const agents = (snapState && snapState.agents) || []
-        if (!agents.length) return null
-        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
-          h('div', { className: 'vwf-card-head' },
-            h('div', { className: 'vwf-card-title' }, t('dashColNode') + ' / ' + t('dashColResult')),
-            h('span', { className: 'vwf-muted-sm' }, t('rdSegmentLabel', { n: head.segment || activeSeg }))
-          ),
-          h('div', { style: { padding: '8px 14px 12px' } },
-            h('table', { className: 'vwf-table' },
-              h('thead', null, h('tr', null, h('th', null, t('dashColIndex')), h('th', null, t('dashColNode')), h('th', null, t('dashColPhase')), h('th', null, t('dashColResult')))),
-              h('tbody', null, dashboardAgentRows(agents))
-            )
-          )
-        )
-      }
-
-      // 正式产物：标注来源分段与 attempt（避免当前轮与上一轮混淆）
-      function renderArtifactsCard() {
-        const arts = latestArtifactRecords(snapState && snapState.formalRecords)
-        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
-          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('formalArtifacts'))),
-          h('div', { style: { padding: '8px 14px 12px' } },
-            arts.length ? arts.map((rec) => h('div', { key: rec.record_id + '@' + rec.record_revision, style: { marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--dsw-alias-border-l2, #333)' } },
-              h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
-                h('strong', null, artifactPathFromRecordId(rec.record_id)),
-                h('span', { className: 'vwf-badge accent' }, t('artifactRevision') + ' R' + rec.record_revision),
-                h('span', { className: 'vwf-muted-sm' }, rec.body && rec.body.media_type ? rec.body.media_type : ''),
-                rec.provenance && rec.provenance.node ? h('span', { className: 'vwf-muted-sm' }, t('dashArtifactNode', { node: rec.provenance.node })) : null
-              ),
-              h('div', { className: 'vwf-muted-sm' }, rec.provenance
-                ? t('rdArtifactSource', { segment: rec.provenance.attempt === undefined || rec.provenance.attempt === null ? '—' : rec.provenance.attempt, attempt: rec.record_revision, provider: String(rec.provenance.provider || 'default'), model: String(rec.provenance.model || 'default') })
-                : t('rdArtifactSourceUnknown')),
-              h('div', { className: 'vwf-row', style: { gap: 6 } }, rec.provenance && rec.provenance.node_business_outcome ? h('span', { className: 'vwf-badge accent' }, String(rec.provenance.node_business_outcome)) : null),
-              renderArtifactBody(rec)
-            )) : h('div', { className: 'vwf-muted-sm' }, t('noFormalArtifacts'))
-          )
-        )
-      }
-
-      // 工作空间面板：mode / repository / branch / 当前·base HEAD / 集成 / 活动锁 / 清理；
-      // 读取失败显示未知状态与重试，不把过时缓存当作当前事实。
-      function renderWorkspaceCard() {
+      // 工作空间字段表：原底部「工作空间信息」区块的表体，V-5 并入运行定位的「详细」展开
+      // （读取失败提示与重试在概要处，不藏在展开层后面）。缺值一律显式标注，不用空白冒充。
+      function workspaceFields() {
         const ws = lr && lr.workspace ? lr.workspace : null
-        const body = []
-        if (lrError) {
-          body.push(h('div', { key: 'e', className: 'vwf-note warn' }, t('rdWsReadFailed', { err: lrError })))
-          body.push(h('div', { key: 'r', className: 'vwf-row' },
-            h('button', { className: 'vwf-btn sm', onClick: () => { setWsTick((n) => n + 1) } }, t('rdWsRetry')),
-            h('span', { className: 'vwf-muted-sm' }, t('rdWsStaleNote'))
-          ))
-        } else if (!ws) {
-          body.push(h('div', { key: 'n', className: 'vwf-muted-sm' }, t('rdWsNoRecord')))
-        } else {
-          const kv = [
-            [t('rdWsMode'), ws.mode ? String(ws.mode) : null],
-            [t('rdWsRepo'), ws.source_path ? String(ws.source_path) : (ws.workspace_path ? String(ws.workspace_path) : null)],
-            [t('rdWsBranch'), ws.work_branch ? String(ws.work_branch) : null],
-            [t('rdWsCurrentHead'), ws.current_head ? shortSha(ws.current_head) : null],
-            [t('rdWsBaseHead'), ws.base_commit ? shortSha(ws.base_commit) : null],
-            [t('rdWsIntegration'), ws.lifecycle ? String(ws.lifecycle) : ((ws.integration_checkpoints || []).length ? String((ws.integration_checkpoints[ws.integration_checkpoints.length - 1] || {}).type || '') : null)],
-            [t('rdWsLocks'), (ws.resource_locks || []).length ? (ws.resource_locks || []).map((l) => t('rdWsLockItem', { type: String(l.type || '') })).join('、') : t('rdWsNoLock')],
-            [t('rdWsCleanup'), ws.cleanup ? (typeof ws.cleanup === 'string' ? String(ws.cleanup) : safeJson(ws.cleanup)) : null],
-          ]
-          body.push(h('table', { key: 'kv', className: 'vwf-table' },
+        if (!ws) return h('div', { className: 'vwf-muted-sm' }, t('rdWsNoRecord'))
+        const kv = [
+          [t('rdWsMode'), ws.mode ? String(ws.mode) : null],
+          [t('rdWsRepo'), ws.source_path ? String(ws.source_path) : (ws.workspace_path ? String(ws.workspace_path) : null)],
+          [t('rdWsBranch'), ws.work_branch ? String(ws.work_branch) : null],
+          [t('rdWsCurrentHead'), ws.current_head ? shortSha(ws.current_head) : null],
+          [t('rdWsBaseHead'), ws.base_commit ? shortSha(ws.base_commit) : null],
+          [t('rdWsIntegration'), ws.lifecycle ? String(ws.lifecycle) : ((ws.integration_checkpoints || []).length ? String((ws.integration_checkpoints[ws.integration_checkpoints.length - 1] || {}).type || '') : null)],
+          [t('rdWsLocks'), (ws.resource_locks || []).length ? (ws.resource_locks || []).map((l) => t('rdWsLockItem', { type: String(l.type || '') })).join('、') : t('rdWsNoLock')],
+          [t('rdWsCleanup'), ws.cleanup ? (typeof ws.cleanup === 'string' ? String(ws.cleanup) : safeJson(ws.cleanup)) : null],
+        ]
+        return h('div', null,
+          h('table', { className: 'vwf-table' },
             h('tbody', null, kv.map(([k, v]) => h('tr', { key: k },
               h('td', { className: 'vwf-muted-sm', style: { width: 90 } }, k),
               h('td', null, v === null || v === undefined || v === '' ? h('span', { className: 'vwf-badge' }, t('rdWsUnknown')) : String(v))
             )))
-          ))
-          if (ws.refreshed_at) body.push(h('div', { key: 'at', className: 'vwf-muted-sm' }, t('rdWsRefreshedAt', { at: fmtAt(ws.refreshed_at) })))
-        }
-        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
-          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdWsPanel'))),
-          h('div', { style: { padding: '8px 14px 12px' } }, body)
+          ),
+          ws.refreshed_at ? h('div', { className: 'vwf-muted-sm' }, t('rdWsRefreshedAt', { at: fmtAt(ws.refreshed_at) })) : null
+        )
+      }
+
+      // 正式产物（V-6）：原页面底部独立区块移入右侧「结果」页签，标注来源分段与 attempt，
+      // 避免当前轮与上一轮混淆；列表 / 修订 / 来源节点信息保持完整。
+      function artifactsSection() {
+        const arts = latestArtifactRecords(snapState && snapState.formalRecords)
+        return h('div', { key: 'arts' },
+          h('div', { className: 'vwf-sec' }, t('formalArtifacts')),
+          arts.length ? arts.map((rec) => h('div', { key: rec.record_id + '@' + rec.record_revision, style: { marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--vwf-border)' } },
+            h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
+              h('strong', null, artifactPathFromRecordId(rec.record_id)),
+              h('span', { className: 'vwf-badge accent' }, t('artifactRevision') + ' R' + rec.record_revision),
+              h('span', { className: 'vwf-muted-sm' }, rec.body && rec.body.media_type ? rec.body.media_type : ''),
+              rec.provenance && rec.provenance.node ? h('span', { className: 'vwf-muted-sm' }, t('dashArtifactNode', { node: rec.provenance.node })) : null
+            ),
+            h('div', { className: 'vwf-muted-sm' }, rec.provenance
+              ? t('rdArtifactSource', { segment: rec.provenance.attempt === undefined || rec.provenance.attempt === null ? '—' : rec.provenance.attempt, attempt: rec.record_revision, provider: String(rec.provenance.provider || 'default'), model: String(rec.provenance.model || 'default') })
+              : t('rdArtifactSourceUnknown')),
+            h('div', { className: 'vwf-row', style: { gap: 6 } }, rec.provenance && rec.provenance.node_business_outcome ? h('span', { className: 'vwf-badge accent' }, String(rec.provenance.node_business_outcome)) : null),
+            renderArtifactBody(rec)
+          )) : h('div', { className: 'vwf-muted-sm' }, t('noFormalArtifacts'))
         )
       }
     }

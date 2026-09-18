@@ -874,12 +874,37 @@ test('fanout 看板：按节点归组展示三项并保留失败状态', async (
     await flush()
   })
   assert.ok(container.querySelector('.vwf-rd-main'), '进入详情工作区')
-  assert.ok(byText(container, '逐项处理 · fanout · 3 items'), '看板显示 fanout 组标题')
-  assert.ok(byText(container, '逐项处理 #1'))
-  assert.ok(byText(container, '逐项处理 #2'))
-  const failed = Array.from(container.querySelectorAll('.vwf-badge')).find((el) => el.textContent.includes('failed'))
+  // FEAT-103 V-3/V-4：节点 / 结果的全貌与并行组归组移到「查看完整经过」链路弹窗；
+  // 页面底部不再并列一份重复的节点 / 结果表。
+  let chainRowBtn = null
+  await act(async () => {
+    chainRowBtn = Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过'))
+    assert.ok(chainRowBtn, '状态条提供查看完整经过')
+    chainRowBtn.click()
+    await flush()
+  })
+  const chain = container.querySelector('.vwf-chain')
+  assert.ok(chain, '链路弹窗打开')
+  assert.ok(byText(chain, '逐项处理 · fanout · 3 items'), '链路显示 fanout 组标题')
+  assert.ok(byText(chain, '逐项处理 #1'), '组内逐项列出（原节点 / 结果表口径）')
+  assert.ok(byText(chain, '逐项处理 #2'))
+  const failed = Array.from(chain.querySelectorAll('.vwf-badge')).find((el) => el.textContent.includes('failed'))
   assert.ok(failed && failed.textContent === '✕ failed', '失败项状态同时有形状与文字（V-4 双通道）')
-  assert.ok(failed.getAttribute('style').includes('var(--vwf-err)'), '失败项使用失败语义 token')
+  const failedEntry = failed.closest('.vwf-chain-entry')
+  assert.ok(failedEntry && failedEntry.className.includes('tone-failed'), '失败项在链路里落到失败语义样式类')
+  // 失败（err）与退回修改（warn）在链路上仍是两种语义色，不只靠形状与文字
+  const chainCss = styleText.join('\n')
+  assert.match(chainCss, /\.vwf-chain-entry\.tone-failed \.vwf-chain-dot \{[^}]*var\(--vwf-err\)/, '失败项用失败语义 token')
+  assert.match(chainCss, /\.vwf-chain-entry\.tone-returned \.vwf-chain-dot \{[^}]*var\(--vwf-warn\)/, '退回项用注意语义 token')
+  // Escape 逐层：链路弹窗是详情之上的一层，先关它（不把整个工作区带走）
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  assert.ok(!container.querySelector('.vwf-chain'), 'Escape 关闭链路弹窗')
+  assert.ok(container.querySelector('.vwf-rd-main'), '工作区详情仍在（Escape 只收一层）')
+  assert.ok(dom.window.document.activeElement === chainRowBtn, 'Escape 关闭后焦点回收到触发按钮')
+  assert.ok(!container.textContent.includes('逐项处理 · fanout'), '看板页面不再并列一份重复的节点 / 结果表')
   await act(async () => {
     const templatesTab = container.querySelector('[data-vwf-nav="templates"]')
     assert.ok(templatesTab, '顶部导航有流程库页签（FEAT-100 V-1）')
@@ -1981,12 +2006,50 @@ test('角色库：内置角色只读可查看可复制，不提供编辑/删除�
   const mgr = fresh.querySelector('[data-vwf-roles-tab]')
   const builtinRow = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => r.getAttribute('data-vwf-role-origin') === 'builtin')
   const builtinBtns = Array.from(builtinRow.querySelectorAll('button')).map(b => b.textContent)
-  assert.deepEqual(builtinBtns, ['查看'], '内置角色只有查看入口，无编辑/复制/删除')
+  // FEAT-103 V-1：内置行与自定义行一样有「基于此角色创建」；编辑 / 删除仍只属于自定义
+  assert.deepEqual(builtinBtns, ['查看', '基于此角色创建'], '内置角色：查看 + 基于此角色创建，无编辑/删除')
   await act(async () => { Array.from(builtinRow.querySelectorAll('button'))[0].click(); await flush() })
   const viewBtns = Array.from(fresh.querySelectorAll('.vwf-role-mgr button')).map(b => b.textContent)
   assert.ok(viewBtns.some((x) => x.includes('基于此角色创建')), '内置详情提供复制为自定义：' + JSON.stringify(viewBtns))
   assert.ok(!viewBtns.includes('编辑'), '内置详情无编辑入口')
   assert.ok(byText(mgr, '开发角色正文'), '内置详情展示完整内容')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+})
+
+// FEAT-103 V-1：内置角色「列表行」的复制入口与详情页同行为——以该角色为初稿进新建表单，
+// 保存落成自定义角色，原内置角色内容不被写回。
+test('FEAT-103 V-1：内置角色行「基于此角色创建」进新建表单并落成自定义角色', async () => {
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+  await openRolesTab(fresh)
+  const mgr = fresh.querySelector('[data-vwf-roles-tab]')
+  const builtinRow = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => r.getAttribute('data-vwf-role-origin') === 'builtin')
+  const cloneBtn = Array.from(builtinRow.querySelectorAll('button')).find(b => b.textContent === '基于此角色创建')
+  assert.ok(cloneBtn, '内置行提供「基于此角色创建」')
+  await act(async () => { cloneBtn.click(); await flush(); await flush() })
+  const nameInput = mgr.querySelector('input.vwf-input')
+  assert.equal(nameInput.value, 'dev - 自定义', '以该内置角色为初稿（建议名预填）')
+  const contentArea = mgr.querySelector('textarea.vwf-textarea')
+  assert.equal(contentArea.value, '开发角色正文\n', '职责正文带入表单')
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    setter.call(nameInput, '内置行复制稿')
+    nameInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    byText(mgr, '保存角色').click()
+    await flush()
+    await flush()
+  })
+  const created = roleState.roles.find(r => r.id === '内置行复制稿')
+  assert.ok(created && created.builtin === false, '保存落成自定义角色')
+  assert.equal(roleState.roles.find(r => r.id === 'dev').content, '开发角色正文\n', '原内置角色内容未被写回')
+  roleState.roles = roleState.roles.filter(r => r.id !== '内置行复制稿')
   await act(async () => { freshRoot.unmount(); fresh.remove() })
 })
 
@@ -2423,28 +2486,41 @@ test('FEAT-85 详情：BLOCKED 恢复卡（原因 / Provider·Model 前后值 / 
   assert.ok(snaps && snaps.textContent.includes('R1'), '快照修订表可查')
 })
 
-test('FEAT-85 详情：工作空间面板字段齐全、读取失败显示未知与重试；节点成果不可用不冒充内容', async () => {
+test('FEAT-85 详情：工作空间字段齐全、读取失败显示未知与重试；节点成果不可用不冒充内容', async () => {
   await openRunsTab()
   await openTask('T-A1')
-  const wsCard = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('工作空间信息'))
-  assert.ok(wsCard, '详情含工作空间面板')
-  const ws = wsCard.textContent
+  const locatorOf = () => Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行定位'))
+  // FEAT-103 V-5：运行定位默认只给概要；「详细」展开全量（原工作空间区域内容并入这里）
+  const locator = locatorOf()
+  assert.ok(locator, '详情含运行定位卡')
+  const expandBtn = Array.from(locator.querySelectorAll('button')).find((b) => b.textContent === '详细')
+  assert.ok(expandBtn && expandBtn.getAttribute('aria-expanded') === 'false', '默认收起，只给概要')
+  assert.ok(!locator.textContent.includes('工作分支'), '概要里不再重复工作空间全量字段')
+  await act(async () => { expandBtn.click(); await flush() })
+  assert.ok(locator.textContent.includes('工作空间信息'), '「详细」展开原工作空间区域内容')
+  const ws = locator.textContent
   for (const field of ['模式', '仓库', '工作分支', '当前 HEAD', 'base HEAD', '集成状态', '活动锁', '清理状态']) {
-    assert.ok(ws.includes(field), '工作空间面板含 ' + field)
+    assert.ok(ws.includes(field), '工作空间字段齐备：' + field)
   }
   assert.ok(ws.includes('ISOLATED_WRITE'), '模式取值来自注册表')
   assert.ok(ws.includes('dev-t-a1'), '工作分支来自注册表')
   assert.ok(ws.includes('aaaa1111bb'), '当前 HEAD 显示短哈希：' + ws.slice(0, 400))
   assert.ok(ws.includes('lock_acquired'), '活动锁可见')
   assert.ok(ws.includes('未知 / 不可用'), '缺值字段显示未知，不用空白冒充')
-  // 逻辑运行读取失败：显式错误 + 重试入口，不把缓存当事实
+  // 收起恢复概要（V-5）
+  await act(async () => {
+    Array.from(locator.querySelectorAll('button')).find((b) => b.textContent === '收起').click()
+    await flush()
+  })
+  assert.ok(!locator.textContent.includes('工作分支'), '收起后回到概要')
+  // 逻辑运行读取失败：显式错误 + 重试入口，不把缓存当事实（失败不藏在展开层后面）
   await backToList()
   await openTask('T-E1')
   assert.ok(container.textContent.includes('逻辑运行摘要读取失败'), '读取失败有可见错误：' + container.textContent.slice(0, 300))
-  const errWs = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('工作空间信息'))
-  assert.ok(errWs.textContent.includes('工作空间信息读取失败'), '工作空间面板显示读取失败')
-  assert.ok(Array.from(errWs.querySelectorAll('button')).some((b) => (b.textContent || '').includes('重试读取')), '提供重试入口')
-  assert.ok(errWs.textContent.includes('不把过时缓存当作当前事实'), '写明不把缓存当事实')
+  const errLoc = locatorOf()
+  assert.ok(errLoc.textContent.includes('工作空间信息读取失败'), '运行定位显示读取失败')
+  assert.ok(Array.from(errLoc.querySelectorAll('button')).some((b) => (b.textContent || '').includes('重试读取')), '提供重试入口')
+  assert.ok(errLoc.textContent.includes('不把过时缓存当作当前事实'), '写明不把缓存当事实')
   // 正式记录通道不可用：只显示尝试元数据，不冒充成果正文
   runState.recordsFail = true
   const refreshBtn = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '刷新列表')
@@ -2496,6 +2572,46 @@ test('FEAT-85 详情：PAUSED 指导经 vwf.run.control 提交；控制按钮名
   const intBtn = Array.from(ctl.querySelectorAll('button')).find((b) => (b.textContent || '').includes('立即中断'))
   assert.ok(pauseBtn && !pauseBtn.disabled, 'RUNNING 可暂停')
   assert.ok(intBtn && !intBtn.disabled, 'RUNNING 可立即中断')
+  await backToList()
+})
+
+// FEAT-103 V-3：链路弹窗展示完整工作链路（含尝试 / 返工轮次），点选一条回到详情并把
+// 右侧当前结果切到该节点那一次；V-4：底部不再并列一份节点 / 结果表；V-6：正式产物进
+// 右侧「结果」页签，页面底部不再有独立区块。
+test('FEAT-103 V-3/V-4/V-6：完整经过链路弹窗点选联动右侧结果；正式产物在「结果」页签', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  const body = container.querySelector('.vwf-rd-body')
+  // V-6：正式产物默认落在「结果」页签内，工件路径 / 修订 / 来源节点齐全
+  assert.ok(body.textContent.includes('Formal Artifacts'), '结果页签内有 Formal Artifacts')
+  assert.ok(body.textContent.includes('node:lr-a:dev'), '工件清单来自 run 的 formalRecords')
+  assert.ok(body.textContent.includes('R2'), '工件修订可见')
+  assert.ok(body.textContent.includes('节点 dev'), '工件来源节点可见')
+  const belowCards = Array.from(container.querySelectorAll('.vwf-root > .vwf-card')).map((c) => c.textContent || '')
+  assert.ok(!belowCards.some((x) => x.includes('Formal Artifacts')), '页面底部不再有独立的 Formal Artifacts 区块')
+  assert.ok(!belowCards.some((x) => x.includes('节点 / 结果')), '页面底部不再有独立的节点 / 结果区域')
+  // V-3：打开链路弹窗
+  await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过')))
+  const chain = container.querySelector('.vwf-chain')
+  assert.ok(chain, '链路弹窗打开')
+  const entry = (node, attempt) => chain.querySelector('[data-vwf-chain-node="' + node + '"][data-vwf-chain-attempt="' + attempt + '"]')
+  const labels = Array.from(chain.querySelectorAll('.vwf-chain-entry')).map((e) => e.textContent)
+  assert.ok(labels.length >= 6, '链路铺开全部节点（未执行的也占位）：' + labels.length)
+  assert.ok(labels.some((x) => x.includes('实现') && x.includes('第 1 次 · 退回修改')), '链路含返工前的第 1 次执行')
+  assert.ok(labels.some((x) => x.includes('实现') && x.includes('第 2 次 · 已通过') && x.includes('最新')), '链路含最新一次执行并标最新')
+  assert.ok(labels.some((x) => x.includes('尚未开始')), '未执行的节点在链路里明确标注')
+  // 点选第 1 次实现 → 关闭弹窗，右侧切到该节点该次执行
+  await clickEl(entry('dev', '1'))
+  assert.ok(!container.querySelector('.vwf-chain'), '点选后弹窗关闭回到详情页')
+  assert.equal(attemptSelect().value, '1', '右侧当前结果切到点选的那一次执行')
+  assert.ok(container.querySelector('.vwf-rd-body').textContent.includes('历史执行'), '历史执行有明确标注')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第 1 次实现成果'), '右侧正文是该次执行的成果')
+  // 再点最新一次 → 回到当前结果
+  await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过')))
+  await clickEl(container.querySelector('.vwf-chain [data-vwf-chain-node="dev"][data-vwf-chain-attempt="2"]'))
+  assert.equal(attemptSelect().value, '2', '切回最新一次执行')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第 2 次实现成果'), '右侧正文回到最新成果')
+  assert.ok(!container.querySelector('.vwf-rd-body').textContent.includes('历史执行'), '最新一次不标历史执行')
   await backToList()
 })
 
@@ -2742,10 +2858,13 @@ test('FEAT-102 V-4：运行详情为 页头 + 状态条 + 三栏工作台（步�
   assert.ok(main.querySelector('.vwf-rd-canvas .vwf-canvas-wrap svg'), '中栏是只读流程画布')
   assert.equal(main.querySelectorAll('.vwf-rd-body .vwf-canvas-wrap').length, 0, '画布不再堆在详情栏下方')
   assert.ok(main.querySelector('.vwf-rd-body .vwf-tab'), '右栏是唯一选中节点详情出口（三页签在其中）')
-  // 运行级记录留在工作台下方，不与详情栏混排（决策卡 / 恢复卡 / 工作空间面板等仍在）
+  // 运行级记录留在工作台下方，不与详情栏混排（决策卡 / 恢复卡 / 控制卡等仍在）
   const belowCards = Array.from(dlg.querySelectorAll('.vwf-root > .vwf-card')).map((c) => c.textContent || '')
   assert.ok(belowCards.some((x) => x.includes('运行控制')), '工作台下方保留运行控制卡')
-  assert.ok(belowCards.some((x) => x.includes('工作空间信息')), '工作台下方保留工作空间面板')
+  // FEAT-103 V-4/V-5/V-6：节点 / 结果表与工作空间区块不再各占一张重复卡——
+  // 前者并入链路弹窗，后者并入左栏运行定位的「详细」，正式产物进右侧「结果」页签。
+  assert.ok(!belowCards.some((x) => x.includes('工作空间信息')), '页面底部不再有独立的工作空间区块')
+  assert.ok(!belowCards.some((x) => x.includes('Formal Artifacts')), '页面底部不再有独立的 Formal Artifacts 区块')
   assert.equal(main.querySelectorAll('.vwf-card').length, 3, '工作台内只有左栏两张 + 详情栏一张卡：' + main.querySelectorAll('.vwf-card').length)
   await backToList()
 })

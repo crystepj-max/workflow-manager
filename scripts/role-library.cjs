@@ -49,6 +49,13 @@ function explicitSummary(content) {
   return m ? m[1].trim() : ''
 }
 
+// 内置角色摘要：显式简介（角色文件前置块）优先，否则用清单里的显式简介数据字段。
+// 不取正文首行——内置角色正文是给 Agent 的角色提示词（「你是开发 Agent。你的职责是…」），
+// 直接当简介展示会截出半句提示词；清单 summary 才是给用户读的定位与职责提炼（FEAT-103 V-2）。
+function builtinSummary(content, fallback) {
+  return explicitSummary(content) || fallback || ''
+}
+
 // 角色正文摘要：显式简介优先；否则取首个有意义行（跳过 frontmatter 键/标题），截 80 字符；
 // 空则回退 fallback。
 function summarizeRole(content, fallback) {
@@ -166,12 +173,9 @@ function createRoleLibrary(rawManifest) {
     for (const meta of builtins) {
       const snap = typeof bodies[meta.id] === 'string' ? bodies[meta.id] : null
       const f = wsById.get(meta.id)
-      const wsSummary = f && f.content != null ? summarizeRole(f.content, '') : ''
-      const entry = { id: meta.id, name: meta.name, summary: snap != null ? summarizeRole(snap, meta.summary) : (wsSummary || meta.summary), builtin: true }
-      if (includeContent) {
-        const content = snap != null ? snap : (f && f.content != null ? f.content : null)
-        if (content != null) entry.content = content
-      }
+      const body = snap != null ? snap : (f && f.content != null ? f.content : null)
+      const entry = { id: meta.id, name: meta.name, summary: builtinSummary(body, meta.summary), builtin: true }
+      if (includeContent && body != null) entry.content = body
       roles.push(entry)
     }
     const customIds = cat.workspace.map((r) => r.id).filter((id) => typeof id === 'string' && !builtinKeySet.has(roleKey(id)))
@@ -212,7 +216,7 @@ function createRoleLibrary(rawManifest) {
         content = f && f.content != null ? f.content : null
       }
       if (content == null) content = placeholderContent(meta)
-      return { id, name: meta.name, summary: summarizeRole(content, meta.summary), builtin: true, content }
+      return { id, name: meta.name, summary: builtinSummary(content, meta.summary), builtin: true, content }
     }
     const f = wsById.get(id)
     if (f) return { id, name: id, summary: summarizeRole(f.content, ''), builtin: false, content: f.content != null ? f.content : '' }
