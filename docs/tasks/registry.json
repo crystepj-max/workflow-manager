@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 71,
+  "revision": 72,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -79,13 +79,13 @@
       "source": "会话录入",
       "source_ref": "LOC-023 有条件通过优化意见③（2026-09-15 人工裁决）：local-task-merge 的 prune 兜底行为（pruned 返回项）无任何用例断言，端到端用例未覆盖。",
       "baseline": "V1",
-      "status": "定义中",
+      "status": "等待验收",
       "priority": "P2",
-      "env_group": null,
-      "env_role": null,
+      "env_group": "CHORE-38",
+      "env_role": "独立",
       "deps": [],
-      "branch": null,
-      "worktree": null,
+      "branch": "dev-chore-38-r1",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/dev-chore-38-r1",
       "runs": [],
       "merge": null,
       "github_sync": "pending",
@@ -93,7 +93,8 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-16T00:03:29.832Z"
+      "updated_at": "2026-09-18T17:27:22.224Z",
+      "spec_path": "docs/tasks/specs/CHORE-38-prune-fallback-test/task-spec-V1.md"
     },
     {
       "task_id": "CHORE-73",
