@@ -48,15 +48,16 @@ function byClass(root, cls) {
   return root.querySelector('.' + cls)
 }
 
-// FEAT-84 渐进披露：技术词（节点类型 / AI 服务与模型 / JSON 结构）收进「高级设置」，默认折叠。
-// 需要操作这些字段的用例先展开对应段——展开本身也是被测行为之一（见 editor-workbench.test.mjs）。
+// FEAT-84 渐进披露（V-11）：技术词（节点类型 / AI 服务与模型 / JSON 结构）收进第三档，
+// 默认停在业务词档。需要操作这些字段的用例先切到对应档——切换本身也是被测行为之一
+// （见 editor-workbench.test.mjs 的 V-11 用例）。
 async function openSection(root, id) {
-  const head = root.querySelector('.vwf-wb-sec-head[data-vwf-section="' + id + '"]')
-  assert.ok(head, '存在 ' + id + ' 配置段')
-  if (head.getAttribute('aria-expanded') !== 'true') {
-    await act(async () => { head.click(); await flush() })
+  const tab = root.querySelector('.vwf-wb-tab[data-vwf-tab="' + id + '"]')
+  assert.ok(tab, '存在 ' + id + ' 配置档')
+  if (tab.getAttribute('aria-selected') !== 'true') {
+    await act(async () => { tab.click(); await flush() })
   }
-  return head
+  return tab
 }
 
 const SEED_DSL = {
@@ -447,23 +448,40 @@ test('重置视图：内容超出小画布时纵横居中', async () => {
   wrap.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600 })
 })
 
-test('拖拽连线：从节点右把手拖到结束节点创建新边', async () => {
+test('拖拽连线：从节点下把手拖到结束节点创建新边', async () => {
   const wrap = container.querySelector('.vwf-canvas-wrap')
   Object.defineProperty(wrap, 'clientWidth', { value: 1000, configurable: true })
   Object.defineProperty(wrap, 'clientHeight', { value: 600, configurable: true })
   wrap.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600 })
   // fitView 已在首帧调用（clientWidth 0 时 scale=0.3）；重新触发一次 fit 以对齐坐标假设
   const before = container.querySelectorAll('.vwf-edge-flow').length
+  // 拖动目标：$end 节点的实际屏幕坐标（纵向布局下它在源节点下方，位置随布局变化，按 DOM 实测算）
+  const targetCenter = () => {
+    const svg = container.querySelector('svg.vwf-svg')
+    const rect = svg.getBoundingClientRect()
+    const g = container.querySelector('g[data-node-id="$end"]')
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    const box = g.querySelector('rect')
+    const scale = Number(svg.getAttribute('width')) / Number(svg.getAttribute('viewBox').split(' ')[2])
+    return {
+      x: rect.left + (Number(m[1]) + Number(box.getAttribute('width')) / 2) * scale,
+      y: rect.top + (Number(m[2]) + Number(box.getAttribute('height')) / 2) * scale,
+    }
+  }
+  const dest = targetCenter()
   await act(async () => {
     const fitBtn = container.querySelector('.vwf-zoom button[title="适配视图"]')
     if (fitBtn) fitBtn.click()
     await flush()
+  })
+  const dest2 = targetCenter()
+  await act(async () => {
     const handles = container.querySelectorAll('.vwf-handle-src')
     assert.ok(handles.length >= 2, '存在源把手（node-1、node-2）')
     const srcHandle = handles[0]
     srcHandle.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 200, clientY: 80 }))
-    // 拖到 $end 节点位置（rank=1：图形坐标 x∈[392,532]；scale=1.2 → clientX 500 → 416.7）
-    dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 500, clientY: 200 }))
+    // 拖到 $end 节点实际中心
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: dest2.x, clientY: dest2.y }))
     await flush()
   })
   // act 结束后 React 已提交：拖线指向的目标节点应带高亮标记
@@ -471,7 +489,7 @@ test('拖拽连线：从节点右把手拖到结束节点创建新边', async ()
   assert.ok(targetHit, '拖线指向目标节点时高亮标记出现')
   assert.equal(targetHit.closest('g').getAttribute('data-node-id'), '$end', '高亮目标为拖动指向的节点')
   await act(async () => {
-    dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 480, clientY: 200 }))
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: dest2.x, clientY: dest2.y }))
     await flush()
   })
   const after = container.querySelectorAll('.vwf-edge-flow').length
@@ -579,7 +597,9 @@ test('fanout 编辑器：类型切换显示专属字段，画布卡片同步类�
   })
   await openSection(container, 'advanced')
   assert.ok(byText(container, 'items 来源'), 'fanout 显示 items 来源')
-  assert.ok(byText(container, '失败阈值'), 'fanout 显示失败阈值（结果与去向层）')
+  await openSection(container, 'outcome')
+  assert.ok(byText(container, '失败阈值'), 'fanout 显示失败阈值（结果与去向档）')
+  await openSection(container, 'advanced')
   assert.ok(container.querySelector('.vwf-help[title*="该 Schema 校验每个子代理"]'), 'fanout 显示 per-item schema 说明')
   const kinds = Array.from(container.querySelectorAll('text.vwf-node-kind')).map((el) => el.textContent)
   assert.ok(kinds.includes('fanout'), '画布卡片显示 fanout')
@@ -761,41 +781,51 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
     }
   }
 
-  // 规则 6：所有边终点落在目标节点左边框垂直居中（不做目标锚点间隔）
-  const endYOf = (d) => Number(d.trim().split(/[\s,]+/).pop())
-  const nodeCenterY = (g) => {
-    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-    const h = Number(g.querySelector('rect').getAttribute('height'))
-    return Number(m[2]) + h / 2
+  // 规则 6（V-12 纵向布局）：所有边终点落在目标节点上边框水平居中（不做目标锚点间隔）
+  const endPointOf = (d) => {
+    const nums = d.trim().split(/[\s,]+/).map(Number)
+    return { x: nums[nums.length - 2], y: nums[nums.length - 1] }
   }
-  // 规则 6：每条边的终点都落在目标节点左边框垂直居中（数据驱动，取自 dsl 与 DOM 实测高度）
+  const nodeCenterX = (g) => {
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    const w = Number(g.querySelector('rect').getAttribute('width'))
+    return Number(m[1]) + w / 2
+  }
+  const nodeTopY = (g) => {
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    return Number(m[2])
+  }
+  // 规则 6：每条边的终点都落在目标节点上边框水平居中（数据驱动，取自 dsl 与 DOM 实测宽度）
   complexDsl.edges.forEach((e, i) => {
     const g = svg.querySelector('g[data-node-id="' + e.to + '"]')
     assert.ok(g, '画布存在目标节点 ' + e.to)
-    assert.equal(endYOf(paths[i].getAttribute('d')), nodeCenterY(g), '边 ' + i + ' 终点在 ' + e.to + ' 左边框垂直居中')
+    const end = endPointOf(paths[i].getAttribute('d'))
+    assert.equal(end.x, nodeCenterX(g), '边 ' + i + ' 终点在 ' + e.to + ' 上边框水平居中')
+    assert.equal(end.y, nodeTopY(g), '边 ' + i + ' 终点落在 ' + e.to + ' 上边框')
   })
-  // 规则 5：同源起点按「上绕 → 直连 → 下绕」自上而下间隔，与边在 dsl 中的出现顺序无关；
-  // 所有起点圆点与对应边同色，且精确落在源节点右边框（transform.x + rect.width）。
+  // 规则 5（V-12 纵向布局）：同源起点按「左绕(上绕) → 直连 → 右绕(下绕)」自左而右间隔，
+  // 与边在 dsl 中的出现顺序无关；起点圆点与对应边同色，且精确落在源节点下边框。
   const starts = Array.from(svg.querySelectorAll('circle.vwf-edge-start'))
   assert.equal(starts.length, paths.length, '每条边有一个起点圆点')
-  const nodeRightX = (id) => {
+  const nodeBottomY = (id) => {
     const g = svg.querySelector('g[data-node-id="' + id + '"]')
     const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-    return Number(m[1]) + Number(g.querySelector('rect').getAttribute('width'))
+    return Number(m[2]) + Number(g.querySelector('rect').getAttribute('height'))
   }
   complexDsl.edges.forEach((e, i) => {
     assert.equal(starts[i].getAttribute('fill'), paths[i].getAttribute('stroke'), '边 ' + i + ' 起点圆点与边同色')
-    assert.equal(Number(starts[i].getAttribute('cx')), nodeRightX(e.from), '边 ' + i + ' 起点落在 ' + e.from + ' 右边框')
+    assert.equal(Number(starts[i].getAttribute('cy')), nodeBottomY(e.from), '边 ' + i + ' 起点落在 ' + e.from + ' 下边框')
   })
   const rankOf = { up: 0, direct: 1, down: 2 }
-  // 路径类型判定：命令字母 + 数字序列解析（与空格/逗号格式无关）；直连为 C 曲线，绕行为 L 折线
+  // 路径类型判定：命令字母 + 数字序列解析（与空格/逗号格式无关）；直连为 C 曲线，绕行为 L 折线。
+  // 纵向布局里转置后的路径是 'M 起点x 起点y L 起点x … L 车道x …'，起点槽位与车道都落在横轴上。
   const kindOf = (i) => {
     const d = paths[i].getAttribute('d')
     if (/C/.test(d)) return 'direct'
     const nums = d.match(/-?[\d.]+/g).map(Number)
-    const yStart = nums[1]
-    const laneY = nums[5]
-    return laneY < yStart ? 'up' : 'down'
+    const startX = nums[0]
+    const laneX = nums[4]
+    return laneX < startX ? 'up' : 'down'
   }
   const perSource = new Map()
   complexDsl.edges.forEach((e, i) => {
@@ -804,24 +834,24 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
     perSource.set(e.from, list)
   })
   for (const [src, list] of perSource) {
-    const cyOf = (idx) => Number(starts[idx].getAttribute('cy'))
+    const cxOf = (idx) => Number(starts[idx].getAttribute('cx'))
     const sorted = list.slice().sort((a, b) => rankOf[a.kind] - rankOf[b.kind] || a.idx - b.idx)
     for (let k = 1; k < sorted.length; k += 1) {
-      // 优化 3：固定三槽位——同类边共享槽位（相等），跨类严格上升（上<直连<下）
-      assert.ok(cyOf(sorted[k].idx) >= cyOf(sorted[k - 1].idx),
-        '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 自下而下不降')
+      // 优化 3：固定三槽位——同类边共享槽位（相等），跨类严格右移（左绕<直连<右绕）
+      assert.ok(cxOf(sorted[k].idx) >= cxOf(sorted[k - 1].idx),
+        '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 自左而右不左移')
       if (sorted[k].kind !== sorted[k - 1].kind) {
-        assert.ok(cyOf(sorted[k].idx) > cyOf(sorted[k - 1].idx),
-          '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 跨类严格上升')
+        assert.ok(cxOf(sorted[k].idx) > cxOf(sorted[k - 1].idx),
+          '源 ' + src + ' 起点按 ' + sorted[k - 1].kind + '→' + sorted[k].kind + ' 跨类严格右移')
       }
     }
-    // 直连槽位 = 节点右边框垂直居中（与连线源把手位置一致）
+    // 直连槽位 = 节点下边框水平居中（与连线源把手位置一致）
     for (const item of sorted) {
       if (item.kind === 'direct') {
         const g = svg.querySelector('g[data-node-id="' + src + '"]')
         const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-        const center = Number(m[2]) + Number(g.querySelector('rect').getAttribute('height')) / 2
-        assert.equal(cyOf(item.idx), center, '源 ' + src + ' 直连起点与节点右框垂直居中一致')
+        const center = Number(m[1]) + Number(g.querySelector('rect').getAttribute('width')) / 2
+        assert.equal(cxOf(item.idx), center, '源 ' + src + ' 直连起点与节点下框水平居中一致')
       }
     }
   }
@@ -856,15 +886,17 @@ test('防重叠：入口变化会触发画布布局重算', async () => {
     canvasTab.click()
     await flush()
   }
-  const yOf = (id) => {
+  const xyOf = (id) => {
     const g = container.querySelector('g[data-node-id="' + id + '"]')
     const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-    return Number(match[2])
+    return { x: Number(match[1]), y: Number(match[2]) }
   }
+  // V-12 纵向布局：A、B 同属主序号 0（同一行），入口决定谁排在左侧
   await act(async () => { await setDsl(makeDsl('a')) })
-  assert.ok(yOf('a') < yOf('b'), 'entry=a 时 A 排在 B 上方')
+  assert.equal(xyOf('a').y, xyOf('b').y, '同一主序号的两个节点排在同一行')
+  assert.ok(xyOf('a').x < xyOf('b').x, 'entry=a 时 A 排在 B 左侧')
   await act(async () => { await setDsl(makeDsl('b')) })
-  assert.ok(yOf('b') < yOf('a'), 'entry 改为 b 后 B 排在 A 上方')
+  assert.ok(xyOf('b').x < xyOf('a').x, 'entry 改为 b 后 B 排在 A 左侧')
 })
 
 test('两级序号：HD 透传后收口主序号在 UAT 右侧，不再与入口同列', async () => {
@@ -921,7 +953,8 @@ test('两级序号：HD 透传后收口主序号在 UAT 右侧，不再与入口
   }
   const pre = xyOf('preflight')
   const close = xyOf('closeout')
-  assert.ok(close.x > pre.x + 50, '收口应在实施前检查右侧（HD 透传后主序号前进），got pre.x=' + pre.x + ' close.x=' + close.x)
+  // V-12 纵向布局：主序号前进 = 在画布上更靠下
+  assert.ok(close.y > pre.y + 50, '收口应在实施前检查下方（HD 透传后主序号前进），got pre.y=' + pre.y + ' close.y=' + close.y)
   assert.equal(seqOf('preflight'), '0')
   assert.equal(seqOf('dev'), '1')
   assert.equal(seqOf('uat'), '2')
@@ -959,19 +992,21 @@ test('两级序号：同列多节点显示 m.1 / m.2 且上小下大', async () 
     canvasTab.click()
     await flush()
   })
-  const yOf = (id) => {
+  const xyOf = (id) => {
     const g = container.querySelector('g[data-node-id="' + id + '"]')
     const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-    return Number(match[2])
+    return { x: Number(match[1]), y: Number(match[2]) }
   }
   const seqOf = (id) => container.querySelector('g[data-node-id="' + id + '"] [data-node-seq]').getAttribute('data-node-seq')
   assert.equal(seqOf('a'), '0')
   assert.equal(seqOf('b1'), '1.1')
   assert.equal(seqOf('b2'), '1.2')
-  assert.ok(yOf('b1') < yOf('b2'), '同列 1.1 应在 1.2 上方')
+  // V-12 纵向布局：同一主序号的兄弟左右并排，1.1 在 1.2 左侧
+  assert.ok(Math.abs(xyOf('b1').y - xyOf('b2').y) < 2, '同级兄弟同一行')
+  assert.ok(xyOf('b1').x < xyOf('b2').x, '同列 1.1 应在 1.2 左侧')
 })
 
-test('自环边：布局不进入死循环，终点仍在节点左边框垂直居中', async () => {
+test('自环边：布局不进入死循环，终点仍在节点上边框水平居中', async () => {
   const selfLoopDsl = {
     id: 'self-loop',
     name: '自环测试',
@@ -1002,11 +1037,17 @@ test('自环边：布局不进入死循环，终点仍在节点左边框垂直�
   const svg = container.querySelector('svg.vwf-svg')
   const paths = Array.from(svg.querySelectorAll('path.vwf-edge-flow'))
   assert.equal(paths.length, 2, '自环边正常渲染不崩溃')
-  const endYOf = (d) => Number(d.trim().split(/[\s,]+/).pop())
+  const endPointOf = (d) => {
+    const nums = d.trim().split(/[\s,]+/).map(Number)
+    return { x: nums[nums.length - 2], y: nums[nums.length - 1] }
+  }
   const aG = container.querySelector('g[data-node-id="a"]')
   const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(aG.getAttribute('transform'))
-  const aCenterY = Number(m[2]) + Number(aG.querySelector('rect').getAttribute('height')) / 2
-  assert.equal(endYOf(paths[1].getAttribute('d')), aCenterY, '自环边终点仍在节点左边框垂直居中')
+  // V-12 纵向布局：终点落在目标节点上边框水平居中
+  const aCenterX = Number(m[1]) + Number(aG.querySelector('rect').getAttribute('width')) / 2
+  const end = endPointOf(paths[1].getAttribute('d'))
+  assert.equal(end.x, aCenterX, '自环边终点仍在节点上边框水平居中')
+  assert.equal(end.y, Number(m[2]), '自环边终点落在目标节点上边框')
 })
 
 test('编辑器关闭：未保存草稿使用统一样式确认弹窗', async () => {
@@ -1414,7 +1455,7 @@ test('角色库删除 fail-closed：usage 返回 ok:false 时不弹出删除确�
   await act(async () => { freshRoot.unmount(); fresh.remove() })
 })
 
-test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链从左到右', async () => {
+test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链自上而下', async () => {
   const blueprint = {
     id: 'wf-construction-full-feature',
     displayName: '完整功能开发',
@@ -1455,13 +1496,14 @@ test('粘贴蓝图 JSON：模型投影、唯一入口徽标、主链从左到右
   const nameInput = Array.from(container.querySelectorAll('input.vwf-input')).find((el) => el.getAttribute('placeholder') === '模板名称' || el.value === '完整功能开发')
   assert.ok(nameInput, '模板名称从 displayName 摄入')
   assert.equal(nameInput.value, '完整功能开发')
-  const xOf = (id) => {
+  const yOf = (id) => {
     const g = container.querySelector('g[data-node-id="' + id + '"]')
     const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
-    return Number(match[1])
+    return Number(match[2])
   }
-  assert.ok(xOf('requirements') < xOf('design'), '需求在设计左侧')
-  assert.ok(xOf('design') < xOf('dev'), '设计在开发左侧')
+  // V-12 自上而下：需求 → 设计 → 开发依次向下
+  assert.ok(yOf('requirements') < yOf('design'), '需求在设计上方')
+  assert.ok(yOf('design') < yOf('dev'), '设计在开发上方')
   const badges = Array.from(container.querySelectorAll('.vwf-entry-badge-text')).map((el) => {
     const g = el.closest('g[data-node-id]')
     return g && g.getAttribute('data-node-id')

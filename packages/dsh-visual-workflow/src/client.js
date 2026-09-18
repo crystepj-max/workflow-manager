@@ -151,14 +151,14 @@ return {
 .vwf-msg-line.muted { color:var(--dsw-alias-label-tertiary, #8a8a8a); }
 /* 大工作区（A 编排台）——FEAT-84：外层不再承担页面级滚动。
    改造前 .vwf-editor-body 是 overflow:auto 的共享滚动容器，画布行按内容撑高，
-   配置栏一滚就把画布带出视口。现在外层只负责定高与裁剪，四个直接网格项
-   （步骤定位 / 画布 / 连接清单 / 节点配置栏）各自滚动，互不带动。 */
+   配置栏一滚就把画布带出视口。现在外层只负责定高与裁剪，三个直接网格项
+   （步骤定位 / 画布 / 节点配置栏）各自滚动，互不带动；连接信息走弹窗（V-13）。 */
 .vwf-editor-body { flex:1; min-height:0; overflow:hidden; position:relative; overscroll-behavior:contain; }
 /* 绝对定位（inset）而不是 height:100% 或 flex 拉伸：列向 flex 派生的高度在 Chromium 里
    不构成百分比可解析的「确定高度」，网格行 minmax(0,1fr) 会退化为 max-content——
    实测内容被撑到 2151px 而容器只有 675px，随后被 overflow:hidden 裁掉（配置栏滚不动、
    画布被推出视口）。inset 给出确定高度，三个滚动区才真正各自生效。 */
-.vwf-editor { position:absolute; inset:12px 16px; display:grid; grid-template-columns:minmax(0,224px) minmax(0,1fr) minmax(0,368px); grid-template-rows:minmax(0,1fr) minmax(0,1fr); grid-template-areas:"nav canvas config" "conn canvas config"; gap:12px; align-items:stretch; min-width:0; min-height:0; }
+.vwf-editor { position:absolute; inset:12px 16px; display:grid; grid-template-columns:minmax(0,224px) minmax(0,1fr) minmax(0,368px); grid-template-rows:minmax(0,1fr); grid-template-areas:"nav canvas config"; gap:12px; align-items:stretch; min-width:0; min-height:0; }
 /* 窄屏：流程 / 配置两个区域切换，不把桌面画布压成不可读小图（规格 §11）。
    断点与 matchMedia 使用同一阈值（900px），保证 CSS 与 JS 判定一致。 */
 /* 窄屏（≤900px）：流程 / 配置两个区域切换，纯 CSS 驱动（与 JS 无关，matchMedia 缺失也不会错位）。
@@ -169,8 +169,8 @@ return {
   .vwf-pane-switch { display:flex; gap:6px; position:absolute; top:12px; left:16px; right:16px; z-index:3; }
   .vwf-editor { grid-template-columns:minmax(0,1fr); inset:54px 16px 12px; }
   .vwf-editor.pane-flow { grid-template-rows:auto minmax(0,1fr); grid-template-areas:"nav" "canvas"; }
-  .vwf-editor.pane-config { grid-template-rows:minmax(0,1.4fr) minmax(0,1fr); grid-template-areas:"config" "conn"; }
-  .vwf-editor.pane-flow .vwf-wb-conn-card, .vwf-editor.pane-flow .vwf-inspector { display:none; }
+  .vwf-editor.pane-config { grid-template-rows:minmax(0,1fr); grid-template-areas:"config"; }
+  .vwf-editor.pane-flow .vwf-inspector { display:none; }
   .vwf-editor.pane-config .vwf-nav-col, .vwf-editor.pane-config .vwf-canvas-col { display:none; }
   /* 步骤定位转为横向位置条：保留步骤方位感，不再占据半个屏幕宽 */
   .vwf-nav-col { flex-direction:row; align-items:stretch; }
@@ -254,7 +254,6 @@ return {
 .vwf-inspector { grid-area:config; min-width:0; min-height:0; overflow:auto; padding:12px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 .vwf-nav-col { grid-area:nav; min-width:0; min-height:0; display:flex; flex-direction:column; gap:12px; }
 .vwf-wb-steps-card { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
-.vwf-wb-conn-card { grid-area:conn; min-width:0; min-height:0; display:flex; flex-direction:column; }
 .vwf-wb-steps-body, .vwf-wb-conn-body { flex:1; min-height:0; overflow:auto; padding:8px 10px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 .vwf-wb-step, .vwf-wb-conn-row { width:100%; text-align:left; border:1px solid var(--vwf-wb-border-control); background:var(--vwf-wb-surface); color:var(--vwf-wb-text); cursor:pointer; font:inherit; font-size:12px; }
 .vwf-wb-step { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:10px; }
@@ -279,14 +278,16 @@ return {
 .vwf-wb-legend { display:flex; flex-direction:column; gap:3px; padding:8px 10px; border-top:1px solid var(--vwf-wb-border); background:var(--vwf-wb-surface-2); }
 .vwf-wb-legend-line { font-size:11px; color:var(--vwf-wb-text-2); overflow-wrap:anywhere; }
 .vwf-wb-legend-line b { color:var(--vwf-wb-text); }
-/* 配置栏渐进披露：三段可折叠区；含校验错误的段自动展开（错误不被折叠隐藏） */
-.vwf-wb-sec { border:1px solid var(--vwf-wb-border); border-radius:10px; background:var(--vwf-wb-surface); margin-top:10px; }
-.vwf-wb-sec-head { display:flex; align-items:center; gap:8px; width:100%; text-align:left; padding:9px 11px; border:0; background:transparent; color:var(--vwf-wb-text); cursor:pointer; font:inherit; font-size:13px; font-weight:600; }
-.vwf-wb-sec-head:hover { background:var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.1)); }
-.vwf-wb-sec-caret { flex:0 0 auto; width:14px; color:var(--vwf-wb-text-2); font-size:11px; }
-.vwf-wb-sec-note { flex:1 1 auto; min-width:0; font-weight:400; font-size:11px; color:var(--vwf-wb-text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.vwf-wb-sec-err { flex:0 0 auto; font-size:11px; color:var(--dsw-alias-state-error-primary, #e5484d); }
-.vwf-wb-sec-body { padding:0 11px 11px; border-top:1px solid var(--vwf-wb-border); }
+/* 配置栏三段 tab（V-11，对齐原型 inspector）：第一档是业务词，高级设置 / JSON 不切过去就不渲染内容；
+   档位带校验错误时标 ⚠ 并自动切到该档（错误不被隐藏在未选中的档里）。 */
+.vwf-wb-tabs { border:1px solid var(--vwf-wb-border); border-radius:10px; background:var(--vwf-wb-surface); margin-top:10px; }
+.vwf-wb-tabbar { display:flex; flex-wrap:wrap; gap:16px; padding:0 12px; border-bottom:1px solid var(--vwf-wb-border); position:sticky; top:0; z-index:1; background:var(--vwf-wb-surface); border-radius:10px 10px 0 0; }
+.vwf-wb-tab { padding:10px 0; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--vwf-wb-text-2); cursor:pointer; font:inherit; font-size:12px; }
+.vwf-wb-tab.on { color:var(--vwf-wb-accent-text); border-bottom-color:var(--vwf-wb-accent); font-weight:600; }
+.vwf-wb-tab-err { margin-left:4px; color:var(--dsw-alias-state-error-primary, #e5484d); }
+.vwf-wb-tabpanel { padding:11px; }
+/* 连接信息弹窗（V-13）：逐条列出全部连接，自身滚动 */
+.vwf-conn-dialog { width:min(760px, 94vw); }
 /* 工作区内的表单控件与按钮统一使用控件边界色（宿主 border token 服务于宿主表面，
    工作区表面是 A 编排台调色板，V-8 的边界目标按工作区计量） */
 .vwf-editor-dialog :is(.vwf-input, .vwf-select, .vwf-textarea):not(.err),
@@ -377,6 +378,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
     const h = React.createElement
 
     // ── 图常量（对应 workflowGraph.ts）──────────────────────────────────────
+    // 画布为自上而下布局（V-12）：NODE_W / NODE_H 是节点在屏幕上的宽高，
+    // 下面的分层算法在「流向轴 = x」的抽象空间里计算（x = 步骤序号方向，y = 同级并排方向），
+    // 出图前统一转置成屏幕坐标，因此常量在算法里分别落到另一条轴上。
     const NODE_W = 220
     const NODE_H = 66
     const TERM_W = 140
@@ -602,7 +606,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       return routes
     }
 
-    // 分层布局：前向结构边（含 HD 透传）最长路定主序号；同列按拓扑序定子序号并纵向堆叠
+    // 分层布局：前向结构边（含 HD 透传）最长路定主序号；同列按拓扑序定子序号并堆叠。
+    // 抽象空间里 x = 流向轴（主序号前进方向）、y = 同级并排轴；出图前转置为屏幕坐标，
+    // 于是入口落在顶部、流程自上而下展开，同一主序号的兄弟步骤左右并排（V-12）。
     function layoutGraph(dsl, extraTerminals) {
       const nodeIds = (dsl.nodes || []).map(n => n.id).filter(Boolean)
       const idSet = new Set(nodeIds)
@@ -611,7 +617,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       ;(dsl.edges || []).forEach(e => { if (e.to === END_NODE && terminalIds.indexOf(END_NODE) < 0) terminalIds.push(END_NODE) })
       ;(extraTerminals || []).forEach(id => { if (terminalIds.indexOf(id) < 0) terminalIds.push(id) })
       const allIds = nodeIds.concat(terminalIds)
-      const sizeOf = (id) => id === END_NODE ? { w: TERM_W, h: TERM_H } : { w: NODE_W, h: NODE_H }
+      // 抽象尺寸：w = 沿流向的占用（转置后成为节点高度），h = 同级并排的占用（成为节点宽度）
+      const sizeOf = (id) => id === END_NODE ? { w: TERM_H, h: TERM_W } : { w: NODE_H, h: NODE_W }
 
       // 主序号（rank）：前向边最长路；回退边 / HD 回指上游不把目标拉到更右
       const rank = {}
@@ -701,7 +708,49 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         maxRouteY += routeShift
       }
       const contentBottom = Math.max(maxY, maxRouteY > -Infinity ? maxRouteY : maxY)
-      return { pos, W: maxX + MARGIN_X, H: contentBottom + MARGIN_Y, lanes, routes, order, seqLabels, rank }
+      // ── 转置为屏幕坐标（V-12）──
+      // 抽象点 (a, b) → 屏幕 (x = b, y = a)：节点矩形交换宽高，边路径逐点转置后即为
+      // 「源节点下边框出手、目标节点上边框入手」的纵向连线；回环与跨节点避让车道
+      // 分别走在节点左右两侧（抽象空间的上绕/下绕）。
+      const screenPos = {}
+      allIds.forEach(id => {
+        const p = pos[id]
+        if (p) screenPos[id] = { x: p.y, y: p.x, w: p.h, h: p.w }
+      })
+      const screenRoutes = new Map()
+      routes.forEach((route, index) => {
+        const e = (dsl.edges || [])[index]
+        const a = e && pos[e.from]
+        const b = e && pos[e.to]
+        if (!a || !b) return
+        const out = a.x + a.w
+        const back = b.x
+        const start = { startX: route.yStart, startY: out }
+        if (route.routed) {
+          screenRoutes.set(index, {
+            kind: route.kind, ...start,
+            d: 'M ' + route.yStart + ' ' + out
+              + ' L ' + route.yStart + ' ' + route.channelStart
+              + ' L ' + route.laneY + ' ' + route.channelStart
+              + ' L ' + route.laneY + ' ' + route.channelEnd
+              + ' L ' + route.yEnd + ' ' + route.channelEnd
+              + ' L ' + route.yEnd + ' ' + back,
+            labelX: route.laneY, labelY: route.labelX,
+          })
+          return
+        }
+        // 平行直连边：共享起点槽位与终点锚点，靠腰部偏移分离曲线与命中路径
+        const off = (route.parallelCount > 1 && route.parallelIndex != null)
+          ? (route.parallelIndex - (route.parallelCount - 1) / 2) * 3
+          : 0
+        const waist = (out + back) / 2 + off
+        screenRoutes.set(index, {
+          kind: route.kind, ...start,
+          d: 'M ' + route.yStart + ' ' + out + ' C ' + route.yStart + ' ' + waist + ', ' + route.yEnd + ' ' + waist + ', ' + route.yEnd + ' ' + back,
+          labelX: (route.yStart + route.yEnd) / 2, labelY: waist,
+        })
+      })
+      return { pos: screenPos, W: contentBottom + MARGIN_Y, H: maxX + MARGIN_X, lanes, routes: screenRoutes, order, seqLabels, rank }
     }
 
     function uniqueNodeId(dsl, base) {
@@ -956,37 +1005,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         const a = pos[e.from]
         const b = pos[e.to]
         if (!a || !b) return
-        const x1 = a.x + a.w
-        const y1 = a.y + a.h / 2
-        const x2 = b.x
-        const y2 = b.y + b.h / 2
-        const route = lay.routes.get(idx) || { kind: 'direct', yStart: y1, yEnd: y2, routed: false }
+        // 路径几何由 layoutGraph 在屏幕坐标里算好（自上而下，V-12）；此处只做渲染与标签避让
+        const route = lay.routes.get(idx) || { kind: 'direct', d: '', startX: a.x + a.w / 2, startY: a.y + a.h, labelX: a.x + a.w / 2, labelY: a.y + a.h + 40 }
         const isFail = e.on === 'failure'
         const isTech = e.on === 'technical'
         const color = isFail ? EDGE_FAIL : isTech ? EDGE_TECH : EDGE_OK
         const selected = props.selectedEdge === idx
-        let d
-        let labelX
-        let labelY
-        if (route.routed) {
-          const so = route.channelStart
-          const to = route.channelEnd
-          const laneY = route.laneY
-          d = 'M ' + x1 + ' ' + route.yStart + ' L ' + so + ' ' + route.yStart + ' L ' + so + ' ' + laneY + ' L ' + to + ' ' + laneY + ' L ' + to + ' ' + route.yEnd + ' L ' + x2 + ' ' + route.yEnd
-          labelX = route.labelX
-          labelY = route.labelY
-        } else {
-          const mx = x1 + (x2 - x1) / 2
-          const sy = route.yStart
-          const ey = route.yEnd
-          // 平行直连边：共享起点槽位/终点锚点，控制点横向微偏移分离曲线与命中路径
-          const off = (route.parallelCount > 1 && route.parallelIndex != null)
-            ? (route.parallelIndex - (route.parallelCount - 1) / 2) * 3
-            : 0
-          d = 'M ' + x1 + ' ' + sy + ' C ' + (mx + off) + ' ' + sy + ', ' + (mx + off) + ' ' + ey + ', ' + x2 + ' ' + ey
-          labelX = mx
-          labelY = (sy + ey) / 2
-        }
+        const d = route.d
+        const labelX = route.labelX
+        let labelY = route.labelY
         // 标签按实际短文案估算宽度（11px 字号：CJK 约 11px/字，拉丁约 7px/字，取 9 折中）；
         // 若与节点或已有标签相碰，沿垂直方向持续让位。节点/既有标签都是有限集合，不设固定次数上限。
         const lbl = edgeLabelText(e, { success: t('edgeSuccess'), failure: t('edgeFailure'), technical: t('edgeTechnical') })
@@ -1016,7 +1043,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         }))
         // 起始点统一小圆点（颜色跟随边的状态），终点由箭头标识。
         edgeEls.push(h('circle', {
-          key: 'sd' + idx, className: 'vwf-edge-start', cx: x1, cy: route.yStart, r: 4,
+          key: 'sd' + idx, className: 'vwf-edge-start', cx: route.startX, cy: route.startY, r: 4,
           fill: selected ? EDGE_SELECTED : color,
           stroke: selected ? EDGE_SELECTED : color, strokeWidth: 1,
         }))
@@ -1047,7 +1074,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           },
             h('rect', { width: p.w, height: p.h, rx: p.h / 2, fill: 'var(--dsw-alias-bg-layer-1, #1e1e1e)', stroke: isConnectTarget ? ACCENT : 'var(--dsw-alias-border-l3, #555)', strokeWidth: isConnectTarget ? 3 : 1, strokeDasharray: '5 4', opacity: 0.9, ...(isConnectTarget ? { 'data-vwf-connect-target': 'true' } : {}) }),
             h('text', { x: p.w / 2, y: p.h / 2 + 4, textAnchor: 'middle', fontSize: 12, fill: 'var(--dsw-alias-label-secondary, #9a9a9a)' }, t('endNode')),
-            h('circle', { className: 'vwf-handle', cx: 0, cy: p.h / 2, r: 4 })
+            h('circle', { className: 'vwf-handle', cx: p.w / 2, cy: 0, r: 4 })
           ))
           return
         }
@@ -1076,9 +1103,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           h('text', { className: 'vwf-node-label', x: p.w / 2, y: p.h / 2 - 4, textAnchor: 'middle' }, (node && (node.label || node.id)) || id),
           h('text', { className: 'vwf-node-kind', x: p.w / 2, y: p.h / 2 + 15, textAnchor: 'middle' }, (node && node.kind) || 'worker'),
           status ? h('circle', { cx: p.w - 14, cy: 14, r: 6, fill: STATUS_COLOR[status] }) : null,
-          !props.readOnly && !props.structureLocked ? h('circle', { className: 'vwf-handle', cx: 0, cy: p.h / 2, r: 4 }) : null,
+          // 纵向布局（V-12）：入口把手在上边框中点、出线把手在下边框中点
+          !props.readOnly && !props.structureLocked ? h('circle', { className: 'vwf-handle', cx: p.w / 2, cy: 0, r: 4 }) : null,
           !props.readOnly && !props.structureLocked ? h('circle', {
-            className: 'vwf-handle vwf-handle-src', cx: p.w, cy: p.h / 2, r: 5,
+            className: 'vwf-handle vwf-handle-src', cx: p.w / 2, cy: p.h, r: 5,
             onPointerDown: (ev) => onSourceDown(id, ev),
           }) : null
         ))
@@ -1088,11 +1116,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       let connectEl = null
       if (connect && pos[connect.from]) {
         const a = pos[connect.from]
-        const x1 = a.x + a.w
-        const y1 = a.y + a.h / 2
-        const mx = x1 + (connect.x - x1) / 2
+        // 出线预览从源节点下边框中点起，同样自上而下出线（V-12）
+        const sx = a.x + a.w / 2
+        const sy = a.y + a.h
+        const my = sy + (connect.y - sy) / 2
         connectEl = h('path', {
-          d: 'M ' + x1 + ' ' + y1 + ' C ' + mx + ' ' + y1 + ', ' + mx + ' ' + connect.y + ', ' + connect.x + ' ' + connect.y,
+          d: 'M ' + sx + ' ' + sy + ' C ' + sx + ' ' + my + ', ' + connect.x + ' ' + my + ', ' + connect.x + ' ' + connect.y,
           fill: 'none', stroke: ACCENT, strokeWidth: 2, strokeDasharray: '6 5', markerEnd: 'url(#vwf-arrow-sel)',
         })
       }
@@ -1228,29 +1257,31 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
 
     // ── 配置栏渐进披露区（FEAT-84 §7.3）────────────────────────────────────
     // 段内出现校验错误时自动展开一次，避免必填错误被折叠藏起来（错误不得静默隐藏）。
-    function InspectorSection(props) {
-      const hasError = !!props.hasError
-      const errKey = props.errKey || ''
-      const [open, setOpen] = React.useState(props.defaultOpen !== false)
-      const lastErrKey = React.useRef(hasError ? errKey : '')
+    // ── 配置栏三段 tab（V-11，对齐原型 inspector 的 tab 形态）────────────────
+    // 渐进披露原则不变：默认停在第一档（业务词），高级设置 / JSON 不切过去就不渲染内容。
+    // 带错误的档位标出 ⚠，并在错误签名变化时自动切到该档——避免「保存被拦却看不到是哪个字段」。
+    function InspectorTabs(props) {
+      const tabs = props.tabs
+      const [active, setActive] = React.useState(tabs[0].key)
+      const errKey = tabs.filter(tb => tb.hasError).map(tb => tb.key).join(',')
+      const lastErrKey = React.useRef(errKey)
       React.useEffect(() => {
-        if (hasError && lastErrKey.current !== errKey) setOpen(true)
-        lastErrKey.current = hasError ? errKey : ''
-      }, [hasError, errKey])
-      const bodyId = 'vwf-wb-sec-' + String(props.id || '').replace(/[^A-Za-z0-9_-]/g, '-')
-      return h('div', { className: 'vwf-wb-sec' },
-        h('button', {
-          className: 'vwf-wb-sec-head', type: 'button',
-          'data-vwf-section': props.id || '',
-          'aria-expanded': open ? 'true' : 'false', 'aria-controls': bodyId,
-          onClick: () => setOpen(v => !v),
-        },
-          h('span', { className: 'vwf-wb-sec-caret', 'aria-hidden': 'true' }, open ? '▾' : '▸'),
-          h('span', null, props.title),
-          props.note ? h('span', { className: 'vwf-wb-sec-note' }, props.note) : null,
-          !open && hasError ? h('span', { className: 'vwf-wb-sec-err' }, '⚠️') : null
+        if (errKey && lastErrKey.current !== errKey) setActive(errKey.split(',')[0])
+        lastErrKey.current = errKey
+      }, [errKey])
+      const current = tabs.find(tb => tb.key === active) || tabs[0]
+      return h('div', { className: 'vwf-wb-tabs' },
+        h('div', { className: 'vwf-wb-tabbar', role: 'tablist' },
+          tabs.map(tb => h('button', {
+            key: tb.key, type: 'button', role: 'tab',
+            className: 'vwf-wb-tab' + (tb.key === current.key ? ' on' : ''),
+            'data-vwf-tab': tb.key,
+            'aria-selected': tb.key === current.key ? 'true' : 'false',
+            title: tb.note || '',
+            onClick: () => setActive(tb.key),
+          }, tb.label, tb.hasError ? h('span', { className: 'vwf-wb-tab-err' }, '⚠') : null))
         ),
-        open ? h('div', { className: 'vwf-wb-sec-body', id: bodyId }, props.children) : null
+        h('div', { className: 'vwf-wb-tabpanel', role: 'tabpanel' }, current.panel)
       )
     }
 
@@ -1571,11 +1602,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       // 当前值不在清单（旧工作流/宿主脏数据）时兜底保留展示
       if (node.profile && !roles.some(r => r.id === node.profile)) roleOptions.push({ value: node.profile, label: node.profile, title: '' })
 
-      // ── 渐进披露分组（FEAT-84 §7.3）：业务词在前，技术词与 JSON 收进高级设置 ──
-      // 字段 → 归属段。必填字段被折叠时，InspectorSection 会在段内出现校验错误时自动展开，
-      // 不出现「保存被拦却看不到是哪个字段」的死角。
+      // ── 渐进披露分组（FEAT-84 §7.3/V-11）：业务词在前，技术词与 JSON 收进第三档 ──
+      // 字段 → 归属档；未选中的档不渲染内容，出错时档位标 ⚠ 并自动切过去。
       const errCount = (fields) => fields.reduce((n, f) => n + errorsFor(f).length, 0)
-      const errSignature = (fields) => fields.map(f => f + ':' + errorsFor(f).length).join('|')
       // 内置模板结构只读（§9/§11）：控件不可用并给出只读说明，不静默忽略点击
       const ro = !!props.readOnlyStructure
       const roDis = ro ? { disabled: true, title: t('wbBuiltinStructureReadonly') } : {}
@@ -1614,10 +1643,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
           : h('div', { className: 'vwf-muted-sm' }, t('wbOutgoingNone'))
       )
 
-      const basicSection = h(InspectorSection, {
-        key: 'basic', id: 'basic', title: t('wbSecBasic'), note: t('wbSecBasicNote'),
-        defaultOpen: true, hasError: errCount(basicFields) > 0, errKey: errSignature(basicFields),
-      },
+      const basicSection = h(React.Fragment, null,
         h(Field, { label: t('wbFieldStepName'), errors: errorsFor('label') },
           h('input', { className: 'vwf-input', value: node.label || '', ...roDis, onChange: (ev) => { if (!ro) props.onUpdate(node.id, { label: ev.target.value }) } })
         ),
@@ -1634,10 +1660,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         !isFanout ? h(ArtifactFilesEditor, { node, readOnly: ro, label: t('wbFieldDeliverable'), onUpdate: (id, patch) => { if (!ro) props.onUpdate(id, patch) }, errorsFor }) : null
       )
 
-      const outcomeSection = h(InspectorSection, {
-        key: 'outcome', id: 'outcome', title: t('wbSecOutcome'), note: t('wbSecOutcomeNote'),
-        defaultOpen: true, hasError: errCount(outcomeFields) > 0, errKey: errSignature(outcomeFields),
-      },
+      const outcomeSection = h(React.Fragment, null,
         isFanout ? h('div', null,
           h('div', { style: { fontSize: 13, fontWeight: 500, marginTop: 10 } }, t('wbFanoutGroup')),
           h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('wbFanoutGroupHelp')),
@@ -1798,10 +1821,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         outgoingBlock
       )
 
-      const advancedSection = h(InspectorSection, {
-        key: 'advanced', id: 'advanced', title: t('wbSecAdvanced'), note: t('wbSecAdvancedNote'),
-        defaultOpen: false, hasError: errCount(advancedFields) > 0, errKey: errSignature(advancedFields),
-      },
+      const advancedSection = h(React.Fragment, null,
         h('div', { className: 'vwf-muted-sm', style: { marginTop: 10, marginBottom: 2 } }, t('wbAdvancedHelp')),
         h(Field, { label: t('nodeKind'), required: true, errors: errorsFor('kind') },
           h(VwfSelect, {
@@ -1881,9 +1901,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
         props.readOnlyStructure
           ? h('div', { className: 'vwf-wb-readonly' }, t('wbBuiltinStructureReadonly'))
           : null,
-        basicSection,
-        outcomeSection,
-        advancedSection
+        h(InspectorTabs, {
+          tabs: [
+            { key: 'basic', label: t('wbSecBasic'), note: t('wbSecBasicNote'), panel: basicSection, hasError: errCount(basicFields) > 0 },
+            { key: 'outcome', label: t('wbSecOutcome'), note: t('wbSecOutcomeNote'), panel: outcomeSection, hasError: errCount(outcomeFields) > 0 },
+            { key: 'advanced', label: t('wbSecAdvanced'), note: t('wbSecAdvancedNote'), panel: advancedSection, hasError: errCount(advancedFields) > 0 },
+          ],
+        })
       )
     }
 
@@ -2286,6 +2310,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       // 用户在配置时完全看不到。与 errors 同源同生命周期，在状态行下方以警示色展示。
       const [liveWarnings, setLiveWarnings] = React.useState([])
       const [roleUI, setRoleUI] = React.useState(null) // 角色管理浮层：null | 'list' | 'create'
+      const [connOpen, setConnOpen] = React.useState(false) // 连接信息弹窗（V-13）
       const validateTimerRef = React.useRef(null)
       const validateSeqRef = React.useRef(0)
       const fitRef = React.useRef(null)
@@ -2440,11 +2465,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       React.useEffect(() => {
         if (props.registerSave) props.registerSave(() => { void handleSave() })
       })
-      // Escape 分层关闭：先关最上层（角色库 / 校验弹窗），都不在时才让宿主关闭整个工作区
+      // Escape 分层关闭：先关最上层（角色库 / 连接弹窗 / 校验弹窗），都不在时才让宿主关闭整个工作区
       React.useEffect(() => {
         const onKey = (ev) => {
           if (ev.key !== 'Escape') return
           if (roleUI) { ev.preventDefault(); ev.stopPropagation(); setRoleUI(null); return }
+          if (connOpen) { ev.preventDefault(); ev.stopPropagation(); setConnOpen(false); return }
           if (dialogOpen) { ev.preventDefault(); ev.stopPropagation(); closeValidationDialog() }
         }
         document.addEventListener('keydown', onKey, true)
@@ -2641,6 +2667,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
       }
 
       return h('div', null,
+        // 连接信息（V-13）：常驻清单改为「查看连接」按钮 + 弹窗，逐条覆盖模板定义的全部连接
+        connOpen ? h('div', { className: 'vwf-dialog-mask', onClick: () => setConnOpen(false) },
+          h('div', { className: 'vwf-dialog vwf-conn-dialog', onClick: (ev) => ev.stopPropagation() },
+            h('div', { className: 'vwf-dialog-title' }, t('wbConnections') + ' · ' + (wf.name || wf.id || '')),
+            h('div', { className: 'vwf-dialog-desc' }, t('wbConnDialogDesc')),
+            h(ConnectionList, {
+              dsl: wf, rankOf, selectedEdgeIndex,
+              onPickEdge: (index) => { setConnOpen(false); pickEdge(index) },
+            }),
+            h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
+              h('button', { className: 'vwf-btn primary', onClick: () => setConnOpen(false) }, t('close'))
+            )
+          )
+        ) : null,
         dialogOpen ? h('div', { className: 'vwf-dialog-mask', onClick: closeValidationDialog },
           h('div', { className: 'vwf-dialog', onClick: (ev) => ev.stopPropagation() },
             h('div', { className: 'vwf-dialog-title' }, t('validationDialogTitle')),
@@ -2754,6 +2794,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
                   },
                     h('span', { className: 'vwf-toolbar-action-icon' }, '−'),
                     h('span', { className: 'vwf-toolbar-action-label' }, t('deleteNode'))
+                  ),
+                  // 查看连接（V-13）：连接信息收进弹窗，画布不再被常驻清单占位
+                  h('button', {
+                    className: 'vwf-toolbar-action vwf-conn-open', onClick: () => setConnOpen(true),
+                    title: t('wbConnDialogDesc'),
+                  },
+                    h('span', { className: 'vwf-toolbar-action-icon' }, '⇄'),
+                    h('span', { className: 'vwf-toolbar-action-label' }, t('wbViewConnections') + '（' + (wf.edges || []).length + '）')
                   )
                 ),
                 h('span', { className: 'vwf-muted-sm vwf-toolbar-hint' }, t('connectHint')),
@@ -2796,17 +2844,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--dsw-alias-bra
               ? h('div', { className: 'vwf-status warn', style: { marginTop: 2 } },
                   '⚠️ ' + liveWarnings.length + ' ' + t('validWarnings') + '：' + liveWarnings[0] + (liveWarnings.length > 1 ? ' …' : ''))
               : null
-          ),
-          // 连接清单：独立滚动区；直接遍历模板定义的 edges，保证不漏边（§9/V-4）
-          h('div', { className: 'vwf-card vwf-wb-conn-card' },
-            h('div', { className: 'vwf-card-head' },
-              h('div', { className: 'vwf-card-title' }, t('wbConnections')),
-              h('span', { className: 'vwf-badge' }, (wf.edges || []).length + '')
-            ),
-            h(ConnectionList, {
-              dsl: wf, rankOf, selectedEdgeIndex,
-              onPickEdge: pickEdge,
-            })
           ),
           h('div', { className: 'vwf-card vwf-inspector' },
             h('div', { className: 'vwf-card-title', style: { marginBottom: 4 } }, t('inspector')),

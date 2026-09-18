@@ -4,7 +4,10 @@
 //   V-1 两层表面与关闭后位置保留（列表 / 筛选）；V-2 三段独立滚动；
 //   V-3 业务文案渐进披露（技术词只在高级层）；V-4 多结果路由与连接清单不漏边；
 //   V-5 调用重试 / 业务回环 / 返工轮次三类不同标签与说明；V-7 内置模板结构只读；
-//   V-8 工作区语义 token 与深色兜底成对；V-9 窄屏流程 / 配置切换与 Escape 分层关闭。
+//   V-8 工作区语义 token 与深色兜底成对；V-9 窄屏流程 / 配置切换与 Escape 分层关闭；
+//   V-11 节点配置三档 tab（业务词在前，高级设置 / JSON 不切过去不渲染）；
+//   V-12 画布自上而下（入口在顶部、流程向下展开，同级并排）；
+//   V-13「查看连接」按钮 + 弹窗，分类标识与不漏边要求不变。
 // V-6（撤销历史语义）由 client.smoke.mjs 既有用例覆盖；V-10 的真实 DSH 验收不在本文件。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -168,17 +171,36 @@ async function openEditor(container, label) {
   return dialog
 }
 
-function sectionHead(root, id) {
-  return root.querySelector('.vwf-wb-sec-head[data-vwf-section="' + id + '"]')
+// 配置栏三档 tab（V-11）：档位按钮自身携带选中态，未选中的档不渲染内容
+function tabOf(root, key) {
+  return root.querySelector('.vwf-wb-tab[data-vwf-tab="' + key + '"]')
 }
 
-async function openSection(root, id) {
-  const head = sectionHead(root, id)
-  assert.ok(head, '存在配置段：' + id)
-  if (head.getAttribute('aria-expanded') !== 'true') {
-    await act(async () => { head.click(); await flush() })
+function activeTabOf(root) {
+  const el = root.querySelector('.vwf-wb-tab.on')
+  return el ? el.getAttribute('data-vwf-tab') : null
+}
+
+async function openTab(root, key) {
+  const tab = tabOf(root, key)
+  assert.ok(tab, '存在配置档：' + key)
+  if (tab.getAttribute('aria-selected') !== 'true') {
+    await act(async () => { tab.click(); await flush() })
   }
-  return head
+  return tab
+}
+
+// 连接信息（V-13）：常驻清单改为「查看连接」按钮 + 弹窗
+async function openConnections(container) {
+  await act(async () => {
+    const btn = container.querySelector('.vwf-conn-open')
+    assert.ok(btn, '存在「查看连接」按钮')
+    btn.click()
+    await flush()
+  })
+  const dialog = container.querySelector('.vwf-conn-dialog')
+  assert.ok(dialog, '连接弹窗已打开')
+  return dialog
 }
 
 function editorOf(container) {
@@ -197,28 +219,27 @@ function compactCss(text) {
 // ═══════════════════════════════════════════════════════════════════════════
 // V-2 三段结构与独立滚动
 // ═══════════════════════════════════════════════════════════════════════════
-test('V-2 三段结构：步骤定位 / 画布 / 连接清单 / 配置栏四个独立滚动区，外层不再承担页面级滚动', async () => {
+test('V-2 三段结构：步骤定位 / 画布 / 配置栏三个独立滚动区，外层不再承担页面级滚动', async () => {
   const { container, styleText } = await mountPage()
   await openEditor(container)
 
   const editor = editorOf(container)
   assert.ok(editor, '存在工作区网格')
-  // 四个直接网格项各占一个 grid-area —— 各自滚动互不带动
+  // 三个直接网格项各占一个 grid-area —— 各自滚动互不带动
   assert.ok(editor.querySelector('.vwf-nav-col'), '左侧步骤定位区存在')
   assert.ok(editor.querySelector('.vwf-canvas-col'), '中间路线画布存在')
-  assert.ok(editor.querySelector('.vwf-wb-conn-card'), '连接清单区存在')
   assert.ok(editor.querySelector('.vwf-inspector'), '右侧节点配置栏存在')
   const areas = Array.from(editor.children).map((el) => el.className)
-  assert.equal(areas.length, 4, '工作区只有四个直接子项：' + JSON.stringify(areas))
+  assert.equal(areas.length, 3, '工作区只有三个直接子项：' + JSON.stringify(areas))
 
   const css = compactCss(styleText.join('\n'))
   // 外层容器只负责裁剪，不再滚动（改造前是 overflow:auto 的共享滚动源）
   assert.match(css, /\.vwf-editor-body\{[^}]*overflow:hidden/, '外层 .vwf-editor-body 不再滚动')
   assert.doesNotMatch(css, /\.vwf-editor-body\{[^}]*overflow:auto/, '外层不得保留 overflow:auto')
-  // 网格项各自滚动
+  // 网格项各自滚动；连接信息走弹窗，自身滚动（V-13）
   assert.match(css, /\.vwf-inspector\{grid-area:config[^}]*overflow:auto/, '配置栏自身滚动')
-  assert.match(css, /\.vwf-wb-steps-body,\.vwf-wb-conn-body\{[^}]*overflow:auto/, '步骤定位与连接清单各自滚动')
-  assert.match(css, /\.vwf-wb-conn-card\{grid-area:conn/, '连接清单占独立网格区')
+  assert.match(css, /\.vwf-wb-steps-body,\.vwf-wb-conn-body\{[^}]*overflow:auto/, '步骤定位与连接弹窗清单各自滚动')
+  assert.match(css, /\.vwf-editor\{position:absolute[^}]*grid-template-areas:"nav canvas config"/, '三段各占一个网格区')
   // 画布在工作区内由网格行定高：不得再用固定 min-height 撑高（改造前 min-height:360px）
   assert.match(css, /\.vwf-editor \.vwf-canvas-wrap\{flex:1;min-height:0/, '工作区画布 min-height:0 随网格收缩')
   assert.doesNotMatch(css, /\.vwf-editor \.vwf-canvas-wrap\{[^}]*min-height:360px/, '不再用固定 min-height 撑高画布')
@@ -244,63 +265,80 @@ test('V-2 配置栏内容长于可视高度时，画布仍是独立滚动区（�
 // ═══════════════════════════════════════════════════════════════════════════
 // V-3 业务文案与渐进披露
 // ═══════════════════════════════════════════════════════════════════════════
-test('V-3 渐进披露：基础段用业务词，节点 ID / JSON 结构默认折叠在高级设置里', async () => {
+test('V-11 配置栏三档 tab：默认停在业务词档，节点 ID / JSON 结构不切过去就不渲染', async () => {
   const { container } = await mountPage({ dsl: DIAG_DSL, list: [{ id: 'wf-diag', name: '诊断与修复', description: '', builtin: false, dsl: JSON.parse(JSON.stringify(DIAG_DSL)) }] })
   await openEditor(container)
 
-  const basic = sectionHead(container, 'basic')
-  const outcome = sectionHead(container, 'outcome')
-  const advanced = sectionHead(container, 'advanced')
-  assert.ok(basic && outcome && advanced, '三段都在')
-  assert.equal(basic.getAttribute('aria-expanded'), 'true', '基础段默认展开')
-  assert.equal(outcome.getAttribute('aria-expanded'), 'true', '结果与去向默认展开')
-  assert.equal(advanced.getAttribute('aria-expanded'), 'false', '高级设置默认折叠')
+  const bar = container.querySelector('.vwf-wb-tabbar')
+  assert.ok(bar, '存在档位条')
+  const tabs = Array.from(container.querySelectorAll('.vwf-wb-tab'))
+  assert.equal(tabs.length, 3, '三个配置档：' + JSON.stringify(tabs.map((el) => el.textContent)))
+  assert.deepEqual(tabs.map((el) => el.getAttribute('data-vwf-tab')), ['basic', 'outcome', 'advanced'])
+  assert.equal(activeTabOf(container), 'basic', '默认停在第一档（业务词）')
+  assert.equal(bar.getAttribute('role'), 'tablist', '档位条语义为 tablist')
+  assert.equal(tabs[0].getAttribute('role'), 'tab', '档位按钮语义为 tab')
+  assert.ok(container.querySelector('.vwf-wb-tabpanel'), '内容落在 tabpanel 内')
 
-  // 基础段：业务词齐备
-  assert.ok(byText(container, '步骤名称'), '基础段有「步骤名称」')
-  assert.ok(byText(container, '任务（这一步要做什么）'), '基础段有「任务」')
-  assert.ok(byText(container, '负责角色'), '基础段有「负责角色」')
-  assert.ok(byText(container, '交付内容（这一步产出什么）'), '基础段有「交付内容」')
+  // 第一档：业务词齐备
+  assert.ok(byText(container, '步骤名称'), '第一档有「步骤名称」')
+  assert.ok(byText(container, '任务（这一步要做什么）'), '第一档有「任务」')
+  assert.ok(byText(container, '负责角色'), '第一档有「负责角色」')
+  assert.ok(byText(container, '交付内容（这一步产出什么）'), '第一档有「交付内容」')
 
-  // 高级段未展开前，技术词不得出现（字段名 / JSON 只出现在高级层）
+  // 未切到第三档前，技术词不得出现（字段名 / JSON 只出现在高级档）
   const beforeText = container.querySelector('.vwf-inspector').textContent
-  assert.ok(beforeText.indexOf('节点 ID') < 0, '折叠时不应出现「节点 ID」')
-  assert.ok(!container.querySelector('.vwf-inspector textarea.vwf-mono'), '折叠时不应出现 JSON 结构编辑区')
+  assert.ok(beforeText.indexOf('节点 ID') < 0, '未切到高级档时不应出现「节点 ID」')
+  assert.ok(!container.querySelector('.vwf-inspector textarea.vwf-mono'), '未切到高级档时不应出现 JSON 结构编辑区')
 
-  await openSection(container, 'advanced')
+  await openTab(container, 'advanced')
   const afterText = container.querySelector('.vwf-inspector').textContent
-  assert.ok(afterText.indexOf('节点 ID') >= 0, '展开后出现「节点 ID」')
-  assert.ok(container.querySelector('.vwf-inspector textarea.vwf-mono'), '展开后出现 JSON 结构编辑区')
-  assert.ok(afterText.indexOf('默认 / 覆盖 / 还原') >= 0, '高级层说明模型默认 / 覆盖 / 还原只对内置模板有效')
+  assert.equal(activeTabOf(container), 'advanced', '已切到高级档')
+  assert.ok(afterText.indexOf('节点 ID') >= 0, '切到高级档后出现「节点 ID」')
+  assert.ok(container.querySelector('.vwf-inspector textarea.vwf-mono'), '切到高级档后出现 JSON 结构编辑区')
+  assert.ok(afterText.indexOf('默认 / 覆盖 / 还原') >= 0, '高级档说明模型默认 / 覆盖 / 还原只对内置模板有效')
+  assert.ok(beforeText.indexOf('结果与去向') >= 0 || tabOf(container, 'outcome').textContent.indexOf('结果与去向') >= 0, '未选中的档位仍以档名可见')
 })
 
-test('V-3 业务结果取值可直接完成配置，不必展开高级设置', async () => {
+test('V-3 业务结果取值可直接完成配置，不必切到高级档', async () => {
   const { container } = await mountPage({ dsl: DIAG_DSL, list: [{ id: 'wf-diag', name: '诊断与修复', description: '', builtin: false, dsl: JSON.parse(JSON.stringify(DIAG_DSL)) }] })
   await openEditor(container)
   // 检查节点默认选中（入口节点）
+  await openTab(container, 'outcome')
   const inspector = container.querySelector('.vwf-inspector')
   const outcomes = Array.from(inspector.querySelectorAll('.vwf-wb-outcome-row'))
-  assert.ok(outcomes.length >= 3, '结果与去向层直接列出该步骤的各条去向：' + outcomes.length)
+  assert.ok(outcomes.length >= 3, '结果与去向档直接列出该步骤的各条去向：' + outcomes.length)
   // 业务结果行内直接写出取值与去向，不需要读 JSON
   const text = inspector.textContent
   assert.ok(text.indexOf('need-fix') >= 0, '业务结果取值可见')
   assert.ok(text.indexOf('修复问题') >= 0, '业务结果的去向以步骤名呈现')
-  assert.equal(sectionHead(container, 'advanced').getAttribute('aria-expanded'), 'false', '全程未展开高级设置')
+  assert.equal(activeTabOf(container), 'outcome', '全程停在业务档位')
+  assert.ok(text.indexOf('节点 ID') < 0, '业务档内不出现技术字段名')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
 // V-4 多结果路由与连接清单不漏边
 // ═══════════════════════════════════════════════════════════════════════════
-test('V-4 连接清单逐条覆盖模板定义的全部连接（不漏边）', async () => {
+test('V-13 查看连接弹窗逐条覆盖模板定义的全部连接（不漏边）', async () => {
   const { container } = await mountPage({ dsl: DIAG_DSL, list: [{ id: 'wf-diag', name: '诊断与修复', description: '', builtin: false, dsl: JSON.parse(JSON.stringify(DIAG_DSL)) }] })
   await openEditor(container)
-  const rows = container.querySelectorAll('.vwf-wb-conn-row')
-  assert.equal(rows.length, DIAG_DSL.edges.length, '连接清单条数 = 模板定义连接数（' + DIAG_DSL.edges.length + '）')
-  const all = container.querySelector('.vwf-wb-conn-body').textContent
+  // 弹窗打开前，连接信息不占画布版面（不再是左下常驻清单）
+  assert.equal(container.querySelector('.vwf-wb-conn-body'), null, '未点「查看连接」时不渲染连接清单')
+  const dialog = await openConnections(container)
+  const rows = dialog.querySelectorAll('.vwf-wb-conn-row')
+  assert.equal(rows.length, DIAG_DSL.edges.length, '连接条数 = 模板定义连接数（' + DIAG_DSL.edges.length + '）')
+  const all = dialog.querySelector('.vwf-wb-conn-body').textContent
   for (const e of DIAG_DSL.edges) {
     const to = e.to === '$end' ? '结束' : (DIAG_DSL.nodes.find((n) => n.id === e.to) || {}).label
-    assert.ok(all.indexOf(to) >= 0, '连接清单覆盖去向：' + to)
+    assert.ok(all.indexOf(to) >= 0, '连接信息覆盖去向：' + to)
   }
+  // 按钮上带条数，点一条可定位到画布上的这条连接（弹窗关闭、边配置出现）
+  assert.ok(container.querySelector('.vwf-conn-open').textContent.indexOf(String(DIAG_DSL.edges.length)) >= 0, '「查看连接」按钮标出连接数')
+  await act(async () => {
+    dialog.querySelectorAll('.vwf-wb-conn-row')[0].click()
+    await flush()
+  })
+  assert.equal(container.querySelector('.vwf-conn-dialog'), null, '点选连接后弹窗关闭')
+  assert.ok(container.querySelector('.vwf-inspector').textContent.indexOf('边配置') >= 0, '点选连接后进入该连接的配置')
 })
 
 test('V-4 已声明但缺少去向的业务结果给出缺项提示，且不删除连接', async () => {
@@ -310,16 +348,17 @@ test('V-4 已声明但缺少去向的业务结果给出缺项提示，且不删�
   const before = dsl.edges.length
   const { container } = await mountPage({ dsl, list: [{ id: 'wf-diag', name: '诊断与修复', description: '', builtin: false, dsl }] })
   await openEditor(container)
-  const conn = container.querySelector('.vwf-wb-conn-body').textContent
+  const dialog = await openConnections(container)
+  const conn = dialog.querySelector('.vwf-wb-conn-body').textContent
   assert.ok(conn.indexOf('已声明') >= 0 && conn.indexOf('pass') >= 0, '缺项提示列出未接去向的取值')
-  assert.equal(container.querySelectorAll('.vwf-wb-conn-row').length, before, '缺项不导致任何连接被删除')
+  assert.equal(dialog.querySelectorAll('.vwf-wb-conn-row').length, before, '缺项不导致任何连接被删除')
 })
 
 
 // ═══════════════════════════════════════════════════════════════════════════
 // V-4 扇出后汇总（真实内置模板 wf-explore：并行研究组 + 汇总 + 三类连接）
 // ═══════════════════════════════════════════════════════════════════════════
-test('V-4 扇出后汇总模板：并行组与汇总可辨认，连接清单不漏边且三类分类正确', async () => {
+test('V-4 扇出后汇总模板：并行组与汇总可辨认，连接信息不漏边且三类分类正确', async () => {
   const dsl = JSON.parse(JSON.stringify(EXPLORE_DSL))
   const { container } = await mountPage({ dsl, list: [{ id: dsl.id, name: dsl.id, description: '', builtin: true, dsl }] })
   await openEditor(container, '查看并验收')
@@ -341,10 +380,11 @@ test('V-4 扇出后汇总模板：并行组与汇总可辨认，连接清单不�
     assert.ok(row && row.textContent.indexOf('汇总') >= 0, '扇出下游节点标为汇总：' + id)
   }
 
-  // 连接清单：条数 = 模板定义连接数（不漏边），三类分类与定义一一对应
-  const rows = Array.from(container.querySelectorAll('.vwf-wb-conn-row'))
-  assert.equal(rows.length, dsl.edges.length, '连接清单条数 = 模板定义连接数（' + dsl.edges.length + '）')
-  const body = container.querySelector('.vwf-wb-conn-body').textContent
+  // 连接信息（V-13 弹窗）：条数 = 模板定义连接数（不漏边），三类分类与定义一一对应
+  const dialog = await openConnections(container)
+  const rows = Array.from(dialog.querySelectorAll('.vwf-wb-conn-row'))
+  assert.equal(rows.length, dsl.edges.length, '连接条数 = 模板定义连接数（' + dsl.edges.length + '）')
+  const body = dialog.querySelector('.vwf-wb-conn-body').textContent
   const countOf = (label) => { const seg = body.split(label + '（')[1]; return seg ? Number(seg.split('）')[0]) : -1 }
   const expectRetry = dsl.edges.filter((e) => e.on === 'technical').length
   const expectLoop = dsl.edges.filter((e) => e.on !== 'technical' && e.countRound === true).length
@@ -357,12 +397,13 @@ test('V-4 扇出后汇总模板：并行组与汇总可辨认，连接清单不�
     assert.ok(body.indexOf(labelOf(e.from) + ' → ' + labelOf(e.to)) >= 0, '清单含该连接：' + labelOf(e.from) + ' → ' + labelOf(e.to))
   }
 
-  // 扇出的汇总语义写在业务侧：部分子任务未完成时汇总保持等待
+  // 扇出的汇总语义写在业务侧：部分子任务未完成时汇总保持等待（在「结果与去向」档内）
   const fanoutId = fanoutIds[0]
   await act(async () => {
     container.querySelector('g[data-node-id="' + fanoutId + '"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
     await flush()
   })
+  await openTab(container, 'outcome')
   const inspector = container.querySelector('.vwf-inspector')
   assert.ok(inspector.textContent.indexOf('并行研究组') >= 0, '扇出节点显示并行研究组说明')
   assert.ok(inspector.textContent.indexOf('每个子任务各自交自己的报告') >= 0, '说明子任务各自报告')
@@ -376,7 +417,8 @@ test('V-4 扇出后汇总模板：并行组与汇总可辨认，连接清单不�
 test('V-5 调用重试 / 业务回环 / 普通业务路由使用不同标签与说明，返工轮次单独表述', async () => {
   const { container } = await mountPage({ dsl: DIAG_DSL, list: [{ id: 'wf-diag', name: '诊断与修复', description: '', builtin: false, dsl: JSON.parse(JSON.stringify(DIAG_DSL)) }] })
   await openEditor(container)
-  const body = container.querySelector('.vwf-wb-conn-body')
+  const dialog = await openConnections(container)
+  const body = dialog.querySelector('.vwf-wb-conn-body')
 
   // 三类分组标签与说明同时存在
   for (const label of ['普通业务路由', '业务回环', '调用重试']) {
@@ -402,9 +444,10 @@ test('V-5 调用重试 / 业务回环 / 普通业务路由使用不同标签与�
 test('V-5 回环与调用重试在边配置中使用不同标签', async () => {
   const { container } = await mountPage({ dsl: DIAG_DSL, list: [{ id: 'wf-diag', name: '诊断与修复', description: '', builtin: false, dsl: JSON.parse(JSON.stringify(DIAG_DSL)) }] })
   await openEditor(container)
-  // 选中回环边（fix → check，countRound）
+  // 选中回环边（fix → check，countRound）：从连接弹窗里点选
+  const dialog = await openConnections(container)
   await act(async () => {
-    const rows = container.querySelectorAll('.vwf-wb-conn-row')
+    const rows = dialog.querySelectorAll('.vwf-wb-conn-row')
     const loopRow = Array.from(rows).find((r) => r.textContent.indexOf('业务回环') >= 0)
     assert.ok(loopRow, '找到回环连接行')
     loopRow.click()
@@ -438,11 +481,14 @@ test('V-7 内置模板：结构控件不可用并给出只读说明，另存为�
   assert.equal(saveBtn.disabled, true, '内置模板不能覆盖保存')
   assert.ok(byText(container, '另存为'), '另存为仍是可用出口')
 
-  // 节点配置段落可见但为只读说明
+  // 节点配置档位可见但为只读说明
   assert.ok(container.querySelector('.vwf-inspector .vwf-wb-readonly'), '节点配置给出只读说明')
-  await openSection(container, 'advanced')
   const goalInput = container.querySelector('.vwf-inspector textarea.vwf-textarea')
   assert.equal(goalInput.disabled, true, '内置模板节点字段不可编辑')
+  await openTab(container, 'advanced')
+  assert.equal(activeTabOf(container), 'advanced', '内置模板同样可在三档之间切换查看')
+  const kindSelect = container.querySelector('.vwf-wb-tabpanel select')
+  assert.equal(kindSelect.disabled, true, '内置模板技术档字段同样不可编辑')
 
   // 模型默认 / 覆盖入口不在自定义模板口径里扩展：流程库行内入口保持存在
   assert.ok(container.textContent.indexOf('模型覆盖') >= 0, '内置模板保留流程库「模型覆盖」入口')
@@ -570,14 +616,15 @@ test('V-7 结构锁：内置模板可选中节点与连接（定位 / 查看）�
     container.querySelector('g[data-node-id="' + BUILTIN_DSL.nodes[1].id + '"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
     await flush()
   })
-  assert.equal(sectionHead(container, 'basic').getAttribute('aria-expanded'), 'true', '点节点后进入该节点配置')
+  assert.equal(activeTabOf(container), 'basic', '点节点后进入该节点配置（默认业务档）')
   assert.ok(container.querySelector('.vwf-inspector').textContent.indexOf(BUILTIN_DSL.nodes[1].label) >= 0
     || container.querySelectorAll('.vwf-inspector .vwf-input').length > 0, '右侧为该节点详情')
 
-  // 可选中连接：点边后出现边配置
+  // 可选中连接：从连接弹窗点一条后出现边配置
+  const connDialog = await openConnections(container)
   await act(async () => {
-    const rows = container.querySelectorAll('.vwf-wb-conn-row')
-    assert.ok(rows.length >= 1, '连接清单有条目')
+    const rows = connDialog.querySelectorAll('.vwf-wb-conn-row')
+    assert.ok(rows.length >= 1, '连接信息有条目')
     rows[0].click()
     await flush()
   })
@@ -733,20 +780,20 @@ test('V-9 窄屏 390×844：流程 / 配置两个区域可切换，不把桌面�
   has('@media (max-width:900px){', '窄屏规则集中在媒体查询内')
   has('.vwf-editor{grid-template-columns:minmax(0,1fr);inset:54px 16px 12px}', '窄屏单列可收缩且让出切换条高度')
   has('.vwf-editor.pane-flow{grid-template-rows:auto minmax(0,1fr);grid-template-areas:"nav" "canvas"}', '流程窗格：步骤条自适应 + 画布占满剩余高度')
-  has('.vwf-editor.pane-config{grid-template-rows:minmax(0,1.4fr) minmax(0,1fr);grid-template-areas:"config" "conn"}', '配置窗格：配置栏与连接清单各自定高')
+  has('.vwf-editor.pane-config{grid-template-rows:minmax(0,1fr);grid-template-areas:"config"}', '配置窗格：配置栏占满剩余高度（连接信息走弹窗，不再占窗格）')
   // 未参与当窗格 grid-template-areas 的项必须显式隐藏，否则被自动放置撑出隐式行
-  has('.vwf-editor.pane-flow .vwf-wb-conn-card,.vwf-editor.pane-flow .vwf-inspector{display:none}', '流程窗格隐藏配置栏与连接清单')
+  has('.vwf-editor.pane-flow .vwf-inspector{display:none}', '流程窗格隐藏配置栏')
   has('.vwf-editor.pane-config .vwf-nav-col,.vwf-editor.pane-config .vwf-canvas-col{display:none}', '配置窗格隐藏步骤定位与画布')
 })
 
-test('V-9 桌面宽度保持三段布局：切换条默认隐藏，网格为三列两行', async () => {
+test('V-9 桌面宽度保持三段布局：切换条默认隐藏，网格为三列一行', async () => {
   const { container, styleText } = await mountPage()
   await openEditor(container)
   assert.equal(container.querySelectorAll('.vwf-wb-pane-tab').length, 2, '切换按钮存在但在桌面不显示（由 CSS 控制）')
   const css = compactCss(styleText.join('\n'))
   const has = (frag, label) => assert.ok(css.indexOf(frag) >= 0, label)
   has('.vwf-pane-switch{display:none}', '切换条默认隐藏')
-  has('grid-template-rows:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"nav canvas config" "conn canvas config"', '桌面两行网格与区域划分')
+  has('grid-template-rows:minmax(0,1fr);grid-template-areas:"nav canvas config"', '桌面单行网格与区域划分')
   // 画布宿主必须撑满卡片剩余高度（否则画布只有内容高度，首屏 fit 落到缩放下限）
   has('.vwf-editor-dialog .vwf-canvas-host{flex:1;min-height:0;display:flex;flex-direction:column}', '画布宿主撑满卡片')
 })
@@ -754,6 +801,15 @@ test('V-9 桌面宽度保持三段布局：切换条默认隐藏，网格为三�
 test('V-9 Escape 分层关闭：先关最上层，不把整个工作区一起带走', async () => {
   const { container } = await mountPage()
   await openEditor(container)
+  // 连接弹窗（V-13）开着时，Escape 只关它
+  await openConnections(container)
+  await act(async () => {
+    document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  assert.equal(container.querySelector('.vwf-conn-dialog'), null, 'Escape 关闭连接弹窗')
+  assert.ok(container.querySelector('dialog.vwf-editor-dialog'), 'Escape 未关闭整个工作区')
+
   // 打开角色库浮层
   await act(async () => {
     byText(container, '管理角色').click()
@@ -783,6 +839,90 @@ test('V-9 Escape 分层关闭：先关最上层，不把整个工作区一起带
   })
   assert.equal(container.querySelector('.vwf-confirm-mask'), null, 'Escape 关闭确认层')
   assert.ok(container.querySelector('dialog.vwf-editor-dialog'), 'Escape 未关闭工作区（改由用户显式选择）')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V-12 画布自上而下：入口在顶部、流程方向向下展开，同级步骤左右并排
+// ═══════════════════════════════════════════════════════════════════════════
+test('V-12 画布自上而下：入口在上、下游节点在下；同级兄弟左右并排而非上下堆叠', async () => {
+  // 并行模板：a（入口）同时通向 b1 / b2，两者属同一主序号（同级兄弟）
+  const parallelDsl = {
+    id: 'vf-vertical', name: '纵向布局', entry: 'a', control: { maxRounds: 3 },
+    nodes: [
+      { id: 'a', label: '安排', profile: 'dispatcher', goal: 'g' },
+      { id: 'b1', label: '分支一', profile: 'dev', goal: 'g' },
+      { id: 'b2', label: '分支二', profile: 'dev', goal: 'g' },
+    ],
+    edges: [
+      { from: 'a', to: 'b1', on: 'success' },
+      { from: 'a', to: 'b2', on: 'success' },
+    ],
+  }
+  const { container } = await mountPage({ dsl: parallelDsl, list: [{ id: parallelDsl.id, name: parallelDsl.name, description: '', builtin: false, dsl: JSON.parse(JSON.stringify(parallelDsl)) }] })
+  await openEditor(container)
+  const nodeAt = (id) => {
+    const g = container.querySelector('g[data-node-id="' + id + '"]')
+    assert.ok(g, '画布存在节点 ' + id)
+    const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'))
+    const rect = g.querySelector('rect')
+    return { x: Number(m[1]), y: Number(m[2]), w: Number(rect.getAttribute('width')), h: Number(rect.getAttribute('height')) }
+  }
+  const a = nodeAt('a')
+  const b1 = nodeAt('b1')
+  const b2 = nodeAt('b2')
+  // 入口在顶部，两条下游分支都在它下方（流程方向向下展开）
+  assert.ok(b1.y > a.y + a.h, '下游节点排在入口下方（自上而下）：a.y=' + a.y + ' b1.y=' + b1.y)
+  assert.ok(b2.y > a.y + a.h, '另一条下游分支也在入口下方')
+  // 同一主序号的兄弟横向并排：同一行、左右分开
+  assert.ok(Math.abs(b1.y - b2.y) < 2, '同级兄弟在同一行：b1.y=' + b1.y + ' b2.y=' + b2.y)
+  assert.ok(b2.x > b1.x + b1.w, '同级兄弟左右并排：b1.x=' + b1.x + ' b2.x=' + b2.x)
+  // 节点是「宽 > 高」的横向卡片（与原型一致），未被转置压成竖条
+  assert.ok(a.w > a.h, '节点保持横向卡片形态：' + a.w + '×' + a.h)
+
+  // 前向边从源节点下边框中点出发，向下落到目标节点上边框中点
+  const nums = container.querySelectorAll('path.vwf-edge-flow')[0].getAttribute('d').match(/-?[\d.]+/g).map(Number)
+  const startY = nums[1]
+  const endY = nums[nums.length - 1]
+  assert.ok(endY > startY, '前向边自上而下：start.y=' + startY + ' end.y=' + endY)
+  assert.ok(Math.abs(nums[0] - (a.x + a.w / 2)) < 2, '前向边从源节点下边框中点出发')
+  assert.ok(Math.abs(nums[nums.length - 2] - (b1.x + b1.w / 2)) < 2, '前向边落到目标节点上边框中点')
+})
+
+test('V-12 纵向布局保持缩放 / 拖拽 / 首屏 fit 与连接可查看（V-2 能力不回退）', async () => {
+  const { container } = await mountPage({ dsl: DIAG_DSL, list: [{ id: 'wf-diag', name: '诊断与修复', description: '', builtin: false, dsl: JSON.parse(JSON.stringify(DIAG_DSL)) }] })
+  await openEditor(container)
+  // 首屏 fit：内容尺寸随纵向布局给出（高度 = 主序号方向的总长，宽度 = 同级并排方向的总长）
+  const wrap = container.querySelector('.vwf-canvas-wrap')
+  const svg = container.querySelector('svg.vwf-svg')
+  assert.ok(svg, '画布 SVG 渲染')
+  const w = Number(svg.getAttribute('width'))
+  const h = Number(svg.getAttribute('height'))
+  assert.ok(w > 0 && h > 0, '首屏 fit 给出可用缩放：' + w + '×' + h)
+  // 滚轮缩放
+  const zoomBefore = svg.getAttribute('viewBox')
+  await act(async () => {
+    wrap.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true }))
+    await flush()
+  })
+  assert.notEqual(container.querySelector('svg.vwf-svg').getAttribute('width'), String(w), '滚轮缩放后画布尺寸变化')
+  assert.ok(container.querySelector('svg.vwf-svg').getAttribute('viewBox') === zoomBefore, '缩放只改渲染尺寸，图坐标不变')
+  // 拖拽平移：任意非把手区域可拖动
+  Object.defineProperty(wrap, 'scrollWidth', { value: 1200, configurable: true })
+  Object.defineProperty(wrap, 'scrollHeight', { value: 1400, configurable: true })
+  wrap.scrollLeft = 100
+  wrap.scrollTop = 100
+  await act(async () => {
+    container.querySelector('.vwf-node-card').dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientX: 300, clientY: 300 }))
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 260, clientY: 240 }))
+    dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 260, clientY: 240 }))
+    await flush()
+  })
+  assert.equal(wrap.scrollLeft, 140, '拖拽后画布横向平移（V-2 位置感保持）')
+  assert.equal(wrap.scrollTop, 160, '拖拽后画布纵向平移（V-2 位置感保持）')
+  // 连接仍可查看：弹窗与画布上的边都可点选
+  assert.ok(container.querySelectorAll('path.vwf-edge-flow').length === DIAG_DSL.edges.length, '画布连接不漏边')
+  const dialog = await openConnections(container)
+  assert.equal(dialog.querySelectorAll('.vwf-wb-conn-row').length, DIAG_DSL.edges.length, '弹窗连接不漏边')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
