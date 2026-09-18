@@ -2693,11 +2693,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       React.useEffect(() => {
         if (props.registerSave) props.registerSave(() => { void handleSave() })
       })
-      // Escape 分层关闭：先关最上层（角色库 / 连接弹窗 / 校验弹窗），都不在时才让宿主关闭整个工作区
+      // Escape 分层关闭：先关最上层（连接弹窗 / 校验弹窗），都不在时才让宿主关闭整个工作区。
+      // 角色库不在此拦截：RoleManager 自带「二次确认 → 详情/表单 → 管理」逐层关闭（含列表层
+      // 自关 + 焦点回收），这里抢先把整个管理器收掉会跳过它的内部分层（FEAT-86 V-6）。
       React.useEffect(() => {
         const onKey = (ev) => {
           if (ev.key !== 'Escape') return
-          if (roleUI) { ev.preventDefault(); ev.stopPropagation(); setRoleUI(null); return }
           if (connOpen) { ev.preventDefault(); ev.stopPropagation(); setConnOpen(false); return }
           if (dialogOpen) { ev.preventDefault(); ev.stopPropagation(); closeValidationDialog() }
         }
