@@ -961,7 +961,7 @@ test('两级序号：HD 透传后收口主序号在 UAT 右侧，不再与入口
   assert.equal(seqOf('closeout'), '3')
 })
 
-test('两级序号：同列多节点显示 m.1 / m.2 且上小下大', async () => {
+test('两级序号：同级多节点显示 m.1 / m.2 且左右并排（V-12 纵向布局）', async () => {
   const parallelDsl = {
     id: 'parallel-seq',
     name: '同列序号',

@@ -106,6 +106,10 @@ function makeRuntime(opts) {
       case 'vwf.roles':
         return { roles: ROLES }
       case 'vwf.validate':
+        // options.validateErrors 用于构造校验失败：错误按节点回填 fieldErrors（与真实内核同口径）
+        if (options.validateErrors) {
+          return { ok: false, errors: options.validateErrors, fieldErrors: options.fieldErrors || {}, sanitized: args.dsl }
+        }
         return { ok: true, errors: [], fieldErrors: {}, sanitized: args.dsl }
       case 'vwf.workflows.save':
         state.saved.push(JSON.parse(JSON.stringify(args.dsl)))
@@ -290,13 +294,51 @@ test('V-11 配置栏三档 tab：默认停在业务词档，节点 ID / JSON 结
   assert.ok(beforeText.indexOf('节点 ID') < 0, '未切到高级档时不应出现「节点 ID」')
   assert.ok(!container.querySelector('.vwf-inspector textarea.vwf-mono'), '未切到高级档时不应出现 JSON 结构编辑区')
 
+  // 未选中的档位：档名常驻可见（可再次切回），但内容不渲染
+  for (const key of ['outcome', 'advanced']) {
+    assert.ok(tabOf(container, key).textContent.length > 0, '未选中的档位仍以档名可见：' + key)
+    assert.equal(tabOf(container, key).getAttribute('aria-selected'), 'false', '未选中的档位不处于选中态：' + key)
+  }
+  const beforePanel = container.querySelector('.vwf-wb-tabpanel').textContent
+  assert.ok(beforePanel.indexOf('怎么判定做完') < 0, '未选中的档位内容不渲染（不是靠 CSS 隐藏）')
+
   await openTab(container, 'advanced')
   const afterText = container.querySelector('.vwf-inspector').textContent
   assert.equal(activeTabOf(container), 'advanced', '已切到高级档')
   assert.ok(afterText.indexOf('节点 ID') >= 0, '切到高级档后出现「节点 ID」')
   assert.ok(container.querySelector('.vwf-inspector textarea.vwf-mono'), '切到高级档后出现 JSON 结构编辑区')
   assert.ok(afterText.indexOf('默认 / 覆盖 / 还原') >= 0, '高级档说明模型默认 / 覆盖 / 还原只对内置模板有效')
-  assert.ok(beforeText.indexOf('结果与去向') >= 0 || tabOf(container, 'outcome').textContent.indexOf('结果与去向') >= 0, '未选中的档位仍以档名可见')
+})
+
+test('V-11 校验错误落在未选中档时档位标出并自动切过去（错误不被藏起来）', async () => {
+  const dsl = JSON.parse(JSON.stringify(DIAG_DSL))
+  // 让内核返回「高级档字段」的错误：model.provider 只出现在高级档
+  const { container } = await mountPage({
+    dsl, list: [{ id: 'wf-diag', name: '诊断与修复', description: '', builtin: false, dsl }],
+    validateErrors: [{ nodeId: 'fix', message: 'fix 缺少 AI 服务' }],
+    fieldErrors: { 'node:fix:model.provider': ['必填'] },
+  })
+  await openEditor(container)
+  assert.equal(activeTabOf(container), 'basic', '默认停在业务档')
+  // 触发一次保存 → 校验失败弹窗
+  await act(async () => {
+    byText(container, '保存工作流').click()
+    await flush(); await flush()
+  })
+  assert.ok(container.querySelector('.vwf-dialog-mask'), '校验失败弹出问题清单')
+  // 关闭弹窗 → 逐字段错误回填（选中节点被切到出错节点 fix）
+  await act(async () => {
+    byText(container, '查看并修正').click()
+    await flush(); await flush()
+  })
+  const marked = Array.from(container.querySelectorAll('.vwf-wb-tab-err')).map((el) => el.closest('.vwf-wb-tab').getAttribute('data-vwf-tab'))
+  assert.deepEqual(marked, ['advanced'], '⚠ 只标在真正出错的档位上：' + JSON.stringify(marked))
+  assert.equal(activeTabOf(container), 'advanced', '错误出现后自动切到出错的档位（不出现保存被拦却看不到字段的死角）')
+  assert.ok(container.querySelector('.vwf-wb-tabpanel .vwf-select'), '出错档位的内容可直接修改')
+  // 用户手动切回业务档后，错误档位的标记仍在（不会因为切走就丢）
+  await openTab(container, 'basic')
+  assert.equal(activeTabOf(container), 'basic', '可手动切回业务档')
+  assert.equal(container.querySelectorAll('.vwf-wb-tab-err').length, 1, '切走后错误标记仍在')
 })
 
 test('V-3 业务结果取值可直接完成配置，不必切到高级档', async () => {
