@@ -2662,6 +2662,18 @@ test('FIX-105 V-1/V-2：链路按真实运转时序排列；状态以 图标+颜
   const seq = seqOf(chain)
   assert.deepEqual(seq, ['dev#1', 'review#1', 'test#1', 'dev#2', 'review#2', 'uat#0', 'explore#0', 'synth#0'],
     '链路按实际运转时序排列（含退回后的重做轮次）：' + seq.join(' → '))
+  // 用例模板的返工/人工裁决声明与内置「完整功能开发」同形：真实模板跑出来的链路同样会有
+  // 回退（countRound 边）与人工裁决门（$human-decision 出边），不是只对着人造夹具成立。
+  const builtin = JSON.parse(readFileSync(join(here, '..', '..', '..', 'templates', 'wf-construction-full-feature.json'), 'utf8'))
+  assert.deepEqual(RUN_DSL.edges.filter((e) => e.countRound === true).map((e) => e.outcome),
+    (builtin.edges || []).filter((e) => e.countRound === true).map((e) => e.outcome),
+    '返工边口径与内置模板一致（countRound）')
+  // 人工裁决门两条来源都要覆盖：内置模板靠 $human-decision 出边声明结果（RUN_DSL_HD 同形，
+  // 见 T-B1 的「人工裁决已完成」）；DSL 没声明时（RUN_DSL，见 T-A1）按「运行正等在这一步」兜底。
+  assert.deepEqual((builtin.edges || []).filter((e) => e.to === '$human-decision').map((e) => e.outcome),
+    RUN_DSL_HD.edges.filter((e) => e.to === '$human-decision').map((e) => e.outcome),
+    '人工裁决门口径与内置模板一致（$human-decision 出边）')
+  assert.equal(RUN_DSL.edges.filter((e) => e.to === '$human-decision').length, 0, '用例里的 RUN_DSL 未声明人工裁决门（走等待节点兜底）')
   assert.ok(chain.parentElement.textContent.includes('下方按实际运转顺序列出每一次执行'), '链路说明写明按实际运转顺序')
   // V-2：六类以上状态各自的「图形 + 颜色」成对表达（颜色由 tone-* 落到语义 token，见下）
   assert.deepEqual(toneOf(chain, 'dev', '1'), { cls: 'tone-pass', glyph: '✓', text: toneOf(chain, 'dev', '1').text }, '第 1 次实现：通过 ✓')
