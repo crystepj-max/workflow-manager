@@ -3978,7 +3978,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const attemptState = (v, latest) => {
         const st = String(v.status || '')
         if (st === 'running') return ['running', 'rdAttemptRunning']
-        if (st === 'failed' || st === 'rejected' || st === 'interrupted') return ['failed', 'rdAttemptFailed']
+        // 中断（宿主收尾时把遗留 running 记终态）不是「执行失败」，如实说是被中断未完成
+        if (st === 'interrupted') return ['failed', 'rdAttemptInterrupted']
+        if (st === 'failed' || st === 'rejected') return ['failed', 'rdAttemptFailed']
         const rk = String(v.retry_kind || '')
         if (rk === 'technical_retry') return ['retry', 'rdAttemptRetry']
         if (rk === 'business_rework') return ['returned', 'rdAttemptRework']

@@ -274,7 +274,12 @@ runState.logical['lr-p'] = {
   last_engine_error: null, pause_state: { action: 'pause', requested_at: 3390 }, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
   formal_records: null, workspace: WS_A, human_decisions: [], consumed_decisions: {},
 }
-runState.records['lr-p'] = { ok: true, found: true, logical_run_id: 'lr-p', records: [logicalAttempt('lr-p', 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', result: { summary: '暂停前成果' } })], attempts: [] }
+// 暂停收尾会把遗留 running 的 attempt 记为 interrupted（宿主 close 口径）：链路要如实说
+// 「已中断（未完成）」，不能含糊成「执行失败」。
+runState.records['lr-p'] = { ok: true, found: true, logical_run_id: 'lr-p', records: [
+  logicalAttempt('lr-p', 'dev', 1, { attempt_id: 'a1k1', ended_at: '2026-09-17T11:30:00Z', outcome: 'READY', result: { summary: '暂停前成果' } }),
+  logicalAttempt('lr-p', 'review', 1, { attempt_id: 'a1k2', ended_at: '2026-09-17T11:40:00Z', status: 'interrupted', snapshot_revision: '1' }),
+], attempts: [] }
 
 // ── Logical Run lr-r：运行中（控制面 pause / interrupt 可用）──
 runState.runs.push({ id: 'run-r1', taskId: 'T-R1', name: '完整功能开发', workflowId: 'wf-runs', status: 'running', phase: '实现', startedAt: 4500, logical_run_id: 'lr-r', segment: 1, segment_count: 1, logical_state: 'RUNNING' })
@@ -2711,6 +2716,17 @@ test('FIX-105 V-1/V-2：链路按真实运转时序排列；状态以 图标+颜
   assert.equal(toneOf(retried, 'dev', '1').cls, 'tone-retry', '技术重试与业务返工分开')
   assert.equal(toneOf(retried, 'dev', '1').glyph, '↻', '技术重试用与回退不同的图形')
   assert.ok(toneOf(retried, 'dev', '1').text.includes('技术重试'), '技术重试有文字')
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  await backToList()
+  // 被宿主收尾记为 interrupted 的执行：如实说「已中断（未完成）」，不含糊成「执行失败」
+  await openTask('T-P1')
+  const paused = await openChain()
+  const stopped = toneOf(paused, 'review', '1')
+  assert.ok(stopped.text.includes('已中断（未完成）'), '中断的执行如实标注：' + stopped.text)
+  assert.ok(!stopped.text.includes('执行失败'), '中断不等于执行失败')
   await act(async () => {
     dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await flush()

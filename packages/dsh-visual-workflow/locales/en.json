@@ -331,6 +331,7 @@
   "rdAttemptPassed": "Passed",
   "rdAttemptRunning": "In progress",
   "rdAttemptFailed": "Failed",
+  "rdAttemptInterrupted": "Interrupted (not finished)",
   "rdAttemptRework": "Business rework",
   "rdAttemptRetry": "Technical retry",
   "rdAttemptBlocked": "Blocked (recoverable)",

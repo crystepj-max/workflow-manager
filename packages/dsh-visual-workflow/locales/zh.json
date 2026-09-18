@@ -331,6 +331,7 @@
   "rdAttemptPassed": "已通过",
   "rdAttemptRunning": "进行中",
   "rdAttemptFailed": "执行失败",
+  "rdAttemptInterrupted": "已中断（未完成）",
   "rdAttemptRework": "业务返工",
   "rdAttemptRetry": "技术重试",
   "rdAttemptBlocked": "阻塞（可恢复）",
