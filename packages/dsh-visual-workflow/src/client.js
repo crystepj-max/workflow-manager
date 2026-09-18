@@ -187,6 +187,9 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-badge { display:inline-block; padding:1px 8px; border-radius:99px; font-size:10px; border:1px solid var(--vwf-border-strong); color:var(--vwf-text-2); }
 .vwf-badge.accent { color:var(--vwf-accent); border-color:currentColor; }
 .vwf-list { display:flex; flex-direction:column; gap:8px; }
+/* 模型设置每节点一块（原型 modelRow）：名称 + 默认/覆盖徽标同行，默认值一行，两个字段并排 */
+.vwf-model-row { padding:10px 12px; border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-canvas); }
+.vwf-two-fields { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .vwf-list-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-canvas); }
 .vwf-list-item:hover { border-color:var(--vwf-border-strong); }
 .vwf-list-name { font-weight:600; font-size:13px; }
@@ -220,14 +223,16 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-msg-line.muted { color:var(--dsw-alias-label-tertiary, #8a8a8a); }
 /* 大工作区（A 编排台）——FEAT-84：外层不再承担页面级滚动。
    改造前 .vwf-editor-body 是 overflow:auto 的共享滚动容器，画布行按内容撑高，
-   配置栏一滚就把画布带出视口。现在外层只负责定高与裁剪，三个直接网格项
-   （步骤定位 / 画布 / 节点配置栏）各自滚动，互不带动；连接信息走弹窗（V-13）。 */
+   配置栏一滚就把画布带出视口。现在外层只负责定高与裁剪，四个直接网格项
+   （左列 节点选择 / 全局参数配置，画布，节点配置栏）各自滚动，互不带动；连接信息走弹窗（V-13）。
+   FEAT-101 V-5：左列拆成上下两块 —— 节点选择（上，6）+ 全局参数配置（下，4）；
+   两块都落在第一列内，画布与配置栏仍整列通高。 */
 .vwf-editor-body { flex:1; min-height:0; overflow:hidden; position:relative; overscroll-behavior:contain; }
 /* 绝对定位（inset）而不是 height:100% 或 flex 拉伸：列向 flex 派生的高度在 Chromium 里
    不构成百分比可解析的「确定高度」，网格行 minmax(0,1fr) 会退化为 max-content——
    实测内容被撑到 2151px 而容器只有 675px，随后被 overflow:hidden 裁掉（配置栏滚不动、
-   画布被推出视口）。inset 给出确定高度，三个滚动区才真正各自生效。 */
-.vwf-editor { position:absolute; inset:12px 16px; display:grid; grid-template-columns:minmax(0,224px) minmax(0,1fr) minmax(0,368px); grid-template-rows:minmax(0,1fr); grid-template-areas:"nav canvas config"; gap:12px; align-items:stretch; min-width:0; min-height:0; }
+   画布被推出视口）。inset 给出确定高度，各滚动区才真正各自生效。 */
+.vwf-editor { position:absolute; inset:12px 16px; display:grid; grid-template-columns:minmax(0,224px) minmax(0,1fr) minmax(0,368px); grid-template-rows:minmax(0,6fr) minmax(0,4fr); grid-template-areas:"nav canvas config" "params canvas config"; gap:12px; align-items:stretch; min-width:0; min-height:0; }
 /* 窄屏：流程 / 配置两个区域切换，不把桌面画布压成不可读小图（规格 §11）。
    断点与 matchMedia 使用同一阈值（900px），保证 CSS 与 JS 判定一致。 */
 /* 窄屏（≤900px）：流程 / 配置两个区域切换，纯 CSS 驱动（与 JS 无关，matchMedia 缺失也不会错位）。
@@ -236,12 +241,13 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-pane-switch { display:none; }
 @media (max-width: 900px) {
   .vwf-pane-switch { display:flex; gap:6px; position:absolute; top:12px; left:16px; right:16px; z-index:3; }
-  .vwf-editor { grid-template-columns:minmax(0,1fr); inset:54px 16px 12px; }
+  .vwf-editor { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); inset:54px 16px 12px; }
   .vwf-editor.pane-flow { grid-template-rows:auto minmax(0,1fr); grid-template-areas:"nav" "canvas"; }
-  .vwf-editor.pane-config { grid-template-rows:minmax(0,1fr); grid-template-areas:"config"; }
+  .vwf-editor.pane-config { grid-template-rows:auto minmax(0,1fr); grid-template-areas:"params" "config"; }
   .vwf-editor.pane-flow .vwf-inspector { display:none; }
+  .vwf-editor.pane-flow .vwf-params-col { display:none; }
   .vwf-editor.pane-config .vwf-nav-col, .vwf-editor.pane-config .vwf-canvas-col { display:none; }
-  /* 步骤定位转为横向位置条：保留步骤方位感，不再占据半个屏幕宽 */
+  /* 节点选择转为横向位置条：保留步骤方位感，不再占据半个屏幕宽 */
   .vwf-nav-col { flex-direction:row; align-items:stretch; }
   .vwf-nav-col .vwf-wb-steps-body { display:flex; flex-direction:row; gap:6px; overflow-x:auto; overflow-y:hidden; padding:8px 10px; }
   .vwf-wb-step { flex:0 0 auto; min-width:132px; }
@@ -322,6 +328,10 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 /* 右侧节点配置栏：网格项自身滚动（不再 position:sticky + height:100% 依附父级滚动） */
 .vwf-inspector { grid-area:config; min-width:0; min-height:0; overflow:auto; padding:12px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 .vwf-nav-col { grid-area:nav; min-width:0; min-height:0; display:flex; flex-direction:column; gap:12px; }
+/* FEAT-101 V-5：全局参数配置固定在左列下方（节点选择之下），两块都是自己的滚动区 */
+.vwf-params-col { grid-area:params; min-width:0; min-height:0; display:flex; flex-direction:column; gap:12px; }
+.vwf-params-col > .vwf-card { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+.vwf-params-body { flex:1; min-height:0; overflow:auto; padding:8px 10px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 .vwf-wb-steps-card { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
 .vwf-wb-steps-body, .vwf-wb-conn-body { flex:1; min-height:0; overflow:auto; padding:8px 10px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 .vwf-wb-step, .vwf-wb-conn-row { width:100%; text-align:left; border:1px solid var(--vwf-wb-border-control); background:var(--vwf-wb-surface); color:var(--vwf-wb-text); cursor:pointer; font:inherit; font-size:12px; }
@@ -407,6 +417,8 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-role-tab { display:flex; flex-direction:column; gap:10px; }
 .vwf-role-mgr { width:min(780px, 94vw); max-height:calc(100vh - 2 * var(--vwf-safe-gap)); display:flex; flex-direction:column; border:1px solid var(--vwf-border); border-radius:14px; background:var(--vwf-surface); color:var(--vwf-text); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:12px; overflow:hidden; }
 .vwf-role-mgr-body { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:10px; overscroll-behavior:contain; }
+/* 固定页脚（原型 modal-foot）：主操作常驻，不随职责正文滚动跑出视野 */
+.vwf-role-mgr-foot { flex:0 0 auto; display:flex; justify-content:flex-end; gap:8px; padding-top:10px; border-top:1px solid var(--vwf-border); }
 .vwf-role-section-title { font-size:13px; font-weight:600; color:var(--vwf-accent); margin-top:6px; }
 .vwf-role-count { color:var(--vwf-text-3); font-weight:400; font-size:11px; }
 .vwf-role-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:8px 10px; border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-canvas); }
@@ -480,13 +492,25 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 .vwf-run-row small { font-size:12px; color:var(--vwf-text-2); }
 /* 详情在大工作区层内：外层只定高与裁剪，正文自身滚动（与编辑器三个滚动区同口径）。 */
 .vwf-rd-scroll { position:absolute; inset:12px 16px; overflow:auto; overscroll-behavior:contain; scroll-padding-bottom:12px; }
-.vwf-rd-main { display:grid; grid-template-columns:minmax(170px, 220px) 1fr; gap:12px; align-items:start; margin-top:8px; }
-.vwf-rd-side { display:flex; flex-direction:column; gap:12px; }
-.vwf-rd-body { min-width:0; }
+/* 页头（原型 page-header）：返回 + 标题 + 状态 + 副标题；操作常驻右侧 */
+.vwf-rd-head { flex-wrap:wrap; }
+.vwf-rd-head-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.vwf-rd-title { margin:0; font-size:16px; font-weight:600; color:var(--vwf-text); }
+.vwf-rd-subline { font-size:12px; color:var(--vwf-text-2); }
+/* 状态条（原型 workspace-strip）：返工与阶段 + 查看完整经过 */
+.vwf-rd-strip { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; padding:8px 16px; border-bottom:1px solid var(--vwf-border); background:var(--vwf-wb-surface-2); font-size:12px; color:var(--vwf-text-2); flex:0 0 auto; }
+/* 三栏工作台（原型 editor-a）：步骤定位 / 画布 / 详情各自滚动，互不带走 */
+.vwf-rd-main { display:grid; grid-template-columns:minmax(170px, 220px) minmax(0, 1fr) minmax(300px, 380px); gap:12px; align-items:stretch; height:min(560px, 62vh); min-height:360px; margin-top:8px; }
+.vwf-rd-side { display:flex; flex-direction:column; gap:12px; min-height:0; overflow:auto; overscroll-behavior:contain; }
+.vwf-rd-canvas { display:flex; flex-direction:column; min-height:0; border:1px solid var(--vwf-border); border-radius:12px; overflow:hidden; background:var(--vwf-wb-canvas); }
+.vwf-rd-canvas .vwf-canvas-wrap { flex:1; min-height:0; height:auto; }
+.vwf-rd-pane-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; flex-wrap:wrap; padding:8px 12px; border-bottom:1px solid var(--vwf-border); background:var(--vwf-wb-surface-2); }
+.vwf-rd-body { min-width:0; min-height:0; overflow:auto; overscroll-behavior:contain; }
 .vwf-rd-kv { margin-top:4px; font-size:12px; }
 .vwf-node-dir-row { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; cursor:pointer; padding:6px 8px; margin-top:4px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--vwf-wb-text); font-size:13px; }
 .vwf-node-dir-row:hover { background:var(--vwf-wb-accent-soft); }
 .vwf-node-dir-row.selected { border-color:var(--vwf-wb-accent); background:var(--vwf-wb-accent-soft); }
+.vwf-node-dir-no { flex:0 0 auto; min-width:20px; font-variant-numeric:tabular-nums; color:var(--vwf-text-3); font-size:11px; }
 .vwf-node-dir-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .vwf-sec { font-size:12px; font-weight:600; color:var(--vwf-wb-text); margin-top:8px; }
 .vwf-note { margin-top:6px; padding:6px 10px; border-radius:8px; font-size:12px; border:1px solid var(--vwf-wb-border); background:var(--vwf-wb-surface-2); color:var(--vwf-wb-text-2); }
@@ -498,7 +522,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 .vwf-run-row:focus-visible, .vwf-node-dir-row:focus-visible, .vwf-tab:focus-visible, .vwf-btn:focus-visible,
 .vwf-input:focus-visible, .vwf-textarea:focus-visible, .vwf-filter select:focus-visible { outline:2px solid var(--vwf-focus); outline-offset:2px; }
 @media (max-width: 560px) {
-  .vwf-rd-main { grid-template-columns:1fr; }
+  .vwf-rd-main { grid-template-columns:1fr; height:auto; }
+  .vwf-rd-side, .vwf-rd-canvas, .vwf-rd-body { max-height:min(460px, 60vh); }
   .vwf-filter { flex:1 1 100%; }
   .vwf-run-list { max-height:none; }
 }
@@ -524,6 +549,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     const MARGIN_X = 56
     const MARGIN_Y = 64
     const CANVAS_PAD = 24
+    // 默认视图比例（FEAT-101 V-6）：按可读比例落在入口段，不 fit 全图——
+    // 节点多时 fit 会落到 0.3 下限，节点文字不可读。取值与原型默认 85% 一致。
+    const DEFAULT_VIEW_SCALE = 0.85
     const END_NODE = '$end'
     const HUMAN_DECISION_ID = '$human-decision'
     const STATUS_COLOR = { running: 'var(--vwf-accent)', pass: 'var(--vwf-ok)', fail: 'var(--vwf-err)', human: 'var(--vwf-warn)' }
@@ -981,14 +1009,35 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           wrapRef.current.scrollTop = Math.max(0, (stageH - wrapRef.current.clientHeight) / 2)
         }, 0)
       }, [W, H])
-      const fittedRef = React.useRef(false)
+      // FEAT-101 V-6：打开时默认「就近清晰」——固定到可读比例并落在入口节点一段，
+      // 不再 fit 全图（节点多时 0.3 下限下节点内容看不清）。缩放 / 拖拽 / ⤢ 适配全图
+      // 三个能力不变：fitView 仍是同一个函数，只是不再被首帧自动调用。
+      const focusEntry = React.useCallback(() => {
+        const wrap = wrapRef.current
+        if (!wrap) return
+        const s = DEFAULT_VIEW_SCALE
+        setScale(s)
+        setPanOffset({ x: 0, y: 0 })
+        ctx.timeout(() => {
+          const w = wrapRef.current
+          if (!w) return
+          // 入口段 = 声明入口节点；未声明时退回首节点（布局自上而下，rank 0 在最上）
+          const first = (dsl.nodes || [])[0]
+          const anchorId = pos[dsl.entry] ? dsl.entry : (first && pos[first.id] ? first.id : null)
+          const a = anchorId ? pos[anchorId] : null
+          if (!a) { w.scrollTop = 0; w.scrollLeft = 0; return }
+          w.scrollTop = Math.max(0, a.y * s - CANVAS_PAD)
+          w.scrollLeft = Math.max(0, (a.x + a.w / 2) * s - w.clientWidth / 2)
+        }, 0)
+      }, [pos, dsl.entry, dsl.nodes])
+      const enteredRef = React.useRef(false)
       React.useEffect(() => {
-        if (fittedRef.current) return undefined
-        fittedRef.current = true
-        // 编辑器宿主是先渲染 <dialog>、再在父级 effect 中 showModal；初始 fit 延后到
+        if (enteredRef.current) return undefined
+        enteredRef.current = true
+        // 编辑器宿主是先渲染 <dialog>、再在父级 effect 中 showModal；初始视图延后到
         // 下一轮，确保读到的是弹层打开后的真实可视尺寸，而不是 display:none 的 0 尺寸。
-        return ctx.timeout(fitView, 0)
-      }, [fitView])
+        return ctx.timeout(focusEntry, 0)
+      }, [focusEntry])
       React.useEffect(() => { props.registerFit && props.registerFit(fitView) }, [fitView])
       // 定位到指定节点（校验弹窗关闭后聚焦首个问题节点，对应 Gold-Band 的 setCenter）
       const posRef = React.useRef(pos)
@@ -2156,15 +2205,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const [formMode, setFormMode] = React.useState(props.initialCreate ? 'create' : 'edit')
       const [current, setCurrent] = React.useState(null) // 查看/编辑中的角色详情（创建来源）
       const [draftName, setDraftName] = React.useState('')
+      const [draftSummary, setDraftSummary] = React.useState('')
       const [draftContent, setDraftContent] = React.useState('')
       const [error, setError] = React.useState(null)
       const [confirm, setConfirm] = React.useState(null) // {kind:'delete'|'blocked'|'impact', role?, usage?, name?, content?}
       const [saving, setSaving] = React.useState(false)
       const dialogRef = React.useRef(null)
-      const viewBtnRefs = React.useRef({}) // 角色 id → 「查看详情」按钮（返回列表后回收焦点）
+      const rowBtnRefs = React.useRef({}) // 角色 id → 行内唯一入口按钮（查看 / 编辑，返回列表后回收焦点）
       const returnFocusRef = React.useRef(null) // 待回收焦点的角色 id
       const confirmReturnRef = React.useRef(null) // 关闭二次确认后要回收焦点的元素
-      const newBtnRef = React.useRef(null) // 列表层「新增角色」：关闭浮层后没有指定行的兜底焦点
+      const newBtnRef = React.useRef(null) // 列表头「新建角色」：关闭浮层后没有指定行的兜底焦点
       const mountedRef = React.useRef(false)
       const refetch = React.useCallback(() => {
         host.call('vwf.roles').then((r) => {
@@ -2181,13 +2231,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       React.useEffect(() => { refetch() }, [])
       // 焦点回收（V-6）：打开详情/表单时焦点进入浮层容器；Escape/返回回到列表时，
       // 焦点归位到该角色的「查看详情」按钮（行按钮是重新渲染的新节点，故按 id 取当次元素）；
-      // 没有指定行时（取消新建等）归位到列表层的「新增角色」，不让焦点掉到 body。
+      // 没有指定行时（取消新建等）归位到列表头的「新建角色」，不让焦点掉到 body。
       // 首次挂载即列表层（角色=设置页签），不抢焦点。
       React.useEffect(() => {
         if (!mountedRef.current) { mountedRef.current = true; return }
         const id = view === 'list' ? returnFocusRef.current : null
         if (view === 'list') returnFocusRef.current = null
-        const el = id ? viewBtnRefs.current[id] : (view === 'list' ? newBtnRef.current : dialogRef.current)
+        const el = id ? rowBtnRefs.current[id] : (view === 'list' ? newBtnRef.current : dialogRef.current)
         if (el && el.focus) el.focus()
       }, [view])
       const fmt = (tpl, vars) => {
@@ -2225,13 +2275,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         }).catch((e) => setError(String(e)))
       }
       const openEdit = (id) => {
-        returnFocusRef.current = null
+        // 自定义角色的「编辑」是行内唯一入口（V-3）：与内置「查看」同口径回收焦点
+        returnFocusRef.current = id
         setCurrent(null); setError(null)
         host.call('vwf.roles.get', { id }).then((r) => {
           if (r && r.ok) {
             setCurrent(r.role)
             setDraftName(r.role.id)
-            setDraftContent(r.role.content || '')
+            setDraftSummary(roleSummaryFieldOf(r.role))
+            setDraftContent(roleBodyOf(r.role.content))
             setFormMode('edit')
             setView('form')
           } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
@@ -2241,7 +2293,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         returnFocusRef.current = null
         setCurrent(source || null)
         setDraftName(source ? t('customRoleSuffix', { src: source.id }) : '')
-        setDraftContent(source ? (source.content || '') : '')
+        setDraftSummary(roleSummaryFieldOf(source))
+        setDraftContent(source ? roleBodyOf(source.content) : '')
         setFormMode('create')
         setError(null)
         setView('form')
@@ -2255,7 +2308,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         host.call('vwf.roles.get', { id: role.id }).then((r) => {
           if (r && r.ok) {
             setDraftName(t('customRoleSuffix', { src: r.role.id }))
-            setDraftContent(r.role.content || '')
+            setDraftSummary(roleSummaryFieldOf(r.role))
+            setDraftContent(roleBodyOf(r.role.content))
           } else setError((r && r.errors && r.errors[0] && r.errors[0].message) || t('roleSaveFailed'))
         }).catch((e) => setError(String(e)))
       }
@@ -2274,10 +2328,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (bad) { setError(bad); return null }
         return name
       }
-      const submitForm = (name, content) => {
+      const submitForm = (name, summary, body) => {
         const editingCustom = !!(current && current.builtin === false)
         setError(null)
         setSaving(true)
+        // 一句话简介随正文一起落盘（RPC 与数据契约不变：仍是 {name, content}），
+        // 只是 content 顶部多一个可摘除的前置块；留空即不写块（沿用职责生成摘要）。
+        const content = withRoleSummary(summary, body)
         const call = editingCustom
           ? host.call('vwf.roles.update', { id: current.id, name: name, content: content, draftDsl: props.draftDsl })
           : host.call('vwf.roles.create', { name: name, content: content })
@@ -2294,7 +2351,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const name = await validForm()
         if (!name) return
         const editingCustom = !!(current && current.builtin === false)
-        if (!editingCustom) { submitForm(name, draftContent); return }
+        if (!editingCustom) { submitForm(name, draftSummary, draftContent); return }
         host.call('vwf.roles.usage', { id: current.id, draftDsl: props.draftDsl }).then((u) => {
           if (!u || u.ok !== true) {
             // 宿主失败以 ok:false 解析（而非 reject）：同样必须保持表单打开。
@@ -2306,8 +2363,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             setError(fmt(t('roleRenameBlocked'), { n: u.count }))
             return
           }
-          if (used) { confirmReturnRef.current = dialogRef.current; setConfirm({ kind: 'impact', usage: u, name: name, content: draftContent }) }
-          else submitForm(name, draftContent)
+          if (used) { confirmReturnRef.current = dialogRef.current; setConfirm({ kind: 'impact', usage: u, name: name, summary: draftSummary, content: draftContent }) }
+          else submitForm(name, draftSummary, draftContent)
         }).catch((e) => {
           // fail-closed：引用统计失败时保持表单打开并展示错误，禁止绕过影响确认保存。
           setError(t('roleUsageFailed') + String(e))
@@ -2317,7 +2374,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (!confirm || !confirm.name) return
         const c = confirm
         setConfirm(null)
-        submitForm(c.name, c.content)
+        submitForm(c.name, c.summary, c.content)
       }
       const askDelete = (role, trigger) => {
         confirmReturnRef.current = trigger || null
@@ -2348,8 +2405,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         return h('span', { className: 'vwf-badge' + (origin.builtin ? ' accent' : '') },
           origin.builtin ? t('builtinRoleBadge') : t('customRoleBadge'))
       }
-      // 列表行：名称 + 来源 badge + 最多两行摘要 + 折行的操作组。摘要为显示层生成，
+      // 列表行：名称 + 来源 badge + 最多两行摘要 + 操作组。摘要为显示层生成，
       // 不写回角色原文（规格 §9）；行高不随职责全文增长（V-2）。
+      // FEAT-101 V-3（原型 roleRow）：每行只有一个「进入」入口——内置「查看」、自定义「编辑」，
+      // 不再并列查看 + 编辑；「基于此角色创建」按原型承载复制语义，删除是既有动作而非并列入口，
+      // 两者能力保持（FEAT-86 权限边界：内置不可编辑/删除，自定义可复制/删除）。
       const roleRow = (role) => {
         const origin = roleOriginOf(role)
         const summary = roleSummaryOf(role)
@@ -2360,9 +2420,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           ),
           summary ? h('div', { className: 'vwf-role-summary', title: summary }, summary) : null,
           h('div', { className: 'vwf-role-actions' },
-            h('button', { className: 'vwf-btn sm', ref: (el) => { viewBtnRefs.current[role.id] = el }, onClick: () => openView(role.id) }, t('viewRoleDetail')),
-            origin.builtin ? null : h('button', { className: 'vwf-btn sm', onClick: () => openEdit(role.id) }, t('editRole')),
-            origin.builtin ? null : h('button', { className: 'vwf-btn sm', onClick: () => openCloneCustom(role) }, t('cloneFromRole')),
+            h('button', {
+              className: 'vwf-btn sm',
+              ref: (el) => { rowBtnRefs.current[role.id] = el },
+              onClick: () => { if (origin.builtin) openView(role.id); else openEdit(role.id) },
+            }, origin.builtin ? t('viewRole') : t('editRole')),
+            origin.builtin ? null : h('button', { className: 'vwf-btn sm', onClick: () => openCloneCustom(role) }, t('createFromRole')),
             origin.builtin ? null : h('button', { className: 'vwf-btn sm danger', onClick: () => askDelete(role) }, t('deleteRole'))
           )
         )
@@ -2382,11 +2445,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       }, label + ' ' + n)
 
       let body = null
+      // 固定页脚（原型 modal-foot）：动作与正文分开，职责再长也不会把主操作挤到视口外
+      let foot = null
       if (roles === null) {
         body = h('div', { className: 'vwf-role-empty', role: 'alert' }, loadError || t('roleLoading'))
       } else if (view === 'list') {
         body = h('div', null,
-          h('div', { className: 'vwf-muted-sm' }, t('roleMgmtHint')),
           h('div', { className: 'vwf-row', role: 'group', 'aria-label': t('roleLibrary') },
             filterBtn('all', t('roleFilterAll'), allRows.length),
             filterBtn('builtin', t('roleBuiltinShort'), builtinRows.length),
@@ -2410,29 +2474,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       } else if (view === 'view') {
         body = current
           ? h('div', null,
-              h('div', { className: 'vwf-row' },
-                h('span', { className: 'vwf-dialog-title' }, current.name || current.id),
-                originBadge(current)
-              ),
-              h('div', { className: 'vwf-muted-sm' },
-                roleOriginOf(current).builtin ? t('roleViewBuiltin') : t('roleViewCustom')),
+              // FEAT-101 V-4：详情展示一句话简介；缺失时由职责生成展示（roleSummaryOf），不写回角色原文
+              h('div', { className: 'vwf-role-summary', title: roleSummaryOf(current) }, roleSummaryOf(current)),
+              h('div', { className: 'vwf-muted-sm' }, t('roleViewBuiltin')),
               h('div', { className: 'vwf-role-section-title' }, h('span', null, t('roleContent'))),
               // 独立滚动区 + 键盘可进入：完整职责再长也不撑高列表或弹层
-              h('div', { className: 'vwf-role-content', tabIndex: 0 }, current.content || ''),
-              h('div', { className: 'vwf-row', style: { marginTop: 8, gap: 8 } },
-                h('button', { className: 'vwf-btn primary', onClick: () => openCreate(current) }, t('createFromRole')),
-                !roleOriginOf(current).builtin ? h('button', { className: 'vwf-btn', onClick: () => openEdit(current.id) }, t('editRole')) : null,
-                h('button', { className: 'vwf-btn sm', onClick: backToList }, t('back'))
-              )
+              h('div', { className: 'vwf-role-content', tabIndex: 0 }, current.content || '')
             )
           : h('div', { className: 'vwf-role-empty' }, error || t('roleLoading'))
+        // V-1/V-2：内置角色用「基于此角色创建」承载复制语义（原型同一入口，位置=固定页脚主操作），
+        // 走 create（新稿），绝不写回原内置角色（FEAT-86 权限边界）
+        if (view === 'view' && current) foot = h('div', { className: 'vwf-role-mgr-foot' },
+          h('button', { className: 'vwf-btn primary', onClick: () => openCreate(current) }, '＋ ' + t('createFromRole'))
+        )
       } else {
         const editingCustom = !!(current && current.builtin === false)
         body = h('div', null,
-          h('div', { className: 'vwf-row' },
-            h('span', { className: 'vwf-dialog-title' }, formMode === 'edit' ? t('editRole') + ' · ' + (current ? current.id : '') : t('newRole')),
-            current ? originBadge(current) : h('span', { className: 'vwf-badge' }, t('customRoleBadge'))
-          ),
           editingCustom ? h('div', { className: 'vwf-muted-sm' }, fmt(t('roleFromSource'), { src: current.id })) : null,
           h('div', { className: 'vwf-field' },
             h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-name' }, t('roleName'), h('span', { className: 'req' }, '*')),
@@ -2450,17 +2507,27 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             })
           ),
           h('div', { className: 'vwf-field' },
+            // V-2：一句话简介（选填）——原型字段顺序为 名称 → 简介 → 完整职责
+            h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-summary' }, t('roleSummary')),
+            h('input', {
+              id: 'vwf-role-summary',
+              className: 'vwf-input', value: draftSummary, placeholder: t('roleSummaryPlaceholder'),
+              onChange: (ev) => setDraftSummary(ev.target.value),
+            }),
+            h('div', { className: 'vwf-muted-sm' }, t('roleSummaryHelp'))
+          ),
+          h('div', { className: 'vwf-field' },
             h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-content' }, t('roleContent'), h(HelpDot, { text: t('roleContentHelp') }), h('span', { className: 'req' }, '*')),
             h('textarea', {
               id: 'vwf-role-content',
               className: 'vwf-textarea vwf-mono', rows: 12, value: draftContent, placeholder: t('roleContentPlaceholder'),
               onChange: (ev) => setDraftContent(ev.target.value),
             })
-          ),
-          h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8 } },
-            h('button', { className: 'vwf-btn', onClick: backToList }, t('cancelRole')),
-            h('button', { className: 'vwf-btn primary', disabled: saving, onClick: save }, t('saveRole'))
           )
+        )
+        foot = h('div', { className: 'vwf-role-mgr-foot' },
+          h('button', { className: 'vwf-btn', onClick: backToList }, t('cancelRole')),
+          h('button', { className: 'vwf-btn primary', disabled: saving, onClick: save }, t('saveRole'))
         )
       }
 
@@ -2516,13 +2583,21 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // 滚动、逐层 Escape、焦点回收」三条能力原样保留（FEAT-86 V-2/V-6）。浮层留在页签容器内，
       // 页签本身不随浮层开合而消失。
       return h('div', { className: 'vwf-role-tab', 'data-vwf-roles-tab': '' },
+        // V-1（原型 settings-section-head）：标题与说明在左，「新建角色」在右——
+        // 新建入口位置与原型一致，仍常驻（不随自定义角色数量消失）。
         view === 'list'
-          ? h('div', { className: 'vwf-row' },
-              h('button', {
-                className: 'vwf-btn sm primary', ref: newBtnRef,
-                onClick: () => openCreate(null),
-              }, '＋ ' + t('newRole')),
-              h('button', { className: 'vwf-btn sm', onClick: refetch }, t('refresh'))
+          ? h('div', { className: 'vwf-row', style: { gap: 10, alignItems: 'flex-start' } },
+              h('div', { style: { minWidth: 0, flex: 1 } },
+                h('div', { className: 'vwf-card-title' }, t('roleManager')),
+                h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('roleMgmtHint'))
+              ),
+              h('div', { className: 'vwf-row', style: { gap: 6 } },
+                h('button', {
+                  className: 'vwf-btn sm primary', ref: newBtnRef,
+                  onClick: () => openCreate(null),
+                }, '＋ ' + t('newRole')),
+                h('button', { className: 'vwf-btn sm', onClick: refetch }, t('refresh'))
+              )
             )
           : null,
         error ? h('div', { className: 'vwf-err-line', role: 'alert' }, error) : null,
@@ -2539,11 +2614,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 onClick: (ev) => ev.stopPropagation(),
               },
                 h('div', { className: 'vwf-row' },
-                  h('div', { className: 'vwf-dialog-title' }, t('roleManager')),
+                  // 浮层标题（原型 modal-head）：内置「内置角色 · 名称」；表单「新建角色 / 编辑角色 · 名称」
+                  h('div', { className: 'vwf-dialog-title' }, view === 'view'
+                    ? t('builtinRoleBadge') + (current ? ' · ' + (current.name || current.id) : '')
+                    : (formMode === 'edit' ? t('editRole') + ' · ' + (current ? current.id : '') : t('newRole'))),
                   h('span', { className: 'vwf-spacer' }),
                   h('button', { className: 'vwf-btn sm', onClick: backToList }, t('close'))
                 ),
-                h('div', { className: 'vwf-role-mgr-body' }, body)
+                h('div', { className: 'vwf-role-mgr-body' }, body),
+                foot
               )
             ),
         overlay
@@ -2978,6 +3057,60 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               })
             )
           ),
+          // FEAT-101 V-5：全局参数配置（原配置面板顶部的工作流控制）落在左列下块，
+          // 与节点选择构成 6:4 竖向分割；字段与保存行为不变（仍是同一份 wf.control / meta）。
+          h('div', { className: 'vwf-params-col' },
+            h('div', { className: 'vwf-card' },
+              h('div', { className: 'vwf-card-head' },
+                h('div', { className: 'vwf-card-title' }, t('workflowControls'), h(HelpDot, { text: t('workflowControlsHelp') }))
+              ),
+              h('div', { className: 'vwf-params-body' },
+                h(Field, { label: t('maxRounds'), help: t('maxRoundsHelp'), errors: fieldErrors['control:maxRounds'] || [] },
+                  h('input', {
+                    className: 'vwf-input' + ((fieldErrors['control:maxRounds'] || []).length ? ' err' : ''),
+                    type: 'number', min: 1, max: 9, step: 1,
+                    value: wf.control && wf.control.maxRounds != null ? wf.control.maxRounds : '',
+                    placeholder: '9',
+                    onChange: (ev) => {
+                      const raw = ev.target.value
+                      if (!raw.trim()) return updateControl({ maxRounds: null })
+                      const parsed = Number(raw)
+                      // 系统约定上限 9（候选二 Q7）：超 9 钳制到 9，校验器同样强制 1-9
+                      updateControl({ maxRounds: Number.isFinite(parsed) ? Math.min(9, Math.trunc(parsed)) : 0 })
+                    },
+                  })
+                ),
+                h(Field, { label: t('heteroCheck'), help: t('heteroCheckHelp'), errors: fieldErrors['heteroCheck'] || [] },
+                  h('select', {
+                    className: 'vwf-input' + ((fieldErrors['heteroCheck'] || []).length ? ' err' : ''),
+                    // 异源档位三态（LOC-021）：默认档 = 弱；关档下开发与审核同模型属用户显式选择，系统不提示
+                    value: (wf.heteroCheck === true || wf.heteroCheck === undefined || wf.heteroCheck === null || wf.heteroCheck === 'weak')
+                      ? 'weak'
+                      : (wf.heteroCheck === false ? 'off' : wf.heteroCheck),
+                    onChange: (ev) => updateMeta({ heteroCheck: ev.target.value }),
+                  },
+                    h('option', { value: 'weak' }, t('heteroModeWeak')),
+                    h('option', { value: 'strong' }, t('heteroModeStrong')),
+                    h('option', { value: 'off' }, t('heteroModeOff'))
+                  )
+                ),
+                h(Field, { label: t('onMaxRounds'), help: t('onMaxRoundsHelp'), errors: fieldErrors['onMaxRounds'] || [] },
+                  h('select', {
+                    className: 'vwf-input',
+                    value: wf.onMaxRounds || 'return',
+                    onChange: (ev) => {
+                      const v = ev.target.value
+                      if (v === 'return') updateMeta({ onMaxRounds: undefined })
+                      else updateMeta({ onMaxRounds: v })
+                    },
+                  },
+                    h('option', { value: 'return' }, 'return'),
+                    h('option', { value: 'auto-reschedule' }, 'auto-reschedule')
+                  )
+                )
+              )
+            )
+          ),
           h('div', { className: 'vwf-canvas-col' },
             h('div', { className: 'vwf-card' },
               h('div', { className: 'vwf-card-head' },
@@ -3101,53 +3234,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           ),
           h('div', { className: 'vwf-card vwf-inspector' },
             h('div', { className: 'vwf-card-title', style: { marginBottom: 4 } }, t('inspector')),
-            h('div', { className: 'vwf-section' },
-              h('div', { style: { fontSize: 13, fontWeight: 500 } }, t('workflowControls')),
-              h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('workflowControlsHelp')),
-              h(Field, { label: t('maxRounds'), help: t('maxRoundsHelp'), errors: fieldErrors['control:maxRounds'] || [] },
-                h('input', {
-                  className: 'vwf-input' + ((fieldErrors['control:maxRounds'] || []).length ? ' err' : ''),
-                  type: 'number', min: 1, max: 9, step: 1,
-                  value: wf.control && wf.control.maxRounds != null ? wf.control.maxRounds : '',
-                  placeholder: '9',
-                  onChange: (ev) => {
-                    const raw = ev.target.value
-                    if (!raw.trim()) return updateControl({ maxRounds: null })
-                    const parsed = Number(raw)
-                    // 系统约定上限 9（候选二 Q7）：超 9 钳制到 9，校验器同样强制 1-9
-                    updateControl({ maxRounds: Number.isFinite(parsed) ? Math.min(9, Math.trunc(parsed)) : 0 })
-                  },
-                })
-              ),
-              h(Field, { label: t('heteroCheck'), help: t('heteroCheckHelp'), errors: fieldErrors['heteroCheck'] || [] },
-                h('select', {
-                  className: 'vwf-input' + ((fieldErrors['heteroCheck'] || []).length ? ' err' : ''),
-                  // 异源档位三态（LOC-021）：默认档 = 弱；关档下开发与审核同模型属用户显式选择，系统不提示
-                  value: (wf.heteroCheck === true || wf.heteroCheck === undefined || wf.heteroCheck === null || wf.heteroCheck === 'weak')
-                    ? 'weak'
-                    : (wf.heteroCheck === false ? 'off' : wf.heteroCheck),
-                  onChange: (ev) => updateMeta({ heteroCheck: ev.target.value }),
-                },
-                  h('option', { value: 'weak' }, t('heteroModeWeak')),
-                  h('option', { value: 'strong' }, t('heteroModeStrong')),
-                  h('option', { value: 'off' }, t('heteroModeOff'))
-                )
-              ),
-              h(Field, { label: t('onMaxRounds'), help: t('onMaxRoundsHelp'), errors: fieldErrors['onMaxRounds'] || [] },
-                h('select', {
-                  className: 'vwf-input',
-                  value: wf.onMaxRounds || 'return',
-                  onChange: (ev) => {
-                    const v = ev.target.value
-                    if (v === 'return') updateMeta({ onMaxRounds: undefined })
-                    else updateMeta({ onMaxRounds: v })
-                  },
-                },
-                  h('option', { value: 'return' }, 'return'),
-                  h('option', { value: 'auto-reschedule' }, 'auto-reschedule')
-                )
-              )
-            ),
             selectedNode ? h(NodeInspector, {
               node: selectedNode, dsl: wf, fieldErrors, providers: props.providers, roles: props.roles,
               readOnlyStructure, orderOf: rankOf, onPickEdge: pickEdge,
@@ -3647,26 +3733,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           onCancel: (ev) => { ev.preventDefault(); setView('list') },
           onClose: () => { if (view === 'detail') setView('list') },
         },
-          h('div', { className: 'vwf-editor-head' },
-            h('strong', null, detailTask.head.taskId || detailTask.head.id),
-            statusBadge(detailTask.head.status),
-            h('span', { className: 'vwf-muted-sm' }, t('dashListRestored')),
-            h('span', { className: 'vwf-spacer' }),
-            h('button', { className: 'vwf-btn sm', onClick: () => setView('list') }, t('dashBackToList'))
-          ),
-          h('div', { className: 'vwf-editor-body' },
-            h('div', { className: 'vwf-rd-scroll' },
-              h(RunDetail, {
-                key: detailTask.key,
-                task: detailTask,
-                tplMap,
-                lrInitial: detailTask.logicalRunId ? lrMap[detailTask.logicalRunId] : null,
-                lrError: detailTask.logicalRunId ? (lrErr[detailTask.logicalRunId] || '') : '',
-                tick,
-                onRefresh: refresh,
-              })
-            )
-          )
+          // 页头 / 状态条 / 三栏工作台由 RunDetail 自己渲染（原型 workspace-shell 的分区）
+          h(RunDetail, {
+            key: detailTask.key,
+            task: detailTask,
+            tplMap,
+            lrInitial: detailTask.logicalRunId ? lrMap[detailTask.logicalRunId] : null,
+            lrError: detailTask.logicalRunId ? (lrErr[detailTask.logicalRunId] || '') : '',
+            tick,
+            onRefresh: refresh,
+            onBack: () => setView('list'),
+          })
         ) : null
       )
     }
@@ -3863,11 +3940,38 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         h('thead', null, h('tr', null, h('th', null, t('dashColNode')), h('th', null, t('rdBlockedPrevValue')))),
         h('tbody', null, rows.map((r) => h('tr', { key: r.k }, h('td', null, r.k), h('td', null, r.v))))
       )
-      return h('div', { className: 'vwf-root' },
-        // 返回列表与位置提示在承载本详情的工作区标题栏上（V-4），正文只保留刷新
-        h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
-          h('button', { className: 'vwf-btn sm', onClick: () => { setWsTick((n) => n + 1) } }, t('refresh'))
+      // 返工深度与生命周期状态：页头操作与状态条共用同一口径
+      const lstate = lr && lr.lifecycle ? String(lr.lifecycle.state) : ''
+      const reworkN = lr ? reworkCountOf(lr) : 0
+      const reload = () => { setWsTick((n) => n + 1) }
+      // 详情域工作区层（原型 workspace-shell）：页头 + 状态条 + 三栏工作台（步骤 / 画布 / 详情），
+      // 运行级记录留在工作台下方。能力出口不变：唯一选中节点、三页签、决策卡、恢复卡、attempt 切换。
+      return h(React.Fragment, null,
+        h('div', { className: 'vwf-editor-head vwf-rd-head' },
+          h('button', { className: 'vwf-btn sm', onClick: props.onBack }, t('dashBackToList')),
+          h('div', { className: 'vwf-rd-head-main' },
+            h('div', { className: 'vwf-row', style: { gap: 8 } },
+              h('h2', { className: 'vwf-rd-title' }, (lr && lr.title ? String(lr.title) : (head.taskId || head.id || '—'))),
+              statusBadge(head.status)
+            ),
+            h('div', { className: 'vwf-rd-subline' },
+              ((lr && lr.workspace && workspaceLabelOf(lr.workspace)) || '—') + ' / ' + (head.name || head.workflowId || '—')
+              + ' · ' + fmtAt(head.startedAt || (lr && lr.created_at)))
+          ),
+          h('span', { className: 'vwf-spacer' }),
+          h('span', { className: 'vwf-muted-sm' }, t('dashListRestored')),
+          !terminal && lstate === 'RUNNING' ? h('button', { className: 'vwf-btn sm', onClick: () => sendControl('pause') }, t('rdControlPause')) : null,
+          h('button', { className: 'vwf-btn sm', onClick: reload }, t('refresh')),
+          h('button', { className: 'vwf-btn sm', onClick: props.onBack }, t('close'))
         ),
+        h('div', { className: 'vwf-rd-strip' },
+          h('span', null, (reworkN > 0 ? t('dashReworkCount', { n: reworkN }) : t('dashFirstRun'))
+            + ' · ' + t('dashPhaseLabel', { phase: snapState ? (snapState.phase || '—') : '—' })),
+          h('button', { className: 'vwf-btn sm', onClick: () => { if (selected) setTab('activity') } }, t('rdFullHistory'))
+        ),
+        h('div', { className: 'vwf-editor-body' },
+        h('div', { className: 'vwf-rd-scroll' },
+        h('div', { className: 'vwf-root' },
         lrError ? h('div', { className: 'vwf-err-line' }, t('dashIntegrityFailed', { err: lrError })) : null,
         recErr ? h('div', { className: 'vwf-note warn' }, t('rdRecordsUnavailable')) : null,
         controlErr ? h('div', { className: 'vwf-err-line' }, controlErr) : null,
@@ -3886,7 +3990,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             ),
             h('div', { className: 'vwf-card', style: { padding: '10px 12px' } },
               h('div', { className: 'vwf-card-title' }, t('rdNodeDirectory')),
-              nodes.length ? nodes.map((n) => {
+              nodes.length ? nodes.map((n, ni) => {
                 const list = logicalAttemptsOf(n.id)
                 const seg = nodeLatestSegment(n.id)
                 const prev = seg > 0 && seg < activeSeg
@@ -3895,6 +3999,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   className: 'vwf-node-dir-row' + (n.id === effectiveSel ? ' selected' : ''),
                   onClick: () => { setSelNode(n.id); setTab('result') },
                 },
+                  h('span', { className: 'vwf-node-dir-no' }, String(ni + 1).padStart(2, '0')),
                   h('span', { className: 'vwf-node-dir-label' }, n.label || n.id),
                   h('span', { className: 'vwf-row', style: { gap: 4 } },
                     list.length ? h('span', { className: 'vwf-badge' }, t('rdAttemptPicker') + ' ' + list.length) : null,
@@ -3905,6 +4010,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 )
               }) : h('div', { className: 'vwf-muted-sm' }, t('rdNoRecords'))
             )
+          ),
+          // 中栏：本次运行的流程（原型 graph 区）——只读画布 + 步骤状态，与详情栏各自滚动
+          h('div', { className: 'vwf-rd-canvas' },
+            h('div', { className: 'vwf-rd-pane-head' },
+              h('div', { className: 'vwf-card-title' }, t('rdRunFlow')),
+              dsl ? h('span', { className: 'vwf-muted-sm' }, t('wbConnCount', { n: ((dsl.edges || []).length) })) : null
+            ),
+            dsl ? h(Canvas, { dsl, readOnly: true, statusMap: st }) : h('div', { className: 'vwf-muted-sm' }, t('rdNoRecords'))
           ),
           // 右栏：唯一选中节点详情出口
           h('div', { className: 'vwf-rd-body' },
@@ -3953,10 +4066,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         renderRecoveryCard(),
         renderSegmentsCard(),
         renderSnapshotsCard(),
-        renderCanvasCard(),
         renderAgentsCard(),
         renderArtifactsCard(),
         renderWorkspaceCard()
+        )))
       )
 
       // 结果页签：本次执行的成果（含扇出子任务独立结果与汇总输入来源）
@@ -4357,12 +4470,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         )
       }
 
-      // 只读画布（沿用既有 Canvas 只读态与 workflowId 匹配的模板 DSL）
-      function renderCanvasCard() {
-        if (!dsl) return null
-        return h('div', { className: 'vwf-card', style: { marginTop: 8 } }, h(Canvas, { dsl, readOnly: true, statusMap: st }))
-      }
-
       // 节点表：既有 agents 行渲染（含 fanout 子项归组），本段来源标注
       function renderAgentsCard() {
         const agents = (snapState && snapState.agents) || []
@@ -4544,6 +4651,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         closeOv()
       }
       const ovSet = (k, field, v) => setOvDraft((d) => ({ ...d, [k]: { ...(d[k] || {}), [field]: v } }))
+      // 「还原本节点默认」（FEAT-101 V-7，原型 reset-node-model）＝删掉该节点的草稿项。
+      // 不能写成「两列同时留空」：留空列的口径是「沿用该行当前默认」，节点有预设时会被
+      // 解析回预设值，于是行仍算覆盖、保存反而把预设固化成了显式覆盖（还原不生效）。
+      const ovClearRow = (k) => setOvDraft((d) => { const next = { ...d }; delete next[k]; return next })
       const reloadOvView = () => {
         // 清除后留在覆盖窗口（UAT 反馈 #5）：刷新清单并就地更新当前查看的模板数据
         return host.call('vwf.workflows.list').then((l) => {
@@ -4569,7 +4680,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const saveOv = () => {
         if (!ovId || ovBusy) return
         const overrides = ovResolvedOf(ovW, ovDraft)
-        if (!Object.keys(overrides).length) { setMsg(t('modelOverrideEmpty')); return }
+        if (!Object.keys(overrides).length) {
+          // 各节点都已还原成默认、模板上却还留着已保存覆盖：保存即清空该模板的覆盖，
+          // 走既有的 clear 通道（与「全部还原默认」同一路径，仍需一次确认）。
+          if (ovSaved !== '{}') { setOvConfirm('clear'); return }
+          setMsg(t('modelOverrideEmpty'))
+          return
+        }
         setOvBusy(true)
         host.call('vwf.workflows.modelOverride.save', { id: ovId, overrides }).then((r) => {
           setOvBusy(false)
@@ -4780,8 +4897,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const hay = [w.name, w.id, w.description].map(x => String(x == null ? '' : x).toLowerCase()).join(' ')
         return hay.indexOf(tplFilterNorm) >= 0
       })
-      // LOC-014 覆盖对话框行：每节点一行；两列下拉的"沿用默认"各自带出本列实际值
-      // （provider 列显示默认 provider，model 列显示默认 model）；无 providers 回退文本输入
+      // LOC-014 覆盖对话框行；FEAT-101 V-7：呈现与交互对齐原型 modelRow——
+      // 每节点一块：节点名 + 「默认 / 覆盖」徽标同行，下行给出该节点预设（默认供应商 / 模型），
+      // 再并排「供应商 / 模型」两个带标签的下拉，最后是「还原本节点默认」。
+      // 两列下拉的「沿用默认」各自带出本列实际值；无 providers 回退文本输入。
       const ovRows = () => {
         const models = (ovW && ovW.dsl && ovW.dsl.bindings && ovW.dsl.bindings.models && typeof ovW.dsl.bindings.models === 'object') ? ovW.dsl.bindings.models : {}
         const provList = (providers || []).map(p => p.id)
@@ -4796,24 +4915,24 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           const curProv = String(d.provider || '').trim() || (eff ? String(eff.provider || '') : '')
           const provCtl = provList.length
             ? h(VwfSelect, { value: d.provider || '', options: [{ value: '', label: provKeep }].concat(provList.map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(n.id, 'provider', v) })
-            : h('input', { className: 'vwf-input vwf-mono', style: { width: 150 }, value: d.provider || '', placeholder: provKeep, onChange: (ev) => ovSet(n.id, 'provider', ev.target.value) })
+            : h('input', { className: 'vwf-input vwf-mono', value: d.provider || '', placeholder: provKeep, onChange: (ev) => ovSet(n.id, 'provider', ev.target.value) })
           const modelCtl = provList.length
             ? h(VwfSelect, { value: d.model || '', options: [{ value: '', label: modelKeep }].concat(modelsOfProv(curProv).map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(n.id, 'model', v) })
-            : h('input', { className: 'vwf-input vwf-mono', style: { width: 170 }, value: d.model || '', placeholder: modelKeep, onChange: (ev) => ovSet(n.id, 'model', ev.target.value) })
-          return h('div', { key: 'ov-row-' + n.id, className: 'vwf-list-item' },
-            h('div', { style: { minWidth: 0, flex: 1 } },
-              h('div', { className: 'vwf-row', style: { gap: 6 } },
-                h('span', null, isOver ? '🔵' : '⚪'),
-                h('span', { className: 'vwf-list-name' }, (n.label || n.id) + '（' + n.id + '）'),
-                isOver
-                  ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge'))
-                  : h('span', { className: 'vwf-badge' }, t('modelOverrideDefaultBadge')),
-                h('span', { className: 'vwf-muted-sm vwf-mono' }, t('modelOverrideCurrent') + (eff ? eff.provider + ' / ' + eff.model : t('modelOverrideInherit')))
-              )
+            : h('input', { className: 'vwf-input vwf-mono', value: d.model || '', placeholder: modelKeep, onChange: (ev) => ovSet(n.id, 'model', ev.target.value) })
+          return h('div', { key: 'ov-row-' + n.id, className: 'vwf-model-row', 'data-vwf-model-node': n.id },
+            h('div', { className: 'vwf-row', style: { justifyContent: 'space-between', gap: 6 } },
+              h('div', { className: 'vwf-list-name' }, (n.label || n.id) + '（' + n.id + '）'),
+              isOver
+                ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge'))
+                : h('span', { className: 'vwf-badge' }, t('modelOverrideDefaultBadge'))
             ),
-            h('div', { style: { width: 150 } }, provCtl),
-            h('div', { style: { width: 170 } }, modelCtl),
-            h('button', { className: 'vwf-btn sm', disabled: ovBusy || !isOver, onClick: () => ovSet(n.id, 'provider', '') || ovSet(n.id, 'model', '') }, t('modelOverrideResetRow'))
+            // 该节点预设即「默认」，覆盖后仍以此行为准（原型：默认：<供应商> / <模型>）
+            h('div', { className: 'vwf-muted-sm vwf-mono' }, t('modelOverrideDefaultLine') + '：' + (eff ? eff.provider + ' / ' + eff.model : t('modelOverrideInherit'))),
+            h('div', { className: 'vwf-two-fields' },
+              h(Field, { label: t('modelOverrideProvider') }, provCtl),
+              h(Field, { label: t('modelOverrideModel') }, modelCtl)
+            ),
+            h('button', { className: 'vwf-btn sm', disabled: ovBusy || !isOver, onClick: () => ovClearRow(n.id) }, t('modelOverrideResetRow'))
           )
         })
       }
@@ -4954,7 +5073,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           onClose: closeOv,
         },
           h('div', { className: 'vwf-editor-head' },
-            h('strong', null, t('modelOverride') + ' · ' + (ovW.name || ovW.id)),
+            h('strong', null, t('modelOverrideTitle') + ' · ' + (ovW.name || ovW.id)),
             h('span', { className: 'vwf-badge' }, ovW.id),
             h('span', { className: 'vwf-spacer' }),
             h('button', { className: 'vwf-btn sm', onClick: requestCloseOv }, t('close'))
@@ -4963,9 +5082,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: 'vwf-muted-sm', style: { marginBottom: 8 } }, t('modelOverrideHelp')),
             h('div', { className: 'vwf-list' }, ovRows())
           ),
+          // 原型对话框底栏：全部还原默认 / 取消 / 保存节点设置。
+          // 「全部还原默认」保持既有二次确认（破坏性动作不静默执行），清空走同一 clear RPC。
           h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8, padding: '8px 0' } },
-            h('button', { className: 'vwf-btn sm danger', disabled: ovBusy, onClick: () => setOvConfirm('clear') }, t('modelOverrideClear')),
-            h('button', { className: 'vwf-btn sm', disabled: ovBusy, onClick: saveOv }, t('modelOverrideSave'))
+            h('button', { className: 'vwf-btn sm', disabled: ovBusy, onClick: () => setOvConfirm('clear') }, t('modelOverrideClear')),
+            h('button', { className: 'vwf-btn sm', disabled: ovBusy, onClick: requestCloseOv }, t('cancelAction')),
+            h('button', { className: 'vwf-btn sm primary', disabled: ovBusy, onClick: saveOv }, t('modelOverrideSave'))
           ),
           ovConfirm ? h('div', { className: 'vwf-confirm-mask', onClick: () => setOvConfirm(null) },
             h('div', { className: 'vwf-confirm', onClick: (ev) => ev.stopPropagation() },
@@ -5073,14 +5195,15 @@ function roleOriginOf(role) {
 }
 
 // 列表摘要（显示层）：显式 summary 优先；缺失时从职责 content 生成一段可读文本，
-// 仅用于展示，不写回、不覆盖角色原文（规格 §9「摘要不写回原文」）。截断按字符
-// 计数（Array.from 切分，不切断代理对）；两行显示上限由 CSS line-clamp 收敛，
+// 仅用于展示，不写回、不覆盖角色原文（规格 §9「摘要不写回原文」）。生成前先摘掉
+// 「一句话简介」前置块（roleBodyOf）——否则载荷没带 summary 时会拿块里的键当正文。
+// 截断按字符计数（Array.from 切分，不切断代理对）；两行显示上限由 CSS line-clamp 收敛，
 // 连续长串靠 overflow-wrap:anywhere 换行，不产生横向溢出。
 function roleSummaryOf(role, maxChars) {
   const limit = typeof maxChars === 'number' && maxChars > 0 ? maxChars : 120
   const explicit = role && typeof role.summary === 'string' ? role.summary.trim() : ''
   if (explicit) return explicit
-  const raw = role && typeof role.content === 'string' ? role.content : ''
+  const raw = roleBodyOf(role && typeof role.content === 'string' ? role.content : '')
   const text = raw
     .replace(/```[\s\S]*?```/g, ' ')        // 代码块不参与摘要
     .replace(/^[ \t]{0,3}#{1,6}[ \t]*/gm, '') // 标题符号
@@ -5091,6 +5214,31 @@ function roleSummaryOf(role, maxChars) {
   if (!text) return ''
   const chars = Array.from(text)
   return chars.length > limit ? chars.slice(0, limit).join('') + '…' : text
+}
+
+// 一句话简介（选填，FEAT-102 V-2）：角色文件顶部的前置块只承载显式简介，职责正文原样
+// 保留在块之后。与内核 scripts/role-library.cjs 的 explicitSummary 是同一约定：没有该块
+// 时按职责生成摘要（留空语义）。职责原文不被改写——保存时只增删这个块。
+function roleSummaryFieldOf(role) {
+  const c = role && typeof role.content === 'string' ? role.content : ''
+  if (c.slice(0, 3) !== '---') return ''
+  const end = c.indexOf('\n---', 3)
+  if (end < 0) return ''
+  const m = /(?:^|\n)[ \t]*summary[ \t]*:[ \t]*([^\n]*)/.exec(c.slice(3, end))
+  return m ? m[1].trim() : ''
+}
+function roleBodyOf(content) {
+  const c = typeof content === 'string' ? content : ''
+  if (c.slice(0, 3) !== '---') return c
+  const end = c.indexOf('\n---', 3)
+  if (end < 0) return c
+  const nl = c.indexOf('\n', end + 1)
+  return (nl < 0 ? '' : c.slice(nl + 1)).replace(/^\n+/, '')
+}
+function withRoleSummary(summary, body) {
+  const s = String(summary == null ? '' : summary).trim()
+  const b = String(body == null ? '' : body)
+  return s ? '---\nsummary: ' + s + '\n---\n\n' + b : b
 }
 
 // ── 基础 Schema 模板生成（独立纯函数，供 beautifySchema 空字段分支与单测复用）──

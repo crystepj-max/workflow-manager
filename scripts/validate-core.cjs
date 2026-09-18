@@ -16,6 +16,7 @@
 // 蓝图 ↔ DSL 形态投影：唯一实现 = ./projection-core.cjs（生成器直接 import，宿主经 dist 加载）。
 // 本文件只转发导出——两份投影实现曾各自漂移（克隆 vs 共享引用），禁止再内嵌副本。
 const { projectToVwf, projectToBlueprint, effectiveHeteroMode, isKnownHeteroValue } = require('./projection-core.cjs')
+const schemaProtocol = require('./schema-protocol-core.cjs')
 
 const COND_RE = /^\$\.([A-Za-z0-9_.]+)\s*(==|!=)\s*(true|false|null|"([^"]*)"|-?\d+(\.\d+)?)$/
 const HUMAN_DECISION_ID = '$human-decision'
@@ -657,6 +658,12 @@ function validateBlueprint(bp, opts) {
     if (kind !== 'fanout') {
       if (n.items !== undefined) err('$.nodes[' + n.id + '].items', 'items 仅允许用于 kind=fanout 节点')
       if (n.failOn !== undefined) err('$.nodes[' + n.id + '].failOn', 'failOn 仅允许用于 kind=fanout 节点')
+      if (n.mechanical !== undefined) {
+        if (typeof n.mechanical !== 'string' || !String(n.mechanical).trim()) {
+          err('$.nodes[' + n.id + '].mechanical', 'mechanical 须为非空字符串（机械节点 id，如 construction-preflight）')
+        }
+        if (kind !== 'worker') err('$.nodes[' + n.id + '].mechanical', 'mechanical 仅允许用于 kind=worker 节点')
+      }
       return
     }
 
@@ -1145,6 +1152,13 @@ function validateBlueprint(bp, opts) {
     })
   }
 
+  // LOC-039：协议版本与 Schema 能力矩阵（静态 schema 审计 + 声明一致性）
+  {
+    const audit = schemaProtocol.auditBlueprintSchemas(bp)
+    audit.errors.forEach((e) => err(e.at, e.message))
+    audit.warnings.forEach((w) => warnings.push(w.message))
+  }
+
   return { ok: errors.length === 0, errors, warnings, counts: { nodes: bp.nodes.length, edges: bp.edges.length } }
 }
 
@@ -1180,4 +1194,6 @@ module.exports = {
   HD_EVENT_RECORD_KIND,
   HD_EVENT_TRIGGER,
   HD_UNKNOWN,
+  // LOC-039 Schema 协议（转发 schema-protocol-core，禁止再内嵌副本）
+  ...schemaProtocol,
 }

@@ -29,7 +29,7 @@
 
 | 节点 | 角色（profile） | 场景契约要点（节点提供，角色不猜） |
 |---|---|---|
-| preflight | evaluator | 实施前硬门禁；PASS / BLOCKED |
+| preflight | evaluator（机械 `construction-preflight`，LOC-038） | 实施前硬门禁：runPreflight 唯一实现，零 LLM；PASS / BLOCKED |
 | dev | dev | 隔离 worktree（路径/分支以运行上下文与 run.json 为准）；自测允许，独立测试证明归测试节点；READY / NEED_REDEFINE / BLOCKED |
 | review | review | 独立会话收敛审查；route 与 verdict 成对一致（CONTRACT_INCONSISTENT 拦截） |
 | test | test | 只审同一候选；独立运行验证；产物 test-report.md |

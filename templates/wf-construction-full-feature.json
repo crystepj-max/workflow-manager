@@ -18,12 +18,24 @@
     "maxRoundsExhausted": "BLOCKED"
   },
   "heteroCheck": "weak",
+  "protocol": {
+    "version": "1.0",
+    "required_capabilities": [
+      "additionalProperties",
+      "const",
+      "enum",
+      "properties",
+      "required",
+      "type"
+    ]
+  },
   "nodes": [
     {
       "id": "preflight",
       "profile": "evaluator",
+      "mechanical": "construction-preflight",
       "label": "实施前检查",
-      "goal": "对已定义任务做实施前硬门禁检查（不得跳过）。逐项核对：Issue 当前状态=已定义；无人值守许可=允许；本地任务规格可读且版本=Issue 需求基线版本；Run 绑定基线版本与 Issue 一致（若已绑定）；前置依赖=无；未决产品事项=0。全部通过则 route=PASS，并将已定义规格导入为已确认需求基线证据、写入定义外置说明性施工包（不是新的产品方案决策门），Issue 状态→交付中。任一项失败则 route=BLOCKED，写明原因，禁止进入开发。将检查结果写入 preflight-report.md；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "机械门禁（LOC-038）：调用 runPreflight 唯一实现，不消耗模型资格判断。逐项核对：Issue 当前状态=已定义/本地已定义；无人值守许可=允许；本地任务规格可读且版本=Issue 需求基线版本；Run 绑定基线版本与 Issue 一致（若已绑定）；前置依赖已完成（登记册+祖先校验）或同组环境串行满足；Definition Check 全部勾选且未决=0。全部通过则 route=PASS，并将已定义规格导入为已确认需求基线证据、写入定义外置说明性施工包（不是新的产品方案决策门），Issue 状态→交付中。任一项失败则 route=BLOCKED，写明原因，禁止进入开发（模型 PASS 无效）。将检查结果写入 preflight-report.md；最终回复只输出本节点 schema 对应 JSON。",
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -62,6 +74,14 @@
     {
       "id": "dev",
       "profile": "dev",
+      "node_capabilities": {
+        "candidate": { "read": true, "write": true },
+        "source": { "read": true, "write": true },
+        "evidence": { "read": true, "write": true },
+        "test_overlay": { "read": true, "write": true },
+        "publish": false,
+        "independent_proof": false
+      },
       "label": "开发",
       "goal": "只按当前已确认需求基线与本地任务规格施工，严格控制范围，在本 Run 隔离工作区完成实现并按角色规则自检。场景契约：本节点在隔离 worktree 内施工（worktree 路径与工作分支以运行上下文/run.json 为准）；允许必要自测与实现相关测试，独立测试证明由后续独立测试节点出具，不由本节点自签。发现必须改变产品结果（目标/范围/验收标准）才能继续时输出 NEED_REDEFINE（不消耗自动返工额度，需回到定义阶段）；外部条件无法安全继续时输出 BLOCKED；否则输出 READY。将完整开发交接写入 dev-report.md；最终回复只输出本节点 schema 对应 JSON。",
       "inputs": [
@@ -155,6 +175,14 @@
     {
       "id": "review",
       "profile": "review",
+      "node_capabilities": {
+        "candidate": { "read": true, "write": false },
+        "source": { "read": true, "write": false },
+        "evidence": { "read": true, "write": true },
+        "test_overlay": { "read": false, "write": false },
+        "publish": false,
+        "independent_proof": true
+      },
       "label": "收敛审查",
       "verifyBranch": true,
       "goal": "独立会话对当前候选成果做收敛审查：阻断项=0 才可通过（route=APPROVE）；实现问题导致不通过则 RETURN_DEV；无法安全继续则 BLOCKED。优化建议不阻断。route 与 verdict 必须成对一致，矛盾组合会被运行时确定性拒绝（CONTRACT_INCONSISTENT，属契约错误而非审查裁决）：APPROVE/APPROVE、RETURN_DEV/REQUEST_CHANGES、BLOCKED/COMMENT_ONLY。仅有非阻断建议且完成审查的审查仍出 APPROVE，非阻断建议随报告呈现；COMMENT_ONLY 表示无法形成可放行裁决，只能配 BLOCKED，不作为质量通过。不得修改正式成果。将审查报告写入 review-report.md；最终回复只输出本节点 schema 对应 JSON。",
@@ -240,6 +268,14 @@
     {
       "id": "test",
       "profile": "test",
+      "node_capabilities": {
+        "candidate": { "read": true, "write": false },
+        "source": { "read": true, "write": false },
+        "evidence": { "read": true, "write": true },
+        "test_overlay": { "read": true, "write": true },
+        "publish": false,
+        "independent_proof": true
+      },
       "label": "测试",
       "verifyBranch": true,
       "goal": "只对刚刚通过收敛审查的同一候选成果做独立运行验证与必要回归：覆盖主路径、验收条件、边界异常、受影响已有能力、本轮修复项。通过则 route=PASS；失败回开发则 RETURN_DEV；无法安全继续则 BLOCKED。route 与 result 必须成对一致，矛盾组合会被运行时确定性拒绝（CONTRACT_INCONSISTENT，属契约错误而非测试结论）：PASS/PASSED、RETURN_DEV/FAILED、BLOCKED/BLOCKED。不得修改正式成果。将测试证据写入 test-report.md；最终回复只输出本节点 schema 对应 JSON。",
@@ -387,6 +423,14 @@
     {
       "id": "closeout",
       "profile": "closeout",
+      "node_capabilities": {
+        "candidate": { "read": true, "write": false },
+        "source": { "read": true, "write": false },
+        "evidence": { "read": true, "write": true },
+        "test_overlay": { "read": false, "write": false },
+        "publish": true,
+        "independent_proof": false
+      },
       "label": "收口",
       "goal": "仅对已经人工验收通过或有条件通过的同一成果执行最终交付、合并、任务关闭、记录整理与安全清理。有条件通过时必须把优化意见保留在收口遗留事项中，供下次定义摄入，且不得改写当前基线。不得修改正式成果、不得重新开发。完成后写 cleanup-report.md；最终回复只输出本节点 schema 对应 JSON，status=DELIVERED。",
       "inputs": [

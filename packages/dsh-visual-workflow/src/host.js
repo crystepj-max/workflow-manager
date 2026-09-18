@@ -82,8 +82,12 @@ return {
     const GENERATOR = CODE_ROOT ? CODE_ROOT + '/scripts/generate.mjs' : null
     const WS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/workspace-isolation-host.mjs' : null
     const RECORDS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/records-host.mjs' : null
+    const PREFLIGHT_GATE = CODE_ROOT ? CODE_ROOT + '/scripts/construction-preflight-gate.mjs' : null
+    const QUALITY_COST_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/run-quality-cost.mjs' : null
     // LOC-032：受管理外部操作账本 + execute-or-reconcile（与 records-host 同进程边界模式）
     const OPERATIONS_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/operations-host.mjs' : null
+    // LOC-041：节点隔离适配（node_capabilities / isolation_guarantee / 探针）
+    const NODE_ISOLATION_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/node-isolation-host.mjs' : null
     // LOC-037：收口事实整理与授权交付动作分离（与 operations-host 同进程边界模式）
     const DELIVERY_CLOSEOUT_HOST = CODE_ROOT ? CODE_ROOT + '/scripts/delivery-closeout-host.mjs' : null
 
@@ -130,6 +134,26 @@ return {
         if (outcome.exitCode !== 0) return { ok: false, detail: ((stderr || stdout) || ('exit ' + outcome.exitCode)).trim().slice(0, 500) }
         return { ok: true, stdout: stdout, stderr: stderr }
       } catch (e) { return { ok: false, detail: errMsg(e) } }
+    }
+    // LOC-038：wf_run 建设模板机械资格检查（与模型探针分离；失败不分配 workspace）
+    async function runConstructionPreflightHost(opts) {
+      if (!PREFLIGHT_GATE) return { ok: false, detail: 'construction-preflight-gate 脚本不可用' }
+      const o = opts || {}
+      const argv = [PREFLIGHT_GATE]
+      if (o.issuePath && o.specPath) argv.push(o.issuePath, o.specPath)
+      else argv.push('--task-id', String(o.taskId || ''))
+      if (o.repo) argv.push('--repo', o.repo)
+      if (o.runBaseline) argv.push('--run-baseline', o.runBaseline)
+      if (o.envStore) argv.push('--env-store', o.envStore)
+      const r = await runNode(argv, { cwd: o.repo || CODE_ROOT, maxBytes: 256 * 1024 })
+      if (!r.ok) return { ok: false, detail: r.detail }
+      try {
+        const text = String(r.stdout || '').trim()
+        const json = text.slice(text.indexOf('{'))
+        return { ok: true, gate: JSON.parse(json) }
+      } catch (e) {
+        return { ok: false, detail: 'construction-preflight-gate 输出解析失败：' + errMsg(e) }
+      }
     }
     const rm = (path) => runNode(['-e', "require('fs').rmSync(process.argv[1],{recursive:true,force:true})", path])
 
@@ -619,7 +643,17 @@ return {
     // 但不是终态——终态判定仍以 LIFECYCLE_TERMINAL 为准。
     // LOC-030：BLOCKED 同为权威运行状态（脚本受阻返回体不得被迟到的 end 盖成 'completed'），
     // 且同样不是生命周期终态（可恢复受阻，terminal=false）—— holdsTask 不含它，并发名额随受阻释放。
-    const TERMINAL_STATUS_RE = /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|BLOCKED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
+    let srcMod = (typeof __VWF_KERNELS__ === 'object' && __VWF_KERNELS__ && __VWF_KERNELS__['state-recovery-core.cjs']) || null
+    let srcCorePromise = null
+    function srcCore() {
+      if (srcMod) return Promise.resolve(srcMod)
+      if (!srcCorePromise) {
+        srcCorePromise = loadDist('state-recovery-core.cjs').then((m) => { srcMod = m; return m }).catch((e) => { srcCorePromise = null; throw e })
+      }
+      return srcCorePromise
+    }
+    srcCore().catch((e) => log('state-recovery-core 预加载失败（首次 wf_run 将重试）：' + errMsg(e)))
+    const TERMINAL_STATUS_RE = () => (srcMod && srcMod.TERMINAL_STATUS_RE) || /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|BLOCKED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
     const HD_STRING_KEYS = ['decision_id', 'reason', 'node']
     const HD_NUMBER_KEYS = ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']
     const HD_OBJECT_KEYS = ['decision_package', 'control_event', 'blocked_edge', 'results']
@@ -633,10 +667,10 @@ return {
     const runFiles = runsStore.fileNames
     const runFile = (id) => runsStore.fileOf(id)
     const live = new Set()
-    const isHumanWait = (s) => s === 'WAITING_HUMAN' || String(s || '').indexOf('AWAITING_HUMAN_') === 0
+    const isHumanWait = (s) => (srcMod ? srcMod.isHumanWaitStatus(s) : (s === 'WAITING_HUMAN' || String(s || '').indexOf('AWAITING_HUMAN_') === 0))
     // workflow/end 只有 completed，可能在 wf_run 回写 WAITING_HUMAN 之后到达把等待态盖掉；
     // 此时仍靠 decision_id + Package 识别可续跑的停机记录
-    const isParkedHd = (rec) => !!rec && (rec.status === 'WAITING_HUMAN' || (rec.status === 'completed' && !!rec.decision_id && !!rec.decision_package && typeof rec.decision_package === 'object'))
+    const isParkedHd = (rec) => (srcMod ? srcMod.isParkedHumanDecision(rec) : (!!rec && (rec.status === 'WAITING_HUMAN' || (rec.status === 'completed' && !!rec.decision_id && !!rec.decision_package && typeof rec.decision_package === 'object'))))
     // #80：PAUSED 记录持有任务（可恢复现场），占用 taskId 直到恢复或派生
     const holdsTask = (rec) => !!rec && !rec.supersededBy && (live.has(rec.id) || isHumanWait(rec.status) || isParkedHd(rec) || rec.status === 'PAUSED')
     const runTs = (rec) => rec.updatedAt || rec.startedAt || 0
@@ -770,6 +804,7 @@ return {
         // LOC-028：宿主签发的人工决定与消费记录（防伪造 completion / 幂等恢复）
         human_decisions: [],
         consumed_decisions: {},
+        human_waits: [],
       }
       // Rev 1 冻结：工作流定义 + 角色（编译产物内联角色正文与路由）+ Provider/Model
       // 绑定 + 运行关键配置。修订仅 Provider/Model，不改脚本，故后续修订以 script_ref
@@ -833,8 +868,25 @@ return {
       const pm = (snap && snap.provider_model) || {}
       return pm[nodeId] || null
     }
+    function trackHumanWait(rec, prevState, nextState) {
+      rec.human_waits = Array.isArray(rec.human_waits) ? rec.human_waits : []
+      const waitStates = ['WAITING_HUMAN', 'PAUSED', 'BLOCKED']
+      const open = rec.human_waits.find((w) => w && !w.ended_at)
+      if (waitStates.indexOf(nextState) >= 0 && prevState === 'RUNNING') {
+        rec.human_waits.push({
+          started_at: new Date().toISOString(),
+          ended_at: null,
+          reason: nextState,
+          node: null,
+        })
+      } else if (open && nextState === 'RUNNING') {
+        open.ended_at = new Date().toISOString()
+      }
+    }
     function logicalSetState(rec, state, reason) {
       if (LIFECYCLE_STATES.indexOf(state) < 0) return false
+      const prev = rec.lifecycle && rec.lifecycle.state ? rec.lifecycle.state : null
+      trackHumanWait(rec, prev, state)
       rec.lifecycle = { state: state, reason: reason || null }
       rec.terminal = LIFECYCLE_TERMINAL.indexOf(state) >= 0
       rec.updated_at = Date.now()
@@ -997,6 +1049,7 @@ return {
         workspace: rec.workspace || null,
         human_decisions: rec.human_decisions || [],
         consumed_decisions: rec.consumed_decisions || {},
+        human_waits: rec.human_waits || [],
       }
     }
     // 队列实现收敛于 logicalStore（LOC-004）；保留原函数名作为薄委托，11 个调用点零改动
@@ -1037,6 +1090,7 @@ return {
         workspace: asObj(data.workspace),
         human_decisions: Array.isArray(data.human_decisions) ? data.human_decisions.filter((d) => d && typeof d === 'object') : [],
         consumed_decisions: asObj(data.consumed_decisions) || {},
+        human_waits: Array.isArray(data.human_waits) ? data.human_waits.filter((w) => w && typeof w === 'object') : [],
       }
       logicalRuns.set(id, rec)
       for (const s of rec.segments) if (s.run_id) logicalRunByEngineRun.set(s.run_id, id)
@@ -1627,13 +1681,13 @@ return {
     // 无检查点 = 该段无可用现场（旧脚本/解析失败）：恢复退化为人工指定 entry，不猜。
     function extractCheckpoint(runRec) {
       if (!runRec) return null
+      if (srcMod) return srcMod.extractCheckpointFromLogs(runRec.logs)
       for (let i = runRec.logs.length - 1; i >= 0; i--) {
         const line = String(runRec.logs[i] || '')
         const idx = line.indexOf('[pw-ckpt]')
         if (idx < 0) continue
         try {
           const ck = JSON.parse(line.slice(idx + '[pw-ckpt]'.length))
-          // c='$end' 只是循环退出标记，不是可恢复节点：跳过它向前找真实检查点
           if (ck && typeof ck === 'object' && typeof ck.c === 'string' && ck.c && ck.c !== '$end') {
             return {
               entry: ck.c,
@@ -1645,8 +1699,8 @@ return {
               maxRounds: Number(ck.mr) || 0,
               decisionSeq: Number(ck.ds) || 0,
               degraded: false,
-              // LOC-031：检查点 tb（紧凑形 {u,g,m,mg,p,carry}）原样回带，脚本双形读取
               ...(ck.tb && { technical_budget: ck.tb }),
+              ...(ck.pt && { protocol_snapshot: ck.pt }),
             }
           }
         } catch (e) { /* 损坏行跳过，继续向前找 */ }
@@ -1689,6 +1743,28 @@ return {
     function buildPauseResumeArgs(rec) {
       const pr = rec.pause_resume || null
       if (!pr) return null
+      const applied = rec.baseline_applied_upto || 0
+      const pending = (rec.baseline_revisions || []).filter((r) => r.revision > applied)
+      const rev1Dsl = rec.snapshots && rec.snapshots[0] && rec.snapshots[0].workflow && rec.snapshots[0].workflow.dsl
+      const built = srcMod ? srcMod.buildPauseResumePayload({
+        pauseResume: {
+          entry: pr.entry,
+          results: deepCloneData(pr.results && typeof pr.results === 'object' ? pr.results : {}),
+          history: Array.isArray(pr.history) ? deepCloneData(pr.history) : [],
+          round: Number(pr.round) || 0,
+          feedback: typeof pr.feedback === 'string' ? pr.feedback : '',
+          budgetUsed: Number(pr.budgetUsed) || 0,
+          maxRounds: Number(pr.maxRounds) || 0,
+          decisionSeq: Number(pr.decisionSeq) || 0,
+          technical_budget: pr.technical_budget || undefined,
+        },
+        baselineRevisions: rec.baseline_revisions || [],
+        baselineAppliedUpto: applied,
+        rev1Entry: rev1Dsl && rev1Dsl.entry ? rev1Dsl.entry : null,
+        guidance: rec.guidance || [],
+        extraArgs: ebBaselineArgs(rec),
+      }) : null
+      if (built) return built
       const args = {
         entry: pr.entry || undefined,
         results: pr.results && typeof pr.results === 'object' ? deepCloneData(pr.results) : {},
@@ -1698,22 +1774,18 @@ return {
         budgetUsed: Number(pr.budgetUsed) || 0,
         maxRounds: Number(pr.maxRounds) || 0,
         decisionSeq: Number(pr.decisionSeq) || 0,
-        // LOC-031：恢复携带冻结技术预算快照（脚本只读不回写；形状由脚本侧校验）
         technical_budget: pr.technical_budget || undefined,
+        protocol_snapshot: pr.protocol_snapshot || undefined,
       }
-      const applied = rec.baseline_applied_upto || 0
-      const pending = (rec.baseline_revisions || []).filter((r) => r.revision > applied)
       const lastRev = pending.length ? pending[pending.length - 1] : (rec.baseline_revisions || [])[rec.baseline_revisions.length - 1]
       if (lastRev) args.baseline_amendment = lastRev.text
       let rebaseBlocked = false
       if (pending.length) {
-        const rev1Dsl = rec.snapshots && rec.snapshots[0] && rec.snapshots[0].workflow && rec.snapshots[0].workflow.dsl
         if (rev1Dsl && rev1Dsl.entry) args.entry = rev1Dsl.entry
         else rebaseBlocked = true
       }
       const coach = (rec.guidance || []).filter((g) => g.mode === 'coach' && g.text)
       if (coach.length) args.guidance_text = coach.map((g) => '- ' + g.text).join('\n')
-      // LOC-027：恢复段携带活动评价基线引用（已核验/历史版本均原样传递，不迁移改写）
       Object.assign(args, ebBaselineArgs(rec))
       return { args: args, pendingRebase: pending.length > 0, rebaseBlocked: rebaseBlocked }
     }
@@ -1746,7 +1818,7 @@ return {
       amRuns.delete(String(info.id || ''))
       onRun(info.id, (rec) => {
         // wf_run 已回写的脚本权威终态（WAITING_HUMAN / DONE / …）不得被迟到的 end 盖掉
-        if (!TERMINAL_STATUS_RE.test(String(rec.status || ''))) rec.status = String(result.stopReason)
+        if (!TERMINAL_STATUS_RE().test(String(rec.status || ''))) rec.status = String(result.stopReason)
         // 终局时仍 running 的子代理不可能再有结果（引擎对启动即失败的项不投递 agent-end）
         for (const a of rec.agents) if (a.outcome === 'running') a.outcome = 'failed'
       })
@@ -1772,19 +1844,23 @@ return {
       }
     }
     function canonicalStop(result) {
-      const v = result && result.value
-      const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
-      return TERMINAL_STATUS_RE.test(cand) ? cand : ''
+      return srcMod ? srcMod.canonicalStopFromResult(result) : (function () {
+        const v = result && result.value
+        const cand = v && typeof v === 'object' && typeof v.status === 'string' ? v.status : (typeof v === 'string' ? v : '')
+        return TERMINAL_STATUS_RE().test(cand) ? cand : ''
+      })()
     }
     // 脚本终态 → workspace 生命周期：人工等待保留，DONE 完成，STOPPED 停止，
     // BLOCKED 可恢复受阻（LOC-030：不落 FAILED，恢复后继续同一 Run），其余失败
     function lifecycleFor(canon, stopReason) {
-      if (canon === 'DONE') return 'COMPLETED'
-      if (canon === 'STOPPED') return 'STOPPED'
-      if (canon === 'BLOCKED') return 'BLOCKED'
-      if (isHumanWait(canon)) return 'WAITING_HUMAN'
-      if (canon || stopReason === 'cancelled' || stopReason === 'error') return 'FAILED'
-      return null
+      return srcMod ? srcMod.lifecycleForStatus(canon, stopReason) : (function () {
+        if (canon === 'DONE') return 'COMPLETED'
+        if (canon === 'STOPPED') return 'STOPPED'
+        if (canon === 'BLOCKED') return 'BLOCKED'
+        if (isHumanWait(canon)) return 'WAITING_HUMAN'
+        if (canon || stopReason === 'cancelled' || stopReason === 'error') return 'FAILED'
+        return null
+      })()
     }
 
     // ── 模板 / 校验 / 编译 / 运行状态 RPC ─────────────────────────────────────
@@ -1920,7 +1996,8 @@ return {
         const prepared = await prepareRunWorkspace({ taskId: taskId, templateId: a.templateId || v.sanitized.id, baseBranch: a.baseBranch || 'main', declaredWorkspace: v.sanitized.workspace, resourceKind: a.resource_kind })
         if (!prepared.ok) return fail('Run Workspace 分配失败，隔离保证无法建立：' + prepared.error)
         if (prepared.workspace) {
-          workspaceArgs = scriptArgsFromWorkspace(prepared.workspace, prepared.capability, taskId)
+          const iso = await probeIsolationGuarantee()
+          workspaceArgs = scriptArgsFromWorkspace(prepared.workspace, prepared.capability, taskId, iso)
           script = injectWorkspaceDefaults(script, workspaceArgs)
           await markWorkspaceLifecycle(taskId, 'RUNNING')
         }
@@ -1981,6 +2058,61 @@ return {
       const recordId = String((a && a.record_id) || '')
       if (!id || !recordId) return fail('缺少 logical_run_id / record_id')
       return recordsHostCall('get', { logical_run_id: id, record_id: recordId })
+    })
+    // LOC-043：质量成本 metrics（消费 attempt 记录 + 质量证据；可重建 JSON + 人读摘要）
+    async function qualityCostCall(cmd, input, opts) {
+      if (!QUALITY_COST_HOST || (await readTextIfExists(QUALITY_COST_HOST)) === null) {
+        return { ok: false, notFound: true, error: 'run-quality-cost.mjs 未找到（LOC-043 运行时集成未部署）' }
+      }
+      const r = await runNode([QUALITY_COST_HOST, cmd, JSON.stringify(input || {})], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 1024 * 1024 })
+      if (!r.ok) return { ok: false, error: 'quality cost 调用失败：' + r.detail }
+      try {
+        const parsed = JSON.parse(r.stdout)
+        return parsed.ok ? parsed : { ok: false, error: parsed.error || 'quality cost 业务错误' }
+      } catch (e) { return { ok: false, error: 'quality cost 输出不可解析：' + errMsg(e), raw: r.stdout } }
+    }
+    async function buildMetricsForRun(id, priceTable) {
+      let rec = logicalRuns.get(id)
+      if (!rec) {
+        const d = fs === undefined ? null : await homeDirs()
+        if (d) {
+          try {
+            hydrateLogicalRunFromDisk(JSON.parse(await fs.readText(await fs.resolve(d.logicalRunsDir + '/' + logicalStore.fileOf(id)))))
+          } catch (e) { /* miss */ }
+          rec = logicalRuns.get(id)
+        }
+      }
+      const list = await recordsHostCall('list', { logical_run_id: id })
+      if (!list.ok) return list
+      return qualityCostCall('build', {
+        logical_run_id: id,
+        template_id: rec ? rec.template_id : null,
+        attempts: list.attempts || [],
+        human_waits: rec ? rec.human_waits || [] : [],
+        records: list.records || [],
+        price_table: priceTable || null,
+      })
+    }
+    registerRpc('vwf.metrics.get', async (a) => {
+      const id = String((a && a.logical_run_id) || '')
+      if (!id) return fail('缺少 logical_run_id')
+      const built = await buildMetricsForRun(id, a && a.price_table ? a.price_table : null)
+      if (!built.ok) return built
+      const rep = await qualityCostCall('report', { metrics: built.metrics })
+      return { ok: true, logical_run_id: id, metrics: built.metrics, report: rep.ok ? rep.report : null }
+    })
+    registerRpc('vwf.metrics.compare', async (a) => {
+      const ids = Array.isArray(a && a.logical_run_ids) ? a.logical_run_ids.map(String).filter(Boolean) : []
+      if (!ids.length) return fail('缺少 logical_run_ids')
+      const runs = []
+      for (const id of ids) {
+        const built = await buildMetricsForRun(id, a && a.price_table ? a.price_table : null)
+        if (!built.ok) return built
+        runs.push(built.metrics)
+      }
+      const cmp = await qualityCostCall('compare', { runs })
+      if (!cmp.ok) return cmp
+      return { ok: true, comparison: cmp.comparison, runs }
     })
     // LOC-032：受管理外部操作入口（execute-or-reconcile）。已确认成功只确认不重复执行；
     // 结果不确定先核查，无法核查时 NEEDS_RECONCILIATION 受阻（unknown 禁止再次执行）。
@@ -2272,6 +2404,30 @@ return {
       return applied.ok ? { ok: true, id: a.id } : applied
     }))
 
+    // ── LOC-041 节点隔离：核心 = scripts/node-isolation.mjs，经包装脚本子进程调用 ──
+    async function niHostCall(cmd, input, opts) {
+      if (!NODE_ISOLATION_HOST || (await readTextIfExists(NODE_ISOLATION_HOST)) === null) return { ok: false, notFound: true, error: 'node-isolation-host.mjs 未找到（LOC-041 集成未部署）' }
+      const r = await runNode([NODE_ISOLATION_HOST, cmd, JSON.stringify(input || {})], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 256 * 1024 })
+      if (!r.ok) return { ok: false, error: 'node isolation host 调用失败：' + r.detail }
+      try {
+        const parsed = JSON.parse(r.stdout)
+        return parsed.ok ? parsed : Object.assign({ ok: false, error: parsed.error || 'node isolation host 业务错误', detail: parsed.detail }, parsed)
+      } catch (e) { return { ok: false, error: 'node isolation host 输出不可解析：' + errMsg(e), raw: r.stdout } }
+    }
+    let isolationProbePromise = null
+    async function probeIsolationGuarantee() {
+      if (!isolationProbePromise) {
+        isolationProbePromise = niHostCall('probe', {}).then((r) => {
+          if (!r || !r.ok) { isolationProbePromise = null; return { guarantee: 'unavailable', evidence: { reason: r && r.error || 'probe 失败' } } }
+          return { guarantee: r.guarantee || 'unavailable', backend: r.backend || null, evidence: r.evidence || {} }
+        }).catch(() => {
+          isolationProbePromise = null
+          return { guarantee: 'unavailable', evidence: { reason: 'probe 异常' } }
+        })
+      }
+      return isolationProbePromise
+    }
+
     // ── 工作区隔离：核心实现 = scripts/workspace-isolation.mjs，经包装脚本子进程调用 ──
     async function wsHostCall(cmd, input, opts) {
       if (!WS_HOST || (await readTextIfExists(WS_HOST)) === null) return { ok: false, notFound: true, error: 'workspace-isolation-host.mjs 未找到（宿主未部署 #93 集成）' }
@@ -2338,12 +2494,15 @@ return {
       }
       return cap
     }
-    function scriptArgsFromWorkspace(ws, cap, taskId) {
+    function scriptArgsFromWorkspace(ws, cap, taskId, isolation) {
       return {
         taskId: taskId || undefined, workspace_id: ws.workspace_id, workspace_path: ws.workspace_path, source_path: ws.source_path,
         records_path: ws.records_path, work_branch: ws.work_branch, source_revision: ws.source_revision, workspace_capability: cap || undefined,
         // LOC-013：隔离模式随现场注入脚本（ISOLATED_READ 时运行上下文标注 source 只读）
         workspace_mode: ws.workspace_mode || undefined,
+        // LOC-041：宿主探测的隔离保证等级（enforced | unavailable）
+        isolation_guarantee: isolation && isolation.guarantee ? isolation.guarantee : undefined,
+        isolation_backend: isolation && isolation.backend ? isolation.backend : undefined,
       }
     }
     // LOC-026：候选捕获范围缺省由包装脚本侧排除 Run 产物目录（与编译脚本 RUNDIR 同源）
@@ -2545,6 +2704,13 @@ return {
           resolved_inputs: resolvedInputsFor(logicalRec, nodeId, results, false, newKeys),
         })
         if (node && node.verifyBranch) {
+          const iso = await probeIsolationGuarantee()
+          const proofGate = await niHostCall('canIssueProof', {
+            isolation_guarantee: iso.guarantee,
+            profile: String(node.profile || ''),
+            node_capabilities: node.node_capabilities || undefined,
+          })
+          const canProof = proofGate.ok && proofGate.decision && proofGate.decision.ok
           if (!cand) {
             const c = await wsHostCall('captureCandidate', { logical_run_id: logicalRunId, capability: capabilityFor(logicalRunId) })
             if (c.candidate) cand = c.candidate
@@ -2556,6 +2722,9 @@ return {
             workspace: ws ? { workspace_id: ws.workspace_id || null, source_path: ws.source_path || null, work_branch: ws.work_branch || null } : null,
             candidate_ref: cand,
             candidate_match: !!(cand && res.candidate_sha256 === cand.version.content_sha256),
+            isolation_guarantee: iso.guarantee || 'unavailable',
+            independent_proof_eligible: canProof === true,
+            independent_proof_block_reason: canProof ? null : ((proofGate.decision && proofGate.decision.reason) || (iso.guarantee !== 'enforced' ? 'isolation_guarantee=unavailable' : '节点不具备 independent_proof')),
           }
           entries.push({
             type: 'proof',
@@ -2924,6 +3093,7 @@ return {
       },
       async execute(rawArgs) {
         refreshServices()
+        await srcCore()
         // 工具平台会 deepFreeze 入参：续跑回填写到浅拷贝上
         const args = Object.assign({}, rawArgs || {})
         const taskId = String(args.taskId || '')
@@ -3136,6 +3306,35 @@ return {
           }
         }
 
+        // LOC-038：建设模板机械资格门禁（runPreflight）——在 workspace 分配前执行，
+        // 与上方 preflight_probe（模型服务探针）分离；结果预填 results.preflight 供脚本零 LLM 消费。
+        const tplIdForGate = String(args.templateId || v.sanitized.id || '')
+        const resumePastPreflight = !!(args.entry && args.entry !== 'preflight')
+        const hasPrefill = !!(args.results && args.results.preflight && args.results.preflight.mechanical)
+        if (tplIdForGate === 'wf-construction-full-feature' && logicalRec && !resumePastPreflight && !hasPrefill) {
+          const repoForGate = CODE_ROOT || projectRoot()
+          const gateRun = await runConstructionPreflightHost({
+            taskId: logicalTaskId,
+            issuePath: args.issuePath,
+            specPath: args.specPath,
+            repo: repoForGate,
+            runBaseline: args.run_baseline || args.runBaseline,
+            envStore: args.env_store || args.envStore,
+          })
+          if (!gateRun.ok) {
+            logicalSetState(logicalRec, 'BLOCKED', logicalReason('PREFLIGHT_GATE_FAILED', gateRun.detail || '机械资格检查执行失败'))
+            requestLogicalPersist(logicalRec.logical_run_id)
+            return JSON.stringify({ blocked: true, stage: 'preflight_qualification', logical_run_id: logicalRec.logical_run_id, detail: gateRun.detail }, null, 2)
+          }
+          const gate = gateRun.gate
+          if (gate.route === 'BLOCKED') {
+            logicalSetState(logicalRec, 'BLOCKED', logicalReason('PREFLIGHT_BLOCKED', String(gate.blockers || gate.summary || '资格检查未通过')))
+            requestLogicalPersist(logicalRec.logical_run_id)
+            return JSON.stringify({ blocked: true, stage: 'preflight_qualification', logical_run_id: logicalRec.logical_run_id, route: gate.route, blockers: gate.blockers, reasons: gate.reasons }, null, 2)
+          }
+          args.results = Object.assign({}, args.results || {}, { preflight: gate })
+        }
+
         // Codex R2 ③：派生运行按自身 logical_run_id 分配 workspace——沿用原 taskId 会让
         // #93 注册表把前任（仍注册）的 workspace 复用给派生运行，或在清理后把溯源记到
         // 旧身份下。markWorkspaceLifecycle/refreshWorkspaceContext 同步用该 ID。
@@ -3151,6 +3350,8 @@ return {
         const ws = prepared.workspace || null
         if (ws) log('workspace allocated: ' + ws.workspace_id + ' at ' + ws.workspace_path)
         else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为')
+        const isolationProbe = ws ? await probeIsolationGuarantee() : null
+        if (isolationProbe) log('node isolation probe: guarantee=' + isolationProbe.guarantee + (isolationProbe.backend ? (' backend=' + isolationProbe.backend) : ''))
 
         // LOC-028：人工决策续跑必须由宿主签发 decision_ref（含候选绑定），禁止信任模型自报
         let hostDecisionRef = null
@@ -3205,6 +3406,8 @@ return {
         const scriptArgs = Object.assign({
           taskId: args.taskId, runDir: args.runDir, roleDir: args.roleDir || c.roleDir, baseBranch: args.baseBranch,
           issueRef: args.issueRef, issueTitle: args.issueTitle, issueBody: args.issueBody, issueComments: args.issueComments,
+          issuePath: args.issuePath, specPath: args.specPath, repo_path: CODE_ROOT || projectRoot(),
+          run_baseline: args.run_baseline || args.runBaseline, env_store: args.env_store || args.envStore,
           requirement: args.requirement, entry: args.entry, approved: args.approved, feedback: args.feedback, startRound: args.startRound, history: args.history,
           decision_id: args.decision_id, user_choice: args.user_choice, blocked_edge: args.blocked_edge, results: args.results, halt_reason: args.halt_reason,
           budgetUsed: args.budgetUsed, maxRounds: args.maxRounds, decisionSeq: args.decisionSeq,
@@ -3219,7 +3422,7 @@ return {
           model_overrides: modelOverridesForExec,
           decision_ref: hostDecisionRef || undefined,
           consumed_decisions: logicalRec ? (logicalRec.consumed_decisions || {}) : undefined,
-        }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined) : {})
+        }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined, isolationProbe) : {})
         if (hostDecisionRef && ws && ws.source_path && hostDecisionRef.candidate_ref) {
           scriptArgs.candidate_ref = hostDecisionRef.candidate_ref
         }
