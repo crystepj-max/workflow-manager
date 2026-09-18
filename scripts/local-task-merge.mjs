@@ -408,7 +408,10 @@ export function runMerge({
       ...(workspaceRemoveError ? { error: workspaceRemoveError } : {}),
     },
     cleanup_hint:
-      '三件套（任务卡 + 规格 + 证据摘要）已入库；失效登记已 prune；' +
+      '三件套（任务卡 + 规格 + 证据摘要）已入库；' +
+      (pruned
+        ? '失效登记已 prune；'
+        : '失效登记未能 prune（git worktree prune 失败），需人工执行 git worktree prune；') +
       (workspaceRemoved
         ? `本任务工作区已删除（${wt}），分支 ${branch} 按阶段一口径保留，待托管恢复后补 PR 再删。`
         : `本任务工作区未删除（${workspaceRemoveError}）；按 R-4 只登记遗留、不阻塞合并——` +

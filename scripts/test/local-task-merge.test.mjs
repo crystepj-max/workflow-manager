@@ -179,6 +179,9 @@ test('端到端：一任务一提交合并回本地主干，标签与归档齐�
   assert.ok(g(['branch', '--list', 'dev-loc-001-r1'], repo))
   assert.equal(fs.existsSync(worktreePathFor(repo, 'dev-loc-001-r1')), false)
   assert.equal(g(['worktree', 'list', '--porcelain'], repo).includes(worktreePathFor(repo, 'dev-loc-001-r1')), false)
+  // 清理兜底已执行（该结果此前无任何用例断言，退化不会被发现）
+  assert.equal(out.pruned, true)
+
   // 登记册写 branch_retained=true（否则 D-10 会静默跳过该任务）
   assert.equal(after.branch_retained, true)
 })
@@ -234,6 +237,33 @@ test('端到端：冲突时中止，主干不受影响', () => {
   assert.equal(g(['rev-parse', 'main'], repo), before)
   assert.equal(loadRegistry(repo).tasks[0].status, '等待验收')
   assert.ok(fs.existsSync(wt))
+})
+
+test('端到端：父工作区删除后残留的失效子登记被 prune 兜底注销', () => {
+  const repo = tmpRepo()
+  const rec = seedTask(repo)
+  const wt = makeBranch(repo, 'dev-loc-001-r1', 'a.txt', 'branch\n')
+
+  // 复现「删父工作区不会级联注销其内部嵌套子登记」缺口（约定 §1.7.4，历史三次复现）：
+  // 在父工作区内再嵌一个子工作区，随后把它的目录移走——只留下一条指向空路径的失效登记。
+  const nested = path.join(wt, 'nested-ghost')
+  g(['worktree', 'add', nested, '-b', 'dev-nested-ghost'], wt)
+  const moved = path.join(os.tmpdir(), `nested-ghost-${Date.now()}`)
+  fs.renameSync(nested, moved)
+  fs.rmSync(moved, { recursive: true, force: true })
+  assert.ok(
+    g(['worktree', 'list', '--porcelain'], repo).includes(nested),
+    `前置条件不成立：失效登记应仍留在清单里（${nested}）`,
+  )
+
+  const out = runMerge({ repo, taskId: rec.task_id, branch: 'dev-loc-001-r1', decision: 'accept' })
+  assert.equal(out.ok, true, JSON.stringify(out.failures))
+  assert.equal(out.pruned, true)
+  assert.equal(
+    g(['worktree', 'list', '--porcelain'], repo).includes(nested),
+    false,
+    `失效子登记未被注销：${nested}`,
+  )
 })
 
 test('dry-run：只出计划不动仓库', () => {
