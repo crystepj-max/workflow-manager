@@ -453,6 +453,42 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 .vwf-canvas-wrap::-webkit-scrollbar, .vwf-editor-body::-webkit-scrollbar, .vwf-inspector::-webkit-scrollbar, .vwf-wb-steps-body::-webkit-scrollbar, .vwf-wb-conn-body::-webkit-scrollbar, .vwf-dialog-issues::-webkit-scrollbar { width:10px; height:10px; }
 .vwf-canvas-wrap::-webkit-scrollbar-thumb, .vwf-editor-body::-webkit-scrollbar-thumb, .vwf-inspector::-webkit-scrollbar-thumb, .vwf-wb-steps-body::-webkit-scrollbar-thumb, .vwf-wb-conn-body::-webkit-scrollbar-thumb, .vwf-dialog-issues::-webkit-scrollbar-thumb { background:var(--dsw-alias-border-l3, #444); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
 .vwf-canvas-wrap::-webkit-scrollbar-track, .vwf-editor-body::-webkit-scrollbar-track, .vwf-inspector::-webkit-scrollbar-track, .vwf-wb-steps-body::-webkit-scrollbar-track, .vwf-wb-conn-body::-webkit-scrollbar-track, .vwf-dialog-issues::-webkit-scrollbar-track { background:transparent; }
+/* ── FEAT-85 运行列表与 Logical Run 详情 ──────────────────────────────────
+   排版基线对齐 DESIGN.md 的 A 编排台：正文 14px、说明 12px、圆角 8/12、
+   间距 4/8/12/16；状态同时给语义色与文字（不靠颜色单独承载含义）。 */
+.vwf-filters { display:flex; flex-wrap:wrap; gap:8px 12px; padding:10px 14px 4px; }
+.vwf-filter { display:flex; flex-direction:column; gap:2px; min-width:150px; flex:1 1 150px; }
+.vwf-filter .vwf-input { width:100%; }
+.vwf-run-list { max-height:460px; overflow-y:auto; padding:4px 14px 8px; }
+.vwf-run-group { margin-top:10px; }
+.vwf-run-group-head { display:flex; align-items:center; gap:8px; margin:0 0 6px; font-size:12px; font-weight:600; color:var(--dsw-alias-label-secondary, #9a9a9a); }
+.vwf-run-row { display:block; width:100%; text-align:left; font-size:14px; cursor:pointer; margin-bottom:8px; padding:10px 12px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:12px; background:var(--dsw-alias-bg-layer-1, #1e1e1e); color:var(--dsw-alias-label-primary, #e8e8e8); }
+.vwf-run-row:hover { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.06)); }
+.vwf-run-row p { margin:4px 0; }
+.vwf-run-row-note { font-size:12px; color:var(--dsw-alias-label-secondary, #9a9a9a); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vwf-run-row small { font-size:12px; color:var(--dsw-alias-label-secondary, #9a9a9a); }
+.vwf-rd-main { display:grid; grid-template-columns:minmax(170px, 220px) 1fr; gap:12px; align-items:start; margin-top:8px; }
+.vwf-rd-side { display:flex; flex-direction:column; gap:12px; }
+.vwf-rd-body { min-width:0; }
+.vwf-rd-kv { margin-top:4px; font-size:12px; }
+.vwf-node-dir-row { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; cursor:pointer; padding:6px 8px; margin-top:4px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--dsw-alias-label-primary, #e8e8e8); font-size:13px; }
+.vwf-node-dir-row:hover { background:var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.06)); }
+.vwf-node-dir-row.selected { border-color:var(--dsw-alias-brand-primary, #4d9fff); background:var(--dsw-alias-bg-layer-2, #242424); }
+.vwf-node-dir-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vwf-sec { font-size:12px; font-weight:600; color:var(--dsw-alias-label-primary, #e8e8e8); margin-top:8px; }
+.vwf-note { margin-top:6px; padding:6px 10px; border-radius:8px; font-size:12px; border:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-layer-1, #1e1e1e); color:var(--dsw-alias-label-secondary, #9a9a9a); }
+.vwf-note.warn { border-color:var(--dsw-alias-state-warn-primary, #f59e0b); color:var(--dsw-alias-label-primary, #e8e8e8); }
+.vwf-tab-panel { padding:10px 2px 4px; font-size:14px; }
+.vwf-fanout-item { margin-top:8px; padding:8px 10px; border:1px solid var(--dsw-alias-border-l2, #333); border-radius:8px; }
+/* 键盘焦点可见（窄屏与键盘同等考虑） */
+.vwf-run-row:focus-visible, .vwf-node-dir-row:focus-visible, .vwf-tab:focus-visible, .vwf-btn:focus-visible,
+.vwf-input:focus-visible, .vwf-textarea:focus-visible, .vwf-filter select:focus-visible { outline:2px solid var(--dsw-alias-brand-primary, #4d9fff); outline-offset:2px; }
+@media (max-width: 560px) {
+  .vwf-rd-main { grid-template-columns:1fr; }
+  .vwf-filter { flex:1 1 100%; }
+  .vwf-run-list { max-height:none; }
+}
+@media (prefers-reduced-motion: reduce) { .vwf-run-row, .vwf-node-dir-row, .vwf-tab { transition:none; } }
 `)
 
     const h = React.createElement
@@ -3179,17 +3215,162 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       return s === 'running' || s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED'
     }
 
-    // 运行看板（#19 多 run 并行）：运行清单 + 切换、门禁卡片队列（一次裁决一张）、
-    // closeout 串行警示条；同 taskId 互斥拒绝在 host 端 wf_run 边界执行。
-    // 数据源 vwf.runs.list + vwf.state；画布按 workflowId 匹配模板 DSL。
+    // ── 运行看板（FEAT-85：多工作空间运行列表 + Logical Run 详情工作区）──────────
+    // 「一个列表管多个任务，一个详情看一次运行」：列表按 logical_run_id 折叠 segment
+    // （一个 Logical Run = 一个用户任务），按工作空间分组；详情只保留一个选中节点的
+    // 结果出口，结果 / 检查 / 活动用页签在同一区域切换。
+    // 数据来源全部为既有协议（不新增 RPC、不改运行存储格式）：
+    //   vwf.runs.list       运行摘要行 + 逻辑运行 join（logical_run_id / segment /
+    //                       segment_count / logical_state / pause_pending）
+    //   vwf.logicalRuns.get 详情：lifecycle / segments / snapshots / node_attempts /
+    //                       business_outcomes / completion / guidance / control_events /
+    //                       baseline_revisions / workspace / human_decisions
+    //   vwf.records.list    逐次 attempt（kind / round / item_index / result / outcome）与
+    //                       节点成果 + resolved_inputs（扇出汇总输入来源）
+    //   vwf.state           现况：agents / logs / formalRecords / decision_package / blocked_edge
+    //   vwf.run.control     pause / interrupt / guidance
+    const HD_UNKNOWN = 'UNKNOWN'
+    // 待处理 = 需人工介入或可恢复（人工门禁 / WAITING_HUMAN / PAUSED / BLOCKED）
+    function isAttentionStatus(status) {
+      const s = String(status || '')
+      return s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED' || s === 'BLOCKED'
+    }
+    // 列表状态分桶：待处理 / 进行中 / 已完成 / 已结束（非完成终态，如 STOPPED、FAILED_*）
+    function runBucketOf(status) {
+      const s = String(status || '')
+      if (isAttentionStatus(s)) return 'attention'
+      if (s === 'DONE') return 'done'
+      if (s === 'running') return 'running'
+      return 'ended'
+    }
+    function fmtAt(ts) {
+      const n = Number(ts) || 0
+      if (!n) return '—'
+      try { return new Date(n).toLocaleString() } catch (e) { return '—' }
+    }
+    function shortSha(v) {
+      const s = String(v || '')
+      return s ? s.slice(0, 10) : '—'
+    }
+    // 同一 Logical Run 的多段折叠为一个用户任务（规格 §9：多 segment 不得呈现为多个新任务）。
+    // 无逻辑归属的旧记录各自成行，保持既有呈现不被吞掉。
+    function foldRunsIntoTasks(runs) {
+      const tasks = []
+      const byLogical = new Map()
+      for (const r of runs || []) {
+        const lr = String(r.logical_run_id || '')
+        if (!lr) { tasks.push({ key: 'run:' + r.id, logicalRunId: '', segments: [r] }); continue }
+        let task = byLogical.get(lr)
+        if (!task) { task = { key: 'lr:' + lr, logicalRunId: lr, segments: [] }; byLogical.set(lr, task); tasks.push(task) }
+        task.segments.push(r)
+      }
+      for (const task of tasks) {
+        task.segments.sort((a, b) => (Number(a.segment) || 0) - (Number(b.segment) || 0) || ((a.startedAt || 0) - (b.startedAt || 0)))
+        // 当前段：未被续跑接管的优先（正在跑的那一段）；都被接管时取段号最大的一段
+        const live = task.segments.filter((s) => !s.supersededBy)
+        const pool = live.length ? live : task.segments
+        task.head = pool.reduce((best, s) => ((Number(s.segment) || 0) >= (Number(best.segment) || 0) ? s : best), pool[0])
+        task.segmentCount = Math.max(task.segments.length, ...task.segments.map((s) => Number(s.segment_count) || 0))
+      }
+      return tasks
+    }
+    // 节点尝试索引：node → 按段号与完成时间升序（node_attempts 为宿主段末扫描的权威入档）
+    function attemptsByNode(list) {
+      const m = {}
+      for (const a of list || []) {
+        if (!a || !a.node) continue
+        const k = String(a.node)
+        if (!m[k]) m[k] = []
+        m[k].push(a)
+      }
+      for (const k of Object.keys(m)) {
+        m[k].sort((a, b) => (Number(a.segment) || 0) - (Number(b.segment) || 0) || ((a.completed_at || 0) - (b.completed_at || 0)))
+      }
+      return m
+    }
+    // 返工深度：同一节点被重复执行的最多次数减一
+    function reworkCountOf(record) {
+      const byNode = attemptsByNode(record && record.node_attempts)
+      let max = 0
+      for (const k of Object.keys(byNode)) max = Math.max(max, byNode[k].length)
+      return max > 0 ? max - 1 : 0
+    }
+    function outcomeValuesOf(record) {
+      const bo = (record && record.business_outcomes) || {}
+      const set = new Set()
+      for (const k of Object.keys(bo)) if (bo[k] && bo[k].outcome !== undefined && bo[k].outcome !== null) set.add(String(bo[k].outcome))
+      return Array.from(set).sort()
+    }
+    // 退回类结果：蓝图里 countRound=true 的边（返工 / 补充回边）声明的 outcome
+    function returnOutcomesOf(dsl) {
+      const set = new Set()
+      for (const e of ((dsl && dsl.edges) || [])) if (e && e.countRound === true && e.outcome) set.add(String(e.outcome))
+      return set
+    }
+    function workspaceLabelOf(ws) {
+      if (!ws) return ''
+      const id = ws.workspace_id ? String(ws.workspace_id) : ''
+      const p = ws.workspace_path ? String(ws.workspace_path) : (ws.source_path ? String(ws.source_path) : '')
+      const base = p ? p.split('/').filter(Boolean).pop() : ''
+      return id || base || (ws.mode ? String(ws.mode) : '')
+    }
+    // 决策包可选四项用 UNKNOWN 哨兵表达「显式未知」；界面必须本地化，不得显示英文哨兵
+    function unknownText(v) {
+      const s = v === undefined || v === null ? '' : String(v).trim()
+      return (!s || s === HD_UNKNOWN) ? t('rdDecisionUnknown') : s
+    }
+    // attempt 记录按 attempt_id 取最新 Revision（running → completed / interrupted 同 id 递进）
+    function latestAttemptBodies(records) {
+      const byAttempt = new Map()
+      for (const r of records || []) {
+        const rid = String((r && r.record_id) || '')
+        if (rid.indexOf('attempt:') !== 0) continue
+        const v = r.body && r.body.value
+        if (!v || !v.attempt_id) continue
+        const cur = byAttempt.get(String(v.attempt_id))
+        if (!cur || Number(r.record_revision || 0) >= Number(cur.record_revision || 0)) byAttempt.set(String(v.attempt_id), { record_id: rid, record_revision: Number(r.record_revision || 0), value: v, provenance: r.provenance || null })
+      }
+      return byAttempt
+    }
+    // node_result 记录按 record_id 取最新 Revision（旧 Revision 仍可查，列表只取用于展示的最新）
+    function latestNodeResultBodies(records) {
+      const byNode = new Map()
+      for (const r of records || []) {
+        const rid = String((r && r.record_id) || '')
+        if (rid.indexOf('node:') !== 0) continue
+        const cur = byNode.get(rid)
+        if (!cur || Number(r.record_revision || 0) >= Number(cur.record_revision || 0)) byNode.set(rid, r)
+      }
+      return byNode
+    }
+    function tierBadgeOf(lifecycleState) {
+      const s = String(lifecycleState || '')
+      const color = s === 'COMPLETED' ? STATUS_COLOR.pass : s === 'RUNNING' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s === 'PAUSED' || s === 'BLOCKED') ? STATUS_COLOR.human : STATUS_COLOR.fail
+      return h('span', { className: 'vwf-badge', style: { color: color } }, s || '—')
+    }
+
+    // 运行看板：列表视图（分组 / 四类筛选 / 分页 / 返回位置保留）+ 详情视图（唯一详情出口）
     function Dashboard(props) {
-      const [runId, setRunId] = React.useState('')
-      const [snap, setSnap] = React.useState(null)
       const [runs, setRuns] = React.useState([])
       const [tplMap, setTplMap] = React.useState({})
       const [auto, setAuto] = React.useState(true)
       const [page, setPage] = React.useState(0)
-      const [pageSize, setPageSize] = React.useState(20)
+      const [pageSize, setPageSize] = React.useState(10)
+      const [view, setView] = React.useState('list')
+      const [taskKey, setTaskKey] = React.useState('')
+      const [runId, setRunId] = React.useState('')
+      const [wsFilter, setWsFilter] = React.useState('all')
+      const [bucketFilter, setBucketFilter] = React.useState('all')
+      const [resultFilter, setResultFilter] = React.useState('all')
+      const [completionFilter, setCompletionFilter] = React.useState('all')
+      const [lrMap, setLrMap] = React.useState({})
+      const [lrErr, setLrErr] = React.useState({})
+      const [listErr, setListErr] = React.useState('')
+      const [tick, setTick] = React.useState(0)
+      const lrMapRef = React.useRef({})
+      const inFlightRef = React.useRef(new Set())
+      const listScrollRef = React.useRef(null)
+      const savedScrollRef = React.useRef(0)
       React.useEffect(() => {
         host.call('vwf.workflows.list').then((l) => {
           const m = {}
@@ -3197,20 +3378,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           setTplMap(m)
         }).catch(() => {})
       }, [])
-      // 立即拉取所选 run 详情：点击行即时切换，不等下一个轮询周期；
-      // seq 守卫防止慢响应回写覆盖新选择（连续切行竞态）
-      const seqRef = React.useRef(0)
-      const fetchState = (id) => {
-        if (!id) return
-        const seq = ++seqRef.current
-        host.call('vwf.state', { runId: id }).then((r) => { if (seq === seqRef.current) setSnap(r) }).catch(() => {})
-      }
-      const selectRun = (id) => { setRunId(id); fetchState(id) }
       const refresh = React.useCallback(() => {
-        host.call('vwf.runs.list').then((r) => setRuns((r && r.runs) || [])).catch(() => {})
-        if (!runId) return
-        fetchState(runId)
-      }, [runId])
+        host.call('vwf.runs.list').then((r) => { setRuns((r && r.runs) || []); setListErr('') }).catch((e) => setListErr(String((e && e.message) || e)))
+        setTick((n) => n + 1)
+      }, [])
       React.useEffect(() => {
         if (!auto) return undefined
         return ctx.interval(refresh, 3000)
@@ -3219,36 +3390,132 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const allRuns = React.useMemo(() => {
         return [...runs].sort((a, b) => ((b.startedAt || b.ts || 0) - (a.startedAt || a.ts || 0)) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
       }, [runs])
+      const tasks = React.useMemo(() => foldRunsIntoTasks(allRuns), [allRuns])
       const activeCount = allRuns.filter((r) => !r.supersededBy && isActiveRunStatus(r.status)).length
-      // LOC-030：BLOCKED（可恢复受阻）与人工门禁同入关注队列——恢复入口 = entry=<resume_node>
-      const gates = allRuns.filter((r) => !r.supersededBy && (String(r.status) === 'WAITING_HUMAN' || String(r.status).indexOf('AWAITING_HUMAN_') === 0 || String(r.status) === 'BLOCKED'))
-      // 分页：数据刷新（新 run 落盘 / 历史拉取）时回到第 0 页
-      React.useEffect(() => { setPage(0) }, [allRuns.length])
-      const totalPages = Math.max(1, Math.ceil(allRuns.length / pageSize))
+      // 门禁队列：一次裁决一张（人工门禁 / WAITING_HUMAN / BLOCKED 同入队列）
+      const gates = allRuns.filter((r) => !r.supersededBy && isAttentionStatus(r.status) && r.status !== 'PAUSED')
+      // 工作空间分组数据源：vwf.runs.list 摘要不含 workspace，按 logical_run_id 惰性补齐并缓存
+      // （规格 §11 首选：客户端缓存 + 惰性补齐，不新增 RPC）。读取失败只标注该行未知，不冒充事实。
+      const PREFETCH_LIMIT = 6
+      React.useEffect(() => {
+        let fired = 0
+        for (const task of tasks) {
+          if (fired >= PREFETCH_LIMIT) break
+          const id = task.logicalRunId
+          if (!id || lrMapRef.current[id] || lrErr[id] || inFlightRef.current.has(id)) continue
+          inFlightRef.current.add(id)
+          fired++
+          host.call('vwf.logicalRuns.get', { logical_run_id: id }).then((r) => {
+            inFlightRef.current.delete(id)
+            if (r && r.found && r.record) {
+              lrMapRef.current = Object.assign({}, lrMapRef.current, { [id]: r.record })
+              setLrMap(lrMapRef.current)
+            } else {
+              setLrErr((m) => (m[id] ? m : Object.assign({}, m, { [id]: t('rdWsNoRecord') })))
+            }
+          }).catch((e) => {
+            inFlightRef.current.delete(id)
+            setLrErr((m) => (m[id] ? m : Object.assign({}, m, { [id]: String((e && e.message) || e) })))
+          })
+        }
+      }, [tasks, lrMap, lrErr])
+      const modelOf = React.useCallback((task) => {
+        const head = task.head || {}
+        const lr = task.logicalRunId ? lrMap[task.logicalRunId] : null
+        const ws = lr && lr.workspace ? lr.workspace : null
+        return {
+          task,
+          head,
+          lr,
+          ws,
+          wsId: ws ? String(ws.workspace_id || '') : '',
+          wsLabel: workspaceLabelOf(ws),
+          wsPending: !!task.logicalRunId && !lr && !lrErr[task.logicalRunId],
+          wsError: task.logicalRunId && !lr ? (lrErr[task.logicalRunId] || '') : '',
+          rework: lr ? reworkCountOf(lr) : null,
+          updatedAt: (lr && lr.updated_at) || head.startedAt || head.ts || 0,
+          completionType: lr && lr.completion && lr.completion.type ? String(lr.completion.type) : '',
+          outcomes: lr ? outcomeValuesOf(lr) : [],
+          lifecycle: lr && lr.lifecycle ? String(lr.lifecycle.state || '') : '',
+          bucket: runBucketOf(head.status),
+        }
+      }, [lrMap, lrErr])
+      const models = React.useMemo(() => tasks.map(modelOf), [tasks, modelOf])
+      // 空间筛选项：来自已补齐的工作空间（含未归属与未知两类显式项）
+      const wsOptions = React.useMemo(() => {
+        const seen = new Map()
+        for (const m of models) if (m.wsId && !seen.has(m.wsId)) seen.set(m.wsId, m.wsLabel || m.wsId)
+        return Array.from(seen.entries()).map(([id, label]) => ({ id, label })).sort((a, b) => (a.label < b.label ? -1 : 1))
+      }, [models])
+      const resultOptions = React.useMemo(() => {
+        const set = new Set()
+        for (const m of models) for (const o of m.outcomes) set.add(o)
+        return Array.from(set).sort()
+      }, [models])
+      const completionOptions = React.useMemo(() => {
+        const set = new Set()
+        for (const m of models) if (m.completionType) set.add(m.completionType)
+        return Array.from(set).sort()
+      }, [models])
+      const visible = models.filter((m) => {
+        if (bucketFilter !== 'all' && m.bucket !== bucketFilter) return false
+        if (resultFilter !== 'all' && !m.outcomes.includes(resultFilter)) return false
+        if (completionFilter === '__none__') { if (m.completionType) return false } else if (completionFilter !== 'all' && m.completionType !== completionFilter) return false
+        if (wsFilter === 'all') return true
+        // 空间未补齐的行在补齐前不因空间筛选被静默隐藏（补齐后立即按真实空间归位）
+        if (m.wsPending) return true
+        if (m.task.logicalRunId && m.wsError) return wsFilter === '__unknown__'
+        if (!m.task.logicalRunId) return wsFilter === '__none__'
+        return wsFilter === '__unknown__' ? !m.wsId : m.wsId === wsFilter
+      })
+      // 分页：仅在筛选条件或每页条数变化时回到第 0 页；轮询导致列表长度变化时保留用户当前位置
+      // （越界由 safePage 收敛，不会显示空页）
+      React.useEffect(() => { setPage(0) }, [wsFilter, bucketFilter, resultFilter, completionFilter, pageSize])
+      const totalPages = Math.max(1, Math.ceil(visible.length / pageSize))
       const safePage = Math.min(page, totalPages - 1)
-      const start = safePage * pageSize
-      const pageRuns = allRuns.slice(start, start + pageSize)
-      const prevPage = () => setPage((p) => Math.max(0, p - 1))
-      const nextPage = () => setPage((p) => Math.min(totalPages - 1, p + 1))
-      const snapState = snap && snap.found ? snap.state : null
-      const dsl = snapState ? (tplMap[snapState.workflowId] || null) : null
-      const st = snapState && dsl ? mapStatus(snapState, dsl) : {}
-      // #80 运行控制面：暂停/中断经看板下发（运行中 Chat 被 wf_run 阻塞，看板 RPC 是唯一
-      // 实时通道）；恢复与指导保持命令式入口（与 Human Decision 续跑同模式），最终 UI 归 #75。
-      // 状态与待生效标志取 runs.list join（host 权威）；PAUSED 详情卡轮询逻辑运行摘要。
-      const selRow = snapState ? (allRuns.find((r) => r.id === snapState.id) || null) : null
-      const lrunId = selRow ? String(selRow.logical_run_id || '') : ''
-      const lrState = selRow ? String(selRow.logical_state || '') : ''
-      const [lrun, setLrun] = React.useState(null)
-      React.useEffect(() => { if (lrunId && lrState === 'PAUSED') host.call('vwf.logicalRuns.get', { logical_run_id: lrunId }).then((r) => { if (r && r.found) setLrun(r.record) }).catch(() => {}) }, [lrunId, lrState, snapState ? snapState.updatedAt : 0])
-      const sendControl = (action) => {
-        if (!lrunId) return
-        if (action === 'interrupt' && !window.confirm(t('ctlConfirmInterrupt'))) return
-        host.call('vwf.run.control', { action, logical_run_id: lrunId }).then((r) => { if (r && r.ok) fetchState(runId) }).catch(() => {})
+      const pageModels = visible.slice(safePage * pageSize, safePage * pageSize + pageSize)
+      // 返回位置保留：离开列表前记住滚动位置与分页，返回时还原（筛选与分页本身留在组件态里）
+      const openDetail = (key) => {
+        const el = listScrollRef.current
+        savedScrollRef.current = el ? el.scrollTop : 0
+        setTaskKey(key)
+        setView('detail')
+      }
+      React.useEffect(() => {
+        if (view !== 'list') return
+        const el = listScrollRef.current
+        if (el) el.scrollTop = savedScrollRef.current
+      }, [view, safePage])
+      const openByRunId = () => {
+        const id = String(runId || '').trim()
+        if (!id) return
+        const hit = tasks.find((task) => task.segments.some((s) => String(s.id) === id))
+        if (hit) { openDetail(hit.key); return }
+        const lrHit = tasks.find((task) => task.logicalRunId === id)
+        if (lrHit) openDetail(lrHit.key)
+      }
+      if (view === 'detail') {
+        const task = tasks.find((x) => x.key === taskKey) || null
+        if (!task) { /* 任务在刷新后消失（记录被清理）：回列表，不显示假详情 */ }
+        else {
+          return h('div', { className: 'vwf-root' },
+            h(RunDetail, {
+              key: task.key,
+              task,
+              tplMap,
+              lrInitial: task.logicalRunId ? lrMap[task.logicalRunId] : null,
+              lrError: task.logicalRunId ? (lrErr[task.logicalRunId] || '') : '',
+              tick,
+              onBack: () => setView('list'),
+              onRefresh: refresh,
+            })
+          )
+        }
       }
       return h('div', { className: 'vwf-root' },
         activeCount >= 2 ? h('div', { className: 'vwf-code', style: { borderColor: STATUS_COLOR.human, marginBottom: 8 } },
           t('dashParallel', { n: activeCount })) : null,
+        listErr ? h('div', { className: 'vwf-err-line' }, t('dashIntegrityFailed', { err: listErr })) : null,
         gates.length ? h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
           h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('dashGateQueue'))),
           h('div', { style: { padding: '4px 14px 10px' } },
@@ -3259,44 +3526,63 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('span', { className: 'vwf-muted-sm' }, (g.name || g.workflowId || '') + ' · ' + (String(g.status) === 'WAITING_HUMAN' ? t('dashHumanDecision', { reason: g.reason || '' }) : String(g.status) === 'BLOCKED' ? t('dashBlockedReason', { reason: g.reason || '' }) : t('dashGateNode', { node: String(g.status).replace('AWAITING_HUMAN_', '') }))),
                 statusBadge(g.status)
               ),
-              h('div', { className: 'vwf-code', style: { marginTop: 4 } },
-                String(g.status) === 'WAITING_HUMAN'
-                  ? ('续跑：wf_run { taskId: "' + (g.taskId || '<taskId>') + '"' + (g.workflowId ? ', templateId: "' + g.workflowId + '"' : '') + ', decision_id: "' + (g.decision_id || '<decision_id>') + '", user_choice: "USER_ACCEPTED|ADD_BUDGET|STOP" }')
-                  : String(g.status) === 'BLOCKED'
-                    ? ('恢复：wf_run { taskId: "' + (g.taskId || '<taskId>') + '"' + (g.workflowId ? ', templateId: "' + g.workflowId + '"' : '') + ', entry: "' + (g.node || '<resume_node>') + '" }')
-                    : ('续跑：wf_run { taskId: "' + (g.taskId || '<taskId>') + '"' + (g.workflowId ? ', templateId: "' + g.workflowId + '"' : '') + ', entry: "' + String(g.status).replace('AWAITING_HUMAN_', '') + '", approved: true|false }'))
-            )))
+              h('div', { className: 'vwf-row', style: { marginTop: 4 } },
+                h('button', { className: 'vwf-btn sm', onClick: () => openDetail('lr:' + String(g.logical_run_id || '')) }, t('dashDetails')),
+                // 界面不拼接让用户复制的命令：结构化选项与字段映射在详情内呈现
+                h('span', { className: 'vwf-muted-sm' }, t('rdDecisionNotYetLocked'))
+              )))
+          )
         ) : null,
         h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
           h('div', { className: 'vwf-card-head' },
             h('div', { className: 'vwf-card-title' }, t('dashRunList')),
-            h('label', { className: 'vwf-row', style: { fontSize: 11 } },
-              h('input', { type: 'checkbox', checked: auto, onChange: (ev) => setAuto(ev.target.checked) }),
-              ' ' + t('dashAutoPoll')
+            h('div', { className: 'vwf-row', style: { gap: 8 } },
+              h('span', { className: 'vwf-muted-sm' }, t('dashTaskCount', { n: visible.length })),
+              h('label', { className: 'vwf-row', style: { fontSize: 11 } },
+                h('input', { type: 'checkbox', checked: auto, onChange: (ev) => setAuto(ev.target.checked) }),
+                ' ' + t('dashAutoPoll')
+              )
             )
           ),
-          h('div', { className: 'vwf-table-scroll', style: { maxHeight: 420, overflowY: 'auto' } },
-            h('table', { className: 'vwf-table' },
-              h('thead', null, h('tr', null, h('th', null, 'taskId'), h('th', null, t('dashWorkflow')), h('th', null, t('dashStatus')), h('th', null, t('dashPhase')), h('th', null, 'runId'))),
-              h('tbody', null, pageRuns.map((r) => h('tr', { key: r.id, onClick: () => selectRun(r.id), style: { cursor: 'pointer', opacity: r.supersededBy ? 0.5 : 1 } },
-                h('td', null, r.taskId || '—'),
-                h('td', null, r.name || r.workflowId || '—'),
-                // #79 最小适配：属于逻辑运行的"已由续跑接管"升级为"同一次运行 · 第 N 段"；
-                // 多段运行在当前段补一个段位徽标。旧记录（无逻辑运行归属）呈现不变。
-                h('td', null, r.supersededBy
-                  ? h('span', { className: 'vwf-badge' }, r.logical_run_id ? ('同一次运行 · 第 ' + (r.segment || '—') + ' 段') : t('dashTakenOver'))
-                  : h('span', null, statusBadge(r.status),
-                      (r.logical_run_id && r.segment_count > 1) ? h('span', { className: 'vwf-badge', style: { marginLeft: 4 } }, '第 ' + (r.segment || '—') + '/' + r.segment_count + ' 段') : null)),
-                h('td', null, r.phase || '—'),
-                h('td', { className: 'vwf-muted-sm' }, r.id)
-              )))
+          h('div', { className: 'vwf-filters' },
+            h('label', { className: 'vwf-filter' },
+              h('span', { className: 'vwf-muted-sm' }, t('dashWsFilterLabel')),
+              h('select', { className: 'vwf-input', value: wsFilter, onChange: (ev) => setWsFilter(ev.target.value) },
+                [h('option', { key: 'all', value: 'all' }, t('dashWsAll', { n: wsOptions.length }))]
+                  .concat(wsOptions.map((o) => h('option', { key: o.id, value: o.id }, o.label)))
+                  .concat([h('option', { key: '__none__', value: '__none__' }, t('dashWsUngrouped')), h('option', { key: '__unknown__', value: '__unknown__' }, t('dashWsUnknown'))])
+              )
+            ),
+            h('label', { className: 'vwf-filter' },
+              h('span', { className: 'vwf-muted-sm' }, t('dashStatus')),
+              h('select', { className: 'vwf-input', value: bucketFilter, onChange: (ev) => setBucketFilter(ev.target.value) },
+                [['all', t('dashFilterAll')], ['attention', t('dashFilterAttention')], ['running', t('dashFilterRunning')], ['done', t('dashFilterDone')], ['ended', t('dashFilterEnded')]]
+                  .map(([v, l]) => h('option', { key: v, value: v }, l))
+              )
+            ),
+            h('label', { className: 'vwf-filter' },
+              h('span', { className: 'vwf-muted-sm' }, t('dashResultFilterLabel')),
+              h('select', { className: 'vwf-input', value: resultFilter, onChange: (ev) => setResultFilter(ev.target.value) },
+                [h('option', { key: 'all', value: 'all' }, t('dashResultAll'))].concat(resultOptions.map((o) => h('option', { key: o, value: o }, o)))
+              )
+            ),
+            h('label', { className: 'vwf-filter' },
+              h('span', { className: 'vwf-muted-sm' }, t('dashCompletionFilterLabel')),
+              h('select', { className: 'vwf-input', value: completionFilter, onChange: (ev) => setCompletionFilter(ev.target.value) },
+                [h('option', { key: 'all', value: 'all' }, t('dashCompletionAll'))]
+                  .concat(completionOptions.map((o) => h('option', { key: o, value: o }, o)))
+                  .concat([h('option', { key: '__none__', value: '__none__' }, t('dashCompletionNone'))])
+              )
             )
           ),
-          pageRuns && !pageRuns.length ? h('div', { className: 'vwf-empty' }, t('dashNoRuns')) : null,
-          h('div', { className: 'vwf-row', style: { marginTop: 8, flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
-            h('span', { className: 'vwf-muted-sm' }, t('dashPage', { page: safePage + 1, total: totalPages, n: allRuns.length })),
-            h('button', { className: 'vwf-btn sm', disabled: safePage === 0, onClick: prevPage }, t('dashPrev')),
-            h('button', { className: 'vwf-btn sm', disabled: safePage >= totalPages - 1, onClick: nextPage }, t('dashNext')),
+          h('div', { className: 'vwf-run-list', ref: listScrollRef },
+            pageModels.length ? groupTaskRows(pageModels, openDetail) : h('div', { className: 'vwf-empty' }, t('dashNoMatch'))
+          ),
+          h('div', { className: 'vwf-muted-sm', style: { padding: '6px 14px 0' } }, t('dashSupersededFolded')),
+          h('div', { className: 'vwf-row', style: { marginTop: 8, padding: '0 14px 12px', flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
+            h('span', { className: 'vwf-muted-sm' }, t('dashPage', { page: safePage + 1, total: totalPages, n: visible.length })),
+            h('button', { className: 'vwf-btn sm', disabled: safePage === 0, onClick: () => setPage((p) => Math.max(0, p - 1)) }, t('dashPrev')),
+            h('button', { className: 'vwf-btn sm', disabled: safePage >= totalPages - 1, onClick: () => setPage((p) => Math.min(totalPages - 1, p + 1)) }, t('dashNext')),
             h('span', { className: 'vwf-muted-sm' }, t('dashPerPage')),
             h('select', { className: 'vwf-input', style: { width: 70 }, value: pageSize, onChange: (ev) => setPageSize(Number(ev.target.value)) },
               [10, 20, 50, 100].map((n) => h('option', { key: n, value: n }, String(n)))
@@ -3310,63 +3596,782 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         ),
         h('div', { className: 'vwf-row' },
           h('input', { className: 'vwf-input', style: { flex: 1 }, placeholder: t('dashRunIdPlaceholder'), value: runId, onChange: (ev) => setRunId(ev.target.value) }),
+          h('button', { className: 'vwf-btn', onClick: openByRunId }, t('dashDetails')),
           h('button', { className: 'vwf-btn', onClick: refresh }, t('refresh'))
-        ),
-        snap === null
-          ? h('div', { className: 'vwf-muted' }, t('dashPickRun'))
-          : !snap.found
-            ? h('div', { className: 'vwf-err-line' }, t('dashRunNotFound'))
-            : h('div', null,
-                h('div', null,
-                  h('div', { className: 'vwf-row' },
-                    h('span', null, t('dashStatusLabel', { status: snap.state.status })),
-                    h('span', { className: 'vwf-muted' }, t('dashPhaseLabel', { phase: snap.state.phase || '—' })),
-                    snap.state.taskId ? h('span', { className: 'vwf-muted' }, t('dashTaskIdLabel', { taskId: snap.state.taskId })) : null
-                  ),
-                  h('div', { className: 'vwf-row', style: { borderTop: '1px solid var(--vwf-border)', marginTop: 6, paddingTop: 6 } },
-                    h('span', { className: 'vwf-muted', style: { fontSize: 10 } }, t('dashLegend')),
-                    // 图例本身承担状态语义：形状与文字成对出现（V-4），不只靠颜色
-                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.running } }, STATUS_SHAPE.run + ' running'),
-                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, STATUS_SHAPE.ok + ' pass'),
-                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.fail } }, STATUS_SHAPE.err + ' fail'),
-                    h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, STATUS_SHAPE.wait + ' ' + t('dashHumanGate'))
-                  ),
-                  lrState ? h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 6, flexWrap: 'wrap' } },
-                    lrState === 'RUNNING' ? h('button', { className: 'vwf-btn sm', onClick: () => sendControl('pause') }, t('ctlPause')) : null,
-                    lrState === 'RUNNING' ? h('button', { className: 'vwf-btn sm', onClick: () => sendControl('interrupt') }, t('ctlInterrupt')) : null,
-                    selRow.pause_pending ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('ctlPending')) : null) : null,
-                  lrState === 'PAUSED' && lrun ? h('div', { className: 'vwf-card', style: { marginTop: 8, padding: '10px 14px' } },
-                    h('div', { className: 'vwf-card-title' }, t('pausedTitle', { id: lrun.logical_run_id, code: (lrun.lifecycle && lrun.lifecycle.reason && lrun.lifecycle.reason.code) || 'PAUSED' })),
-                    h('div', { className: 'vwf-code', style: { marginTop: 6 } }, t('pausedResumeCmd', { taskId: snapState.taskId, tpl: snapState.workflowId }) + '\n' + t('pausedGuidanceCmd', { id: lrun.logical_run_id })),
-                    (lrun.guidance && lrun.guidance.length) ? h('div', { className: 'vwf-code', style: { marginTop: 8 } },
-                      t('guidanceTimeline') + '\n' + lrun.guidance.map((g) => '#' + g.seq + ' · ' + t(g.mode === 'baseline' ? 'guidanceBaseline' : 'guidanceCoach') + ' · ' + new Date(g.at).toLocaleString() + ' · ' + (g.mode === 'baseline' ? t('baselineNewText') + (g.new_baseline || '') : (g.text || ''))).join('\n')) : null) : null,
-                ),
-                dsl ? h('div', { className: 'vwf-card', style: { marginTop: 8 } }, h(Canvas, { dsl, readOnly: true, statusMap: st })) : null,
-                h('table', { className: 'vwf-table', style: { marginTop: 8 } },
-                  h('thead', null, h('tr', null, h('th', null, t('dashColIndex')), h('th', null, t('dashColNode')), h('th', null, t('dashColPhase')), h('th', null, t('dashColResult')))),
-                  h('tbody', null, dashboardAgentRows(snap.state.agents))
-                ),
-                (() => {
-                  const arts = latestArtifactRecords(snap.state.formalRecords)
-                  return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
-                    h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('formalArtifacts'))),
-                    h('div', { style: { padding: '8px 14px 12px' } },
-                      arts.length ? arts.map((rec) => h('div', { key: rec.record_id + '@' + rec.record_revision, style: { marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--vwf-border)' } },
-                        h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
-                          h('strong', null, artifactPathFromRecordId(rec.record_id)),
-                          h('span', { className: 'vwf-badge accent' }, t('artifactRevision') + ' R' + rec.record_revision),
-                          h('span', { className: 'vwf-muted-sm' }, rec.body && rec.body.media_type ? rec.body.media_type : ''),
-                          rec.provenance && rec.provenance.node ? h('span', { className: 'vwf-muted-sm' }, t('dashArtifactNode', { node: rec.provenance.node })) : null
-                        ),
-                        renderArtifactBody(rec)
-                      )) : h('div', { className: 'vwf-muted-sm' }, t('noFormalArtifacts'))
-                    )
-                  )
-                })(),
-                h('div', { className: 'vwf-code', style: { marginTop: 8 } }, (snap.state.logs || []).slice(-20).join('\n'))
-              )
+        )
       )
     }
+
+    // 列表分组渲染：按工作空间分组，组标题带条目数；行只显示任务级摘要，详情一律经唯一出口
+    function groupTaskRows(models, openDetail) {
+      const order = []
+      const byWs = new Map()
+      for (const m of models) {
+        const key = m.wsPending ? '__pending__' : (!m.task.logicalRunId ? '__none__' : (m.wsError ? '__unknown__' : (m.wsId || '__unknown__')))
+        if (!byWs.has(key)) { byWs.set(key, []); order.push(key) }
+        byWs.get(key).push(m)
+      }
+      const labelOf = (key) => {
+        if (key === '__pending__') return t('dashWsLoading')
+        if (key === '__none__') return t('dashWsUngrouped')
+        if (key === '__unknown__') return t('dashWsUnknown')
+        const hit = models.find((m) => m.wsId === key)
+        return (hit && hit.wsLabel) || key
+      }
+      return order.map((key) => h('section', { key: key, className: 'vwf-run-group', 'aria-label': labelOf(key) },
+        h('h3', { className: 'vwf-run-group-head' },
+          h('span', null, labelOf(key)),
+          h('span', { className: 'vwf-badge' }, String(byWs.get(key).length))
+        ),
+        byWs.get(key).map((m) => h('button', {
+          key: m.task.key,
+          className: 'vwf-run-row',
+          onClick: () => openDetail(m.task.key),
+          'aria-label': (m.head.taskId || m.head.id) + ' ' + t('dashDetails'),
+        },
+          h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
+            h('strong', null, m.head.taskId || m.head.id),
+            statusBadge(m.head.status)
+          ),
+          h('p', { className: 'vwf-run-row-note' }, m.lr && m.lr.title ? String(m.lr.title) : (m.head.name || m.head.workflowId || '—')),
+          h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
+            h('small', null, (m.head.name || m.head.workflowId || '—') + ' · ' + (m.rework === null ? t('dashRuntimeLabel') : (m.rework > 0 ? t('dashReworkCount', { n: m.rework }) : t('dashFirstRun')))),
+            h('small', null, m.task.segmentCount > 1 ? t('dashSegment', { n: (m.head.segment || m.task.segmentCount), total: m.task.segmentCount }) + ' · ' : '')
+          ),
+          h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
+            h('small', { className: 'vwf-muted-sm' }, t('dashUpdatedAt', { at: fmtAt(m.updatedAt) })),
+            h('small', { className: 'vwf-muted-sm' }, m.completionType ? m.completionType : '')
+          ),
+          m.wsError ? h('small', { className: 'vwf-muted-sm' }, t('dashIntegrityLabel') + '：' + m.wsError) : null
+        ))
+      ))
+    }
+
+    // ── Logical Run 详情工作区（唯一选中节点结果出口）────────────────────────
+    // 左侧运行定位 + 节点目录用于定位；正文只展示一个选中节点，结果 / 检查 / 活动页签切换。
+    function RunDetail(props) {
+      const task = props.task
+      const tplMap = props.tplMap || {}
+      const head = task.head || {}
+      const lrId = task.logicalRunId
+      const [lr, setLr] = React.useState(props.lrInitial || null)
+      const [lrError, setLrError] = React.useState(props.lrError || '')
+      const [recs, setRecs] = React.useState(null)
+      const [recErr, setRecErr] = React.useState('')
+      const [snap, setSnap] = React.useState(null)
+      const [selNode, setSelNode] = React.useState('')
+      const [tab, setTab] = React.useState('result')
+      const [attemptSel, setAttemptSel] = React.useState({})
+      const [wsTick, setWsTick] = React.useState(0)
+      const [providers, setProviders] = React.useState(null)
+      const [modelDraft, setModelDraft] = React.useState({})
+      const [decisionChoice, setDecisionChoice] = React.useState('')
+      const [decisionReason, setDecisionReason] = React.useState('')
+      const [guidanceText, setGuidanceText] = React.useState('')
+      const [guidanceMsg, setGuidanceMsg] = React.useState('')
+      const [controlErr, setControlErr] = React.useState('')
+      const fetchLr = React.useCallback(() => {
+        if (!lrId) return
+        host.call('vwf.logicalRuns.get', { logical_run_id: lrId }).then((r) => {
+          if (r && r.found && r.record) { setLr(r.record); setLrError('') } else setLrError(t('rdWsNoRecord'))
+        }).catch((e) => setLrError(String((e && e.message) || e)))
+      }, [lrId, wsTick])
+      const fetchRecords = React.useCallback(() => {
+        if (!lrId) return
+        host.call('vwf.records.list', { logical_run_id: lrId }).then((r) => {
+          if (r && r.ok) { setRecs(r); setRecErr('') } else setRecErr(String((r && r.error) || 'unavailable'))
+        }).catch((e) => setRecErr(String((e && e.message) || e)))
+      }, [lrId, wsTick])
+      React.useEffect(() => { fetchLr() }, [fetchLr, props.tick])
+      React.useEffect(() => { fetchRecords() }, [fetchRecords, props.tick])
+      React.useEffect(() => {
+        if (!head.id) return
+        host.call('vwf.state', { runId: head.id }).then((r) => setSnap(r && r.found ? r : null)).catch(() => {})
+      }, [head.id, props.tick])
+      React.useEffect(() => {
+        host.call('vwf.models', {}).then((r) => setProviders((r && r.providers) || [])).catch(() => setProviders([]))
+      }, [])
+      const snapState = snap && snap.found ? snap.state : null
+      const dsl = (lr && lr.snapshots && lr.snapshots.length ? (lr.snapshots[lr.snapshots.length - 1].workflow || {}).dsl : null) || tplMap[head.workflowId] || null
+      const st = snapState && dsl ? mapStatus(snapState, dsl) : {}
+      const activeSeg = lr ? Math.max(1, ...((lr.segments || []).map((s) => Number(s.index) || 0).concat([1]))) : 1
+      const attempts = React.useMemo(() => latestAttemptBodies(recs && recs.records), [recs])
+      const nodeResults = React.useMemo(() => latestNodeResultBodies(recs && recs.records), [recs])
+      const byNode = React.useMemo(() => attemptsByNode(lr && lr.node_attempts), [lr])
+      // 目录：DSL 节点 + 该节点的逻辑尝试（kind=logical，排除 fanout 子项）
+      const logicalAttemptsOf = React.useCallback((nodeId) => {
+        const out = []
+        for (const a of attempts.values()) {
+          const v = a.value
+          if (!v || String(v.node) !== String(nodeId) || v.kind === 'item') continue
+          out.push(a)
+        }
+        out.sort((x, y) => (Number(x.value.segment) || 0) - (Number(y.value.segment) || 0) || (new Date(x.value.ended_at || x.value.started_at || 0) - new Date(y.value.ended_at || y.value.started_at || 0)))
+        return out
+      }, [attempts])
+      const itemsOf = React.useCallback((nodeId) => {
+        const out = []
+        for (const a of attempts.values()) {
+          const v = a.value
+          if (!v || String(v.node) !== String(nodeId) || v.kind !== 'item') continue
+          out.push(a)
+        }
+        out.sort((x, y) => (Number(x.value.item_index) || 0) - (Number(y.value.item_index) || 0) || (Number(x.value.segment) || 0) - (Number(y.value.segment) || 0))
+        return out
+      }, [attempts])
+      const nodes = (dsl && dsl.nodes) || []
+      const phaseNodeId = snapState && snapState.phase && dsl ? nodeIdForLabel(snapState.phase, dsl) : null
+      const effectiveSel = selNode || phaseNodeId || (nodes[0] ? nodes[0].id : '')
+      const selected = nodes.find((n) => n.id === effectiveSel) || null
+      const selectedAttempts = selected ? logicalAttemptsOf(selected.id) : []
+      const latestIdx = selectedAttempts.length
+      const pickedIdx = selected && attemptSel[selected.id] ? Math.min(attemptSel[selected.id], latestIdx) : latestIdx
+      const picked = pickedIdx > 0 ? selectedAttempts[pickedIdx - 1] : null
+      const pickedValue = picked ? picked.value : null
+      // 「上一轮成果」：该节点最新尝试所在段早于当前生效段 → 显示的是返工前的成果
+      const nodeLatestSegment = (nodeId) => {
+        const list = logicalAttemptsOf(nodeId)
+        let max = 0
+        for (const a of list) max = Math.max(max, Number(a.value.segment) || 0)
+        return max
+      }
+      const isPrevRound = selected ? (nodeLatestSegment(selected.id) > 0 && nodeLatestSegment(selected.id) < activeSeg) : false
+      const historical = selected ? (pickedIdx > 0 && pickedIdx < latestIdx) : false
+      const returnOutcomes = returnOutcomesOf(dsl)
+      // 退回意见跟随触发它的审查轮次：从该段记录里找产出退回类 outcome 的节点
+      const returnsFor = (segment) => {
+        const out = []
+        for (const a of attempts.values()) {
+          const v = a.value
+          if (!v || v.kind === 'item') continue
+          if ((Number(v.segment) || 0) !== Number(segment)) continue
+          if (v.outcome === undefined || v.outcome === null) continue
+          if (!returnOutcomes.has(String(v.outcome))) continue
+          out.push({ node: String(v.node), outcome: String(v.outcome), segment: Number(v.segment) || 0, round: Number(v.round) || 0, result: v.result, at: v.ended_at || v.started_at || null })
+        }
+        return out.sort((a, b) => (a.round - b.round) || ((Number(a.segment) || 0) - (Number(b.segment) || 0)))
+      }
+      const nodeResultBody = (nodeId) => {
+        const rec = nodeResults.get('node:' + lrId + ':' + nodeId)
+        return rec && rec.body ? rec.body.value : null
+      }
+      const nodeResolvedInputs = (nodeId) => {
+        const rec = nodeResults.get('node:' + lrId + ':' + nodeId)
+        if (!rec) return []
+        // 输入清单的权威位置是 provenance.resolved_inputs_snapshot（scripts/revision-dependencies.mjs
+        // 经 buildRecordDependencies 写入）；兼容少数直接带顶层 resolved_inputs 的记录形状。
+        const snap = (rec.provenance && rec.provenance.resolved_inputs_snapshot) || rec.resolved_inputs || null
+        const items = snap && snap.items
+        return Array.isArray(items) ? items : []
+      }
+      const sendControl = (action, extra) => {
+        if (!lrId) return
+        if (action === 'interrupt' && !window.confirm(t('ctlConfirmInterrupt'))) return
+        setControlErr('')
+        host.call('vwf.run.control', Object.assign({ action, logical_run_id: lrId }, extra || {})).then((r) => {
+          if (r && r.ok) { if (extra && extra.text) { setGuidanceText(''); setGuidanceMsg(t('rdControlGuidance') + ' ✓') } fetchLr(); props.onRefresh && props.onRefresh() }
+          else setControlErr(String((r && r.error) || 'control failed'))
+        }).catch((e) => setControlErr(String((e && e.message) || e)))
+      }
+      const terminal = !!(lr && (lr.terminal === true || ['COMPLETED', 'STOPPED', 'FAILED'].indexOf(String(lr.lifecycle && lr.lifecycle.state)) >= 0))
+      // 决策包与受阻现场：来自 vwf.state（宿主权威运行记录）
+      const pkg = snapState && snapState.decision_package && typeof snapState.decision_package === 'object' ? snapState.decision_package : null
+      const decisionId = snapState ? String(snapState.decision_id || '') : ''
+      const consumed = lr && lr.consumed_decisions && decisionId ? lr.consumed_decisions[decisionId] : null
+      const blockedEdge = snapState ? snapState.blocked_edge : null
+      const lrWorkflow = lr && lr.snapshots && lr.snapshots.length ? lr.snapshots[lr.snapshots.length - 1] : null
+      const lrProviderModel = (lrWorkflow && lrWorkflow.provider_model) || {}
+      const mappingRows = (rows) => h('table', { className: 'vwf-table' },
+        h('thead', null, h('tr', null, h('th', null, t('dashColNode')), h('th', null, t('rdBlockedPrevValue')))),
+        h('tbody', null, rows.map((r) => h('tr', { key: r.k }, h('td', null, r.k), h('td', null, r.v))))
+      )
+      return h('div', { className: 'vwf-root' },
+        h('div', { className: 'vwf-row', style: { justifyContent: 'space-between', flexWrap: 'wrap' } },
+          h('button', { className: 'vwf-btn sm', onClick: props.onBack }, t('dashBackToList')),
+          h('div', { className: 'vwf-row', style: { gap: 8 } },
+            h('span', { className: 'vwf-muted-sm' }, t('dashListRestored')),
+            h('button', { className: 'vwf-btn sm', onClick: () => { setWsTick((n) => n + 1) } }, t('refresh'))
+          )
+        ),
+        lrError ? h('div', { className: 'vwf-err-line' }, t('dashIntegrityFailed', { err: lrError })) : null,
+        recErr ? h('div', { className: 'vwf-note warn' }, t('rdRecordsUnavailable')) : null,
+        controlErr ? h('div', { className: 'vwf-err-line' }, controlErr) : null,
+        h('div', { className: 'vwf-rd-main' },
+          // 左栏：运行定位（工作空间 / 模板 / 当前阶段 / 状态）+ 节点目录（只用于定位）
+          h('div', { className: 'vwf-rd-side' },
+            h('div', { className: 'vwf-card', style: { padding: '10px 12px' } },
+              h('div', { className: 'vwf-card-title' }, t('rdLocator')),
+              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdWorkspaceLabel', { ws: (lr && lr.workspace && workspaceLabelOf(lr.workspace)) || '—' }))),
+              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdTemplateLabel') + '：' + (head.name || head.workflowId || '—'))),
+              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('dashPhaseLabel', { phase: snapState ? (snapState.phase || '—') : '—' }))),
+              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('dashTaskIdLabel', { taskId: head.taskId || '—' }))),
+              h('div', { className: 'vwf-rd-kv vwf-row', style: { gap: 6 } }, h('span', { className: 'vwf-muted-sm' }, t('rdLifecycleLabel')), tierBadgeOf(lr && lr.lifecycle ? lr.lifecycle.state : '')),
+              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdCompletionLabel') + '：' + (lr && lr.completion && lr.completion.type ? String(lr.completion.type) : t('dashCompletionNone')))),
+              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdReworkLabel') + '：' + (lr ? (reworkCountOf(lr) > 0 ? t('dashReworkCount', { n: reworkCountOf(lr) }) : t('dashFirstRun')) : '—')))
+            ),
+            h('div', { className: 'vwf-card', style: { padding: '10px 12px' } },
+              h('div', { className: 'vwf-card-title' }, t('rdNodeDirectory')),
+              nodes.length ? nodes.map((n) => {
+                const list = logicalAttemptsOf(n.id)
+                const seg = nodeLatestSegment(n.id)
+                const prev = seg > 0 && seg < activeSeg
+                return h('button', {
+                  key: n.id,
+                  className: 'vwf-node-dir-row' + (n.id === effectiveSel ? ' selected' : ''),
+                  onClick: () => { setSelNode(n.id); setTab('result') },
+                },
+                  h('span', { className: 'vwf-node-dir-label' }, n.label || n.id),
+                  h('span', { className: 'vwf-row', style: { gap: 4 } },
+                    list.length ? h('span', { className: 'vwf-badge' }, t('rdAttemptPicker') + ' ' + list.length) : null,
+                    prev ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null,
+                    st[n.id] ? h('span', { className: 'vwf-badge', style: { color: st[n.id] === 'pass' ? STATUS_COLOR.pass : st[n.id] === 'fail' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, st[n.id]) : null,
+                    n.id === phaseNodeId ? h('span', { className: 'vwf-badge accent' }, t('rdCurrentNode')) : null
+                  )
+                )
+              }) : h('div', { className: 'vwf-muted-sm' }, t('rdNoRecords'))
+            )
+          ),
+          // 右栏：唯一选中节点详情出口
+          h('div', { className: 'vwf-rd-body' },
+            selected ? h('div', { className: 'vwf-card', style: { padding: '10px 12px' } },
+              h('div', { className: 'vwf-row', style: { justifyContent: 'space-between', flexWrap: 'wrap' } },
+                h('div', { className: 'vwf-row', style: { gap: 6 } },
+                  h('span', { className: 'vwf-badge ' + (historical || isPrevRound ? 'accent' : '') }, historical || isPrevRound ? t('rdHistorical') : t('rdCurrentResult')),
+                  isPrevRound ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
+                ),
+                h('span', { className: 'vwf-muted-sm' }, (lr && lr.title ? String(lr.title) : (head.taskId || head.id)))
+              ),
+              h('div', { className: 'vwf-card-title', style: { marginTop: 6 } }, selected.label || selected.id),
+              selectedAttempts.length ? h('label', { className: 'vwf-row', style: { gap: 8, marginTop: 6 } },
+                h('span', { className: 'vwf-muted-sm' }, t('rdAttemptPicker')),
+                h('select', {
+                  className: 'vwf-input', style: { maxWidth: 320 },
+                  value: String(pickedIdx),
+                  onChange: (ev) => setAttemptSel(Object.assign({}, attemptSel, { [selected.id]: Number(ev.target.value) })),
+                }, selectedAttempts.map((a, i) => {
+                  const v = a.value
+                  const label = t('rdAttemptOption', { n: i + 1, state: v.status === 'failed' ? t('rdAttemptReturned') : (v.status === 'completed' ? (i + 1 < selectedAttempts.length ? t('rdAttemptReturned') : t('rdAttemptPassed')) : t('rdAttemptRunning')) }) + (i + 1 === selectedAttempts.length ? t('rdAttemptLatest') : '')
+                  return h('option', { key: v.attempt_id, value: String(i + 1) }, label)
+                }))
+              ) : h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('rdNotStarted') + '：' + t('rdNotStartedNote')),
+              pickedValue ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } },
+                t('rdAttemptMeta', { segment: pickedValue.segment, revision: pickedValue.snapshot_revision, provider: pickedValue.provider, model: pickedValue.model })
+                + (pickedValue.ended_at ? ' · ' + t('rdAttemptAt', { at: fmtAt(Date.parse(pickedValue.ended_at)) }) : '')
+              ) : null,
+              isPrevRound ? h('div', { className: 'vwf-note warn' }, t('rdPrevRoundNote')) : null,
+              // 三页签：同一区域内切换，页面不同时重复展示同一节点详情
+              h('div', { className: 'vwf-tabs', style: { marginTop: 8 }, role: 'tablist' },
+                [['result', t('rdTabResult')], ['checks', t('rdTabChecks')], ['activity', t('rdTabActivity')]].map(([k, l]) =>
+                  h('button', {
+                    key: k, role: 'tab', 'aria-selected': tab === k ? 'true' : 'false',
+                    className: 'vwf-tab' + (tab === k ? ' on' : ''),
+                    onClick: () => setTab(k),
+                  }, l))
+              ),
+              tab === 'result' ? renderResultTab() : tab === 'checks' ? renderChecksTab() : renderActivityTab()
+            ) : h('div', { className: 'vwf-empty' }, t('rdSelectNodeHint'))
+          )
+        ),
+        renderControlCard(),
+        renderPausedCard(),
+        renderDecisionCard(),
+        renderRecoveryCard(),
+        renderSegmentsCard(),
+        renderSnapshotsCard(),
+        renderCanvasCard(),
+        renderAgentsCard(),
+        renderArtifactsCard(),
+        renderWorkspaceCard()
+      )
+
+      // 结果页签：本次执行的成果（含扇出子任务独立结果与汇总输入来源）
+      function renderResultTab() {
+        const rt = []
+        if (!picked && isPrevRound) {
+          rt.push(h('div', { className: 'vwf-note warn', key: 'prev' }, t('rdPrevRoundNote')))
+        }
+        if (recErr) rt.push(h('div', { className: 'vwf-note warn', key: 'rec' }, t('rdNoRecords')))
+        // 成果必须跟随所选 attempt：attempt 记录自带该次结果（与 node_result 同源）。
+        // node_result 是「最新 Revision」语义，因此只在所选就是最新一次时才回退到它——
+        // 历史执行没有正文时如实显示「暂无成果」，不冒充最新一轮成果。
+        const isLatestPick = pickedIdx === latestIdx
+        const bodyValue = isLatestPick ? nodeResultBody(selected.id) : null
+        const showValue = pickedValue && pickedValue.result !== undefined
+          ? pickedValue.result
+          : (bodyValue !== null && bodyValue !== undefined ? bodyValue : null)
+        if (showValue !== null && showValue !== undefined) {
+          rt.push(h('div', { key: 'body' },
+            h('div', { className: 'vwf-sec' }, t('rdTabResult')),
+            h('div', { className: 'vwf-code' }, typeof showValue === 'string' ? showValue : safeJson(showValue))
+          ))
+        } else if (pickedValue) {
+          rt.push(h('div', { className: 'vwf-note', key: 'nobody' }, t('rdNoRecords')))
+        }
+        if (pickedValue && pickedValue.outcome !== undefined && pickedValue.outcome !== null) {
+          rt.push(h('div', { className: 'vwf-row', key: 'oc', style: { gap: 6, marginTop: 6 } },
+            h('span', { className: 'vwf-badge accent' }, String(pickedValue.outcome)),
+            h('span', { className: 'vwf-muted-sm' }, pickedValue.outcome_path ? t('rdOutcomePath', { path: pickedValue.outcome_path }) : '')
+          ))
+        } else if (selected && pickedValue) {
+          rt.push(h('div', { className: 'vwf-muted-sm', key: 'oc0', style: { marginTop: 6 } }, t('rdBusinessOutcomeNone')))
+        }
+        // 扇出：并行组子任务各自独立结果 + 汇总输入来源；部分未完成时不冒充完成
+        if (selected && selected.kind === 'fanout') {
+          const items = itemsOf(selected.id)
+          rt.push(h('div', { key: 'fanout' },
+            h('div', { className: 'vwf-sec' }, t('rdFanoutGroup', { n: items.length || (Array.isArray(selected.items) ? selected.items.length : 0) })),
+            h('div', { className: 'vwf-muted-sm' }, t('rdFanoutIndependent')),
+            items.length ? items.map((a) => {
+              const v = a.value
+              const done = v.status === 'completed'
+              return h('div', { key: v.attempt_id, className: 'vwf-fanout-item' },
+                h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
+                  h('strong', null, t('rdFanoutChild', { n: (Number(v.item_index) || 0) + 1 }) + (v.item ? ' · ' + String(v.item).slice(0, 80) : '')),
+                  h('span', { className: 'vwf-badge', style: { color: done ? STATUS_COLOR.pass : v.status === 'failed' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, done ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptReturned') : t('rdFanoutIncomplete')))
+                ),
+                h('div', { className: 'vwf-muted-sm' }, t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model })),
+                v.result !== undefined && v.result !== null ? h('div', { className: 'vwf-code', style: { marginTop: 4 } }, typeof v.result === 'string' ? v.result : safeJson(v.result)) : null,
+                v.error ? h('div', { className: 'vwf-note warn' }, String(v.error)) : null
+              )
+            }) : h('div', { className: 'vwf-muted-sm' }, t('rdFanoutNoSub')),
+            (() => {
+              const pending = items.filter((a) => a.value.status !== 'completed')
+              const expected = Array.isArray(selected.items) ? selected.items.length : items.length
+              const unfinished = Math.max(pending.length, Math.max(0, expected - items.length))
+              return unfinished > 0
+                ? h('div', { className: 'vwf-note warn' }, t('rdFanoutWaiting', { n: unfinished }) + ' ' + t('rdFanoutWaitingNote'))
+                : (expected > 0 ? h('div', { className: 'vwf-note' }, t('rdFanoutWaitingNote')) : null)
+            })()
+          ))
+        }
+        // 汇总输入来源：node_result 的 resolved_inputs（LOC-034 依赖链）
+        const inputs = nodeResolvedInputs(selected.id)
+        if (inputs.length) {
+          rt.push(h('div', { key: 'inputs' },
+            h('div', { className: 'vwf-sec' }, t('rdFanoutSynth')),
+            h('div', { className: 'vwf-row', style: { gap: 6 } },
+              inputs.map((it, i) => h('span', { key: i, className: 'vwf-badge' }, t('rdFanoutInputFrom', { producer: String(it.producer || it.binding || '—') })))
+            )
+          ))
+        }
+        return h('div', { className: 'vwf-tab-panel' }, rt)
+      }
+
+      // 检查页签：本次执行的检查结论与退回意见（意见跟随触发它的审查轮次）
+      function renderChecksTab() {
+        const rt = []
+        if (!picked) return h('div', { className: 'vwf-tab-panel' }, h('div', { className: 'vwf-muted-sm' }, t('rdNodeNotRun')))
+        const seg = Number(pickedValue.segment) || 0
+        const returns = returnsFor(seg)
+        rt.push(h('div', { key: 'head', className: 'vwf-sec' }, t('rdAttemptPicker') + ' ' + pickedIdx + ' · ' + t('rdSegmentLabel', { n: seg })))
+        rt.push(h('div', { key: 'meta', className: 'vwf-muted-sm' },
+          t('rdAttemptMeta', { segment: pickedValue.segment, revision: pickedValue.snapshot_revision, provider: pickedValue.provider, model: pickedValue.model })))
+        rt.push(h('div', { key: 'own', className: 'vwf-row', style: { gap: 6, marginTop: 6 } },
+          h('span', { className: 'vwf-muted-sm' }, t('dashColResult') + '：'),
+          pickedValue.outcome !== undefined && pickedValue.outcome !== null
+            ? h('span', { className: 'vwf-badge accent' }, String(pickedValue.outcome))
+            : h('span', { className: 'vwf-muted-sm' }, t('rdBusinessOutcomeNone'))
+        ))
+        if (returns.length) {
+          for (const r of returns) {
+            rt.push(h('div', { key: 'ret-' + r.node + '-' + r.round + '-' + r.segment },
+              h('div', { className: 'vwf-sec' }, t('rdReturnComments') + ' · ' + t('rdReturnFromRound', { n: r.round || r.segment })),
+              h('div', { className: 'vwf-note warn' }, t('rdReturnFromRound', { n: r.round || r.segment }) + '：' + String(r.node) + ' → ' + String(r.outcome)),
+              r.result !== undefined && r.result !== null ? h('div', { className: 'vwf-code' }, typeof r.result === 'string' ? r.result : safeJson(r.result)) : null,
+              h('div', { className: 'vwf-muted-sm' }, t('rdAfterReturn') + '：' + t('rdAfterReturnNote'))
+            ))
+          }
+        } else {
+          rt.push(h('div', { key: 'noret', className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('rdReturnNone')))
+        }
+        return h('div', { className: 'vwf-tab-panel' }, rt)
+      }
+
+      // 活动页签：指导 / 控制事件 / 人工决策 / 基线修订 / 运行日志（日志标注来源分段）
+      function renderActivityTab() {
+        const rt = []
+        const g = (lr && lr.guidance) || []
+        const ce = (lr && lr.control_events) || []
+        const hd = (lr && lr.human_decisions) || []
+        const br = (lr && lr.baseline_revisions) || []
+        rt.push(h('div', { key: 'g', className: 'vwf-sec' }, t('rdActivityTitle')))
+        if (g.length) {
+          rt.push(h('div', { key: 'gl' }, g.map((x) => h('div', { key: 'g' + x.seq, className: 'vwf-muted-sm' },
+            '#' + x.seq + ' · ' + t(x.mode === 'baseline' ? 'rdPausedGuidanceBaseline' : 'rdPausedGuidanceCoach') + ' · ' + fmtAt(x.at) + ' · ' + (x.mode === 'baseline' ? String(x.new_baseline || '') : String(x.text || ''))))))
+        }
+        if (ce.length) {
+          rt.push(h('div', { key: 'ce', style: { marginTop: 6 } },
+            h('div', { className: 'vwf-muted-sm' }, t('rdActivityControl')),
+            h('div', null, ce.map((x, i) => h('div', { key: 'ce' + i, className: 'vwf-muted-sm' },
+              String(x.type || '—') + ' · ' + fmtAt(x.at) + (x.run_id ? ' · ' + t('rdSegmentLabel', { n: (x.run_id === head.id ? (head.segment || activeSeg) : '?') }) : ''))))))
+        }
+        if (hd.length) {
+          rt.push(h('div', { key: 'hd', style: { marginTop: 6 } },
+            h('div', { className: 'vwf-muted-sm' }, t('rdActivityHuman')),
+            h('div', null, hd.map((x, i) => h('div', { key: 'hd' + i, className: 'vwf-muted-sm' },
+              String(x.decision_id || '—') + ' · ' + String(x.user_choice || '—') + ' · ' + fmtAt(x.at || x.created_at))))))
+        }
+        if (br.length) {
+          rt.push(h('div', { key: 'br', style: { marginTop: 6 } },
+            h('div', { className: 'vwf-muted-sm' }, t('rdActivityBaseline')),
+            h('div', null, br.map((x, i) => h('div', { key: 'br' + i, className: 'vwf-muted-sm' }, 'R' + (x.revision || i + 1) + ' · ' + fmtAt(x.at))))))
+        }
+        const logs = (snapState && snapState.logs) || []
+        rt.push(h('div', { key: 'lg', style: { marginTop: 6 } },
+          h('div', { className: 'vwf-muted-sm' }, t('rdActivityLogs') + ' · ' + t('rdSegmentLabel', { n: head.segment || activeSeg })),
+          logs.length ? h('div', { className: 'vwf-code' }, logs.slice(-20).map((line) => t('rdLogSource', { segment: head.segment || activeSeg, text: String(line) })).join('\n')) : h('div', { className: 'vwf-muted-sm' }, t('rdActivityNone'))
+        ))
+        return h('div', { className: 'vwf-tab-panel' }, rt)
+      }
+
+      // 运行控制：按钮名对应实际 action（pause=检查点生效，interrupt=立即中止，guidance 仅 PAUSED）
+      function renderControlCard() {
+        const lstate = lr && lr.lifecycle ? String(lr.lifecycle.state) : ''
+        const badge = statusBadge(head.status)
+        return h('div', { className: 'vwf-card', style: { marginTop: 8, padding: '10px 12px' } },
+          h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
+            h('div', { className: 'vwf-card-title' }, t('rdControlTitle')),
+            badge
+          ),
+          h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('dashStatusLabel', { status: head.status }) + ' · ' + t('rdLifecycleLabel') + '：' + (lstate || '—')),
+          terminal ? h('div', { className: 'vwf-note warn' }, t('rdControlTerminal', { state: lstate || head.status })) : null,
+          !terminal && lstate === 'RUNNING' ? h('div', null,
+            h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 6 } },
+              h('button', { className: 'vwf-btn sm', onClick: () => sendControl('pause') }, t('rdControlPause')),
+              h('button', { className: 'vwf-btn sm', onClick: () => sendControl('interrupt') }, t('rdControlInterrupt')),
+              head.pause_pending ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('ctlPending')) : null
+            ),
+            h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('rdControlPauseNote') + ' ' + t('rdControlInterruptNote'))
+          ) : null,
+          !terminal && lstate === 'PAUSED' ? h('div', { className: 'vwf-note warn', style: { marginTop: 6 } },
+            t('rdPausedTitle') + ' · ' + t('rdPausedWhy') + '：' + String((lr && lr.lifecycle && lr.lifecycle.reason && (lr.lifecycle.reason.code || lr.lifecycle.reason.message)) || '—')) : null
+        )
+      }
+
+      // PAUSED 卡：暂停原因 / 已有 guidance / 指导提交 / 恢复入口。
+      // 指导经 vwf.run.control 提交（宿主 RPC，不属 DT-01 阻塞面），不产生业务结果；
+      // 恢复沿用既有 wf_run 续跑语义，其提交路径受 DT-01 阻塞，只交参数映射。
+      function renderPausedCard() {
+        const lstate = lr && lr.lifecycle ? String(lr.lifecycle.state) : ''
+        if (lstate !== 'PAUSED') return null
+        const reason = lr && lr.lifecycle && lr.lifecycle.reason ? (lr.lifecycle.reason.code || lr.lifecycle.reason.message) : ''
+        const g = (lr && lr.guidance) || []
+        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
+          h('div', { className: 'vwf-card-head' },
+            h('div', { className: 'vwf-card-title' }, t('rdPausedTitle')),
+            h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, String(head.status || 'PAUSED'))
+          ),
+          h('div', { style: { padding: '8px 14px 12px' } },
+            h('div', { className: 'vwf-muted' }, t('rdPausedWhy') + '：' + String(reason || '—')),
+            h('div', { className: 'vwf-note' }, t('rdPausedNote')),
+            h('div', { className: 'vwf-sec', style: { marginTop: 6 } }, t('rdPausedGuidance')),
+            g.length
+              ? h('table', { className: 'vwf-table' },
+                  h('tbody', null, g.map((x) => h('tr', { key: 'g' + x.seq },
+                    h('td', { className: 'vwf-muted-sm', style: { width: 90 } }, '#' + x.seq + ' · ' + t(x.mode === 'baseline' ? 'rdPausedGuidanceBaseline' : 'rdPausedGuidanceCoach')),
+                    h('td', null, x.mode === 'baseline' ? String(x.new_baseline || '') : String(x.text || '')),
+                    h('td', { className: 'vwf-muted-sm', style: { width: 140 } }, fmtAt(x.at))
+                  )))
+                )
+              : h('div', { className: 'vwf-muted-sm' }, t('rdPausedGuidanceNone')),
+            h('label', { style: { display: 'block', marginTop: 6 } },
+              h('span', { className: 'vwf-field-label' }, t('rdControlGuidance')),
+              h('textarea', { className: 'vwf-textarea', rows: 2, style: { width: '100%' }, placeholder: t('rdPausedGuidancePlaceholder'), value: guidanceText, onChange: (ev) => setGuidanceText(ev.target.value) })
+            ),
+            h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 6 } },
+              h('button', { className: 'vwf-btn sm primary', disabled: !guidanceText.trim(), onClick: () => sendControl('guidance', { text: guidanceText.trim() }) }, t('rdPausedGuidanceSubmit')),
+              guidanceMsg ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, guidanceMsg) : null,
+              h('span', { className: 'vwf-muted-sm' }, t('rdControlGuidanceNote'))
+            ),
+            h('div', { className: 'vwf-sec', style: { marginTop: 10 } }, t('rdPausedResume')),
+            h('div', { className: 'vwf-note warn' }, t('rdPausedResumeDt01')),
+            mappingRows([
+              { k: 'taskId', v: String(head.taskId || '—') },
+              { k: 'templateId', v: String(head.workflowId || '—') },
+              { k: 'resume_paused', v: 'true' },
+              { k: 'logical_run_id', v: String(lrId || '—') },
+            ])
+          )
+        )
+      }
+
+      // WAITING_HUMAN 结构化决策卡：选项 / 理由 / 影响说明 / 提交后锁定与续跑中；
+      // 提交路径受 DT-01 阻塞时只交界面与字段映射，不伪造成功状态。
+      function renderDecisionCard() {
+        const status = String(head.status || '')
+        if (status !== 'WAITING_HUMAN' && status.indexOf('AWAITING_HUMAN_') !== 0) return null
+        const rows = []
+        if (!pkg) {
+          rows.push(h('div', { key: 'nopkg', className: 'vwf-note warn' }, t('rdDecisionNoPackage')))
+        } else {
+          rows.push(h('div', { key: 'why' },
+            h('div', { className: 'vwf-sec' }, t('rdDecisionWhy')),
+            h('div', { className: 'vwf-muted' }, unknownText(pkg.why))
+          ))
+          rows.push(h('div', { key: 'cur', style: { marginTop: 6 } },
+            h('div', { className: 'vwf-sec' }, t('rdDecisionCurrent')),
+            h('div', { className: 'vwf-muted' }, unknownText(pkg.current_state))
+          ))
+          const opts = Array.isArray(pkg.options) ? pkg.options.map((o) => String((o && o.id) || '')).filter(Boolean) : []
+          const effects = pkg.subsequent_effects && typeof pkg.subsequent_effects === 'object' ? pkg.subsequent_effects : {}
+          rows.push(h('div', { key: 'opt', style: { marginTop: 6 } },
+            h('div', { className: 'vwf-sec' }, t('rdDecisionOptions')),
+            opts.length ? h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap' } }, opts.map((id) => {
+              const control = ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP'].indexOf(id) >= 0
+              return h('button', {
+                key: id, className: 'vwf-btn sm' + (decisionChoice === id ? ' primary' : ''),
+                'aria-pressed': decisionChoice === id ? 'true' : 'false',
+                onClick: () => setDecisionChoice(id),
+                title: effects[id] || '',
+              }, id + (control ? '' : ''))
+            })) : h('div', { className: 'vwf-muted-sm' }, t('rdDecisionUnknown'))
+          ))
+          if (opts.length) {
+            rows.push(h('div', { key: 'eff', style: { marginTop: 6 } },
+              h('div', { className: 'vwf-sec' }, t('rdDecisionEffects')),
+              h('table', { className: 'vwf-table' },
+                h('thead', null, h('tr', null, h('th', null, t('rdDecisionOptions')), h('th', null, t('rdDecisionEffects')))),
+                h('tbody', null, opts.map((id) => h('tr', { key: id }, h('td', null, id), h('td', null, effects[id] ? unknownText(effects[id]) : t('rdDecisionUnknown')))))
+              )
+            ))
+          }
+          const extra = [['cost', t('rdDecisionCost')], ['benefit', t('rdDecisionBenefit')], ['risk', t('rdDecisionRisk')], ['recommendation', t('rdDecisionRecommendation')]]
+            .filter(([k]) => pkg[k] !== undefined && pkg[k] !== null && String(pkg[k]).trim() !== '')
+          if (extra.length) {
+            rows.push(h('div', { key: 'extra', style: { marginTop: 6 } },
+              h('div', { className: 'vwf-sec' }, t('rdDecisionCost') + ' / ' + t('rdDecisionBenefit') + ' / ' + t('rdDecisionRisk')),
+              h('table', { className: 'vwf-table' },
+                h('tbody', null, extra.map(([k, l]) => h('tr', { key: k }, h('td', null, l), h('td', null, unknownText(pkg[k])))))
+              )
+            ))
+          }
+          if (blockedEdge) {
+            rows.push(h('div', { key: 'be', style: { marginTop: 6 } },
+              h('div', { className: 'vwf-sec' }, t('rdDecisionBlockedEdge')),
+              h('div', { className: 'vwf-code' }, safeJson(blockedEdge))
+            ))
+          }
+        }
+        rows.push(h('label', { key: 'reason', style: { display: 'block', marginTop: 6 } },
+          h('span', { className: 'vwf-field-label' }, t('rdDecisionReason')),
+          h('textarea', { className: 'vwf-textarea', rows: 2, placeholder: t('rdDecisionReasonPlaceholder'), value: decisionReason, onChange: (ev) => setDecisionReason(ev.target.value), style: { width: '100%' } })
+        ))
+        rows.push(h('div', { key: 'impact', className: 'vwf-note' }, t('rdDecisionImpact') + '：' + t('rdDecisionImpactNote')))
+        if (consumed) rows.push(h('div', { key: 'cons', className: 'vwf-note warn' }, t('rdDecisionConsumed', { id: decisionId })))
+        rows.push(h('div', { key: 'dt01', className: 'vwf-note warn' }, t('rdDecisionDt01')))
+        const mapRows = [['decision_id', decisionId || '—'], ['user_choice', decisionChoice || '—']]
+        if (decisionReason.trim()) mapRows.push(['reason', decisionReason.trim()])
+        mapRows.push(['taskId', head.taskId || '—'])
+        mapRows.push(['templateId', head.workflowId || '—'])
+        rows.push(h('div', { key: 'map' },
+          h('div', { className: 'vwf-sec' }, t('rdDecisionMapping')),
+          mappingRows(mapRows.map(([k, v]) => ({ k, v: String(v) })))
+        ))
+        rows.push(h('div', { key: 'act', className: 'vwf-row', style: { marginTop: 6, gap: 8 } },
+          // 提交按钮在 DT-01 未裁定前锁定：不发起续跑，也不显示成功
+          h('button', { className: 'vwf-btn primary', disabled: true, 'aria-disabled': 'true' }, t('rdDecisionSubmit')),
+          h('span', { className: 'vwf-muted-sm' }, t('rdDecisionLocked') + ' · ' + t('rdDecisionNotYetLocked'))
+        ))
+        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
+          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdDecisionTitle'))),
+          h('div', { style: { padding: '8px 14px 12px' } }, rows)
+        )
+      }
+
+      // BLOCKED 恢复卡：阻塞原因 / 当前 Provider·Model / 修改后值 / 新修订与旧修订保留说明
+      function renderRecoveryCard() {
+        if (String(head.status) !== 'BLOCKED') return null
+        const rows = []
+        rows.push(h('div', { key: 'r', className: 'vwf-note warn' }, t('rdBlockedReason') + '：' + String(head.reason || '—')))
+        rows.push(h('div', { key: 'n', className: 'vwf-muted-sm' }, t('rdBlockedResumeNode', { node: String(head.node || '—') })))
+        const nodeIds = Object.keys(lrProviderModel)
+        rows.push(h('div', { key: 'pm', style: { marginTop: 6 } },
+          h('div', { className: 'vwf-sec' }, t('rdBlockedModel')),
+          nodeIds.length
+            ? h('table', { className: 'vwf-table' },
+                h('thead', null, h('tr', null, h('th', null, t('dashColNode')), h('th', null, t('rdBlockedPrevValue')), h('th', null, t('rdBlockedNewValue')))),
+                h('tbody', null, nodeIds.map((nid) => {
+                  const pm = lrProviderModel[nid] || {}
+                  const draft = modelDraft[nid] || {}
+                  const provs = (providers || []).map((p) => String((p && (p.id || p.name)) || '')).filter(Boolean)
+                  const models = (providers || []).filter((p) => String((p && (p.id || p.name)) || '') === String(draft.provider || pm.provider)).flatMap((p) => (p.models || []).map((m) => String(m)))
+                  return h('tr', { key: nid },
+                    h('td', null, nid),
+                    h('td', null, String(pm.provider || 'default') + ' / ' + String(pm.model || 'default')),
+                    h('td', null, h('div', { className: 'vwf-row', style: { gap: 4 } },
+                      h('select', { className: 'vwf-input', style: { width: 110 }, value: String(draft.provider || pm.provider || ''), onChange: (ev) => setModelDraft(Object.assign({}, modelDraft, { [nid]: Object.assign({}, draft, { provider: ev.target.value, model: '' }) })) },
+                        [h('option', { key: '', value: '' }, t('rdBlockedKeepDefault'))].concat(provs.map((p) => h('option', { key: p, value: p }, p)))),
+                      h('select', { className: 'vwf-input', style: { width: 130 }, value: String(draft.model || pm.model || ''), onChange: (ev) => setModelDraft(Object.assign({}, modelDraft, { [nid]: Object.assign({}, draft, { model: ev.target.value }) })) },
+                        [h('option', { key: '', value: '' }, t('rdBlockedKeepDefault'))].concat(models.map((m) => h('option', { key: m, value: m }, m))))
+                    ))
+                  )
+                }))
+              )
+            : h('div', { className: 'vwf-muted-sm' }, t('rdBlockedNoProvider'))
+        ))
+        rows.push(h('div', { key: 'note', className: 'vwf-note' }, t('rdBlockedRestoreNote')))
+        rows.push(h('div', { key: 'dt01', className: 'vwf-note warn' }, t('rdBlockedDt01')))
+        const overrides = {}
+        for (const nid of Object.keys(modelDraft)) {
+          const d = modelDraft[nid] || {}
+          if (!d.provider && !d.model) continue
+          overrides[nid] = { provider: d.provider || undefined, model: d.model || undefined }
+        }
+        rows.push(h('div', { key: 'map' },
+          h('div', { className: 'vwf-sec' }, t('rdBlockedMapping')),
+          mappingRows([
+            { k: 'taskId', v: String(head.taskId || '—') },
+            { k: 'templateId', v: String(head.workflowId || '—') },
+            { k: 'entry', v: String(head.node || '—') },
+            { k: 'model_overrides', v: Object.keys(overrides).length ? safeJson(overrides) : '—' },
+          ])
+        ))
+        rows.push(h('div', { key: 'act', className: 'vwf-row', style: { marginTop: 6, gap: 8 } },
+          h('button', { className: 'vwf-btn primary', disabled: true, 'aria-disabled': 'true' }, t('rdBlockedSubmit')),
+          h('span', { className: 'vwf-muted-sm' }, t('rdDecisionLocked'))
+        ))
+        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
+          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdBlockedTitle'))),
+          h('div', { style: { padding: '8px 14px 12px' } }, rows)
+        )
+      }
+
+      // 执行分段：一个 Logical Run 的每一段（多段折叠为一条任务的连续分段）
+      function renderSegmentsCard() {
+        const segs = (lr && lr.segments) || task.segments || []
+        if (!segs.length) return null
+        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
+          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdSegments'))),
+          h('div', { style: { padding: '8px 14px 12px' } },
+            h('table', { className: 'vwf-table' },
+              h('thead', null, h('tr', null,
+                h('th', null, t('rdColSegment')), h('th', null, t('rdColTrigger')), h('th', null, t('rdColState')),
+                h('th', null, t('rdColStarted')), h('th', null, t('rdColEnded')), h('th', null, t('rdColDecision'))
+              )),
+              h('tbody', null, segs.map((s) => h('tr', { key: 'seg' + (s.index || s.id) },
+                h('td', null, String(s.index !== undefined ? s.index : (s.segment || '—')) + (s.active ? ' · ' + t('rdSegmentActive') : '')),
+                h('td', null, String(s.trigger || '—')),
+                h('td', null, String(s.status || head.status || '—')),
+                h('td', null, fmtAt(s.started_at || s.startedAt)),
+                h('td', null, fmtAt(s.ended_at || s.endedAt)),
+                h('td', null, String(s.decision_id || '—'))
+              )))
+            )
+          )
+        )
+      }
+
+      // 快照修订：生效修订与历史修订都保留可查（Provider / Model 变更留下新修订）
+      function renderSnapshotsCard() {
+        const snaps = (lr && lr.snapshots) || []
+        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
+          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdSnapshots'))),
+          h('div', { style: { padding: '8px 14px 12px' } },
+            snaps.length ? h('table', { className: 'vwf-table' },
+              h('thead', null, h('tr', null,
+                h('th', null, t('rdColRevision')), h('th', null, t('rdColActive')), h('th', null, t('rdColTime')), h('th', null, t('rdColProviderModel'))
+              )),
+              h('tbody', null, snaps.map((s) => h('tr', { key: 'snap' + s.revision },
+                h('td', null, 'R' + String(s.revision)),
+                h('td', null, s.active ? t('rdSegmentActive') : '—'),
+                h('td', null, fmtAt(s.created_at)),
+                h('td', null, h('div', { className: 'vwf-muted-sm' }, Object.keys(s.provider_model || {}).map((nid) => nid + '=' + String((s.provider_model[nid] || {}).provider || 'default') + '/' + String((s.provider_model[nid] || {}).model || 'default')).join(' · ') || '—'))
+              )))
+            ) : h('div', { className: 'vwf-muted-sm' }, t('rdNoSnapshots'))
+          )
+        )
+      }
+
+      // 只读画布（沿用既有 Canvas 只读态与 workflowId 匹配的模板 DSL）
+      function renderCanvasCard() {
+        if (!dsl) return null
+        return h('div', { className: 'vwf-card', style: { marginTop: 8 } }, h(Canvas, { dsl, readOnly: true, statusMap: st }))
+      }
+
+      // 节点表：既有 agents 行渲染（含 fanout 子项归组），本段来源标注
+      function renderAgentsCard() {
+        const agents = (snapState && snapState.agents) || []
+        if (!agents.length) return null
+        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
+          h('div', { className: 'vwf-card-head' },
+            h('div', { className: 'vwf-card-title' }, t('dashColNode') + ' / ' + t('dashColResult')),
+            h('span', { className: 'vwf-muted-sm' }, t('rdSegmentLabel', { n: head.segment || activeSeg }))
+          ),
+          h('div', { style: { padding: '8px 14px 12px' } },
+            h('table', { className: 'vwf-table' },
+              h('thead', null, h('tr', null, h('th', null, t('dashColIndex')), h('th', null, t('dashColNode')), h('th', null, t('dashColPhase')), h('th', null, t('dashColResult')))),
+              h('tbody', null, dashboardAgentRows(agents))
+            )
+          )
+        )
+      }
+
+      // 正式产物：标注来源分段与 attempt（避免当前轮与上一轮混淆）
+      function renderArtifactsCard() {
+        const arts = latestArtifactRecords(snapState && snapState.formalRecords)
+        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
+          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('formalArtifacts'))),
+          h('div', { style: { padding: '8px 14px 12px' } },
+            arts.length ? arts.map((rec) => h('div', { key: rec.record_id + '@' + rec.record_revision, style: { marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--dsw-alias-border-l2, #333)' } },
+              h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
+                h('strong', null, artifactPathFromRecordId(rec.record_id)),
+                h('span', { className: 'vwf-badge accent' }, t('artifactRevision') + ' R' + rec.record_revision),
+                h('span', { className: 'vwf-muted-sm' }, rec.body && rec.body.media_type ? rec.body.media_type : ''),
+                rec.provenance && rec.provenance.node ? h('span', { className: 'vwf-muted-sm' }, t('dashArtifactNode', { node: rec.provenance.node })) : null
+              ),
+              h('div', { className: 'vwf-muted-sm' }, rec.provenance
+                ? t('rdArtifactSource', { segment: rec.provenance.attempt === undefined || rec.provenance.attempt === null ? '—' : rec.provenance.attempt, attempt: rec.record_revision, provider: String(rec.provenance.provider || 'default'), model: String(rec.provenance.model || 'default') })
+                : t('rdArtifactSourceUnknown')),
+              h('div', { className: 'vwf-row', style: { gap: 6 } }, rec.provenance && rec.provenance.node_business_outcome ? h('span', { className: 'vwf-badge accent' }, String(rec.provenance.node_business_outcome)) : null),
+              renderArtifactBody(rec)
+            )) : h('div', { className: 'vwf-muted-sm' }, t('noFormalArtifacts'))
+          )
+        )
+      }
+
+      // 工作空间面板：mode / repository / branch / 当前·base HEAD / 集成 / 活动锁 / 清理；
+      // 读取失败显示未知状态与重试，不把过时缓存当作当前事实。
+      function renderWorkspaceCard() {
+        const ws = lr && lr.workspace ? lr.workspace : null
+        const body = []
+        if (lrError) {
+          body.push(h('div', { key: 'e', className: 'vwf-note warn' }, t('rdWsReadFailed', { err: lrError })))
+          body.push(h('div', { key: 'r', className: 'vwf-row' },
+            h('button', { className: 'vwf-btn sm', onClick: () => { setWsTick((n) => n + 1) } }, t('rdWsRetry')),
+            h('span', { className: 'vwf-muted-sm' }, t('rdWsStaleNote'))
+          ))
+        } else if (!ws) {
+          body.push(h('div', { key: 'n', className: 'vwf-muted-sm' }, t('rdWsNoRecord')))
+        } else {
+          const kv = [
+            [t('rdWsMode'), ws.mode ? String(ws.mode) : null],
+            [t('rdWsRepo'), ws.source_path ? String(ws.source_path) : (ws.workspace_path ? String(ws.workspace_path) : null)],
+            [t('rdWsBranch'), ws.work_branch ? String(ws.work_branch) : null],
+            [t('rdWsCurrentHead'), ws.current_head ? shortSha(ws.current_head) : null],
+            [t('rdWsBaseHead'), ws.base_commit ? shortSha(ws.base_commit) : null],
+            [t('rdWsIntegration'), ws.lifecycle ? String(ws.lifecycle) : ((ws.integration_checkpoints || []).length ? String((ws.integration_checkpoints[ws.integration_checkpoints.length - 1] || {}).type || '') : null)],
+            [t('rdWsLocks'), (ws.resource_locks || []).length ? (ws.resource_locks || []).map((l) => t('rdWsLockItem', { type: String(l.type || '') })).join('、') : t('rdWsNoLock')],
+            [t('rdWsCleanup'), ws.cleanup ? (typeof ws.cleanup === 'string' ? String(ws.cleanup) : safeJson(ws.cleanup)) : null],
+          ]
+          body.push(h('table', { key: 'kv', className: 'vwf-table' },
+            h('tbody', null, kv.map(([k, v]) => h('tr', { key: k },
+              h('td', { className: 'vwf-muted-sm', style: { width: 90 } }, k),
+              h('td', null, v === null || v === undefined || v === '' ? h('span', { className: 'vwf-badge' }, t('rdWsUnknown')) : String(v))
+            )))
+          ))
+          if (ws.refreshed_at) body.push(h('div', { key: 'at', className: 'vwf-muted-sm' }, t('rdWsRefreshedAt', { at: fmtAt(ws.refreshed_at) })))
+        }
+        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
+          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdWsPanel'))),
+          h('div', { style: { padding: '8px 14px 12px' } }, body)
+        )
+      }
+    }
+
+    function safeJson(v) {
+      try { return JSON.stringify(v, null, 2) } catch (e) { return String(v) }
+    }
+
 
     // ── 页面：模板库 + 全局编辑层 + 运行看板 ───────────────────────────────
     function Skeleton() {

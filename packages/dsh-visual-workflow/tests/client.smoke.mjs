@@ -89,6 +89,208 @@ const ROLE_USAGE = {
 }
 
 // ── 组装动态客户端运行环境 ─────────────────────────────────────────────────
+
+// ── FEAT-85 运行列表与 Logical Run 详情夹具 ────────────────────────────────
+// 覆盖：两个工作空间 + 一个未归属旧记录；同一 Logical Run 两段（含被接管的第 1 段）；
+// 返工（实现第 1/2 次、检查退回）；扇出（3 个子任务，2 完成 1 未完成）；受阻运行；
+// 逻辑运行读取失败运行；以及 12 条历史运行用于分页。
+const RUN_DSL = {
+  id: 'wf-runs',
+  name: '完整功能开发',
+  entry: 'dev',
+  control: { maxRounds: 3 },
+  nodes: [
+    { id: 'dev', label: '实现', profile: 'dev' },
+    { id: 'review', label: '检查', profile: 'review' },
+    { id: 'test', label: '测试', profile: 'test' },
+    { id: 'uat', label: '验收', profile: 'uat' },
+    { id: 'explore', label: '多视角研究', profile: 'researcher', kind: 'fanout', items: ['技术可行性', '用户需求', '风险与反证'] },
+    { id: 'synth', label: '汇总发现', profile: 'researcher' },
+  ],
+  edges: [
+    { from: 'dev', to: 'review', outcome: 'READY' },
+    { from: 'review', to: 'dev', outcome: 'RETURN_DEV', countRound: true },
+    { from: 'review', to: 'test', outcome: 'APPROVE' },
+    { from: 'test', to: 'dev', outcome: 'RETURN_DEV', countRound: true },
+    { from: 'test', to: 'uat', outcome: 'PASS' },
+    { from: 'uat', to: '$end', outcome: 'ACCEPT' },
+    { from: 'explore', to: 'synth', outcome: 'success' },
+  ],
+}
+
+const WS_A = { workspace_id: '工作空间A', mode: 'ISOLATED_WRITE', workspace_path: '/tmp/ws-a', source_path: 'crystepj-max/workflow-manager', source_revision: 'r1', work_branch: 'dev-t-a1', current_head: 'aaaa1111bbbb2222', base_commit: 'cccc3333dddd4444', lifecycle: 'ACTIVE', allocated_at: 900, events: [], resource_locks: [{ type: 'lock_acquired' }], integration_checkpoints: [], cleanup: null, refreshed_at: 4100 }
+const WS_B = { workspace_id: '工作空间B', mode: 'READ_ONLY', workspace_path: '/tmp/ws-b', source_path: 'crystepj-max/side-project', source_revision: 'r2', work_branch: 'dev-t-b1', current_head: 'eeee5555ffff6666', base_commit: 'aaaa7777bbbb8888', lifecycle: 'ACTIVE', allocated_at: 910, events: [], resource_locks: [], integration_checkpoints: [{ type: 'integration_checkpoint' }], cleanup: { state: 'pending' }, refreshed_at: 5100 }
+
+function attemptRec(logicalRunId, v, rev) {
+  return { record_id: 'attempt:' + logicalRunId + ':' + v.attempt_id, record_revision: rev || 1, body: { media_type: 'application/json', value: v }, provenance: { node: v.node, attempt: v.segment, snapshot_revision: v.snapshot_revision, provider: v.provider, model: v.model } }
+}
+function logicalAttempt(id, node, segment, opts) {
+  const o = opts || {}
+  return attemptRec(id, {
+    schema: 1, attempt_id: o.attempt_id, kind: 'logical', node: node, round: o.round || 0, segment: segment,
+    status: o.status || 'completed', snapshot_revision: String(o.revision || segment), provider: 'p1', model: 'm' + segment,
+    ended_at: o.ended_at || '2026-09-17T10:00:00Z',
+    ...(o.outcome === undefined ? {} : { outcome: o.outcome }),
+    ...(o.outcomePath === undefined ? {} : { outcome_path: o.outcomePath }),
+    ...(o.result === undefined ? {} : { result: o.result }),
+  })
+}
+
+const runState = {
+  states: {},
+  logical: {},
+  records: {},
+  logicalUnavailable: '',
+  recordsFail: false,
+  controlCalls: [],
+  controlFail: false,
+  runs: [],
+}
+
+// ── Logical Run lr-a：两段 + 返工（实现 2 次 / 检查退回 1 次）──
+runState.runs.push(
+  { id: 'run-a1', taskId: 'T-A1', name: '完整功能开发', workflowId: 'wf-runs', status: 'running', phase: '实现', startedAt: 3000, supersededBy: 'run-a2', logical_run_id: 'lr-a', segment: 1, segment_count: 2, logical_state: 'RUNNING' },
+  { id: 'run-a2', taskId: 'T-A1', name: '完整功能开发', workflowId: 'wf-runs', status: 'WAITING_HUMAN', phase: '验收', startedAt: 4000, decision_id: 'T-A1:review:1:1', reason: 'HUMAN_ACCEPTANCE', logical_run_id: 'lr-a', segment: 2, segment_count: 2, logical_state: 'WAITING_HUMAN' },
+)
+runState.logical['lr-a'] = {
+  logical_run_id: 'lr-a', schema: 1, task_id: 'T-A1', template_id: 'wf-runs', title: '工作流界面改版', created_at: 2900, updated_at: 4200,
+  lifecycle: { state: 'WAITING_HUMAN', reason: { code: 'HUMAN_ACCEPTANCE' } }, terminal: false, completion: null,
+  segments: [
+    { index: 1, run_id: 'run-a1', trigger: 'start', started_at: 3000, ended_at: 3200, status: 'DONE', active: false },
+    { index: 2, run_id: 'run-a2', trigger: 'human_decision', started_at: 4000, status: 'running', active: true, decision_id: 'T-A1:review:1:1' },
+  ],
+  snapshots: [
+    { revision: 1, created_at: 2900, active: false, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { dev: { provider: 'p1', model: 'm1' } } },
+    { revision: 2, created_at: 3900, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { dev: { provider: 'p1', model: 'm2' }, review: { provider: 'p1', model: 'm2' } } },
+  ],
+  node_attempts: [
+    { node: 'dev', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY', completed_at: 3100 },
+    { node: 'review', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'RETURN_DEV', completed_at: 3150 },
+    { node: 'test', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'PASS', completed_at: 3180 },
+    { node: 'dev', segment: 2, snapshot_revision: 2, provider: 'p1', model: 'm2', outcome: 'READY', completed_at: 4100 },
+    { node: 'review', segment: 2, snapshot_revision: 2, provider: 'p1', model: 'm2', outcome: 'APPROVE', completed_at: 4150 },
+  ],
+  business_outcomes: {
+    dev: { outcome: 'READY', path: '$.status', segment: 2, snapshot_revision: 2, at: 4100 },
+    review: { outcome: 'APPROVE', path: '$.verdict', segment: 2, snapshot_revision: 2, at: 4150 },
+    test: { outcome: 'PASS', path: '$.verdict', segment: 1, snapshot_revision: 1, at: 3180 },
+  },
+  guidance: [], control_events: [{ type: 'pause_requested', at: 4300, run_id: 'run-a2' }], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null,
+  evaluation_baseline: null, evaluation_baselines: [], formal_records: null, workspace: WS_A,
+  human_decisions: [{ decision_id: 'T-A1:review:1:1', user_choice: 'ADD_BUDGET', at: 2800 }], consumed_decisions: {},
+}
+runState.records['lr-a'] = {
+  ok: true, found: true, logical_run_id: 'lr-a',
+  records: [
+    logicalAttempt('lr-a', 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', outcomePath: '$.status', result: { summary: '第 1 次实现成果' } }),
+    logicalAttempt('lr-a', 'review', 1, { attempt_id: 'a1k2', round: 1, outcome: 'RETURN_DEV', outcomePath: '$.verdict', result: { issues: '配置滚动后主要操作离开视口，需要修改' } }),
+    logicalAttempt('lr-a', 'test', 1, { attempt_id: 'a1k3', outcome: 'PASS', result: { note: '第 1 轮测试通过' } }),
+    logicalAttempt('lr-a', 'dev', 2, { attempt_id: 'a2k1', outcome: 'READY', outcomePath: '$.status', result: { summary: '第 2 次实现成果' } }),
+    logicalAttempt('lr-a', 'review', 2, { attempt_id: 'a2k2', round: 1, outcome: 'APPROVE', result: { note: '检查通过' } }),
+    { record_id: 'node:lr-a:dev', record_revision: 2, body: { media_type: 'application/json', value: { summary: '第 2 次实现成果' } }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY' }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY', resolved_inputs_snapshot: { mode: 'record', items: [{ binding: 'from_preflight', producer: 'preflight' }] } } },
+  ], attempts: [],
+}
+
+// ── Logical Run lr-b：扇出（3 子任务，2 完成 1 未完成）+ 完成类型 ──
+runState.runs.push({ id: 'run-b1', taskId: 'T-B1', name: '完整功能开发', workflowId: 'wf-runs', status: 'DONE', phase: '收口', startedAt: 5000, logical_run_id: 'lr-b', segment: 1, segment_count: 1, logical_state: 'COMPLETED' })
+runState.logical['lr-b'] = {
+  logical_run_id: 'lr-b', schema: 1, task_id: 'T-B1', template_id: 'wf-runs', title: '多视角探索', created_at: 4900, updated_at: 5200,
+  lifecycle: { state: 'COMPLETED', reason: null }, terminal: true, completion: { type: 'DELIVERED', node: 'uat', path: '$.completion.type' },
+  segments: [{ index: 1, run_id: 'run-b1', trigger: 'start', started_at: 5000, ended_at: 5200, status: 'DONE', active: false }],
+  snapshots: [{ revision: 1, created_at: 4900, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { explore: { provider: 'p1', model: 'm1' } } }],
+  node_attempts: [
+    { node: 'explore', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'success', completed_at: 5100 },
+    { node: 'synth', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'SYNTHESIS_READY', completed_at: 5150 },
+  ],
+  business_outcomes: { synth: { outcome: 'SYNTHESIS_READY', path: '$.status', segment: 1, snapshot_revision: 1, at: 5150 } },
+  guidance: [], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_B, human_decisions: [], consumed_decisions: {},
+}
+runState.records['lr-b'] = {
+  ok: true, found: true, logical_run_id: 'lr-b',
+  records: [
+    attemptRec('lr-b', { attempt_id: 'a1k10', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 0, item: '技术可行性', result: { finding: '技术上可行' }, ended_at: '2026-09-17T10:01:00Z' }),
+    attemptRec('lr-b', { attempt_id: 'a1k11', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'completed', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 1, item: '用户需求', result: { finding: '需求集中在位置感' }, ended_at: '2026-09-17T10:02:00Z' }),
+    attemptRec('lr-b', { attempt_id: 'a1k12', kind: 'item', node: 'explore', round: 0, segment: 1, status: 'running', snapshot_revision: '1', provider: 'p1', model: 'm1', item_index: 2, item: '风险与反证', started_at: '2026-09-17T10:03:00Z' }),
+    logicalAttempt('lr-b', 'synth', 1, { attempt_id: 'a1k20', outcome: 'SYNTHESIS_READY', result: { summary: '汇总了 2 份研究' } }),
+    { record_id: 'node:lr-b:synth', record_revision: 1, body: { media_type: 'application/json', value: { summary: '汇总了 2 份研究' } }, provenance: { node: 'synth', attempt: 1, snapshot_revision: '1', provider: 'p1', model: 'm1', resolved_inputs_snapshot: { mode: 'record', items: [{ binding: 'from_explore', producer: 'explore' }, { binding: 'from_note', producer: 'note' }] } } },
+  ], attempts: [],
+}
+
+// ── Logical Run lr-c：受阻（BLOCKED，可恢复）──
+runState.runs.push({ id: 'run-c2', taskId: 'T-C2', name: '完整功能开发', workflowId: 'wf-runs', status: 'BLOCKED', reason: 'EVALUATION_BASELINE_CONFLICT', node: 'dev', phase: '实现', startedAt: 3500, logical_run_id: 'lr-c', segment: 1, segment_count: 1, logical_state: 'BLOCKED' })
+runState.logical['lr-c'] = {
+  logical_run_id: 'lr-c', schema: 1, task_id: 'T-C2', template_id: 'wf-runs', title: '受阻任务', created_at: 3400, updated_at: 3600,
+  lifecycle: { state: 'BLOCKED', reason: { code: 'EVALUATION_BASELINE_CONFLICT' } }, terminal: false, completion: null,
+  segments: [{ index: 1, run_id: 'run-c2', trigger: 'start', started_at: 3500, status: 'running', active: true }],
+  snapshots: [{ revision: 1, created_at: 3400, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { dev: { provider: 'deepseek-official', model: 'deepseek-v4-pro' }, review: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } } }],
+  node_attempts: [], business_outcomes: {}, guidance: [], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_A, human_decisions: [], consumed_decisions: {},
+}
+runState.records['lr-c'] = { ok: true, found: true, logical_run_id: 'lr-c', records: [], attempts: [] }
+
+// ── Logical Run lr-p：PAUSED（指导提交走 vwf.run.control）──
+runState.runs.push({ id: 'run-p1', taskId: 'T-P1', name: '完整功能开发', workflowId: 'wf-runs', status: 'PAUSED', reason: 'USER_PAUSE', startedAt: 3300, logical_run_id: 'lr-p', segment: 1, segment_count: 1, logical_state: 'PAUSED' })
+runState.logical['lr-p'] = {
+  logical_run_id: 'lr-p', schema: 1, task_id: 'T-P1', template_id: 'wf-runs', title: '暂停任务', created_at: 3200, updated_at: 3400,
+  lifecycle: { state: 'PAUSED', reason: { code: 'USER_PAUSE' } }, terminal: false, completion: null,
+  segments: [{ index: 1, run_id: 'run-p1', trigger: 'start', started_at: 3300, status: 'running', active: true }],
+  snapshots: [{ revision: 1, created_at: 3200, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { dev: { provider: 'p1', model: 'm1' } } }],
+  node_attempts: [{ node: 'dev', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY', completed_at: 3350 }],
+  business_outcomes: {}, guidance: [{ seq: 1, mode: 'coach', text: '先补测试再继续', at: 3380 }], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: { action: 'pause', requested_at: 3390 }, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_A, human_decisions: [], consumed_decisions: {},
+}
+runState.records['lr-p'] = { ok: true, found: true, logical_run_id: 'lr-p', records: [logicalAttempt('lr-p', 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', result: { summary: '暂停前成果' } })], attempts: [] }
+
+// ── Logical Run lr-r：运行中（控制面 pause / interrupt 可用）──
+runState.runs.push({ id: 'run-r1', taskId: 'T-R1', name: '完整功能开发', workflowId: 'wf-runs', status: 'running', phase: '实现', startedAt: 4500, logical_run_id: 'lr-r', segment: 1, segment_count: 1, logical_state: 'RUNNING' })
+runState.logical['lr-r'] = {
+  logical_run_id: 'lr-r', schema: 1, task_id: 'T-R1', template_id: 'wf-runs', title: '运行中任务', created_at: 4400, updated_at: 4600,
+  lifecycle: { state: 'RUNNING', reason: null }, terminal: false, completion: null,
+  segments: [{ index: 1, run_id: 'run-r1', trigger: 'start', started_at: 4500, status: 'running', active: true }],
+  snapshots: [{ revision: 1, created_at: 4400, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { dev: { provider: 'p1', model: 'm1' } } }],
+  node_attempts: [{ node: 'dev', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY', completed_at: 4550 }],
+  business_outcomes: { dev: { outcome: 'READY', path: '$.status', segment: 1, snapshot_revision: 1, at: 4550 } },
+  guidance: [], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_B, human_decisions: [], consumed_decisions: {},
+}
+runState.records['lr-r'] = { ok: true, found: true, logical_run_id: 'lr-r', records: [logicalAttempt('lr-r', 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', result: { summary: '运行中成果' } })], attempts: [] }
+runState.states['run-r1'] = { status: 'running', phase: '实现', logs: ['[段1] 正在实现'], agents: [], formalRecords: [] }
+
+// ── 逻辑运行读取失败（工作空间未知）+ 旧记录（无逻辑归属）+ 历史分页 ──
+runState.logicalUnavailable = 'lr-err'
+runState.runs.push({ id: 'run-err1', taskId: 'T-E1', name: '读取失败任务', workflowId: 'wf-runs', status: 'running', startedAt: 2500, logical_run_id: 'lr-err', segment: 1, segment_count: 1, logical_state: 'RUNNING' })
+// 看板 agents 回归用例的诊断运行：走 runId 直查默认 vwf.state（逐项处理 #1–#3）
+runState.runs.push({ id: 'run-1', taskId: 'T-DASH', name: '看板回归', workflowId: 'wf-history', status: 'running', phase: '逐项处理', startedAt: 6000 })
+runState.runs.push({ id: 'run-c1', taskId: 'T-C1', name: '诊断与修复', workflowId: 'wf-history', status: 'running', phase: '诊断', startedAt: 2000 })
+for (let i = 1; i <= 12; i++) {
+  runState.runs.push({ id: 'run-x' + i, taskId: 'T-X' + i, name: '历史任务', workflowId: 'wf-history', status: 'DONE', phase: '收口', startedAt: 1000 + i })
+}
+
+// 运行现况（vwf.state）：决策包 / 受阻现场 / 完成类型
+runState.states['run-a2'] = {
+  status: 'WAITING_HUMAN', phase: '验收', logs: ['[段2] 实现完成', '[段2] 检查通过'],
+  decision_id: 'T-A1:review:1:1', reason: 'HUMAN_ACCEPTANCE', node: 'uat',
+  decision_package: {
+    why: '材料齐备，交给你验收。',
+    current_state: '实现与检查均已完成，等待人工决定。',
+    options: [{ id: 'USER_ACCEPTED' }, { id: 'ADD_BUDGET' }, { id: 'STOP' }],
+    subsequent_effects: { USER_ACCEPTED: '按模板完成类型结束本次运行', ADD_BUDGET: '增加 1 轮自动返工额度后继续', STOP: '停止本 Run，保留已有成果' },
+    cost: 'UNKNOWN', benefit: 'UNKNOWN', risk: 'UNKNOWN', recommendation: 'UNKNOWN',
+  },
+  blocked_edge: null,
+  agents: [{ seq: 1, label: '实现', phase: '实现', outcome: 'completed' }, { seq: 2, label: '检查', phase: '检查', outcome: 'completed' }],
+  formalRecords: [{ record_id: 'node:lr-a:dev', record_revision: 2, body: { media_type: 'application/json', value: { summary: '第 2 次实现成果' } }, provenance: { node: 'dev', attempt: 2, snapshot_revision: '2', provider: 'p1', model: 'm2', node_business_outcome: 'READY' } }],
+}
+runState.states['run-c2'] = { status: 'BLOCKED', reason: 'EVALUATION_BASELINE_CONFLICT', node: 'dev', phase: '实现', logs: ['[段1] 评价基线冲突，停止推进'], agents: [], formalRecords: [] }
+runState.states['run-b1'] = { status: 'DONE', phase: '收口', logs: ['[段1] 收口完成'], agents: [{ seq: 1, label: '多视角研究 #1', phase: '研究', outcome: 'completed' }, { seq: 2, label: '多视角研究 #2', phase: '研究', outcome: 'completed' }, { seq: 3, label: '多视角研究 #3', phase: '研究', outcome: 'failed' }], formalRecords: [] }
+runState.states['run-p1'] = { status: 'PAUSED', reason: 'USER_PAUSE', logs: ['[段1] 已暂停'], agents: [], formalRecords: [] }
+
 function makeRuntime() {
   const state = { failSave: false, failUsage: false, failRoles: false, saved: [], validateWarning: null }
   const rpc = async (method, args) => {
@@ -183,8 +385,24 @@ function makeRuntime() {
           cached: false,
         }
       case 'vwf.runs.list':
-        return { runs: [] }
-      case 'vwf.state':
+        return { runs: runState.runs }
+      case 'vwf.logicalRuns.get': {
+        const id = String((args && args.logical_run_id) || '')
+        if (runState.logicalUnavailable === id) return { found: false, record: null }
+        const rec = runState.logical[id]
+        return rec ? { found: true, record: rec } : { found: false, record: null }
+      }
+      case 'vwf.records.list': {
+        if (runState.recordsFail) return { ok: false, error: 'records-host.mjs 未找到（LOC-008 运行时集成未部署）' }
+        return runState.records[String((args && args.logical_run_id) || '')] || { ok: true, found: true, logical_run_id: String((args && args.logical_run_id) || ''), records: [], attempts: [] }
+      }
+      case 'vwf.run.control':
+        runState.controlCalls.push({ action: String((args && args.action) || ''), logical_run_id: String((args && args.logical_run_id) || ''), text: args && args.text })
+        if (runState.controlFail) return { ok: false, error: '仅 PAUSED 的逻辑运行可提交 Guidance；当前为 RUNNING' }
+        return { ok: true, action: String((args && args.action) || ''), logical_run_id: String((args && args.logical_run_id) || '') }
+      case 'vwf.state': {
+        const id = String((args && args.runId) || '')
+        if (runState.states[id]) return { found: true, state: runState.states[id] }
         return {
           found: true,
           state: {
@@ -196,6 +414,7 @@ function makeRuntime() {
             ],
           },
         }
+      }
       default:
         throw new Error('unexpected rpc: ' + method)
     }
@@ -613,7 +832,10 @@ test('fanout 看板：按节点归组展示三项并保留失败状态', async (
     assert.ok(dashboardTab)
     dashboardTab.click()
     await flush()
+    await flush()
+    await flush()
   })
+  // FEAT-85：详情入口收敛为唯一出口——runId 输入框 + 「详情」按钮打开该运行详情工作区
   const input = container.querySelector('input[placeholder^="runId"]')
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
@@ -622,10 +844,14 @@ test('fanout 看板：按节点归组展示三项并保留失败状态', async (
     await flush()
   })
   await act(async () => {
-    const refresh = input.parentElement.querySelector('button')
-    refresh.click()
+    const openBtn = Array.from(input.parentElement.querySelectorAll('button')).find((b) => b.textContent === '详情')
+    assert.ok(openBtn, '详情按钮存在')
+    openBtn.click()
+    await flush()
+    await flush()
     await flush()
   })
+  assert.ok(container.querySelector('.vwf-rd-main'), '进入详情工作区')
   assert.ok(byText(container, '逐项处理 · fanout · 3 items'), '看板显示 fanout 组标题')
   assert.ok(byText(container, '逐项处理 #1'))
   assert.ok(byText(container, '逐项处理 #2'))
@@ -1733,6 +1959,385 @@ test('角色库：读取失败显示明确失败态，不把空列表当作「�
   state.failRoles = false
   // 失败态不是终态：关闭后重开可恢复（roles 重新拉取）
   await act(async () => { freshRoot.unmount(); fresh.remove() })
+})
+
+
+// ── FEAT-85：多工作空间运行列表与 Logical Run 详情 ────────────────────────
+function runRows() { return Array.from(container.querySelectorAll('.vwf-run-row')) }
+function groupHeads() { return Array.from(container.querySelectorAll('.vwf-run-group-head')).map((el) => (el.textContent || '').trim()) }
+function runRowWith(text) { return runRows().find((r) => (r.textContent || '').includes(text)) }
+function nodeDirRows() { return Array.from(container.querySelectorAll('.vwf-node-dir-row')) }
+function detailTabs() { return Array.from(container.querySelectorAll('.vwf-rd-body .vwf-tab')) }
+function attemptSelect() { return container.querySelector('.vwf-rd-body select') }
+
+async function clickEl(el, times) {
+  assert.ok(el, '待点击元素存在')
+  await act(async () => {
+    el.click()
+    for (let i = 0; i < (times || 3); i++) await flush()
+  })
+}
+async function selectValue(sel, value) {
+  assert.ok(sel, '待选择控件存在')
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set
+    setter.call(sel, value)
+    sel.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush()
+    await flush()
+  })
+}
+// 打开运行看板：先确保编辑器层已关闭，避免其文案混入断言
+async function openRunsTab() {
+  const dlg = container.querySelector('dialog.vwf-editor-dialog[open]')
+  if (dlg) {
+    const closeBtn = Array.from(dlg.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '关闭')
+    if (closeBtn) await clickEl(closeBtn)
+    const discard = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '不改了')
+    if (discard) await clickEl(discard)
+  }
+  const tabBtn = Array.from(container.querySelectorAll('.vwf-tab')).find((b) => (b.textContent || '').includes('运行看板'))
+  await clickEl(tabBtn, 6)
+  await resetFilters()
+}
+// 四类筛选复位：避免前一条用例的筛选残留影响后续断言
+async function resetFilters() {
+  for (let i = 0; i < 4; i++) {
+    const sel = filterSelect(i)
+    if (sel && sel.value !== 'all') await selectValue(sel, 'all')
+  }
+}
+function filterSelect(index) { return container.querySelectorAll('.vwf-filter select')[index] }
+async function backToList() {
+  const btn = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').includes('返回列表'))
+  await clickEl(btn)
+}
+
+test('FEAT-85 列表：同一 Logical Run 折叠为一条任务、按工作空间分组、superseded 段不另起一行', async () => {
+  await openRunsTab()
+  await act(async () => { await flush(); await flush(); await flush() })
+  const rows = runRows()
+  assert.ok(rows.length > 0, '运行列表渲染')
+  // 同一 Logical Run 的两段只呈现为一条任务（T-A1 只出现一次）
+  const a1Rows = rows.filter((r) => (r.textContent || '').includes('T-A1'))
+  assert.equal(a1Rows.length, 1, '多 segment 折叠为一条用户任务：' + a1Rows.length)
+  // 被续跑接管的第 1 段不再单独占一行：列表里不出现「已由续跑接管」行
+  assert.ok(!container.querySelector('.vwf-run-row') || !container.textContent.includes('已由续跑接管'), 'superseded 段不作为新用户任务展示')
+  // 多段任务显示段位
+  assert.ok(a1Rows[0].textContent.includes('第 2/2 段'), '多段任务显示当前段/总段数：' + a1Rows[0].textContent)
+  // 按工作空间分组（两个空间 + 未归属旧记录）
+  const heads = groupHeads()
+  assert.ok(heads.some((x) => x.includes('工作空间A')), '按工作空间 A 分组：' + JSON.stringify(heads))
+  assert.ok(heads.some((x) => x.includes('工作空间B')), '按工作空间 B 分组：' + JSON.stringify(heads))
+  assert.ok(heads.some((x) => x.includes('未归属工作空间')), '无逻辑归属的旧记录有独立分组：' + JSON.stringify(heads))
+  // 返工次数与最近更新时间
+  assert.ok(a1Rows[0].textContent.includes('返工 1 次'), '返工次数来自节点重复执行：' + a1Rows[0].textContent)
+  assert.ok(a1Rows[0].textContent.includes('最近更新'), '显示最近更新时间：' + a1Rows[0].textContent)
+  // 折叠说明可见（用户不会误以为分段是新任务）
+  assert.ok(container.textContent.includes('同一 Logical Run 的多段折叠为一条任务'), '列表给出折叠说明')
+  // 界面不拼接让用户复制的命令
+  assert.ok(!container.textContent.includes('wf_run {'), '界面不出现可复制的 wf_run 命令')
+  assert.ok(!container.textContent.includes('USER_ACCEPTED|ADD_BUDGET|STOP'), '界面不出现占位枚举命令行')
+})
+
+test('FEAT-85 列表：空间/状态/结果/完成类型四类筛选与分页', async () => {
+  await openRunsTab()
+  const total = Array.from(container.querySelectorAll('.vwf-muted-sm')).map((e) => e.textContent).join(' ')
+  assert.ok(total.includes('共 20 条'), '任务总数为折叠后的 20：' + total.slice(0, 200))
+  assert.ok(container.textContent.includes('第 1/2 页'), '分页按任务数计算')
+  // 空间筛选：只剩工作空间 A 的三条
+  await selectValue(filterSelect(0), '工作空间A')
+  let rows = runRows()
+  assert.equal(rows.length, 3, '按空间筛选后只剩该空间任务：' + rows.length)
+  assert.ok(!rows.some((r) => (r.textContent || '').includes('T-B1')), '其它空间任务被筛掉')
+  await selectValue(filterSelect(0), 'all')
+  // 状态筛选：待处理 = WAITING_HUMAN + BLOCKED + PAUSED
+  await selectValue(filterSelect(1), 'attention')
+  rows = runRows()
+  assert.equal(rows.length, 3, '待处理筛选命中三个可恢复/待裁决运行：' + rows.length)
+  await selectValue(filterSelect(1), 'done')
+  assert.ok(container.textContent.includes('共 13 条'), '已完成筛选按 DONE 计：' + rows.length)
+  await selectValue(filterSelect(1), 'all')
+  // 业务结果筛选：READY 只命中 lr-a
+  await selectValue(filterSelect(2), 'READY')
+  rows = runRows()
+  assert.equal(rows.length, 2, '业务结果筛选按节点业务结果取值：' + rows.length)
+  await selectValue(filterSelect(2), 'all')
+  // 完成类型筛选：DELIVERED 只命中 lr-b
+  await selectValue(filterSelect(3), 'DELIVERED')
+  rows = runRows()
+  assert.equal(rows.length, 1, '完成类型筛选按 completion.type：' + rows.length)
+  assert.ok((rows[0].textContent || '').includes('T-B1'), '完成类型命中 T-B1：' + rows[0].textContent)
+  await selectValue(filterSelect(3), 'all')
+})
+
+test('FEAT-85 列表：进入详情再返回后保留筛选与列表位置', async () => {
+  await openRunsTab()
+  await selectValue(filterSelect(1), 'done')
+  // 翻到第 2 页并记住位置
+  const nextBtn = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '下一页')
+  await clickEl(nextBtn)
+  assert.ok(container.textContent.includes('第 2/2 页'), '翻到第 2 页')
+  await openTask('T-X1')
+  assert.ok(container.querySelector('.vwf-rd-main'), '进入详情工作区')
+  assert.ok(container.textContent.includes('保留筛选与列表位置'), '详情给出返回后位置保留提示')
+  await backToList()
+  assert.ok(container.textContent.includes('第 2/2 页'), '返回后保留分页位置')
+  const doneSel = filterSelect(1)
+  assert.equal(doneSel.value, 'done', '返回后保留状态筛选')
+  await selectValue(filterSelect(1), 'all')
+})
+
+async function openTask(taskId) {
+  // 前一个用例可能停在详情视图：先回到列表，保证每条用例独立可重复
+  if (!runRows().length) {
+    const back = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').includes('返回列表'))
+    if (back) await clickEl(back)
+  }
+  const row = runRowWith(taskId)
+  assert.ok(row, '列表中找到任务行：' + taskId)
+  await clickEl(row, 6)
+}
+
+test('FEAT-85 详情：唯一选中节点结果出口 + 结果/检查/活动三页签', async () => {
+  await openRunsTab()
+  await selectValue(filterSelect(0), 'all')
+  await selectValue(filterSelect(1), 'all')
+  await openTask('T-A1')
+  assert.ok(container.querySelector('.vwf-rd-main'), '详情为左侧定位 + 单一结果出口布局')
+  assert.equal(nodeDirRows().length, 6, '节点目录列出全部节点：' + nodeDirRows().length)
+  assert.equal(container.querySelectorAll('.vwf-rd-body .vwf-card').length, 1, '正文只有一个选中节点详情卡（不上下重复）')
+  assert.equal(container.querySelectorAll('.vwf-tab-panel').length, 1, '同一时刻只有一个页签面板')
+  assert.equal(container.querySelectorAll('.vwf-rd-body select').length, 0, '未执行节点不渲染 attempt 选择器')
+  await clickEl(nodeDirRows().find((r) => (r.textContent || '').includes('实现')))
+  assert.equal(container.querySelectorAll('.vwf-rd-body select').length, 1, '唯一 attempt 选择器')
+  // 页签切换：同一区域内容切换，不叠加
+  const labels = detailTabs().map((t) => (t.textContent || '').trim())
+  assert.deepEqual(labels, ['结果', '检查', '活动'], '三个页签：' + JSON.stringify(labels))
+  await clickEl(detailTabs().find((t) => t.textContent.trim() === '检查'))
+  assert.equal(container.querySelectorAll('.vwf-tab-panel').length, 1, '切换后仍只有一个面板')
+  const checksPanel = container.querySelector('.vwf-tab-panel').textContent
+  // 当前选中「实现」的第 2 次执行（第 2 段）：该段检查已通过，因此如实显示没有退回意见
+  assert.ok(checksPanel.includes('本次执行没有记录退回意见'), '检查页签按所选执行如实显示：' + checksPanel.slice(0, 140))
+  assert.ok(!checksPanel.includes('第 1 次实现成果'), '检查页签不重复展示结果页签正文（不叠加）')
+  await clickEl(detailTabs().find((t) => t.textContent.trim() === '活动'))
+  const actPanel = container.querySelector('.vwf-tab-panel').textContent
+  assert.ok(actPanel.includes('活动记录'), '活动页签渲染：' + actPanel.slice(0, 120))
+  assert.ok(!actPanel.includes('本次执行没有记录退回意见'), '切换页签后不再显示检查页签内容（不叠加）')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('[段 2]'), '运行日志标注来源分段')
+  await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))
+})
+
+test('FEAT-85 详情：返工 attempt 切换、退回意见跟随审查轮次、旧下游结果标为上一轮成果', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  // 目录：测试节点只有第 1 段尝试 → 上一轮成果
+  const testRow = nodeDirRows().find((r) => (r.textContent || '').includes('测试'))
+  assert.ok(testRow.textContent.includes('上一轮成果'), '旧下游结果在目录标注上一轮成果：' + testRow.textContent)
+  await clickEl(testRow)
+  assert.ok(container.querySelector('.vwf-note.warn') && container.querySelector('.vwf-note.warn').textContent.includes('这是返工前的成果'), '选中旧下游节点给出上一轮成果说明')
+  // 实现节点有两次执行
+  const devRow = nodeDirRows().find((r) => (r.textContent || '').includes('实现'))
+  await clickEl(devRow)
+  const sel = attemptSelect()
+  assert.equal(sel.options.length, 2, '实现节点有两次执行记录：' + sel.options.length)
+  assert.ok(sel.options[0].textContent.includes('第 1 次') && sel.options[0].textContent.includes('退回修改'), '第 1 次标为退回修改：' + sel.options[0].textContent)
+  assert.ok(sel.options[1].textContent.includes('最新'), '第 2 次标为最新：' + sel.options[1].textContent)
+  // 切到第 1 次 → 历史执行 + 该轮成果
+  await selectValue(sel, '1')
+  assert.ok(container.querySelector('.vwf-rd-body').textContent.includes('历史执行'), '切到历史执行有明确标注')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第 1 次实现成果'), '第 1 次成果与选择对应')
+  // 检查页签：退回意见跟随第 1 段审查轮次
+  await clickEl(detailTabs().find((t) => t.textContent.trim() === '检查'))
+  const checks = container.querySelector('.vwf-tab-panel').textContent
+  assert.ok(checks.includes('需要修改的问题'), '检查页签显示退回意见：' + checks.slice(0, 200))
+  assert.ok(checks.includes('配置滚动后主要操作离开视口'), '退回意见内容来自该段记录：' + checks.slice(0, 200))
+  assert.ok(checks.includes('退回意见 · 第 1 次审查'), '退回意见跟随触发它的审查轮次：' + checks.slice(0, 200))
+  // 回最新执行
+  await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))
+  await selectValue(attemptSelect(), '2')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第 2 次实现成果'), '回到第 2 次成果')
+})
+
+test('FEAT-85 详情：扇出子任务独立结果与汇总输入来源，未完成不冒充完成', async () => {
+  await openRunsTab()
+  await openTask('T-B1')
+  const fanRow = nodeDirRows().find((r) => (r.textContent || '').includes('多视角研究'))
+  assert.ok(fanRow, '目录有并行组节点')
+  await clickEl(fanRow)
+  const panel = container.querySelector('.vwf-tab-panel').textContent
+  assert.ok(panel.includes('并行组 · 3 个子任务'), '并行组显示子任务数：' + panel.slice(0, 200))
+  assert.ok(panel.includes('技术可行性') && panel.includes('用户需求') && panel.includes('风险与反证'), '三个子任务各自可辨识')
+  assert.ok(panel.includes('技术上可行') && panel.includes('需求集中在位置感'), '每个子任务有独立结果')
+  assert.ok(panel.includes('未完成'), '未完成子任务有明确状态')
+  assert.ok(panel.includes('汇总节点等待'), '未完成时汇总节点显示等待：' + panel.slice(0, 300))
+  assert.ok(panel.includes('不冒充完成'), '给出不冒充完成的说明')
+  // 汇总节点输入来源
+  const synthRow = nodeDirRows().find((r) => (r.textContent || '').includes('汇总发现'))
+  await clickEl(synthRow)
+  const synthPanel = container.querySelector('.vwf-tab-panel').textContent
+  assert.ok(synthPanel.includes('汇总输入来源'), '汇总节点显示输入来源')
+  assert.ok(synthPanel.includes('来自 explore'), '输入来源列出生产者：' + synthPanel.slice(0, 300))
+})
+
+test('FEAT-85 详情：WAITING_HUMAN 决策卡（选项/理由/影响/锁定 + DT-01 受阻字段映射）', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  const card = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('需要你的决定'))
+  assert.ok(card, 'WAITING_HUMAN 显示结构化决策卡')
+  const text = card.textContent
+  assert.ok(text.includes('材料齐备，交给你验收'), '决策卡显示为什么需要决定')
+  assert.ok(text.includes('实现与检查均已完成'), '决策卡显示当前状态')
+  for (const opt of ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP']) {
+    assert.ok(text.includes(opt), '决策卡含选项 ' + opt)
+    assert.ok(text.includes('选择后效果'), '决策卡含选择后效果')
+  }
+  assert.ok(text.includes('增加 1 轮自动返工额度后继续'), '选择后效果来自决策包')
+  assert.ok(text.includes('未知'), '可选四项显式未知被本地化')
+  assert.ok(!text.includes('UNKNOWN'), '不出现英文 UNKNOWN 哨兵')
+  assert.ok(card.querySelector('textarea'), '决策卡含理由输入')
+  assert.ok(text.includes('提交前影响说明'), '决策卡含提交前影响说明')
+  const submit = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('提交决定'))
+  assert.ok(submit && submit.disabled, 'DT-01 未裁定：提交按钮锁定，不伪造成功')
+  assert.ok(text.includes('DT-01-ui-resume-attribution') && text.includes('不会发起续跑'), '决策卡写明提交路径受阻及其原因')
+  assert.ok(text.includes('字段映射'), '决策卡附字段映射（交给会话执行）')
+  assert.ok(text.includes('T-A1:review:1:1'), '字段映射含真实 decision_id')
+  // 点选选项后映射更新
+  const addBudget = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === 'ADD_BUDGET')
+  await clickEl(addBudget)
+  assert.ok(card.textContent.includes('增加 1 轮自动返工额度后继续'), '点选选项后影响说明可读')
+  assert.ok(container.textContent.includes('提交中，按钮已锁定') || container.textContent.includes('按钮锁定'), '给出提交后锁定与续跑中状态说明')
+  assert.ok(!container.textContent.includes('wf_run {'), '决策卡不拼接让用户复制的命令')
+})
+
+test('FEAT-85 详情：BLOCKED 恢复卡（原因 / Provider·Model 前后值 / 新修订与旧修订保留）', async () => {
+  await openRunsTab()
+  await openTask('T-C2')
+  const card = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('阻塞原因'))
+  assert.ok(card, 'BLOCKED 显示恢复卡')
+  const text = card.textContent
+  assert.ok(text.includes('EVALUATION_BASELINE_CONFLICT'), '恢复卡显示阻塞原因')
+  assert.ok(text.includes('恢复入口：dev'), '恢复卡显示恢复入口节点')
+  assert.ok(text.includes('deepseek-official / deepseek-v4-pro'), '恢复卡显示当前 Provider / Model')
+  assert.ok(card.querySelectorAll('select').length >= 2, '恢复卡提供 Provider / Model 修改入口')
+  assert.ok(text.includes('恢复后产生新的 Snapshot Revision，历史修订仍可查'), '恢复卡说明新修订与旧修订保留')
+  assert.ok(text.includes('model_overrides'), '恢复卡附 model_overrides 字段映射')
+  const submit = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('恢复并继续'))
+  assert.ok(submit && submit.disabled, 'DT-01 未裁定：恢复提交按钮锁定')
+  // 修订表同时保留旧修订
+  const snaps = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('快照修订'))
+  assert.ok(snaps && snaps.textContent.includes('R1'), '快照修订表可查')
+})
+
+test('FEAT-85 详情：工作空间面板字段齐全、读取失败显示未知与重试；节点成果不可用不冒充内容', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  const wsCard = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('工作空间信息'))
+  assert.ok(wsCard, '详情含工作空间面板')
+  const ws = wsCard.textContent
+  for (const field of ['模式', '仓库', '工作分支', '当前 HEAD', 'base HEAD', '集成状态', '活动锁', '清理状态']) {
+    assert.ok(ws.includes(field), '工作空间面板含 ' + field)
+  }
+  assert.ok(ws.includes('ISOLATED_WRITE'), '模式取值来自注册表')
+  assert.ok(ws.includes('dev-t-a1'), '工作分支来自注册表')
+  assert.ok(ws.includes('aaaa1111bb'), '当前 HEAD 显示短哈希：' + ws.slice(0, 400))
+  assert.ok(ws.includes('lock_acquired'), '活动锁可见')
+  assert.ok(ws.includes('未知 / 不可用'), '缺值字段显示未知，不用空白冒充')
+  // 逻辑运行读取失败：显式错误 + 重试入口，不把缓存当事实
+  await backToList()
+  await openTask('T-E1')
+  assert.ok(container.textContent.includes('逻辑运行摘要读取失败'), '读取失败有可见错误：' + container.textContent.slice(0, 300))
+  const errWs = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('工作空间信息'))
+  assert.ok(errWs.textContent.includes('工作空间信息读取失败'), '工作空间面板显示读取失败')
+  assert.ok(Array.from(errWs.querySelectorAll('button')).some((b) => (b.textContent || '').includes('重试读取')), '提供重试入口')
+  assert.ok(errWs.textContent.includes('不把过时缓存当作当前事实'), '写明不把缓存当事实')
+  // 正式记录通道不可用：只显示尝试元数据，不冒充成果正文
+  runState.recordsFail = true
+  const refreshBtn = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '刷新列表')
+  await clickEl(refreshBtn, 6)
+  assert.ok(container.textContent.includes('节点成果正文不可用'), '记录通道不可用时给出明确降级说明')
+  assert.ok(container.textContent.includes('不冒充成果内容'), '写明不冒充成果内容')
+  runState.recordsFail = false
+  await backToList()
+})
+
+test('FEAT-85 详情：PAUSED 指导经 vwf.run.control 提交；控制按钮名对应实际 action', async () => {
+  await openRunsTab()
+  await openTask('T-P1')
+  const card = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('提交指导'))
+  assert.ok(card, 'PAUSED 显示暂停卡')
+  assert.ok(card.textContent.includes('USER_PAUSE'), '暂停卡显示暂停原因')
+  assert.ok(card.textContent.includes('先补测试再继续'), '暂停卡显示已有指导')
+  assert.ok(card.textContent.includes('暂停指导不属人工业务结果'), '不把暂停指导误标为人工业务结果')
+  // 已有指导时提交按钮因空输入禁用
+  const submit = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('提交指导'))
+  assert.ok(submit && submit.disabled, '无输入时指导提交禁用')
+  // 输入后提交 → 走 vwf.run.control guidance
+  const ta = card.querySelector('textarea')
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(ta, '补测试再继续')
+    ta.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+  })
+  const submit2 = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('提交指导'))
+  assert.ok(!submit2.disabled, '有输入后指导提交可用')
+  await clickEl(submit2, 6)
+  assert.equal(runState.controlCalls.length, 1, '指导提交走控制通道：' + JSON.stringify(runState.controlCalls))
+  assert.equal(runState.controlCalls[0].action, 'guidance', '指导 action = guidance')
+  assert.equal(runState.controlCalls[0].logical_run_id, 'lr-p', '指导按逻辑运行提交')
+  assert.equal(runState.controlCalls[0].text, '补测试再继续', '指导正文随请求提交')
+  assert.ok(card.textContent.includes('恢复入口'), '暂停卡含恢复入口')
+  assert.ok(card.textContent.includes('resume_paused'), '恢复参数映射含 resume_paused')
+  assert.ok(card.textContent.includes('DT-01-ui-resume-attribution'), '恢复提交路径受阻有明确标注')
+  await backToList()
+  // 控制按钮名对应实际 action（RUNNING 运行才可用暂停/立即中断）
+  await openTask('T-R1')
+  const ctl = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行控制'))
+  assert.ok(ctl, '运行控制卡渲染')
+  const ctlText = ctl.textContent
+  assert.ok(ctlText.includes('暂停在最近完成节点的检查点后生效'), '暂停说明对应检查点语义')
+  assert.ok(ctlText.includes('立即中断不等检查点'), '立即中断说明对应即时中止语义')
+  const pauseBtn = Array.from(ctl.querySelectorAll('button')).find((b) => (b.textContent || '').includes('暂停'))
+  const intBtn = Array.from(ctl.querySelectorAll('button')).find((b) => (b.textContent || '').includes('立即中断'))
+  assert.ok(pauseBtn && !pauseBtn.disabled, 'RUNNING 可暂停')
+  assert.ok(intBtn && !intBtn.disabled, 'RUNNING 可立即中断')
+  await backToList()
+})
+
+test('FEAT-85 详情：结果 / Lifecycle / 完成类型分层显示（不塌缩为成功失败徽标）', async () => {
+  await openRunsTab()
+  await openTask('T-B1')
+  const locator = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行定位'))
+  assert.ok(locator, '运行定位卡渲染')
+  const text = locator.textContent
+  assert.ok(text.includes('生命周期'), '生命周单独成层：' + text.slice(0, 300))
+  assert.ok(text.includes('COMPLETED'), '生命周期取值可见')
+  assert.ok(text.includes('完成类型'), '完成类型单独成层')
+  assert.ok(text.includes('DELIVERED'), '完成类型取值来自 completion.type')
+  await backToList()
+  // 未声明完成类型时如实标注
+  await openTask('T-C2')
+  const locator2 = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行定位'))
+  assert.ok(locator2.textContent.includes('未声明完成类型'), '无完成类型时如实标注而非留白')
+  await backToList()
+})
+
+test('FEAT-85 窄屏与键盘：详情在同页切换、控件可聚焦、窄屏折行样式存在', async () => {
+  const css = styleText.join('\n')
+  assert.match(css, /\.vwf-rd-main[^`]*grid-template-columns/, '详情为定位 + 出口的网格布局')
+  assert.match(css, /@media \(max-width: 560px\)[^`]*\.vwf-rd-main[^}]*grid-template-columns:1fr/, '窄屏下详情折为单列')
+  assert.match(css, /\.vwf-run-row:focus-visible[^`]*outline/, '列表行有可见键盘焦点')
+  assert.match(css, /\.vwf-node-dir-row:focus-visible/, '节点目录有可见键盘焦点')
+  assert.match(css, /\.vwf-tab:focus-visible/, '页签有可见键盘焦点')
+  assert.match(css, /prefers-reduced-motion/, '尊重减少动态效果设置')
+  // 详情与列表在同一页面切换（不是弹窗），返回按钮可聚焦
+  await openRunsTab()
+  await openTask('T-A1')
+  const back = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').includes('返回列表'))
+  assert.equal(back.tagName, 'BUTTON', '返回控件是原生按钮（键盘可达）')
+  assert.ok(!container.querySelector('.vwf-rd-main[role="dialog"]'), '详情不是模态层，避免焦点被困')
+  await backToList()
 })
 
 test('清理：卸载冒烟测试根节点', async () => {
