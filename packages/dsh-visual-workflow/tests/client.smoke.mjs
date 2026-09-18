@@ -83,6 +83,21 @@ const roleState = {
     { id: '需求分析师', name: '需求分析师', summary: '需求拆解', builtin: false, content: '需求分析正文\n' },
   ],
 }
+// 与内核 scripts/role-library.cjs 同口径的最小镜像：文件顶部前置块的显式简介优先，
+// 否则取首个有意义行（跳过前置块键与标题）。角色写入口的 summary 一律经它计算。
+function summaryOfContent(content) {
+  const c = String(content || '')
+  if (c.slice(0, 3) === '---') {
+    const end = c.indexOf('\n---', 3)
+    if (end >= 0) {
+      const m = /(?:^|\n)[ \t]*summary[ \t]*:[ \t]*([^\n]*)/.exec(c.slice(3, end))
+      if (m && m[1].trim()) return m[1].trim().slice(0, 80)
+    }
+  }
+  const line = c.split('\n').map((l) => l.trim()).find((l) => l && !/^---|^id:|^name:|^summary|^#/.test(l))
+  return (line || '').slice(0, 80)
+}
+
 // 模拟「需求分析师」被 node-1 引用（其余角色零引用）
 const ROLE_USAGE = {
   '需求分析师': { count: 1, refs: [{ workflowId: 'wf1', workflowName: '测试流', builtin: false, nodes: [{ id: 'node-1', label: '节点1' }] }] },
@@ -317,14 +332,14 @@ function makeRuntime() {
       case 'vwf.roles.create': {
         const dup = roleState.roles.some(r => String(r.id).toLowerCase() === String(args.name).toLowerCase())
         if (dup) return { ok: false, errors: [{ at: 'name', message: '已存在同名角色，请使用其他名称。' }] }
-        const role = { id: args.name, name: args.name, summary: String(args.content || '').split('\n')[0].slice(0, 80), builtin: false, content: args.content }
+        const role = { id: args.name, name: args.name, summary: summaryOfContent(args.content), builtin: false, content: args.content }
         roleState.roles.push(role)
         return { ok: true, role: { ...role } }
       }
       case 'vwf.roles.update': {
         const idx = roleState.roles.findIndex(r => r.id === args.id)
         if (idx < 0) return { ok: false, errors: [{ at: '$', message: '自定义角色不存在：' + args.id }] }
-        const role = { ...roleState.roles[idx], id: args.name || args.id, name: args.name || args.id, content: args.content }
+        const role = { ...roleState.roles[idx], id: args.name || args.id, name: args.name || args.id, content: args.content, summary: summaryOfContent(args.content) }
         roleState.roles.splice(idx, 1, role)
         return { ok: true, role: { ...role } }
       }
@@ -1969,7 +1984,7 @@ test('角色库：内置角色只读可查看可复制，不提供编辑/删除�
   assert.deepEqual(builtinBtns, ['查看'], '内置角色只有查看入口，无编辑/复制/删除')
   await act(async () => { Array.from(builtinRow.querySelectorAll('button'))[0].click(); await flush() })
   const viewBtns = Array.from(fresh.querySelectorAll('.vwf-role-mgr button')).map(b => b.textContent)
-  assert.ok(viewBtns.includes('基于此角色创建'), '内置详情提供复制为自定义')
+  assert.ok(viewBtns.some((x) => x.includes('基于此角色创建')), '内置详情提供复制为自定义：' + JSON.stringify(viewBtns))
   assert.ok(!viewBtns.includes('编辑'), '内置详情无编辑入口')
   assert.ok(byText(mgr, '开发角色正文'), '内置详情展示完整内容')
   await act(async () => { freshRoot.unmount(); fresh.remove() })
@@ -2005,6 +2020,96 @@ test('FEAT-101 V-4：角色详情展示一句话简介；缺失时由职责生�
   assert.equal(stored.content, '第一句职责。\n第二句职责。\n', '职责原文未被改写')
   await act(async () => { freshRoot.unmount(); fresh.remove() })
   roleState.roles = roleState.roles.filter(r => r.id !== '无简介角色')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FEAT-102 角色一句话简介（选填）+ 内置「基于此角色创建」固定页脚
+// 原型基准：packages/dsh-visual-workflow/prototypes/ui-workbench/prototype-v2.js:193
+//   · 表单字段顺序：角色名称 → 一句话简介（选填）→ 完整职责；页脚 取消 / 保存角色
+//   · 内置详情：note + 完整职责；页脚只有「＋ 基于此角色创建」
+// ═══════════════════════════════════════════════════════════════════════════
+
+function setInput(el, value) {
+  const proto = el.tagName === 'TEXTAREA' ? dom.window.HTMLTextAreaElement.prototype : dom.window.HTMLInputElement.prototype
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value').set
+  setter.call(el, value)
+  el.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+}
+
+test('FEAT-102 V-2/V-3：一句话简介（选填）显式优先展示、留空沿用职责生成、职责原文不改写', async () => {
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => { freshRoot.render(React.createElement(Page)); await flush(); await flush() })
+  const mgr = await openRolesTab(fresh)
+  await act(async () => { byText(mgr, '新建角色').click(); await flush() })
+  // 字段顺序照原型：名称 → 一句话简介（选填）→ 完整职责
+  const labels = Array.from(mgr.querySelectorAll('.vwf-role-mgr .vwf-field-label')).map((l) => (l.textContent || '').trim())
+  assert.ok(labels[0].includes('角色名称'), '第一字段是角色名称：' + JSON.stringify(labels))
+  assert.ok(labels[1].includes('一句话简介（选填）'), '第二字段是一句话简介（选填）：' + JSON.stringify(labels))
+  assert.ok(labels[2].includes('角色配置'), '第三字段是完整职责：' + JSON.stringify(labels))
+  const summaryInput = mgr.querySelector('#vwf-role-summary')
+  assert.ok(summaryInput, '一句话简介是独立输入框')
+  assert.equal(summaryInput.value, '', '新建时简介留空（＝沿用职责生成）')
+  assert.ok(byText(mgr, '列表只显示简介；未填写时，从职责中截取两行。'), '给出原型同款说明')
+  // 填简介 + 正文 → 保存
+  await act(async () => {
+    setInput(mgr.querySelector('#vwf-role-name'), '体验检查员')
+    setInput(summaryInput, '检查一致性、可读性与操作连续性。')
+    setInput(mgr.querySelector('textarea'), '体验检查员职责正文\n第二行职责。\n')
+    await flush()
+  })
+  await act(async () => { byText(mgr, '保存角色').click(); await flush(); await flush() })
+  const stored = () => roleState.roles.find((r) => r.id === '体验检查员')
+  assert.ok(stored(), '角色保存成功')
+  assert.equal(stored().content, '---\nsummary: 检查一致性、可读性与操作连续性。\n---\n\n体验检查员职责正文\n第二行职责。\n', '简介以文件顶部前置块保存')
+  // V-3：列表行展示显式简介（两行收敛样式与断词由 .vwf-role-summary 承担，见 role-theme.test.mjs）
+  const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find((r) => byText(r, '体验检查员'))
+  assert.equal(row.querySelector('.vwf-role-summary').textContent, '检查一致性、可读性与操作连续性。', '列表行展示显式简介')
+  // 编辑：简介回填；职责正文原样（前置块不进入正文文本域）
+  await act(async () => {
+    Array.from(row.querySelectorAll('button')).find((b) => b.textContent === '编辑').click()
+    await flush(); await flush()
+  })
+  assert.equal(mgr.querySelector('#vwf-role-summary').value, '检查一致性、可读性与操作连续性。', '编辑时简介回填')
+  assert.equal(mgr.querySelector('textarea').value, '体验检查员职责正文\n第二行职责。\n', '职责正文原样展示（不带前置块）')
+  // 清空简介保存：不再写前置块；列表回落为「由职责生成」
+  await act(async () => {
+    setInput(mgr.querySelector('#vwf-role-summary'), '')
+    await flush()
+  })
+  await act(async () => { byText(mgr, '保存角色').click(); await flush(); await flush() })
+  assert.equal(stored().content, '体验检查员职责正文\n第二行职责。\n', '留空时不写前置块，职责原文逐字不变')
+  const row2 = Array.from(mgr.querySelectorAll('.vwf-role-row')).find((r) => byText(r, '体验检查员'))
+  assert.equal(row2.querySelector('.vwf-role-summary').textContent, '体验检查员职责正文', '留空时由职责生成摘要')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+  roleState.roles = roleState.roles.filter((r) => r.id !== '体验检查员')
+})
+
+test('FEAT-102 V-1：内置详情「基于此角色创建」在固定页脚（原型 modal-foot 单一主操作）', async () => {
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => { freshRoot.render(React.createElement(Page)); await flush(); await flush() })
+  const mgr = await openRolesTab(fresh)
+  const builtinRow = Array.from(mgr.querySelectorAll('.vwf-role-row')).find((r) => r.getAttribute('data-vwf-role-origin') === 'builtin')
+  await act(async () => { Array.from(builtinRow.querySelectorAll('button'))[0].click(); await flush(); await flush() })
+  const foot = fresh.querySelector('.vwf-role-mgr-foot')
+  assert.ok(foot, '内置详情提供固定页脚（动作不随职责滚动跑出视野）')
+  const footBtns = Array.from(foot.querySelectorAll('button'))
+  assert.deepEqual(footBtns.map((b) => b.textContent), ['＋ 基于此角色创建'], '页脚只有原型那一个主操作：' + JSON.stringify(footBtns.map((b) => b.textContent)))
+  assert.equal(footBtns[0].className, 'vwf-btn primary', '主操作为主按钮（原型 button(..., "primary", "plus")）')
+  assert.ok(byText(fresh.querySelector('.vwf-role-mgr'), '内置角色 · 开发'), '浮层标题照原型带来源前缀')
+  assert.equal(fresh.querySelectorAll('.vwf-role-mgr-body [data-vwf-role-origin]').length, 0, '详情正文不再重复行内入口')
+  // 点击后进入以该角色为初稿的新建表单；表单页脚同样是固定页脚
+  await act(async () => { footBtns[0].click(); await flush(); await flush() })
+  assert.equal(mgr.querySelector('#vwf-role-name').value, 'dev - 自定义', '以原角色为初稿的新建表单')
+  assert.ok(mgr.querySelector('textarea').value.includes('开发角色正文'), '正文预填原角色内容')
+  const foot2 = fresh.querySelector('.vwf-role-mgr-foot')
+  assert.deepEqual(Array.from(foot2.querySelectorAll('button')).map((b) => b.textContent), ['取消', '保存角色'], '表单页脚为 取消 / 保存角色')
+  const original = roleState.roles.find((r) => r.id === 'dev')
+  assert.equal(original.content, '开发角色正文\n', '查看/复制路径不写回原内置角色')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
 })
 
 test('角色库：读取失败显示明确失败态，不把空列表当作「没有角色」（规格 §11）', async () => {
@@ -2594,6 +2699,48 @@ test('FEAT-100 V-4：点击运行记录在同级大工作区层打开详情，�
   assert.equal(filterSelect(1).value, 'done', '返回后保留状态筛选')
   assert.ok(runRowWith('T-X1'), '返回后列表可用')
   await selectValue(filterSelect(1), 'all')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FEAT-102 V-4 运行记录详情页布局照原型
+// 原型基准：packages/dsh-visual-workflow/prototypes/ui-workbench/prototype-v2.js:160 workspace()
+//   · 页头 page-header：返回 + 标题 + 状态徽标 + 副标题（工作空间 / 模板 · 时间）+ 操作
+//   · 状态条 workspace-strip：返工 / 阶段 + 查看完整经过
+//   · 三栏 editor-a：步骤定位 outline / 画布 graph / 详情 runInspector
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('FEAT-102 V-4：运行详情为 页头 + 状态条 + 三栏工作台（步骤 / 画布 / 详情）', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  const dlg = container.querySelector('dialog.vwf-editor-dialog[open]')
+  // 页头：标题 = 运行标题，状态徽标 + 副标题（工作空间 / 模板 · 时间），返回与关闭常驻
+  const head = dlg.querySelector('.vwf-rd-head')
+  assert.ok(head, '详情有页头（原型 page-header）')
+  assert.equal(head.querySelector('.vwf-rd-title').textContent, '工作流界面改版', '标题取运行标题')
+  assert.ok(head.querySelector('.vwf-badge'), '状态徽标在标题行')
+  const subline = head.querySelector('.vwf-rd-subline').textContent
+  assert.ok(subline.includes('工作空间A') && subline.includes('完整功能开发'), '副标题含工作空间 / 模板：' + subline)
+  const headBtns = Array.from(head.querySelectorAll('button')).map((b) => (b.textContent || '').trim())
+  assert.ok(headBtns.some((x) => x.includes('返回列表')) && headBtns.some((x) => x === '关闭'), '页头提供返回与关闭：' + JSON.stringify(headBtns))
+  assert.ok(headBtns.some((x) => x === '刷新列表'), '页头保留刷新入口')
+  // 状态条：返工 / 阶段 + 查看完整经过
+  const strip = dlg.querySelector('.vwf-rd-strip')
+  assert.ok(strip, '详情有状态条（原型 workspace-strip）')
+  assert.ok(strip.textContent.includes('返工') && strip.textContent.includes('当前阶段'), '状态条显示返工与阶段：' + strip.textContent)
+  assert.ok(Array.from(strip.querySelectorAll('button')).some((b) => b.textContent.includes('查看完整经过')), '状态条提供查看完整经过')
+  // 三栏：步骤定位 / 画布 / 详情
+  const main = dlg.querySelector('.vwf-rd-main')
+  assert.deepEqual(Array.from(main.children).map((c) => c.className), ['vwf-rd-side', 'vwf-rd-canvas', 'vwf-rd-body'], '三栏顺序照原型（步骤 / 画布 / 详情）')
+  assert.equal(nodeDirRows().length, 6, '左栏步骤定位列出全部节点')
+  assert.ok(main.querySelector('.vwf-rd-canvas .vwf-canvas-wrap svg'), '中栏是只读流程画布')
+  assert.equal(main.querySelectorAll('.vwf-rd-body .vwf-canvas-wrap').length, 0, '画布不再堆在详情栏下方')
+  assert.ok(main.querySelector('.vwf-rd-body .vwf-tab'), '右栏是唯一选中节点详情出口（三页签在其中）')
+  // 运行级记录留在工作台下方，不与详情栏混排（决策卡 / 恢复卡 / 工作空间面板等仍在）
+  const belowCards = Array.from(dlg.querySelectorAll('.vwf-root > .vwf-card')).map((c) => c.textContent || '')
+  assert.ok(belowCards.some((x) => x.includes('运行控制')), '工作台下方保留运行控制卡')
+  assert.ok(belowCards.some((x) => x.includes('工作空间信息')), '工作台下方保留工作空间面板')
+  assert.equal(main.querySelectorAll('.vwf-card').length, 3, '工作台内只有左栏两张 + 详情栏一张卡：' + main.querySelectorAll('.vwf-card').length)
+  await backToList()
 })
 
 test('FEAT-100 V-5：流程库与运行页共用同一套语义 token（浅色下不出现灰白混用）', async () => {

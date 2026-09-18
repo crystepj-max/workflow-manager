@@ -36,9 +36,25 @@ function validateRoleName(name) {
   return null
 }
 
-// 角色正文摘要：取首个有意义行（跳过 frontmatter 键/标题），截 80 字符；空则回退 fallback。
+// 一句话简介（选填）：角色文件顶部的前置块承载显式简介，职责正文原样保留在块之后。
+//   ---
+//   summary: 检查一致性、可读性与操作连续性。
+//   ---
+// 只认「首行 --- 起、成对 --- 收」的块；没有该块时行为与既有逐字一致（不改写正文）。
+function explicitSummary(content) {
+  if (typeof content !== 'string' || content.slice(0, 3) !== '---') return ''
+  const end = content.indexOf('\n---', 3)
+  if (end < 0) return ''
+  const m = /(?:^|\n)[ \t]*summary[ \t]*:[ \t]*([^\r\n]*)/.exec(content.slice(3, end))
+  return m ? m[1].trim() : ''
+}
+
+// 角色正文摘要：显式简介优先；否则取首个有意义行（跳过 frontmatter 键/标题），截 80 字符；
+// 空则回退 fallback。
 function summarizeRole(content, fallback) {
   if (typeof content !== 'string') return fallback || ''
+  const explicit = explicitSummary(content)
+  if (explicit) return explicit.slice(0, 80)
   const skip = /^---|^id:|^name:|^summary|^createdAt|^updatedAt|^dynamicTemplate|^#/
   const firstLine = content.split('\n').map((l) => l.trim()).filter((l) => l && !skip.test(l))[0]
   return (firstLine || fallback || '').slice(0, 80)
