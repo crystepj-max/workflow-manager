@@ -4,8 +4,14 @@
 //   EB3 原评价文件缺失 → BLOCKED（不进入执行）
 //   EB4 冻结后原路径被改写 → 段收尾核验出基线冲突 BLOCKED，冻结副本保留
 //   EB5 未声明 evaluationBaseline 的模板零改动（不观察、不冻结、不阻断）
+//   EB6 运行产物基准 = 执行现场 cwd（与编译脚本 RUNDIR 同口径），不得按隔离工作区 source 解析
+//   EB7 workspace 参数合并不得抹掉脚本 taskId（runDir 默认口径依赖它）
+//   EB8 自动恢复段必须新起段控制器，不得复用已中止的控制器
 // 保真边界：fake 引擎只建模 start/result + 事件时序；冻结/核验经 spawnHandler 跑真实
-// node 子进程（真实 fs + crypto 字节语义），workspace 路径指向真实临时目录。
+// node 子进程（真实 fs + crypto 字节语义），执行现场与 workspace 路径均指向真实临时目录。
+// 口径权威：内核 freezePayload 注释「runDir 相对路径与编译脚本 RUNDIR 口径一致」——节点按
+// 会话/执行现场 cwd 落盘，故冻结宿主也必须以该 cwd 为基准（EB1–EB4 夹具曾把契约放在 workspace
+// source 内，等于为「按 source 解析」的错误口径背书；EB6 起改为执行现场）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -59,7 +65,7 @@ function ebSpawnHandler(spec) {
   return undefined
 }
 
-function env({ template = OPTIMIZE_LIKE, workspaceSource = null, engine = null } = {}) {
+function env({ template = OPTIMIZE_LIKE, workspaceSource = null, engine = null, execCwd = null } = {}) {
   const seed = {
     [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
     [REPO + '/scripts/workspace-isolation-host.mjs']: '// workspace-isolation-host stub（测试种子）',
@@ -77,7 +83,7 @@ function env({ template = OPTIMIZE_LIKE, workspaceSource = null, engine = null }
   const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', wsHost, spawnHandler: ebSpawnHandler })
   const { handlers, definedTools, events, ctx } = loadHost({
     fs, subprocess: sub, sandboxPolicy,
-    agents: { requireInitiator: () => ({}), currentInitiator: () => null },
+    agents: { requireInitiator: () => ({}), currentInitiator: () => (execCwd ? { session: { header: { cwd: execCwd } } } : null) },
     workflowEngine: engine || undefined,
   })
   return { handlers, definedTools, events, ctx, fs }
@@ -110,20 +116,24 @@ const ckptLog = (events, runId, next, results) => {
 }
 const freezeLine = (version, claimed, supersedes) => '[eb-freeze]' + JSON.stringify({ version, source: '.agent-runs/t-eb/evaluation-contract.md', copy: '.agent-runs/t-eb/evaluation-baselines/v' + version + '/evaluation-contract.md', claimed_digest: claimed, supersedes: supersedes || null })
 
-// 建真实工作区现场：<tmp>/source/.agent-runs/t-eb/evaluation-contract.md
+// 建真实执行现场：<tmp>/exec/.agent-runs/t-eb/evaluation-contract.md
+// 隔离工作区 source 另起一个空目录：运行产物不得按它解析（口径 = 编译脚本 RUNDIR = 执行现场 cwd）
 function workspaceFixture(content) {
   const tmp = mkdtempSync(path.join(tmpdir(), 'vwf-eb-runtime-'))
-  const runDir = path.join(tmp, 'source', '.agent-runs', 't-eb')
+  const execDir = path.join(tmp, 'exec')
+  const wsSource = path.join(tmp, 'source')
+  mkdirSync(wsSource, { recursive: true })
+  const runDir = path.join(execDir, '.agent-runs', 't-eb')
   mkdirSync(runDir, { recursive: true })
   if (content !== undefined) writeFileSync(path.join(runDir, 'evaluation-contract.md'), content, 'utf8')
-  return { tmp, contractPath: path.join(runDir, 'evaluation-contract.md'), copyV1: path.join(runDir, 'evaluation-baselines', 'v1', 'evaluation-contract.md') }
+  return { tmp, execDir, wsSource, contractPath: path.join(runDir, 'evaluation-contract.md'), copyV1: path.join(runDir, 'evaluation-baselines', 'v1', 'evaluation-contract.md') }
 }
 
 test('EB1 冻结成功：检查点中止 + 注入已核验引用自动恢复 + 逻辑运行入档', async () => {
   const wsx = workspaceFixture('# 契约\n判据：A\n')
   const real = createHash('sha256').update(readFileSync(wsx.contractPath)).digest('hex')
   const eng = makeEngine()
-  const { events, definedTools, fs } = env({ workspaceSource: path.join(wsx.tmp, 'source'), engine: eng })
+  const { events, definedTools, fs } = env({ workspaceSource: wsx.wsSource, execCwd: wsx.execDir, engine: eng })
   const wfRun = definedTools.find((t) => t.name === 'wf_run')
   const p = wfRun.execute({ templateId: 'eb-spec', taskId: 't-eb', runDir: '.agent-runs/t-eb' })
   await until(() => eng.starts.length >= 1, '首段启动')
@@ -167,7 +177,7 @@ test('EB1 冻结成功：检查点中止 + 注入已核验引用自动恢复 + �
 test('EB2 摘要与模型声称值不符：BLOCKED 不放行，不恢复', async () => {
   const wsx = workspaceFixture('# 契约\n判据：A\n')
   const eng = makeEngine()
-  const { events, definedTools, fs } = env({ workspaceSource: path.join(wsx.tmp, 'source'), engine: eng })
+  const { events, definedTools, fs } = env({ workspaceSource: wsx.wsSource, execCwd: wsx.execDir, engine: eng })
   const wfRun = definedTools.find((t) => t.name === 'wf_run')
   const p = wfRun.execute({ templateId: 'eb-spec', taskId: 't-eb', runDir: '.agent-runs/t-eb' })
   await until(() => eng.starts.length >= 1, '首段启动')
@@ -188,7 +198,7 @@ test('EB2 摘要与模型声称值不符：BLOCKED 不放行，不恢复', async
 test('EB3 原评价文件缺失：BLOCKED（不进入执行）', async () => {
   const wsx = workspaceFixture(undefined)
   const eng = makeEngine()
-  const { events, definedTools, fs } = env({ workspaceSource: path.join(wsx.tmp, 'source'), engine: eng })
+  const { events, definedTools, fs } = env({ workspaceSource: wsx.wsSource, execCwd: wsx.execDir, engine: eng })
   const wfRun = definedTools.find((t) => t.name === 'wf_run')
   const p = wfRun.execute({ templateId: 'eb-spec', taskId: 't-eb', runDir: '.agent-runs/t-eb' })
   await until(() => eng.starts.length >= 1, '首段启动')
@@ -208,7 +218,7 @@ test('EB4 冻结后原路径被改写：段收尾核验出基线冲突 BLOCKED�
   const wsx = workspaceFixture('# 契约\n判据：A\n')
   const real = createHash('sha256').update(readFileSync(wsx.contractPath)).digest('hex')
   const eng = makeEngine()
-  const { events, definedTools, fs } = env({ workspaceSource: path.join(wsx.tmp, 'source'), engine: eng })
+  const { events, definedTools, fs } = env({ workspaceSource: wsx.wsSource, execCwd: wsx.execDir, engine: eng })
   const wfRun = definedTools.find((t) => t.name === 'wf_run')
   const p = wfRun.execute({ templateId: 'eb-spec', taskId: 't-eb', runDir: '.agent-runs/t-eb' })
   await until(() => eng.starts.length >= 1, '首段启动')
@@ -251,6 +261,69 @@ test('EB5 未声明 evaluationBaseline：不观察不冻结，正常流程零改
   assert.equal(out.value.status, 'DONE')
   const logical = readLogical(fs, 't-plain')
   assert.equal(logical.evaluation_baseline, null, '无声明模板不产生基线入档')
+  rmSync(wsx.tmp, { recursive: true, force: true })
+})
+
+// EB6 运行产物基准：必须与编译脚本 RUNDIR 同口径（执行现场 cwd），不得按隔离工作区 source 解析
+test('EB6 契约位于执行现场 cwd：按执行口径解析并自动恢复', async () => {
+  const wsx = workspaceFixture('# 契约\n判据：A\n')
+  const real = createHash('sha256').update(readFileSync(wsx.contractPath)).digest('hex')
+  const eng = makeEngine()
+  const { events, definedTools, fs } = env({ workspaceSource: wsx.wsSource, execCwd: wsx.execDir, engine: eng })
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const p = wfRun.execute({ templateId: 'eb-spec', taskId: 't-eb', runDir: '.agent-runs/t-eb' })
+  await until(() => eng.starts.length >= 1, '首段启动')
+  await until(() => fs._files.get(LOGICAL_DIR + '/' + encodeURIComponent('t-eb') + '.json'), '逻辑运行登记')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'eb' } })
+  events.get('workflow/log')({ id: 'run-1' }, freezeLine(1, real))
+  await until(() => (readLogical(fs, 't-eb').control_events || []).some((e) => e.type === 'evaluation_baseline_freeze_requested'), '冻结请求入档')
+  const frozenReq = readLogical(fs, 't-eb').control_events.find((e) => e.type === 'evaluation_baseline_freeze_requested')
+  assert.equal(frozenReq.source, path.join(wsx.execDir, '.agent-runs', 't-eb', 'evaluation-contract.md'), '冻结必须按执行现场 cwd 解析 runDir（与编译脚本 RUNDIR 同口径）')
+  ckptLog(events, 'run-1', 'execute', { confirm: { route: 'READY', contract_digest: real } })
+  let done = null
+  p.then((x) => { done = JSON.parse(x) })
+  settle(eng, events, 'run-1', 'cancelled')
+  await until(() => done !== null || eng.starts.length >= 2, '闸门收束或恢复段启动')
+  if (done === null) {
+    settle(eng, events, 'run-2', 'completed', { status: 'DONE', results: { confirm: { route: 'READY', contract_digest: real }, evaluate: { route: 'PASS', contract_digest: real }, closeout: { status: 'DELIVERED' } }, completion: { type: 'EVALUATION_PASSED', node: 'closeout', path: '$.status' } })
+    await until(() => done !== null, '恢复段收束')
+  }
+  assert.equal(done.value.status, 'DONE', '契约位于执行现场时必须冻结成功并自动恢复，实际：' + JSON.stringify(done.value))
+  rmSync(wsx.tmp, { recursive: true, force: true })
+})
+
+// EB7 workspace 参数合并不得抹掉脚本 taskId：脚本 TASK/RUNDIR 默认口径都依赖它
+test('EB7 workspace 分配后脚本 taskId 必须仍是逻辑任务 id', async () => {
+  const wsx = workspaceFixture('# 契约\n判据：A\n')
+  const eng = makeEngine()
+  const { events, definedTools } = env({ workspaceSource: wsx.wsSource, execCwd: wsx.execDir, engine: eng })
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const p = wfRun.execute({ templateId: 'eb-spec', taskId: 't-eb' })
+  await until(() => eng.starts.length >= 1, '首段启动')
+  assert.equal(eng.starts[0].args.taskId, 't-eb', 'workspace 参数合并后脚本 taskId 不得被抹掉（否则 TASK 退化为 task、runDir 默认错位）')
+  settle(eng, events, 'run-1', 'cancelled')
+  rmSync(wsx.tmp, { recursive: true, force: true })
+})
+
+// EB8 段控制器生命周期：冻结待决中止首段后，恢复段必须拿到未中止的新控制器
+test('EB8 自动恢复段必须新起段控制器，不得复用已中止的控制器', async () => {
+  const wsx = workspaceFixture('# 契约\n判据：A\n')
+  const real = createHash('sha256').update(readFileSync(wsx.contractPath)).digest('hex')
+  const eng = makeEngine()
+  const { events, definedTools } = env({ workspaceSource: wsx.wsSource, execCwd: wsx.execDir, engine: eng })
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const p = wfRun.execute({ templateId: 'eb-spec', taskId: 't-eb', runDir: '.agent-runs/t-eb' })
+  await until(() => eng.starts.length >= 1, '首段启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'eb' } })
+  events.get('workflow/log')({ id: 'run-1' }, freezeLine(1, real))
+  ckptLog(events, 'run-1', 'execute', { confirm: { route: 'READY', contract_digest: real } })
+  assert.equal(eng.starts[0].signal.aborted, true, '前置：冻结待决时首段必须被中止')
+  settle(eng, events, 'run-1', 'cancelled')
+  await until(() => eng.starts.length >= 2, '基线恢复段启动')
+  assert.equal(eng.starts[1].signal.aborted, false, '恢复段不得复用已中止的段控制器（否则引擎启动即 CANCELLED）')
+  settle(eng, events, 'run-2', 'completed', { status: 'DONE', results: { confirm: { route: 'READY', contract_digest: real }, evaluate: { route: 'PASS', contract_digest: real }, closeout: { status: 'DELIVERED' } }, completion: { type: 'EVALUATION_PASSED', node: 'closeout', path: '$.status' } })
+  const out = JSON.parse(await p)
+  assert.equal(out.value.status, 'DONE')
   rmSync(wsx.tmp, { recursive: true, force: true })
 })
 
