@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 100,
+  "revision": 101,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -1622,7 +1622,7 @@
       "source": "Codex UI 原型 handoff",
       "source_ref": "docs/tasks/handoffs/H1-editor-workbench.md",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FEAT-84",
       "env_role": "独立",
@@ -1634,9 +1634,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-17T13:02:10.962Z",
-      "updated_at": "2026-09-18T02:29:41.332Z",
+      "updated_at": "2026-09-19T04:01:50.485Z",
       "spec_path": "docs/tasks/specs/FEAT-84-vwf-editor-workbench/task-spec-V1.md"
     },
     {
@@ -1683,7 +1683,7 @@
       "source": "Codex UI 原型 handoff",
       "source_ref": "docs/tasks/handoffs/H3-role-theme-responsive.md",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P2",
       "env_group": "FEAT-86",
       "env_role": "独立",
@@ -1695,9 +1695,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-17T13:02:21.580Z",
-      "updated_at": "2026-09-17T17:02:02.316Z",
+      "updated_at": "2026-09-19T04:01:50.485Z",
       "spec_path": "docs/tasks/specs/FEAT-86-vwf-role-theme-responsive/task-spec-V1.md"
     },
     {
@@ -1712,7 +1712,7 @@
       "source": "集成真机验收差距批次（松哥逐条给出，原型<>现状六条）",
       "source_ref": "docs/tasks/specs/FEAT-100-settings-ia-prototype-alignment/task-spec-V1.md",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FEAT-100",
       "env_role": "独立",
@@ -1724,9 +1724,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-18T03:55:52.849Z",
-      "updated_at": "2026-09-18T04:37:09.888Z",
+      "updated_at": "2026-09-19T04:01:50.485Z",
       "spec_path": "docs/tasks/specs/FEAT-100-settings-ia-prototype-alignment/task-spec-V1.md"
     },
     {
@@ -1741,7 +1741,7 @@
       "source": "集成真机验收差距第二批（松哥逐条给出，原型<>现状三条）",
       "source_ref": "docs/tasks/specs/FEAT-101-role-actions-canvas-defaults/task-spec-V1.md",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FEAT-101",
       "env_role": "独立",
@@ -1753,9 +1753,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-18T07:05:16.269Z",
-      "updated_at": "2026-09-18T07:38:47.448Z",
+      "updated_at": "2026-09-19T04:01:50.485Z",
       "spec_path": "docs/tasks/specs/FEAT-101-role-actions-canvas-defaults/task-spec-V1.md"
     },
     {
@@ -1770,7 +1770,7 @@
       "source": "集成真机验收差距第三批（松哥逐条给出，原型<>现状）",
       "source_ref": "docs/tasks/specs/FEAT-102-role-summary-run-detail-layout/task-spec-V1.md",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FEAT-102",
       "env_role": "独立",
@@ -1782,9 +1782,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-18T13:49:40.551Z",
-      "updated_at": "2026-09-18T13:49:40.551Z",
+      "updated_at": "2026-09-19T04:01:50.485Z",
       "spec_path": "docs/tasks/specs/FEAT-102-role-summary-run-detail-layout/task-spec-V1.md"
     },
     {
@@ -1828,7 +1828,7 @@
       "source": "集成真机验收差距第四批（松哥逐条给出，原型<>现状六条）",
       "source_ref": "docs/tasks/specs/FEAT-103-role-row-create-run-chain-dialog/task-spec-V1.md",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FEAT-103",
       "env_role": "独立",
@@ -1840,9 +1840,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-18T15:28:58.144Z",
-      "updated_at": "2026-09-18T16:04:41.862Z",
+      "updated_at": "2026-09-19T04:01:50.485Z",
       "spec_path": "docs/tasks/specs/FEAT-103-role-row-create-run-chain-dialog/task-spec-V1.md"
     },
     {
@@ -1857,7 +1857,7 @@
       "source": "FEAT-103 载荷闸门裁决的兜底纪律卡（总控立卡）",
       "source_ref": "cnb#104 issue 正文",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P2",
       "env_group": "CHORE-104",
       "env_role": "独立",
@@ -1869,9 +1869,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-18T16:13:32.448Z",
-      "updated_at": "2026-09-19T01:59:48.574Z",
+      "updated_at": "2026-09-19T04:01:50.485Z",
       "spec_path": "cnb#104 issue 正文（轻量卡，暂不落独立规格）"
     },
     {
@@ -1886,7 +1886,7 @@
       "source": "集成验收缺陷（松哥，cnb#105）",
       "source_ref": "docs/tasks/specs/FIX-105-execution-chain-order-status/task-spec-V1.md",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FIX-105",
       "env_role": "独立",
@@ -1898,9 +1898,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-18T17:56:19.243Z",
-      "updated_at": "2026-09-18T18:36:55.938Z",
+      "updated_at": "2026-09-19T04:01:50.485Z",
       "spec_path": "docs/tasks/specs/FIX-105-execution-chain-order-status/task-spec-V1.md"
     },
     {
@@ -1947,7 +1947,7 @@
       "source": "集成验收缺陷第二批（松哥确认清单，cnb#107）",
       "source_ref": "docs/tasks/specs/FIX-107-jargon-free-run-surfaces/task-spec-V1.md",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FIX-107",
       "env_role": "独立",
@@ -1961,9 +1961,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-18T18:08:09.672Z",
-      "updated_at": "2026-09-18T19:20:08.512Z",
+      "updated_at": "2026-09-19T04:01:50.485Z",
       "spec_path": "docs/tasks/specs/FIX-107-jargon-free-run-surfaces/task-spec-V1.md"
     },
     {
@@ -1978,7 +1978,7 @@
       "source": "集成验收缺陷第三批（松哥，smoke-01 实测，cnb#108）",
       "source_ref": "docs/tasks/specs/FIX-108-status-authority-prev-round-label/task-spec-V1.md",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FIX-108",
       "env_role": "独立",
@@ -1990,9 +1990,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-19T02:42:15.665Z",
-      "updated_at": "2026-09-19T03:36:12.897Z",
+      "updated_at": "2026-09-19T04:01:50.485Z",
       "spec_path": "docs/tasks/specs/FIX-108-status-authority-prev-round-label/task-spec-V1.md"
     },
     {
@@ -2083,5 +2083,5 @@
       "spec_path": "docs/tasks/specs/CHORE-111-numbering-source-migration/task-spec-V1.md"
     }
   ],
-  "updated_at": "2026-09-19T02:42:15.665Z"
+  "updated_at": "2026-09-19T04:01:50.485Z"
 }
