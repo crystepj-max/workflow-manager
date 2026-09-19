@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 85,
+  "revision": 88,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -1857,12 +1857,12 @@
       "source": "FEAT-103 载荷闸门裁决的兜底纪律卡（总控立卡）",
       "source_ref": "cnb#104 issue 正文",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "等待验收",
       "priority": "P2",
       "env_group": "CHORE-104",
       "env_role": "独立",
       "deps": [],
-      "branch": null,
+      "branch": "dev-chore-104-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
@@ -1871,7 +1871,7 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-18T16:13:32.448Z",
-      "updated_at": "2026-09-18T16:13:32.448Z",
+      "updated_at": "2026-09-19T01:59:48.574Z",
       "spec_path": "cnb#104 issue 正文（轻量卡，暂不落独立规格）"
     },
     {
@@ -1915,7 +1915,7 @@
       "source": "会话录入",
       "source_ref": "",
       "baseline": "V1",
-      "status": "待确认",
+      "status": "本地已定义",
       "priority": "P1",
       "env_group": null,
       "env_role": null,
@@ -1929,7 +1929,7 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-18T18:05:53.882Z",
-      "updated_at": "2026-09-19T01:13:04.780Z",
+      "updated_at": "2026-09-19T02:21:30.738Z",
       "spec_path": "docs/tasks/specs/CHORE-106-close-task-issue/task-spec-V1.md"
     },
     {
@@ -1962,7 +1962,36 @@
       "created_at": "2026-09-18T18:08:09.672Z",
       "updated_at": "2026-09-18T19:20:08.512Z",
       "spec_path": "docs/tasks/specs/FIX-107-jargon-free-run-surfaces/task-spec-V1.md"
+    },
+    {
+      "task_id": "FIX-108",
+      "type": "FIX",
+      "remote": "cnb#108",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": null,
+      "name": "运行详情状态口径统一 + 上一轮成果标签显示条件修正",
+      "slug": "status-authority-prev-round-label",
+      "source": "集成验收缺陷第三批（松哥，smoke-01 实测，cnb#108）",
+      "source_ref": "docs/tasks/specs/FIX-108-status-authority-prev-round-label/task-spec-V1.md",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P1",
+      "env_group": "FIX-108",
+      "env_role": "独立",
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-19T02:42:15.665Z",
+      "updated_at": "2026-09-19T02:42:15.665Z",
+      "spec_path": "docs/tasks/specs/FIX-108-status-authority-prev-round-label/task-spec-V1.md"
     }
   ],
-  "updated_at": "2026-09-18T18:08:09.672Z"
+  "updated_at": "2026-09-19T02:42:15.665Z"
 }
