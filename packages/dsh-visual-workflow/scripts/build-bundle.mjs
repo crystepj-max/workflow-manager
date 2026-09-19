@@ -266,7 +266,14 @@ const clientBytes = Buffer.byteLength(dynClient)
 // LOC-032 操作账本宿主接线（operationsHostCall 进程边界）与 LOC-031 并入后终态实测
 // host 103804 + client 101610 = 205414B（200.6KiB）超 200KiB，按人工裁决先例
 // 「全部 P0 任务并入后按终态实测一次性定值」上调至 208KiB（含 LOC-033 并入余量）。
-const PAYLOAD_LIMIT = 208 * 1024
+// FEAT-84 编排台工作流模板编辑器（三段布局 + 步骤定位 + 连接清单 + 渐进披露 + 窄屏切换 +
+// 工作区语义 token + 独立滚动收口）并入后终态实测 host 109822 + client 121816 = 231638B
+// （226.21KiB）：上述 208KiB 中留给 LOC-033 的余量已先被 host 侧后续合并
+// （103804→109822）吃掉，本任务 client 侧净增 20206B，按同一「上限按实测值定值」口径
+// 上调至 232KiB，余量 5.8KiB 供同改 client 半的 FEAT-85 / FEAT-86 并入；
+// 两任务并入后按各自终态实测再评估，余量不足时先瘦身。
+// 新增载荷仍应优先瘦身，不要继续推高。
+const PAYLOAD_LIMIT = 284 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)

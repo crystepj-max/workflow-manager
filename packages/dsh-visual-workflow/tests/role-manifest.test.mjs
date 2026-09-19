@@ -12,20 +12,21 @@ const repoRoot = join(here, '..', '..', '..')
 const MANIFEST = join(repoRoot, 'dsh', 'roles', 'builtin-roles.json')
 const ROLES_DIR = join(repoRoot, 'dsh', 'roles')
 
-// 规格 §8 的权威名单（通用 8 + 专业 4，顺序即展示顺序）
+// 规格 §8 的权威名单（通用 8 + 专业 4，顺序即展示顺序）+ 一句话简介数据字段
+// （FEAT-103 V-2：定位与职责的 1~2 句提炼，列表与详情直接展示该字段）
 const EXPECTED = [
-  { id: 'requirements', name: '需求分析', summary: '需求分析角色：三要素门禁，产出需求基线' },
-  { id: 'designer', name: '方案设计', summary: '方案设计角色：实施路径、关键取舍与风险' },
-  { id: 'dev', name: '开发', summary: '开发角色：测试驱动施工，满足质量闸门' },
-  { id: 'review', name: '审核', summary: '审核角色：规范与需求符合性、代码质量双轴审查' },
-  { id: 'test', name: '测试', summary: '测试角色：运行态验证，证据驱动判定' },
-  { id: 'evaluator', name: '评估', summary: '评估角色：按节点评价契约独立评估，场景差异由节点表达' },
-  { id: 'accept', name: '验收助手', summary: '验收助手角色：对照验收标准最终核验并等待人工签字' },
-  { id: 'closeout', name: '收口', summary: '收口角色：一致性收口与交接产物汇总' },
-  { id: 'diagnose', name: '缺陷诊断', summary: '缺陷诊断角色：先取证后结论，收敛到根因' },
-  { id: 'orchestrator', name: '探索统筹', summary: '探索统筹角色：设计研究方案与专家任务书' },
-  { id: 'researcher', name: '专家研究', summary: '专家研究角色：按任务书独立取证，含反证' },
-  { id: 'synthesizer', name: '综合分析', summary: '综合分析角色：把独立判断整合为可决策的观点地图' },
+  { id: 'requirements', name: '需求分析', summary: '把原始诉求加工成可直接执行的需求：任务目标、涉及范围、验收标准三要素齐全、不含歧义。' },
+  { id: 'designer', name: '方案设计', summary: '把已确认的需求转化为可实施方案：拆解实施路径、明确关键取舍、指出风险与验证方式。' },
+  { id: 'dev', name: '开发', summary: '按任务目标、涉及范围和验收标准实现需求，并做必要的自测与实现相关测试。独立测试证明交由独立会话出具。' },
+  { id: 'review', name: '审核', summary: '对实现做规范与需求符合性、代码质量的双轴并行审查并给出明确结论。不实施修复、不写测试。' },
+  { id: 'test', name: '测试', summary: '对实现做运行态验证，用证据判定通过或失败。不修改业务代码、不做验收。' },
+  { id: 'evaluator', name: '评估', summary: '依据所在节点给出的评价契约对当前成果做独立评估，回答是否足够以及是否需要再来一轮。' },
+  { id: 'accept', name: '验收助手', summary: '在审核通过后对照验收标准做最终核验，产出验收报告并等待人工确认。' },
+  { id: 'closeout', name: '收口', summary: '验收通过后做合并前收口：先只读整理交付事实，再按已授权的必要动作完成交付。' },
+  { id: 'diagnose', name: '缺陷诊断', summary: '动手修复之前先还原现象、收集证据并收敛到根因，再交棒给开发角色去修。' },
+  { id: 'orchestrator', name: '探索统筹', summary: '为问题设计研究方案：明确核心问题、判断研究条件、选择互补视角并形成专家任务书。' },
+  { id: 'researcher', name: '专家研究', summary: '严格按专家任务书指定的视角独立研究，形成有证据、有反证、有边界的明确观点。' },
+  { id: 'synthesizer', name: '综合分析', summary: '把多份相互独立的专业判断整合成一张可支持决策的观点地图，不掩盖真实分歧。' },
 ]
 
 function loadManifest() {
@@ -48,6 +49,19 @@ test('manifest：12 个内置角色按规格 §8 精确顺序与文案', () => {
     assert.equal(got.id, want.id, `第 ${i} 位角色 id 漂移`)
     assert.equal(got.name, want.name, `${want.id} 中文名漂移`)
     assert.equal(got.summary, want.summary, `${want.id} 摘要漂移`)
+  }
+})
+
+// FEAT-103 V-2：简介是给用户读的「定位与职责」1~2 句，不是角色名标签、也不是提示词片段。
+test('manifest：一句话简介是 1~2 句定位与职责（非角色名标签、非提示词首句）', () => {
+  const m = loadManifest()
+  for (const r of m.builtins) {
+    const s = String(r.summary)
+    assert.ok(s.length <= 80, `${r.id} 简介过长（${s.length} > 80 字符，列表两行放不下）`)
+    assert.ok(/。$/.test(s), `${r.id} 简介必须以句号收尾（1~2 句）`)
+    assert.ok(s.split('。').filter(Boolean).length <= 2, `${r.id} 简介最多 2 句`)
+    assert.ok(!s.startsWith(r.name), `${r.id} 简介不再以角色名开头（行内已有角色名，重复即冗余）`)
+    assert.ok(!/^你是/.test(s) && !/Agent/.test(s), `${r.id} 简介不得是角色提示词原文（"你是…Agent"）`)
   }
 })
 

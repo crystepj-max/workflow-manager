@@ -79,17 +79,62 @@ test('list：内置在前、工作区自定义按 id 序居中、打包回退排
   const dp = r.roles[r.roles.length - 1]
   assert.equal(dp.builtin, false)
   assert.equal(dp.summary, '调度首行', '打包回退摘要取首个非空行')
-  // 内置摘要：无快照时从工作区文件正文计算（dev 有工作区文件）
-  assert.equal(r.roles.find((x) => x.id === 'dev').summary, '工作区旧 dev 摘要')
+  // 内置摘要：FEAT-103 V-2 起固定取清单的显式简介数据字段（正文首行是给 Agent 的角色
+  // 提示词，不再作为用户可见简介）；工作区同名文件只在写出前置块显式简介时覆盖它。
+  assert.equal(r.roles.find((x) => x.id === 'dev').summary, manifest.builtins.find((b) => b.id === 'dev').summary)
 })
 
-test('list：内置摘要优先取打包快照（与工作区旧文件脱钩）', async () => {
+test('list：内置摘要固定取清单字段，快照与工作区正文首行都不再冒充简介', async () => {
   const facts = {
     catalog: catalog({ workspace: [{ id: 'dev', content: '工作区旧摘要\n旧正文' }] }),
     builtinBodies: { dev: '打包快照首行\n\n正文' },
   }
   const r = await lib().execute({ operation: 'list', facts })
-  assert.equal(r.roles.find((x) => x.id === 'dev').summary, '打包快照首行')
+  assert.equal(r.roles.find((x) => x.id === 'dev').summary, manifest.builtins.find((b) => b.id === 'dev').summary, '快照与工作区正文首行都不再冒充简介')
+})
+
+// FEAT-102 V-2/V-3：一句话简介（选填）——文件顶部前置块的显式值优先于按正文生成的摘要，
+// 正文逐字保留（不写回、不覆盖）。
+test('list/get：前置块显式简介优先，正文逐字保留', async () => {
+  const withBlock = '---\nsummary: 检查一致性、可读性与操作连续性。\n---\n\n体验检查员职责正文\n第二行\n'
+  const facts = { catalog: catalog({ workspace: [{ id: 'my-role', content: withBlock }] }) }
+  const l = lib()
+  const listed = await l.execute({ operation: 'list', facts })
+  assert.equal(listed.roles.find((x) => x.id === 'my-role').summary, '检查一致性、可读性与操作连续性。')
+  const got = await l.execute({ operation: 'get', id: 'my-role', facts })
+  assert.equal(got.role.summary, '检查一致性、可读性与操作连续性。')
+  assert.equal(got.role.content, withBlock, '职责正文与前置块逐字保留，不被摘要覆盖')
+})
+
+// FEAT-103 V-2：内置角色的「一句话简介」是清单数据字段（给用户读的定位与职责），
+// 角色文件前置块里写了显式简介时以文件为准（与自定义角色同一口径），列表与详情同值。
+test('list/get：内置简介取清单字段；文件前置块的显式简介优先', async () => {
+  const l = lib()
+  const manifestSummary = manifest.builtins.find((b) => b.id === 'dev').summary
+  const blockBody = '---\nsummary: 写代码并把改动交给独立审核。\n---\n\n打包正文\n'
+  let r = await l.execute({ operation: 'list', facts: { catalog: catalog({ state: 'missing' }), builtinBodies: { dev: '打包正文\n' } } })
+  assert.equal(r.roles.find((x) => x.id === 'dev').summary, manifestSummary, '无前置块时列表展示清单简介，不截提示词首行')
+  r = await l.execute({ operation: 'list', facts: { catalog: catalog({ state: 'missing' }), builtinBodies: { dev: blockBody } } })
+  assert.equal(r.roles.find((x) => x.id === 'dev').summary, '写代码并把改动交给独立审核。', '前置块显式简介优先')
+  // 工作区里的同名内置角色文件写了前置块时，同样覆盖清单字段（FEAT-86 工作区覆盖语义）
+  r = await l.execute({ operation: 'list', facts: { catalog: catalog({ workspace: [{ id: 'dev', content: blockBody }] }) } })
+  assert.equal(r.roles.find((x) => x.id === 'dev').summary, '写代码并把改动交给独立审核。', '工作区同名文件的前置块同样优先于清单字段')
+  r = await l.execute({ operation: 'get', id: 'dev', facts: { catalog: catalog({ state: 'missing' }), builtinBodies: { dev: '打包正文\n' } } })
+  assert.equal(r.role.summary, manifestSummary, '详情与列表同一口径')
+  assert.equal(r.role.content, '打包正文\n', '正文逐字保留，不被简介改写')
+})
+
+test('list：无前置块时摘要口径不变（向后兼容）；残缺块不误判', async () => {
+  const l = lib()
+  // 无前置块：仍取首个有意义行
+  let r = await l.execute({ operation: 'list', facts: { catalog: catalog({ workspace: [{ id: 'plain', content: '# 标题\n首行简介\n正文' }] }) } })
+  assert.equal(r.roles.find((x) => x.id === 'plain').summary, '首行简介')
+  // 前置块里没有 summary 键：回落到正文摘要，不返回空
+  r = await l.execute({ operation: 'list', facts: { catalog: catalog({ workspace: [{ id: 'noKey', content: '---\nname: x\n---\n正文首行\n' }] }) } })
+  assert.equal(r.roles.find((x) => x.id === 'noKey').summary, '正文首行')
+  // 只有起始 --- 没有收尾（不是前置块）：不当作显式简介，仍按既有正文口径取首个有意义行
+  r = await l.execute({ operation: 'list', facts: { catalog: catalog({ workspace: [{ id: 'unclosed', content: '---\nsummary: 不算数\n正文\n' }] }) } })
+  assert.equal(r.roles.find((x) => x.id === 'unclosed').summary, '正文')
 })
 
 // ── get ──────────────────────────────────────────────────────────────────

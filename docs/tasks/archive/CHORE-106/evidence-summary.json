@@ -1,0 +1,26 @@
+{
+  "task_id": "CHORE-106",
+  "run_id": "chore-106-r1",
+  "task_name": "收口交付动作 close-task 实现：合并后关闭远端 issue 并落账",
+  "status": "等待验收",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": "2026-09-19T02:31:49.130Z",
+      "produced_by": "WorkBuddy（克里斯）",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/chore-106-r1",
+    "file_count": 3,
+    "total_bytes": 5175
+  },
+  "generated_at": "2026-09-19T02:46:07.322Z"
+}

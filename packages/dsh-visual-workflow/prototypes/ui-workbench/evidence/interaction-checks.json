@@ -1,0 +1,207 @@
+{
+  "date": "2026-09-15",
+  "scope": "一次性 UI 原型；浏览器模拟交互，不是正式产品验收",
+  "viewports": [
+    {
+      "width": 1280,
+      "height": 720
+    },
+    {
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "checks": [
+    {
+      "name": "配置独立滚动",
+      "pass": true,
+      "observed": {
+        "before": {
+          "canvas": {
+            "bottom": 642,
+            "height": 487.90625,
+            "left": 208,
+            "right": 966,
+            "top": 154.09375,
+            "width": 758,
+            "x": 208,
+            "y": 154.09375
+          },
+          "inspectorScroll": 0,
+          "pageScroll": 0
+        },
+        "after": {
+          "canvas": {
+            "bottom": 642,
+            "height": 487.90625,
+            "left": 208,
+            "right": 966,
+            "top": 154.09375,
+            "width": 758,
+            "x": 208,
+            "y": 154.09375
+          },
+          "inspectorScroll": 503,
+          "pageScroll": 0,
+          "saveState": "未保存"
+        }
+      }
+    },
+    {
+      "name": "方向切换保留编辑",
+      "pass": true,
+      "observed": "审查报告、修改建议与对应依据"
+    },
+    {
+      "name": "输入框方向键不切换设计",
+      "pass": true,
+      "observed": "http://127.0.0.1:4178/settings/workflow-visual?variant=A&theme=dark&view=editor"
+    },
+    {
+      "name": "撤销恢复内容",
+      "pass": true,
+      "observed": "审查报告与待修改事项"
+    },
+    {
+      "name": "保存草稿",
+      "pass": true,
+      "observed": "草稿已保存"
+    },
+    {
+      "name": "退回意见必填",
+      "pass": true,
+      "observed": "请先写明需要修改的问题，协作者才能继续。"
+    },
+    {
+      "name": "退回后进入实现任务",
+      "pass": true,
+      "observed": "步骤 02\n实现任务\n\n按已确认要求完成开发"
+    },
+    {
+      "name": "异常说明和恢复",
+      "pass": true,
+      "observed": {
+        "blocked": " 测试环境尚未就绪，效果验证暂时无法继续。\n先恢复环境，再继续验证\n\n已完成的实现和审查记录仍然保留。请确认测试服务可以打开，再继续当前步骤。\n\n任务要求与当前成果已保留\n审查已完成，无须重新开始\n等待测试环境可用\n演示操作：点击下方「环境已就绪，继续」，查看恢复后的页面。",
+        "paused": "当前进度 · 示例运行\n已暂停，可以稍后继续\n\n实际运行已通过审查的成果，验证主要操作、边界情况和受影响的原有功能。记录可复查的证据。\n\n任务停在这里，已有成果保留\n结果就绪后会在这里显示\n已暂停\n点击顶部「继续运行」恢复本页演示。"
+      }
+    },
+    {
+      "name": "有条件通过后进入交付",
+      "pass": true,
+      "observed": "步骤 06\n完成交付\n\n整理交付记录和后续事项"
+    },
+    {
+      "name": "小屏流程和配置切换",
+      "pass": true,
+      "observed": {
+        "mobileCanvas": true,
+        "selectedMobile": "4/6 · 验证效果\n选择步骤\n看流程"
+      }
+    },
+    {
+      "name": "搜索空态及清除",
+      "pass": true,
+      "observed": {
+        "emptyLibrary": "没有找到这个流程\n\n换一个关键词，或从现有流程开始创建。\n\n清除搜索",
+        "libraryCount": 4
+      }
+    },
+    {
+      "name": "复制真实诊断模板",
+      "pass": true,
+      "observed": {
+        "newTitle": "诊断与修复 · 副本",
+        "importedCount": 5
+      }
+    },
+    {
+      "name": "对话框关闭后焦点恢复",
+      "pass": true,
+      "observed": {
+        "action": "design",
+        "modalOpen": false
+      }
+    },
+    {
+      "name": "键盘焦点未被底栏遮挡",
+      "pass": true,
+      "observed": {
+        "label": "上一步",
+        "rect": {
+          "bottom": 812,
+          "height": 36,
+          "left": 1119,
+          "right": 1208,
+          "top": 776,
+          "width": 89,
+          "x": 1119,
+          "y": 776
+        },
+        "switcherTop": 822
+      }
+    },
+    {
+      "name": "自定义角色可编辑并用于步骤",
+      "pass": true,
+      "observed": "自定义\n体验检查员\n\n检查长表单、主题切换与验收操作是否清楚易用。\n\n查看职责"
+    },
+    {
+      "name": "C 分类选中态一致",
+      "pass": true,
+      "observed": "结果与下一步\n\n完成了去哪里，需要修改找谁。"
+    },
+    {
+      "name": "技术详情按需展开",
+      "pass": true
+    }
+  ],
+  "wideScreenGeometry": {
+    "canvas": {
+      "bottom": 777,
+      "height": 521.171875,
+      "left": 234,
+      "right": 1100,
+      "top": 255.828125,
+      "width": 866,
+      "x": 234,
+      "y": 255.828125
+    },
+    "height": 900,
+    "lastNode": {
+      "bottom": 697.53125,
+      "height": 118.84375,
+      "left": 315.40625,
+      "right": 515.453125,
+      "top": 578.6875,
+      "width": 200.046875,
+      "x": 315.40625,
+      "y": 578.6875
+    },
+    "main": {
+      "bottom": 822,
+      "height": 636,
+      "left": 66,
+      "right": 1440,
+      "top": 186,
+      "width": 1374,
+      "x": 66,
+      "y": 186
+    },
+    "pageWidth": 1440,
+    "switcher": {
+      "bottom": 900,
+      "height": 78,
+      "left": 0,
+      "right": 1440,
+      "top": 822,
+      "width": 1440,
+      "x": 0,
+      "y": 822
+    },
+    "width": 1440
+  }
+}

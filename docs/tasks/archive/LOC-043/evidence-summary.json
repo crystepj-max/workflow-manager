@@ -1,0 +1,42 @@
+{
+  "task_id": "LOC-043",
+  "run_id": "loc-043-r1",
+  "task_name": "WR-020 提供按 Run、节点和尝试关联的质量成本记录",
+  "branch": "dev-loc-043-r1",
+  "status": "等待验收",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "stages": [
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": null,
+      "produced_by": null
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a1.json",
+      "created_at": null,
+      "produced_by": null
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a1.json",
+      "created_at": null,
+      "produced_by": null
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a1.json",
+      "created_at": null,
+      "produced_by": null
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-043-r1",
+    "file_count": 15,
+    "total_bytes": 14103
+  },
+  "generated_at": "2026-09-17T14:05:15.892Z"
+}

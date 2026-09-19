@@ -834,11 +834,14 @@ test('内置角色详情：打包快照优先于工作区旧版同名文件（#1
     const d = await call(handlers, 'vwf.roles.get', { id: 'dev' })
     assert.equal(d.ok, true)
     assert.equal(d.role.content, '打包快照 dev 正文\n', '内置角色详情应优先取打包快照（与运行时 roleRef 同源）')
-    assert.equal(d.role.summary, '打包快照 dev 正文', '摘要与展示内容同源')
-    // 角色列表（vwf.roles）内置摘要同样本快照优先——旧版工作区文件不再以旧版摘要出现
+    // FEAT-103 V-2：内置角色的「一句话简介」取自清单的显式简介数据字段，不再拿正文首行冒充
+    const manifest = JSON.parse(ROLE_CORE_SEED[REPO + '/dsh/roles/builtin-roles.json'])
+    const devSummary = manifest.builtins.find((b) => b.id === 'dev').summary
+    assert.equal(d.role.summary, devSummary, '内置简介取清单字段（正文是给 Agent 的提示词，不截首行）')
+    // 角色列表（vwf.roles）内置摘要同一口径——旧版工作区文件不再以旧版摘要出现
     const r = await call(handlers, 'vwf.roles')
     const devInList = r.roles.find(x => x.id === 'dev')
-    assert.equal(devInList.summary, '打包快照 dev 正文', '角色列表内置摘要同取打包快照（#129 遗留项 1）')
+    assert.equal(devInList.summary, devSummary, '角色列表与详情同口径（#129 遗留项 1：与执行正文同源）')
   } finally {
     delete globalThis.__VWF_REPO_ROOT__
   }
