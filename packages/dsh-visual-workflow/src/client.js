@@ -548,6 +548,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 
     const h = React.createElement
 
+    // ── 通用渲染片段（FEAT-84/85/86/100~103 六批各自书写同类结构后归并）──
+    // DOM 标签、class 与属性对象形状逐字不变；style / key 未传时与原来直接不写
+    // 该项等价（React 对 undefined 的 style / key 视同缺省）。
+    const mutedDiv = (x, st, key) => h('div', { className: 'vwf-muted-sm', style: st, key: key }, x)
+    const mutedSpan = (x) => h('span', { className: 'vwf-muted-sm' }, x)
+    const mutedSmall = (x) => h('small', { className: 'vwf-muted-sm' }, x)
+    const mutedTd = (x, st) => h('td', { className: 'vwf-muted-sm', style: st }, x)
+    const mutedText = (x, st) => h('div', { className: 'vwf-muted', style: st }, x)
+    const secDiv = (x, st, key) => h('div', { className: 'vwf-sec', style: st, key: key }, x)
+    const warnNote = (x, st, key) => h('div', { className: 'vwf-note warn', style: st, key: key }, x)
+    const errLine = (x) => h('div', { className: 'vwf-err-line' }, x)
+    const okLine = (x) => h('div', { className: 'vwf-ok-line' }, x)
+    const emptyDiv = (x, st) => h('div', { className: 'vwf-empty', style: st }, x)
+
     // ── 图常量（对应 workflowGraph.ts）──────────────────────────────────────
     // 画布为自上而下布局（V-12）：NODE_W / NODE_H 是节点在屏幕上的宽高，
     // 下面的分层算法在「流向轴 = x」的抽象空间里计算（x = 步骤序号方向，y = 同级并排方向），
@@ -959,7 +973,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           props.required ? h('span', { className: 'req' }, '*') : null
         ),
         props.children,
-        errs.map((m, i) => h('div', { key: i, className: 'vwf-err-line' }, m))
+        errs.map((m, i) => errLine(m, null, i))
       )
     }
 
@@ -1450,7 +1464,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               onChange: (v) => updateEntry(path, path, v),
             }),
             props.readOnly ? null : h('button', { className: 'vwf-btn sm danger', type: 'button', onClick: () => removeEntry(path) }, t('removeArtifact'))
-          )) : h('div', { className: 'vwf-muted-sm' }, '—'),
+          )) : mutedDiv('—'),
           props.readOnly ? null : h('button', { className: 'vwf-btn sm', type: 'button', style: { marginTop: 6 }, onClick: addEntry }, t('addArtifact'))
         )
       )
@@ -1495,7 +1509,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const lay = React.useMemo(() => {
         try { return layoutGraph(dsl, visibleTerminals) } catch (e) { return null }
       }, [JSON.stringify({ entry: dsl.entry || '', n: (dsl.nodes || []).map(n => n.id), e: (dsl.edges || []).map(e => [e.from, e.to, e.on, e.outcome, e.countRound]), v: visibleTerminals })])
-      if (!lay) return h('div', { className: 'vwf-wb-steps-body' }, h('div', { className: 'vwf-muted-sm' }, '—'))
+      if (!lay) return h('div', { className: 'vwf-wb-steps-body' }, mutedDiv('—'))
       const seqLabels = lay.seqLabels || {}
       const rankOf = (id) => (lay.rank && lay.rank[id] != null ? lay.rank[id] : null)
       // 汇总 = 直接接收扇出节点出边的节点（扇出完成后汇聚到它）
@@ -1529,7 +1543,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             node.profile ? h('span', { className: 'vwf-wb-step-role' }, node.profile) : null
           )
         }),
-        !ids.length ? h('div', { className: 'vwf-muted-sm' }, t('wbNoSteps')) : null
+        !ids.length ? mutedDiv(t('wbNoSteps')) : null
       )
     }
 
@@ -1570,7 +1584,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         })
       })
       return h('div', { className: 'vwf-wb-conn-body' },
-        !edges.length ? h('div', { className: 'vwf-muted-sm' }, t('wbConnEmpty')) : null,
+        !edges.length ? mutedDiv(t('wbConnEmpty')) : null,
         groups.map(g => {
           const list = rows.filter(r => r.cls === g.cls)
           if (!list.length) return null
@@ -1598,8 +1612,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           )
         }),
         missing.length
-          ? h('div', { className: 'vwf-err-line', style: { marginTop: 8 } },
-              t('wbConnMissingEdges') + missing.map(m => m.label + ' · ' + m.value).join('、'))
+          ? errLine(t('wbConnMissingEdges') + missing.map(m => m.label + ' · ' + m.value).join('、'), { marginTop: 8 })
           : null,
         h('div', { className: 'vwf-wb-legend' },
           h('div', { className: 'vwf-wb-legend-line' },
@@ -1810,8 +1823,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           }, '✨')
         ),
         schemaError
-          ? h('div', { className: 'vwf-err-line' }, schemaError)
-          : (schemaNotice ? h('div', { className: 'vwf-ok-line' }, schemaNotice) : null)
+          ? errLine(schemaError)
+          : (schemaNotice ? okLine(schemaNotice) : null)
       )
 
       const commitNodeId = (value) => {
@@ -1904,7 +1917,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h('span', { className: 'vwf-wb-outcome-to' }, cond)
             )
           })
-          : h('div', { className: 'vwf-muted-sm' }, t('wbOutgoingNone'))
+          : mutedDiv(t('wbOutgoingNone'))
       )
 
       const basicSection = h(React.Fragment, null,
@@ -1927,7 +1940,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const outcomeSection = h(React.Fragment, null,
         isFanout ? h('div', null,
           h('div', { style: { fontSize: 13, fontWeight: 500, marginTop: 10 } }, t('wbFanoutGroup')),
-          h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('wbFanoutGroupHelp')),
+          mutedDiv(t('wbFanoutGroupHelp'), { marginTop: 2 }),
           h(Field, { label: t('fanoutFailOn'), required: true, help: t('fanoutFailOnHelp'), errors: errorsFor('failOn') },
             h(VwfSelect, {
               value: failOnMode,
@@ -1947,10 +1960,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             }) : null
           ),
           // 扇出未完成不得冒充汇总完成（§9）：把汇总语义写在业务侧，不只在运行页体现
-          h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('wbFanoutSummaryWait'))
+          mutedDiv(t('wbFanoutSummaryWait'), { marginTop: 4 })
         ) : h('div', null,
           h('div', { style: { fontSize: 13, fontWeight: 500, marginTop: 10 } }, t('resultMode')),
-          h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('resultModeDescription')),
+          mutedDiv(t('resultModeDescription'), { marginTop: 2 }),
           h('div', { className: 'vwf-field' },
             h(VwfSelect, {
               value: resultMode,
@@ -2058,13 +2071,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               })
             ),
             // 该字段的作用用可见文字说明（不只放在 ? tooltip 里）
-            h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('routingFieldNameHint')),
+            mutedDiv(t('routingFieldNameHint'), { marginTop: 2 }),
             // 候选：schema 中已有的可穷举字段（R6/E2）
             h('datalist', { id: 'vwf-routing-candidates' },
               routingCandidateList.map((c) => h('option', { key: c, value: c }))
             ),
             !routingName
-              ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('routingNeedFieldName'))
+              ? mutedDiv(t('routingNeedFieldName'), { marginTop: 6 })
               : h('div', { className: 'vwf-field', style: { marginTop: 6 } },
                 h('div', { className: 'vwf-field-label' }, t('routingValues'), h('span', { className: 'req' }, '*'),
                   h('span', { className: 'vwf-help', title: t('routingValuesHelp') }, '?')),
@@ -2118,18 +2131,18 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 }, '＋ ' + t('routingAddValue')),
                 // E3/E4：不可穷举或 boolean 型路由字段
                 !routingEnumerable && routingValuesDraft.filter((v) => String(v).trim()).length === 0
-                  ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('routingValuesEmpty'))
+                  ? mutedDiv(t('routingValuesEmpty'), { marginTop: 4 })
                   : null,
                 routingIsBoolean
-                  ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('routingBooleanUnsupported'))
+                  ? mutedDiv(t('routingBooleanUnsupported'), { marginTop: 4 })
                   : (!routingEnumerable && routingValuesDraft.filter((v) => String(v).trim()).length > 0
-                    ? h('div', { className: 'vwf-err-line' }, t('routingNotEnumerable'))
+                    ? errLine(t('routingNotEnumerable'))
                     : null),
                 // F4：反向告警——图中存在未声明的 outcome 取值
                 routingStatus.undeclared.length
-                  ? h('div', { className: 'vwf-err-line' }, t('routingUndeclaredEdges') + routingStatus.undeclared.map((x) => x.value + ' → ' + x.to).join('、'))
+                  ? errLine(t('routingUndeclaredEdges') + routingStatus.undeclared.map((x) => x.value + ' → ' + x.to).join('、'))
                   : null,
-                routingNotice ? h('div', { className: 'vwf-err-line' }, routingNotice) : null
+                routingNotice ? errLine(routingNotice) : null
               )
           ) : null
         ),
@@ -2138,7 +2151,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       )
 
       const advancedSection = h(React.Fragment, null,
-        h('div', { className: 'vwf-muted-sm', style: { marginTop: 10, marginBottom: 2 } }, t('wbAdvancedHelp')),
+        mutedDiv(t('wbAdvancedHelp'), { marginTop: 10, marginBottom: 2 }),
         h(Field, { label: t('nodeKind'), required: true, errors: errorsFor('kind') },
           h(VwfSelect, {
             value: isFanout ? 'fanout' : 'worker',
@@ -2190,7 +2203,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               })
             : h('input', { className: 'vwf-input', value: curModel, placeholder: 'deepseek-v4-flash', ...roDis, onChange: (ev) => { if (!ro) props.onUpdate(node.id, { model: { provider: curProv || undefined, model: ev.target.value || undefined } }) } })
         ),
-        h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('wbModelScopeNote')),
+        mutedDiv(t('wbModelScopeNote'), { marginTop: 2 }),
         isFanout
           ? schemaField({ label: t('outputSchema'), help: t('perItemSchemaHelp') })
           : h('div', null,
@@ -2297,7 +2310,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           t('edgeCountRound'),
           h('span', { className: 'vwf-help', title: t('edgeCountRoundHelp') }, '?')
         ) : null,
-        kind === 'technical' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('edgeTechnicalHelp')) : null,
+        kind === 'technical' ? mutedDiv(t('edgeTechnicalHelp'), { marginTop: 6 }) : null,
         h(Field, { label: t('edgeTarget'), required: true, errors: errorsFor('to') },
           h(VwfSelect, {
             value: edge.to,
@@ -2606,7 +2619,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           ? h('div', null,
               // FEAT-101 V-4：详情展示一句话简介；缺失时由职责生成展示（roleSummaryOf），不写回角色原文
               h('div', { className: 'vwf-role-summary', title: roleSummaryOf(current) }, roleSummaryOf(current)),
-              h('div', { className: 'vwf-muted-sm' }, t('roleViewBuiltin')),
+              mutedDiv(t('roleViewBuiltin')),
               h('div', { className: 'vwf-role-section-title' }, h('span', null, t('roleContent'))),
               // 独立滚动区 + 键盘可进入：完整职责再长也不撑高列表或弹层
               h('div', { className: 'vwf-role-content', tabIndex: 0 }, current.content || '')
@@ -2620,7 +2633,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       } else {
         const editingCustom = !!(current && current.builtin === false)
         body = h('div', null,
-          editingCustom ? h('div', { className: 'vwf-muted-sm' }, fmt(t('roleFromSource'), { src: current.id })) : null,
+          editingCustom ? mutedDiv(fmt(t('roleFromSource'), { src: current.id })) : null,
           h('div', { className: 'vwf-field' },
             h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-name' }, t('roleName'), h('span', { className: 'req' }, '*')),
             h('input', {
@@ -2644,7 +2657,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               className: 'vwf-input', value: draftSummary, placeholder: t('roleSummaryPlaceholder'),
               onChange: (ev) => setDraftSummary(ev.target.value),
             }),
-            h('div', { className: 'vwf-muted-sm' }, t('roleSummaryHelp'))
+            mutedDiv(t('roleSummaryHelp'))
           ),
           h('div', { className: 'vwf-field' },
             h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-content' }, t('roleContent'), h(HelpDot, { text: t('roleContentHelp') }), h('span', { className: 'req' }, '*')),
@@ -2681,7 +2694,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h('div', { className: 'vwf-dialog-title' }, t('roleBlockedTitle')),
               h('div', { className: 'vwf-dialog-desc' }, fmt(t('roleDeleteBlocked'), { name: confirm.role.id, n: usage.count })),
               (usage.refs || []).length ? h('div', null,
-                h('div', { className: 'vwf-muted-sm', style: { marginBottom: 4 } }, t('roleRefs')),
+                mutedDiv(t('roleRefs'), { marginBottom: 4 }),
                 h('div', { className: 'vwf-role-refs', tabIndex: 0 },
                   usage.refs.map((w, wi) => h('div', { key: 'wf' + wi, className: 'vwf-role-ref-line' },
                     (w.workflowName || w.workflowId) + (w.builtin ? '（' + t('builtinRoleBadge') + '）' : '') + '：' +
@@ -2719,7 +2732,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           ? h('div', { className: 'vwf-row', style: { gap: 10, alignItems: 'flex-start' } },
               h('div', { style: { minWidth: 0, flex: 1 } },
                 h('div', { className: 'vwf-card-title' }, t('roleManager')),
-                h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('roleMgmtHint'))
+                mutedDiv(t('roleMgmtHint'), { marginTop: 2 })
               ),
               h('div', { className: 'vwf-row', style: { gap: 6 } },
                 h('button', {
@@ -3263,7 +3276,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                       onChange: (ev) => { if (!readOnlyStructure) syncWorkflow({ ...wf, id: ev.target.value }) },
                     })
                   ),
-                  h('div', { className: 'vwf-muted-sm', style: { marginTop: 2 } }, t('subtitle'))
+                  mutedDiv(t('subtitle'), { marginTop: 2 })
                 ),
                 h('div', { className: 'vwf-row', style: { gap: 6, alignItems: 'center' } },
                   h('div', { className: 'vwf-history-group' },
@@ -3349,7 +3362,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   })
                 : h('div', { style: { padding: 12, borderTop: '1px solid var(--vwf-border)' } },
                     h('textarea', { className: 'vwf-textarea vwf-json-edit', value: jsonDraft, spellCheck: false, onChange: (ev) => onJsonChange(ev.target.value) }),
-                    jsonError ? h('div', { className: 'vwf-err-line' }, jsonError) : null
+                    jsonError ? errLine(jsonError) : null
                   )
             ),
             h('div', { className: 'vwf-status ' + (liveErrors.length ? 'err' : 'ok'), style: { marginTop: 6 } },
@@ -3370,7 +3383,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               onUpdate: updateNode, onAddOutcomeEdge: addOutcomeEdge,
             }) : null,
             selectedEdge ? h(EdgeInspector, { edge: selectedEdge, index: selectedEdgeIndex, dsl: wf, fieldErrors, readOnlyStructure, onUpdate: updateEdge, onDelete: deleteSelectedEdge }) : null,
-            !selectedNode && !selectedEdge ? h('div', { className: 'vwf-empty', style: { marginTop: 10 } }, t('selectHint')) : null
+            !selectedNode && !selectedEdge ? emptyDiv(t('selectHint'), { marginTop: 10 }) : null
           )
         ),
       )
@@ -3794,12 +3807,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       return h('div', { className: 'vwf-root' },
         activeCount >= 2 ? h('div', { className: 'vwf-code', style: { borderColor: STATUS_COLOR.human, marginBottom: 8 } },
           t('dashParallel', { n: activeCount })) : null,
-        listErr ? h('div', { className: 'vwf-err-line' }, t('dashIntegrityFailed', { err: listErr })) : null,
+        listErr ? errLine(t('dashIntegrityFailed', { err: listErr })) : null,
         h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
           h('div', { className: 'vwf-card-head' },
             h('div', { className: 'vwf-card-title' }, t('dashRunList')),
             h('div', { className: 'vwf-row', style: { gap: 8 } },
-              h('span', { className: 'vwf-muted-sm' }, t('dashTaskCount', { n: visible.length })),
+              mutedSpan(t('dashTaskCount', { n: visible.length })),
               h('label', { className: 'vwf-row', style: { fontSize: 11 } },
                 h('input', { type: 'checkbox', checked: auto, onChange: (ev) => setAuto(ev.target.checked) }),
                 ' ' + t('dashAutoPoll')
@@ -3808,7 +3821,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           ),
           h('div', { className: 'vwf-filters' },
             h('label', { className: 'vwf-filter' },
-              h('span', { className: 'vwf-muted-sm' }, t('dashWsFilterLabel')),
+              mutedSpan(t('dashWsFilterLabel')),
               h('select', { className: 'vwf-input', value: wsFilter, onChange: (ev) => setWsFilter(ev.target.value) },
                 [h('option', { key: 'all', value: 'all' }, t('dashWsAll', { n: wsOptions.length }))]
                   .concat(wsOptions.map((o) => h('option', { key: o.id, value: o.id }, o.label)))
@@ -3816,20 +3829,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               )
             ),
             h('label', { className: 'vwf-filter' },
-              h('span', { className: 'vwf-muted-sm' }, t('dashStatus')),
+              mutedSpan(t('dashStatus')),
               h('select', { className: 'vwf-input', value: bucketFilter, onChange: (ev) => setBucketFilter(ev.target.value) },
                 [['all', t('dashFilterAll')], ['attention', t('dashFilterAttention')], ['running', t('dashFilterRunning')], ['done', t('dashFilterDone')], ['ended', t('dashFilterEnded')]]
                   .map(([v, l]) => h('option', { key: v, value: v }, l))
               )
             ),
             h('label', { className: 'vwf-filter' },
-              h('span', { className: 'vwf-muted-sm' }, t('dashResultFilterLabel')),
+              mutedSpan(t('dashResultFilterLabel')),
               h('select', { className: 'vwf-input', value: resultFilter, onChange: (ev) => setResultFilter(ev.target.value) },
                 [h('option', { key: 'all', value: 'all' }, t('dashResultAll'))].concat(resultOptions.map((o) => h('option', { key: o, value: o }, o)))
               )
             ),
             h('label', { className: 'vwf-filter' },
-              h('span', { className: 'vwf-muted-sm' }, t('dashCompletionFilterLabel')),
+              mutedSpan(t('dashCompletionFilterLabel')),
               h('select', { className: 'vwf-input', value: completionFilter, onChange: (ev) => setCompletionFilter(ev.target.value) },
                 [h('option', { key: 'all', value: 'all' }, t('dashCompletionAll'))]
                   .concat(completionOptions.map((o) => h('option', { key: o, value: o }, displayWord(o))))
@@ -3838,14 +3851,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             )
           ),
           h('div', { className: 'vwf-run-list', ref: listScrollRef },
-            pageModels.length ? groupTaskRows(pageModels, openDetail, gateIdx) : h('div', { className: 'vwf-empty' }, t('dashNoMatch'))
+            pageModels.length ? groupTaskRows(pageModels, openDetail, gateIdx) : emptyDiv(t('dashNoMatch'))
           ),
-          h('div', { className: 'vwf-muted-sm', style: { padding: '6px 14px 0' } }, t('dashSupersededFolded')),
+          mutedDiv(t('dashSupersededFolded'), { padding: '6px 14px 0' }),
           h('div', { className: 'vwf-row', style: { marginTop: 8, padding: '0 14px 12px', flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
-            h('span', { className: 'vwf-muted-sm' }, t('dashPage', { page: safePage + 1, total: totalPages, n: visible.length })),
+            mutedSpan(t('dashPage', { page: safePage + 1, total: totalPages, n: visible.length })),
             h('button', { className: 'vwf-btn sm', disabled: safePage === 0, onClick: () => setPage((p) => Math.max(0, p - 1)) }, t('dashPrev')),
             h('button', { className: 'vwf-btn sm', disabled: safePage >= totalPages - 1, onClick: () => setPage((p) => Math.min(totalPages - 1, p + 1)) }, t('dashNext')),
-            h('span', { className: 'vwf-muted-sm' }, t('dashPerPage')),
+            mutedSpan(t('dashPerPage')),
             h('select', { className: 'vwf-input', style: { width: 70 }, value: pageSize, onChange: (ev) => setPageSize(Number(ev.target.value)) },
               [10, 20, 50, 100].map((n) => h('option', { key: n, value: n }, String(n)))
             )
@@ -3853,8 +3866,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         ),
         h('div', { className: 'vwf-card', style: { marginBottom: 8, padding: '10px 14px' } },
           h('div', { className: 'vwf-card-title' }, t('runMode')),
-          h('div', { className: 'vwf-muted', style: { marginTop: 4 } }, t('runModePrimary')),
-          h('div', { className: 'vwf-muted', style: { marginTop: 2 } }, t('runModeEnhanced'))
+          mutedText(t('runModePrimary'), { marginTop: 4 }),
+          mutedText(t('runModeEnhanced'), { marginTop: 2 })
         ),
         h('div', { className: 'vwf-row' },
           h('input', { className: 'vwf-input', style: { flex: 1 }, placeholder: t('dashRunIdPlaceholder'), value: runId, onChange: (ev) => setRunId(ev.target.value) }),
@@ -3930,10 +3943,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('small', null, m.task.segmentCount > 1 ? t('dashSegment', { n: (m.head.segment || m.task.segmentCount), total: m.task.segmentCount }) + ' · ' : '')
           ),
           h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
-            h('small', { className: 'vwf-muted-sm' }, t('dashUpdatedAt', { at: fmtAt(m.updatedAt) })),
-            h('small', { className: 'vwf-muted-sm' }, m.completionType ? displayWord(m.completionType) : '')
+            mutedSmall(t('dashUpdatedAt', { at: fmtAt(m.updatedAt) })),
+            mutedSmall(m.completionType ? displayWord(m.completionType) : '')
           ),
-          m.wsError ? h('small', { className: 'vwf-muted-sm' }, t('dashIntegrityLabel') + '：' + m.wsError) : null
+          m.wsError ? mutedSmall(t('dashIntegrityLabel') + '：' + m.wsError) : null
           )
         })
       ))
@@ -4229,7 +4242,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               + ' · ' + fmtAt(head.startedAt || (lr && lr.created_at)))
           ),
           h('span', { className: 'vwf-spacer' }),
-          h('span', { className: 'vwf-muted-sm' }, t('dashListRestored')),
+          mutedSpan(t('dashListRestored')),
           !terminal && lstate === 'RUNNING' ? h('button', { className: 'vwf-btn sm', onClick: () => sendControl('pause') }, t('rdControlPause')) : null,
           h('button', { className: 'vwf-btn sm', onClick: reload }, t('refresh')),
           h('button', { className: 'vwf-btn sm', onClick: props.onBack }, t('close'))
@@ -4242,16 +4255,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         h('div', { className: 'vwf-editor-body' },
         h('div', { className: 'vwf-rd-scroll' },
         h('div', { className: 'vwf-root' },
-        lrError ? h('div', { className: 'vwf-err-line' }, t('dashIntegrityFailed', { err: lrError })) : null,
+        lrError ? errLine(t('dashIntegrityFailed', { err: lrError })) : null,
         // B8（FIX-107）：降级说明读用户语言的文案，并保留就地重试入口——
         // 重试即重取逻辑运行摘要与记录（reload → wsTick），不新增 RPC、不改读取口径。
-        recErr ? h('div', { className: 'vwf-note warn' },
-          h('div', { className: 'vwf-row', style: { gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+        recErr ? warnNote(h('div', { className: 'vwf-row', style: { gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
             h('span', null, t('rdRecordsUnavailable')),
             h('button', { className: 'vwf-btn sm', onClick: reload }, t('rdRecordsRetry'))
-          )
-        ) : null,
-        controlErr ? h('div', { className: 'vwf-err-line' }, controlErr) : null,
+          )) : null,
+        controlErr ? errLine(controlErr) : null,
         h('div', { className: 'vwf-rd-main' },
           // 左栏：运行定位（工作空间 / 模板 / 当前阶段 / 状态）+ 节点目录（只用于定位）
           h('div', { className: 'vwf-rd-side' },
@@ -4265,23 +4276,23 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   onClick: () => setLocDetail(!locDetail),
                 }, locDetail ? t('rdCollapse') : t('rdDetail'))
               ),
-              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdWorkspaceLabel', { ws: (lr && lr.workspace && workspaceLabelOf(lr.workspace)) || '—' }))),
-              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdTemplateLabel') + '：' + (head.name || head.workflowId || '—'))),
-              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('dashPhaseLabel', { phase: snapState ? (snapState.phase || '—') : '—' }))),
-              h('div', { className: 'vwf-rd-kv vwf-row', style: { gap: 6 } }, h('span', { className: 'vwf-muted-sm' }, t('rdLifecycleLabel')), tierBadgeOf(lr && lr.lifecycle ? lr.lifecycle.state : '')),
-              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdCompletionLabel') + '：' + (lr && lr.completion && lr.completion.type ? displayWord(lr.completion.type) : t('dashCompletionNone')))),
-              h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('rdReworkLabel') + '：' + (lr ? (reworkCountOf(lr) > 0 ? t('dashReworkCount', { n: reworkCountOf(lr) }) : t('dashFirstRun')) : '—'))),
+              h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('rdWorkspaceLabel', { ws: (lr && lr.workspace && workspaceLabelOf(lr.workspace)) || '—' }))),
+              h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('rdTemplateLabel') + '：' + (head.name || head.workflowId || '—'))),
+              h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('dashPhaseLabel', { phase: snapState ? (snapState.phase || '—') : '—' }))),
+              h('div', { className: 'vwf-rd-kv vwf-row', style: { gap: 6 } }, mutedSpan(t('rdLifecycleLabel')), tierBadgeOf(lr && lr.lifecycle ? lr.lifecycle.state : '')),
+              h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('rdCompletionLabel') + '：' + (lr && lr.completion && lr.completion.type ? displayWord(lr.completion.type) : t('dashCompletionNone')))),
+              h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('rdReworkLabel') + '：' + (lr ? (reworkCountOf(lr) > 0 ? t('dashReworkCount', { n: reworkCountOf(lr) }) : t('dashFirstRun')) : '—'))),
               // 读取失败不藏进「详细」：定位本身已不可信，必须默认可见并给出重试
               lrError ? h('div', { key: 'wse' },
-                h('div', { className: 'vwf-note warn' }, t('rdWsReadFailed', { err: lrError })),
+                warnNote(t('rdWsReadFailed', { err: lrError })),
                 h('div', { className: 'vwf-row' },
                   h('button', { className: 'vwf-btn sm', onClick: () => { setWsTick((n) => n + 1) } }, t('rdWsRetry')),
-                  h('span', { className: 'vwf-muted-sm' }, t('rdWsStaleNote'))
+                  mutedSpan(t('rdWsStaleNote'))
                 )
               ) : null,
               locDetail ? h('div', { 'data-vwf-locator-detail': '' },
-                h('div', { className: 'vwf-rd-kv' }, h('span', { className: 'vwf-muted-sm' }, t('dashTaskIdLabel', { taskId: head.taskId || '—' }))),
-                h('div', { className: 'vwf-sec', style: { marginTop: 6 } }, t('rdWsPanel')),
+                h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('dashTaskIdLabel', { taskId: head.taskId || '—' }))),
+                secDiv(t('rdWsPanel'), { marginTop: 6 }),
                 workspaceFields()
               ) : null
             ),
@@ -4304,22 +4315,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                     n.id === phaseNodeId ? h('span', { className: 'vwf-badge accent' }, t('rdCurrentNode')) : null
                   )
                 )
-              }) : h('div', { className: 'vwf-muted-sm' }, t('rdNoRecords'))
+              }) : mutedDiv(t('rdNoRecords'))
             )
           ),
           // 中栏：本次运行的流程（原型 graph 区）——只读画布 + 步骤状态，与详情栏各自滚动
           h('div', { className: 'vwf-rd-canvas' },
             h('div', { className: 'vwf-rd-pane-head' },
               h('div', { className: 'vwf-card-title' }, t('rdRunFlow')),
-              dsl ? h('span', { className: 'vwf-muted-sm' }, t('wbConnCount', { n: ((dsl.edges || []).length) })) : null
+              dsl ? mutedSpan(t('wbConnCount', { n: ((dsl.edges || []).length) })) : null
             ),
             // 图例（FIX-107 B5）：中文与形状成对，颜色只作辅助；与画布 / 目录的状态编码同源
             h('div', { className: 'vwf-rd-legend', style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '0 14px 6px' } },
-              h('span', { className: 'vwf-muted-sm' }, t('dashLegend')),
+              mutedSpan(t('dashLegend')),
               [['ok', 'rdStatusPassed'], ['err', 'rdStatusFailed'], ['run', 'rdStatusRunning'], ['wait', 'dashWaitHuman']].map(([tone, key]) =>
                 h('span', { key: tone, className: 'vwf-badge', style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + t(key)))
             ),
-            dsl ? h(Canvas, { dsl, readOnly: true, statusMap: st }) : h('div', { className: 'vwf-muted-sm' }, t('rdNoRecords'))
+            dsl ? h(Canvas, { dsl, readOnly: true, statusMap: st }) : mutedDiv(t('rdNoRecords'))
           ),
           // 右栏：唯一选中节点详情出口
           h('div', { className: 'vwf-rd-body' },
@@ -4331,11 +4342,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   pickedVerdictRow ? h('span', { className: 'vwf-badge', 'data-vwf-verdict': pickedVerdict, style: { color: STATUS_COLOR[pickedVerdictRow[1]] } }, STATUS_SHAPE[pickedVerdictRow[2]] + ' ' + verdictTextOf(pickedVerdict)) : null,
                   isPrevRound ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
                 ),
-                h('span', { className: 'vwf-muted-sm' }, (lr && lr.title ? String(lr.title) : (head.taskId || head.id)))
+                mutedSpan((lr && lr.title ? String(lr.title) : (head.taskId || head.id)))
               ),
               h('div', { className: 'vwf-card-title', style: { marginTop: 6 } }, selected.label || selected.id),
               selectedAttempts.length ? h('label', { className: 'vwf-row', style: { gap: 8, marginTop: 6 } },
-                h('span', { className: 'vwf-muted-sm' }, t('rdAttemptPicker')),
+                mutedSpan(t('rdAttemptPicker')),
                 h('select', {
                   className: 'vwf-input', style: { maxWidth: 320 },
                   value: String(pickedIdx),
@@ -4345,12 +4356,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   const label = t('rdAttemptOption', { n: i + 1, state: verdictTextOf(verdictOf(v)) }) + (i + 1 === selectedAttempts.length ? t('rdAttemptLatest') : '')
                   return h('option', { key: v.attempt_id, value: String(i + 1) }, label)
                 }))
-              ) : h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('rdNotStarted') + '：' + t('rdNotStartedNote')),
-              pickedValue ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } },
-                t('rdAttemptMeta', { segment: pickedValue.segment, revision: pickedValue.snapshot_revision, provider: pickedValue.provider, model: pickedValue.model })
-                + (pickedValue.ended_at ? ' · ' + t('rdAttemptAt', { at: fmtAt(Date.parse(pickedValue.ended_at)) }) : '')
-              ) : null,
-              isPrevRound ? h('div', { className: 'vwf-note warn' }, t('rdPrevRoundNote')) : null,
+              ) : mutedDiv(t('rdNotStarted') + '：' + t('rdNotStartedNote'), { marginTop: 6 }),
+              pickedValue ? mutedDiv(t('rdAttemptMeta', { segment: pickedValue.segment, revision: pickedValue.snapshot_revision, provider: pickedValue.provider, model: pickedValue.model })
+                + (pickedValue.ended_at ? ' · ' + t('rdAttemptAt', { at: fmtAt(Date.parse(pickedValue.ended_at)) }) : ''), { marginTop: 4 }) : null,
+              isPrevRound ? warnNote(t('rdPrevRoundNote')) : null,
               // 三页签：同一区域内切换，页面不同时重复展示同一节点详情
               h('div', { className: 'vwf-tabs', style: { marginTop: 8 }, role: 'tablist' },
                 [['result', t('rdTabResult')], ['checks', t('rdTabChecks')], ['activity', t('rdTabActivity')]].map(([k, l]) =>
@@ -4361,7 +4370,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   }, l))
               ),
               tab === 'result' ? renderResultTab() : tab === 'checks' ? renderChecksTab() : renderActivityTab()
-            ) : h('div', { className: 'vwf-empty' }, t('rdSelectNodeHint'))
+            ) : emptyDiv(t('rdSelectNodeHint'))
           )
         ),
         renderControlCard(),
@@ -4409,9 +4418,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       function renderResultTab() {
         const rt = []
         if (!picked && isPrevRound) {
-          rt.push(h('div', { className: 'vwf-note warn', key: 'prev' }, t('rdPrevRoundNote')))
+          rt.push(warnNote(t('rdPrevRoundNote'), null, 'prev'))
         }
-        if (recErr) rt.push(h('div', { className: 'vwf-note warn', key: 'rec' }, t('rdNoRecords')))
+        if (recErr) rt.push(warnNote(t('rdNoRecords'), null, 'rec'))
         // 成果必须跟随所选 attempt：attempt 记录自带该次结果（与 node_result 同源）。
         // node_result 是「最新 Revision」语义，因此只在所选就是最新一次时才回退到它——
         // 历史执行没有正文时如实显示「暂无成果」，不冒充最新一轮成果。
@@ -4422,7 +4431,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           : (bodyValue !== null && bodyValue !== undefined ? bodyValue : null)
         if (showValue !== null && showValue !== undefined) {
           rt.push(h('div', { key: 'body' },
-            h('div', { className: 'vwf-sec' }, t('rdTabResult')),
+            secDiv(t('rdTabResult')),
             h('div', { className: 'vwf-code' }, typeof showValue === 'string' ? showValue : safeJson(showValue))
           ))
         } else if (pickedValue) {
@@ -4431,7 +4440,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (pickedValue && pickedValue.outcome !== undefined && pickedValue.outcome !== null) {
           rt.push(h('div', { className: 'vwf-row', key: 'oc', style: { gap: 6, marginTop: 6 } },
             h('span', { className: 'vwf-badge accent' }, String(pickedValue.outcome)),
-            h('span', { className: 'vwf-muted-sm' }, pickedValue.outcome_path ? t('rdOutcomePath', { path: pickedValue.outcome_path }) : '')
+            mutedSpan(pickedValue.outcome_path ? t('rdOutcomePath', { path: pickedValue.outcome_path }) : '')
           ))
         } else if (selected && pickedValue) {
           rt.push(h('div', { className: 'vwf-muted-sm', key: 'oc0', style: { marginTop: 6 } }, t('rdBusinessOutcomeNone')))
@@ -4440,8 +4449,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (selected && selected.kind === 'fanout') {
           const items = itemsOf(selected.id)
           rt.push(h('div', { key: 'fanout' },
-            h('div', { className: 'vwf-sec' }, t('rdFanoutGroup', { n: items.length || (Array.isArray(selected.items) ? selected.items.length : 0) })),
-            h('div', { className: 'vwf-muted-sm' }, t('rdFanoutIndependent')),
+            secDiv(t('rdFanoutGroup', { n: items.length || (Array.isArray(selected.items) ? selected.items.length : 0) })),
+            mutedDiv(t('rdFanoutIndependent')),
             items.length ? items.map((a) => {
               const v = a.value
               const done = v.status === 'completed'
@@ -4450,17 +4459,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   h('strong', null, t('rdFanoutChild', { n: (Number(v.item_index) || 0) + 1 }) + (v.item ? ' · ' + String(v.item).slice(0, 80) : '')),
                   h('span', { className: 'vwf-badge', style: { color: done ? STATUS_COLOR.pass : v.status === 'failed' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, done ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptReturned') : t('rdFanoutIncomplete')))
                 ),
-                h('div', { className: 'vwf-muted-sm' }, t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model })),
+                mutedDiv(t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model })),
                 v.result !== undefined && v.result !== null ? h('div', { className: 'vwf-code', style: { marginTop: 4 } }, typeof v.result === 'string' ? v.result : safeJson(v.result)) : null,
-                v.error ? h('div', { className: 'vwf-note warn' }, String(v.error)) : null
+                v.error ? warnNote(String(v.error)) : null
               )
-            }) : h('div', { className: 'vwf-muted-sm' }, t('rdFanoutNoSub')),
+            }) : mutedDiv(t('rdFanoutNoSub')),
             (() => {
               const pending = items.filter((a) => a.value.status !== 'completed')
               const expected = Array.isArray(selected.items) ? selected.items.length : items.length
               const unfinished = Math.max(pending.length, Math.max(0, expected - items.length))
               return unfinished > 0
-                ? h('div', { className: 'vwf-note warn' }, t('rdFanoutWaiting', { n: unfinished }) + ' ' + t('rdFanoutWaitingNote'))
+                ? warnNote(t('rdFanoutWaiting', { n: unfinished }) + ' ' + t('rdFanoutWaitingNote'))
                 : (expected > 0 ? h('div', { className: 'vwf-note' }, t('rdFanoutWaitingNote')) : null)
             })()
           ))
@@ -4469,7 +4478,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const inputs = nodeResolvedInputs(selected.id)
         if (inputs.length) {
           rt.push(h('div', { key: 'inputs' },
-            h('div', { className: 'vwf-sec' }, t('rdFanoutSynth')),
+            secDiv(t('rdFanoutSynth')),
             h('div', { className: 'vwf-row', style: { gap: 6 } },
               inputs.map((it, i) => h('span', { key: i, className: 'vwf-badge' }, t('rdFanoutInputFrom', { producer: String(it.producer || it.binding || '—') })))
             )
@@ -4483,29 +4492,28 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // 检查页签：本次执行的检查结论与退回意见（意见跟随触发它的审查轮次）
       function renderChecksTab() {
         const rt = []
-        if (!picked) return h('div', { className: 'vwf-tab-panel' }, h('div', { className: 'vwf-muted-sm' }, t('rdNodeNotRun')))
+        if (!picked) return h('div', { className: 'vwf-tab-panel' }, mutedDiv(t('rdNodeNotRun')))
         const seg = Number(pickedValue.segment) || 0
         const returns = returnsFor(seg)
-        rt.push(h('div', { key: 'head', className: 'vwf-sec' }, t('rdAttemptPicker') + ' ' + pickedIdx + ' · ' + t('rdSegmentLabel', { n: seg })))
-        rt.push(h('div', { key: 'meta', className: 'vwf-muted-sm' },
-          t('rdAttemptMeta', { segment: pickedValue.segment, revision: pickedValue.snapshot_revision, provider: pickedValue.provider, model: pickedValue.model })))
+        rt.push(secDiv(t('rdAttemptPicker') + ' ' + pickedIdx + ' · ' + t('rdSegmentLabel', { n: seg }), null, 'head'))
+        rt.push(mutedDiv(t('rdAttemptMeta', { segment: pickedValue.segment, revision: pickedValue.snapshot_revision, provider: pickedValue.provider, model: pickedValue.model }), null, 'meta'))
         rt.push(h('div', { key: 'own', className: 'vwf-row', style: { gap: 6, marginTop: 6 } },
-          h('span', { className: 'vwf-muted-sm' }, t('dashColResult') + '：'),
+          mutedSpan(t('dashColResult') + '：'),
           pickedValue.outcome !== undefined && pickedValue.outcome !== null
             ? h('span', { className: 'vwf-badge accent' }, String(pickedValue.outcome))
-            : h('span', { className: 'vwf-muted-sm' }, t('rdBusinessOutcomeNone'))
+            : mutedSpan(t('rdBusinessOutcomeNone'))
         ))
         if (returns.length) {
           for (const r of returns) {
             rt.push(h('div', { key: 'ret-' + r.node + '-' + r.round + '-' + r.segment },
-              h('div', { className: 'vwf-sec' }, t('rdReturnComments') + ' · ' + t('rdReturnFromRound', { n: r.round || r.segment })),
-              h('div', { className: 'vwf-note warn' }, t('rdReturnFromRound', { n: r.round || r.segment }) + '：' + String(r.node) + ' → ' + String(r.outcome)),
+              secDiv(t('rdReturnComments') + ' · ' + t('rdReturnFromRound', { n: r.round || r.segment })),
+              warnNote(t('rdReturnFromRound', { n: r.round || r.segment }) + '：' + String(r.node) + ' → ' + String(r.outcome)),
               r.result !== undefined && r.result !== null ? h('div', { className: 'vwf-code' }, typeof r.result === 'string' ? r.result : safeJson(r.result)) : null,
-              h('div', { className: 'vwf-muted-sm' }, t('rdAfterReturn') + '：' + t('rdAfterReturnNote'))
+              mutedDiv(t('rdAfterReturn') + '：' + t('rdAfterReturnNote'))
             ))
           }
         } else {
-          rt.push(h('div', { key: 'noret', className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('rdReturnNone')))
+          rt.push(mutedDiv(t('rdReturnNone'), { marginTop: 6 }, 'noret'))
         }
         return h('div', { className: 'vwf-tab-panel' }, rt)
       }
@@ -4517,32 +4525,29 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const ce = (lr && lr.control_events) || []
         const hd = (lr && lr.human_decisions) || []
         const br = (lr && lr.baseline_revisions) || []
-        rt.push(h('div', { key: 'g', className: 'vwf-sec' }, t('rdActivityTitle')))
+        rt.push(secDiv(t('rdActivityTitle'), null, 'g'))
         if (g.length) {
-          rt.push(h('div', { key: 'gl' }, g.map((x) => h('div', { key: 'g' + x.seq, className: 'vwf-muted-sm' },
-            '#' + x.seq + ' · ' + t(x.mode === 'baseline' ? 'rdPausedGuidanceBaseline' : 'rdPausedGuidanceCoach') + ' · ' + fmtAt(x.at) + ' · ' + (x.mode === 'baseline' ? String(x.new_baseline || '') : String(x.text || ''))))))
+          rt.push(h('div', { key: 'gl' }, g.map((x) => mutedDiv('#' + x.seq + ' · ' + t(x.mode === 'baseline' ? 'rdPausedGuidanceBaseline' : 'rdPausedGuidanceCoach') + ' · ' + fmtAt(x.at) + ' · ' + (x.mode === 'baseline' ? String(x.new_baseline || '') : String(x.text || '')), null, 'g' + x.seq))))
         }
         if (ce.length) {
           rt.push(h('div', { key: 'ce', style: { marginTop: 6 } },
-            h('div', { className: 'vwf-muted-sm' }, t('rdActivityControl')),
-            h('div', null, ce.map((x, i) => h('div', { key: 'ce' + i, className: 'vwf-muted-sm' },
-              String(x.type || '—') + ' · ' + fmtAt(x.at) + (x.run_id ? ' · ' + t('rdSegmentLabel', { n: (x.run_id === head.id ? (head.segment || activeSeg) : '?') }) : ''))))))
+            mutedDiv(t('rdActivityControl')),
+            h('div', null, ce.map((x, i) => mutedDiv(String(x.type || '—') + ' · ' + fmtAt(x.at) + (x.run_id ? ' · ' + t('rdSegmentLabel', { n: (x.run_id === head.id ? (head.segment || activeSeg) : '?') }) : ''), null, 'ce' + i)))))
         }
         if (hd.length) {
           rt.push(h('div', { key: 'hd', style: { marginTop: 6 } },
-            h('div', { className: 'vwf-muted-sm' }, t('rdActivityHuman')),
-            h('div', null, hd.map((x, i) => h('div', { key: 'hd' + i, className: 'vwf-muted-sm' },
-              String(x.decision_id || '—') + ' · ' + String(x.user_choice || '—') + ' · ' + fmtAt(x.at || x.created_at))))))
+            mutedDiv(t('rdActivityHuman')),
+            h('div', null, hd.map((x, i) => mutedDiv(String(x.decision_id || '—') + ' · ' + String(x.user_choice || '—') + ' · ' + fmtAt(x.at || x.created_at), null, 'hd' + i)))))
         }
         if (br.length) {
           rt.push(h('div', { key: 'br', style: { marginTop: 6 } },
-            h('div', { className: 'vwf-muted-sm' }, t('rdActivityBaseline')),
-            h('div', null, br.map((x, i) => h('div', { key: 'br' + i, className: 'vwf-muted-sm' }, t('rdVersionShort', { n: x.revision || i + 1 }) + ' · ' + fmtAt(x.at))))))
+            mutedDiv(t('rdActivityBaseline')),
+            h('div', null, br.map((x, i) => mutedDiv(t('rdVersionShort', { n: x.revision || i + 1 }) + ' · ' + fmtAt(x.at), null, 'br' + i)))))
         }
         const logs = (snapState && snapState.logs) || []
         rt.push(h('div', { key: 'lg', style: { marginTop: 6 } },
-          h('div', { className: 'vwf-muted-sm' }, t('rdActivityLogs') + ' · ' + t('rdSegmentLabel', { n: head.segment || activeSeg })),
-          logs.length ? h('div', { className: 'vwf-code' }, logs.slice(-20).map((line) => t('rdLogSource', { segment: head.segment || activeSeg, text: String(line) })).join('\n')) : h('div', { className: 'vwf-muted-sm' }, t('rdActivityNone'))
+          mutedDiv(t('rdActivityLogs') + ' · ' + t('rdSegmentLabel', { n: head.segment || activeSeg })),
+          logs.length ? h('div', { className: 'vwf-code' }, logs.slice(-20).map((line) => t('rdLogSource', { segment: head.segment || activeSeg, text: String(line) })).join('\n')) : mutedDiv(t('rdActivityNone'))
         ))
         return h('div', { className: 'vwf-tab-panel' }, rt)
       }
@@ -4556,18 +4561,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: 'vwf-card-title' }, t('rdControlTitle')),
             badge
           ),
-          h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('dashStatusLabel', { status: displayWord(head.status) }) + ' · ' + t('rdLifecycleLabel') + '：' + (lstate || '—')),
-          terminal ? h('div', { className: 'vwf-note warn' }, t('rdControlTerminal', { state: lstate || head.status })) : null,
+          mutedDiv(t('dashStatusLabel', { status: displayWord(head.status) }) + ' · ' + t('rdLifecycleLabel') + '：' + (lstate || '—'), { marginTop: 4 }),
+          terminal ? warnNote(t('rdControlTerminal', { state: lstate || head.status })) : null,
           !terminal && lstate === 'RUNNING' ? h('div', null,
             h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 6 } },
               h('button', { className: 'vwf-btn sm', onClick: () => sendControl('pause') }, t('rdControlPause')),
               h('button', { className: 'vwf-btn sm', onClick: () => sendControl('interrupt') }, t('rdControlInterrupt')),
               head.pause_pending ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('ctlPending')) : null
             ),
-            h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('rdControlPauseNote') + ' ' + t('rdControlInterruptNote'))
+            mutedDiv(t('rdControlPauseNote') + ' ' + t('rdControlInterruptNote'), { marginTop: 4 })
           ) : null,
-          !terminal && lstate === 'PAUSED' ? h('div', { className: 'vwf-note warn', style: { marginTop: 6 } },
-            t('rdPausedTitle') + ' · ' + t('rdPausedWhy') + '：' + String((lr && lr.lifecycle && lr.lifecycle.reason && (lr.lifecycle.reason.code || lr.lifecycle.reason.message)) || '—')) : null
+          !terminal && lstate === 'PAUSED' ? warnNote(t('rdPausedTitle') + ' · ' + t('rdPausedWhy') + '：' + String((lr && lr.lifecycle && lr.lifecycle.reason && (lr.lifecycle.reason.code || lr.lifecycle.reason.message)) || '—'), { marginTop: 6 }) : null
         )
       }
 
@@ -4585,18 +4589,18 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, String(head.status || 'PAUSED'))
           ),
           h('div', { style: { padding: '8px 14px 12px' } },
-            h('div', { className: 'vwf-muted' }, t('rdPausedWhy') + '：' + String(reason || '—')),
+            mutedText(t('rdPausedWhy') + '：' + String(reason || '—')),
             h('div', { className: 'vwf-note' }, t('rdPausedNote')),
-            h('div', { className: 'vwf-sec', style: { marginTop: 6 } }, t('rdPausedGuidance')),
+            secDiv(t('rdPausedGuidance'), { marginTop: 6 }),
             g.length
               ? h('table', { className: 'vwf-table' },
                   h('tbody', null, g.map((x) => h('tr', { key: 'g' + x.seq },
-                    h('td', { className: 'vwf-muted-sm', style: { width: 90 } }, '#' + x.seq + ' · ' + t(x.mode === 'baseline' ? 'rdPausedGuidanceBaseline' : 'rdPausedGuidanceCoach')),
+                    mutedTd('#' + x.seq + ' · ' + t(x.mode === 'baseline' ? 'rdPausedGuidanceBaseline' : 'rdPausedGuidanceCoach'), { width: 90 }),
                     h('td', null, x.mode === 'baseline' ? String(x.new_baseline || '') : String(x.text || '')),
-                    h('td', { className: 'vwf-muted-sm', style: { width: 140 } }, fmtAt(x.at))
+                    mutedTd(fmtAt(x.at), { width: 140 })
                   )))
                 )
-              : h('div', { className: 'vwf-muted-sm' }, t('rdPausedGuidanceNone')),
+              : mutedDiv(t('rdPausedGuidanceNone')),
             h('label', { style: { display: 'block', marginTop: 6 } },
               h('span', { className: 'vwf-field-label' }, t('rdControlGuidance')),
               h('textarea', { className: 'vwf-textarea', rows: 2, style: { width: '100%' }, placeholder: t('rdPausedGuidancePlaceholder'), value: guidanceText, onChange: (ev) => setGuidanceText(ev.target.value) })
@@ -4604,10 +4608,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 6 } },
               h('button', { className: 'vwf-btn sm primary', disabled: !guidanceText.trim(), onClick: () => sendControl('guidance', { text: guidanceText.trim() }) }, t('rdPausedGuidanceSubmit')),
               guidanceMsg ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, guidanceMsg) : null,
-              h('span', { className: 'vwf-muted-sm' }, t('rdControlGuidanceNote'))
+              mutedSpan(t('rdControlGuidanceNote'))
             ),
-            h('div', { className: 'vwf-sec', style: { marginTop: 10 } }, t('rdPausedResume')),
-            h('div', { className: 'vwf-note warn' }, t('rdPausedResumeDt01')),
+            secDiv(t('rdPausedResume'), { marginTop: 10 }),
+            warnNote(t('rdPausedResumeDt01')),
             mappingRows([
               { k: 'taskId', v: String(head.taskId || '—') },
               { k: 'templateId', v: String(head.workflowId || '—') },
@@ -4625,20 +4629,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (status !== 'WAITING_HUMAN' && status.indexOf('AWAITING_HUMAN_') !== 0) return null
         const rows = []
         if (!pkg) {
-          rows.push(h('div', { key: 'nopkg', className: 'vwf-note warn' }, t('rdDecisionNoPackage')))
+          rows.push(warnNote(t('rdDecisionNoPackage'), null, 'nopkg'))
         } else {
           rows.push(h('div', { key: 'why' },
-            h('div', { className: 'vwf-sec' }, t('rdDecisionWhy')),
-            h('div', { className: 'vwf-muted' }, unknownText(pkg.why))
+            secDiv(t('rdDecisionWhy')),
+            mutedText(unknownText(pkg.why))
           ))
           rows.push(h('div', { key: 'cur', style: { marginTop: 6 } },
-            h('div', { className: 'vwf-sec' }, t('rdDecisionCurrent')),
-            h('div', { className: 'vwf-muted' }, unknownText(pkg.current_state))
+            secDiv(t('rdDecisionCurrent')),
+            mutedText(unknownText(pkg.current_state))
           ))
           const opts = Array.isArray(pkg.options) ? pkg.options.map((o) => String((o && o.id) || '')).filter(Boolean) : []
           const effects = pkg.subsequent_effects && typeof pkg.subsequent_effects === 'object' ? pkg.subsequent_effects : {}
           rows.push(h('div', { key: 'opt', style: { marginTop: 6 } },
-            h('div', { className: 'vwf-sec' }, t('rdDecisionOptions')),
+            secDiv(t('rdDecisionOptions')),
             opts.length ? h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap' } }, opts.map((id) => {
               const control = ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP'].indexOf(id) >= 0
               return h('button', {
@@ -4647,11 +4651,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 onClick: () => setDecisionChoice(id),
                 title: effects[id] || '',
               }, id + (control ? '' : ''))
-            })) : h('div', { className: 'vwf-muted-sm' }, t('rdDecisionUnknown'))
+            })) : mutedDiv(t('rdDecisionUnknown'))
           ))
           if (opts.length) {
             rows.push(h('div', { key: 'eff', style: { marginTop: 6 } },
-              h('div', { className: 'vwf-sec' }, t('rdDecisionEffects')),
+              secDiv(t('rdDecisionEffects')),
               h('table', { className: 'vwf-table' },
                 h('thead', null, h('tr', null, h('th', null, t('rdDecisionOptions')), h('th', null, t('rdDecisionEffects')))),
                 h('tbody', null, opts.map((id) => h('tr', { key: id }, h('td', null, id), h('td', null, effects[id] ? unknownText(effects[id]) : t('rdDecisionUnknown')))))
@@ -4662,7 +4666,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             .filter(([k]) => pkg[k] !== undefined && pkg[k] !== null && String(pkg[k]).trim() !== '')
           if (extra.length) {
             rows.push(h('div', { key: 'extra', style: { marginTop: 6 } },
-              h('div', { className: 'vwf-sec' }, t('rdDecisionCost') + ' / ' + t('rdDecisionBenefit') + ' / ' + t('rdDecisionRisk')),
+              secDiv(t('rdDecisionCost') + ' / ' + t('rdDecisionBenefit') + ' / ' + t('rdDecisionRisk')),
               h('table', { className: 'vwf-table' },
                 h('tbody', null, extra.map(([k, l]) => h('tr', { key: k }, h('td', null, l), h('td', null, unknownText(pkg[k])))))
               )
@@ -4670,7 +4674,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           }
           if (blockedEdge) {
             rows.push(h('div', { key: 'be', style: { marginTop: 6 } },
-              h('div', { className: 'vwf-sec' }, t('rdDecisionBlockedEdge')),
+              secDiv(t('rdDecisionBlockedEdge')),
               h('div', { className: 'vwf-code' }, safeJson(blockedEdge))
             ))
           }
@@ -4680,20 +4684,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('textarea', { className: 'vwf-textarea', rows: 2, placeholder: t('rdDecisionReasonPlaceholder'), value: decisionReason, onChange: (ev) => setDecisionReason(ev.target.value), style: { width: '100%' } })
         ))
         rows.push(h('div', { key: 'impact', className: 'vwf-note' }, t('rdDecisionImpact') + '：' + t('rdDecisionImpactNote')))
-        if (consumed) rows.push(h('div', { key: 'cons', className: 'vwf-note warn' }, t('rdDecisionConsumed', { id: decisionId })))
-        rows.push(h('div', { key: 'dt01', className: 'vwf-note warn' }, t('rdDecisionDt01')))
+        if (consumed) rows.push(warnNote(t('rdDecisionConsumed', { id: decisionId }), null, 'cons'))
+        rows.push(warnNote(t('rdDecisionDt01'), null, 'dt01'))
         const mapRows = [['decision_id', decisionId || '—'], ['user_choice', decisionChoice || '—']]
         if (decisionReason.trim()) mapRows.push(['reason', decisionReason.trim()])
         mapRows.push(['taskId', head.taskId || '—'])
         mapRows.push(['templateId', head.workflowId || '—'])
         rows.push(h('div', { key: 'map' },
-          h('div', { className: 'vwf-sec' }, t('rdDecisionMapping')),
+          secDiv(t('rdDecisionMapping')),
           mappingRows(mapRows.map(([k, v]) => ({ k, v: String(v) })))
         ))
         rows.push(h('div', { key: 'act', className: 'vwf-row', style: { marginTop: 6, gap: 8 } },
           // 提交按钮在 DT-01 未裁定前锁定：不发起续跑，也不显示成功
           h('button', { className: 'vwf-btn primary', disabled: true, 'aria-disabled': 'true' }, t('rdDecisionSubmit')),
-          h('span', { className: 'vwf-muted-sm' }, t('rdDecisionLocked') + ' · ' + t('rdDecisionNotYetLocked'))
+          mutedSpan(t('rdDecisionLocked') + ' · ' + t('rdDecisionNotYetLocked'))
         ))
         return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
           h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdDecisionTitle'))),
@@ -4705,11 +4709,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       function renderRecoveryCard() {
         if (String(head.status) !== 'BLOCKED') return null
         const rows = []
-        rows.push(h('div', { key: 'r', className: 'vwf-note warn' }, t('rdBlockedReason') + '：' + String(head.reason || '—')))
-        rows.push(h('div', { key: 'n', className: 'vwf-muted-sm' }, t('rdBlockedResumeNode', { node: String(head.node || '—') })))
+        rows.push(warnNote(t('rdBlockedReason') + '：' + String(head.reason || '—'), null, 'r'))
+        rows.push(mutedDiv(t('rdBlockedResumeNode', { node: String(head.node || '—') }), null, 'n'))
         const nodeIds = Object.keys(lrProviderModel)
         rows.push(h('div', { key: 'pm', style: { marginTop: 6 } },
-          h('div', { className: 'vwf-sec' }, t('rdBlockedModel')),
+          secDiv(t('rdBlockedModel')),
           nodeIds.length
             ? h('table', { className: 'vwf-table' },
                 h('thead', null, h('tr', null, h('th', null, t('dashColNode')), h('th', null, t('rdBlockedPrevValue')), h('th', null, t('rdBlockedNewValue')))),
@@ -4730,10 +4734,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   )
                 }))
               )
-            : h('div', { className: 'vwf-muted-sm' }, t('rdBlockedNoProvider'))
+            : mutedDiv(t('rdBlockedNoProvider'))
         ))
         rows.push(h('div', { key: 'note', className: 'vwf-note' }, t('rdBlockedRestoreNote')))
-        rows.push(h('div', { key: 'dt01', className: 'vwf-note warn' }, t('rdBlockedDt01')))
+        rows.push(warnNote(t('rdBlockedDt01'), null, 'dt01'))
         const overrides = {}
         for (const nid of Object.keys(modelDraft)) {
           const d = modelDraft[nid] || {}
@@ -4741,7 +4745,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           overrides[nid] = { provider: d.provider || undefined, model: d.model || undefined }
         }
         rows.push(h('div', { key: 'map' },
-          h('div', { className: 'vwf-sec' }, t('rdBlockedMapping')),
+          secDiv(t('rdBlockedMapping')),
           mappingRows([
             { k: 'taskId', v: String(head.taskId || '—') },
             { k: 'templateId', v: String(head.workflowId || '—') },
@@ -4751,7 +4755,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         ))
         rows.push(h('div', { key: 'act', className: 'vwf-row', style: { marginTop: 6, gap: 8 } },
           h('button', { className: 'vwf-btn primary', disabled: true, 'aria-disabled': 'true' }, t('rdBlockedSubmit')),
-          h('span', { className: 'vwf-muted-sm' }, t('rdDecisionLocked'))
+          mutedSpan(t('rdDecisionLocked'))
         ))
         return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
           h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdBlockedTitle'))),
@@ -4812,7 +4816,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('td', null, h('div', { className: 'vwf-muted-sm' }, Object.keys(s.provider_model || {}).map((nid) => nid + '=' + String((s.provider_model[nid] || {}).provider || 'default') + '/' + String((s.provider_model[nid] || {}).model || 'default')).join(' · ') || '—')),
                 h('td', null, h('div', { className: 'vwf-muted-sm' }, roleEntriesText(s)))
               )))
-            ) : h('div', { className: 'vwf-muted-sm' }, t('rdNoSnapshots'))
+            ) : mutedDiv(t('rdNoSnapshots'))
           )
         )
       }
@@ -4821,7 +4825,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // （读取失败提示与重试在概要处，不藏在展开层后面）。缺值一律显式标注，不用空白冒充。
       function workspaceFields() {
         const ws = lr && lr.workspace ? lr.workspace : null
-        if (!ws) return h('div', { className: 'vwf-muted-sm' }, t('rdWsNoRecord'))
+        if (!ws) return mutedDiv(t('rdWsNoRecord'))
         const kv = [
           [t('rdWsMode'), ws.mode ? String(ws.mode) : null],
           [t('rdWsRepo'), ws.source_path ? String(ws.source_path) : (ws.workspace_path ? String(ws.workspace_path) : null)],
@@ -4835,11 +4839,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         return h('div', null,
           h('table', { className: 'vwf-table' },
             h('tbody', null, kv.map(([k, v]) => h('tr', { key: k },
-              h('td', { className: 'vwf-muted-sm', style: { width: 90 } }, k),
+              mutedTd(k, { width: 90 }),
               h('td', null, v === null || v === undefined || v === '' ? h('span', { className: 'vwf-badge' }, t('rdWsUnknown')) : String(v))
             )))
           ),
-          ws.refreshed_at ? h('div', { className: 'vwf-muted-sm' }, t('rdWsRefreshedAt', { at: fmtAt(ws.refreshed_at) })) : null
+          ws.refreshed_at ? mutedDiv(t('rdWsRefreshedAt', { at: fmtAt(ws.refreshed_at) })) : null
         )
       }
 
@@ -4848,20 +4852,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       function artifactsSection() {
         const arts = latestArtifactRecords(snapState && snapState.formalRecords)
         return h('div', { key: 'arts' },
-          h('div', { className: 'vwf-sec' }, t('formalArtifacts')),
+          secDiv(t('formalArtifacts')),
           arts.length ? arts.map((rec) => h('div', { key: rec.record_id + '@' + rec.record_revision, style: { marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--vwf-border)' } },
             h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
               h('strong', null, artifactPathFromRecordId(rec.record_id)),
               h('span', { className: 'vwf-badge accent' }, t('artifactRevision') + ' ' + rec.record_revision),
-              h('span', { className: 'vwf-muted-sm' }, rec.body && rec.body.media_type ? rec.body.media_type : ''),
-              rec.provenance && rec.provenance.node ? h('span', { className: 'vwf-muted-sm' }, t('dashArtifactNode', { node: rec.provenance.node })) : null
+              mutedSpan(rec.body && rec.body.media_type ? rec.body.media_type : ''),
+              rec.provenance && rec.provenance.node ? mutedSpan(t('dashArtifactNode', { node: rec.provenance.node })) : null
             ),
-            h('div', { className: 'vwf-muted-sm' }, rec.provenance
+            mutedDiv(rec.provenance
               ? t('rdArtifactSource', { segment: rec.provenance.attempt === undefined || rec.provenance.attempt === null ? '—' : rec.provenance.attempt, attempt: rec.record_revision, provider: String(rec.provenance.provider || 'default'), model: String(rec.provenance.model || 'default') })
               : t('rdArtifactSourceUnknown')),
             h('div', { className: 'vwf-row', style: { gap: 6 } }, rec.provenance && rec.provenance.node_business_outcome ? h('span', { className: 'vwf-badge accent' }, String(rec.provenance.node_business_outcome)) : null),
             renderArtifactBody(rec)
-          )) : h('div', { className: 'vwf-muted-sm' }, t('noFormalArtifacts'))
+          )) : mutedDiv(t('noFormalArtifacts'))
         )
       }
     }
@@ -5267,7 +5271,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           })
         )
       }
-      if (!i18nReady) return h('div', { className: 'vwf-muted' }, t('i18nLoading'))
+      if (!i18nReady) return mutedText(t('i18nLoading'))
 
       return h('div', { className: 'vwf-root' },
         // V-1：顶部导航为 流程库 / 运行 / 角色 三个页签；角色库有独立入口，
@@ -5289,7 +5293,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               value: tplFilter, placeholder: t('wbLibraryFilter'), 'aria-label': t('wbLibraryFilter'),
               onChange: (ev) => setTplFilter(ev.target.value),
             }),
-            !providers.length ? h('span', { className: 'vwf-muted-sm' }, t('noModels')) : null
+            !providers.length ? mutedSpan(t('noModels')) : null
           ),
           // V-2：流程库子页签 全部 / 内置 / 我的（默认全部）；真按钮，键盘可达
           h('div', { className: 'vwf-row', role: 'tablist', 'aria-label': t('templates') },
@@ -5322,8 +5326,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 ? h('button', { className: 'vwf-btn sm', onClick: () => openOv(w) }, t('modelOverride'))
                 : h('button', { className: 'vwf-btn sm danger', onClick: () => onRemove(w.id) }, t('deleteTemplate'))
             )),
-            list && !list.length ? h('div', { className: 'vwf-empty' }, '—') : null,
-            list && list.length && !filteredList.length ? h('div', { className: 'vwf-empty' }, t('wbLibraryFilterEmpty')) : null
+            list && !list.length ? emptyDiv('—') : null,
+            list && list.length && !filteredList.length ? emptyDiv(t('wbLibraryFilterEmpty')) : null
           )
         ) : null,
         tab === 'dashboard' ? h(Dashboard, { wf, onAttention: setAttention }) : null,
@@ -5395,7 +5399,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('button', { className: 'vwf-btn sm', onClick: requestCloseOv }, t('close'))
           ),
           h('div', { className: 'vwf-editor-body' },
-            h('div', { className: 'vwf-muted-sm', style: { marginBottom: 8 } }, t('modelOverrideHelp')),
+            mutedDiv(t('modelOverrideHelp'), { marginBottom: 8 }),
             h('div', { className: 'vwf-list' }, ovRows())
           ),
           // 原型对话框底栏：全部还原默认 / 取消 / 保存节点设置。
