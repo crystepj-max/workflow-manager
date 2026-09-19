@@ -2082,18 +2082,48 @@ return {
       if (!id || !recordId) return fail('缺少 logical_run_id / record_id')
       return recordsHostCall('get', { logical_run_id: id, record_id: recordId })
     })
-    // LOC-043：质量成本 metrics（消费 attempt 记录 + 质量证据；可重建 JSON + 人读摘要）
-    async function qualityCostCall(cmd, input, opts) {
-      if (!QUALITY_COST_HOST || (await readTextIfExists(QUALITY_COST_HOST)) === null) {
-        return { ok: false, notFound: true, error: 'run-quality-cost.mjs 未找到（LOC-043 运行时集成未部署）' }
+    // ── 包装脚本宿主调用：LOC-008/017/032/037/041/043 六批各自书写了同一模式 ──
+    // （判缺件 → 注入目录 → 子进程 JSON 信封 → 业务错误映射），差异只在脚本路径、
+    // 文案、注入的目录键、超时/输出上限与业务错误映射策略，全部由参数承载。
+    // 子进程调用形态、返回对象字段与错误文案逐字保持。
+    const BIZ = {
+      plain: (p, l) => ({ ok: false, error: p.error || l + ' 业务错误' }),
+      // 业务错误对象整包透传（保留 code/conflicts 等结构化字段，LOC-017 闸门按 code 路由）
+      pass: (p, l) => Object.assign({ ok: false, error: p.error || l + ' 业务错误', detail: p.detail }, p),
+      operations: (p, l) => ({
+        ok: false, code: p.code, blocked: p.blocked === true,
+        status: p.status, operation_id: p.operation_id,
+        error: p.error || p.message || l + ' 业务错误',
+      }),
+      delivery: (p, l) => ({
+        ok: false, code: p.code, status: p.status, delivery_status: p.delivery_status,
+        error: p.error || p.message || l + ' 业务错误',
+      }),
+    }
+    const makeHostCall = (o) => async (cmd, input, opts) => {
+      const label = o.label
+      if (!o.host || (await readTextIfExists(o.host)) === null) {
+        return { ok: false, notFound: true, error: o.missing }
       }
-      const r = await runNode([QUALITY_COST_HOST, cmd, JSON.stringify(input || {})], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 1024 * 1024 })
-      if (!r.ok) return { ok: false, error: 'quality cost 调用失败：' + r.detail }
+      let payload = input || {}
+      if (o.dir) {
+        const d = await homeDirs()
+        if (!d) return o.noHomeNotFound ? { ok: false, notFound: true, error: o.noHome } : { ok: false, error: o.noHome }
+        payload = { ...payload, [o.dir]: payload[o.dir] || d[o.dirField] }
+      }
+      const r = await runNode([o.host, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || o.graceMs, maxBytes: o.maxBytes })
+      if (!r.ok) return { ok: false, error: label + ' 调用失败：' + r.detail }
       try {
         const parsed = JSON.parse(r.stdout)
-        return parsed.ok ? parsed : { ok: false, error: parsed.error || 'quality cost 业务错误' }
-      } catch (e) { return { ok: false, error: 'quality cost 输出不可解析：' + errMsg(e), raw: r.stdout } }
+        return parsed.ok ? parsed : BIZ[o.biz](parsed, label)
+      } catch (e) { return { ok: false, error: label + ' 输出不可解析：' + errMsg(e), raw: r.stdout } }
     }
+    // LOC-043：质量成本 metrics（消费 attempt 记录 + 质量证据；可重建 JSON + 人读摘要）
+    const qualityCostCall = makeHostCall({
+      host: QUALITY_COST_HOST, label: 'quality cost', biz: 'plain',
+      missing: 'run-quality-cost.mjs 未找到（LOC-043 运行时集成未部署）',
+      graceMs: 30000, maxBytes: 1024 * 1024,
+    })
     async function buildMetricsForRun(id, priceTable) {
       let rec = logicalRuns.get(id)
       if (!rec) {
@@ -2486,19 +2516,12 @@ return {
     }
 
     // ── 工作区隔离：核心实现 = scripts/workspace-isolation.mjs，经包装脚本子进程调用 ──
-    async function wsHostCall(cmd, input, opts) {
-      if (!WS_HOST || (await readTextIfExists(WS_HOST)) === null) return { ok: false, notFound: true, error: 'workspace-isolation-host.mjs 未找到（宿主未部署 #93 集成）' }
-      const d = await homeDirs()
-      if (!d) return { ok: false, notFound: true, error: '无法解析 workspace 根目录' }
-      const payload = { ...input, work_root: input.work_root || d.workspaces }
-      const r = await runNode([WS_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 256 * 1024 })
-      if (!r.ok) return { ok: false, error: 'workspace host 调用失败：' + r.detail }
-      try {
-        const parsed = JSON.parse(r.stdout)
-        // 业务错误对象整包透传（保留 code/conflicts 等结构化字段，LOC-017 闸门按 code 路由）
-        return parsed.ok ? parsed : Object.assign({ ok: false, error: parsed.error || 'workspace host 业务错误', detail: parsed.detail }, parsed)
-      } catch (e) { return { ok: false, error: 'workspace host 输出不可解析：' + errMsg(e), raw: r.stdout } }
-    }
+    const wsHostCall = makeHostCall({
+      host: WS_HOST, label: 'workspace host', biz: 'pass',
+      missing: 'workspace-isolation-host.mjs 未找到（宿主未部署 #93 集成）',
+      dir: 'work_root', dirField: 'workspaces', noHome: '无法解析 workspace 根目录', noHomeNotFound: true,
+      graceMs: 30000, maxBytes: 256 * 1024,
+    })
     // 模板 → 隔离策略类型（LOC-009）：以 Core TEMPLATE_REGISTRY 为权威，不再按
     // 模板 id 名字猜测。解析顺序：① templateId 精确等于注册表键；
     // ② 模板声明的 workspace.template_id（蓝图 meta 字段，投影双向同步）；
@@ -2656,53 +2679,27 @@ return {
     // 只在真实 Node 子进程中加载；本侧只做事实采集与效果执行。每次调用独立进程、
     // 权威状态在磁盘（<DSH Home>/visual-workflow/records/<logical_run_id>.json），
     // 重启后按 logical_run_id 查询天然生效。
-    async function recordsHostCall(cmd, input, opts) {
-      if (!RECORDS_HOST || (await readTextIfExists(RECORDS_HOST)) === null) return { ok: false, notFound: true, error: 'records-host.mjs 未找到（LOC-008 运行时集成未部署）' }
-      const d = await homeDirs()
-      if (!d) return { ok: false, error: '无法解析 DSH Home：records 目录不可用' }
-      const payload = { ...input, records_dir: input.records_dir || d.recordsDir }
-      const r = await runNode([RECORDS_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 1024 * 1024 })
-      if (!r.ok) return { ok: false, error: 'records host 调用失败：' + r.detail }
-      try {
-        const parsed = JSON.parse(r.stdout)
-        return parsed.ok ? parsed : { ok: false, error: parsed.error || 'records host 业务错误' }
-      } catch (e) { return { ok: false, error: 'records host 输出不可解析：' + errMsg(e), raw: r.stdout } }
-    }
+    const recordsHostCall = makeHostCall({
+      host: RECORDS_HOST, label: 'records host', biz: 'plain',
+      missing: 'records-host.mjs 未找到（LOC-008 运行时集成未部署）',
+      dir: 'records_dir', dirField: 'recordsDir', noHome: '无法解析 DSH Home：records 目录不可用',
+      graceMs: 30000, maxBytes: 1024 * 1024,
+    })
     // LOC-032：操作账本进程边界（与 recordsHostCall 同模式）。外部交付动作可能慢，
     // graceMs 放宽到 120s；业务受阻（NEEDS_RECONCILIATION 等）透传 code。
-    async function operationsHostCall(cmd, input, opts) {
-      if (!OPERATIONS_HOST || (await readTextIfExists(OPERATIONS_HOST)) === null) return { ok: false, notFound: true, error: 'operations-host.mjs 未找到（LOC-032 运行时集成未部署）' }
-      const d = await homeDirs()
-      if (!d) return { ok: false, error: '无法解析 DSH Home：operations 目录不可用' }
-      const payload = { ...input, operations_dir: input.operations_dir || d.operationsDir }
-      const r = await runNode([OPERATIONS_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 120000, maxBytes: 1024 * 1024 })
-      if (!r.ok) return { ok: false, error: 'operations host 调用失败：' + r.detail }
-      try {
-        const parsed = JSON.parse(r.stdout)
-        return parsed.ok ? parsed : {
-          ok: false, code: parsed.code, blocked: parsed.blocked === true,
-          status: parsed.status, operation_id: parsed.operation_id,
-          error: parsed.error || parsed.message || 'operations host 业务错误',
-        }
-      } catch (e) { return { ok: false, error: 'operations host 输出不可解析：' + errMsg(e), raw: r.stdout } }
-    }
+    const operationsHostCall = makeHostCall({
+      host: OPERATIONS_HOST, label: 'operations host', biz: 'operations',
+      missing: 'operations-host.mjs 未找到（LOC-032 运行时集成未部署）',
+      dir: 'operations_dir', dirField: 'operationsDir', noHome: '无法解析 DSH Home：operations 目录不可用',
+      graceMs: 120000, maxBytes: 1024 * 1024,
+    })
     // LOC-037：收口交付动作进程边界（与 operationsHostCall 同模式）
-    async function deliveryCloseoutHostCall(cmd, input, opts) {
-      if (!DELIVERY_CLOSEOUT_HOST || (await readTextIfExists(DELIVERY_CLOSEOUT_HOST)) === null) return { ok: false, notFound: true, error: 'delivery-closeout-host.mjs 未找到（LOC-037 运行时集成未部署）' }
-      const d = await homeDirs()
-      if (!d) return { ok: false, error: '无法解析 DSH Home：operations 目录不可用' }
-      const payload = { ...input, operations_dir: input.operations_dir || d.operationsDir }
-      const r = await runNode([DELIVERY_CLOSEOUT_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 120000, maxBytes: 1024 * 1024 })
-      if (!r.ok) return { ok: false, error: 'delivery closeout host 调用失败：' + r.detail }
-      try {
-        const parsed = JSON.parse(r.stdout)
-        return parsed.ok ? parsed : {
-          ok: false, code: parsed.code, status: parsed.status,
-          delivery_status: parsed.delivery_status,
-          error: parsed.error || parsed.message || 'delivery closeout host 业务错误',
-        }
-      } catch (e) { return { ok: false, error: 'delivery closeout host 输出不可解析：' + errMsg(e), raw: r.stdout } }
-    }
+    const deliveryCloseoutHostCall = makeHostCall({
+      host: DELIVERY_CLOSEOUT_HOST, label: 'delivery closeout host', biz: 'delivery',
+      missing: 'delivery-closeout-host.mjs 未找到（LOC-037 运行时集成未部署）',
+      dir: 'operations_dir', dirField: 'operationsDir', noHome: '无法解析 DSH Home：operations 目录不可用',
+      graceMs: 120000, maxBytes: 1024 * 1024,
+    })
     // 节点收尾产物 → commit 条目（单一提交通道的宿主侧采集）：
     //  - 每个本段新完成节点 → node:<logical_run_id>:<nodeId> 的追加 Revision；
     //  - verifyBranch 节点（审核/测试）强制加发 proof：<logical_run_id>:<nodeId> 的
