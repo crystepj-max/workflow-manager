@@ -29,7 +29,7 @@
  *       "full-access": { "command": "zcode",  "args": ["exec", …, "{promptFile}"] },
  *       "auto-edit":   { "command": "claude", "args": ["-p", …, "{promptFile}"] } } },
  *   "sceneInit": { "command": "node", "args": ["<project>/scripts/cwf-run-init.mjs", "{taskId}", "{runId}", "--local-base"] },
- *   "remoteIssueCommand": "cnb issues …"          // 可省略；仅报告性核验，失败不影响批次
+ *   "remoteIssueCommand": "gh issue list …"       // 可省略；仅报告性核验，失败不影响批次
  * }
  * 占位符（args 通用）：{taskId} {runId} {runDir} {worktree} {promptFile} {project}
  *
