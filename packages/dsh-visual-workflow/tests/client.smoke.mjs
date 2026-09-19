@@ -280,6 +280,147 @@ runState.states['run-r1'] = { status: 'running', phase: '实现', logs: ['[段1]
 // ── 逻辑运行读取失败（工作空间未知）+ 旧记录（无逻辑归属）+ 历史分页 ──
 runState.logicalUnavailable = 'lr-err'
 runState.runs.push({ id: 'run-err1', taskId: 'T-E1', name: '读取失败任务', workflowId: 'wf-runs', status: 'running', startedAt: 2500, logical_run_id: 'lr-err', segment: 1, segment_count: 1, logical_state: 'RUNNING' })
+// ── Logical Run lr-d：多段但**没有返工**（第 2 段由集成同步后重跑触发）──
+// FIX-108 缺陷 1/2 的构造复现：收敛审查两段都成功（APPROVE），第 2 段不是返工轮。
+// 基线行为是「非最后一次一律退回修改」+「每个没在最后一段跑的节点都挂上一轮成果」。
+runState.runs.push(
+  { id: 'run-d1', taskId: 'T-D1', name: '完整功能开发', workflowId: 'wf-runs', status: 'DONE', phase: '检查', startedAt: 7000, supersededBy: 'run-d2', logical_run_id: 'lr-d', segment: 1, segment_count: 2, logical_state: 'WAITING_HUMAN' },
+  { id: 'run-d2', taskId: 'T-D1', name: '完整功能开发', workflowId: 'wf-runs', status: 'WAITING_HUMAN', phase: '验收', startedAt: 8000, logical_run_id: 'lr-d', segment: 2, segment_count: 2, logical_state: 'WAITING_HUMAN' },
+)
+runState.logical['lr-d'] = {
+  logical_run_id: 'lr-d', schema: 1, task_id: 'T-D1', template_id: 'wf-runs', title: '集成同步后重跑', created_at: 6900, updated_at: 8200,
+  lifecycle: { state: 'WAITING_HUMAN', reason: { code: 'HUMAN_ACCEPTANCE' } }, terminal: false, completion: null,
+  segments: [
+    { index: 1, run_id: 'run-d1', trigger: 'start', started_at: 7000, ended_at: 7300, status: 'WAITING_HUMAN', active: false },
+    { index: 2, run_id: 'run-d2', trigger: 'integration_gate_rerun', started_at: 8000, status: 'running', active: true },
+  ],
+  snapshots: [{ revision: 1, created_at: 6900, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: { review: { provider: 'p1', model: 'm1' } } }],
+  node_attempts: [
+    { node: 'dev', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY', completed_at: 7100 },
+    { node: 'review', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'APPROVE', completed_at: 7150 },
+    { node: 'review', segment: 2, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'APPROVE', completed_at: 8100 },
+    { node: 'test', segment: 2, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'PASS', completed_at: 8150 },
+  ],
+  business_outcomes: {
+    dev: { outcome: 'READY', path: '$.route', segment: 1, snapshot_revision: 1, at: 7100 },
+    review: { outcome: 'APPROVE', path: '$.route', segment: 2, snapshot_revision: 1, at: 8100 },
+    test: { outcome: 'PASS', path: '$.route', segment: 2, snapshot_revision: 1, at: 8150 },
+  },
+  guidance: [], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_A, human_decisions: [], consumed_decisions: {},
+}
+runState.records['lr-d'] = {
+  ok: true, found: true, logical_run_id: 'lr-d',
+  records: [
+    logicalAttempt('lr-d', 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', outcomePath: '$.route', result: { summary: '实现成果' } }),
+    logicalAttempt('lr-d', 'review', 1, { attempt_id: 'a1k2', outcome: 'APPROVE', outcomePath: '$.route', result: { verdict: '第一段审查通过' } }),
+    logicalAttempt('lr-d', 'review', 2, { attempt_id: 'a2k1', outcome: 'APPROVE', outcomePath: '$.route', result: { verdict: '同步后重跑仍通过' } }),
+    logicalAttempt('lr-d', 'test', 2, { attempt_id: 'a2k2', outcome: 'PASS', outcomePath: '$.route', result: { result: 'PASSED' } }),
+  ], attempts: [],
+}
+
+// ── Logical Run lr-e：人工门禁（等待人工 / 已裁决）──
+const HUMAN_DSL = {
+  id: 'wf-human', name: '带人工门禁的流', description: 'seed', entry: 'uat',
+  nodes: [{ id: 'uat', profile: 'accept', label: '验收准备' }, { id: 'dev', profile: 'dev', label: '开发' }, { id: 'closeout', profile: 'closeout', label: '收口' }],
+  edges: [
+    { from: 'dev', to: 'uat', outcome: 'READY' },
+    { from: 'uat', to: '$human-decision', outcome: 'READY_FOR_HUMAN' },
+    { from: '$human-decision', to: 'closeout', outcome: 'ACCEPT', subsequent_effect: '验收通过' },
+    { from: '$human-decision', to: 'dev', outcome: 'REJECT', subsequent_effect: '验收退回' },
+    { from: 'closeout', to: '$end', outcome: 'DELIVERED' },
+    { from: 'uat', to: 'uat', on: 'technical' },
+  ],
+}
+runState.runs.push({ id: 'run-e1', taskId: 'T-H1', name: '带人工门禁的流', workflowId: 'wf-human', status: 'WAITING_HUMAN', phase: '验收', startedAt: 9000, logical_run_id: 'lr-e', segment: 1, segment_count: 1, logical_state: 'WAITING_HUMAN' })
+runState.logical['lr-e'] = {
+  logical_run_id: 'lr-e', schema: 1, task_id: 'T-H1', template_id: 'wf-human', title: '等人决定', created_at: 8900, updated_at: 9200,
+  lifecycle: { state: 'WAITING_HUMAN', reason: { code: 'HUMAN_ACCEPTANCE' } }, terminal: false, completion: null,
+  segments: [{ index: 1, run_id: 'run-e1', trigger: 'start', started_at: 9000, status: 'running', active: true }],
+  snapshots: [{ revision: 1, created_at: 8900, active: true, workflow: { id: 'wf-human', name: '带人工门禁的流', dsl: HUMAN_DSL }, provider_model: {} }],
+  node_attempts: [{ node: 'uat', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY_FOR_HUMAN', completed_at: 9100 }],
+  business_outcomes: { uat: { outcome: 'READY_FOR_HUMAN', path: '$.route', segment: 1, snapshot_revision: 1, at: 9100 } },
+  guidance: [], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_A, human_decisions: [], consumed_decisions: {},
+}
+runState.records['lr-e'] = { ok: true, found: true, logical_run_id: 'lr-e', records: [logicalAttempt('lr-e', 'uat', 1, { attempt_id: 'a1k1', outcome: 'READY_FOR_HUMAN', outcomePath: '$.route', result: { summary: '验收材料已备齐' } })], attempts: [] }
+
+// 同一条流、人工已裁决（决策段带 decision_id）→ 同一次执行从「等待人工」转为「已裁决」
+runState.runs.push({ id: 'run-e2', taskId: 'T-H2', name: '带人工门禁的流', workflowId: 'wf-human', status: 'DONE', phase: '收口', startedAt: 9500, logical_run_id: 'lr-f', segment: 2, segment_count: 2, logical_state: 'COMPLETED' })
+runState.logical['lr-f'] = {
+  ...JSON.parse(JSON.stringify(runState.logical['lr-e'])),
+  logical_run_id: 'lr-f', task_id: 'T-H2', title: '已裁决',
+  lifecycle: { state: 'COMPLETED', reason: null }, terminal: true, completion: { type: 'USER_ACCEPTED', node: 'closeout', path: '$.status' },
+  segments: [
+    { index: 1, run_id: 'run-e1', trigger: 'start', started_at: 9000, ended_at: 9200, status: 'WAITING_HUMAN', active: false },
+    { index: 2, run_id: 'run-e2', trigger: 'human_decision', started_at: 9500, status: 'DONE', active: false, decision_id: 'T-H2:uat:0:1' },
+  ],
+  node_attempts: [{ node: 'uat', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY_FOR_HUMAN', completed_at: 9100 }],
+}
+runState.records['lr-f'] = { ok: true, found: true, logical_run_id: 'lr-f', records: [logicalAttempt('lr-f', 'uat', 1, { attempt_id: 'a1k1', outcome: 'READY_FOR_HUMAN', outcomePath: '$.route', result: { summary: '验收材料已备齐' } })], attempts: [] }
+
+// 人工退回后**再次停在门禁**等人裁决：新门禁尚未裁决，不得因「这个运行曾裁决过」写成已裁决
+runState.runs.push({ id: 'run-h2', taskId: 'T-H3', name: '带人工门禁的流', workflowId: 'wf-human', status: 'WAITING_HUMAN', phase: '验收', startedAt: 9800, logical_run_id: 'lr-h', segment: 2, segment_count: 2, logical_state: 'WAITING_HUMAN' })
+runState.logical['lr-h'] = {
+  logical_run_id: 'lr-h', schema: 1, task_id: 'T-H3', template_id: 'wf-human', title: '退回后再次等人裁决', created_at: 9700, updated_at: 9900,
+  lifecycle: { state: 'WAITING_HUMAN', reason: { code: 'HUMAN_ACCEPTANCE' } }, terminal: false, completion: null,
+  segments: [
+    { index: 1, run_id: 'run-h1', trigger: 'start', started_at: 9600, ended_at: 9650, status: 'WAITING_HUMAN', active: false },
+    { index: 2, run_id: 'run-h2', trigger: 'human_decision', started_at: 9800, status: 'running', active: true, decision_id: 'T-H3:uat:1:1' },
+  ],
+  snapshots: [{ revision: 1, created_at: 9700, active: true, workflow: { id: 'wf-human', name: '带人工门禁的流', dsl: HUMAN_DSL }, provider_model: {} }],
+  node_attempts: [
+    { node: 'uat', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY_FOR_HUMAN', completed_at: 9640 },
+    { node: 'dev', segment: 2, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY', completed_at: 9850 },
+    { node: 'uat', segment: 2, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY_FOR_HUMAN', completed_at: 9900 },
+  ],
+  business_outcomes: { uat: { outcome: 'READY_FOR_HUMAN', path: '$.route', segment: 2, snapshot_revision: 1, at: 9900 } },
+  guidance: [], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_A, human_decisions: [{ decision_id: 'T-H3:uat:1:1', user_choice: 'REJECT', at: 9700 }], consumed_decisions: {},
+}
+runState.records['lr-h'] = {
+  ok: true, found: true, logical_run_id: 'lr-h',
+  records: [
+    logicalAttempt('lr-h', 'uat', 1, { attempt_id: 'a1k1', outcome: 'READY_FOR_HUMAN', outcomePath: '$.route', ended_at: '2026-09-17T10:00:01Z', result: { summary: '第 1 轮验收材料' } }),
+    logicalAttempt('lr-h', 'dev', 2, { attempt_id: 'a2k1', outcome: 'READY', outcomePath: '$.route', ended_at: '2026-09-17T10:00:02Z', result: { summary: '退回后重做' } }),
+    logicalAttempt('lr-h', 'uat', 2, { attempt_id: 'a2k2', outcome: 'READY_FOR_HUMAN', outcomePath: '$.route', ended_at: '2026-09-17T10:00:03Z', result: { summary: '第 2 轮验收材料' } }),
+  ], attempts: [],
+}
+
+// ── Logical Run lr-g：**同一段内**业务返工（countRound 回环不新开段）──
+// 真实引擎证据：一次逻辑运行只跑一段，同一节点被调用两次（.agent-runs/fix-108-r1 的
+// verify-same-segment-rework.mjs：execute k=2 / k=4 同段同 round）。判「本轮有没有重做过」
+// 只能靠真实执行先后，不能只看段号——这里把该形态固化成回归锁。
+runState.runs.push({ id: 'run-g1', taskId: 'T-G1', name: '完整功能开发', workflowId: 'wf-runs', status: 'running', phase: '实现', startedAt: 10000, logical_run_id: 'lr-g', segment: 1, segment_count: 1, logical_state: 'RUNNING' })
+runState.logical['lr-g'] = {
+  logical_run_id: 'lr-g', schema: 1, task_id: 'T-G1', template_id: 'wf-runs', title: '同段返工', created_at: 9900, updated_at: 10100,
+  lifecycle: { state: 'RUNNING', reason: null }, terminal: false, completion: null,
+  segments: [{ index: 1, run_id: 'run-g1', trigger: 'start', started_at: 10000, status: 'running', active: true }],
+  snapshots: [{ revision: 1, created_at: 9900, active: true, workflow: { id: 'wf-runs', name: '完整功能开发', dsl: RUN_DSL }, provider_model: {} }],
+  node_attempts: [
+    { node: 'dev', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY', completed_at: 10010 },
+    { node: 'review', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'APPROVE', completed_at: 10020 },
+    { node: 'test', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'RETURN_DEV', completed_at: 10030 },
+    { node: 'dev', segment: 1, snapshot_revision: 1, provider: 'p1', model: 'm1', outcome: 'READY', completed_at: 10040 },
+  ],
+  business_outcomes: { dev: { outcome: 'READY', path: '$.route', segment: 1, snapshot_revision: 1, at: 10040 } },
+  guidance: [], control_events: [], baseline_revisions: [], baseline_applied_upto: 0,
+  last_engine_error: null, pause_state: null, pause_resume: null, evaluation_baseline: null, evaluation_baselines: [],
+  formal_records: null, workspace: WS_A, human_decisions: [], consumed_decisions: {},
+}
+runState.records['lr-g'] = {
+  ok: true, found: true, logical_run_id: 'lr-g',
+  records: [
+    logicalAttempt('lr-g', 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', outcomePath: '$.route', ended_at: '2026-09-17T10:00:01Z', result: { summary: '第 1 次实现' } }),
+    logicalAttempt('lr-g', 'review', 1, { attempt_id: 'a1k2', outcome: 'APPROVE', outcomePath: '$.route', ended_at: '2026-09-17T10:00:02Z', result: { summary: '第 1 次审查通过' } }),
+    logicalAttempt('lr-g', 'test', 1, { attempt_id: 'a1k3', outcome: 'RETURN_DEV', outcomePath: '$.route', ended_at: '2026-09-17T10:00:03Z', result: { reason: '测试发现回归，退回实现' } }),
+    logicalAttempt('lr-g', 'dev', 1, { attempt_id: 'a1k4', outcome: 'READY', outcomePath: '$.route', ended_at: '2026-09-17T10:00:04Z', result: { summary: '第 2 次实现（返工）' } }),
+  ], attempts: [],
+}
+
 // 看板 agents 回归用例的诊断运行：走 runId 直查默认 vwf.state（逐项处理 #1–#3）
 runState.runs.push({ id: 'run-1', taskId: 'T-DASH', name: '看板回归', workflowId: 'wf-history', status: 'running', phase: '逐项处理', startedAt: 6000 })
 runState.runs.push({ id: 'run-c1', taskId: 'T-C1', name: '诊断与修复', workflowId: 'wf-history', status: 'running', phase: '诊断', startedAt: 2000 })
@@ -857,8 +998,8 @@ test('fanout 看板：按节点归组展示三项并保留失败状态', async (
     await flush()
     await flush()
   })
-  // FEAT-85：详情入口收敛为唯一出口——runId 输入框 + 「详情」按钮打开该运行详情工作区
-  const input = container.querySelector('input[placeholder^="runId"]')
+  // FEAT-85：详情入口收敛为唯一出口——运行编号输入框 + 「详情」按钮打开该运行详情工作区
+  const input = container.querySelector('input[placeholder^="运行编号"]')
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
     setter.call(input, 'run-1')
@@ -874,12 +1015,37 @@ test('fanout 看板：按节点归组展示三项并保留失败状态', async (
     await flush()
   })
   assert.ok(container.querySelector('.vwf-rd-main'), '进入详情工作区')
-  assert.ok(byText(container, '逐项处理 · fanout · 3 items'), '看板显示 fanout 组标题')
-  assert.ok(byText(container, '逐项处理 #1'))
-  assert.ok(byText(container, '逐项处理 #2'))
-  const failed = Array.from(container.querySelectorAll('.vwf-badge')).find((el) => el.textContent.includes('failed'))
+  // FEAT-103 V-3/V-4：节点 / 结果的全貌与并行组归组移到「查看完整经过」链路弹窗；
+  // 页面底部不再并列一份重复的节点 / 结果表。
+  let chainRowBtn = null
+  await act(async () => {
+    chainRowBtn = Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过'))
+    assert.ok(chainRowBtn, '状态条提供查看完整经过')
+    chainRowBtn.click()
+    await flush()
+  })
+  const chain = container.querySelector('.vwf-chain')
+  assert.ok(chain, '链路弹窗打开')
+  assert.ok(byText(chain, '逐项处理 · fanout · 3 items'), '链路显示 fanout 组标题')
+  assert.ok(byText(chain, '逐项处理 #1'), '组内逐项列出（原节点 / 结果表口径）')
+  assert.ok(byText(chain, '逐项处理 #2'))
+  const failed = Array.from(chain.querySelectorAll('.vwf-badge')).find((el) => el.textContent.includes('failed'))
   assert.ok(failed && failed.textContent === '✕ failed', '失败项状态同时有形状与文字（V-4 双通道）')
-  assert.ok(failed.getAttribute('style').includes('var(--vwf-err)'), '失败项使用失败语义 token')
+  const failedEntry = failed.closest('.vwf-chain-entry')
+  assert.ok(failedEntry && failedEntry.className.includes('tone-failed'), '失败项在链路里落到失败语义样式类')
+  // 失败（err）与退回修改（warn）在链路上仍是两种语义色，不只靠形状与文字
+  const chainCss = styleText.join('\n')
+  assert.match(chainCss, /\.vwf-chain-entry\.tone-failed \.vwf-chain-dot \{[^}]*var\(--vwf-err\)/, '失败项用失败语义 token')
+  assert.match(chainCss, /\.vwf-chain-entry\.tone-returned \.vwf-chain-dot \{[^}]*var\(--vwf-warn\)/, '退回项用注意语义 token')
+  // Escape 逐层：链路弹窗是详情之上的一层，先关它（不把整个工作区带走）
+  await act(async () => {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flush()
+  })
+  assert.ok(!container.querySelector('.vwf-chain'), 'Escape 关闭链路弹窗')
+  assert.ok(container.querySelector('.vwf-rd-main'), '工作区详情仍在（Escape 只收一层）')
+  assert.ok(dom.window.document.activeElement === chainRowBtn, 'Escape 关闭后焦点回收到触发按钮')
+  assert.ok(!container.textContent.includes('逐项处理 · fanout'), '看板页面不再并列一份重复的节点 / 结果表')
   await act(async () => {
     const templatesTab = container.querySelector('[data-vwf-nav="templates"]')
     assert.ok(templatesTab, '顶部导航有流程库页签（FEAT-100 V-1）')
@@ -1981,12 +2147,50 @@ test('角色库：内置角色只读可查看可复制，不提供编辑/删除�
   const mgr = fresh.querySelector('[data-vwf-roles-tab]')
   const builtinRow = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => r.getAttribute('data-vwf-role-origin') === 'builtin')
   const builtinBtns = Array.from(builtinRow.querySelectorAll('button')).map(b => b.textContent)
-  assert.deepEqual(builtinBtns, ['查看'], '内置角色只有查看入口，无编辑/复制/删除')
+  // FEAT-103 V-1：内置行与自定义行一样有「基于此角色创建」；编辑 / 删除仍只属于自定义
+  assert.deepEqual(builtinBtns, ['查看', '基于此角色创建'], '内置角色：查看 + 基于此角色创建，无编辑/删除')
   await act(async () => { Array.from(builtinRow.querySelectorAll('button'))[0].click(); await flush() })
   const viewBtns = Array.from(fresh.querySelectorAll('.vwf-role-mgr button')).map(b => b.textContent)
   assert.ok(viewBtns.some((x) => x.includes('基于此角色创建')), '内置详情提供复制为自定义：' + JSON.stringify(viewBtns))
   assert.ok(!viewBtns.includes('编辑'), '内置详情无编辑入口')
   assert.ok(byText(mgr, '开发角色正文'), '内置详情展示完整内容')
+  await act(async () => { freshRoot.unmount(); fresh.remove() })
+})
+
+// FEAT-103 V-1：内置角色「列表行」的复制入口与详情页同行为——以该角色为初稿进新建表单，
+// 保存落成自定义角色，原内置角色内容不被写回。
+test('FEAT-103 V-1：内置角色行「基于此角色创建」进新建表单并落成自定义角色', async () => {
+  const fresh = document.createElement('div')
+  document.body.appendChild(fresh)
+  const freshRoot = createRoot(fresh)
+  await act(async () => {
+    freshRoot.render(React.createElement(Page))
+    await flush()
+    await flush()
+  })
+  await openRolesTab(fresh)
+  const mgr = fresh.querySelector('[data-vwf-roles-tab]')
+  const builtinRow = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => r.getAttribute('data-vwf-role-origin') === 'builtin')
+  const cloneBtn = Array.from(builtinRow.querySelectorAll('button')).find(b => b.textContent === '基于此角色创建')
+  assert.ok(cloneBtn, '内置行提供「基于此角色创建」')
+  await act(async () => { cloneBtn.click(); await flush(); await flush() })
+  const nameInput = mgr.querySelector('input.vwf-input')
+  assert.equal(nameInput.value, 'dev - 自定义', '以该内置角色为初稿（建议名预填）')
+  const contentArea = mgr.querySelector('textarea.vwf-textarea')
+  assert.equal(contentArea.value, '开发角色正文\n', '职责正文带入表单')
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    setter.call(nameInput, '内置行复制稿')
+    nameInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+    byText(mgr, '保存角色').click()
+    await flush()
+    await flush()
+  })
+  const created = roleState.roles.find(r => r.id === '内置行复制稿')
+  assert.ok(created && created.builtin === false, '保存落成自定义角色')
+  assert.equal(roleState.roles.find(r => r.id === 'dev').content, '开发角色正文\n', '原内置角色内容未被写回')
+  roleState.roles = roleState.roles.filter(r => r.id !== '内置行复制稿')
   await act(async () => { freshRoot.unmount(); fresh.remove() })
 })
 
@@ -2209,18 +2413,18 @@ async function backToList() {
   await clickEl(btn)
 }
 
-test('FEAT-85 列表：同一 Logical Run 折叠为一条任务、按工作空间分组、superseded 段不另起一行', async () => {
+test('FEAT-85 列表：同一任务的多次执行合并为一条、按工作空间分组、superseded 段不另起一行', async () => {
   await openRunsTab()
   await act(async () => { await flush(); await flush(); await flush() })
   const rows = runRows()
   assert.ok(rows.length > 0, '运行列表渲染')
-  // 同一 Logical Run 的两段只呈现为一条任务（T-A1 只出现一次）
+  // 同一次运行的两段只呈现为一条任务（T-A1 只出现一次）
   const a1Rows = rows.filter((r) => (r.textContent || '').includes('T-A1'))
   assert.equal(a1Rows.length, 1, '多 segment 折叠为一条用户任务：' + a1Rows.length)
-  // 被续跑接管的第 1 段不再单独占一行：列表里不出现「已由续跑接管」行
-  assert.ok(!container.querySelector('.vwf-run-row') || !container.textContent.includes('已由续跑接管'), 'superseded 段不作为新用户任务展示')
-  // 多段任务显示段位
-  assert.ok(a1Rows[0].textContent.includes('第 2/2 段'), '多段任务显示当前段/总段数：' + a1Rows[0].textContent)
+  // 被恢复的运行接续的第 1 段不再单独占一行：列表里不出现「已由恢复的运行接续」行
+  assert.ok(!container.querySelector('.vwf-run-row') || !container.textContent.includes('已由恢复的运行接续'), 'superseded 段不作为新用户任务展示')
+  // 多段任务显示轮次
+  assert.ok(a1Rows[0].textContent.includes('第 2/2 轮'), '多段任务显示当前轮/总轮数：' + a1Rows[0].textContent)
   // 按工作空间分组（两个空间 + 未归属旧记录）
   const heads = groupHeads()
   assert.ok(heads.some((x) => x.includes('工作空间A')), '按工作空间 A 分组：' + JSON.stringify(heads))
@@ -2229,41 +2433,44 @@ test('FEAT-85 列表：同一 Logical Run 折叠为一条任务、按工作空�
   // 返工次数与最近更新时间
   assert.ok(a1Rows[0].textContent.includes('返工 1 次'), '返工次数来自节点重复执行：' + a1Rows[0].textContent)
   assert.ok(a1Rows[0].textContent.includes('最近更新'), '显示最近更新时间：' + a1Rows[0].textContent)
-  // 折叠说明可见（用户不会误以为分段是新任务）
-  assert.ok(container.textContent.includes('同一 Logical Run 的多段折叠为一条任务'), '列表给出折叠说明')
+  // 合并说明可见（用户不会误以为多轮执行是新任务）
+  assert.ok(container.textContent.includes('同一次任务的多次执行合并为一条'), '列表给出合并说明')
   // 界面不拼接让用户复制的命令
   assert.ok(!container.textContent.includes('wf_run {'), '界面不出现可复制的 wf_run 命令')
   assert.ok(!container.textContent.includes('USER_ACCEPTED|ADD_BUDGET|STOP'), '界面不出现占位枚举命令行')
 })
 
-test('FEAT-85 列表：空间/状态/结果/完成类型四类筛选与分页', async () => {
+test('FEAT-85 列表：空间/状态/结果/结束方式四类筛选与分页', async () => {
   await openRunsTab()
   const total = Array.from(container.querySelectorAll('.vwf-muted-sm')).map((e) => e.textContent).join(' ')
-  assert.ok(total.includes('共 20 条'), '任务总数为折叠后的 20：' + total.slice(0, 200))
-  assert.ok(container.textContent.includes('第 1/2 页'), '分页按任务数计算')
+  assert.ok(total.includes('共 25 条'), '任务总数为折叠后的 25（含 FIX-108 新增样本）：' + total.slice(0, 200))
+  assert.ok(container.textContent.includes('第 1/3 页'), '分页按任务数计算')
   // 空间筛选：只剩工作空间 A 的三条
   await selectValue(filterSelect(0), '工作空间A')
   let rows = runRows()
-  assert.equal(rows.length, 3, '按空间筛选后只剩该空间任务：' + rows.length)
+  assert.equal(rows.length, 8, '按空间筛选后只剩该空间任务（含 FIX-108 新增样本）：' + rows.length)
   assert.ok(!rows.some((r) => (r.textContent || '').includes('T-B1')), '其它空间任务被筛掉')
   await selectValue(filterSelect(0), 'all')
   // 状态筛选：待处理 = WAITING_HUMAN + BLOCKED + PAUSED
   await selectValue(filterSelect(1), 'attention')
   rows = runRows()
-  assert.equal(rows.length, 3, '待处理筛选命中三个可恢复/待裁决运行：' + rows.length)
+  assert.equal(rows.length, 6, '待处理筛选命中全部可恢复/待裁决运行（含 FIX-108 新增样本）：' + rows.length)
   await selectValue(filterSelect(1), 'done')
-  assert.ok(container.textContent.includes('共 13 条'), '已完成筛选按 DONE 计：' + rows.length)
+  rows = runRows()
+  assert.ok(container.textContent.includes('共 14 条'), '已完成筛选按 DONE 计（含 FIX-108 新增样本）：' + rows.length)
   await selectValue(filterSelect(1), 'all')
-  // 业务结果筛选：READY 只命中 lr-a
+  // 业务结果筛选：READY 命中 lr-a、lr-d、lr-h（三边的 dev 业务结果都是 READY）
   await selectValue(filterSelect(2), 'READY')
   rows = runRows()
-  assert.equal(rows.length, 2, '业务结果筛选按节点业务结果取值：' + rows.length)
+  assert.equal(rows.length, 4, '业务结果筛选按节点业务结果取值（T-D1/T-H3 的 dev 结果同为 READY）：' + rows.length)
   await selectValue(filterSelect(2), 'all')
-  // 完成类型筛选：DELIVERED 只命中 lr-b
+  // 结束方式筛选：DELIVERED（raw 值仍是筛选口径，展示为「独立完成」）只命中 lr-b
   await selectValue(filterSelect(3), 'DELIVERED')
   rows = runRows()
-  assert.equal(rows.length, 1, '完成类型筛选按 completion.type：' + rows.length)
-  assert.ok((rows[0].textContent || '').includes('T-B1'), '完成类型命中 T-B1：' + rows[0].textContent)
+  assert.equal(rows.length, 1, '结束方式筛选按 completion.type：' + rows.length)
+  assert.ok((rows[0].textContent || '').includes('T-B1'), '结束方式命中 T-B1：' + rows[0].textContent)
+  assert.ok(container.textContent.includes('结束方式') && container.textContent.includes('独立完成'), '结束方式筛选与取值展示为用户语言')
+  assert.ok(!container.textContent.includes('完成类型'), '旧文案「完成类型」不再出现')
   await selectValue(filterSelect(3), 'all')
 })
 
@@ -2318,27 +2525,35 @@ test('FEAT-85 详情：唯一选中节点结果出口 + 结果/检查/活动三�
   const actPanel = container.querySelector('.vwf-tab-panel').textContent
   assert.ok(actPanel.includes('活动记录'), '活动页签渲染：' + actPanel.slice(0, 120))
   assert.ok(!actPanel.includes('本次执行没有记录退回意见'), '切换页签后不再显示检查页签内容（不叠加）')
-  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('[段 2]'), '运行日志标注来源分段')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('[第 2 轮]'), '运行日志标注来源轮次')
   await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))
 })
 
 test('FEAT-85 详情：返工 attempt 切换、退回意见跟随审查轮次、旧下游结果标为上一轮成果', async () => {
   await openRunsTab()
   await openTask('T-A1')
-  // 目录：测试节点只有第 1 段尝试 → 上一轮成果
-  const testRow = nodeDirRows().find((r) => (r.textContent || '').includes('测试'))
-  assert.ok(testRow.textContent.includes('上一轮成果'), '旧下游结果在目录标注上一轮成果：' + testRow.textContent)
-  await clickEl(testRow)
-  assert.ok(container.querySelector('.vwf-note.warn') && container.querySelector('.vwf-note.warn').textContent.includes('这是返工前的成果'), '选中旧下游节点给出上一轮成果说明')
-  // 实现节点有两次执行
+  // lr-a 的「测试」那次执行按真实执行先后排在退回之后（属返工后的本轮成果）→ 不挂「上一轮成果」。
+  // 返工未达节点确实显示该标签的情形由 FIX-108 V-3 用例（lr-g：同段返工）覆盖。
+  for (const l of ['实现', '检查', '测试']) {
+    const row = nodeDirRows().find((r) => (r.textContent || '').includes(l))
+    assert.ok(!(row.textContent || '').includes('上一轮成果'), '本轮已重做/已推进到的节点不标上一轮成果（FIX-108 V-3）：' + l + '：' + row.textContent)
+  }
+  // 实现节点有两次执行：每一次按自己的终局标注（READY 是向前推进的取值 → 已通过）
   const devRow = nodeDirRows().find((r) => (r.textContent || '').includes('实现'))
   await clickEl(devRow)
   const sel = attemptSelect()
   assert.equal(sel.options.length, 2, '实现节点有两次执行记录：' + sel.options.length)
-  assert.ok(sel.options[0].textContent.includes('第 1 次') && sel.options[0].textContent.includes('退回修改'), '第 1 次标为退回修改：' + sel.options[0].textContent)
+  assert.ok(sel.options[0].textContent.includes('第 1 次') && sel.options[0].textContent.includes('已通过'), '第 1 次按自身终局标注（不再按「非最后一次」译成退回修改）：' + sel.options[0].textContent)
   assert.ok(sel.options[1].textContent.includes('最新'), '第 2 次标为最新：' + sel.options[1].textContent)
+  // 真正触发退回的是检查那一次（RETURN_DEV）——退回事实由它自己承载，不由上游代述
+  const reviewRow = nodeDirRows().find((r) => (r.textContent || '').includes('检查'))
+  await clickEl(reviewRow)
+  const rsel = attemptSelect()
+  assert.equal(rsel.options.length, 2, '检查节点有两次执行记录：' + rsel.options.length)
+  assert.ok(rsel.options[0].textContent.includes('退回修改'), '产出退回裁决的那次执行标为退回修改：' + rsel.options[0].textContent)
   // 切到第 1 次 → 历史执行 + 该轮成果
-  await selectValue(sel, '1')
+  await clickEl(devRow)
+  await selectValue(attemptSelect(), '1')
   assert.ok(container.querySelector('.vwf-rd-body').textContent.includes('历史执行'), '切到历史执行有明确标注')
   assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第 1 次实现成果'), '第 1 次成果与选择对应')
   // 检查页签：退回意见跟随第 1 段审查轮次
@@ -2404,7 +2619,7 @@ test('FEAT-85 详情：WAITING_HUMAN 决策卡（选项/理由/影响/锁定 + D
   assert.ok(!container.textContent.includes('wf_run {'), '决策卡不拼接让用户复制的命令')
 })
 
-test('FEAT-85 详情：BLOCKED 恢复卡（原因 / Provider·Model 前后值 / 新修订与旧修订保留）', async () => {
+test('FEAT-85 详情：BLOCKED 恢复卡（原因 / 服务商·模型前后值 / 新版本与旧版本保留）', async () => {
   await openRunsTab()
   await openTask('T-C2')
   const card = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('阻塞原因'))
@@ -2412,51 +2627,74 @@ test('FEAT-85 详情：BLOCKED 恢复卡（原因 / Provider·Model 前后值 / 
   const text = card.textContent
   assert.ok(text.includes('EVALUATION_BASELINE_CONFLICT'), '恢复卡显示阻塞原因')
   assert.ok(text.includes('恢复入口：dev'), '恢复卡显示恢复入口节点')
-  assert.ok(text.includes('deepseek-official / deepseek-v4-pro'), '恢复卡显示当前 Provider / Model')
-  assert.ok(card.querySelectorAll('select').length >= 2, '恢复卡提供 Provider / Model 修改入口')
-  assert.ok(text.includes('恢复后产生新的 Snapshot Revision，历史修订仍可查'), '恢复卡说明新修订与旧修订保留')
+  assert.ok(text.includes('deepseek-official / deepseek-v4-pro'), '恢复卡显示当前服务商 / 模型')
+  assert.ok(card.querySelectorAll('select').length >= 2, '恢复卡提供服务商 / 模型修改入口')
+  assert.ok(text.includes('恢复后会生成新的版本存档，历史版本仍可查'), '恢复卡说明新版本与旧版本保留')
   assert.ok(text.includes('model_overrides'), '恢复卡附 model_overrides 字段映射')
   const submit = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('恢复并继续'))
   assert.ok(submit && submit.disabled, 'DT-01 未裁定：恢复提交按钮锁定')
-  // 修订表同时保留旧修订
-  const snaps = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('快照修订'))
-  assert.ok(snaps && snaps.textContent.includes('R1'), '快照修订表可查')
+  // 版本表同时保留旧版本（按卡片标题定位，避免与恢复卡里的同词说明混淆）
+  const snaps = Array.from(container.querySelectorAll('.vwf-card')).find((c) => {
+    const title = c.querySelector('.vwf-card-title')
+    return title && (title.textContent || '').trim() === '历史版本'
+  })
+  assert.ok(snaps && snaps.textContent.includes('第 1 版'), '历史版本表可查')
 })
 
-test('FEAT-85 详情：工作空间面板字段齐全、读取失败显示未知与重试；节点成果不可用不冒充内容', async () => {
+test('FEAT-85 详情：工作空间字段齐全、读取失败显示未知与重试；节点成果不可用不冒充内容', async () => {
   await openRunsTab()
   await openTask('T-A1')
-  const wsCard = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('工作空间信息'))
-  assert.ok(wsCard, '详情含工作空间面板')
-  const ws = wsCard.textContent
+  const locatorOf = () => Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行定位'))
+  // FEAT-103 V-5：运行定位默认只给概要；「详细」展开全量（原工作空间区域内容并入这里）
+  const locator = locatorOf()
+  assert.ok(locator, '详情含运行定位卡')
+  const expandBtn = Array.from(locator.querySelectorAll('button')).find((b) => b.textContent === '详细')
+  assert.ok(expandBtn && expandBtn.getAttribute('aria-expanded') === 'false', '默认收起，只给概要')
+  assert.ok(!locator.textContent.includes('工作分支'), '概要里不再重复工作空间全量字段')
+  await act(async () => { expandBtn.click(); await flush() })
+  assert.ok(locator.textContent.includes('工作空间信息'), '「详细」展开原工作空间区域内容')
+  const ws = locator.textContent
   for (const field of ['模式', '仓库', '工作分支', '当前 HEAD', 'base HEAD', '集成状态', '活动锁', '清理状态']) {
-    assert.ok(ws.includes(field), '工作空间面板含 ' + field)
+    assert.ok(ws.includes(field), '工作空间字段齐备：' + field)
   }
   assert.ok(ws.includes('ISOLATED_WRITE'), '模式取值来自注册表')
   assert.ok(ws.includes('dev-t-a1'), '工作分支来自注册表')
   assert.ok(ws.includes('aaaa1111bb'), '当前 HEAD 显示短哈希：' + ws.slice(0, 400))
   assert.ok(ws.includes('lock_acquired'), '活动锁可见')
   assert.ok(ws.includes('未知 / 不可用'), '缺值字段显示未知，不用空白冒充')
-  // 逻辑运行读取失败：显式错误 + 重试入口，不把缓存当事实
+  // 收起恢复概要（V-5）
+  await act(async () => {
+    Array.from(locator.querySelectorAll('button')).find((b) => b.textContent === '收起').click()
+    await flush()
+  })
+  assert.ok(!locator.textContent.includes('工作分支'), '收起后回到概要')
+  // 运行记录读取失败：显式错误 + 重试入口，不把缓存当事实（失败不藏在展开层后面）
   await backToList()
+  // 夹具增长后旧任务落到后面几页：查它之前先把每页条数放到 100
+  await selectValue(Array.from(container.querySelectorAll('select')).find((x) => Array.from(x.options).map((o) => o.value).join() === '10,20,50,100'), '100')
   await openTask('T-E1')
-  assert.ok(container.textContent.includes('逻辑运行摘要读取失败'), '读取失败有可见错误：' + container.textContent.slice(0, 300))
-  const errWs = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('工作空间信息'))
-  assert.ok(errWs.textContent.includes('工作空间信息读取失败'), '工作空间面板显示读取失败')
-  assert.ok(Array.from(errWs.querySelectorAll('button')).some((b) => (b.textContent || '').includes('重试读取')), '提供重试入口')
-  assert.ok(errWs.textContent.includes('不把过时缓存当作当前事实'), '写明不把缓存当事实')
-  // 正式记录通道不可用：只显示尝试元数据，不冒充成果正文
+  assert.ok(container.textContent.includes('记录摘要暂时读不到'), '读取失败有可见错误：' + container.textContent.slice(0, 300))
+  const errLoc = locatorOf()
+  assert.ok(errLoc.textContent.includes('工作空间信息读取失败'), '运行定位显示读取失败')
+  assert.ok(Array.from(errLoc.querySelectorAll('button')).some((b) => (b.textContent || '').includes('重试读取')), '提供重试入口')
+  assert.ok(errLoc.textContent.includes('不把过时缓存当作当前事实'), '写明不把缓存当事实')
+  // 正式记录通道不可用：只显示基本信息，不冒充成果正文
   runState.recordsFail = true
   const refreshBtn = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '刷新列表')
   await clickEl(refreshBtn, 6)
-  assert.ok(container.textContent.includes('节点成果正文不可用'), '记录通道不可用时给出明确降级说明')
-  assert.ok(container.textContent.includes('不冒充成果内容'), '写明不冒充成果内容')
+  assert.ok(container.textContent.includes('暂时读不到这一步的成果内容'), '记录通道不可用时给出明确降级说明')
+  assert.ok(container.textContent.includes('只显示基本信息'), '写明只显示基本信息、不冒充内容')
+  // B8：降级说明就地保留重试入口（重试即重取摘要与记录，不隐藏失败也不新增 RPC）
+  const recNote = Array.from(container.querySelectorAll('.vwf-note.warn'))
+    .find((n) => (n.textContent || '').includes('暂时读不到这一步的成果内容'))
+  assert.ok(recNote && Array.from(recNote.querySelectorAll('button')).some((b) => (b.textContent || '').includes('重试读取')), '降级说明旁保留重试读取入口')
   runState.recordsFail = false
   await backToList()
 })
 
 test('FEAT-85 详情：PAUSED 指导经 vwf.run.control 提交；控制按钮名对应实际 action', async () => {
   await openRunsTab()
+  await selectValue(Array.from(container.querySelectorAll('select')).find((x) => Array.from(x.options).map((o) => o.value).join() === '10,20,50,100'), '100')
   await openTask('T-P1')
   const card = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('提交指导'))
   assert.ok(card, 'PAUSED 显示暂停卡')
@@ -2499,21 +2737,197 @@ test('FEAT-85 详情：PAUSED 指导经 vwf.run.control 提交；控制按钮名
   await backToList()
 })
 
-test('FEAT-85 详情：结果 / Lifecycle / 完成类型分层显示（不塌缩为成功失败徽标）', async () => {
+// FEAT-103 V-3：链路弹窗展示完整工作链路（含尝试 / 返工轮次），点选一条回到详情并把
+// 右侧当前结果切到该节点那一次；V-4：底部不再并列一份节点 / 结果表；V-6：正式产物进
+// 右侧「结果」页签，页面底部不再有独立区块。
+test('FEAT-103 V-3/V-4/V-6：完整经过链路弹窗点选联动右侧结果；正式产物在「结果」页签', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  const body = container.querySelector('.vwf-rd-body')
+  // V-6：正式产物默认落在「结果」页签内，工件路径 / 版本 / 来源节点齐全
+  assert.ok(body.textContent.includes('正式交付物'), '结果页签内有正式交付物')
+  assert.ok(body.textContent.includes('node:lr-a:dev'), '工件清单来自 run 的 formalRecords')
+  assert.ok(body.textContent.includes('版本 2'), '工件版本可见')
+  assert.ok(body.textContent.includes('节点 dev'), '工件来源节点可见')
+  const belowCards = Array.from(container.querySelectorAll('.vwf-root > .vwf-card')).map((c) => c.textContent || '')
+  assert.ok(!belowCards.some((x) => x.includes('正式交付物')), '页面底部不再有独立的正式交付物区块')
+  assert.ok(!belowCards.some((x) => x.includes('节点 / 结果')), '页面底部不再有独立的节点 / 结果区域')
+  // V-3：打开链路弹窗
+  await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过')))
+  const chain = container.querySelector('.vwf-chain')
+  assert.ok(chain, '链路弹窗打开')
+  const entry = (node, attempt) => chain.querySelector('[data-vwf-chain-node="' + node + '"][data-vwf-chain-attempt="' + attempt + '"]')
+  const labels = Array.from(chain.querySelectorAll('.vwf-chain-entry')).map((e) => e.textContent)
+  assert.ok(labels.length >= 6, '链路铺开全部节点（未执行的也占位）：' + labels.length)
+  assert.ok(labels.some((x) => x.includes('实现') && x.includes('第 1 次 · 已通过')), '链路含返工前的第 1 次执行（按自身终局标注）：' + JSON.stringify(labels))
+  assert.ok(labels.some((x) => x.includes('检查') && x.includes('第 1 次 · 退回修改')), '链路含真正产出退回裁决的那次执行：' + JSON.stringify(labels))
+  assert.ok(labels.some((x) => x.includes('实现') && x.includes('第 2 次 · 已通过') && x.includes('最新')), '链路含最新一次执行并标最新')
+  // 上一轮成果只落在「产出在本轮起点之前且此后没被重做」的那一条上（FIX-108 缺陷 2）；
+  // lr-a 里各节点的最新成果都排在退回之后 → 一条都不该标
+  assert.equal(labels.filter((x) => x.includes('上一轮成果')).length, 0, '链路上不得有上一轮成果标记：' + JSON.stringify(labels))
+  assert.ok(labels.some((x) => x.includes('尚未开始')), '未执行的节点在链路里明确标注')
+  // 点选第 1 次实现 → 关闭弹窗，右侧切到该节点该次执行
+  await clickEl(entry('dev', '1'))
+  assert.ok(!container.querySelector('.vwf-chain'), '点选后弹窗关闭回到详情页')
+  assert.equal(attemptSelect().value, '1', '右侧当前结果切到点选的那一次执行')
+  assert.ok(container.querySelector('.vwf-rd-body').textContent.includes('历史执行'), '历史执行有明确标注')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第 1 次实现成果'), '右侧正文是该次执行的成果')
+  // 再点最新一次 → 回到当前结果
+  await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过')))
+  await clickEl(container.querySelector('.vwf-chain [data-vwf-chain-node="dev"][data-vwf-chain-attempt="2"]'))
+  assert.equal(attemptSelect().value, '2', '切回最新一次执行')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第 2 次实现成果'), '右侧正文回到最新成果')
+  assert.ok(!container.querySelector('.vwf-rd-body').textContent.includes('历史执行'), '最新一次不标历史执行')
+  await backToList()
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FIX-108：attempt 结局的单一权威（结果信息 / 执行记录 / 完整经过链路三处一致）
+// 数据基线：.agent-runs/fix-108-r1/diagnosis.md（smoke-01 真实记录实测）
+// ═══════════════════════════════════════════════════════════════════════════
+
+// 三处视图对「同一次执行」的状态结论必须逐字相同。做法：对每个节点取该次执行的
+//   结果信息 —— 右栏状态徽标（data-vwf-verdict）
+//   执行记录 —— attempt 下拉那一项的 {state}
+//   完整经过链路 —— 链路 entry 徽标里的 {state}
+// 直接比对三处文本，任一处不同即失败（这正是缺陷 1 的形状）。
+async function threeViewVerdicts(taskId) {
+  await openRunsTab()
+  await openTask(taskId)
+  const out = {}
+  for (const row of nodeDirRows()) {
+    const label = (row.querySelector('.vwf-node-dir-label') || {}).textContent || ''
+    await clickEl(row)
+    const sel = attemptSelect()
+    if (!sel) continue
+    const pickerStates = Array.from(sel.options).map((o) => String(o.textContent).replace(/第 \d+ 次 · /, '').replace('（最新）', ''))
+    const resultStates = []
+    for (let i = 0; i < sel.options.length; i++) {
+      await selectValue(sel, String(i + 1))
+      const badge = container.querySelector('.vwf-rd-body [data-vwf-verdict]')
+      assert.ok(badge, label + ' 第 ' + (i + 1) + ' 次：结果信息给出状态结论')
+      resultStates.push(badge.textContent.replace(/^[^\s]+\s/, ''))
+    }
+    await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过')))
+    // 节点 id 不在行 DOM 上，按节点标签匹配链路条目
+    const entries = Array.from(container.querySelectorAll('.vwf-chain-entry'))
+      .filter((e) => (e.textContent || '').includes(label))
+      .filter((e) => e.getAttribute('data-vwf-chain-attempt') !== '0')
+    const chainBadges = entries.map((e) => {
+      const b = Array.from(e.querySelectorAll('.vwf-badge')).find((x) => /^(第 \d+ 次 · )/.test(x.textContent || ''))
+      return b ? String(b.textContent).replace(/第 \d+ 次 · /, '').replace('（最新）', '') : ''
+    })
+    await clickEl(Array.from(container.querySelectorAll('.vwf-chain-dialog button')).find((b) => b.textContent.trim() === '关闭'))
+    out[label] = { picker: pickerStates, result: resultStates, chain: chainBadges }
+  }
+  await backToList()
+  return out
+}
+
+test('FIX-108 V-1：三处视图（结果信息 / 执行记录 / 完整经过链路）对同一次执行的状态结论完全一致', async () => {
+  // 含返工的构造用例：第 1 段检查退回 → 第 2 段重做（同一节点两次执行，一次退回一次通过）
+  const a = await threeViewVerdicts('T-A1')
+  for (const label of Object.keys(a)) {
+    const v = a[label]
+    if (!v.picker.length) continue
+    assert.deepEqual(v.result, v.picker, '结果信息与执行记录一致（' + label + '）：' + JSON.stringify(v))
+    assert.deepEqual(v.chain, v.picker, '链路与执行记录一致（' + label + '）：' + JSON.stringify(v))
+  }
+  // 实测缺陷形状：检查节点第 1 次是退回裁决（RETURN_DEV），第 2 次通过
+  assert.deepEqual(a['检查'].picker, ['退回修改', '已通过'], '检查节点两次执行的结局：' + JSON.stringify(a['检查'].picker))
+  assert.deepEqual(a['实现'].picker, ['已通过', '已通过'], '实现节点按自身终局标注：' + JSON.stringify(a['实现'].picker))
+  assert.deepEqual(a['测试'].picker, ['已通过'], '测试节点按自身终局标注：' + JSON.stringify(a['测试'].picker))
+})
+
+test('FIX-108 V-1/V-3：多段但无返工时三处一致，且不出现「上一轮成果」（smoke-01 实测形状）', async () => {
+  const d = await threeViewVerdicts('T-D1')
+  for (const label of Object.keys(d)) {
+    const v = d[label]
+    if (!v.picker.length) continue
+    assert.deepEqual(v.result, v.picker, '结果信息与执行记录一致（' + label + '）：' + JSON.stringify(v))
+    assert.deepEqual(v.chain, v.picker, '链路与执行记录一致（' + label + '）：' + JSON.stringify(v))
+  }
+  // 收敛审查两段都成功；第 2 段是集成同步后重跑，不是返工——不得把第 1 次译成「退回修改」
+  assert.deepEqual(d['检查'].picker, ['已通过', '已通过'], '无返工时的两次审查都按自身终局标注：' + JSON.stringify(d['检查'].picker))
+  // V-3：没有返工就没有「上一轮成果」这一轮 → 目录与链路都不得出现
+  await openRunsTab()
+  await openTask('T-D1')
+  for (const row of nodeDirRows()) {
+    assert.ok(!(row.textContent || '').includes('上一轮成果'), '无返工时目录不标上一轮成果：' + row.textContent)
+  }
+  await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过')))
+  const chainText = container.querySelector('.vwf-chain').textContent
+  assert.ok(!chainText.includes('上一轮成果'), '无返工时链路不标上一轮成果：' + chainText.slice(0, 300))
+  await clickEl(Array.from(container.querySelectorAll('.vwf-chain-dialog button')).find((b) => b.textContent.trim() === '关闭'))
+  await backToList()
+})
+
+test('FIX-108 V-3：首轮不显示「上一轮成果」', async () => {
+  await openRunsTab()
+  await openTask('T-B1') // lr-b：单段、无退回
+  for (const row of nodeDirRows()) {
+    assert.ok(!(row.textContent || '').includes('上一轮成果'), '首轮不标上一轮成果：' + row.textContent)
+  }
+  await backToList()
+})
+
+test('FIX-108 V-2：人工门禁的结局语义（等待人工 / 已裁决）在三处一致，且只认这次门禁的裁决', async () => {
+  const e = await threeViewVerdicts('T-H1') // 首次停在门禁，尚未裁决
+  assert.deepEqual(e['验收准备'].picker, ['等待人工'], '未裁决时执行记录标等待人工：' + JSON.stringify(e['验收准备'].picker))
+  assert.deepEqual(e['验收准备'].chain, ['等待人工'], '未裁决时链路同口径：' + JSON.stringify(e['验收准备']))
+  const f = await threeViewVerdicts('T-H2') // 第 2 段带 decision_id → 该次门禁已裁决
+  assert.deepEqual(f['验收准备'].picker, ['已裁决'], '裁决后同一状态转为已裁决：' + JSON.stringify(f['验收准备'].picker))
+  assert.deepEqual(f['验收准备'].chain, ['已裁决'], '裁决后链路同口径：' + JSON.stringify(f['验收准备']))
+  const h = await threeViewVerdicts('T-H3') // 第 1 轮门禁被退回裁决，第 2 轮再次停在门禁等人裁决
+  assert.deepEqual(h['验收准备'].picker, ['已裁决', '等待人工'], '只认这次门禁：第 1 轮已裁决、第 2 轮仍在等待：' + JSON.stringify(h['验收准备'].picker))
+  assert.deepEqual(h['验收准备'].chain, ['已裁决', '等待人工'], '链路同口径，不得把仍在等待的门禁写成已裁决：' + JSON.stringify(h['验收准备']))
+})
+
+test('FIX-108 V-3：同一段内业务返工时，返工未达节点显示上一轮成果、已重做节点不显示', async () => {
+  const g = await threeViewVerdicts('T-G1')
+  for (const label of Object.keys(g)) {
+    const v = g[label]
+    if (!v.picker.length) continue
+    assert.deepEqual(v.result, v.picker, '结果信息与执行记录一致（' + label + '）：' + JSON.stringify(v))
+    assert.deepEqual(v.chain, v.picker, '链路与执行记录一致（' + label + '）：' + JSON.stringify(v))
+  }
+  // 同段返工：实现在同段内被重做两次（真实引擎形态），本轮已有新成果 → 不得标上一轮成果
+  assert.deepEqual(g['实现'].picker, ['已通过', '已通过'], '同段返工的节点按自身终局标注：' + JSON.stringify(g['实现'].picker))
+  await openRunsTab()
+  await openTask('T-G1')
+  const dirText = (l) => (nodeDirRows().find((r) => (r.textContent || '').includes(l)) || {}).textContent || ''
+  assert.ok(!dirText('实现').includes('上一轮成果'), '同段内已重做的节点不标上一轮成果：' + dirText('实现'))
+  assert.ok(!dirText('测试').includes('上一轮成果'), '产出退回裁决的那次执行不标上一轮成果（它就是本轮裁决）：' + dirText('测试'))
+  assert.ok(dirText('检查').includes('上一轮成果'), '返工未达节点标上一轮成果：' + dirText('检查'))
+  await clickEl(nodeDirRows().find((r) => (r.textContent || '').includes('检查')))
+  assert.ok(container.querySelector('.vwf-note.warn') && container.querySelector('.vwf-note.warn').textContent.includes('这是返工前的成果'), '选中返工未达节点给出上一轮成果说明')
+  assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第 1 次审查通过'), '该节点展示的正是上一轮成果内容')
+  // 链路：只有那一条成果挂标
+  await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find((b) => b.textContent.includes('查看完整经过')))
+  const entries = Array.from(container.querySelectorAll('.vwf-chain-entry')).map((e) => e.textContent)
+  const prevLabels = entries.filter((x) => x.includes('上一轮成果'))
+  assert.equal(prevLabels.length, 1, '链路只标一条上一轮成果：' + JSON.stringify(prevLabels))
+  assert.ok(prevLabels[0].includes('检查'), '标记落在返工未达节点上：' + prevLabels[0])
+  await clickEl(Array.from(container.querySelectorAll('.vwf-chain-dialog button')).find((b) => b.textContent.trim() === '关闭'))
+  await backToList()
+})
+
+test('FEAT-85 详情：结果 / 当前进展 / 结束方式分层显示（不塌缩为成功失败徽标）', async () => {
   await openRunsTab()
   await openTask('T-B1')
   const locator = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行定位'))
   assert.ok(locator, '运行定位卡渲染')
   const text = locator.textContent
-  assert.ok(text.includes('生命周期'), '生命周单独成层：' + text.slice(0, 300))
-  assert.ok(text.includes('COMPLETED'), '生命周期取值可见')
-  assert.ok(text.includes('完成类型'), '完成类型单独成层')
-  assert.ok(text.includes('DELIVERED'), '完成类型取值来自 completion.type')
+  assert.ok(text.includes('当前进展'), '当前进展单独成层：' + text.slice(0, 300))
+  assert.ok(text.includes('COMPLETED'), '当前进展取值可见')
+  assert.ok(text.includes('结束方式'), '结束方式单独成层')
+  assert.ok(text.includes('独立完成'), '结束方式取值来自 completion.type 且展示为用户语言')
+  assert.ok(!text.includes('DELIVERED'), '结束方式不再显示 raw 机器词')
   await backToList()
-  // 未声明完成类型时如实标注
+  // 未声明结束方式时如实标注
   await openTask('T-C2')
   const locator2 = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('运行定位'))
-  assert.ok(locator2.textContent.includes('未声明完成类型'), '无完成类型时如实标注而非留白')
+  assert.ok(locator2.textContent.includes('未声明结束方式'), '无结束方式时如实标注而非留白')
   await backToList()
 })
 
@@ -2642,7 +3056,7 @@ test('FEAT-100 V-3：运行列表按工作空间分组，组内 需处理 → �
   const badgeTextOf = (row) => {
     const t = row.textContent || ''
     if (t.includes('等待人工') || t.includes('受阻') || t.includes('PAUSED')) return 0
-    if (t.includes('running')) return 1
+    if (t.includes('进行中')) return 1
     if (t.includes('DONE')) return 2
     return 3
   }
@@ -2661,7 +3075,8 @@ test('FEAT-100 V-3：运行列表按工作空间分组，组内 需处理 → �
   // 决定性证据：混合档位分组内，最后开始的进行中任务仍排在待处理任务之后
   const groupOf = (label) => groups.find((g) => (g.querySelector('.vwf-run-group-head').textContent || '').includes(label))
   const rankListOf = (g) => Array.from(g.querySelectorAll('.vwf-run-row')).map(badgeTextOf)
-  assert.deepEqual(rankListOf(groupOf('工作空间A')), [0, 0, 0, 1], '工作空间A：三条待处理在前，最新开始的进行中任务在后（按时间倒序它会排到最前）')
+  // 档位分组内的条数含 FIX-108 新增的多段无返工样本（T-D1）与人工门禁样本（T-H1 未裁决／T-H2 已完成）
+  assert.deepEqual(rankListOf(groupOf('工作空间A')), [0, 0, 0, 0, 0, 0, 1, 1, 2], '工作空间A：待处理全部在前，最新开始的进行中任务与已完成任务在后（按时间倒序进行中会排到最前）')
   assert.deepEqual(rankListOf(groupOf('工作空间B')), [1, 2], '工作空间B：进行中在已完成之前')
   // 待处理项一个不少：页签计数与「待处理」筛选同口径，且原队列里的项都在
   const badge = container.querySelector('[data-vwf-nav="dashboard"] .vwf-badge')
@@ -2671,11 +3086,12 @@ test('FEAT-100 V-3：运行列表按工作空间分组，组内 需处理 → �
   assert.equal(attRows.length, Number(badge.textContent), '页签计数与待处理筛选同口径')
   const attText = attRows.map((r) => r.textContent || '').join('\n')
   for (const id of ['T-A1', 'T-C2', 'T-P1']) assert.ok(attText.includes(id), '待处理项 ' + id + ' 并入列表后仍可见')
-  // 人工门禁位次信息保留（原队列卡上的「裁决中 / 排队 #n」）
-  const a1 = attRows.find((r) => (r.textContent || '').includes('T-A1'))
-  const c2 = attRows.find((r) => (r.textContent || '').includes('T-C2'))
-  assert.ok((a1.textContent || '').includes('裁决中'), '裁决中的运行在列表行上标出：' + a1.textContent)
-  assert.ok((c2.textContent || '').includes('排队 #'), '排队位次在列表行上标出：' + c2.textContent)
+  // 人工门禁位次信息保留（原队列卡上的「裁决中 / 排队 #n」）：一次裁决一张 ——
+  // 队首（列表顺序在最前的那条待处理项）标「裁决中」，其余标「排队 #n」。
+  const deciding = attRows.filter((r) => (r.textContent || '').includes('裁决中'))
+  assert.equal(deciding.length, 1, '人工门禁队列恰好一条「裁决中」：' + deciding.map((r) => r.textContent).join(' | '))
+  assert.equal(deciding[0], attRows[0], '队首待处理项即「裁决中」那条')
+  assert.ok(attRows.filter((r) => (r.textContent || '').includes('排队 #')).length >= 1, '排队位次在其余行上标出')
   await selectValue(filterSelect(1), 'all')
   await selectValue(sizeSel, '10')
 })
@@ -2742,10 +3158,13 @@ test('FEAT-102 V-4：运行详情为 页头 + 状态条 + 三栏工作台（步�
   assert.ok(main.querySelector('.vwf-rd-canvas .vwf-canvas-wrap svg'), '中栏是只读流程画布')
   assert.equal(main.querySelectorAll('.vwf-rd-body .vwf-canvas-wrap').length, 0, '画布不再堆在详情栏下方')
   assert.ok(main.querySelector('.vwf-rd-body .vwf-tab'), '右栏是唯一选中节点详情出口（三页签在其中）')
-  // 运行级记录留在工作台下方，不与详情栏混排（决策卡 / 恢复卡 / 工作空间面板等仍在）
+  // 运行级记录留在工作台下方，不与详情栏混排（决策卡 / 恢复卡 / 控制卡等仍在）
   const belowCards = Array.from(dlg.querySelectorAll('.vwf-root > .vwf-card')).map((c) => c.textContent || '')
   assert.ok(belowCards.some((x) => x.includes('运行控制')), '工作台下方保留运行控制卡')
-  assert.ok(belowCards.some((x) => x.includes('工作空间信息')), '工作台下方保留工作空间面板')
+  // FEAT-103 V-4/V-5/V-6：节点 / 结果表与工作空间区块不再各占一张重复卡——
+  // 前者并入链路弹窗，后者并入左栏运行定位的「详细」，正式产物进右侧「结果」页签。
+  assert.ok(!belowCards.some((x) => x.includes('工作空间信息')), '页面底部不再有独立的工作空间区块')
+  assert.ok(!belowCards.some((x) => x.includes('Formal Artifacts')), '页面底部不再有独立的 Formal Artifacts 区块')
   assert.equal(main.querySelectorAll('.vwf-card').length, 3, '工作台内只有左栏两张 + 详情栏一张卡：' + main.querySelectorAll('.vwf-card').length)
   await backToList()
 })

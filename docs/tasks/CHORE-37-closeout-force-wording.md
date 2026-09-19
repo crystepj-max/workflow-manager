@@ -19,7 +19,7 @@
 | 无人值守许可 | 允许 |
 | 任务规格位置 | `docs/tasks/specs/CHORE-37-closeout-force-wording/task-spec-V1.md`（入库） |
 | 定义时间 | 2026-09-16T16:09:57Z（基线 V1 经松哥确认） |
-| GitHub 同步 | pending |
+| GitHub 同步 | synced#203 |
 
 > 说明（不进机器解析字段）：
 > - `GitHub 同步 = pending` 的含义：本任务属**本地轨道**——GitHub 凭据不可用；CNB 侧已有编号锚点（cnb#37）但**未被交付流程接入**，仅作需求源与讨论留痕，**不构成 tracker 侧的「已定义」**。本版本的开工资格来自本地任务卡与登记册。

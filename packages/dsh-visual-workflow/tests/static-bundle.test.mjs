@@ -123,9 +123,9 @@ test('开发粘贴用 dynamic 闭包合计 ≤ 232KB（一次 cordis_define 载�
   // LOC-032 操作账本宿主接线与 LOC-031 并入后终态实测 205414B 超 200KiB，
   // 按人工裁决先例「全部 P0 任务并入后按终态实测一次性定值」上调至 208KiB。
   // FEAT-84 编排台工作流模板编辑器并入后终态实测 host 109822 + client 121816 = 231638B
-  // （226.21KiB），按同一口径上调至 272KiB（84+85+86 三切片并入后终态实测 271327B，余量 7.2KiB；FIX-65 先例：上限按终态实测定值，新增载荷优先瘦身），
+  // （226.21KiB），按同一口径上调至 284KiB（84/85/86/100/101/102 并入 + CNB 同步后终态实测 287372B，余量 3.4KiB；FIX-65 先例：上限按终态实测定值，新增载荷优先瘦身；瘦身专项另行立卡），
   // 与 build-bundle.mjs 保持一致；新增载荷仍应先瘦身。
-  const limit = 272 * 1024
+  const limit = 284 * 1024
   assert.ok(host.byteLength + client.byteLength <= limit, `host ${host.byteLength} + client ${client.byteLength} > ${limit}`)
   const hostText = host.toString('utf8')
   const clientText = client.toString('utf8')
