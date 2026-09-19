@@ -194,4 +194,28 @@ const DEFAULT_GIT_ACTIONS = ['create-review', 'merge', 'close-task']
 - [ ] stash@{1} 的 `workspace-isolation-host.mjs` 9 行：与 ZCODE 确认 FEAT-85 工作区面板数据来源后决定取用或丢弃。
 - [ ] stash@{0} / stash@{2}：可丢弃（待用户授权）。
 - [ ] 登记册滞后条目修正：FIX-76 / FEAT-77 应置「已合并」，CHORE-38 应置「等待验收」。
-- [ ] 新建产物尚未提交：CHORE-106 / CHORE-75 的卡与规格 + registry.json + BOARD.md 已 `git add` 入库（主检出另有他人在制的 LOC-045 benchmark 改动，未一并提交）。
+- [x] ~~新建产物尚未提交~~ → 已提交（CHORE-106 的卡与规格经收口流程入库；本文件与 SYNC-01/02 同批入库）。
+- [x] ~~收口工具口径缺口立票~~ → **已完成，见本文第五节**：**FIX-109（cnb#109）** 与 **CHORE-110（cnb#110）**。
+
+---
+
+## 五、收口工具口径缺口（2026-09-19 收口 CHORE-106 时实测发现，已立票）
+
+除本文第一节的 `close-task` 缺口外，CHORE-106 收口实操中另发现三处**每次收口必然发生**的口径缺陷。均不影响「代码是否合入主干」这一主结果，故长期未被发现。
+
+| # | 缺口 | 实证 | 处置 |
+|---|---|---|---|
+| 1 | **收口后主检出残留未提交改动**：脚本在 `git commit` **之后**才把 `merge.commit` 由 `PENDING` 写成真实哈希（`local-task-merge.mjs` L318–L323 提交，L326–L329 回写）→ 每次收口都把主检出弄脏 | CHORE-106 收口后残留 `docs/tasks/registry.json`；因 `checkMerge` 要求主检出干净，会**阻塞并行会话的下一次收口**；当时人工补提交 `7e8e8ba` | **FIX-109**（与缺口 2 合并为一笔） |
+| 2 | **收口提交「任务范围」字段恒为废值**：`rangeText` 正则 `### 涉及范围[\s\S]*?\n\n` 因标题后紧跟空行，非贪婪匹配退化为标题本身（L237） | CHORE-37 / CHORE-38 / CHORE-106 的收口提交 `任务范围:` **全部**为字面 `### 涉及范围` | **FIX-109** |
+| 3 | **轻量路线登记不了正式验收包**：`acceptance_package.assembled` 强制五类前置记录引用 + checkpoint，轻量路线无 `review_proof` / `test_proof` → 无法登记 → 归档摘要 `decision` / `decided_by` / `decided_at` 恒为 `null` | `docs/tasks/archive/CHORE-106/evidence-summary.json` 与 `CHORE-37` 三字段全为 null；**本批任务全部走轻量路线**，故为常态而非个例 | **CHORE-110** |
+
+**票面**：
+
+- `docs/tasks/FIX-109-closeout-tooling-gaps.md` + `docs/tasks/specs/FIX-109-closeout-tooling-gaps/`（定义门全过、未决事项 0，待基线确认）
+- `docs/tasks/CHORE-110-acceptance-package-schema.md` + `docs/tasks/specs/CHORE-110-acceptance-package-schema/`
+
+**⚠️ CHORE-110 带一项待裁定开放项**（阻塞开工）：轻量路线的验收签署以什么形态记录？
+选 A（验收包分层，推荐）/ B（新增独立轻量记录类型）/ C（不放宽，改口径为「轻量路线不留签署」）。
+记录见 `docs/tasks/specs/CHORE-110-acceptance-package-schema/decision-tickets/DT-01-lightweight-acceptance-record.md`（**open**）。
+
+> 缺口 3 的严重性提示：`decided_by` / `decided_at` 是审计链上**最不可再生**的一环——代码可重跑、测试可重跑，但「当时是谁确认通过的」一旦没记下来即永久丢失（事后补记等同伪造）。
