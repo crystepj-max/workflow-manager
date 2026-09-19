@@ -18,7 +18,7 @@
 | [skill-set.md](./skill-set.md) | 集合落点与双仓同步（含 M4 触发） | M1–M4 |
 
 - 定义入口 Skill：`dsh/skills/requirements-analysis/`（同步副本：[my-agent-skills](https://github.com/crystepj-max/my-agent-skills)）
-- 交付入口 Skill：`dsh/skills/construction-bootstrap/`（从已定义开工）
+- 交付入口：内置蓝图 `wf-construction-full-feature` + 其生成 Skill（从已定义开工；命令序列 `docs/runbooks/construction-dsh/runbook.md`）
 - 批量调度 Skill：`dsh/skills/execution-plan/`（定时 = 到点再调本入口，见 M4）
 
 机械验收：

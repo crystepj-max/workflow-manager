@@ -114,7 +114,6 @@ dsh plugin --profile web add link:/你的绝对路径/workflow-manager/packages/
 ```bash
 cd workflow-manager
 ./dsh/install-requirements-analysis.sh      # 需求分析
-./dsh/install-construction-bootstrap.sh     # 建设 · 完整功能开发
 ./dsh/install-execution-plan.sh             # 执行计划（批量调度）
 ```
 

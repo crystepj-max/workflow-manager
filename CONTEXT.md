@@ -185,7 +185,7 @@
 > `public-task-contract.md` + `single-task-delivery-m2.md` + `execution-plan-m3.md` +  
 > `scheduled-trigger-m4.md`。  
 > 工程真源在本仓；`my-agent-skills` 为通用 skill 集副本。  
-> 定义入口 = `requirements-analysis`；单任务交付 = 内置蓝图 + `construction-bootstrap`；  
+> 定义入口 = `requirements-analysis`；单任务交付 = 内置蓝图 `wf-construction-full-feature`（DSH 轨道命令序列见 `docs/runbooks/construction-dsh/runbook.md`）；  
 > 批量调度 = `execution-plan`；到点开跑 = `scripts/ai-task-scheduled-trigger.mjs`（唤起同一执行计划，不另建 Skill）。  
 > **M2 与 Portable 旧七阶段关系（唯一权威）**：[`docs/design/m2-vs-portable-delivery.md`](docs/design/m2-vs-portable-delivery.md)。  
 > **能力 Current/Target/Legacy 索引**：[`docs/design/workflow-capability-index.md`](docs/design/workflow-capability-index.md)。

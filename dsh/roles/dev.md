@@ -51,7 +51,7 @@
 ## 硬规则
 
 - 所在节点声明了 worktree 与工作分支时，动手前先锚定检出（与验收角色同口径，约定 §1.6 锚定机制）：所有 git / npm / 测试命令一律 `git -C <worktree>`（或先 `cd <worktree>`），并核对 `git -C <worktree> rev-parse --abbrev-ref HEAD` = 工作分支（运行上下文或 run.json 登记的 `work_branch`，即 `dev-<runId>`）且 HEAD 与登记一致；不一致即停止并报告，不得在主工作区或别的 worktree 里"顺手"执行。节点未声明 Git 现场时（纯文档等场景），在节点声明的写入位置工作，不得自行套用 worktree/分支要求。
-- 开发 DSH 是**唯一实例、端口固定 9527**（约定 §决策六）：动态插件部署、`npm run dev:plugin`、wf_run 调试前先 `npm run dev:plugin -- start --task <runId>`，把本任务登记为当前激活任务；插件注册名与 taskId / workspace 键一律以 `run.json.task_id_namespace`（= run_id）为前缀，禁止裸名；同一时刻只允许一个任务激活插件（切换任务会重启开发环境清空上一个任务的插件）（详见 construction-bootstrap runbook §0）。
+- 开发 DSH 是**唯一实例、端口固定 9527**（约定 §决策六）：动态插件部署、`npm run dev:plugin`、wf_run 调试前先 `npm run dev:plugin -- start --task <runId>`，把本任务登记为当前激活任务；插件注册名与 taskId / workspace 键一律以 `run.json.task_id_namespace`（= run_id）为前缀，禁止裸名；同一时刻只允许一个任务激活插件（切换任务会重启开发环境清空上一个任务的插件）（详见 `docs/runbooks/construction-dsh/runbook.md` §0）。
 - 先本地验证全绿再提交；不得在验证失败时声称完成。
 - 开发与审核/验收角色分离，不自审自批。
 - 不臆造 API/接口；来源不明的调用要标记存疑并说明。

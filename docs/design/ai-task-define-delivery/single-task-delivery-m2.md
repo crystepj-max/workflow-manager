@@ -2,7 +2,7 @@
 
 > **里程碑**：M2  
 > **产品拍板**：改造「建设 · 完整功能开发」——定义外置，交付从「已定义」开工；自动返工上限 **3**；验收严格三态。  
-> **调用入口**：仍用现有建设 Skill（`construction-bootstrap`），不新建第二套交付入口。  
+> **调用入口**：正式内置蓝图 `wf-construction-full-feature` 及其生成 Skill（`npm run install:builtin-skills` 安装）；DSH 轨道命令序列见 `docs/runbooks/construction-dsh/runbook.md`。不新建第二套交付入口。  
 > **公共契约**：`public-task-contract.md`  
 > **证据底物**：可继续使用建设交接包 schema（`handoff.schema.json`）；产品可见主链以本文为准。
 

@@ -1,6 +1,6 @@
 # 建设 · 完整功能开发 Portable Contract
 
-> **版本**：**v0.1.8 + M2 overlay（2026-09-05）** —— 正文七阶段证据底物仍以 v0.1.8 冻结为准；**产品可见单任务交付主链以** `docs/design/ai-task-define-delivery/single-task-delivery-m2.md` **为准（定义外置）**。  
+> **版本**：**v0.1.9 + M2 overlay（2026-09-19）** —— 正文七阶段证据底物仍以 v0.1.8 冻结为准（v0.1.9 仅追加 §9.6 收敛记录，不改语义）；**产品可见单任务交付主链以** `docs/design/ai-task-define-delivery/single-task-delivery-m2.md` **为准（定义外置）**。  
 > **M2 与 Portable 七阶段差异（接手者必读，唯一权威）**：[`m2-vs-portable-delivery.md`](m2-vs-portable-delivery.md) —— 其他文档须引用该文，不得再写第二套「当前主链」。
 > **来源**：#102（epic，A1–A5 节为本契约的决断依据）、#103（本契约的任务 issue）；M2 对接《AI 任务定义与批量交付 V0.1》
 > **消费者**：DSH Execution Profile（#105）、External Coding Agent Profile（#104，Codex/Cursor）
@@ -393,6 +393,7 @@ Closeout 归档时，七类记录与全部 Proof 必须保留并可按 `run_id` 
 | v0.1.6 | 2026-08-30 | Codex Review 修复（八）：acceptance 证据链第 ⑨ 项（review/test 的 produced_by 必须异于 dev 产生者）、feedback/ blocked_reason 非空白约束、decision options ≥1 且 name 非空、全部字符串列表项拒绝空白项、§9.3 冻结标记改为以文档头为单一事实源 | PR #115 Review |
 | v0.1.7 | 2026-08-30 | Codex Review 修复（九）：design 新增 `decision_request` 待决决策包（question/options/recommendation，§5.3），与已决 `decision` 分离并存——pending 门挂起时人工可见完整候选方案；`integration_checkpoint` 结构化（target_advanced ⇒ proofs_state=rerun_completed 可机检）；§8.2 record_version 行改为引用文档头单一事实源 | PR #115 Review |
 | v0.1.8 | 2026-08-30 | Codex Review 修复（十，收口轮）：checkpoint `target_advanced` 须由 Controller 从实际仓库状态计算（§7.3）、已决 gated package 强制保留 `decision_request` 且 `chosen` 属呈递候选集（§5.3 防换选项）、`tradeoffs` 非空白；**范围外加固类建议登记为遗留事项（另建 issue）** | PR #115 Review |
+| v0.1.9 | 2026-09-19 | 追加 §9.6「#105 Bootstrap shim 收敛记录」：九项 shim 逐项回写正式机制落点与 main 落地证据，`construction-bootstrap` 执行 Profile 随 #82 正式 Built-in（`wf-construction-full-feature`）落地退役。**纯收敛事实回写，不改主链结构、人工门与额度语义**（§9.3 冻结解除条件未触发） | #102 #105 #82 |
 
 ### 9.4 #103 九条验收清单证据映射
 
@@ -427,3 +428,27 @@ Closeout 归档时，七类记录与全部 Proof 必须保留并可按 `run_id` 
 | 11 | 最终 PR/merge 按仓库规则执行 | §3.7（Closeout 交付集成）+ §7.3 |
 
 **结论：#105 可直接引用本契约执行 Bootstrap Run，无需重新定义建设工作流语义。**
+
+### 9.6 #105 Bootstrap shim 收敛记录（2026-09-19 回写）
+
+本节是原 `dsh/skills/construction-bootstrap/shim-map.md`（#105 Bootstrap 期「收敛路径唯一索引」）的退役事实回写。
+按 §9.3 修订纪律与 shim-map 原「退役纪律 1」执行：**逐项回写本契约 → 再删 shim**。九项依赖的 GitHub issue 现均为 `CLOSED / stateReason=COMPLETED`（非 won't fix），落地证据为 main 祖先提交（已 `git merge-base --is-ancestor` 逐项核对）。
+
+| 契约能力 | 依赖 issue | 原 Bootstrap shim（本 Profile 实现） | 正式机制落点 | main 落地证据 | 处置 |
+|---|---|---|---|---|---|
+| Business Outcome Routing（§6） | #77 | runbook 解释专业结果基元（旧 §6.3/§6.4），路由判断由 controller 会话执行 | 蓝图 `output.outcomePath` + `outcome` 出边、引擎段路由（`blueprint-schema.md` §4.2） | `9bd93e0`（经 `3b4ca0c` 并入 main） | ✅ shim 退役：runbook 不再解释逐节点路由，改为「引擎驱动」引用 |
+| 受控人工决策（§5） | #72 | 会话挂起呈递 + 用户指令恢复；`decision_request`/`decision` 以 JSON 落盘 | `$human-decision` + `ROUTE_HALTED → WAITING_HUMAN` + Decision Package 与追加-only 控制面（`blueprint-schema.md` §2.4） | `047ff8d`（#118 / PR#148） | ✅ shim 退役：记录字段名早已与正式控制面对齐，无历史断链 |
+| 自动回退额度（§4.2） | #73 | `cwf-record rollback` 在 run.json 显式记账，超限拒绝 | 边级 `countRound` 声明 + `control.maxRounds` / `maxRoundsExhausted` | `5367283`（#141） | ✅ shim 退役；`run.json.rollback_used` 保留为历史 Run 的记账痕迹，映射到新额度语义 |
+| Formal Records / Provenance（§8） | #78 | 七类 JSON 记录 + `cwf-validate` 机械校验 + `.agent-runs` 本地保留 | 不可覆盖 Revision + 依赖链 + 证明失效（`scripts/formal-records.mjs`） | `8399487`（#143）；运行时集成 `03e8b4d` | ✅ shim 退役；v0.1.x 记录可按 `provenance.portable` 重放映射（见 `docs/design/formal-records.md`） |
+| Workspace/Resource Isolation（§7.2） | #93 | `cwf-run-init` 建 worktree/branch 纪律；`run.json.workspace_id` | Workspace 注册表与模板策略解析（`scripts/workspace-isolation.mjs`、`c94acf9`）；实施前检查复用确定性判定 | `6e1e590`（引用 #93） | ✅ 隔离强制移交 Runtime；`workspace_id` 映射正式 workspace 标识 |
+| Logical Run / Snapshot（§7.1） | #79 | `run.json` 的 portable run identity 十字段 | Logical Run / Execution Segment / Lifecycle / Run Snapshot Revision | `ab827d1`（PR#177，2026-09-08） | ✅ `run_id` → `logical_run_id` 映射成立，历史 Dogfood Run 可追溯 |
+| Preflight 探针 | #74 | 无（旧 runbook 前置条件人工核对） | 运行前模型可用性探针；建设蓝图 `preflight` 节点 `mechanical: construction-preflight` | `409532d` | ✅ 从未成为 shim；正式机制已覆盖，人工核对项收敛到 §2 实施前检查机械门禁 |
+| 正式内置角色 | #81 | controller 会话 + 独立子会话充当 review/test 证明者 | 12 正式内置角色体系（`dsh/roles/*.md` + `dsh/roles/builtin-roles.json`，随模板编译进 `.generated/*/script.mjs` 的 `ROLE_DEFS`） | `a3628ce`；一致性修复 `611096c` | ✅ shim 退役：角色由模板节点 `profile` 绑定，不再由会话临时充当 |
+| Skill/Chat 正式调用入口 | #83 | `construction-bootstrap` skill 触发词 | Skill 调用入口接入统一 Logical Run Runtime；正式内置模板生成 skill `wf-construction-full-feature` | `6e8bd5f`（LOC-015 V3）；文档收敛 `eea83b1` | ✅ shim 退役：入口 = 生成 skill + `wf_run`，触发词由模板 `displayName`「完整功能开发」承接 |
+
+**执行 Profile 收敛（§9.2 引用规范下的落点变更）**：DSH Execution Profile（#105）的运行包装由 `dsh/skills/construction-bootstrap/` 迁移到 #82 正式 Built-in —— 蓝图 `templates/wf-construction-full-feature.json`、生成物 `.generated/wf-construction-full-feature/`、安装态 skill `wf-construction-full-feature`、角色卡 `dsh/roles/*.md`；DSH 轨道命令序列改指 `docs/runbooks/construction-dsh/runbook.md`，External Profile 仍在 `docs/runbooks/construction-external/runbook.md`。本契约的业务语义不因该迁移发生变化。
+
+**保留的历史事实（不删除）**：`docs/design/construction-workflow/examples/*.json` 中 `produced_by: "dsh:construction-bootstrap"` 是 §8.4 所述**取材于本契约开发 Run 的历史示例值**，钉扎在 v0.1.1 内容完成点 HEAD（`c8d8625`），按 §8.4「patch 级修订不前移示例链 HEAD 绑定」保持原样，不作为当前入口。
+
+**收敛后状态**：九项 shim 全部退役；不再存在 `construction-bootstrap` 与正式「建设」两份可见业务模板（#105 Formal Convergence / shim-map 退役纪律 2）。
+
