@@ -11,7 +11,7 @@
 | 任务名称 | 任务编号发号源从 CNB 迁移到 GitHub（编号连续性 + 历史号段冲突处置） |
 | 任务类型 | 维护性（编号类型 CHORE） |
 | 优先级 | P2 |
-| 当前状态 | 定义中 |
+| 当前状态 | 待确认 |
 | 需求基线版本 | V1 |
 | 前置依赖 | 无 |
 | 施工环境组 | 待定 |
@@ -66,13 +66,13 @@
 | GitHub 分支保护 | **已撤销**（`gh api repos/.../branches/main/protection` 返回 404 `Branch not protected`）→ 与旧记忆「禁止直推」前提相反 |
 | 镜像机制 | `.github/workflows/mirror-cnb.yml`（PR #205 合入，`452ee07`）已上线；运行 `35418948093` 实测 **success 13s**；只允许快进，CNB 领先时失败等人工回灌 |
 | 发号源绑定位置 | `local-task-registry.mjs` L72–80 `resolveRemoteSlug`、L91–113 `remoteAllocate`、L328–359 `allocate` |
-| 号段冲突 | GitHub **#106/#108/#109/#110 均为 `[Accidental / Closed]`** 占位 issue，与本地 `FIX-109`(cnb#109)、`CHORE-110`(cnb#110) 直接撞号 |
+| 号段冲突（已处置） | GitHub #108/#109/#110 原为 2026-08-30 误建占位 issue，与本地 `FIX-108`/`FIX-109`/`CHORE-110` 直接撞号；经 `DT-01` 裁定 **A · 复用占位号对齐**，2026-09-19 已执行完毕（三号重命名为对应任务正式 issue + 重开 + 打类型标签）；`#106` 是真实 issue（有 parent #76）**不动**，`CHORE-106` 锚点保留 `cnb#106` |
 | 历史号规模 | `registry.json` 共 71 个任务，`remote` 全为 `cnb#N`；`github_sync` 中 69 个 `pending`、2 个 `synced#203/#204` |
 | 登记册脏改动来源 | 本票落档时 `docs/tasks/registry.json` 已含并行会话对 `FIX-108` 的「本地已定义→等待验收」推进（revision 97→98），本票代入且内容未改动 |
 
 ## 关联
 
-- `docs/tasks/specs/CHORE-111-numbering-source-migration/decision-tickets/DT-01-numbering-collision.md`（历史号段冲突处置，阻塞本票开工）
+- `docs/tasks/specs/CHORE-111-numbering-source-migration/decision-tickets/DT-01-numbering-collision.md`（历史号段冲突处置，**已裁定 A · 复用占位号对齐并执行完毕**）
 - `docs/tasks/specs/CHORE-111-numbering-source-migration/task-spec-V1.md`
 - `docs/tasks/FIX-109-closeout-tooling-gaps.md`（收口脚本口径缺口，与本票同区域改动，需排先后）
 - `docs/tasks/CHORE-110-acceptance-package-schema.md`（验收包 schema，与本票同期待裁定）
