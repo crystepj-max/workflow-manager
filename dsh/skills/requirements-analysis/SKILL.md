@@ -259,15 +259,15 @@ Agent 必须带着分析与推荐提问，不能把分析责任转嫁给用户�
 6. **登记规格位置**：`node scripts/local-task-registry.mjs set --task <任务标识> --spec-path docs/tasks/specs/<任务标识>-<slug>/task-spec-V<n>.md`
 7. **通过上下文门禁**：`npm run validate:task-context`（校验规格与任务卡均已入库、活跃任务均有远端锚点）
 
-**任务标识分配**：由远端（CNB）发号，本机不自己算号，双机并行与多会话并行都不会撞号：
+**任务标识分配**：由 GitHub 主源发号，本机不自己算号，双机并行与多会话并行都不会撞号：
 
 ```bash
 node scripts/local-task-registry.mjs allocate --name <任务名称> --type FEAT|FIX|CHORE [--priority P0..P2]
 ```
 
-- 返回 `FEAT-<远端号>` / `FIX-<远端号>` / `CHORE-<远端号>`，同时在 CNB 建好对应 issue，编号即 issue 号；
-- 远端不可达时降级为临时号 `TMP-<机器码>-<日期><序号>`，联网后用 `node scripts/remote-issue-sync.mjs reissue --task <临时号>` 换取正式号；
-- 历史任务（2026-09-15 及以前）沿用 `LOC-<序号>` 旧号，通过登记册 `remote` / `legacy_id` 字段与远端号双向可查。
+- 返回 `FEAT-<远端号>` / `FIX-<远端号>` / `CHORE-<远端号>`，同时在 GitHub 主源仓库建好对应 issue，编号即 issue 号，登记册 `remote` 记 `github#<号>`；
+- 远端不可达时降级为临时号 `TMP-<机器码>-<日期><序号>`，联网后用 `node scripts/remote-issue-sync.mjs reissue --task <临时号>` 换取正式号；**禁止静默回落到 CNB 发号**（CNB 自 2026-09-19 起是灾备镜像，不再签发任务号）；
+- 历史任务（2026-09-15 及以前）沿用 `LOC-<序号>` 旧号，通过登记册 `remote` / `legacy_id` 字段与远端号双向可查；切换前由 CNB 签发的 `cnb#N` 保留为历史事实，不重编。
 
 成功回报格式：
 
