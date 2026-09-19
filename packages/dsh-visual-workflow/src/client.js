@@ -171,19 +171,14 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 /* 页签计数（原型 nav-tab .count）：待处理运行数不随筛选与分页消失 */
 .vwf-tab .vwf-badge { margin-left:6px; }
 .vwf-card { border:1px solid var(--vwf-border); border-radius:12px; background:var(--vwf-surface); overflow:hidden; }
-.vwf-card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; border-bottom:1px solid var(--vwf-border); flex-wrap:wrap; }
-.vwf-card-title { font-size:14px; font-weight:600; color:var(--vwf-text); }
+.vwf-card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; border-bottom:1px solid var(--vwf-border); flex-wrap:wrap; }.vwf-card-title, .vwf-confirm-title {font-size:14px; font-weight:600; color:var(--vwf-text);}
 /* 控件边界（按钮 / 输入 / 下拉）用 ≥3:1 的 --vwf-border-ctl；卡片、分隔线等
    装饰性边界用 --vwf-border，避免整屏描边过重（V-4 非文本对比度）。 */
 .vwf-btn { padding:6px 12px; border-radius:8px; border:1px solid var(--vwf-border-ctl); background:transparent; color:var(--vwf-text); cursor:pointer; font-size:12px; line-height:1.4; }
-.vwf-btn:hover:not(:disabled) { background:var(--vwf-accent-surface); border-color:var(--vwf-accent); }
-.vwf-btn:disabled { opacity:.45; cursor:not-allowed; }
+.vwf-btn:hover:not(:disabled) { background:var(--vwf-accent-surface); border-color:var(--vwf-accent); }.vwf-btn:disabled, .vwf-history-group .vwf-history-btn:disabled {opacity:.45; cursor:not-allowed;}
 .vwf-btn.primary { border-color:var(--vwf-accent); background:var(--vwf-accent); color:var(--vwf-accent-on); }
 .vwf-btn.danger { color:var(--vwf-err); }
-.vwf-btn.danger:hover:not(:disabled) { background:var(--vwf-err); border-color:var(--vwf-err); color:var(--vwf-accent-on); }
-/* 画布顶部删除操作保持完整红色；禁用态不用透明度混色，避免在深色画布上发黑。 */
-.vwf-canvas-toolbar .vwf-btn.danger,
-.vwf-canvas-toolbar .vwf-btn.danger:disabled { color:var(--vwf-err); opacity:1; -webkit-text-fill-color:currentColor; }
+.vwf-btn.danger:hover:not(:disabled) { background:var(--vwf-err); border-color:var(--vwf-err); color:var(--vwf-accent-on); }.vwf-canvas-toolbar .vwf-btn.danger, .vwf-canvas-toolbar .vwf-btn.danger:disabled, .vwf-toolbar-action.danger, .vwf-toolbar-action.danger:disabled {color:var(--vwf-err); opacity:1; -webkit-text-fill-color:currentColor;}
 .vwf-btn.ghost { border-color:transparent; background:transparent; }
 .vwf-btn.sm { padding:3px 10px; font-size:12px; border-radius:99px; }
 .vwf-badge { display:inline-block; padding:1px 8px; border-radius:99px; font-size:10px; border:1px solid var(--vwf-border-strong); color:var(--vwf-text-2); }
@@ -254,11 +249,8 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
   .vwf-nav-col .vwf-wb-steps-body { display:flex; flex-direction:row; gap:6px; overflow-x:auto; overflow-y:hidden; padding:8px 10px; }
   .vwf-wb-step { flex:0 0 auto; min-width:132px; }
 }
-.vwf-canvas-col { grid-area:canvas; min-width:0; min-height:0; display:flex; flex-direction:column; }
-.vwf-canvas-col > .vwf-card { flex:1; min-height:0; display:flex; flex-direction:column; }
+.vwf-canvas-col { grid-area:canvas; min-width:0; min-height:0; display:flex; flex-direction:column; }.vwf-canvas-col > .vwf-card, .vwf-editor-dialog .vwf-canvas-host {flex:1; min-height:0; display:flex; flex-direction:column;}
 .vwf-canvas-wrap { position:relative; height:560px; overflow:auto; display:flex; border-top:1px solid var(--dsw-alias-border-l2, #333); background:var(--dsw-alias-bg-base, #181818); overscroll-behavior:contain; }
-/* 工作区内画布由网格行定高，自身滚动；min-height:0 是网格子项能真正收缩的前提 */
-.vwf-editor-dialog .vwf-canvas-host { flex:1; min-height:0; display:flex; flex-direction:column; }
 .vwf-editor .vwf-canvas-wrap { flex:1; min-height:0; height:auto; background:var(--vwf-wb-canvas); }
 .vwf-canvas-stage { flex:0 0 auto; width:max-content; height:max-content; box-sizing:border-box; margin:auto; padding:24px; cursor:grab; }
 .vwf-canvas-stage:active { cursor:grabbing; }
@@ -272,14 +264,11 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-toolbar-action + .vwf-toolbar-action { border-left:1px solid var(--vwf-border); }
 .vwf-toolbar-action:hover:not(:disabled) { background:var(--vwf-accent-surface); }
 .vwf-toolbar-action .vwf-toolbar-action-icon { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:999px; background:var(--vwf-accent-surface); color:var(--vwf-accent); font-size:13px; }
-.vwf-toolbar-action.danger,
-.vwf-toolbar-action.danger:disabled { color:var(--vwf-err); opacity:1; -webkit-text-fill-color:currentColor; }
 .vwf-toolbar-action.danger:hover:not(:disabled) { background:var(--vwf-accent-surface); }
 .vwf-toolbar-action:disabled { cursor:not-allowed; }
 /* 显示名历史撤销/重做按钮组 */
 .vwf-history-group { display:inline-flex; border:1px solid var(--vwf-border-ctl); border-radius:999px; background:var(--vwf-canvas); overflow:hidden; }
 .vwf-history-group .vwf-history-btn { border:0; border-radius:0; background:transparent; font-size:14px; min-width:28px; padding:3px 8px; color:var(--vwf-text); }
-.vwf-history-group .vwf-history-btn:disabled { opacity:.45; cursor:not-allowed; }
 .vwf-svg { display:block; user-select:none; touch-action:none; }
 .vwf-menu { position:absolute; z-index:20; min-width:160px; padding:4px; border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-surface); box-shadow:0 8px 28px rgba(0,0,0,.4); }
 .vwf-menu-item { display:block; width:100%; text-align:left; padding:7px 10px; border:0; border-radius:7px; background:transparent; color:var(--vwf-text); font-size:12px; cursor:pointer; }
@@ -331,29 +320,21 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-inspector { grid-area:config; min-width:0; min-height:0; overflow:auto; padding:12px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 .vwf-nav-col { grid-area:nav; min-width:0; min-height:0; display:flex; flex-direction:column; gap:12px; }
 /* FEAT-101 V-5：全局参数配置固定在左列下方（节点选择之下），两块都是自己的滚动区 */
-.vwf-params-col { grid-area:params; min-width:0; min-height:0; display:flex; flex-direction:column; gap:12px; }
-.vwf-params-col > .vwf-card { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
-.vwf-params-body { flex:1; min-height:0; overflow:auto; padding:8px 10px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
-.vwf-wb-steps-card { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
-.vwf-wb-steps-body, .vwf-wb-conn-body { flex:1; min-height:0; overflow:auto; padding:8px 10px; overscroll-behavior:contain; scroll-padding-bottom:12px; }
+.vwf-params-col { grid-area:params; min-width:0; min-height:0; display:flex; flex-direction:column; gap:12px; }.vwf-params-col > .vwf-card, .vwf-wb-steps-card {flex:1 1 auto; min-height:0; display:flex; flex-direction:column;}.vwf-params-body, .vwf-wb-steps-body, .vwf-wb-conn-body {flex:1; min-height:0; overflow:auto; padding:8px 10px; overscroll-behavior:contain; scroll-padding-bottom:12px;}
 .vwf-wb-step, .vwf-wb-conn-row { width:100%; text-align:left; border:1px solid var(--vwf-wb-border-control); background:var(--vwf-wb-surface); color:var(--vwf-wb-text); cursor:pointer; font:inherit; font-size:12px; }
 .vwf-wb-step { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:10px; }
-.vwf-wb-step + .vwf-wb-step, .vwf-wb-conn-row + .vwf-wb-conn-row { margin-top:6px; }
-.vwf-wb-step:hover { border-color:var(--vwf-wb-border-strong); }
+.vwf-wb-step + .vwf-wb-step, .vwf-wb-conn-row + .vwf-wb-conn-row { margin-top:6px; }.vwf-wb-step:hover, .vwf-wb-conn-row:hover, .vwf-wb-outcome-row:hover {border-color:var(--vwf-wb-border-strong);}
 .vwf-wb-step.on { border-color:var(--vwf-wb-accent); background:var(--vwf-wb-accent-soft); color:var(--vwf-wb-text); }
 .vwf-wb-step-seq { flex:0 0 auto; min-width:20px; height:20px; padding:0 4px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; background:var(--vwf-wb-surface-2); border:1px solid var(--vwf-wb-border); color:var(--vwf-wb-text-2); font-size:11px; font-weight:700; font-variant-numeric:tabular-nums; }
 .vwf-wb-step.on .vwf-wb-step-seq { border-color:var(--vwf-wb-accent); color:var(--vwf-wb-accent-text); }
 .vwf-wb-step-label { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
 .vwf-wb-step-role { flex:0 0 auto; color:var(--vwf-wb-text-2); font-size:11px; max-width:88px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .vwf-wb-conn-row { display:flex; flex-direction:column; gap:2px; padding:7px 9px; border-radius:9px; }
-.vwf-wb-step:hover, .vwf-wb-conn-row:hover, .vwf-wb-outcome-row:hover { border-color:var(--vwf-wb-border-strong); }
 .vwf-wb-conn-row.on { border-color:var(--vwf-wb-accent); }
-.vwf-wb-conn-route { overflow-wrap:anywhere; }
-.vwf-wb-conn-meta { color:var(--vwf-wb-text-2); font-size:11px; overflow-wrap:anywhere; }
+.vwf-wb-conn-route { overflow-wrap:anywhere; }.vwf-wb-conn-meta, .vwf-wb-outcome-to {color:var(--vwf-wb-text-2); font-size:11px; overflow-wrap:anywhere;}
 .vwf-wb-conn-kind { flex:0 0 auto; font-size:10px; padding:1px 7px; border-radius:99px; border:1px solid currentColor; white-space:nowrap; }
 .vwf-wb-conn-kind.normal { color:var(--dsw-alias-state-success-primary, #1F7A4D); }
-.vwf-wb-conn-kind.loop { color:var(--dsw-alias-state-warn-primary, #9A6100); }
-.vwf-wb-conn-kind.retry { color:var(--vwf-wb-text-2); }
+.vwf-wb-conn-kind.loop { color:var(--dsw-alias-state-warn-primary, #9A6100); }.vwf-wb-conn-kind.retry, .vwf-editor-dialog .vwf-zoom button {color:var(--vwf-wb-text-2);}
 .vwf-wb-conn-group { font-size:11px; font-weight:700; letter-spacing:.04em; color:var(--vwf-wb-text-2); margin:10px 0 2px; }
 .vwf-wb-conn-group:first-child { margin-top:0; }
 .vwf-wb-legend { display:flex; flex-direction:column; gap:3px; padding:8px 10px; border-top:1px solid var(--vwf-wb-border); background:var(--vwf-wb-surface-2); }
@@ -383,20 +364,14 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
    大工作区，运行看板的只读画布不受影响（属 FEAT-85 范围）。 */
 .vwf-editor-dialog .vwf-canvas-wrap { background:var(--vwf-wb-canvas); }
 .vwf-editor-dialog .vwf-canvas-toolbar,
-.vwf-editor-dialog .vwf-zoom { background:var(--vwf-wb-surface-2); }
-.vwf-editor-dialog .vwf-zoom button { color:var(--vwf-wb-text-2); }
-.vwf-editor-dialog .vwf-node-card { fill:var(--vwf-wb-surface); stroke:var(--vwf-wb-border-control); }
-.vwf-editor-dialog .vwf-node-label { fill:var(--vwf-wb-text); }
-.vwf-editor-dialog .vwf-node-kind { fill:var(--vwf-wb-text-2); }
+.vwf-editor-dialog .vwf-zoom { background:var(--vwf-wb-surface-2); }.vwf-editor-dialog .vwf-node-card, .vwf-editor-dialog .vwf-entry-badge {fill:var(--vwf-wb-surface); stroke:var(--vwf-wb-border-control);}
+.vwf-editor-dialog .vwf-node-label { fill:var(--vwf-wb-text); }.vwf-editor-dialog .vwf-node-kind, .vwf-editor-dialog .vwf-entry-badge-text {fill:var(--vwf-wb-text-2);}
 .vwf-editor-dialog .vwf-node-seq { fill:var(--vwf-wb-accent-text); }
 .vwf-editor-dialog .vwf-node-seq-badge { fill:var(--vwf-wb-surface); stroke:var(--vwf-wb-accent); }
-.vwf-editor-dialog .vwf-entry-badge { fill:var(--vwf-wb-surface); stroke:var(--vwf-wb-border-control); }
-.vwf-editor-dialog .vwf-entry-badge-text { fill:var(--vwf-wb-text-2); }
 .vwf-editor-dialog .vwf-handle { fill:var(--vwf-wb-text-2); stroke:var(--vwf-wb-surface); }
 .vwf-wb-readonly { display:flex; gap:6px; align-items:flex-start; margin-top:8px; padding:8px 10px; border:1px solid var(--vwf-wb-border); border-radius:9px; background:var(--vwf-wb-surface-2); color:var(--vwf-wb-text-2); font-size:11px; }
 .vwf-wb-outcome-row { display:flex; flex-direction:column; gap:3px; padding:8px 10px; border:1px solid var(--vwf-wb-border-control); border-radius:9px; background:var(--vwf-wb-surface-2); margin-top:6px; }
 .vwf-wb-outcome-name { font-weight:600; }
-.vwf-wb-outcome-to { color:var(--vwf-wb-text-2); font-size:11px; overflow-wrap:anywhere; }
 /* 工作区固定小节：画布与配置栏内部不再出现页面级滚动条 */
 .vwf-wb-pane-tab { padding:6px 14px; border:1px solid var(--vwf-wb-border-control); border-radius:999px; background:var(--vwf-wb-surface); color:var(--vwf-wb-text); cursor:pointer; font:inherit; font-size:12px; }
 .vwf-wb-pane-tab.on { border-color:var(--vwf-wb-accent); background:var(--vwf-wb-accent-soft); font-weight:600; }
@@ -407,7 +382,6 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-dialog { width:min(520px, 92vw); max-height:80vh; display:flex; flex-direction:column; border:1px solid var(--vwf-border); border-radius:14px; background:var(--vwf-surface); color:var(--vwf-text); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:16px; gap:10px; }
 .vwf-confirm-mask { position:fixed; inset:0; z-index:960; background:var(--vwf-mask); display:flex; align-items:center; justify-content:center; }
 .vwf-confirm { width:min(360px, 90vw); display:flex; flex-direction:column; gap:14px; border:1px solid var(--vwf-border); border-radius:14px; background:var(--vwf-surface); color:var(--vwf-text); box-shadow:0 24px 64px rgba(0,0,0,.5); padding:18px; }
-.vwf-confirm-title { font-size:14px; font-weight:600; color:var(--vwf-text); }
 .vwf-confirm-actions { display:flex; justify-content:flex-end; gap:8px; }
 .vwf-dialog-title { font-size:15px; font-weight:600; }
 .vwf-dialog-desc { font-size:12px; color:var(--vwf-text-2); overflow-wrap:anywhere; }
@@ -422,7 +396,6 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 /* 固定页脚（原型 modal-foot）：主操作常驻，不随职责正文滚动跑出视野 */
 .vwf-role-mgr-foot { flex:0 0 auto; display:flex; justify-content:flex-end; gap:8px; padding-top:10px; border-top:1px solid var(--vwf-border); }
 .vwf-role-section-title { font-size:13px; font-weight:600; color:var(--vwf-accent); margin-top:6px; }
-.vwf-role-count { color:var(--vwf-text-3); font-weight:400; font-size:11px; }
 .vwf-role-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:8px 10px; border:1px solid var(--vwf-border); border-radius:10px; background:var(--vwf-canvas); }
 .vwf-role-row-main { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; flex:1 1 auto; }
 .vwf-role-row .vwf-role-name { font-weight:600; font-size:13px; color:var(--vwf-text); overflow-wrap:anywhere; }
@@ -432,8 +405,7 @@ body[data-ds-dark-theme], :root[data-ds-dark-theme] {
 .vwf-role-actions { display:flex; flex-wrap:wrap; gap:6px; margin-left:auto; }
 /* 完整职责的独立滚动区：列表之外单独滚动，键盘可进入（tabindex=0） */
 .vwf-role-content { white-space:pre-wrap; font-size:11px; line-height:1.55; max-height:min(340px, 40vh); overflow:auto; overscroll-behavior:contain; border:1px solid var(--vwf-border); border-radius:8px; padding:10px; background:var(--vwf-canvas); overflow-wrap:anywhere; word-break:break-word; }
-.vwf-role-refs { display:flex; flex-direction:column; gap:6px; max-height:min(200px, 28vh); overflow:auto; border:1px solid var(--vwf-border); border-radius:8px; padding:8px 10px; background:var(--vwf-canvas); font-size:11px; }
-.vwf-role-ref-line { color:var(--vwf-text-2); overflow-wrap:anywhere; }
+.vwf-role-refs { display:flex; flex-direction:column; gap:6px; max-height:min(200px, 28vh); overflow:auto; border:1px solid var(--vwf-border); border-radius:8px; padding:8px 10px; background:var(--vwf-canvas); font-size:11px; }.vwf-role-ref-line, .vwf-chain-note {color:var(--vwf-text-2); overflow-wrap:anywhere;}
 .vwf-role-empty { padding:14px; border:1px dashed var(--vwf-border-strong); border-radius:10px; color:var(--vwf-text-2); font-size:12px; text-align:center; overflow-wrap:anywhere; }
 .vwf-status { font-size:11px; }
 .vwf-status.ok { color:var(--vwf-ok); }
@@ -489,15 +461,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 .vwf-run-row { display:block; width:100%; text-align:left; font-size:14px; cursor:pointer; margin-bottom:8px; padding:10px 12px; border:1px solid var(--vwf-border); border-radius:12px; background:var(--vwf-canvas); color:var(--vwf-text); }
 .vwf-run-row:hover { border-color:var(--vwf-accent); background:var(--vwf-accent-surface); }
 .vwf-run-row p { margin:4px 0; }
-.vwf-run-row-note { font-size:12px; color:var(--vwf-text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.vwf-run-row small { font-size:12px; color:var(--vwf-text-2); }
+.vwf-run-row-note { font-size:12px; color:var(--vwf-text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.vwf-run-row small, .vwf-rd-subline {font-size:12px; color:var(--vwf-text-2);}
 /* 详情在大工作区层内：外层只定高与裁剪，正文自身滚动（与编辑器三个滚动区同口径）。 */
 .vwf-rd-scroll { position:absolute; inset:12px 16px; overflow:auto; overscroll-behavior:contain; scroll-padding-bottom:12px; }
 /* 页头（原型 page-header）：返回 + 标题 + 状态 + 副标题；操作常驻右侧 */
-.vwf-rd-head { flex-wrap:wrap; }
-.vwf-rd-head-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.vwf-rd-head { flex-wrap:wrap; }.vwf-rd-head-main, .vwf-chain-main {display:flex; flex-direction:column; gap:2px; min-width:0;}
 .vwf-rd-title { margin:0; font-size:16px; font-weight:600; color:var(--vwf-text); }
-.vwf-rd-subline { font-size:12px; color:var(--vwf-text-2); }
 /* 状态条（原型 workspace-strip）：返工与阶段 + 查看完整经过 */
 .vwf-rd-strip { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; padding:8px 16px; border-bottom:1px solid var(--vwf-border); background:var(--vwf-wb-surface-2); font-size:12px; color:var(--vwf-text-2); flex:0 0 auto; }
 /* 三栏工作台（原型 editor-a）：步骤定位 / 画布 / 详情各自滚动，互不带走 */
@@ -522,7 +491,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 .vwf-chain-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
 .vwf-chain-group { padding:8px 8px 2px; font-size:11px; font-weight:600; color:var(--vwf-accent); }
 .vwf-chain-head { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
-.vwf-chain-note { color:var(--vwf-text-2); overflow-wrap:anywhere; }
 .vwf-node-dir-row { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; cursor:pointer; padding:6px 8px; margin-top:4px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--vwf-wb-text); font-size:13px; }
 .vwf-node-dir-row:hover { background:var(--vwf-wb-accent-soft); }
 .vwf-node-dir-row.selected { border-color:var(--vwf-wb-accent); background:var(--vwf-wb-accent-soft); }
@@ -1445,13 +1413,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       return parts.length >= 4 ? parts.slice(3).join(':') : recordId
     }
 
-    function latestArtifactRecords(records) {
-      const byId = new Map()
-      for (const r of records || []) {
-        if (!r || !r.record_id) continue
-        const cur = byId.get(r.record_id)
-        if (!cur || (r.record_revision || 0) > (cur.record_revision || 0)) byId.set(r.record_id, r)
+    // 「每个键取最新 Revision」的统一取法（FEAT-84 归档、FEAT-85 attempt 与 node_result
+    // 三批各自书写）：差异只在键的取法、平局取先/取后与要不要投影，全部由参数承载。
+    function latestBy(list, keyOf, project, strict) {
+      const byKey = new Map()
+      for (const r of list || []) {
+        const key = keyOf(r)
+        if (!key) continue
+        const cur = byKey.get(key)
+        if (!cur || (strict ? (r.record_revision || 0) > (cur.record_revision || 0) : Number(r.record_revision || 0) >= Number(cur.record_revision || 0))) {
+          byKey.set(key, project ? project(r) : r)
+        }
       }
+      return byKey
+    }
+    function latestArtifactRecords(records) {
+      const byId = latestBy(records, (r) => (r && r.record_id) || '', null, true)
       return Array.from(byId.values()).sort((a, b) => String(a.record_id).localeCompare(String(b.record_id)))
     }
 
@@ -2434,11 +2411,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const el = id ? rowBtnRefs.current[id] : (view === 'list' ? newBtnRef.current : dialogRef.current)
         if (el && el.focus) el.focus()
       }, [view])
-      const fmt = (tpl, vars) => {
-        let s = String(tpl || '')
-        for (const k of Object.keys(vars || {})) s = s.split('{' + k + '}').join(String(vars[k]))
-        return s
-      }
       const backToList = () => { setError(null); setView('list'); setCurrent(null) }
       const closeConfirm = () => {
         setConfirm(null)
@@ -2554,7 +2526,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           }
           const used = u.count > 0
           if (name !== current.id && used) {
-            setError(fmt(t('roleRenameBlocked'), { n: u.count }))
+            setError(t('roleRenameBlocked', { n: u.count }))
             return
           }
           if (used) { confirmReturnRef.current = dialogRef.current; setConfirm({ kind: 'impact', usage: u, name: name, summary: draftSummary, content: draftContent }) }
@@ -2686,10 +2658,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       } else {
         const editingCustom = !!(current && current.builtin === false)
         body = h('div', null,
-          editingCustom ? mutedDiv(fmt(t('roleFromSource'), { src: current.id })) : null,
-          h('div', { className: 'vwf-field' },
-            h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-name' }, t('roleName'), h('span', { className: 'req' }, '*')),
-            h('input', {
+          editingCustom ? mutedDiv(t('roleFromSource', { src: current.id })) : null,
+          hc('div', 'vwf-field', h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-name' }, t('roleName'), hc('span', 'req', '*')), h('input', {
               id: 'vwf-role-name',
               className: 'vwf-input', value: draftName, placeholder: t('roleNamePlaceholder'),
               onChange: (ev) => setDraftName(ev.target.value),
@@ -2744,7 +2714,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           overlay = modalBox({
             z: 980,
             title: t('roleBlockedTitle'),
-            desc: fmt(t('roleDeleteBlocked'), { name: confirm.role.id, n: usage.count }),
+            desc: t('roleDeleteBlocked', { name: confirm.role.id, n: usage.count }),
             body: [(usage.refs || []).length ? h('div', null,
               mutedDiv(t('roleRefs'), { marginBottom: 4 }),
               h('div', { className: 'vwf-role-refs', tabIndex: 0 },
@@ -2760,7 +2730,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           overlay = modalBox({
             z: 980, gap: true,
             title: t('roleUsageTitle'),
-            desc: fmt(t('roleUsageConfirm'), { n: confirm.usage.count }),
+            desc: t('roleUsageConfirm', { n: confirm.usage.count }),
             footer: [
               h('button', { className: 'vwf-btn', onClick: closeConfirm }, t('cancelRole')),
               h('button', { className: 'vwf-btn primary', onClick: confirmSave }, t('confirmSaveRole'))
@@ -3633,27 +3603,21 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     }
     // attempt 记录按 attempt_id 取最新 Revision（running → completed / interrupted 同 id 递进）
     function latestAttemptBodies(records) {
-      const byAttempt = new Map()
-      for (const r of records || []) {
+      return latestBy(records, (r) => {
         const rid = String((r && r.record_id) || '')
-        if (rid.indexOf('attempt:') !== 0) continue
-        const v = r.body && r.body.value
-        if (!v || !v.attempt_id) continue
-        const cur = byAttempt.get(String(v.attempt_id))
-        if (!cur || Number(r.record_revision || 0) >= Number(cur.record_revision || 0)) byAttempt.set(String(v.attempt_id), { record_id: rid, record_revision: Number(r.record_revision || 0), value: v, provenance: r.provenance || null })
-      }
-      return byAttempt
+        const v = rid.indexOf('attempt:') === 0 ? r.body && r.body.value : null
+        return v && v.attempt_id ? String(v.attempt_id) : ''
+      }, (r) => ({
+        record_id: String(r.record_id), record_revision: Number(r.record_revision || 0),
+        value: r.body.value, provenance: r.provenance || null,
+      }))
     }
     // node_result 记录按 record_id 取最新 Revision（旧 Revision 仍可查，列表只取用于展示的最新）
     function latestNodeResultBodies(records) {
-      const byNode = new Map()
-      for (const r of records || []) {
+      return latestBy(records, (r) => {
         const rid = String((r && r.record_id) || '')
-        if (rid.indexOf('node:') !== 0) continue
-        const cur = byNode.get(rid)
-        if (!cur || Number(r.record_revision || 0) >= Number(cur.record_revision || 0)) byNode.set(rid, r)
-      }
-      return byNode
+        return rid.indexOf('node:') === 0 ? rid : ''
+      })
     }
     function tierBadgeOf(lifecycleState) {
       const s = String(lifecycleState || '')
@@ -4899,7 +4863,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     function safeJson(v) {
       try { return JSON.stringify(v, null, 2) } catch (e) { return String(v) }
     }
-
 
     // ── 页面：模板库 + 全局编辑层 + 运行看板 ───────────────────────────────
     function Skeleton() {
