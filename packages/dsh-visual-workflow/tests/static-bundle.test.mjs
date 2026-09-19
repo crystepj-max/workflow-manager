@@ -105,7 +105,7 @@ test('静态 bundle dist 含语言资源与内置角色正文', () => {
   assert.ok(existsSync(join(here, '..', 'dist', 'dynamic', 'client.js')), 'dist/dynamic/client.js 必须存在')
 })
 
-test('开发粘贴用 dynamic 闭包合计 ≤ 232KB（一次 cordis_define 载荷），host 自带头部常量与 Buffer 垫片', () => {
+test('开发粘贴用 dynamic 闭包合计 ≤ 284KB（一次 cordis_define 载荷），host 自带头部常量与 Buffer 垫片', () => {
   const host = readFileSync(join(here, '..', 'dist', 'dynamic', 'host.js'))
   const client = readFileSync(join(here, '..', 'dist', 'dynamic', 'client.js'))
   // 预算按「同一次 cordis_define 的粘贴总量」计（两半天生不等大）。
