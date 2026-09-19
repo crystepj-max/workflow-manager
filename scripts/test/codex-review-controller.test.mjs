@@ -10,6 +10,8 @@ import {
   parseCommand,
   parseStateComment,
   retryDecision,
+  runController,
+  TRIGGER_COMMAND,
 } from '../codex-review-controller.mjs';
 
 test('解析 next / retry / extend 命令', () => {
@@ -70,11 +72,37 @@ test('没有独立触发身份时必须 fail closed', () => {
   assert.equal(hasReviewIdentity('token-present'), true);
 });
 
-test('第 2/3 轮提示词明确收敛范围', () => {
+test('触发评论以单一常量承载 @cursor review，不再注入 @codex 自由提示词', () => {
+  assert.equal(TRIGGER_COMMAND, '@cursor review', '触发词以 Cursor 设置页 Manual-Only 文案为单一事实源');
+  const p1 = buildReviewPrompt(1, 3);
+  assert.ok(p1.startsWith(TRIGGER_COMMAND), '触发评论首行必须是常量触发词');
+  assert.match(p1, /^@cursor review(?=\s|$)/, '触发词独立成行，后接审计留痕');
+  assert.ok(!p1.includes('@codex'), '不得残留 @codex 触发');
+  assert.ok(!/codex/i.test(p1), '触发评论正文不得再出现 codex');
+});
+
+test('各轮仍保留轮次审计留痕（完整/收敛/最终/人工追加）', () => {
   assert.match(buildReviewPrompt(1, 3), /完整审查/);
   assert.match(buildReviewPrompt(2, 3), /收敛审查/);
   assert.match(buildReviewPrompt(3, 3), /最终收敛审查/);
   assert.match(buildReviewPrompt(4, 4, '仍有 P1'), /人工追加原因：仍有 P1/);
+});
+
+test('普通 Issue 评论不触发 Controller（非 PR）', async () => {
+  // 门禁在解析命令前即返回，不触达任何网络调用
+  const res = await runController(
+    { issue: { number: 1 }, comment: { body: '/codex-review next' } },
+    { token: 't', reviewToken: 'r', repo: 'o/r' },
+  );
+  assert.deepEqual(res, { handled: false, reason: 'NOT_PR' });
+});
+
+test('PR 内的非命令评论不触发 Controller', async () => {
+  const res = await runController(
+    { issue: { number: 1, pull_request: {} }, comment: { body: '普通评论' } },
+    { token: 't', reviewToken: 'r', repo: 'o/r' },
+  );
+  assert.deepEqual(res, { handled: false, reason: 'NOT_COMMAND' });
 });
 
 test('可以从 Controller 状态评论恢复状态', () => {
