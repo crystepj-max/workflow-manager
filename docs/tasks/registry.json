@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 102,
+  "revision": 106,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -1969,7 +1969,7 @@
     {
       "task_id": "FIX-108",
       "type": "FIX",
-      "remote": "cnb#108",
+      "remote": "cnb#108 + github#108",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -1987,18 +1987,18 @@
       "worktree": null,
       "runs": [],
       "merge": "GitHub PR #206 (integ/opt-round-20260919)",
-      "github_sync": "pending",
+      "github_sync": "synced#108",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": true,
       "created_at": "2026-09-19T02:42:15.665Z",
-      "updated_at": "2026-09-19T04:01:50.485Z",
+      "updated_at": "2026-09-19T04:06:03.577Z",
       "spec_path": "docs/tasks/specs/FIX-108-status-authority-prev-round-label/task-spec-V1.md"
     },
     {
       "task_id": "FIX-109",
       "type": "FIX",
-      "remote": "cnb#109",
+      "remote": "cnb#109 + github#109",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2016,18 +2016,18 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#109",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T02:53:14.421Z",
-      "updated_at": "2026-09-19T02:57:44.473Z",
+      "updated_at": "2026-09-19T04:06:03.589Z",
       "spec_path": "docs/tasks/specs/FIX-109-closeout-tooling-gaps/task-spec-V1.md"
     },
     {
       "task_id": "CHORE-110",
       "type": "CHORE",
-      "remote": "cnb#110",
+      "remote": "cnb#110 + github#110",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2045,12 +2045,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#110",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T02:53:24.804Z",
-      "updated_at": "2026-09-19T02:57:44.482Z",
+      "updated_at": "2026-09-19T04:06:03.592Z",
       "spec_path": "docs/tasks/specs/CHORE-110-acceptance-package-schema/task-spec-V1.md"
     },
     {
@@ -2065,7 +2065,7 @@
       "source": "会话录入（松哥 2026-09-19：GitHub 恢复，改为主源；发号源单独立票迁移）",
       "source_ref": "",
       "baseline": "V1",
-      "status": "定义中",
+      "status": "待确认",
       "priority": "P2",
       "env_group": null,
       "env_role": null,
@@ -2079,7 +2079,7 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T03:56:05.485Z",
-      "updated_at": "2026-09-19T03:57:26.392Z",
+      "updated_at": "2026-09-19T04:06:03.594Z",
       "spec_path": "docs/tasks/specs/CHORE-111-numbering-source-migration/task-spec-V1.md"
     }
   ],
