@@ -2,10 +2,17 @@
   "task_id": "CHORE-36",
   "run_id": "chore-36-r1",
   "task_name": "验收清单前置条件规则补齐（UAT 卡与规格模板）",
-  "status": "等待验收",
-  "decision": null,
-  "decided_by": null,
-  "decided_at": null,
+  "branch": "dev-chore-36-r1",
+  "status": "已合并",
+  "decision": "accept",
+  "decided_by": "松哥",
+  "decided_at": "2026-09-16T14:02:03.100Z",
+  "acceptance_state": "decided",
+  "merge": {
+    "commit": "e2c3994332287c612027ac87c06efba80a5d5f82",
+    "merged_at": "2026-09-16T13:53:57.247Z",
+    "issue": null
+  },
   "stages": [
     {
       "record_type": "requirements_baseline",
@@ -53,17 +60,22 @@
     {
       "record_type": "acceptance_package",
       "file": "acceptance_package.a3.json",
-      "created_at": "2026-09-16T10:52:24.637Z",
+      "created_at": "2026-09-16T14:02:03.218Z",
       "produced_by": "workbuddy-chore36-uat",
       "summary": {
-        "status": "awaiting_decision"
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "松哥",
+        "decided_at": "2026-09-16T14:02:03.100Z",
+        "verified_branch": "dev-chore-36-r1",
+        "verified_head": "ccb2ac42733ec7864bea5674c0d98bf649723c5f"
       }
     }
   ],
   "evidence": {
     "archive_path": ".agent-runs/chore-36-r1",
-    "file_count": 23,
-    "total_bytes": 76476
+    "file_count": 29,
+    "total_bytes": 91847
   },
-  "generated_at": "2026-09-16T13:53:57.179Z"
+  "generated_at": "2026-09-19T14:20:54.640Z"
 }

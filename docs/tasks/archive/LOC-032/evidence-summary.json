@@ -1,16 +1,81 @@
 {
   "task_id": "LOC-032",
+  "run_id": "loc-032-r1",
+  "run_id_source": "discovered_from_agent_runs",
   "task_name": "WR-012 恢复执行时防止重复外部动作",
   "status": "已合并",
-  "archive_form": "lightweight-remote",
-  "remote_ref": "cnb#50",
+  "decision": "accept",
+  "decided_by": "松哥",
+  "decided_at": "2026-09-16T02:54:39.000Z",
+  "acceptance_state": "decided",
   "merge": {
     "commit": "51739d6b3e3556888ad9cda0d03072b77f19d090",
-    "merged_at": "2026-09-16T04:59:07.163Z"
+    "merged_at": "2026-09-16T04:59:07.163Z",
+    "issue": null
   },
-  "branch": null,
-  "branch_retained": false,
-  "generated_by": "FIX-72（fix-72-r1）轻量归档回填",
-  "generated_at": "2026-09-16T10:05:11.420Z",
-  "note": "远程收口任务：经 CNB 合并请求合入，本地未走收口流程。规格正文与任务详情以远端 issue 为源（本存根仅记指针与凭据，不复制正文）；若远端 issue 被清理，该部分历史不可恢复——此风险已在 FIX-72 规格已知限制中声明。"
+  "stages": [
+    {
+      "record_type": "requirements_baseline",
+      "file": "requirements_baseline.a1.json",
+      "created_at": "2026-09-15T16:21:10.673Z",
+      "produced_by": "construction-bootstrap",
+      "summary": {
+        "status": "confirmed"
+      }
+    },
+    {
+      "record_type": "design_package",
+      "file": "design_package.a1.json",
+      "created_at": "2026-09-15T16:21:11.047Z",
+      "produced_by": "construction-bootstrap"
+    },
+    {
+      "record_type": "dev_handoff",
+      "file": "dev_handoff.a1.json",
+      "created_at": "2026-09-15T16:21:43.377Z",
+      "produced_by": "construction-bootstrap",
+      "summary": {
+        "outcome": "handoff_ready"
+      }
+    },
+    {
+      "record_type": "review_proof",
+      "file": "review_proof.a2.json",
+      "created_at": "2026-09-15T16:32:32.453Z",
+      "produced_by": "cursor-agent-composer-review",
+      "summary": {
+        "verdict": "approve"
+      }
+    },
+    {
+      "record_type": "test_proof",
+      "file": "test_proof.a3.json",
+      "created_at": "2026-09-15T16:40:04.350Z",
+      "produced_by": "cursor-agent-composer-test",
+      "summary": {
+        "verdict": "pass",
+        "environment": "worktree /Users/chris/workspace/workflow-manager-worktrees/dev-loc-032-r1，Node 24，node_modules 已安装；独立会话 cursor-agent（model composer-2.5）"
+      }
+    },
+    {
+      "record_type": "acceptance_package",
+      "file": "acceptance_package.a3.json",
+      "created_at": "2026-09-16T02:55:10.137Z",
+      "produced_by": "human-acceptance",
+      "summary": {
+        "status": "decided",
+        "decision": "accept",
+        "decided_by": "松哥",
+        "decided_at": "2026-09-16T02:54:39.000Z",
+        "verified_branch": "dev-loc-032-r1",
+        "verified_head": "40e52e98f4aedd1ec0eb0ded4898ebdbfe517475"
+      }
+    }
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/loc-032-r1",
+    "file_count": 30,
+    "total_bytes": 76016
+  },
+  "generated_at": "2026-09-19T14:20:54.679Z"
 }
