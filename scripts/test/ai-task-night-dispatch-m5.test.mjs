@@ -21,6 +21,8 @@ function buildProject({ taskIds, extraTasks = [] }) {
     fs.mkdirSync(path.join(proj, '.scratch/specs', id), { recursive: true })
     fs.copyFileSync(path.join(m3Fixtures, fx, 'issue-basics.md'), path.join(proj, 'docs/tasks', `${id}-defined.md`))
     fs.copyFileSync(path.join(m3Fixtures, fx, 'task-spec-V1.md'), path.join(proj, '.scratch/specs', id, 'task-spec-V1.md'))
+    // 少了这份，preflight 定义门禁 PREFLIGHT_DEF_CHECK_MISSING 会把候选全部挡在拉起之前
+    fs.copyFileSync(path.join(m3Fixtures, fx, 'definition-check.md'), path.join(proj, '.scratch/specs', id, 'definition-check.md'))
     return {
       task_id: id, name: `测试任务${id}`, status: '已定义', slug: 'defined',
       deps: [], env_group: id, env_role: '独立', priority: null,
