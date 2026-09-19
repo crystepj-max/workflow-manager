@@ -516,6 +516,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 .vwf-chain-entry.tone-failed .vwf-chain-dot { color:var(--vwf-err); }
 .vwf-chain-entry.tone-returned .vwf-chain-dot { color:var(--vwf-warn); }
 .vwf-chain-entry.tone-running .vwf-chain-dot { color:var(--vwf-accent); }
+.vwf-chain-entry.tone-wait .vwf-chain-dot { color:var(--vwf-warn); }
 .vwf-chain-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
 .vwf-chain-group { padding:8px 8px 2px; font-size:11px; font-weight:600; color:var(--vwf-accent); }
 .vwf-chain-head { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
@@ -3407,12 +3408,48 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       for (const k of Object.keys(bo)) if (bo[k] && bo[k].outcome !== undefined && bo[k].outcome !== null) set.add(String(bo[k].outcome))
       return Array.from(set).sort()
     }
-    // 退回类结果：蓝图里 countRound=true 的边（返工 / 补充回边）声明的 outcome
-    function returnOutcomesOf(dsl) {
-      const set = new Set()
-      for (const e of ((dsl && dsl.edges) || [])) if (e && e.countRound === true && e.outcome) set.add(String(e.outcome))
-      return set
+    // 执行顺序键：段号 + 结束/开始时间（与 logicalAttemptsOf 的排序同一口径，等值按记录
+    // 追加序稳定兜底）。业务返工在**同一段内**回环重做（countRound 边不新开段），所以判断
+    // 「本轮有没有重做过」只能靠真实执行先后，不能只看段号。
+    const ordOf = (v) => String(Number(v.segment) || 0).padStart(3, '0') + String(new Date(v.ended_at || v.started_at || 0).getTime() || 0).padStart(14, '0')
+    // 结局词表（全部由蓝图派生，不认节点名与取值名写法）：退回类 = countRound=true 的
+    // 边（返工/补充回边）声明的 outcome；人工门禁类 = 指向人工裁决节点的边声明的 outcome。
+    function verdictWordsOf(dsl) {
+      const ret = new Set()
+      const wait = new Set()
+      for (const e of ((dsl && dsl.edges) || [])) {
+        if (!e || !e.outcome) continue
+        const o = String(e.outcome)
+        if (e.countRound === true) ret.add(o)
+        if (String(e.to || '') === HUMAN_DECISION_ID) wait.add(o)
+      }
+      return { ret, wait }
     }
+    // ── attempt 结局的单一权威（FIX-108）────────────────────────────────────
+    // 「结果信息 / 执行记录 / 完整经过链路」三处一律经 attemptVerdictOf 取结论：判据是
+    // 这次执行**自己的**终局（status + 蓝图声明的业务结果 outcome），不再用「是不是最后
+    // 一次」反推过没过（那会把每一条历史执行都译成「退回修改」，见 run 目录 diagnosis.md）。
+    // 返回语义键；tone / color / shape / 文案都由下面这一张表取，三处不会各说一套。
+    // 键 → [链路 tone, 状态色, 状态形状]。已裁决复用 done 色调（裁决已下，文字区分等待人工）
+    const ATTEMPT_VERDICT = {
+      running: ['running', 'running', 'run'], passed: ['done', 'pass', 'ok'],
+      returned: ['returned', 'human', 'wait'], blocked: ['failed', 'fail', 'err'],
+      waiting: ['wait', 'human', 'wait'], decided: ['done', 'pass', 'ok'],
+    }
+    // 链路圆点：与 tone 一一对应（形状 + 颜色双通道，不只靠颜色）
+    const CHAIN_DOT = { done: '✓', failed: '✕', returned: '↩', running: '·', wait: '!', todo: '—' }
+    function attemptVerdictOf(v, words, decidedAfter) {
+      const status = String((v && v.status) || '')
+      if (status === 'running') return 'running'
+      if (status !== 'completed') return 'blocked'
+      const o = v && v.outcome !== undefined && v.outcome !== null ? String(v.outcome) : ''
+      if (!o) return 'passed'
+      if (o === 'BLOCKED') return 'blocked'
+      if (words.ret.has(o)) return 'returned'
+      if (words.wait.has(o)) return (Number(v.segment) || 0) < decidedAfter ? 'decided' : 'waiting'
+      return 'passed'
+    }
+    const verdictTextOf = (key) => t('rdAttempt' + key.charAt(0).toUpperCase() + key.slice(1))
     function workspaceLabelOf(ws) {
       if (!ws) return ''
       const id = ws.workspace_id ? String(ws.workspace_id) : ''
@@ -3871,17 +3908,36 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const pickedIdx = selected && attemptSel[selected.id] ? Math.min(attemptSel[selected.id], latestIdx) : latestIdx
       const picked = pickedIdx > 0 ? selectedAttempts[pickedIdx - 1] : null
       const pickedValue = picked ? picked.value : null
-      // 「上一轮成果」：该节点最新尝试所在段早于当前生效段 → 显示的是返工前的成果
-      const nodeLatestSegment = (nodeId) => {
-        const list = logicalAttemptsOf(nodeId)
-        let max = 0
-        for (const a of list) max = Math.max(max, Number(a.value.segment) || 0)
-        return max
+      // attempt 结局词表（蓝图派生）与「人工门禁已裁决到的段号」：三处视图共用同一份判据输入。
+      // 门禁是否已裁决只认**这次执行之后**的裁决（人工退回后再次停在门禁时，新门禁还没有裁决，
+      // 不能因为「这个运行曾经裁决过」就写成已裁决）。
+      const verdictWords = verdictWordsOf(dsl)
+      let decidedAfter = 0
+      for (const sg of ((lr && lr.segments) || [])) if (sg.decision_id) decidedAfter = Math.max(decidedAfter, Number(sg.index) || 0)
+      // 「本轮起点」= 最近一次退回类裁决在真实执行顺序里的位置（ordOf）。没有退回就没有
+      // 「上一轮」这一轮，一律不标——smoke-01 的多段（集成同步重跑 / 人工裁决收口）即如此。
+      let bootKey = ''
+      for (const a of attempts.values()) {
+        const v = a.value
+        if (!v || v.kind === 'item') continue
+        if (v.outcome === undefined || v.outcome === null) continue
+        if (!verdictWords.ret.has(String(v.outcome))) continue
+        const k = ordOf(v)
+        if (k > bootKey) bootKey = k
       }
-      const isPrevRound = selected ? (nodeLatestSegment(selected.id) > 0 && nodeLatestSegment(selected.id) < activeSeg) : false
+      // 「上一轮成果」的单一判据（FIX-108）：① 运行里确实发生过退回；② 该节点有成果；
+      // ③ 这条成果产出在本轮起点之前（即此后没有被重做）。标记只落在这条成果上。
+      const prevRoundOf = (nodeId) => {
+        const list = logicalAttemptsOf(nodeId)
+        return !!bootKey && !!list.length && ordOf(list[list.length - 1].value) < bootKey
+      }
+      const isPrevRound = selected ? prevRoundOf(selected.id) : false
+      // 三处视图共用的结局取值：结果信息 / 执行记录 / 完整经过链路都只经它
+      const verdictOf = (value) => attemptVerdictOf(value, verdictWords, decidedAfter)
+      const pickedVerdict = pickedValue ? verdictOf(pickedValue) : ''
+      const pickedVerdictRow = ATTEMPT_VERDICT[pickedVerdict] || null
       const historical = selected ? (pickedIdx > 0 && pickedIdx < latestIdx) : false
-      const returnOutcomes = returnOutcomesOf(dsl)
-      // 退回意见跟随触发它的审查轮次：从该段记录里找产出退回类 outcome 的节点
+      // 退回意见跟随触发它的审查轮次：从该段记录里找产出退回类 outcome 的节点（词表同 verdictWords.ret）
       const returnsFor = (segment) => {
         const out = []
         for (const a of attempts.values()) {
@@ -3889,7 +3945,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           if (!v || v.kind === 'item') continue
           if ((Number(v.segment) || 0) !== Number(segment)) continue
           if (v.outcome === undefined || v.outcome === null) continue
-          if (!returnOutcomes.has(String(v.outcome))) continue
+          if (!verdictWords.ret.has(String(v.outcome))) continue
           out.push({ node: String(v.node), outcome: String(v.outcome), segment: Number(v.segment) || 0, round: Number(v.round) || 0, result: v.result, at: v.ended_at || v.started_at || null })
         }
         return out.sort((a, b) => (a.round - b.round) || ((Number(a.segment) || 0) - (Number(b.segment) || 0)))
@@ -3940,11 +3996,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         }
         nodes.forEach((n, ni) => {
           const label = n.label || n.id
+          // 「上一轮成果」只落在那一条上一轮成果上（该节点在返工轮之前的最新一次执行），
+          // 不挂到本轮新做出的成果上——本任务前，它挂在该节点的每一条 entry 上。
+          const prevEntry = prevRoundOf(n.id) ? logicalAttemptsOf(n.id).length : 0
           const base = {
             id: n.id,
             seq: String(ni + 1).padStart(2, '0'),
             label,
-            prev: nodeLatestSegment(n.id) > 0 && nodeLatestSegment(n.id) < activeSeg,
             current: n.id === phaseNodeId,
           }
           const rows = agents.filter((a) => takenAgents.indexOf(a) < 0 && agentNameOf(a.label) === String(label))
@@ -3962,14 +4020,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           list.forEach((a, i) => {
             const v = a.value
             const last = i + 1 === list.length
+            const verdict = verdictOf(v)
             out.push(Object.assign({
               key: 'a' + n.id + i,
               attempt: i + 1,
-              tone: v.status === 'failed' ? 'failed' : (last ? (v.status === 'completed' ? 'done' : 'running') : 'returned'),
-              state: v.status === 'failed' ? t('rdAttemptReturned') : (last ? (v.status === 'completed' ? t('rdAttemptPassed') : t('rdAttemptRunning')) : t('rdAttemptReturned')),
+              tone: ATTEMPT_VERDICT[verdict][0],
+              state: verdictTextOf(verdict),
               note: String(v.error || ''),
               meta: t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }),
               latest: last,
+              prev: i + 1 === prevEntry,
             }, base))
           })
           items.forEach((a, i) => {
@@ -4115,8 +4175,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h('div', { className: 'vwf-card-title' }, t('rdNodeDirectory')),
               nodes.length ? nodes.map((n, ni) => {
                 const list = logicalAttemptsOf(n.id)
-                const seg = nodeLatestSegment(n.id)
-                const prev = seg > 0 && seg < activeSeg
+                const prev = prevRoundOf(n.id)
                 return h('button', {
                   key: n.id,
                   className: 'vwf-node-dir-row' + (n.id === effectiveSel ? ' selected' : ''),
@@ -4154,6 +4213,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h('div', { className: 'vwf-row', style: { justifyContent: 'space-between', flexWrap: 'wrap' } },
                 h('div', { className: 'vwf-row', style: { gap: 6 } },
                   h('span', { className: 'vwf-badge ' + (historical || isPrevRound ? 'accent' : '') }, historical || isPrevRound ? t('rdHistorical') : t('rdCurrentResult')),
+                  // 结果信息也给出这次执行的状态结论，与执行记录 / 链路同一权威、同一措辞
+                  pickedVerdictRow ? h('span', { className: 'vwf-badge', 'data-vwf-verdict': pickedVerdict, style: { color: STATUS_COLOR[pickedVerdictRow[1]] } }, STATUS_SHAPE[pickedVerdictRow[2]] + ' ' + verdictTextOf(pickedVerdict)) : null,
                   isPrevRound ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
                 ),
                 h('span', { className: 'vwf-muted-sm' }, (lr && lr.title ? String(lr.title) : (head.taskId || head.id)))
@@ -4167,7 +4228,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   onChange: (ev) => setAttemptSel(Object.assign({}, attemptSel, { [selected.id]: Number(ev.target.value) })),
                 }, selectedAttempts.map((a, i) => {
                   const v = a.value
-                  const label = t('rdAttemptOption', { n: i + 1, state: v.status === 'failed' ? t('rdAttemptReturned') : (v.status === 'completed' ? (i + 1 < selectedAttempts.length ? t('rdAttemptReturned') : t('rdAttemptPassed')) : t('rdAttemptRunning')) }) + (i + 1 === selectedAttempts.length ? t('rdAttemptLatest') : '')
+                  const label = t('rdAttemptOption', { n: i + 1, state: verdictTextOf(verdictOf(v)) }) + (i + 1 === selectedAttempts.length ? t('rdAttemptLatest') : '')
                   return h('option', { key: v.attempt_id, value: String(i + 1) }, label)
                 }))
               ) : h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('rdNotStarted') + '：' + t('rdNotStartedNote')),
@@ -4211,7 +4272,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 'data-vwf-chain-attempt': String(e.attempt),
                 onClick: () => pickChain(e),
               },
-                h('span', { className: 'vwf-chain-dot' }, e.tone === 'done' ? '✓' : e.tone === 'failed' ? '✕' : e.tone === 'returned' ? '↩' : e.tone === 'running' ? '·' : '—'),
+                h('span', { className: 'vwf-chain-dot' }, CHAIN_DOT[e.tone] || '—'),
                 h('span', { className: 'vwf-chain-main' },
                   h('span', { className: 'vwf-chain-head' },
                     h('strong', null, (e.seq ? e.seq + ' ' : '') + e.label + (e.child ? ' · ' + t('rdFanoutChild', { n: e.child }) : '')),
