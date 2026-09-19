@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 107,
+  "revision": 111,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -730,14 +730,14 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#213",
       "created_at": "2026-09-10T16:28:40.142Z",
-      "updated_at": "2026-09-16T00:07:23.973Z",
+      "updated_at": "2026-09-19T09:32:54.636Z",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "type": "CHORE",
-      "remote": "cnb#40",
+      "remote": "cnb#40 + github#213",
       "spec_path": null
     },
     {
@@ -1528,7 +1528,7 @@
     {
       "task_id": "CHORE-75",
       "type": "CHORE",
-      "remote": "cnb#75",
+      "remote": "cnb#75 + github#214",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -1546,12 +1546,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#214",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-16T13:57:49.950Z",
-      "updated_at": "2026-09-18T18:10:24.897Z",
+      "updated_at": "2026-09-19T09:32:54.641Z",
       "spec_path": "docs/tasks/specs/CHORE-75-registry-reconcile/task-spec-V1.md"
     },
     {
@@ -1799,7 +1799,7 @@
       "source": "会话录入",
       "source_ref": "",
       "baseline": "V1",
-      "status": "等待验收",
+      "status": "已合并",
       "priority": "P1",
       "env_group": null,
       "env_role": null,
@@ -1807,13 +1807,13 @@
       "branch": "fix/FIX-97-vwf-run-host-fix",
       "worktree": null,
       "runs": [],
-      "merge": null,
-      "github_sync": "pending",
+      "merge": "GitHub PR #212 (fix/FIX-97-vwf-run-host-fix-clean)",
+      "github_sync": "synced#212",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-17T15:01:28.603Z",
-      "updated_at": "2026-09-17T15:04:13.836Z",
+      "updated_at": "2026-09-19T09:32:54.643Z",
       "spec_path": "docs/tasks/specs/FIX-97-vwf-run-host-fix/task-spec-V1.md"
     },
     {
@@ -2056,7 +2056,7 @@
     {
       "task_id": "CHORE-111",
       "type": "CHORE",
-      "remote": "cnb#111",
+      "remote": "cnb#111 + github#215",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2074,12 +2074,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#215",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T03:56:05.485Z",
-      "updated_at": "2026-09-19T04:06:03.594Z",
+      "updated_at": "2026-09-19T09:32:54.642Z",
       "spec_path": "docs/tasks/specs/CHORE-111-numbering-source-migration/task-spec-V1.md"
     },
     {
