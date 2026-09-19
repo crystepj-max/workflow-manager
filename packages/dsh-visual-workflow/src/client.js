@@ -558,9 +558,62 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     const mutedText = (x, st) => h('div', { className: 'vwf-muted', style: st }, x)
     const secDiv = (x, st, key) => h('div', { className: 'vwf-sec', style: st, key: key }, x)
     const warnNote = (x, st, key) => h('div', { className: 'vwf-note warn', style: st, key: key }, x)
-    const errLine = (x) => h('div', { className: 'vwf-err-line' }, x)
+    const errLine = (x, st, key) => h('div', { className: 'vwf-err-line', style: st, key: key }, x)
     const okLine = (x) => h('div', { className: 'vwf-ok-line' }, x)
     const emptyDiv = (x, st) => h('div', { className: 'vwf-empty', style: st }, x)
+
+    // 弹窗骨架（角色库 / 编排台 / 运行详情三批各自书写）：遮罩 + 卡片 + 标题 + 说明 + 正文 + 页脚。
+    // 遮罩点击关闭只在传 dismiss 时挂监听：角色库三处点遮罩不关，维持原行为。
+    // 未传的可选属性为 undefined，与原来属性对象里不写该项等价（React 视同缺省）。
+    const modalBox = (o) => h('div', {
+      className: 'vwf-dialog-mask',
+      style: o.z ? { zIndex: o.z } : undefined,
+      onClick: o.dismiss,
+    }, h('div', {
+      className: 'vwf-dialog' + (o.cls ? ' ' + o.cls : ''),
+      onClick: o.stop ? (ev) => ev.stopPropagation() : undefined,
+      role: o.role,
+      'aria-modal': o.modal,
+      'aria-label': o.label,
+    },
+      h('div', { className: 'vwf-dialog-title' }, o.title),
+      h('div', { className: 'vwf-dialog-desc' }, o.desc),
+      // body / footer 都逐个展开为子节点（不传数组也不包一层容器），
+      // 与原「标题、说明、正文、页脚同为大工作区层的直接子节点」的 DOM 形态一致。
+      ...(o.body || []),
+      h('div', { className: 'vwf-row', style: o.gap ? { justifyContent: 'flex-end', gap: 8 } : { justifyContent: 'flex-end' } }, ...(o.footer || []))
+    ))
+    // 大工作区层 dialog 的公共属性（详情 / 编辑器 / 模型覆盖三处打开层共用）。
+    // onClose 与「点遮罩 / Esc」的关闭不同：详情层只在自己仍处于详情视图时回列表。
+    const bigDialogProps = (ref, label, dismiss, onClose) => ({
+      className: 'vwf-editor-dialog',
+      ref: ref,
+      'aria-label': label,
+      onClick: (ev) => { if (ev.target === ev.currentTarget) dismiss() },
+      onCancel: (ev) => { ev.preventDefault(); dismiss() },
+      onClose: onClose || dismiss,
+    })
+    // 原生 top-layer dialog 打开（issue-54：避免宿主祖先 transform/overflow 把 fixed 定位
+    // 限制在设置页内部）。对照环境没有 showModal 时按 attrFallback 退回 setAttribute('open')。
+    const useDialogOpen = (ref, open, opts) => {
+      const attrFallback = !!(opts && opts.attrFallback)
+      const closeOnUnmount = !!(opts && opts.closeOnUnmount)
+      const allowNoRef = !!(opts && opts.allowNoRef)
+      React.useEffect(() => {
+        if (!open) return undefined
+        const dialog = ref.current
+        if (!dialog && !allowNoRef) return undefined
+        try {
+          if (dialog && typeof dialog.showModal === 'function') { if (!dialog.open) dialog.showModal() }
+          else if (attrFallback && dialog) dialog.setAttribute('open', '')
+        } catch (e) { if (attrFallback && dialog) dialog.setAttribute('open', '') }
+        // 卸载时由 cleanup 收掉：节点被 React 摘掉后再读 ref 已经拿不到对话框，
+        // 不在这里关就会留下一个仍带 open 的游离 dialog。
+        return closeOnUnmount
+          ? () => { try { if (dialog.open && typeof dialog.close === 'function') dialog.close() } catch (e) { /* 同上 */ } }
+          : undefined
+      }, [open])
+    }
 
     // ── 图常量（对应 workflowGraph.ts）──────────────────────────────────────
     // 画布为自上而下布局（V-12）：NODE_W / NODE_H 是节点在屏幕上的宽高，
@@ -2677,47 +2730,42 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       let overlay = null
       if (confirm) {
         if (confirm.kind === 'delete') {
-          overlay = h('div', { className: 'vwf-dialog-mask', style: { zIndex: 980 } },
-            h('div', { className: 'vwf-dialog' },
-              h('div', { className: 'vwf-dialog-title' }, t('roleDeleteTitle') + confirm.role.id + t('roleDeleteTitleSuffix')),
-              h('div', { className: 'vwf-dialog-desc' }, t('roleDeleteDesc')),
-              h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8 } },
-                h('button', { className: 'vwf-btn', onClick: closeConfirm }, t('cancelRole')),
-                h('button', { className: 'vwf-btn danger', disabled: saving, onClick: doDelete }, t('deleteRole'))
-              )
-            )
-          )
+          overlay = modalBox({
+            z: 980, gap: true,
+            title: t('roleDeleteTitle') + confirm.role.id + t('roleDeleteTitleSuffix'),
+            desc: t('roleDeleteDesc'),
+            footer: [
+              h('button', { className: 'vwf-btn', onClick: closeConfirm }, t('cancelRole')),
+              h('button', { className: 'vwf-btn danger', disabled: saving, onClick: doDelete }, t('deleteRole'))
+            ]
+          })
         } else if (confirm.kind === 'blocked') {
           const usage = confirm.usage || { count: 0, refs: [] }
-          overlay = h('div', { className: 'vwf-dialog-mask', style: { zIndex: 980 } },
-            h('div', { className: 'vwf-dialog' },
-              h('div', { className: 'vwf-dialog-title' }, t('roleBlockedTitle')),
-              h('div', { className: 'vwf-dialog-desc' }, fmt(t('roleDeleteBlocked'), { name: confirm.role.id, n: usage.count })),
-              (usage.refs || []).length ? h('div', null,
-                mutedDiv(t('roleRefs'), { marginBottom: 4 }),
-                h('div', { className: 'vwf-role-refs', tabIndex: 0 },
-                  usage.refs.map((w, wi) => h('div', { key: 'wf' + wi, className: 'vwf-role-ref-line' },
-                    (w.workflowName || w.workflowId) + (w.builtin ? '（' + t('builtinRoleBadge') + '）' : '') + '：' +
-                    w.nodes.map(n => n.label + '（' + n.id + '）').join('、')
-                  ))
-                )
-              ) : null,
-              h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
-                h('button', { className: 'vwf-btn primary', onClick: closeConfirm }, t('close'))
+          overlay = modalBox({
+            z: 980,
+            title: t('roleBlockedTitle'),
+            desc: fmt(t('roleDeleteBlocked'), { name: confirm.role.id, n: usage.count }),
+            body: [(usage.refs || []).length ? h('div', null,
+              mutedDiv(t('roleRefs'), { marginBottom: 4 }),
+              h('div', { className: 'vwf-role-refs', tabIndex: 0 },
+                usage.refs.map((w, wi) => h('div', { key: 'wf' + wi, className: 'vwf-role-ref-line' },
+                  (w.workflowName || w.workflowId) + (w.builtin ? '（' + t('builtinRoleBadge') + '）' : '') + '：' +
+                  w.nodes.map(n => n.label + '（' + n.id + '）').join('、')
+                ))
               )
-            )
-          )
+            ) : null],
+            footer: [h('button', { className: 'vwf-btn primary', onClick: closeConfirm }, t('close'))]
+          })
         } else if (confirm.kind === 'impact') {
-          overlay = h('div', { className: 'vwf-dialog-mask', style: { zIndex: 980 } },
-            h('div', { className: 'vwf-dialog' },
-              h('div', { className: 'vwf-dialog-title' }, t('roleUsageTitle')),
-              h('div', { className: 'vwf-dialog-desc' }, fmt(t('roleUsageConfirm'), { n: confirm.usage.count })),
-              h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8 } },
-                h('button', { className: 'vwf-btn', onClick: closeConfirm }, t('cancelRole')),
-                h('button', { className: 'vwf-btn primary', onClick: confirmSave }, t('confirmSaveRole'))
-              )
-            )
-          )
+          overlay = modalBox({
+            z: 980, gap: true,
+            title: t('roleUsageTitle'),
+            desc: fmt(t('roleUsageConfirm'), { n: confirm.usage.count }),
+            footer: [
+              h('button', { className: 'vwf-btn', onClick: closeConfirm }, t('cancelRole')),
+              h('button', { className: 'vwf-btn primary', onClick: confirmSave }, t('confirmSaveRole'))
+            ]
+          })
         }
       }
 
@@ -3149,31 +3197,25 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 
       return h('div', null,
         // 连接信息（V-13）：常驻清单改为「查看连接」按钮 + 弹窗，逐条覆盖模板定义的全部连接
-        connOpen ? h('div', { className: 'vwf-dialog-mask', onClick: () => setConnOpen(false) },
-          h('div', { className: 'vwf-dialog vwf-conn-dialog', onClick: (ev) => ev.stopPropagation() },
-            h('div', { className: 'vwf-dialog-title' }, t('wbConnections') + ' · ' + (wf.name || wf.id || '')),
-            h('div', { className: 'vwf-dialog-desc' }, t('wbConnDialogDesc')),
-            h(ConnectionList, {
-              dsl: wf, rankOf, selectedEdgeIndex,
-              onPickEdge: (index) => { setConnOpen(false); pickEdge(index) },
-            }),
-            h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
-              h('button', { className: 'vwf-btn primary', onClick: () => setConnOpen(false) }, t('close'))
-            )
-          )
-        ) : null,
-        dialogOpen ? h('div', { className: 'vwf-dialog-mask', onClick: closeValidationDialog },
-          h('div', { className: 'vwf-dialog', onClick: (ev) => ev.stopPropagation() },
-            h('div', { className: 'vwf-dialog-title' }, t('validationDialogTitle')),
-            h('div', { className: 'vwf-dialog-desc' }, t('validationDialogDescription')),
-            h('div', { className: 'vwf-dialog-issues' },
-              ((pendingValidation && pendingValidation.errors) || []).map((e2, i) => h('div', { key: i, className: 'vwf-dialog-issue' }, e2.message))
-            ),
-            h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
-              h('button', { className: 'vwf-btn primary', onClick: closeValidationDialog }, t('validationDialogClose'))
-            )
-          )
-        ) : null,
+        connOpen ? modalBox({
+          cls: 'vwf-conn-dialog', stop: true, dismiss: () => setConnOpen(false),
+          title: t('wbConnections') + ' · ' + (wf.name || wf.id || ''),
+          desc: t('wbConnDialogDesc'),
+          body: [h(ConnectionList, {
+            dsl: wf, rankOf, selectedEdgeIndex,
+            onPickEdge: (index) => { setConnOpen(false); pickEdge(index) },
+          })],
+          footer: [h('button', { className: 'vwf-btn primary', onClick: () => setConnOpen(false) }, t('close'))]
+        }) : null,
+        dialogOpen ? modalBox({
+          stop: true, dismiss: closeValidationDialog,
+          title: t('validationDialogTitle'),
+          desc: t('validationDialogDescription'),
+          body: [h('div', { className: 'vwf-dialog-issues' },
+            ((pendingValidation && pendingValidation.errors) || []).map((e2, i) => h('div', { key: i, className: 'vwf-dialog-issue' }, e2.message))
+          )],
+          footer: [h('button', { className: 'vwf-btn primary', onClick: closeValidationDialog }, t('validationDialogClose'))]
+        }) : null,
         // 窗格切换条与网格平级：放在网格内会随所在窗格一起被隐藏（配置窗格里无法切回流程）
         h('div', { className: 'vwf-pane-switch', role: 'tablist', 'aria-label': t('wbPaneSwitch') },
           h('button', {
@@ -3788,16 +3830,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const detailOpen = !!detailTask
       const detailDialogRef = React.useRef(null)
       const detailReturnRef = React.useRef(null)
-      React.useEffect(() => {
-        const dialog = detailDialogRef.current
-        if (!dialog) return undefined
-        try {
-          if (detailOpen && !dialog.open && typeof dialog.showModal === 'function') dialog.showModal()
-        } catch (e) { /* 无 showModal 的对照环境由样式层兜底 */ }
-        // 卸载 / 关闭时由 cleanup 收掉：节点被 React 摘掉后再读 ref 已经拿不到对话框，
-        // 不在这里关就会留下一个仍带 open 的游离 dialog。
-        return () => { try { if (dialog.open && typeof dialog.close === 'function') dialog.close() } catch (e) { /* 同上 */ } }
-      }, [detailOpen])
+      useDialogOpen(detailDialogRef, detailOpen, { closeOnUnmount: true })
       React.useEffect(() => {
         if (detailOpen) return
         const el = detailReturnRef.current
@@ -3875,14 +3908,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('button', { className: 'vwf-btn', onClick: refresh }, t('refresh'))
         ),
         // 任务在刷新后消失（记录被清理）时不渲染假详情，回列表
-        detailTask ? h('dialog', {
-          className: 'vwf-editor-dialog',
-          ref: detailDialogRef,
-          'aria-label': t('dashRunDetailTitle', { id: detailTask.head.taskId || detailTask.head.id }),
-          onClick: (ev) => { if (ev.target === ev.currentTarget) setView('list') },
-          onCancel: (ev) => { ev.preventDefault(); setView('list') },
-          onClose: () => { if (view === 'detail') setView('list') },
-        },
+        detailTask ? h('dialog', bigDialogProps(detailDialogRef, t('dashRunDetailTitle', { id: detailTask.head.taskId || detailTask.head.id }), () => setView('list'), () => { if (view === 'detail') setView('list') }),
           // 页头 / 状态条 / 三栏工作台由 RunDetail 自己渲染（原型 workspace-shell 的分区）
           h(RunDetail, {
             key: detailTask.key,
@@ -4407,11 +4433,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   e.tone === 'todo' || !e.id ? null : h('span', { className: 'vwf-muted-sm' }, t('rdChainOpenResult'))
                 )
               )))),
-            h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
-              h('button', { className: 'vwf-btn', onClick: () => setChainOpen(false) }, t('close'))
-            )
-          )
-        ) : null
+          ],
+          footer: [h('button', { className: 'vwf-btn', onClick: () => setChainOpen(false) }, t('close'))]
+        }) : null
       )
 
       // 结果页签：本次执行的成果（含扇出子任务独立结果与汇总输入来源）
@@ -4911,21 +4935,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 
       // issue-54：用原生 top-layer dialog 承载编辑器，避免皮肤布局中的
       // transform / overflow 等祖先样式把 position:fixed 元素限制在设置页内部。
-      React.useEffect(() => {
-        if (!editorOpen) return undefined
-        const dialog = editorDialogRef.current
-        if (!dialog) return undefined
-        try {
-          if (typeof dialog.showModal === 'function') {
-            if (!dialog.open) dialog.showModal()
-          } else {
-            dialog.setAttribute('open', '')
-          }
-        } catch (e) {
-          dialog.setAttribute('open', '')
-        }
-        return undefined
-      }, [editorOpen])
+      useDialogOpen(editorDialogRef, editorOpen, { attrFallback: true })
 
       const refresh = React.useCallback(() => host.call('vwf.workflows.list').then((l) => setList(l || [])).catch(() => setList([])), [])
       // ── LOC-014 模型覆盖（最小入口）：内置模板按节点 / $default 覆盖 Provider/Model ──
@@ -4945,15 +4955,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (provider && model) a[k] = { provider, model }
         return a
       }, {}))
-      React.useEffect(() => {
-        if (!ovId) return undefined
-        const dialog = ovDialogRef.current
-        try {
-          if (dialog && typeof dialog.showModal === 'function') { if (!dialog.open) dialog.showModal() }
-          else if (dialog) dialog.setAttribute('open', '')
-        } catch (e) { if (dialog) dialog.setAttribute('open', '') }
-        return undefined
-      }, [ovId])
+      useDialogOpen(ovDialogRef, ovId, { attrFallback: true, allowNoRef: true })
       const openOv = (w) => {
         if (!w || !w.builtin) return
         host.call('vwf.workflows.modelOverride.get', { id: w.id }).then((r) => {
@@ -5333,14 +5335,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         tab === 'dashboard' ? h(Dashboard, { wf, onAttention: setAttention }) : null,
         tab === 'roles' ? h(RoleManager, { onChanged: refetchRoles }) : null,
         msg ? renderMsg(msg) : null,
-        wf ? h('dialog', {
-          className: 'vwf-editor-dialog',
-          ref: editorDialogRef,
-          'aria-label': t('title'),
-          onClick: (ev) => { if (ev.target === ev.currentTarget) requestCloseEditor() },
-          onCancel: (ev) => { ev.preventDefault(); requestCloseEditor() },
-          onClose: closeEditor,
-        },
+        wf ? h('dialog', bigDialogProps(editorDialogRef, t('title'), requestCloseEditor, closeEditor),
           h('div', { className: 'vwf-editor-head' },
             h('strong', null, (wf.name || wf.id) + ''),
             editId ? h('span', { className: 'vwf-badge' }, editId) : h('span', { className: 'vwf-badge accent' }, t('newTemplate')),
@@ -5384,14 +5379,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             )
           ) : null
         ) : null,
-        ovId && ovW ? h('dialog', {
-          className: 'vwf-editor-dialog',
-          ref: ovDialogRef,
-          'aria-label': t('modelOverride'),
-          onClick: (ev) => { if (ev.target === ev.currentTarget) requestCloseOv() },
-          onCancel: (ev) => { ev.preventDefault(); requestCloseOv() },
-          onClose: closeOv,
-        },
+        ovId && ovW ? h('dialog', bigDialogProps(ovDialogRef, t('modelOverride'), requestCloseOv, closeOv),
           h('div', { className: 'vwf-editor-head' },
             h('strong', null, t('modelOverrideTitle') + ' · ' + (ovW.name || ovW.id)),
             h('span', { className: 'vwf-badge' }, ovW.id),
