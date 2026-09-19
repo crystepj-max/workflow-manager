@@ -8,8 +8,9 @@ import path, { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
-  gatherFacts, planActions, executeCloseout, resolveTargetAdapter, setGitRunner,
+  gatherFacts, planActions, executeCloseout, resolveTargetAdapter, setGitRunner, setCnbRunner,
 } from '../delivery-closeout-host.mjs'
+import { operationsGet } from '../operations-host.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const HOST = join(here, '..', 'delivery-closeout-host.mjs')
@@ -27,6 +28,15 @@ const BASE = {
   acceptance: { decision: 'accept', summary: 'UAT 通过' },
   reports: [{ name: 'uat-card', path: '.agent-runs/loc-037/uat-card.md' }],
 }
+
+// CHORE-106：cnb 适配器对 close-task 走真实远端执行，测试统一用替身不触网。
+// 真实形态见 delivery-closeout-host.mjs 的 defaultCnbRunner（调用 cnb CLI）。
+const ISSUE_PARAMS = { 'close-task': { remote_repo: 'owner/repo', remote_issue: 42 } }
+setCnbRunner((args) => {
+  if (args[0] === 'issues' && args[1] === 'get-issue') return { ok: true, stdout: JSON.stringify({ state: 'open' }) }
+  if (args[0] === 'issues' && args[1] === 'update-issue') return { ok: true, stdout: '{}' }
+  return { ok: false, stderr: 'unexpected cnb call: ' + args.join(' ') }
+})
 
 test('D1 非 Git 本地交付：required_actions 为空，无 Git 调用，可 DELIVERED（UAT-01 / AC-01）', () => {
   const dir = opsDir()
@@ -64,6 +74,7 @@ test('D2 有效授权不重问；缺失授权先交付事实再等待（UAT-02 /
     candidate_ref: { workspace_path: '/repo', head: 'deadbeef', branch: 'dev-x' },
     authorization_ref: 'approval-2026-09-16#1',
     authorizations: [{ ref: 'approval-2026-09-16#1', scope: 'create-review:cnb/owner/repo', target: 'cnb/owner/repo', valid: true }],
+    action_params: ISSUE_PARAMS,
     include_cleanup: false,
   })
   assert.equal(withAuth.status, 'DELIVERED')
@@ -74,6 +85,7 @@ test('D2 有效授权不重问；缺失授权先交付事实再等待（UAT-02 /
     operations_dir: dir,
     candidate_ref: { workspace_path: '/repo', head: 'deadbeef', branch: 'dev-x' },
     authorization_ref: 'approval-2026-09-16#1',
+    action_params: ISSUE_PARAMS,
     include_cleanup: false,
   })
   assert.equal(second.status, 'DELIVERED')
@@ -191,5 +203,122 @@ test('D6 CLI 子进程：gather-facts / plan-actions / closeout', () => {
   assert.equal(plan.action_plan.required_actions.length, 0)
   const close = cli('closeout', { ...BASE, delivery_scope: 'non-git', operations_dir: dir, include_cleanup: false })
   assert.equal(close.status, 'DELIVERED')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+// ── CHORE-106：close-task 必须产生真实远端效果（不接受「声明了却不执行」）──────
+
+const GIT_RUNNER = (args) => {
+  if (args[0] === 'remote' && args[1] === 'get-url') return { ok: true, stdout: 'https://cnb.cool/owner/repo.git' }
+  if (args[0] === 'config') return { ok: false }
+  if (args[0] === 'rev-parse') return { ok: true, stdout: 'cnb/main' }
+  return { ok: false }
+}
+
+const gitInput = (runId, extra = {}) => ({
+  run_id: runId,
+  delivery_scope: 'git',
+  candidate_ref: { workspace_path: '/repo', head: 'deadbeef', branch: 'dev-x' },
+  authorization_ref: 'auth-close',
+  include_cleanup: false,
+  ...extra,
+})
+
+test('D7 close-task 产生真实远端效果：按定位调用关闭并确认成功（CHORE-106 AC-1）', () => {
+  const dir = opsDir()
+  setGitRunner(GIT_RUNNER)
+  const calls = []
+  setCnbRunner((args) => {
+    calls.push(args)
+    if (args[1] === 'get-issue') return { ok: true, stdout: JSON.stringify({ state: 'open' }) }
+    if (args[1] === 'update-issue') return { ok: true, stdout: '{}' }
+    return { ok: false, stderr: 'unexpected ' + args.join(' ') }
+  })
+  const result = executeCloseout(gitInput('r-close-1', {
+    operations_dir: dir,
+    action_params: { 'close-task': { remote_repo: 'owner/repo', remote_issue: 'cnb#106' } },
+  }))
+  assert.equal(result.status, 'DELIVERED')
+  assert.equal(result.delivery_status, 'DELIVERED')
+  assert.equal(result.pending_manual_close.length, 0, '成功关闭不应留待人工项')
+  const closeCall = calls.find((a) => a[1] === 'update-issue')
+  assert.ok(closeCall, '必须发出真实关闭请求（不得只记账）')
+  assert.deepEqual(closeCall.slice(0, 8), ['issues', 'update-issue', '--repo', 'owner/repo', '--number', '106', '--state', 'closed'])
+  const slot = result.action_results.find((r) => r.action === 'close-task')
+  assert.equal(slot.result.status, 'confirmed_success')
+  assert.equal(slot.result.remote_ref.id, 'cnb-issue-106', '回读凭证指向被关闭的 issue')
+  // 账本可独立核查到 confirmed_success（验收标准 1）
+  const ledgerEntry = operationsGet({ operations_dir: dir, run_id: 'r-close-1', logical_action: 'close-task' })
+  assert.equal(ledgerEntry.ok, true)
+  assert.equal(ledgerEntry.status, 'confirmed_success')
+  assert.equal(ledgerEntry.operation.remote_ref.id, 'cnb-issue-106')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('D8 远端已关闭时不重复发关闭请求（WR-012 防重，CHORE-106 AC-2）', () => {
+  const dir = opsDir()
+  setGitRunner(GIT_RUNNER)
+  const calls = []
+  setCnbRunner((args) => {
+    calls.push(args)
+    if (args[1] === 'get-issue') return { ok: true, stdout: JSON.stringify({ state: 'closed' }) }
+    if (args[1] === 'update-issue') return { ok: true, stdout: '{}' }
+    return { ok: false, stderr: 'unexpected ' + args.join(' ') }
+  })
+  const result = executeCloseout(gitInput('r-close-idem', {
+    operations_dir: dir,
+    action_params: { 'close-task': { remote_repo: 'owner/repo', remote_issue: 106 } },
+  }))
+  assert.equal(result.status, 'DELIVERED')
+  assert.equal(calls.filter((a) => a[1] === 'update-issue').length, 0, '已关闭不得再次发出关闭请求')
+  const slot = result.action_results.find((r) => r.action === 'close-task')
+  assert.equal(slot.result.result.prior_state, 'closed')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('D9 缺远端定位：不得 DELIVERED 且显式列待人工关闭（CHORE-106 AC-3）', () => {
+  const dir = opsDir()
+  setGitRunner(GIT_RUNNER)
+  const result = executeCloseout(gitInput('r-close-noloc', { operations_dir: dir }))
+  assert.equal(result.status, 'ACTION_FAILED')
+  assert.equal(result.delivery_status, 'NOT_DELIVERED')
+  assert.equal(result.pending_manual_close.length, 1)
+  assert.match(result.pending_manual_close[0].reason, /缺少远端 issue 定位/)
+  assert.match(result.message, /待人工关闭/)
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('D10 远端关闭失败：不得 DELIVERED 并给人工补救命令（CHORE-106 AC-3）', () => {
+  const dir = opsDir()
+  setGitRunner(GIT_RUNNER)
+  setCnbRunner((args) => {
+    if (args[1] === 'get-issue') return { ok: true, stdout: JSON.stringify({ state: 'open' }) }
+    if (args[1] === 'update-issue') return { ok: false, stderr: 'permission denied' }
+    return { ok: false, stderr: 'unexpected ' + args.join(' ') }
+  })
+  const result = executeCloseout(gitInput('r-close-fail', {
+    operations_dir: dir,
+    action_params: { 'close-task': { remote_repo: 'owner/repo', remote_issue: 106 } },
+  }))
+  assert.equal(result.status, 'ACTION_FAILED')
+  assert.equal(result.delivery_status, 'NOT_DELIVERED')
+  assert.match(result.pending_manual_close[0].reason, /关闭远端 issue 失败/)
+  assert.match(result.pending_manual_close[0].hint, /update-issue --repo owner\/repo --number 106/)
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('D11 远端状态不可确认：按 unknown 受阻不误报成功（CHORE-106 AC-3）', () => {
+  const dir = opsDir()
+  setGitRunner(GIT_RUNNER)
+  setCnbRunner(() => ({ ok: false, stderr: 'network unreachable' }))
+  const result = executeCloseout(gitInput('r-close-unknown', {
+    operations_dir: dir,
+    action_params: { 'close-task': { remote_repo: 'owner/repo', remote_issue: 106 } },
+  }))
+  assert.equal(result.delivery_status, 'NOT_DELIVERED')
+  const slot = result.action_results.find((r) => r.action === 'close-task')
+  assert.equal(slot.result.blocked, true)
+  assert.equal(slot.result.code, 'NEEDS_RECONCILIATION')
+  assert.equal(result.pending_manual_close.length, 1)
   rmSync(dir, { recursive: true, force: true })
 })

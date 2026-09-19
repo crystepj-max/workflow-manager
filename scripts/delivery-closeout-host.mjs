@@ -57,6 +57,48 @@ function git(args, cwd) {
   return gitRunner(args, cwd)
 }
 
+// ── 可注入 CNB 远端执行器（测试替身 / 真实 cnb CLI）──────────────────────────
+// CHORE-106：close-task 必须产生真实远端效果。执行器可注入，测试不触网；
+// 真实形态调用 `cnb` CLI，凭据沿用平台既有登录态（与 remote-issue-sync 同通道）。
+let cnbRunner = defaultCnbRunner
+export function setCnbRunner(fn) {
+  cnbRunner = fn || defaultCnbRunner
+}
+
+function defaultCnbRunner(args) {
+  try {
+    const out = execFileSync('cnb', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+    return { ok: true, stdout: out }
+  } catch (e) {
+    return { ok: false, stderr: String((e && e.stderr) || (e && e.message) || e), code: e && e.status }
+  }
+}
+
+// 远端 issue 定位：close-task 的规范参数（缺一不可，否则无法自动关闭）
+function closeTaskTarget(params) {
+  const repo = params && typeof params.remote_repo === 'string' ? params.remote_repo.trim() : ''
+  const raw = params && params.remote_issue !== undefined && params.remote_issue !== null ? String(params.remote_issue).trim() : ''
+  const issue = raw.replace(/^[a-z]+#/i, '').trim() // 兼容 `cnb#106` 写法
+  if (!repo || !issue || !/^\d+$/.test(issue)) return null
+  return { repo, issue }
+}
+
+// 远端 issue 当前状态（WR-012 防重的前提）：closed / open / unknown
+function cnbIssueState(repo, issue) {
+  const r = cnbRunner(['issues', 'get-issue', '--repo', repo, '--number', String(issue), '--verbose'])
+  if (!r.ok || !r.stdout) return 'unknown'
+  let parsed = null
+  try {
+    parsed = JSON.parse(r.stdout)
+  } catch (e) {
+    return 'unknown'
+  }
+  const state = String((parsed && (parsed.state || (parsed.data && parsed.data.state))) || '').toLowerCase()
+  if (state === 'closed') return 'closed'
+  if (state === 'open') return 'open'
+  return 'unknown'
+}
+
 // ── CNB 适配器（注册到 operations-host，供 execute-or-reconcile 调用）────────
 const cnbStoreFile = (operationsDir) => requireText(operationsDir, 'operations_dir') + '/provider-cnb.json'
 
@@ -90,6 +132,34 @@ const cnbProvider = (() => {
       }
       if (params && params.simulate_failure === true) {
         return { status: 'confirmed_failure', error: params.failure_message || 'cnb simulated failure' }
+      }
+      // CHORE-106：close-task 必须产生真实远端效果，不允许「声明了却不执行」。
+      // 缺定位或关闭失败 = confirmed_failure（收口据此判 NOT_DELIVERED 并列待人工关闭）；
+      // 状态不可确认 = unknown（交由 ops 层 reconcile，禁止盲目重复关闭）。
+      if (logical_action === 'close-task') {
+        const located = closeTaskTarget(params)
+        if (!located) {
+          return {
+            status: 'confirmed_failure',
+            error: 'close-task 缺少远端 issue 定位（remote_repo + remote_issue）：无法自动关闭，须人工关闭远端 issue',
+          }
+        }
+        const state = cnbIssueState(located.repo, located.issue)
+        if (state === 'unknown') {
+          return { status: 'unknown', detail: '无法确认远端 issue ' + located.repo + '#' + located.issue + ' 的当前状态' }
+        }
+        // WR-012 防重：已关闭则只确认，不再发一次关闭请求
+        if (state === 'open') {
+          const closed = cnbRunner(['issues', 'update-issue', '--repo', located.repo, '--number', located.issue, '--state', 'closed', '--state-reason', 'completed'])
+          if (!closed.ok) {
+            return { status: 'confirmed_failure', error: '关闭远端 issue 失败：' + String(closed.stderr || closed.stdout || '').slice(0, 300) }
+          }
+        }
+        const remote_ref = { system: 'cnb', id: 'cnb-issue-' + located.issue, version: 1, target: located.repo + '#' + located.issue }
+        const result = { logical_action, target, params: params ?? null, remote_repo: located.repo, remote_issue: located.issue, issue_state: 'closed', prior_state: state }
+        store.effects[idempotency_key] = { logical_action, target, remote_ref, result, created_at: new Date().toISOString() }
+        save(file, store)
+        return { status: 'confirmed_success', remote_ref, result }
       }
       const n = Object.keys(store.effects).length + 1
       const remote_ref = { system: 'cnb', id: 'cnb-' + logical_action + '-' + n, version: 1, target }
@@ -303,6 +373,7 @@ export function executeCloseout(input) {
         action_plan: plan,
         action_results: [],
         cleanup_pending: [],
+        pending_manual_close: [],
         git_calls: gitCallLog.length,
         delivery_status: 'NOT_DELIVERED',
       }
@@ -315,6 +386,7 @@ export function executeCloseout(input) {
         action_plan: plan,
         action_results: [],
         cleanup_pending: [],
+        pending_manual_close: [],
         git_calls: gitCallLog.length,
         delivery_status: 'NOT_DELIVERED',
         message: '必要动作缺少有效授权：已整理交付事实，等待授权后执行',
@@ -328,11 +400,14 @@ export function executeCloseout(input) {
         action_plan: plan,
         action_results: [],
         cleanup_pending: [],
+        pending_manual_close: [],
         git_calls: gitCallLog.length,
         delivery_status: 'NOT_DELIVERED',
       }
     }
     const action_results = []
+    // CHORE-106：close-task 未确认成功时，显式落「待人工关闭」，不让缺口静默消失
+    const pending_manual_close = []
     let requiredFailed = false
     const provider = plan.target_adapter === 'cnb' ? 'cnb' : 'local-count'
     for (const action of plan.required_actions) {
@@ -354,6 +429,19 @@ export function executeCloseout(input) {
       }
       const result = operationsExecute(execInput)
       action_results.push({ action, required: true, result })
+      const confirmedOk = result.ok && result.status === 'confirmed_success'
+      if (action === 'close-task' && !confirmedOk) {
+        const located = closeTaskTarget(execInput.params)
+        pending_manual_close.push({
+          action: 'close-task',
+          remote_repo: located ? located.repo : (execInput.params && execInput.params.remote_repo) || null,
+          remote_issue: located ? located.issue : (execInput.params && execInput.params.remote_issue) || null,
+          reason: (result && (result.error || result.detail)) || (result && result.code) || 'close-task 未确认成功',
+          hint: located
+            ? 'cnb issues update-issue --repo ' + located.repo + ' --number ' + located.issue + ' --state closed --state-reason completed'
+            : '补 remote_repo/remote_issue 后重跑收口，或人工关闭远端 issue',
+        })
+      }
       if (!result.ok || result.status === 'confirmed_failure' || result.code) {
         requiredFailed = true
         break
@@ -406,11 +494,14 @@ export function executeCloseout(input) {
       action_plan: plan,
       action_results,
       cleanup_pending,
+      pending_manual_close,
       git_calls: gitCallLog.length,
       candidate_unchanged: candidateUnchanged,
       message: delivered
         ? (cleanup_pending.length ? '交付完成；可选清理待处理' : '交付完成')
-        : '必要动作未全部确认成功，不得 DELIVERED',
+        : (pending_manual_close.length
+          ? '必要动作未全部确认成功，不得 DELIVERED；待人工关闭远端 issue：' + pending_manual_close.map((p) => (p.remote_issue ? p.remote_repo + '#' + p.remote_issue : '未定位')).join('、')
+          : '必要动作未全部确认成功，不得 DELIVERED'),
     }
   } finally {
     gitRunner = prev

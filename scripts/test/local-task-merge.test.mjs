@@ -278,3 +278,34 @@ test('dry-run：只出计划不动仓库', () => {
   assert.match(out.message, /任务标识: LOC-001/)
   assert.equal(g(['rev-parse', 'main'], repo), before)
 })
+
+// ── CHORE-106 / DT-01（裁定 A）：本地脚本路线不自动关闭远端 issue，
+//    但必须把缺口显式列出，否则「代码已合入、issue 一直开着」会静默累积 ──────
+test('本地收口不自动关闭远端 issue，但显式列出待人工关闭（CHORE-106）', () => {
+  const repo = tmpRepo()
+  const rec = seedTask(repo)
+  update(repo, rec.task_id, { remote: 'cnb#999' })
+  g(['add', '-A'], repo)
+  g(['commit', '-m', 'chore: set remote'], repo)
+  makeBranch(repo, 'dev-loc-001-r1', 'close.txt', 'branch\n')
+  const out = runMerge({ repo, taskId: rec.task_id, branch: 'dev-loc-001-r1', decision: 'accept' })
+  assert.equal(out.merged, true)
+  assert.equal(out.pending_manual_close.length, 1, '本地路线须列出待人工关闭')
+  assert.equal(out.pending_manual_close[0].system, 'cnb')
+  assert.equal(out.pending_manual_close[0].remote_issue, 999)
+  assert.match(out.pending_manual_close[0].reason, /DT-01/)
+  assert.match(out.cleanup_hint, /待人工关闭/)
+  assert.match(out.cleanup_hint, /cnb#999/)
+  fs.rmSync(repo, { recursive: true, force: true })
+})
+
+test('任务无远端锚点时不产生待人工关闭条目（CHORE-106）', () => {
+  const repo = tmpRepo()
+  const rec = seedTask(repo)
+  makeBranch(repo, 'dev-loc-001-r1', 'none.txt', 'branch\n')
+  const out = runMerge({ repo, taskId: rec.task_id, branch: 'dev-loc-001-r1', decision: 'accept' })
+  assert.equal(out.merged, true)
+  assert.equal(out.pending_manual_close.length, 0)
+  assert.ok(!/待人工关闭/.test(out.cleanup_hint))
+  fs.rmSync(repo, { recursive: true, force: true })
+})

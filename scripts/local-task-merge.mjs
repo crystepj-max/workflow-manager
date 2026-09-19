@@ -385,6 +385,34 @@ export function runMerge({
     }
   }
 
+  // CHORE-106 / DT-01（裁定 A）：本地脚本路线**不**执行远端关闭，但必须把缺口显式列出，
+  // 否则「代码已合入主干、issue 一直开着」会静默累积（2026-09-19 实测人工补关 18 个）。
+  const pendingManualClose = []
+  try {
+    const registry = loadRegistry(repo)
+    const record = registry.tasks.find((r) => r.task_id === taskId)
+    const remote = record && record.remote ? String(record.remote) : ''
+    const m = remote.match(/^([a-z]+)#(\d+)$/i)
+    if (m) {
+      const system = m[1].toLowerCase()
+      const num = Number(m[2])
+      let repoSlug = null
+      try {
+        const url = git(['remote', 'get-url', system], repo).trim()
+        repoSlug = url.replace(/\.git$/, '').split('/').slice(-2).join('/')
+      } catch { /* 远端不可读时用占位 */ }
+      pendingManualClose.push({
+        action: 'close-task',
+        system,
+        remote_issue: num,
+        reason: '本地收口脚本路线不执行远端关闭（DT-01 裁定 A）',
+        hint: repoSlug
+          ? `cnb issues update-issue --repo ${repoSlug} --number ${num} --state closed --state-reason completed`
+          : `人工关闭 ${system} issue #${num}`,
+      })
+    }
+  } catch { /* 登记册不可读不阻塞合并主路径 */ }
+
   return {
     ok: true,
     merged: true,
@@ -402,6 +430,7 @@ export function runMerge({
     },
     pruned,
     mirror: mirrorResult,
+    pending_manual_close: pendingManualClose,
     workspace: {
       path: wt,
       removed: workspaceRemoved,
@@ -416,7 +445,12 @@ export function runMerge({
         ? `本任务工作区已删除（${wt}），分支 ${branch} 按阶段一口径保留，待托管恢复后补 PR 再删。`
         : `本任务工作区未删除（${workspaceRemoveError}）；按 R-4 只登记遗留、不阻塞合并——` +
           `确认无未归档内容后人工执行 git worktree remove ${wt}，随后 git worktree prune。` +
-          `分支 ${branch} 保留。`),
+          `分支 ${branch} 保留。`) +
+      (pendingManualClose.length
+        ? ` ⚠️ 远端 issue 待人工关闭（本地脚本路线不自动关闭）：` +
+          pendingManualClose.map((p) => `${p.system}#${p.remote_issue}`).join('、') +
+          `；关闭命令见 pending_manual_close[].hint。`
+        : ''),
   }
 }
 
