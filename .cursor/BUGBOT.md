@@ -1,7 +1,7 @@
 # Bugbot 评审规则（workflow-manager）
 
 > 本文件只定义 **Cursor Bugbot 评审本次 PR diff 时的判定口径**。
-> 治理侧——受控触发入口 `/codex-review`、轮次额度、同 HEAD 去重、人工 `extend`——
+> 治理侧——受控触发入口 `/pr-review`、轮次额度、同 HEAD 去重、人工 `extend`——
 > 以仓库根 `AGENTS.md` 的「PR Review 收敛规则（Cursor Bugbot）」一节与
 > `scripts/codex-review-controller.mjs` 为准，本文件不复述、也不新增第二套额度规则。
 > 注：Bugbot 只读取 `.cursor/BUGBOT.md` 这类常驻规则文件，不会执行单次触发评论里的临时指令；
