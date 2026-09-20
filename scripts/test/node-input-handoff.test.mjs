@@ -51,10 +51,18 @@ test('LOC-024 三个模板 inputs 声明通过校验，wf-explore 维持旧输�
   }
   const declaredIds = (bp) => bp.nodes.filter((n) => Array.isArray(n.inputs) && n.inputs.length).map((n) => n.id)
   assert.deepEqual(declaredIds(optimizeBp).sort(), ['closeout', 'execute'])
-  assert.deepEqual(declaredIds(diagnoseBp).sort(), ['diagnose', 'fix'])
+  assert.deepEqual(declaredIds(diagnoseBp).sort(), ['diagnose', 'fix', 'regression', 'review'])
   assert.deepEqual(declaredIds(constructionBp).sort(), ['closeout', 'dev', 'review', 'test', 'uat'])
   const explore = load('wf-explore')
   assert.ok(explore.nodes.every((n) => n.inputs === undefined), 'wf-explore 未声明输入 = 旧输入模式')
+  // 签发 Proof 的节点（verifyBranch）必须自己声明 inputs：否则其依赖只能靠宿主段末回填，
+  // Proof 的覆盖判定就不再出自节点契约（LOC-026 / FIX-228）。
+  for (const bp of [optimizeBp, diagnoseBp, constructionBp, explore]) {
+    for (const n of bp.nodes) {
+      if (!n.verifyBranch) continue
+      assert.ok(Array.isArray(n.inputs) && n.inputs.length, bp.id + '.' + n.id + ' 签发 Proof 却未声明 inputs')
+    }
+  }
   for (const bp of [optimizeBp, diagnoseBp, constructionBp]) {
     for (const n of bp.nodes) {
       if (!Array.isArray(n.inputs)) continue
