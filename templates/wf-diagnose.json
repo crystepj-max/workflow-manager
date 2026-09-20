@@ -457,11 +457,11 @@
       },
       "review": {
         "provider": "deepseek-official",
-        "model": "deepseek-v4-flash"
+        "model": "deepseek-v4.1-flash"
       },
       "regression": {
         "provider": "deepseek-official",
-        "model": "deepseek-v4-flash"
+        "model": "deepseek-v4.1-flash"
       },
       "closeout": {
         "provider": "deepseek-official",
