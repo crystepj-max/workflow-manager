@@ -16,10 +16,10 @@ packages/dsh-visual-workflow/
 │   ├── host.test.mjs      # host 单测（双根加载/校验/编译/撞名/RPC/回退/异源）
 │   ├── client.smoke.mjs   # jsdom 冒烟
 │   ├── static-bundle.test.mjs  # 无 harness 静态 Host / dist apply
-│   └── dist-fresh.test.mjs     # dist 新鲜度 + dsh-tools 版本对齐
+│   └── dist-fresh.test.mjs     # dist 新鲜度 + dsh-tools 链接同源校验
 ├── verify.sh              # 本地质量闸门（build + 新鲜度 + 版本 + 包测试）
 ├── docs/EDITOR-MIGRATION.md
-└── package.json           # @deepseek-ai/dsh-tools 对齐宿主 DSH v0.1.1-rc.2
+└── package.json           # @deepseek-ai/dsh-tools file: 链接宿主 DSH 工作区副本（同模块实例）
 ```
 
 ## 开发模式：动态插件快速迭代
@@ -130,9 +130,9 @@ bash verify.sh                        # Gate1–4：版本对齐 + 构建 + 新�
 
 ## 版本策略（dsh-tools ↔ 宿主）
 
-- 插件 `@deepseek-ai/dsh-tools` **固定 `0.1.1-rc.2`**，与本地/官方最新宿主 **DSH v0.1.1-rc.2** 对齐（npm dist-tag `next`）。
-- 用途仅限静态 bundle 的 `defineTool` 兜底（动态模式走 `harness.defineTool`）。`defineTool` 工厂签名自 rc.7 / rc.8 / 0.1.1-rc.2 保持兼容。
-- Minke 0.2.0 宿主本体仍内嵌 `dsh-tools@0.1.0-rc.8`。插件不再把 rc.7 混入 rc.8/0.1.1 宿主闭包；静态模式用本包自己的 0.1.1-rc.2 副本整形工具对象，再经 `ctx.tools.register` 交给宿主。
+- 插件 `@deepseek-ai/dsh-tools` 以 **`file:` 链接**到宿主源码工作区副本（`file:/Users/chris/workspace/deepseek-harness/packages/core/tools`），与正在运行的宿主 DSH 加载**同一文件**：`defineTool`、`TOOL_RUNTIME_SCHEDULER` 同一 Symbol，进程内单一模块实例。
+- 为什么不能再用 npm 固定版本：宿主 DSH v0.1.6 起工具调度器改为模块级 Symbol 键控。link 挂载的插件按真实路径解析依赖，npm 携带的旧副本（如 0.1.1-rc.2）会与宿主副本形成进程内双模块，Symbol 错位后工具执行即崩（`Cannot read properties of undefined (reading 'prepare')`，2026-09-19 wf-explore DeepSeek 测试事故）。profile 回退解析只覆盖安装在 profile 内的插件，帮不到 link 挂载的本插件。
+- 用途仅限静态 bundle 的 `defineTool` 兜底（动态模式走 `harness.defineTool`）。宿主换版本后需回归确认 `defineTool` 工厂签名兼容（`tests/dist-fresh.test.mjs` T4 会校验链接同源）。
 - 改 `src/` 后若未 `npm run build`，`npm run check:dist` / `verify.sh` / 包测试会失败，避免再出现 issue-33 的过期 `dist/host-entry.mjs`。
 
 ## 与 pkg-19 的主要差异

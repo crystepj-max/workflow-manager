@@ -1,7 +1,8 @@
-// issue-33 / T2+T4：dist 与源码一致性 + dsh-tools 与宿主版本对齐
+// issue-33 / T2+T4：dist 与源码一致性 + dsh-tools 与宿主同源对齐
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -41,11 +42,20 @@ test('T2：重建后的 dist 含双模式守卫，不再无条件调用 harness.
   assert.match(body, /const isDynamicHost = typeof harness !== 'undefined'/, 'harness.handle 仅允许出现在 isDynamicHost 守卫之后')
 })
 
-test('T4：@deepseek-ai/dsh-tools 对齐最新宿主 DSH v0.1.1-rc.2', () => {
+test('T4：@deepseek-ai/dsh-tools file: 链接宿主工作区副本（进程内单一模块实例）', () => {
   const pkg = JSON.parse(readFileSync(PKG, 'utf8'))
+  const spec = pkg.dependencies['@deepseek-ai/dsh-tools']
+  assert.match(
+    spec,
+    /^file:.+\/packages\/core\/tools$/,
+    '插件 dsh-tools 必须 file: 链接到宿主源码工作区 packages/core/tools：宿主 v0.1.6 起调度器按模块 Symbol 键控，npm 双副本会 Symbol 错位导致工具执行崩溃',
+  )
+  const hostEntry = join(spec.slice('file:'.length), 'lib', 'index.js')
+  assert.ok(existsSync(hostEntry), `宿主 dsh-tools 构建产物缺失：${hostEntry}（请在宿主仓库构建 lib）`)
+  const resolved = createRequire(join(pkgRoot, 'dist', 'host-entry.mjs')).resolve('@deepseek-ai/dsh-tools')
   assert.equal(
-    pkg.dependencies['@deepseek-ai/dsh-tools'],
-    '0.1.1-rc.2',
-    '插件 dsh-tools 必须与宿主 DSH v0.1.1-rc.2 对齐，消除 rc.7 混用',
+    resolved,
+    hostEntry,
+    '插件 dist 解析到的 dsh-tools 必须与宿主加载的是同一文件（单一模块实例，Symbol 同源）',
   )
 })
