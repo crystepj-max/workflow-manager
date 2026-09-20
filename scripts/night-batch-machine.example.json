@@ -16,5 +16,5 @@
     "command": "node",
     "args": ["{project}/scripts/cwf-run-init.mjs", "{taskId}", "{runId}", "--local-base"]
   },
-  "remoteIssueCommand": "cnb issue list --repo chris.ai/workflow-manager"
+  "remoteIssueCommand": "gh issue list --repo crystepj-max/workflow-manager"
 }

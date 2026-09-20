@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 111,
+  "revision": 112,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2065,7 +2065,7 @@
       "source": "会话录入（松哥 2026-09-19：GitHub 恢复，改为主源；发号源单独立票迁移）",
       "source_ref": "",
       "baseline": "V1",
-      "status": "待确认",
+      "status": "本地已定义",
       "priority": "P2",
       "env_group": null,
       "env_role": null,
@@ -2079,7 +2079,7 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T03:56:05.485Z",
-      "updated_at": "2026-09-19T09:32:54.642Z",
+      "updated_at": "2026-09-19T14:57:30.027Z",
       "spec_path": "docs/tasks/specs/CHORE-111-numbering-source-migration/task-spec-V1.md"
     },
     {
