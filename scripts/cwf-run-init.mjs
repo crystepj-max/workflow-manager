@@ -44,8 +44,10 @@ export function claimForRun({ repo, taskId, runId, branch = null, enabled = true
     return { status: 'warn', reason: String((e && e.message) || e).slice(0, 300) }
   }
   if (r.ok) return { status: r.code === 'reused' ? 'reused' : 'claimed', issue: r.issue, worker: r.worker, claimKey: r.claimKey, assigned: r.assigned ?? null }
-  if (r.code === 'claimed-by-other' || r.code === 'claim-raced') {
-    return { status: 'blocked', issue: r.issue, holder: r.holder, reason: r.reason }
+  // 「已被他人认领」与「issue 已关闭」都是硬拒绝：前者防重复施工，后者防空转死任务
+  // （已关闭的 issue 说明任务已收口或作废，开工只会产出无人要的提交）
+  if (r.code === 'claimed-by-other' || r.code === 'claim-raced' || r.code === 'issue-not-open') {
+    return { status: 'blocked', issue: r.issue, holder: r.holder ?? null, reason: r.reason }
   }
   return { status: 'warn', issue: r.issue || null, reason: r.reason || r.code }
 }
@@ -222,8 +224,13 @@ function main() {
   // 施工认领（FEAT-237）：必须在建分支/建现场之前完成——被拒时不该留下任何垃圾现场
   const claim = claimForRun({ repo: main, taskId: issue, runId, branch, enabled: claimEnabled })
   if (claim.status === 'blocked') {
-    console.error(`开工被拒：issue #${claim.issue} 已被 ${claim.holder} 认领（标签「施工中」），同一任务不重复施工。`)
-    console.error(`  确认要接手：先释放对方认领 —— node scripts/github-issues.mjs release --task ${issue} --reason "接手"（或人工摘标签），再重跑本命令。`)
+    if (claim.holder) {
+      console.error(`开工被拒：issue #${claim.issue} 已被 ${claim.holder} 认领（标签「施工中」），同一任务不重复施工。`)
+      console.error(`  确认要接手：先释放对方认领 —— node scripts/github-issues.mjs release --task ${issue} --reason "接手"（或人工摘标签），再重跑本命令。`)
+    } else {
+      console.error(`开工被拒：${claim.reason || `issue #${claim.issue} 不可认领`}`)
+      console.error(`  请先核对远端 issue 状态与登记册；确属误判再人工处理。`)
+    }
     console.error('  本机自测、不需要远端互斥：加 --no-claim。')
     process.exit(1)
   }

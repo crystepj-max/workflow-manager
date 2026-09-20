@@ -83,6 +83,8 @@ function fakeGh({ hooks = {} } = {}) {
         if (rem) it.labels = it.labels.filter((l) => !rem.split(',').includes(l))
         const asg = flag('--add-assignee')
         if (asg) asg.split(',').forEach((x) => { if (!it.assignees.includes(x)) it.assignees.push(x) })
+        const unasg = flag('--remove-assignee')
+        if (unasg) it.assignees = it.assignees.filter((x) => !unasg.split(',').includes(x))
         return ''
       }
       if (op === 'comment') {
@@ -292,7 +294,7 @@ test('fetchTaskSource：claimed 是 ready 的子集，且带出施工人', () =>
   const snap = withGh(fake, () => fetchTaskSource({ repo }))
   assert.deepEqual(snap.ready.map((i) => i.number).sort(), [224, 225])
   assert.deepEqual(snap.claimed.map((i) => i.number), [225])
-  assert.equal(snap.claimedBy.get(225), 'tester')
+  assert.equal(snap.claimedBy.get(225), 'tester（assignee）', '无认领标记时退回 assignee，并标注来源')
 })
 
 test('远端不可达（gh 未登录）时：读动作抛错，由调用方决定阻断或降级', () => {
@@ -305,4 +307,41 @@ test('远端不可达（gh 未登录）时：读动作抛错，由调用方决�
   } finally {
     setGhRunner(null)
   }
+})
+
+// ===== Bugbot #240 审查回归（3 条） =====
+
+test('审查回归①：已关闭的 issue 不得打「可施工」标签', () => {
+  const repo = tmpRepo()
+  writeRegistry(repo, [rec('FIX-224', 'github#224')])
+  const fake = fakeGh()
+  fake.issue(224).state = 'CLOSED'
+  const r = withGh(fake, () => markReady({ repo, taskId: 'FIX-224' }))
+  assert.equal(r.ok, false)
+  assert.equal(r.code, 'issue-not-open')
+  assert.deepEqual(fake.issue(224).labels, [], '关闭的 issue 不应被打标')
+})
+
+test('审查回归③：释放时一并摘 assignee，避免报告指认上任施工人', () => {
+  const repo = tmpRepo()
+  writeRegistry(repo, [rec('FIX-224', 'github#224')])
+  const fake = fakeGh()
+  withGh(fake, () => claimIssue({ repo, taskId: 'FIX-224', runId: 'fix-224-r1', actor: 'tester' }))
+  assert.deepEqual(fake.issue(224).assignees, ['tester'])
+  withGh(fake, () => releaseIssue({ repo, taskId: 'FIX-224', runId: 'fix-224-r1', actor: 'tester' }))
+  assert.deepEqual(fake.issue(224).assignees, [], '释放后应摘掉 assignee')
+})
+
+test('审查回归③：claimedBy 取认领标记（当前窗口最早者），不取可能过期的 assignee', () => {
+  const repo = tmpRepo()
+  writeRegistry(repo, [])
+  const fake = fakeGh()
+  const it = fake.issue(224)
+  it.labels.push(READY_LABEL, WIP_LABEL)
+  it.assignees.push('stale-user') // 上任施工人残留
+  it.comments.push({ body: `旧认领 ${claimMarker('hostA/fix-224-r1')}`, author: { login: 'stale-user' }, createdAt: '2026-01-01T00:00:00Z' })
+  it.comments.push({ body: `结束 ${releaseMarker}`, author: { login: 'stale-user' }, createdAt: '2026-01-02T00:00:00Z' })
+  it.comments.push({ body: `新认领 ${claimMarker('hostB/fix-224-r2')}`, author: { login: 'new-user' }, createdAt: '2026-01-03T00:00:00Z' })
+  const snap = withGh(fake, () => fetchTaskSource({ repo }))
+  assert.equal(snap.claimedBy.get(224), 'hostB/fix-224-r2', '应指认现任认领人')
 })

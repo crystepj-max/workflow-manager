@@ -164,6 +164,21 @@ export function addAssignees({ slug, number, logins }) {
   }
 }
 
+/**
+ * 摘除 assignee（释放时清场）。
+ * 必须做：否则「已释放」的 issue 仍挂着上任施工人，批次报告会把现任认领人指认错（Bugbot 审查 #240 第 3 条）。
+ */
+export function removeAssignees({ slug, number, logins }) {
+  const list = (logins || []).filter(Boolean)
+  if (!list.length) return { ok: true }
+  try {
+    runGh(['issue', 'edit', String(number), '--repo', slug, '--remove-assignee', list.join(',')])
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, reason: String(e.message || e).slice(0, 200) }
+  }
+}
+
 /** 当前 gh 登录账号（施工人的权威来源，比手写配置可靠）。 */
 export function currentActor() {
   try {
@@ -302,6 +317,9 @@ export function releaseIssue({ repo, taskId, runId = null, reason = '', outcome 
     return { ok: true, code: 'already-released', issue: number }
   }
   removeLabels({ slug, number, labels: [WIP_LABEL] })
+  // 一并摘 assignee：否则「已释放」的 issue 还挂着上任施工人，下一任认领前后
+  // 批次报告都会把现任认领人指认错（Bugbot #240 第 3 条）
+  removeAssignees({ slug, number, logins: before.assignees })
   commentIssue({
     slug, number,
     body: [
@@ -323,17 +341,26 @@ export function releaseIssue({ repo, taskId, runId = null, reason = '', outcome 
 /**
  * 远端任务源快照：一次拉齐「已就绪」与「已被认领」两个集合。
  * `claimed` 是 `ready` 的子集（带 `施工中` 标签者），分开给调用方，便于分别归因。
+ *
+ * 认领人取自 issue 评论里的认领标记（当前窗口内最早者），**不用 assignee**：
+ * assignee 可能因手动指派或未清场而过期，而认领标记是认领动作本身留下的痕迹。
  */
 export function fetchTaskSource({ repo, readyLabel = READY_LABEL, wipLabel = WIP_LABEL, limit = 500 }) {
   const slug = repoSlug(repo)
   const ready = listReadyIssues({ slug, readyLabel, limit })
   const claimed = ready.filter((i) => i.labels.includes(wipLabel))
-  return {
-    slug,
-    ready,
-    claimed,
-    claimedBy: new Map(claimed.map((i) => [i.number, (i.assignees || [])[0] || '未知施工人'])),
+  const claimedBy = new Map()
+  for (const issue of claimed) {
+    let holder = (issue.assignees || [])[0] || '未知施工人'
+    try {
+      const full = viewIssue({ slug, number: issue.number }) // 含 comments，才能解析认领标记
+      holder = holderOf(full, holder)
+    } catch {
+      // 读不到评论就退回 assignee：批次报告宁可略粗，不可因单个 issue 查询失败而中断
+    }
+    claimedBy.set(issue.number, holder)
   }
+  return { slug, ready, claimed, claimedBy }
 }
 
 /** 给任务打「可施工」标签；幂等，已是就绪状态则 no-op。 */
@@ -352,6 +379,10 @@ export function markReady({ repo, taskId, readyLabel = READY_LABEL, dryRun = fal
   if (dryRun) return { ok: true, code: 'dry-run', issue: number }
 
   const issue = viewIssue({ slug, number })
+  // 已关闭（或已合并）的 issue 不得再被标记为「可施工」——那会把死任务重新推进施工池
+  if (issue.state && issue.state !== 'OPEN') {
+    return { ok: false, code: 'issue-not-open', issue: number, state: issue.state, reason: `issue #${number} 状态 ${issue.state}，不得打「可施工」标签` }
+  }
   if (issue.labels.includes(readyLabel)) {
     return { ok: true, code: 'already-ready', issue: number }
   }

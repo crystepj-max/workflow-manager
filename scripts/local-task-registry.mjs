@@ -432,6 +432,8 @@ async function main(argv) {
     return i >= 0 ? argv[i + 1] : undefined
   }
   const repo = path.resolve(get('--repo') || process.cwd())
+  // 函数作用域：mark-ready / set / show 都按 --task 取任务标识
+  const taskId = get('--task')
 
   if (cmd === 'allocate') {
     const name = get('--name')
@@ -458,7 +460,6 @@ async function main(argv) {
   }
 
   if (cmd === 'set') {
-    const taskId = get('--task')
     if (!taskId) {
       console.error(
         '用法: set --task LOC-001 [--status <状态>] [--baseline V1] [--branch <b>] [--merge-commit <sha>] [--github-sync <x>]\n' +
@@ -524,7 +525,6 @@ async function main(argv) {
   }
 
   if (cmd === 'show') {
-    const taskId = get('--task')
     const rec = loadRegistry(repo).tasks.find((r) => r.task_id === taskId)
     if (!rec) {
       console.error(`任务不存在：${taskId}`)
@@ -539,5 +539,12 @@ async function main(argv) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await main(process.argv.slice(2))
+  // 刻意**不用**顶层 await：mark-ready 会 `await import('./github-issues.mjs')`，而后者反向
+  // import 本模块。若本模块的求值被顶层 await 挂起，反向 import 会等一个永不完成的模块求值 →
+  // 死锁（现象：exit 13「unsettled top-level await」、stdout 全空）。
+  // 浮空 promise 让本模块先求值完成，动态 import 即可正常解析。
+  main(process.argv.slice(2)).catch((e) => {
+    console.error(e?.stack || String(e))
+    process.exit(1)
+  })
 }

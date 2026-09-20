@@ -135,3 +135,26 @@ test('claimIssue 与 claimForRun 共用同一套判定（无分叉实现）', ()
   const direct = withGh(runner(), () => claimIssue({ repo, taskId: 'FIX-224', runId: 'fix-224-r1', actor: 'tester' }))
   assert.equal(direct.code, 'claimed')
 })
+
+// ===== Bugbot #240 审查回归（第 2 条）=====
+
+test('审查回归②：issue 已关闭 → 硬拒绝开工（不是告警放行）', () => {
+  const repo = tmpRepo()
+  writeRegistry(repo, [{ task_id: 'FIX-224', remote: 'github#224', slug: 'x' }])
+  const closedRunner = (args) => {
+    const a = [...args]
+    const cmd = a.shift()
+    if (cmd === 'api') return JSON.stringify({ login: 'tester' })
+    if (cmd === 'label') return a[0] === 'list' ? JSON.stringify([{ name: 'ready-for-agent' }, { name: WIP_LABEL }]) : ''
+    if (cmd === 'issue') {
+      const op = a.shift()
+      if (op === 'view') return JSON.stringify({ number: 224, title: 't', state: 'CLOSED', labels: [], assignees: [], url: '', comments: [] })
+      return ''
+    }
+    throw new Error('未实现的 gh 调用')
+  }
+  const r = withGh(closedRunner, () => claimForRun({ repo, taskId: 'FIX-224', runId: 'fix-224-r1', actor: 'tester' }))
+  assert.equal(r.status, 'blocked', '已关闭的 issue 必须拒绝开工')
+  assert.match(r.reason, /CLOSED/)
+  assert.equal(r.holder, null)
+})
