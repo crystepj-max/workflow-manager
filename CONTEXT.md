@@ -275,7 +275,8 @@
 
 - **countRound（本边是否计数）**：该业务回退边是否消耗自动回退额度。#73 已落地：`true` 消耗，`false`/缺省不消耗但仍记 `history`。
 - **maxRounds（自动回退额度）**：允许自动跨节点回上游再产出的次数；初次执行不计。旧蓝图仍把该字段当 failure 边打回上限。
-- **MAX_ROUNDS_REACHED（额度耗尽）**：Lifecycle（运行生命周期）上 `WAITING_HUMAN` 的 reason（原因码）。不是 `FAILED_MAX_ROUNDS`。
+- **MAX_ROUNDS_REACHED（额度耗尽）**：额度耗尽的结构化原因码，始终记入运行 `history` 的停机痕迹（`halted:true`）。默认处置下它同时是 Lifecycle 上 `WAITING_HUMAN` 的 reason；模板声明替代处置时不再挂 `WAITING_HUMAN`（见 `maxRoundsExhausted`）。不是 `FAILED_MAX_ROUNDS`。
+- **maxRoundsExhausted（额度耗尽处置）**：`control` 字段，声明本模板耗尽额度后怎么收口。缺省 = `WAITING_HUMAN` + 决策卡；`BLOCKED` = 可恢复受阻（建设模板，`reason_code=AUTO_REWORK_EXHAUSTED`）；`INSUFFICIENT` = 宿主收口为合法完成、不弹决策卡（探索模板，D-LOC-036 于 2026-09-16 确认、2026-09-20 复确认 A 口径）。内核校验限定 `INSUFFICIENT` 只允许 `wf-explore` 声明；三种处置都不改写触发节点的业务结果。
 - **FAILED_MAX_ROUNDS（超过打回上限）**：Current 引擎返回状态；旧蓝图过渡期仍用。
 - **WAITING_HUMAN（等待人工）**：Run Lifecycle 值。进入条件包括人工决策与额度耗尽。由 #79/#72 承接，#77 不宣称自己实现了该生命周期。
 - **ROUTE_HALTED（路由停机）**：#77 引擎段返回状态（#87）。表示蓝图要求不要自动走下一步。payload 含 `reason`、`node`、原样 `results`。不是运行生命周期。命中 `$human-decision` 时 `reason=HUMAN_DECISION`。#77 不因额度耗尽发此状态。
