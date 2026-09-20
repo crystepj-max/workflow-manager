@@ -78,6 +78,7 @@
 | D-2 `$CWF_ASSETS` 口径 | 统一改写为仓库内 `scripts/` | 松哥（crystepj-max），2026-09-19 本会话 | 安装态 assets 是 Bootstrap 分发机制的产物；为正式 skill 另建 assets 打包属功能开发，超出退役范围 |
 | D-3 shim 收敛记录落点 | 契约 §9.6（并按 §9.3 追加版本历史行） | 沿用 shim-map 自身「退役纪律 1」+ 契约 §9.3 | 该 Profile 的退役纪律本就规定"先改契约版本历史，再删 shim" |
 | D-4 立卡口径 | `TMP-chrisdem-260919e` 草稿号，不写 registry / BOARD | 沿用同检出当日既成做法（b/c/d 已被占）；CHORE-111 迁移仍「待确认」 | 发号规则未生效，且 registry 上有他人未提交改动，`allocate` 会覆盖其工作 |
+| D-5 引用改指的归属原则（人工纠正后补） | **按引用内容的归属分别改指**：环境/工作区纪律 → 约定文档决策六；DSH 轨道命令序列 → `docs/runbooks/construction-dsh/runbook.md`；交付入口 → 正式模板与生成 skill。不得一律改指 `wf-construction-full-feature` | 松哥（crystepj-max），2026-09-19 本会话纠正 | 现存引用不是同一种东西：`dsh/roles/dev.md:54` 讲的是单实例 9527 / 命名空间前缀 / 单激活，属环境纪律，其权威是决策六（:95 取代 #185 每 Run 独占 Home、:73 GC 退役、:97/:148 为依据）；把环境规则挂到模板上会造成新的错位权威 |
 
 ## 13. 功能切片关系
 

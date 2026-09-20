@@ -54,7 +54,8 @@ npm test
 - 开发 DSH 是**唯一实例、端口固定 9527**（约定 §决策六）：建设 Run 的开发 DSH 操作走
   `npm run dev:plugin -- start --task <run_id>`（登记本任务为当前激活任务），收口先登记
   注销、再用 `scripts/cwf-env-recycle.mjs` 清本任务命名空间项；同一时刻只允许一个任务
-  激活插件，插件注册名必须带 Run 命名空间前缀（详见 `docs/runbooks/construction-dsh/runbook.md` §0/§6）。
+  激活插件，插件注册名必须带 Run 命名空间前缀（口径权威：约定文档 §决策六；命令序列见
+  `docs/runbooks/construction-dsh/runbook.md` §0/§6）。
 - `npm run dev:plugin` 是开发环境状态检查与同步指引，不是保存即热同步器。动态更新必须在
   DSH 开发会话中使用公开的 Cordis 能力完成；一次开发版本必须同时包含当前 `src/host.js`
   与 `src/client.js`，禁止只更新其中一半。两种模式始终共用这一份 `src/`。
