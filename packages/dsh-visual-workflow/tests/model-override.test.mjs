@@ -211,3 +211,74 @@ test('LOC-014 双写兼容：蓝图形态 DSL（含 bindings.models）合成时�
   assert.equal(nodeModelOf(entry, 'b').model, 'm9', '内联模型已合成')
   assert.equal(modelsOf(entry).b.model, 'm9', 'bindings.models 双写一致')
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FIX-233 回归：混合形态（DSL + 顶层 bindings.models）经校验管道不得丢节点模型。
+// 根因：ingestToDsl 曾把「顶层非空 bindings.models」当作蓝图落盘格式判据，混合形态被
+// projectToVwf 按蓝图语义重投影，丢弃未列入 bindings.models 节点的内联 model，
+// templateId 启动误报「未绑定 Agent」（真机 UAT 实证，覆盖层节点恰是幸存者）。
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('FIX-233 回归：覆盖合成模板经 vwf.validate 通过（混合形态 DSL 直传）', async () => {
+  const { handlers } = env({
+    [OV_DIR + '/' + BUILTIN_ID + '.json']: JSON.stringify({ a: { provider: 'p2', model: 'm2' } }),
+  })
+  const list = await call(handlers, 'vwf.workflows.list', {})
+  const entry = list.find((w) => w.id === BUILTIN_ID)
+  assert.ok(entry, '内置条目存在')
+  // 合成产物 = 混合形态：全部节点带内联模型 + 顶层 bindings.models（仅被覆盖节点）
+  assert.ok(entry.dsl.bindings && entry.dsl.bindings.models && entry.dsl.bindings.models.a, '合成产物携带顶层 bindings.models')
+  const v = await call(handlers, 'vwf.validate', { dsl: entry.dsl })
+  assert.equal(v.ok, true, '覆盖合成模板必须通过校验：' + JSON.stringify(v.errors))
+  const sanitizedA = v.sanitized.nodes.find((n) => n.id === 'a')
+  const sanitizedB = v.sanitized.nodes.find((n) => n.id === 'b')
+  assert.equal(sanitizedA.model.provider, 'p2', '覆盖后的模型保留')
+  assert.equal(sanitizedB.model.provider, 'p1', '未被覆盖节点的内联模型不丢（修复前此处报未绑定 Agent）')
+})
+
+test('FIX-233 回归：显式 DSL + 部分 bindings.models，内联模型与兜底合并并存', async () => {
+  const { handlers } = env()
+  const v = await call(handlers, 'vwf.validate', {
+    dsl: {
+      id: 'fix233-partial', name: '部分绑定显式图', entry: 'a', control: { maxRounds: 3 },
+      nodes: [
+        { id: 'a', profile: 'dispatcher', label: 'A', goal: 'g', model: { provider: 'p1', model: 'm1' } },
+        { id: 'b', profile: 'dev', label: 'B', goal: 'g', model: { provider: 'p1', model: 'm1' } },
+        { id: 'c', profile: 'review', label: 'C', goal: 'g' },
+      ],
+      bindings: { models: { c: { provider: 'p4', model: 'm4' } } },
+      edges: [
+        { from: 'a', to: 'b', on: 'success' },
+        { from: 'b', to: 'c', on: 'success' },
+        { from: 'c', to: '$end', on: 'success' },
+      ],
+    },
+  })
+  assert.equal(v.ok, true, '部分绑定 + 缺内联节点经兜底合并必须通过：' + JSON.stringify(v.errors))
+  const byId = Object.fromEntries(v.sanitized.nodes.map((n) => [n.id, n]))
+  assert.equal(byId.a.model.provider, 'p1', '内联模型不丢')
+  assert.equal(byId.b.model.provider, 'p1', '未列入绑定的节点内联模型不丢')
+  assert.equal(byId.c.model.model, 'm4', '仅 bindings.models 的节点经兜底合并获得模型')
+})
+
+test('FIX-233 回归：蓝图落盘格式（displayName + bindings.models）仍走投影路径', async () => {
+  const { handlers } = env()
+  const v = await call(handlers, 'vwf.validate', {
+    dsl: {
+      displayName: '蓝图形态模板', id: 'fix233-bp', entry: 'a',
+      nodes: [
+        { id: 'a', profile: 'dispatcher', label: 'A', goal: 'g' },
+        { id: 'b', profile: 'dev', label: 'B', goal: 'g' },
+      ],
+      bindings: { models: { a: { provider: 'p1', model: 'm1' }, b: { provider: 'p1', model: 'm1' } } },
+      edges: [
+        { from: 'a', to: 'b', on: 'success' },
+        { from: 'b', to: '$end', on: 'success' },
+      ],
+    },
+  })
+  assert.equal(v.ok, true, '蓝图形态经 projectToVwf 投影后必须通过：' + JSON.stringify(v.errors))
+  const byId = Object.fromEntries(v.sanitized.nodes.map((n) => [n.id, n]))
+  assert.equal(byId.a.model.model, 'm1', '投影后节点获得 bindings.models 的内联模型')
+  assert.equal(byId.b.model.model, 'm1')
+})
