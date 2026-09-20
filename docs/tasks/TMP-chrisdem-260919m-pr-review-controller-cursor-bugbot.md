@@ -38,7 +38,7 @@
   - `AGENTS.md`「PR Review 收敛规则（Cursor Bugbot）」一节措辞与事实同步；
   - 更新 Controller 测试：断言新触发词、补「非 PR 评论不触发」与「PR 内非命令不触发」两条缺口用例，不削弱既有断言。
 - 不做：
-  - 不改命令命名空间 `/codex-review`（改名与否呈递产品，见决策票）；
+  - ~~不改命令命名空间 `/codex-review`~~：DT-01 于 2026-09-20 裁定 **B**，已改名 `/pr-review`（V2，见变更记录）；
   - 不改轮次/去重/extend/fail-closed/串行算法与内部审计标记（`STATE_MARKER` 等），保证在途 PR 状态连续；
   - 不擅自把触发方式从「评论」改成「`POST /api.cursor.com/bugbot/review`」（更稳但机制改动大，作备选呈递）；
   - 不在 Cursor 控制台连接仓库 / 关自动评审 / 配 Secret（工具外动作，交用户）；
@@ -82,3 +82,4 @@
 |---|---|---|
 | 2026-09-19T21:4xZ | 定义中 | 独立开工会话立卡；按在飞 TMP 草稿口径不代写 registry、不代发号 |
 | 2026-09-19T22:0xZ | 定义中 | **据用户实测 Cursor 设置页修正**：触发词以 Manual-Only 文案为准改 `@cursor review`（单一常量 `TRIGGER_COMMAND`，公开文档无 @ 写法保留为冒烟备选）；写入 Incremental Review=On（收敛只看新改动，不再重复要求）、Review Draft=Off（须先转 Ready）、PR Summaries=On（建议关，PR 描述属收口证据）、Autofix=Off（🔴 须持续关）、Effort=Smart（成本不可预估，另给固定档位选项）；同步 BUGBOT.md / AGENTS.md / 规格 |
+| 2026-09-20T07:0xZ | 交付中 | **DT-01 裁定 B**：命令 `/codex-review`→`/pr-review`（无兼容），同步 Controller 解析 / workflow `if:` / AGENTS.md / BUGBOT.md / 测试；内部标记与文件名保留旧名。#134 已因引擎切换关闭，本改名作为其后续在同一分支链跟进 |

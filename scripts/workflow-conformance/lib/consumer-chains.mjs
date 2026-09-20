@@ -108,10 +108,14 @@ export async function runConsumerChains(repoRoot = findRepoRoot()) {
   const explore = await runTemplate('wf-explore', {
     探索统筹: {
       route: 'PLAN_READY', round_type: 'BROAD', research_question: 'A vs B',
+      questions: [
+        { id: 'q-decision', required: true, text: 'A 与 B 该选哪个' },
+        { id: 'q-cost', required: true, text: '迁移成本是多少' },
+      ],
       expert_briefs: [
-        { expert_id: 'ops-a', focus: 'A', brief: '读 01' },
-        { expert_id: 'edge-b', focus: 'B', brief: '读 03' },
-        { expert_id: 'cost-gap', focus: '成本', brief: '读 06' },
+        { expert_id: 'ops-a', focus: 'A', brief: '读 01', question_ids: ['q-decision'] },
+        { expert_id: 'edge-b', focus: 'B', brief: '读 03', question_ids: ['q-decision'] },
+        { expert_id: 'cost-gap', focus: '成本', brief: '读 06', question_ids: ['q-cost'] },
       ],
       plan_summary: '三专家',
     },
@@ -129,7 +133,15 @@ export async function runConsumerChains(repoRoot = findRepoRoot()) {
         confidence: isCost ? 'low' : 'medium',
       }
     },
-    综合分析: { route: 'SYNTHESIS_READY', consensus: ['部分支持A'], disagreements: ['B证据不足'], evidence_map: '01,03,06', open_gaps: ['成本未知'], synthesis_summary: '部分完成' },
+    综合分析: {
+      route: 'SYNTHESIS_READY', consensus: ['部分支持A'], disagreements: ['B证据不足'], evidence_map: '01,03,06',
+      coverage: [
+        { question_id: 'q-decision', status: 'answered', evidence_refs: ['01-support-a-ops.md', '03-support-b-autonomy.md'] },
+        { question_id: 'q-cost', status: 'unavailable_with_evidence', evidence_refs: ['06-cost-unknown.md'], reason: '成本数据客观不可得' },
+      ],
+      source_overlaps: [], research_failures: [],
+      open_gaps: ['成本未知'], synthesis_summary: '部分完成',
+    },
     结论评估: { verdict: 'INSUFFICIENT', completion_type: 'INSUFFICIENT', why: '成本缺口', summary_for_human: '需补充', current_state: '部分失败', open_gaps: ['成本未知'] },
   })
   chains.push({

@@ -29,6 +29,15 @@ npm run sync:remote-issues -- plan
 npm run sync:remote-issues -- apply
 node scripts/remote-issue-sync.mjs reissue --task TMP-<机器码>-<日期><序号> --type CHORE
 
+# 定义落档后给任务的 GitHub issue 打「可施工」标签（ready-for-agent；幂等，可反复执行）
+# 批量调度按这个标签筛任务，落档后不打标签 = 该任务不会被夜间批次选中
+node scripts/local-task-registry.mjs mark-ready --task FIX-224
+
+# 施工认领：开工时由 cwf-run-init 自动完成（打「施工中」+ assignee + 认领评论），无需单独执行
+# 释放认领（收口 / 人工接手僵尸认领）：摘「施工中」标签 + 留结束评论；ready-for-agent 保留
+node scripts/github-issues.mjs release --task FIX-224 --reason "收口"
+node scripts/github-issues.mjs list-ready
+
 # 任务上下文门禁：规格与任务卡是否真的在仓库里、活跃任务是否有远端锚点
 npm run validate:task-context
 
@@ -46,5 +55,6 @@ node scripts/local-task-merge.mjs --task LOC-001 --branch dev-loc-001-r1 --decis
 2. **任务规格必须与任务卡一起入库**：规格落在 `docs/tasks/specs/<任务标识>-<slug>/`，禁止留在 `.scratch/` 等被忽略的目录——否则干净检出或远端克隆后实施前检查必然失败；
 3. **活跃任务必须有远端（GitHub 主源）issue 号**：任务不能只活在某台机器的本地文件里，`remote` 字段为 `pending` / `none` 的须尽快换取正式号；
 4. **编号由远端发**：新任务一律 `FEAT-<远端号>` / `FIX-<远端号>` / `CHORE-<远端号>`，本机不自己算号；
-2. 本地主干只能由「任务合并」推进，禁止直接在主干上改动；
-3. 已合并任务的**工作区由合并脚本自动删除、分支保留**（阶段一口径：工作区可再生，`git worktree add` 随时重建；分支不可再生，是补登 PR 的唯一载体）。
+5. **两个施工信号只由工具写，不手工编造**：`ready-for-agent`（可施工）由 `mark-ready` 或调度器门禁后自动补打；`施工中`（已被认领）由 `cwf-run-init` 开工时写入、`release` 摘除。手工摘 `施工中` 等于放弃「防重复施工」保护，须在会话里说明原因（FEAT-237）；
+6. 本地主干只能由「任务合并」推进，禁止直接在主干上改动；
+7. 已合并任务的**工作区由合并脚本自动删除、分支保留**（阶段一口径：工作区可再生，`git worktree add` 随时重建；分支不可再生，是补登 PR 的唯一载体）。

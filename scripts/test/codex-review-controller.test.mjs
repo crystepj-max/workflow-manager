@@ -14,16 +14,21 @@ import {
   TRIGGER_COMMAND,
 } from '../codex-review-controller.mjs';
 
-test('解析 next / retry / extend 命令', () => {
-  assert.deepEqual(parseCommand('/codex-review next'), { type: 'next' });
-  assert.deepEqual(parseCommand('/codex-review retry'), { type: 'retry' });
-  assert.deepEqual(parseCommand('/codex-review extend 1 仍有 P1 阻塞'), {
+test('解析 next / retry / extend 命令（/pr-review）', () => {
+  assert.deepEqual(parseCommand('/pr-review next'), { type: 'next' });
+  assert.deepEqual(parseCommand('/pr-review retry'), { type: 'retry' });
+  assert.deepEqual(parseCommand('/pr-review extend 1 仍有 P1 阻塞'), {
     type: 'extend',
     amount: 1,
     reason: '仍有 P1 阻塞',
   });
-  assert.deepEqual(parseCommand('/codex-review extend 2'), { type: 'invalid' });
+  assert.deepEqual(parseCommand('/pr-review extend 2'), { type: 'invalid' });
   assert.equal(parseCommand('普通评论'), null);
+});
+
+test('旧命令 /codex-review 已失效（DT-01=B，无兼容期）', () => {
+  assert.equal(parseCommand('/codex-review next'), null);
+  assert.equal(parseCommand('/codex-review extend 1 原因'), null);
 });
 
 test('默认最多三轮，第四次被拒绝', () => {
@@ -91,7 +96,7 @@ test('各轮仍保留轮次审计留痕（完整/收敛/最终/人工追加）',
 test('普通 Issue 评论不触发 Controller（非 PR）', async () => {
   // 门禁在解析命令前即返回，不触达任何网络调用
   const res = await runController(
-    { issue: { number: 1 }, comment: { body: '/codex-review next' } },
+    { issue: { number: 1 }, comment: { body: '/pr-review next' } },
     { token: 't', reviewToken: 'r', repo: 'o/r' },
   );
   assert.deepEqual(res, { handled: false, reason: 'NOT_PR' });

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   controller:
-    if: ${{ github.event.issue.pull_request != null && startsWith(github.event.comment.body, '/codex-review') }}
+    if: ${{ github.event.issue.pull_request != null && startsWith(github.event.comment.body, '/pr-review') }}
     runs-on: ubuntu-latest
     concurrency:
       group: codex-pr-review-${{ github.event.repository.full_name }}-${{ github.event.issue.number }}

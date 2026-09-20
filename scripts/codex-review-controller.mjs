@@ -11,10 +11,10 @@ export const TRIGGER_COMMAND = '@cursor review';
 
 export function parseCommand(body) {
   const text = String(body ?? '').trim();
-  if (!text.toLowerCase().startsWith('/codex-review')) return null;
-  if (/^\/codex-review\s+next\s*$/i.test(text)) return { type: 'next' };
-  if (/^\/codex-review\s+retry\s*$/i.test(text)) return { type: 'retry' };
-  const extend = text.match(/^\/codex-review\s+extend\s+1(?:\s+([\s\S]+))?$/i);
+  if (!text.toLowerCase().startsWith('/pr-review')) return null;
+  if (/^\/pr-review\s+next\s*$/i.test(text)) return { type: 'next' };
+  if (/^\/pr-review\s+retry\s*$/i.test(text)) return { type: 'retry' };
+  const extend = text.match(/^\/pr-review\s+extend\s+1(?:\s+([\s\S]+))?$/i);
   if (extend) return { type: 'extend', amount: 1, reason: sanitizeText(extend[1] ?? '') };
   return { type: 'invalid' };
 }
@@ -55,7 +55,7 @@ export function hasReviewIdentity(reviewToken) {
 }
 
 // Cursor Bugbot 只按仓库常驻规则文件（.cursor/BUGBOT.md）评审，不接受单条自由提示词。
-// 因此触发评论只承载触发命令 `cursor review`；原按轮次差异化的自然语言指令不再作为对
+// 因此触发评论只承载触发常量 TRIGGER_COMMAND；原按轮次差异化的自然语言指令不再作为对
 // 评审引擎的指令，而是退化为可见的轮次审计留痕——治理语义由 Controller 与 AGENTS.md 承担。
 export function buildReviewPrompt(round, maxRounds, extensionReason = '') {
   const reason = extensionReason ? `（人工追加原因：${extensionReason}）` : '';
@@ -92,7 +92,7 @@ function renderState(state) {
     EXTENDED: '人工已追加有限额度',
   }[state.status] ?? state.status;
   const json = JSON.stringify(state);
-  return `### PR Review Controller（Cursor Bugbot）\n\n- 当前轮次：**${state.round} / ${state.maxRounds}**\n- 状态：**${statusText}**\n- 最近审查版本：${state.lastHead ? `\`${state.lastHead.slice(0, 12)}\`` : '—'}\n- 剩余可申请轮次：**${remaining}**\n- 人工追加：**${added}**\n\n命令：\`/codex-review next\` · 服务故障重试：\`/codex-review retry\` · 额度耗尽后人工追加：\`/codex-review extend 1 <原因>\`\n\n<!-- ${STATE_MARKER}\n${json}\n-->`;
+  return `### PR Review Controller（Cursor Bugbot）\n\n- 当前轮次：**${state.round} / ${state.maxRounds}**\n- 状态：**${statusText}**\n- 最近审查版本：${state.lastHead ? `\`${state.lastHead.slice(0, 12)}\`` : '—'}\n- 剩余可申请轮次：**${remaining}**\n- 人工追加：**${added}**\n\n命令：\`/pr-review next\` · 服务故障重试：\`/pr-review retry\` · 额度耗尽后人工追加：\`/pr-review extend 1 <原因>\`\n\n<!-- ${STATE_MARKER}\n${json}\n-->`;
 }
 
 function isAuthorized(event) {
@@ -154,7 +154,7 @@ async function saveState(token, repo, number, stateComment, state) {
 
 async function triggerReview({ token, reviewToken, repo, number, body }) {
   if (!hasReviewIdentity(reviewToken)) {
-    await postComment(token, repo, number, '⛔ Controller 尚未配置可被 Cursor Bugbot 识别的触发身份，本次请求**不消耗 Review 轮次**。请先配置仓库 Secret `PR_REVIEW_TRIGGER_TOKEN`（一个已连接该 GitHub 仓库、且被 Bugbot 接受的账号身份，通常为 fine-grained PAT），然后重新执行同一条 `/codex-review next` 或 `/codex-review retry`。');
+    await postComment(token, repo, number, '⛔ Controller 尚未配置可被 Cursor Bugbot 识别的触发身份，本次请求**不消耗 Review 轮次**。请先配置仓库 Secret `PR_REVIEW_TRIGGER_TOKEN`（一个已连接该 GitHub 仓库、且被 Bugbot 接受的账号身份，通常为 fine-grained PAT），然后重新执行同一条 `/pr-review next` 或 `/pr-review retry`。');
     return false;
   }
   try {
@@ -173,10 +173,10 @@ async function handleNext({ token, reviewToken, repo, number, actor, stateCommen
       state.status = 'EXHAUSTED';
       state.updatedAt = new Date().toISOString();
       await saveState(token, repo, number, stateComment, state);
-      await postComment(token, repo, number, `⛔ Bugbot 自动 Review 已达到 ${state.round}/${state.maxRounds}。Controller 不会触发下一轮。请人工选择收口、拆分 follow-up，或使用 \`/codex-review extend 1 <原因>\` 追加 1 轮有限额度。`);
+      await postComment(token, repo, number, `⛔ Bugbot 自动 Review 已达到 ${state.round}/${state.maxRounds}。Controller 不会触发下一轮。请人工选择收口、拆分 follow-up，或使用 \`/pr-review extend 1 <原因>\` 追加 1 轮有限额度。`);
       return;
     }
-    await postComment(token, repo, number, `ℹ️ 当前版本 \`${head.slice(0, 12)}\` 已经发起过 Round ${state.round}，不会重复占用下一轮。若上一轮是 Bugbot 服务/工具错误，请使用 \`/codex-review retry\`；若已完成修改，请先提交新的 PR 版本再申请 \`next\`。`);
+    await postComment(token, repo, number, `ℹ️ 当前版本 \`${head.slice(0, 12)}\` 已经发起过 Round ${state.round}，不会重复占用下一轮。若上一轮是 Bugbot 服务/工具错误，请使用 \`/pr-review retry\`；若已完成修改，请先提交新的 PR 版本再申请 \`next\`。`);
     return;
   }
 
@@ -197,8 +197,8 @@ async function handleRetry({ token, reviewToken, repo, number, actor, stateComme
   const decision = retryDecision(state, head);
   if (!decision.ok) {
     const message = decision.reason === 'NO_ROUND'
-      ? '当前还没有已发起的 Review，请先使用 `/codex-review next`。'
-      : 'PR 版本已经变化，不能把新版本当作上一轮服务重试；请使用 `/codex-review next`。';
+      ? '当前还没有已发起的 Review，请先使用 `/pr-review next`。'
+      : 'PR 版本已经变化，不能把新版本当作上一轮服务重试；请使用 `/pr-review next`。';
     await postComment(token, repo, number, `ℹ️ ${message}`);
     return;
   }
@@ -216,7 +216,7 @@ async function handleRetry({ token, reviewToken, repo, number, actor, stateComme
 
 async function handleExtend({ token, repo, number, actor, stateComment, state, command }) {
   if (!command.reason) {
-    await postComment(token, repo, number, '⛔ 人工追加额度必须记录原因。用法：`/codex-review extend 1 <原因>`。');
+    await postComment(token, repo, number, '⛔ 人工追加额度必须记录原因。用法：`/pr-review extend 1 <原因>`。');
     return;
   }
   const decision = extendDecision(state, command.amount);
@@ -237,7 +237,7 @@ async function handleExtend({ token, repo, number, actor, stateComment, state, c
   });
   state.updatedAt = new Date().toISOString();
   await saveState(token, repo, number, stateComment, state);
-  await postComment(token, repo, number, `✅ @${actor} 已人工追加 **1 轮** Cursor Bugbot Review，最大轮次变为 **${state.maxRounds}**。原因：${command.reason}\n\n追加额度不会自动触发审查；完成针对阻塞项的修改并提交新版本后，再使用 \`/codex-review next\`。`);
+  await postComment(token, repo, number, `✅ @${actor} 已人工追加 **1 轮** Cursor Bugbot Review，最大轮次变为 **${state.maxRounds}**。原因：${command.reason}\n\n追加额度不会自动触发审查；完成针对阻塞项的修改并提交新版本后，再使用 \`/pr-review next\`。`);
 }
 
 export async function runController(event, { token, reviewToken, repo }) {
@@ -251,7 +251,7 @@ export async function runController(event, { token, reviewToken, repo }) {
     return { handled: true, reason: 'UNAUTHORIZED' };
   }
   if (command.type === 'invalid') {
-    await postComment(token, repo, number, '用法：`/codex-review next`、`/codex-review retry`、`/codex-review extend 1 <原因>`。');
+    await postComment(token, repo, number, '用法：`/pr-review next`、`/pr-review retry`、`/pr-review extend 1 <原因>`。');
     return { handled: true, reason: 'INVALID' };
   }
 

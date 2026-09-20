@@ -29,7 +29,14 @@
  *       "full-access": { "command": "zcode",  "args": ["exec", …, "{promptFile}"] },
  *       "auto-edit":   { "command": "claude", "args": ["-p", …, "{promptFile}"] } } },
  *   "sceneInit": { "command": "node", "args": ["<project>/scripts/cwf-run-init.mjs", "{taskId}", "{runId}", "--local-base"] },
- *   "remoteIssueCommand": "gh issue list …"       // 可省略；仅报告性核验，失败不影响批次
+ *   "remoteIssueCommand": "gh issue list …",       // 可省略；仅报告性核验，失败不影响批次
+ *   "taskSource": {                                // 可省略；省略即不启用 GitHub 任务源（保持旧行为）
+ *     "readyLabel": "ready-for-agent",             // 远端「可施工」标签
+ *     "wipLabel": "施工中",                        // 认领标签（他人已认领 → 本批不重开）
+ *     "labelSync": true,                           // 门禁已过但远端缺标签时自动补打
+ *     "onUnavailable": "block",                    // 远端不可信：block（默认，不开工）/ local-only（降级仅本地）
+ *     "requireAnchor": false                       // true = 无 github#N 锚点的任务也排除（默认放行并标注）
+ *   }
  * }
  * 占位符（args 通用）：{taskId} {runId} {runDir} {worktree} {promptFile} {project}
  *
@@ -48,7 +55,16 @@ import {
   autoPhaseDone,
   assessAndSort,
 } from './ai-task-execution-plan.mjs'
-import { collectLocalCandidates, slugForTaskId, scanOpenRuns } from './ai-task-candidate-collect.mjs'
+import {
+  collectLocalCandidates,
+  slugForTaskId,
+  scanOpenRuns,
+  planTaskSourceAdmission,
+  pendingLabelSync,
+  STAGE_TASK_SOURCE,
+} from './ai-task-candidate-collect.mjs'
+import { fetchTaskSource, markReady } from './github-issues.mjs'
+import { loadRegistry } from './local-task-registry.mjs'
 import { runDirFor, worktreePathFor } from './workspace-paths.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -146,7 +162,7 @@ function waitingTable(state, sites) {
   ]
 }
 
-function buildReport({ schedule, permission, state, sites, launched, leftoverQueue, leftoverLabel = '未启动（超出 endAt 截止，未开新任务）', snapshotCount, startedAt, endedAt, preHygiene, postHygiene, remoteCheck, initFailures }) {
+function buildReport({ schedule, permission, state, sites, launched, leftoverQueue, leftoverLabel = '未启动（超出 endAt 截止，未开新任务）', snapshotCount, startedAt, endedAt, preHygiene, postHygiene, remoteCheck, initFailures, taskSourceLines = [] }) {
   const done = autoPhaseDone(state)
   const lines = [
     '【夜间批次报告】',
@@ -182,6 +198,10 @@ function buildReport({ schedule, permission, state, sites, launched, leftoverQue
     '## 未纳入（完整清单）',
     '',
     ...(state.excluded.length ? state.excluded.map((t) => `- ${t.id} ${t.name}｜${t.stage || '机械门禁'}｜${t.reason}`) : ['- （无）']),
+    '',
+    '## 远端任务源（GitHub：ready-for-agent 筛选 + 施工中认领互斥）',
+    '',
+    ...(taskSourceLines.length ? taskSourceLines : ['- （未配置 taskSource，本批仅用本地登记册）']),
     '',
     '## 远端核验（报告性，不影响本批候选）',
     '',
@@ -262,12 +282,55 @@ async function main() {
   }
   const machine = machineEntry.config || {}
 
-  // 1) 候选采集 → 快照冻结（落盘后本批不再变动）
+  // 任务源（FEAT-237）：机器本地配置；未配置即不启用 GitHub 通道（保持旧行为）
+  const tsCfg = machine.taskSource
+  const taskSource = tsCfg
+    ? {
+        enabled: true,
+        readyLabel: tsCfg.readyLabel || 'ready-for-agent',
+        wipLabel: tsCfg.wipLabel || '施工中',
+        labelSync: tsCfg.labelSync !== false,
+        onUnavailable: tsCfg.onUnavailable || 'block',
+        requireAnchor: tsCfg.requireAnchor === true,
+      }
+    : { enabled: false }
+
+  // 1) 候选采集（本地事实层）→ 远端任务源准入 → 快照冻结
   const collected = collectLocalCandidates({ repo: main, blacklist })
+
+  let remoteSnapshot = null
+  let remoteSourceError = null
+  let admission = null
+  if (taskSource.enabled) {
+    try {
+      remoteSnapshot = fetchTaskSource({
+        repo: main,
+        readyLabel: taskSource.readyLabel,
+        wipLabel: taskSource.wipLabel,
+      })
+    } catch (e) {
+      remoteSourceError = String((e && e.message) || e).slice(0, 300)
+    }
+    admission = planTaskSourceAdmission({
+      registryTasks: loadRegistry(main).tasks,
+      candidates: collected.candidates,
+      readyIssues: remoteSnapshot ? remoteSnapshot.ready : [],
+      claimedBy: remoteSnapshot ? remoteSnapshot.claimedBy : new Map(),
+      remoteError: remoteSourceError,
+      onUnavailable: taskSource.onUnavailable,
+      requireAnchor: taskSource.requireAnchor,
+    })
+  }
+
+  // 远端任务源的硬排除项（他人已认领 / 无锚点且 requireAnchor）在门禁之前就摘掉，
+  // 避免把「本就不该开工」的任务送进定义门禁，产生误导性的门禁失败记录。
+  const remoteHardExcluded = new Set((admission?.preExcluded || []).map((e) => e.id))
+  const localCandidates = collected.candidates.filter((c) => !remoteHardExcluded.has(c.id))
+
   const batchDir = path.join(main, '.scratch/night-batches', `${localDate(startAt || new Date())}-${batchName}`)
   fs.mkdirSync(batchDir, { recursive: true })
   const batchJsonPath = path.join(batchDir, 'batch.json')
-  const batchCandidates = collected.candidates.map((c) => {
+  const batchCandidates = localCandidates.map((c) => {
     const rel = (p) => (p ? path.relative(batchDir, path.resolve(main, p)) : '（registry 未登记，路径缺失）')
     return { id: c.id, name: c.name, registryStatus: c.registryStatus, priority: c.priority, issueBasics: rel(c.issueBasics), taskSpec: rel(c.taskSpec) }
   })
@@ -278,14 +341,29 @@ async function main() {
     snapshotAt: nowIso(),
     project: main,
     blacklist,
-    candidateSources: collected.sourceNote,
+    candidateSources: {
+      ...collected.sourceNote,
+      ...(admission ? { taskSource: admission.note } : {}),
+    },
     candidates: batchCandidates,
   }
   fs.writeFileSync(batchJsonPath, JSON.stringify(snapshot, null, 2) + '\n', 'utf8')
+  if (remoteSnapshot) {
+    // 远端快照留档：本批到底看到哪些「可施工」issue，事后可对账
+    fs.writeFileSync(path.join(batchDir, 'task-source.json'), JSON.stringify({
+      capturedAt: nowIso(),
+      slug: remoteSnapshot.slug,
+      readyLabel: taskSource.readyLabel,
+      wipLabel: taskSource.wipLabel,
+      ready: remoteSnapshot.ready.map((i) => ({ number: i.number, title: i.title, labels: i.labels, assignees: i.assignees })),
+    }, null, 2) + '\n', 'utf8')
+  }
 
   // 2) 远端核验（报告性 best-effort；失败只记录，不影响本批）
   let remoteCheck = '未配置 remoteIssueCommand，本批未做远端核验'
-  if (machine.remoteIssueCommand) {
+  if (taskSource.enabled) {
+    remoteCheck = '已由 taskSource（GitHub 任务源通道）承担，见上一节'
+  } else if (machine.remoteIssueCommand) {
     const r = spawnSync(String(machine.remoteIssueCommand), { shell: true, cwd: main, encoding: 'utf8', timeout: 60_000 })
     remoteCheck = r.status === 0
       ? `已执行远端查询（截选）：${String(r.stdout || '').trim().split('\n').slice(0, 8).join(' ⏎ ')}`
@@ -303,14 +381,78 @@ async function main() {
 
   // 4) 机械门禁 + 排序（复用 M3 assessAndSort；依赖 git 事实核查以目标项目为准）
   const { eligible, excluded: gateExcluded } = await assessAndSort(batchCandidates, batchJsonPath, main)
-  const collectorExcludedTagged = collected.excluded.map((e) => ({ ...e }))
+  const collectorExcludedTagged = [
+    ...collected.excluded.map((e) => ({ ...e })),
+    ...(admission?.preExcluded || []),
+    ...(admission?.orphans || []),
+  ]
   const gateExcludedTagged = gateExcluded.map((e) => ({ ...e, stage: '定义门禁' }))
+
+  // 4.5) 远端标签同步（FEAT-237）：门禁已过的任务，远端必须带「可施工」标签才进施工池。
+  //      标签语义是「需求清晰可执行」，故只能在门禁之后补——之前补会把过不了门禁的任务标成可施工。
+  const labelSyncLog = []
+  let admitted = eligible
+  if (taskSource.enabled && admission && admission.available) {
+    const need = pendingLabelSync(eligible, admission.verdicts)
+    const needIds = new Set(need.map((n) => n.id))
+    const skipBecause = (t, reason) => {
+      labelSyncLog.push({ id: t.id, result: `${reason} → 排除` })
+      gateExcludedTagged.push({ id: t.id, name: t.name, stage: STAGE_TASK_SOURCE, reason })
+    }
+    if (need.length && !taskSource.labelSync) {
+      for (const t of eligible) if (needIds.has(t.id)) skipBecause(t, `远端未标记 ${taskSource.readyLabel}，且 taskSource.labelSync=false`)
+    } else if (need.length && dryRun) {
+      for (const n of need) labelSyncLog.push({ id: n.id, result: `dry-run：本应补打 ${taskSource.readyLabel}（issue #${n.issueNumber}）` })
+    } else if (need.length) {
+      for (const n of need) {
+        const t = eligible.find((x) => x.id === n.id)
+        try {
+          const r = markReady({ repo: main, taskId: n.id, readyLabel: taskSource.readyLabel })
+          if (r.ok) {
+            labelSyncLog.push({ id: n.id, result: `${r.code === 'marked' ? '已补打' : '已是就绪'} ${taskSource.readyLabel}（issue #${n.issueNumber}）` })
+          } else {
+            skipBecause(t || { id: n.id, name: n.id }, `远端标签同步失败（${r.code}）→ 不进施工池：${r.reason}`)
+          }
+        } catch (e) {
+          const msg = String((e && e.message) || e).slice(0, 200)
+          skipBecause(t || { id: n.id, name: n.id }, `远端标签同步异常 → 不进施工池：${msg}`)
+        }
+      }
+    }
+    admitted = eligible.filter((t) => !gateExcludedTagged.some((e) => e.id === t.id && e.stage === STAGE_TASK_SOURCE))
+  }
+
+  // 报告用：远端任务源这一节的原始事实（不加工、不美化）
+  const taskSourceLines = []
+  if (taskSource.enabled) {
+    taskSourceLines.push(`- ${admission.note}`)
+    if (admission.blocked) {
+      taskSourceLines.push('- ⛔ 已阻断本批：远端任务源不可信时不开工（`taskSource.onUnavailable=block`）。确需降级请显式配 `local-only`。')
+    }
+    if (taskSource.labelSync === false) taskSourceLines.push('- `labelSync=false`：本轮不自动补打标签，缺标签任务一律排除')
+    if (taskSource.requireAnchor) taskSourceLines.push('- `requireAnchor=true`：无 `github#N` 锚点的任务也排除')
+    if (labelSyncLog.length) {
+      taskSourceLines.push('- 标签补打记录：', ...labelSyncLog.map((l) => `  - ${l.id}：${l.result}`))
+    }
+    const claimed = [...admission.verdicts.entries()].filter(([, v]) => v.status === 'claimed')
+    if (claimed.length) {
+      taskSourceLines.push(`- 因他人已认领（${taskSource.wipLabel}）排除：${claimed.map(([id, v]) => `${id}（issue #${v.issueNumber}，${v.holder}）`).join('、')}`)
+    }
+    const noAnchor = [...admission.verdicts.entries()].filter(([, v]) => v.status === 'no-anchor').map(([id]) => id)
+    if (noAnchor.length) {
+      taskSourceLines.push(`- 无 github 锚点放行（不做标签筛选与认领互斥）：${noAnchor.join('、')}`)
+    }
+    if (admission.orphans.length) {
+      taskSourceLines.push(`- 远端就绪但未纳入（${admission.orphans.length}）：`, ...admission.orphans.map((o) => `  - ${o.id} ${o.name}：${o.reason}`))
+    }
+  }
+
   const startedAt = nowIso()
   const state = createBatchState({
     name: batchName,
     maxConcurrency,
     startedAt,
-    snapshot: eligible.map((t) => ({ ...t, snapshotAt: startedAt })),
+    snapshot: admitted.map((t) => ({ ...t, snapshotAt: startedAt })),
     excluded: [...collectorExcludedTagged, ...gateExcludedTagged],
   })
 
@@ -455,7 +597,7 @@ async function main() {
       snapshotCount: state.snapshot.length,
       startedAt, endedAt,
       preHygiene, postHygiene: { validate: '（预演/模拟批次未执行）' },
-      remoteCheck, initFailures,
+      remoteCheck, initFailures, taskSourceLines,
     })
     const reportPath = path.join(batchDir, 'report.md')
     fs.writeFileSync(reportPath, report, 'utf8')
@@ -468,9 +610,11 @@ async function main() {
       blocked: state.blocked.map((t) => t.id),
       completed: state.completed.map((t) => t.id),
       excluded: state.excluded,
+      taskSource: taskSource.enabled ? { note: admission.note, blocked: admission.blocked, labelSyncLog } : null,
       batchJsonPath, reportPath,
     }, null, 2))
-    process.exit(simulatePath && !autoPhaseDone(state) ? 1 : 0)
+    const taskSourceBlocked = Boolean(taskSource.enabled && admission && admission.blocked)
+    process.exit((simulatePath && !autoPhaseDone(state)) || taskSourceBlocked ? 1 : 0)
   }
 
   // ----- 真实唤起模式 -----
@@ -529,7 +673,7 @@ async function main() {
     if (!finishing) {
       finishing = true
       const endedAt = nowIso()
-      const report = buildReport({ schedule: { ...schedule, project: main }, permission, state, sites, launched, leftoverQueue: state.queue, snapshotCount: state.snapshot.length, startedAt, endedAt, preHygiene, postHygiene: { validate: `（调度器收到 ${signal}，收工检查未执行）` }, remoteCheck, initFailures })
+      const report = buildReport({ schedule: { ...schedule, project: main }, permission, state, sites, launched, leftoverQueue: state.queue, snapshotCount: state.snapshot.length, startedAt, endedAt, preHygiene, postHygiene: { validate: `（调度器收到 ${signal}，收工检查未执行）` }, remoteCheck, initFailures, taskSourceLines })
       fs.writeFileSync(path.join(batchDir, 'report.md'), report, 'utf8')
     }
     process.exit(130)
@@ -554,14 +698,16 @@ async function main() {
     const report = buildReport({
       schedule: { ...schedule, project: main }, permission, state, sites, launched,
       leftoverQueue, snapshotCount: state.snapshot.length, startedAt, endedAt,
-      preHygiene, postHygiene, remoteCheck, initFailures,
+      preHygiene, postHygiene, remoteCheck, initFailures, taskSourceLines,
     })
     const reportPath = path.join(batchDir, 'report.md')
     fs.writeFileSync(reportPath, report, 'utf8')
     const done = autoPhaseDone(state)
+    const taskSourceBlocked = Boolean(taskSource.enabled && admission && admission.blocked)
     console.log(JSON.stringify({
       ok: true, milestone: 'M5', mode: 'real',
       autoPhaseDone: done,
+      taskSource: taskSource.enabled ? { note: admission.note, blocked: admission.blocked, labelSyncLog } : null,
       leftoverQueue,
       snapshotIds: state.snapshot.map((t) => t.id),
       launchOrder: state.launchLog.filter((e) => e.action === 'launch').map((e) => e.taskId),
@@ -572,7 +718,7 @@ async function main() {
       validate: validateOk,
       batchJsonPath, reportPath,
     }, null, 2))
-    process.exit(done ? 0 : 1)
+    process.exit(done && !taskSourceBlocked ? 0 : 1)
   }
 }
 

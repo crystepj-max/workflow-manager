@@ -16,5 +16,13 @@
     "command": "node",
     "args": ["{project}/scripts/cwf-run-init.mjs", "{taskId}", "{runId}", "--local-base"]
   },
-  "remoteIssueCommand": "gh issue list --repo crystepj-max/workflow-manager"
+  "taskSource": {
+    "_说明": "FEAT-237：远端任务源（GitHub 标签）。整段省略 = 退回「仅本地登记册」的旧行为。repo 由 git remote 自动识别（github.com 的那个），不在这里配。",
+    "readyLabel": "ready-for-agent",
+    "wipLabel": "施工中",
+    "labelSync": true,
+    "onUnavailable": "block",
+    "requireAnchor": false
+  },
+  "remoteIssueCommand": "gh issue list --repo crystepj-max/workflow-manager --label ready-for-agent --state open"
 }
