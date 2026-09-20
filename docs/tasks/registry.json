@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 136,
+  "revision": 138,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2416,7 +2416,7 @@
       "origin_machine": "chrisdem",
       "origin_agent": null,
       "name": "任务账本与立票/收口路线适配 PR-only 主干（消除每任务额外 PR）",
-      "slug": "pr-only-pr",
+      "slug": "ledger-closeout-pr-track",
       "source": "会话录入",
       "source_ref": "2026-09-20 CHORE-111 收口过程暴露的流程缺陷 + 松哥要求给出完整解决方案",
       "baseline": "V1",
@@ -2557,5 +2557,5 @@
       "spec_path": "docs/tasks/specs/FIX-235-node-isolation-probe-fix/task-spec-V1.md"
     }
   ],
-  "updated_at": "2026-09-20T15:40:03.828Z"
+  "updated_at": "2026-09-20T16:10:00.000Z"
 }
