@@ -19,7 +19,7 @@
 | 无人值守许可 | 允许（实施与自动检查免问；**合并需人工批准**） |
 | 任务规格位置 | `docs/tasks/specs/CHORE-230-ledger-closeout-pr-track/task-spec-V1.md`（入库） |
 | 定义时间 | 待人工确认 |
-| GitHub 同步 | pending |
+| GitHub 同步 | synced#230 |
 
 > 说明（不进机器解析字段）：
 > - `无人值守许可 = 允许` 的依据与边界：改动落在登记册字段、收口/前置判据脚本、门禁分级与文档，全部可由单测与既有门禁验证；但本票改的正是**所有后续任务共用的开工前置判据与收口路线**，误判会波及整批任务，因此合并动作保留人工批准点。
@@ -41,11 +41,11 @@
 ### 涉及范围
 
 - 做：`local-task-registry.mjs`（`merge.pr` / `--merged-at` / 本地解析回填）、`local-task-merge.mjs`（新增 `--via-pr` 收口路线，不推进本地主干）、`ai-task-preflight-check.mjs`（前置合并判据兼容 PR 号解析）、`validate-task-spec-sync.mjs`（未跟踪规格分级判定）、`validate-workspace.mjs` 归档一致性对解析值的兼容、三处文档口径、单测覆盖。
-- 不做：不改历史任务的 `task_id`/`remote`/`merge` 值（含存量字符串形状，沿用 CHORE-111 的 D-03 裁定）；不给 main 开 ruleset bypass；不把账本搬出 Git；不改编号契约语义；不改 GitHub 收口适配器的既有动作形态。
+- 不做：不改历史任务的 `task_id`/`remote`/`merge` 值（含存量字符串形状，沿用 CHORE-111 的 D-03 裁定）；不给 main 开 ruleset bypass；不把账本搬出 Git；不改编号契约语义；不改 GitHub 收口适配器的既有动作形态；不改机器本地 git 配置（含 `remote.pushDefault`，第 16 项走代码层显式指定主源）。
 
 ### 验收标准
 
-见规格 §8（7 条）。核心两条：合入后再收口一个任务只产生 1 个 PR；`validate:task-context` 不再因"材料尚未入库"的正常窗口而长期红。
+见规格 §7（8 条）。核心两条：合入后再收口一个任务只产生 1 个 PR；`validate:task-context` 不再因"材料尚未入库"的正常窗口而长期红。
 
 ## 关键证据（2026-09-20 实测）
 
