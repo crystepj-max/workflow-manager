@@ -1,11 +1,30 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
-const pluginRoot = join(repoRoot, 'packages', 'dsh-visual-workflow')
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+
+// 自动发现所有需要打包的插件包，无需在此登记包名——此前只写死
+// packages/dsh-visual-workflow，新增插件包不会进入发布闸门。
+const packagesDir = join(repoRoot, 'packages')
+const buildPackages = (existsSync(packagesDir) ? readdirSync(packagesDir, { withFileTypes: true }) : [])
+  .filter((d) => d.isDirectory())
+  .map((d) => {
+    const dir = join(packagesDir, d.name)
+    const manifest = join(dir, 'package.json')
+    if (!existsSync(manifest)) return null
+    let scripts = {}
+    try {
+      scripts = JSON.parse(readFileSync(manifest, 'utf8')).scripts || {}
+    } catch (e) {
+      return null
+    }
+    return scripts.build ? { name: d.name, dir, scripts } : null
+  })
+  .filter(Boolean)
 
 const stages = [
   {
@@ -14,18 +33,20 @@ const stages = [
     args: ['run', 'generate'],
     cwd: repoRoot,
   },
-  {
-    name: '生成正式 VWF 组合包',
+  ...buildPackages.map((p) => ({
+    name: `生成正式组合包（${p.name}）`,
     command: npm,
     args: ['run', 'build'],
-    cwd: pluginRoot,
-  },
-  {
-    name: '检查正式 VWF 产物新鲜度',
-    command: npm,
-    args: ['run', 'check:dist'],
-    cwd: pluginRoot,
-  },
+    cwd: p.dir,
+  })),
+  ...buildPackages
+    .filter((p) => p.scripts['check:dist'])
+    .map((p) => ({
+      name: `检查产物新鲜度（${p.name}）`,
+      command: npm,
+      args: ['run', 'check:dist'],
+      cwd: p.dir,
+    })),
   {
     name: 'LOC-042 消费方契约机器层',
     command: process.execPath,
@@ -45,6 +66,11 @@ const stages = [
     cwd: repoRoot,
   },
 ]
+
+if (buildPackages.length === 0) {
+  console.error('\n❌ 未发现任何需要打包的插件包（packages/ 下应至少有一个带 build 脚本的包）')
+  process.exit(1)
+}
 
 for (const [index, stage] of stages.entries()) {
   console.log(`\n[${index + 1}/${stages.length}] ${stage.name}`)
