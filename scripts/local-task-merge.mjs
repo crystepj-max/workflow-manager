@@ -37,6 +37,10 @@ import { loadRegistry, update, writeBoard, githubSlugOf, STATUS_LOCAL_DEFINED, S
 import { field, parseSpecVersion, TASK_FIELDS } from './task-card-parse.mjs'
 import { mainCheckout, worktreePathFor, runDirFor } from './workspace-paths.mjs'
 import { generateEvidenceSummary } from './workspace-evidence-summary.mjs'
+// 锚点解析唯一实现 = remote-anchors（FEAT-237 抽出，收口与 issue 通道共用）
+import { parseRemoteAnchors } from './remote-anchors.mjs'
+
+export { parseRemoteAnchors }
 
 export const MERGEABLE_DECISIONS = new Set(['accept', 'conditional_pass'])
 export const PRE_MERGE_STATUS = STATUS_WAITING_ACCEPTANCE
@@ -66,23 +70,6 @@ function worktreeStatus(cwd) {
 function specVersionOf(specPath) {
   // 版本解析唯一实现 = task-card-parse（LOC-002）；此处只负责读文件。
   return parseSpecVersion(fs.readFileSync(specPath, 'utf-8'), specPath)
-}
-
-/**
- * 解析登记册 `remote` 字段为远端锚点列表（CHORE-111）。
- * 历史取值形态不一：`cnb#106`、`github#215`、双锚点 `cnb#111 + github#215`、空格式 `GitHub #208`。
- * 收口时每个锚点都要单独提示关闭——只认一种形态会让另一侧 issue 静默常开。
- * @returns {{ system: string, issue: number }[]} 无锚点取值（pending / none）返回空数组
- */
-export function parseRemoteAnchors(remote) {
-  const anchors = []
-  for (const token of String(remote ?? '').split(/[+,;&]+/)) {
-    const m = /^\s*([a-z]{2,})\s*#\s*(\d+)\s*$/i.exec(token)
-    if (!m) continue
-    const anchor = { system: m[1].toLowerCase(), issue: Number(m[2]) }
-    if (!anchors.some((x) => x.system === anchor.system && x.issue === anchor.issue)) anchors.push(anchor)
-  }
-  return anchors
 }
 
 /**

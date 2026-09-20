@@ -8,6 +8,7 @@
  * CLI:
  *   node scripts/local-task-registry.mjs allocate --name <任务名称> [--slug <x>] [--source <来源>] [--source-ref <x>] [--repo <path>]
  *   node scripts/local-task-registry.mjs set --task LOC-001 [--status <状态>] [--baseline V1] [--branch <b>] [--worktree <p>] [--merge-commit <sha>] [--github-sync <x>] [--repo <path>]
+ *   node scripts/local-task-registry.mjs mark-ready --task FIX-224 [--repo <path>]   # 打 ready-for-agent（远端可施工信号）
  *   node scripts/local-task-registry.mjs board [--repo <path>]
  *   node scripts/local-task-registry.mjs list [--github-sync pending] [--repo <path>]
  *   node scripts/local-task-registry.mjs show --task LOC-001 [--repo <path>]
@@ -424,13 +425,15 @@ export function writeBoard(repo) {
 }
 
 // —— CLI ——
-function main(argv) {
+async function main(argv) {
   const cmd = argv[0]
   const get = (f) => {
     const i = argv.indexOf(f)
     return i >= 0 ? argv[i + 1] : undefined
   }
   const repo = path.resolve(get('--repo') || process.cwd())
+  // 函数作用域：mark-ready / set / show 都按 --task 取任务标识
+  const taskId = get('--task')
 
   if (cmd === 'allocate') {
     const name = get('--name')
@@ -457,7 +460,6 @@ function main(argv) {
   }
 
   if (cmd === 'set') {
-    const taskId = get('--task')
     if (!taskId) {
       console.error(
         '用法: set --task LOC-001 [--status <状态>] [--baseline V1] [--branch <b>] [--merge-commit <sha>] [--github-sync <x>]\n' +
@@ -489,6 +491,26 @@ function main(argv) {
     return
   }
 
+  if (cmd === 'mark-ready') {
+    // 「满足开工条件」的远端信号（FEAT-237）：把 ready-for-agent 打到该任务的 GitHub issue 上。
+    // 定义落档（status=本地已定义/已定义）之后跑一次；幂等，可反复执行。
+    if (!taskId) {
+      console.error('用法: mark-ready --task <任务标识> [--repo <path>] [--dry-run]\n' +
+        '        在任务的 GitHub issue 上打「可施工」标签（ready-for-agent）；无 github#N 锚点时报错并给出换号指引。')
+      process.exit(2)
+    }
+    const { markReady } = await import('./github-issues.mjs')
+    let r
+    try {
+      r = markReady({ repo, taskId, dryRun: argv.includes('--dry-run') })
+    } catch (e) {
+      r = { ok: false, code: 'remote-failed', reason: String((e && e.message) || e).slice(0, 300) }
+    }
+    console.log(JSON.stringify(r, null, 2))
+    if (!r.ok) console.error(`[error] 未打上「可施工」标签（${r.code}）：${r.reason}`)
+    process.exit(r.ok ? 0 : 1)
+  }
+
   if (cmd === 'board') {
     const p = writeBoard(repo)
     console.log(JSON.stringify({ board: p }, null, 2))
@@ -503,7 +525,6 @@ function main(argv) {
   }
 
   if (cmd === 'show') {
-    const taskId = get('--task')
     const rec = loadRegistry(repo).tasks.find((r) => r.task_id === taskId)
     if (!rec) {
       console.error(`任务不存在：${taskId}`)
@@ -513,10 +534,17 @@ function main(argv) {
     return
   }
 
-  console.error('用法: allocate | set | board | list | show')
+  console.error('用法: allocate | set | mark-ready | board | list | show')
   process.exit(2)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2))
+  // 刻意**不用**顶层 await：mark-ready 会 `await import('./github-issues.mjs')`，而后者反向
+  // import 本模块。若本模块的求值被顶层 await 挂起，反向 import 会等一个永不完成的模块求值 →
+  // 死锁（现象：exit 13「unsettled top-level await」、stdout 全空）。
+  // 浮空 promise 让本模块先求值完成，动态 import 即可正常解析。
+  main(process.argv.slice(2)).catch((e) => {
+    console.error(e?.stack || String(e))
+    process.exit(1)
+  })
 }
