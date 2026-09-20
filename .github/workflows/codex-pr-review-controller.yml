@@ -21,9 +21,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: 处理 Codex Review 轮次请求
+      - name: 处理 PR Review 轮次请求（Cursor Bugbot 触发）
         run: node scripts/codex-review-controller.mjs "$GITHUB_EVENT_PATH"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CODEX_REVIEW_TOKEN: ${{ secrets.CODEX_REVIEW_TOKEN }}
+          PR_REVIEW_TRIGGER_TOKEN: ${{ secrets.PR_REVIEW_TRIGGER_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}

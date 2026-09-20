@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 export const DEFAULT_MAX_ROUNDS = 3;
 const STATE_MARKER = 'codex-review-controller-state';
 const ALLOWED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+// Bugbot 手动触发词。以 Cursor 设置页 Manual-Only 文案为准取 `@cursor review`（别名 `bugbot run`）；
+// 公开文档另有不带 @ 的 `cursor review` 写法，真实生效形式待冒烟确认，改这一处即可全局生效。
+export const TRIGGER_COMMAND = '@cursor review';
 
 export function parseCommand(body) {
   const text = String(body ?? '').trim();
@@ -51,18 +54,17 @@ export function hasReviewIdentity(reviewToken) {
   return typeof reviewToken === 'string' && reviewToken.trim().length > 0;
 }
 
+// Cursor Bugbot 只按仓库常驻规则文件（.cursor/BUGBOT.md）评审，不接受单条自由提示词。
+// 因此触发评论只承载触发命令 `cursor review`；原按轮次差异化的自然语言指令不再作为对
+// 评审引擎的指令，而是退化为可见的轮次审计留痕——治理语义由 Controller 与 AGENTS.md 承担。
 export function buildReviewPrompt(round, maxRounds, extensionReason = '') {
-  if (round === 1) {
-    return `@codex review 第 1/${maxRounds} 轮完整审查：围绕当前 Issue/PR 的验收条件检查需求符合性、正确性、回归风险、证据与必要边界条件。请区分必须在本 PR 修复的阻塞问题与可作为 follow-up 的非阻塞建议。`;
-  }
-  if (round === 2) {
-    return `@codex review 第 2/${maxRounds} 轮收敛审查：重点验证上一轮阻塞问题是否正确解决，以及本轮修改是否引入新的当前范围阻塞问题。新的非阻塞优化建议请明确标记为 follow-up，不要扩大当前 PR 的验收范围。`;
-  }
-  if (round === 3 && maxRounds === DEFAULT_MAX_ROUNDS) {
-    return '@codex review 第 3/3 轮最终收敛审查：只报告会导致当前 Issue 验收失败、当前修改引入的明显回归或必须在合并前解决的阻塞问题。其他改进建议请标记为 follow-up，不得作为继续自动循环的理由。';
-  }
-  const reason = extensionReason ? ` 人工追加原因：${extensionReason}` : '';
-  return `@codex review 人工追加的第 ${round}/${maxRounds} 轮收敛审查：仅核查当前 PR 尚未解决的明确阻塞项及相关修复是否引入回归；新的非阻塞建议统一作为 follow-up，不扩大当前 PR 范围。${reason}`;
+  const reason = extensionReason ? `（人工追加原因：${extensionReason}）` : '';
+  let scope;
+  if (round === 1) scope = '完整审查';
+  else if (maxRounds > DEFAULT_MAX_ROUNDS && round === maxRounds) scope = '人工追加轮收敛审查';
+  else if (round === DEFAULT_MAX_ROUNDS && maxRounds === DEFAULT_MAX_ROUNDS) scope = '最终收敛审查';
+  else scope = '收敛审查';
+  return `${TRIGGER_COMMAND}\n\n> PR Review Controller：第 ${round}/${maxRounds} 轮 · ${scope}${reason}。评审范围、A/B/C 分类与不扩大当前 PR 的要求以仓库 .cursor/BUGBOT.md 常驻规则为准，不随本条指令变化；本行仅作轮次审计留痕。`;
 }
 
 export function parseStateComment(body) {
@@ -90,7 +92,7 @@ function renderState(state) {
     EXTENDED: '人工已追加有限额度',
   }[state.status] ?? state.status;
   const json = JSON.stringify(state);
-  return `### Codex PR Review Controller\n\n- 当前轮次：**${state.round} / ${state.maxRounds}**\n- 状态：**${statusText}**\n- 最近审查版本：${state.lastHead ? `\`${state.lastHead.slice(0, 12)}\`` : '—'}\n- 剩余可申请轮次：**${remaining}**\n- 人工追加：**${added}**\n\n命令：\`/codex-review next\` · 服务故障重试：\`/codex-review retry\` · 额度耗尽后人工追加：\`/codex-review extend 1 <原因>\`\n\n<!-- ${STATE_MARKER}\n${json}\n-->`;
+  return `### PR Review Controller（Cursor Bugbot）\n\n- 当前轮次：**${state.round} / ${state.maxRounds}**\n- 状态：**${statusText}**\n- 最近审查版本：${state.lastHead ? `\`${state.lastHead.slice(0, 12)}\`` : '—'}\n- 剩余可申请轮次：**${remaining}**\n- 人工追加：**${added}**\n\n命令：\`/codex-review next\` · 服务故障重试：\`/codex-review retry\` · 额度耗尽后人工追加：\`/codex-review extend 1 <原因>\`\n\n<!-- ${STATE_MARKER}\n${json}\n-->`;
 }
 
 function isAuthorized(event) {
@@ -104,7 +106,7 @@ async function githubRequest(token, path, options = {}) {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${token}`,
       'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'workflow-manager-codex-review-controller',
+      'User-Agent': 'workflow-manager-pr-review-controller',
       ...(options.headers ?? {}),
     },
   });
@@ -152,14 +154,14 @@ async function saveState(token, repo, number, stateComment, state) {
 
 async function triggerReview({ token, reviewToken, repo, number, body }) {
   if (!hasReviewIdentity(reviewToken)) {
-    await postComment(token, repo, number, '⛔ Controller 尚未配置可被 Codex 识别的触发身份，本次请求**不消耗 Review 轮次**。请先配置仓库 Secret `CODEX_REVIEW_TOKEN`，其身份必须已经连接 Codex 与 GitHub，然后重新执行同一条 `/codex-review next` 或 `/codex-review retry`。');
+    await postComment(token, repo, number, '⛔ Controller 尚未配置可被 Cursor Bugbot 识别的触发身份，本次请求**不消耗 Review 轮次**。请先配置仓库 Secret `PR_REVIEW_TRIGGER_TOKEN`（一个已连接该 GitHub 仓库、且被 Bugbot 接受的账号身份，通常为 fine-grained PAT），然后重新执行同一条 `/codex-review next` 或 `/codex-review retry`。');
     return false;
   }
   try {
     await postComment(reviewToken, repo, number, body);
     return true;
   } catch (error) {
-    await postComment(token, repo, number, `⛔ Codex Review 触发身份调用失败，本次请求**不消耗 Review 轮次**。请检查 \`CODEX_REVIEW_TOKEN\` 后重试。错误：${sanitizeText(error.message)}`);
+    await postComment(token, repo, number, `⛔ Bugbot Review 触发身份调用失败，本次请求**不消耗 Review 轮次**。请检查 \`PR_REVIEW_TRIGGER_TOKEN\` 后重试。错误：${sanitizeText(error.message)}`);
     return false;
   }
 }
@@ -171,10 +173,10 @@ async function handleNext({ token, reviewToken, repo, number, actor, stateCommen
       state.status = 'EXHAUSTED';
       state.updatedAt = new Date().toISOString();
       await saveState(token, repo, number, stateComment, state);
-      await postComment(token, repo, number, `⛔ Codex 自动 Review 已达到 ${state.round}/${state.maxRounds}。Controller 不会触发下一轮。请人工选择收口、拆分 follow-up，或使用 \`/codex-review extend 1 <原因>\` 追加 1 轮有限额度。`);
+      await postComment(token, repo, number, `⛔ Bugbot 自动 Review 已达到 ${state.round}/${state.maxRounds}。Controller 不会触发下一轮。请人工选择收口、拆分 follow-up，或使用 \`/codex-review extend 1 <原因>\` 追加 1 轮有限额度。`);
       return;
     }
-    await postComment(token, repo, number, `ℹ️ 当前版本 \`${head.slice(0, 12)}\` 已经发起过 Round ${state.round}，不会重复占用下一轮。若上一轮是 Codex 服务错误，请使用 \`/codex-review retry\`；若已完成修改，请先提交新的 PR 版本再申请 \`next\`。`);
+    await postComment(token, repo, number, `ℹ️ 当前版本 \`${head.slice(0, 12)}\` 已经发起过 Round ${state.round}，不会重复占用下一轮。若上一轮是 Bugbot 服务/工具错误，请使用 \`/codex-review retry\`；若已完成修改，请先提交新的 PR 版本再申请 \`next\`。`);
     return;
   }
 
@@ -235,7 +237,7 @@ async function handleExtend({ token, repo, number, actor, stateComment, state, c
   });
   state.updatedAt = new Date().toISOString();
   await saveState(token, repo, number, stateComment, state);
-  await postComment(token, repo, number, `✅ @${actor} 已人工追加 **1 轮** Codex Review，最大轮次变为 **${state.maxRounds}**。原因：${command.reason}\n\n追加额度不会自动触发审查；完成针对阻塞项的修改并提交新版本后，再使用 \`/codex-review next\`。`);
+  await postComment(token, repo, number, `✅ @${actor} 已人工追加 **1 轮** Cursor Bugbot Review，最大轮次变为 **${state.maxRounds}**。原因：${command.reason}\n\n追加额度不会自动触发审查；完成针对阻塞项的修改并提交新版本后，再使用 \`/codex-review next\`。`);
 }
 
 export async function runController(event, { token, reviewToken, repo }) {
@@ -245,7 +247,7 @@ export async function runController(event, { token, reviewToken, repo }) {
   const number = event.issue.number;
 
   if (!isAuthorized(event)) {
-    await postComment(token, repo, number, '⛔ 只有仓库 Owner / Member / Collaborator 可以操作 Codex Review Controller。');
+    await postComment(token, repo, number, '⛔ 只有仓库 Owner / Member / Collaborator 可以操作 PR Review Controller。');
     return { handled: true, reason: 'UNAUTHORIZED' };
   }
   if (command.type === 'invalid') {
@@ -270,7 +272,7 @@ export async function runController(event, { token, reviewToken, repo }) {
 async function main() {
   const eventPath = process.argv[2] ?? process.env.GITHUB_EVENT_PATH;
   const token = process.env.GITHUB_TOKEN;
-  const reviewToken = process.env.CODEX_REVIEW_TOKEN;
+  const reviewToken = process.env.PR_REVIEW_TRIGGER_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
   if (!eventPath || !token || !repo) throw new Error('缺少 GITHUB_EVENT_PATH / GITHUB_TOKEN / GITHUB_REPOSITORY');
   const event = JSON.parse(await fs.readFile(eventPath, 'utf8'));
