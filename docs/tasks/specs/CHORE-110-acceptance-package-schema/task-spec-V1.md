@@ -150,7 +150,7 @@
 
 | 方案 | 做法 | 真实影响面（核对代码后） | 风险 |
 |---|---|---|---|
-| **A · 验收包分层** | 同一记录类型内分「重 / 轻」两套 `assembled` 必填集；轻量套**强制** `decided_by` / `decided_at` | `handoff.schema.json`（`assembled` 为 `additionalProperties:false`，加字段＋`oneOf` 分支）、`cwf-evidence-verify.mjs:59-176` 九项校验按套分支、**`formal-records.mjs:50-63` 的第二份五类硬编码副本须同改**、契约 §3.6/§8.3、examples 06、测试 | 分层判据若来自「会话自报路线」＝绕过独立评审的后门（见子问题 b） |
+| **A · 验收包分层** | 同一记录类型内分「重 / 轻」两套 `assembled` 必填集；轻量套**强制** `decided_by` / `decided_at` | `handoff.schema.json`（`assembled` 为 `additionalProperties:false`，加字段＋`oneOf` 分支）、`cwf-evidence-verify.mjs:59-176` 九项校验按套分支、契约 §3.6/§8.3、examples、测试（`formal-records.mjs:50-56` 施工时实测为「存在即链接」非闸门，**不改代码**，仅加防分叉断言——见 §7.3） | 分层判据若来自「会话自报路线」＝绕过独立评审的后门（见子问题 b） |
 | **B · 独立轻量记录类型** | 新增记录类型（如 `acceptance_note`），只记签署人 / 时间 / 结论 / 依据清单；正式验收包不动 | `cwf-record.mjs:19-27` `RECORD_TYPES`、schema 根 `record_type` enum 与根 `oneOf` 新分支（`run.stage` 仍须落在既有 7 值内）、`workspace-evidence-summary.mjs:28-44`（现仅从 `acceptance_package` 取三字段）、`formal-records.mjs` 映射、契约 §8.1 | 两套「验收」概念并存，长期语义分叉（与 LOC-016「两套同名实现」坑同型） |
 | **C · 不放宽，改口径为「轻量路线不留签署」** | 契约明确写死：走轻量路线即不产生结构化验收签署；三字段以显式「不适用」值标记并附原因 | 仅契约说明 + `workspace-evidence-summary.mjs:125-127` 取值（不动 schema） | 改动最小，但**放弃**「谁验收的」可追溯性——断链被制度化而非消除 |
 

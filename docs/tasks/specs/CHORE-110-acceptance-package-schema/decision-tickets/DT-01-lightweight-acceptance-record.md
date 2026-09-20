@@ -26,7 +26,7 @@
 - **c（命名）**：新字段**不得**叫 `route`（该键已表示节点下一跳）。
 - **d（签署凭据）**：轻量档 `decided_by` 须带可核对来源，禁 AI 代签。
 - **e（版本兼容）**：改动做成**纯放宽**（历史记录全部继续合法），故 `record_version` 的 `const:"v0.1.8"` **不前移**——避免盘上 211 条 index 内记录与 7 个 examples 失效。
-- **f（规则副本）**：`formal-records.mjs:50-63` 的第二份五类硬编码副本与 `cwf-evidence-verify.mjs` 同处改，并加分叉防护断言。
+- **f（规则副本）**：施工时实测修正——`formal-records.mjs:50-56` 的五类清单只是「存在即链接」（唯一消费点 L340-344），不是必填闸门，故**不改代码**；仅新增防分叉断言（规格 §7.3）。
 
 ## 背景（为什么必须决定）
 
@@ -82,7 +82,7 @@
 - **c · 命名**：`route` 键在建设记录里已表示**节点下一跳**（`loc-035/040/044` 的验收包 payload 带 `route=READY_FOR_HUMAN`；`construction-preflight-gate.mjs:54,64` 输出 `route=PASS|BLOCKED`）。新字段若同名必致二次歧义，须用 `delivery_route` / `evidence_tier` 等区分名。
 - **d · 签署凭据**：轻量路线下 `decided_by` 由 Agent 依会话中人工「通过」写入。契约禁 AI 代签，故须规定可核对形式（例如同时落人工确认所在位置/收口报告条目），否则新字段比 null 更糟——不可核对的断言。
 - **e · 向后兼容（已入库记录不得失效）**：`record_version` 现为 `const:"v0.1.8"`（`handoff.schema.json:22-24`），盘上 **453 条**记录与 **7 个** examples 全为该值；`cwf-record.mjs:88` 写入时直接取该 const，而 `schema-protocol.test.mjs:113-119` 用当前 schema 校验 examples。若为语义变更须前移版本，须同时决定：保持 const 并同步改 examples/测试，还是 const→enum 接受旧值。A 若以「新增可选字段＋`oneOf` 变体」实现，旧记录可继续合法。
-- **f · 规则副本**：五类引用规则在 `handoff.schema.json` 与 `formal-records.mjs:50-63` 两处各存一份，放开必须同处改，否则 schema 与机器校验分叉。
+- **f · 规则副本**：`formal-records.mjs:50-56` 也列了五类，但实测为「存在即链接」而非闸门（定义初稿曾把它当成第二份硬编码闸门，已修正）；仍需一条防分叉断言，防日后被收紧成必填。
 
 ## 推荐
 
