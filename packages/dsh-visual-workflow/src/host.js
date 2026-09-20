@@ -2666,7 +2666,10 @@ return {
     //（闸门按 mismatch 拒绝，不当 legacy 放行）。
     //  - verifyBranch 节点强制加发 proof；dependencies 来自 resolved_inputs（LOC-034），
     //    不再从 Store 全量推导。段内 [vwf-attempt] 的 ri 由 attempt-ledger 写入
-    //    logicalRec.resolved_inputs_map；段末扫描回退时用 legacy 规则补上游节点引用。
+    //    logicalRec.resolved_inputs_map；段末扫描回退时按上游节点补引用，并如实标
+    //    host_bound（宿主回填，非节点声明）。
+    //  - 回填项只给 producer：同批内上游 node_result 先于 proof 落库，Store 侧据此钉到
+    //    其正式 Revision。不得自造 tmp-exec 引用——摘要对不上会让整批 commit 中止。
     function resolvedInputsFor(logicalRec, nodeId, results, isProof, newKeys) {
       const riMap = logicalRec.resolved_inputs_map || {}
       if (riMap[nodeId]) return riMap[nodeId]
@@ -2676,7 +2679,6 @@ return {
       const items = upstream.filter((k) => results[k] != null).map((k) => ({
         binding: 'from_' + k,
         producer: String(k),
-        version_ref: 'tmp-exec:1:00000000',
       }))
       const sync = logicalRec.last_gate_sync
       if (sync && sync.record_id && sync.record_revision) {
@@ -2686,7 +2688,7 @@ return {
           version_ref: 'record:' + sync.record_id + '@' + sync.record_revision,
         })
       }
-      return { mode: 'legacy', items }
+      return { mode: 'host_bound', items }
     }
     async function nodeRecordEntries(logicalRec, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
       const logicalRunId = logicalRec.logical_run_id
