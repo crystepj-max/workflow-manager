@@ -8,6 +8,7 @@
  * CLI:
  *   node scripts/local-task-registry.mjs allocate --name <任务名称> [--slug <x>] [--source <来源>] [--source-ref <x>] [--repo <path>]
  *   node scripts/local-task-registry.mjs set --task LOC-001 [--status <状态>] [--baseline V1] [--branch <b>] [--worktree <p>] [--merge-commit <sha>] [--github-sync <x>] [--repo <path>]
+ *   node scripts/local-task-registry.mjs mark-ready --task FIX-224 [--repo <path>]   # 打 ready-for-agent（远端可施工信号）
  *   node scripts/local-task-registry.mjs board [--repo <path>]
  *   node scripts/local-task-registry.mjs list [--github-sync pending] [--repo <path>]
  *   node scripts/local-task-registry.mjs show --task LOC-001 [--repo <path>]
@@ -424,7 +425,7 @@ export function writeBoard(repo) {
 }
 
 // —— CLI ——
-function main(argv) {
+async function main(argv) {
   const cmd = argv[0]
   const get = (f) => {
     const i = argv.indexOf(f)
@@ -489,6 +490,26 @@ function main(argv) {
     return
   }
 
+  if (cmd === 'mark-ready') {
+    // 「满足开工条件」的远端信号（FEAT-237）：把 ready-for-agent 打到该任务的 GitHub issue 上。
+    // 定义落档（status=本地已定义/已定义）之后跑一次；幂等，可反复执行。
+    if (!taskId) {
+      console.error('用法: mark-ready --task <任务标识> [--repo <path>] [--dry-run]\n' +
+        '        在任务的 GitHub issue 上打「可施工」标签（ready-for-agent）；无 github#N 锚点时报错并给出换号指引。')
+      process.exit(2)
+    }
+    const { markReady } = await import('./github-issues.mjs')
+    let r
+    try {
+      r = markReady({ repo, taskId, dryRun: argv.includes('--dry-run') })
+    } catch (e) {
+      r = { ok: false, code: 'remote-failed', reason: String((e && e.message) || e).slice(0, 300) }
+    }
+    console.log(JSON.stringify(r, null, 2))
+    if (!r.ok) console.error(`[error] 未打上「可施工」标签（${r.code}）：${r.reason}`)
+    process.exit(r.ok ? 0 : 1)
+  }
+
   if (cmd === 'board') {
     const p = writeBoard(repo)
     console.log(JSON.stringify({ board: p }, null, 2))
@@ -513,10 +534,10 @@ function main(argv) {
     return
   }
 
-  console.error('用法: allocate | set | board | list | show')
+  console.error('用法: allocate | set | mark-ready | board | list | show')
   process.exit(2)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2))
+  await main(process.argv.slice(2))
 }

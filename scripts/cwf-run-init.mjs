@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 // 建设工作流 Run 引导：从 target 创建分支 + worktree + run 目录 + portable run identity
 // 用法（可在任意工作树内执行——路径一律由主检出派生，不依赖当前目录）：
-//   node scripts/cwf-run-init.mjs <issue_id> <run_id> [--base <ref>] [--budget <n>]
+//   node scripts/cwf-run-init.mjs <issue_id> <run_id> [--base <ref>] [--budget <n>] [--no-claim]
 // 产物（见 docs/design/workspace-directory-convention.md §1.4 / §1.6）：
 //   worktree：<主检出父目录>/<仓库名>-worktrees/<分支名>/   ← 相邻容器，禁止位于仓库内
 //   run 目录：<主检出>/.agent-runs/<run_id>/run.json          ← 锚定主检出，不写进工作树
 //   开发 DSH 为**单实例固定端口**（约定 §决策六）：不再分配每 Run 独占 Home，
 //   env_resources 只登记「本任务插件命名空间 + 固定端口」；隔离由「插件注册名带任务
 //   命名空间」+「同一时刻只允许一个任务激活插件」纪律承担。
+//
+// 施工认领（FEAT-237）：开工前在对应 GitHub issue 上打 `施工中` 标签 + assignee + 认领评论
+// （施工人 = gh 登录账号 @ 机器码），目的是让「不同施工人同时选中同一任务」在远端可见并互斥。
+// 已被他人认领 → **拒绝开工**（exit 1），不做静默绕过；确认要接手请先 `github-issues release`
+// 释放对方认领（或人工摘标签）。无 GitHub 远端 / gh 不可用 / 任务无 github 锚点时只告警不阻断，
+// 本地轨道与离线仓仍可开工（`--no-claim` 可显式跳过）。
 
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
@@ -17,8 +23,32 @@ import {
   mainCheckout, worktreePathFor, runDirFor, runsRoot,
   DEV_DSH_PORT, pluginNamespaceFor,
 } from './workspace-paths.mjs'
+import { claimIssue } from './github-issues.mjs'
 
 const DEFAULT_BUDGET = 3
+
+/**
+ * 开工认领（FEAT-237）：把「谁在施工」写进远端 issue，形成跨机器互斥。
+ *
+ * 只有「已被他人认领」是硬拒绝；其余失败（无远端、gh 不可用、无锚点）降级为告警，
+ * 否则本地轨道与测试环境会被远端可用性绑死。
+ *
+ * @returns {{ status: 'claimed'|'reused'|'skipped'|'warn'|'blocked', ... }}
+ */
+export function claimForRun({ repo, taskId, runId, branch = null, enabled = true, actor = null }) {
+  if (!enabled) return { status: 'skipped', reason: '--no-claim' }
+  let r
+  try {
+    r = claimIssue({ repo, taskId, runId, branch, actor })
+  } catch (e) {
+    return { status: 'warn', reason: String((e && e.message) || e).slice(0, 300) }
+  }
+  if (r.ok) return { status: r.code === 'reused' ? 'reused' : 'claimed', issue: r.issue, worker: r.worker, claimKey: r.claimKey, assigned: r.assigned ?? null }
+  if (r.code === 'claimed-by-other' || r.code === 'claim-raced') {
+    return { status: 'blocked', issue: r.issue, holder: r.holder, reason: r.reason }
+  }
+  return { status: 'warn', issue: r.issue || null, reason: r.reason || r.code }
+}
 
 export function envResourcesFor(runId) {
   // run.json 统一资源字段：按资源类型分层命名，后续新增资源类型（#187）在同一字段下扩展。
@@ -114,16 +144,17 @@ function git(args, cwd) {
 function parseArgs(argv) {
   const [issue, runId, ...rest] = argv
   if (!issue || !runId) {
-    console.error('用法: node scripts/cwf-run-init.mjs <issue_id|任务标识> <run_id> [--base <ref>] [--budget <n>] [--local-base]')
+    console.error('用法: node scripts/cwf-run-init.mjs <issue_id|任务标识> <run_id> [--base <ref>] [--budget <n>] [--local-base] [--no-claim]')
     process.exit(2)
   }
   assertRunIdSafe(runId)
-  const opts = { base: 'main', budget: DEFAULT_BUDGET, localBase: false }
+  const opts = { base: 'main', budget: DEFAULT_BUDGET, localBase: false, claim: true }
   for (let i = 0; i < rest.length; i++) {
     try {
       if (rest[i] === '--base') opts.base = rest[++i]
       else if (rest[i] === '--budget') opts.budget = parseBudget(rest[++i])
       else if (rest[i] === '--local-base' || rest[i] === '--no-fetch') opts.localBase = true
+      else if (rest[i] === '--no-claim') opts.claim = false
       else {
         console.error(`未知参数: ${rest[i]}`)
         process.exit(2)
@@ -137,7 +168,7 @@ function parseArgs(argv) {
 }
 
 function main() {
-  const { issue, runId, base, budget, localBase } = parseArgs(process.argv.slice(2))
+  const { issue, runId, base, budget, localBase, claim: claimEnabled } = parseArgs(process.argv.slice(2))
   // 路径一律由**主检出**派生（§1.6 锚定机制）：在任意工作树内执行结果都一致，
   // 且工作树建在仓库之外，嵌套在结构上不可能发生。
   const main = mainCheckout(process.cwd())
@@ -188,6 +219,22 @@ function main() {
     process.exit(1)
   }
 
+  // 施工认领（FEAT-237）：必须在建分支/建现场之前完成——被拒时不该留下任何垃圾现场
+  const claim = claimForRun({ repo: main, taskId: issue, runId, branch, enabled: claimEnabled })
+  if (claim.status === 'blocked') {
+    console.error(`开工被拒：issue #${claim.issue} 已被 ${claim.holder} 认领（标签「施工中」），同一任务不重复施工。`)
+    console.error(`  确认要接手：先释放对方认领 —— node scripts/github-issues.mjs release --task ${issue} --reason "接手"（或人工摘标签），再重跑本命令。`)
+    console.error('  本机自测、不需要远端互斥：加 --no-claim。')
+    process.exit(1)
+  }
+  if (claim.status === 'warn') {
+    console.error(`[warn] 远端施工认领未生效（${claim.reason}）；本 Run 继续，但跨机器「防重复施工」保护本轮不生效`)
+  } else if (claim.status === 'claimed') {
+    console.error(`[info] 已认领 issue #${claim.issue}：施工人 ${claim.worker}${claim.assigned === false ? '（assignee 未设置成功，不影响标签与评论）' : ''}`)
+  } else if (claim.status === 'reused') {
+    console.error(`[info] issue #${claim.issue} 已由本 Run 认领（幂等复用，不重复评论）`)
+  }
+
   const identity = {
     run_id: runId,
     issue_or_task_identity: `#${issue}`,
@@ -231,6 +278,14 @@ function main() {
     rollback_history: [],
     task_id_namespace: runId,
     env_resources: envResourcesFor(runId),
+    // 施工认领留痕（FEAT-237）：本地 run.json 也能回答「谁在施工这个任务」
+    remote_issue: claim.issue ?? null,
+    claim: {
+      status: claim.status,
+      worker: claim.worker ?? null,
+      claim_key: claim.claimKey ?? null,
+      at: new Date().toISOString(),
+    },
     created_at: new Date().toISOString(),
   }
   writeFileSync(join(runDir, 'run.json'), JSON.stringify(runState, null, 2) + '\n')
@@ -242,6 +297,7 @@ function main() {
     plugin_namespace: runState.env_resources.plugin_namespace,
     dev_dsh_port: runState.env_resources.dev_dsh_port,
     task_id_namespace: runId,
+    claim,
   }, null, 2))
 }
 
