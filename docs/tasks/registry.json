@@ -1,6 +1,10 @@
 {
   "version": 1,
+<<<<<<< HEAD
   "revision": 130,
+=======
+  "revision": 114,
+>>>>>>> origin/main
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2065,21 +2069,32 @@
       "source": "会话录入（松哥 2026-09-19：GitHub 恢复，改为主源；发号源单独立票迁移）",
       "source_ref": "",
       "baseline": "V1",
+<<<<<<< HEAD
       "status": "本地已定义",
+=======
+      "status": "已合并",
+>>>>>>> origin/main
       "priority": "P2",
       "env_group": null,
       "env_role": null,
       "deps": [],
-      "branch": null,
+      "branch": "dev-chore-111-r1",
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "eea2b99ee12221c2c713a924f3f3f416f2a51515",
+        "merged_at": "2026-09-20T02:09:33Z"
+      },
       "github_sync": "synced#215",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-19T03:56:05.485Z",
+<<<<<<< HEAD
       "updated_at": "2026-09-19T14:08:57.339Z",
+=======
+      "updated_at": "2026-09-20T07:01:05.595Z",
+>>>>>>> origin/main
       "spec_path": "docs/tasks/specs/CHORE-111-numbering-source-migration/task-spec-V1.md"
     },
     {

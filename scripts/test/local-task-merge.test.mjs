@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { allocate, update, loadRegistry } from '../local-task-registry.mjs'
-import { buildCommitMessage, checkMerge, runMerge } from '../local-task-merge.mjs'
+import { buildCommitMessage, checkMerge, runMerge, parseRemoteAnchors, remoteRepoSlug, closeTaskHint } from '../local-task-merge.mjs'
 import { worktreePathFor } from '../workspace-paths.mjs'
 
 const GIT_ENV = {
@@ -296,6 +296,62 @@ test('本地收口不自动关闭远端 issue，但显式列出待人工关闭�
   assert.match(out.pending_manual_close[0].reason, /DT-01/)
   assert.match(out.cleanup_hint, /待人工关闭/)
   assert.match(out.cleanup_hint, /cnb#999/)
+  fs.rmSync(repo, { recursive: true, force: true })
+})
+
+// ── CHORE-111：remote 锚点解析平台无关，关闭命令按平台给 ─────────────────────
+test('parseRemoteAnchors：单值 / 双锚点 / 空格式都解析，无锚点取值返回空', () => {
+  assert.deepEqual(parseRemoteAnchors('cnb#106'), [{ system: 'cnb', issue: 106 }])
+  assert.deepEqual(parseRemoteAnchors('github#215'), [{ system: 'github', issue: 215 }])
+  assert.deepEqual(parseRemoteAnchors('cnb#111 + github#215'), [
+    { system: 'cnb', issue: 111 },
+    { system: 'github', issue: 215 },
+  ], '双锚点逐个列出，另一侧不会静默常开')
+  assert.deepEqual(parseRemoteAnchors('GitHub #208'), [{ system: 'github', issue: 208 }])
+  assert.deepEqual(parseRemoteAnchors('cnb#9 + cnb#9'), [{ system: 'cnb', issue: 9 }], '重复锚点去重')
+  for (const empty of ['pending', 'none', '', null, undefined]) {
+    assert.deepEqual(parseRemoteAnchors(empty), [], `${empty} 不是锚点`)
+  }
+})
+
+test('closeTaskHint：按平台给该平台真实可执行命令，取不到仓库时退回人工描述', () => {
+  assert.equal(closeTaskHint('github', 'o/r', 42), 'gh issue close 42 --repo o/r')
+  assert.equal(
+    closeTaskHint('cnb', 'chris.ai/r', 42),
+    'cnb issues update-issue --repo chris.ai/r --number 42 --state closed --state-reason completed',
+  )
+  assert.equal(closeTaskHint('github', null, 42), '人工关闭 github issue #42')
+})
+
+test('remoteRepoSlug：主源远端叫 origin 也能取到 owner/repo（平台名≠远端名）', () => {
+  const repo = tmpRepo()
+  g(['remote', 'add', 'origin', 'https://github.com/o/r.git'], repo)
+  assert.equal(remoteRepoSlug(repo, 'github'), 'o/r', '按 `git remote get-url github` 直查会取不到')
+  assert.equal(remoteRepoSlug(repo, 'cnb'), null, '没有该远端就不编造')
+  g(['remote', 'set-url', 'origin', 'https://cnb.cool/other/r.git'], repo)
+  g(['remote', 'add', 'github', 'https://github.com/o/r.git'], repo)
+  assert.equal(remoteRepoSlug(repo, 'github'), 'o/r', 'origin 指向别的平台时改用名为 github 的远端')
+  fs.rmSync(repo, { recursive: true, force: true })
+})
+
+test('双锚点任务收口时两侧 issue 都列待关闭，命令各按平台给（验收 7）', () => {
+  const repo = tmpRepo()
+  const rec = seedTask(repo)
+  g(['remote', 'add', 'origin', 'https://github.com/crystepj-max/workflow-manager.git'], repo)
+  g(['remote', 'add', 'cnb', 'https://cnb.cool/chris.ai/workflow-manager.git'], repo)
+  update(repo, rec.task_id, { remote: 'cnb#111 + github#215' })
+  g(['add', '-A'], repo)
+  g(['commit', '-m', 'chore: set dual anchors'], repo)
+  makeBranch(repo, 'dev-loc-001-r1', 'dual.txt', 'branch\n')
+  const out = runMerge({ repo, taskId: rec.task_id, branch: 'dev-loc-001-r1', decision: 'accept' })
+  assert.deepEqual(
+    out.pending_manual_close.map((p) => `${p.system}#${p.remote_issue}`),
+    ['cnb#111', 'github#215'],
+  )
+  assert.equal(out.pending_manual_close[1].hint, 'gh issue close 215 --repo crystepj-max/workflow-manager')
+  assert.match(out.pending_manual_close[0].hint, /^cnb issues update-issue --repo chris\.ai\/workflow-manager/)
+  assert.match(out.cleanup_hint, /cnb#111/)
+  assert.match(out.cleanup_hint, /github#215/)
   fs.rmSync(repo, { recursive: true, force: true })
 })
 

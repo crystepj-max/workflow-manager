@@ -10,7 +10,7 @@
  * 用法：
  *   node scripts/ai-task-candidate-collect.mjs --repo <主检出> [--blacklist A,B] [--out <batch.json>]
  *
- * 远端（CNB）候选不在本脚本范围：夜间远端候选永远「未纳入（缺本地定义）」不开工，
+ * 远端候选不在本脚本范围：夜间远端候选永远「未纳入（缺本地定义）」不开工，
  * 只做报告性核验，由 M5 调度器按机器配置 best-effort 执行。
  */
 import fs from 'node:fs'
