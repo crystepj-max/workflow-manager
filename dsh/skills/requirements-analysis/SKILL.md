@@ -254,20 +254,25 @@ Agent 必须带着分析与推荐提问，不能把分析责任转嫁给用户�
    
    字段：任务标识、需求来源、来源定位、任务名称、任务类型、优先级、当前状态、需求基线版本、前置依赖、施工环境组、施工环境角色、无人值守许可、任务规格位置、定义时间。
 3. **版本一致**：任务卡/Issue 基线版本 = 本地规格版本
-4. **标记就绪**：GitHub 轨道打 `ready-for-agent` 与对应 size 标签、去掉 `needs-info`；本地轨道把本地任务卡状态写为 `本地已定义` 并登记到 `docs/tasks/registry.json`（`status=本地已定义`、`github_sync=pending`）
+4. **标记就绪**：
+   - GitHub 轨道：`node scripts/local-task-registry.mjs mark-ready --task <任务标识>` 给该任务的 issue 打 `ready-for-agent`（幂等；无 `github#N` 锚点时会报错并给出换号指引），再按体量补 `sized-s|m|l`、去掉 `needs-info`；
+   - 本地轨道：把本地任务卡状态写为 `本地已定义` 并登记到 `docs/tasks/registry.json`（`status=本地已定义`、`github_sync=pending`）；**本地轨道不打 `ready-for-agent`**（该标签是远端可施工信号，本地准备完成不等于可施工）。换取正式号后补跑 `mark-ready`。
+   - 该标签是批量调度的施工池筛选条件（FEAT-237）：漏打 = 夜间批次不会选中该任务；
 5. **分析摘要**（可选保留）：`docs/tasks/specs/<任务标识>-<slug>/requirements-analysis.md`
 6. **登记规格位置**：`node scripts/local-task-registry.mjs set --task <任务标识> --spec-path docs/tasks/specs/<任务标识>-<slug>/task-spec-V<n>.md`
 7. **通过上下文门禁**：`npm run validate:task-context`（校验规格与任务卡均已入库、活跃任务均有远端锚点）
 
-**任务标识分配**：由远端（CNB）发号，本机不自己算号，双机并行与多会话并行都不会撞号：
+> 施工阶段的两个远端动作由工具自动完成，定义阶段不要手工打：`施工中` 标签与 assignee 由 `cwf-run-init` 开工时写入（`node scripts/github-issues.mjs claim/release` 可单独调用）。
+
+**任务标识分配**：由 GitHub 主源发号，本机不自己算号，双机并行与多会话并行都不会撞号：
 
 ```bash
 node scripts/local-task-registry.mjs allocate --name <任务名称> --type FEAT|FIX|CHORE [--priority P0..P2]
 ```
 
-- 返回 `FEAT-<远端号>` / `FIX-<远端号>` / `CHORE-<远端号>`，同时在 CNB 建好对应 issue，编号即 issue 号；
-- 远端不可达时降级为临时号 `TMP-<机器码>-<日期><序号>`，联网后用 `node scripts/remote-issue-sync.mjs reissue --task <临时号>` 换取正式号；
-- 历史任务（2026-09-15 及以前）沿用 `LOC-<序号>` 旧号，通过登记册 `remote` / `legacy_id` 字段与远端号双向可查。
+- 返回 `FEAT-<远端号>` / `FIX-<远端号>` / `CHORE-<远端号>`，同时在 GitHub 主源仓库建好对应 issue，编号即 issue 号，登记册 `remote` 记 `github#<号>`；
+- 远端不可达时降级为临时号 `TMP-<机器码>-<日期><序号>`，联网后用 `node scripts/remote-issue-sync.mjs reissue --task <临时号>` 换取正式号；**禁止静默回落到 CNB 发号**（CNB 自 2026-09-19 起是灾备镜像，不再签发任务号）；
+- 历史任务（2026-09-15 及以前）沿用 `LOC-<序号>` 旧号，通过登记册 `remote` / `legacy_id` 字段与远端号双向可查；切换前由 CNB 签发的 `cnb#N` 保留为历史事实，不重编。
 
 成功回报格式：
 

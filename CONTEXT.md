@@ -176,6 +176,10 @@
 - **issue 标签**：状态 `needs-triage` / `needs-info`（有待决断项）/ `ready-for-agent`（规格完整可施工）；
   体量 `sized-s|m|l`；开发模式 `generic-agent`（仓库内纯代码，Node 测试可验证）与
   `dsh-cordis`（必须在 DSH 会话对着插件运行时开发）。
+- **施工信号（FEAT-237）**：`ready-for-agent` = 可施工（批量任务源的筛选条件，定义落档后由
+  `mark-ready` 或调度器门禁后自动补打）；`施工中` = 已被某施工人认领（`cwf-run-init` 开工时写，
+  含 assignee 与认领评论，收口/接手时 `release` 摘除）。批量施工池 = 本地已定义 ∩ 远端 `ready-for-agent`，
+  远端带 `施工中` 的任务不重复施工。
 - **storageDomain（历史方案）**：DSH 宿主持久化域；P2-D3 原定用它存模板与运行记录，
   T2（#17）改双轨方案（宿主目录文件 + save 即生成 skill）后不再依赖。
 
