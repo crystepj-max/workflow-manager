@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 116,
+  "revision": 117,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2131,7 +2131,7 @@
       "env_group": null,
       "env_role": null,
       "deps": [],
-      "branch": null,
+      "branch": "dev-chore-230-r1",
       "worktree": null,
       "runs": [],
       "merge": null,
@@ -2140,7 +2140,7 @@
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-20T07:37:21.181Z",
-      "updated_at": "2026-09-20T10:14:26.825Z",
+      "updated_at": "2026-09-20T13:12:06.096Z",
       "spec_path": "docs/tasks/specs/CHORE-230-ledger-closeout-pr-track/task-spec-V1.md"
     }
   ],
