@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 183,
+  "revision": 184,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -137,9 +137,9 @@
       "remote": "github#283",
       "legacy_id": null,
       "origin_machine": "chrisdem",
-      "origin_agent": null,
+      "origin_agent": "zcode",
       "name": "隔离保证等级观测性：运行档案结构化落盘 + 界面显示（含非独立取证标识）",
-      "slug": "task",
+      "slug": "isolation-observability-ui",
       "source": "会话录入（松哥 2026-09-21：与 #235 待判定 2 的界面显示合并立 backlog 票）",
       "source_ref": "UAT uat-fix233-r2 实证：logical-runs/runs/records 三处均无 isolation_guarantee 字段",
       "baseline": "V1",
@@ -2932,5 +2932,5 @@
       "spec_path": "docs/tasks/specs/CHORE-279-ci-260-m7-benchmark-artifacts/task-spec-V1.md"
     }
   ],
-  "updated_at": "2026-09-21T15:22:35.123Z"
+  "updated_at": "2026-09-21T15:27:01.184Z"
 }
