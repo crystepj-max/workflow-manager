@@ -586,6 +586,8 @@ return {
           const out = JSON.parse(r.stdout)
           if (!out.ok) return { ok: false, detail: '编译器返回错误：' + (out.error || '未知') }
           const result = { ok: true, script: out.script, meta: out.meta || metaFromDsl(dsl) }
+          // FIX-226：角色元信息（身份 / 是否内联 / 内容摘要）随译文带出，由调用方写 Rev1 快照
+          if (Array.isArray(out.roles)) result.roles = out.roles
           const roleDir = await findRoleDir(dsl.id)
           if (roleDir) result.roleDir = roleDir
           return result
@@ -832,12 +834,25 @@ return {
       // Rev 1 冻结：工作流定义 + 角色（编译产物内联角色正文与路由）+ Provider/Model
       // 绑定 + 运行关键配置。修订仅 Provider/Model，不改脚本，故后续修订以 script_ref
       // 指向 Rev 1，不再复制。
+      // FIX-226：角色条目除路径外还记身份与内容摘要（哪几个角色、摘要值、是否内联）——
+      // 快照能回答「本 Run 用的是哪一版角色」；inlined:false 即该角色未冻结（降级为读
+      // 文件路径，见启动时的 role_inline_degraded 控制事件）。
       rec.snapshots.push({
         revision: 1,
         created_at: now,
         active: true,
         workflow: { id: String((info.dsl && info.dsl.id) || info.templateId || ''), name: String((info.dsl && info.dsl.name) || ''), dsl: info.dsl || null },
-        roles: { role_dir: String(info.roleDir || '') },
+        roles: {
+          role_dir: String(info.roleDir || ''),
+          entries: Array.isArray(info.roles) ? info.roles.map((r) => ({
+            id: String((r && r.id) || ''),
+            builtin: !!(r && r.builtin),
+            inlined: !!(r && r.inlined),
+            digest: (r && r.digest) ? String(r.digest) : null,
+            bytes: (r && Number.isFinite(r.bytes)) ? r.bytes : 0,
+            reason: (r && r.inlined ? null : ((r && r.reason) ? String(r.reason) : 'unreadable')),
+          })) : [],
+        },
         script: info.script || null,
         provider_model: providerModel,
         config: info.config || {},
@@ -3197,6 +3212,9 @@ return {
         }
         let logicalRec = null
         let logicalTrigger = 'start'
+        // FIX-226：本次是否新建了逻辑运行（新建才写 Rev1 角色条目并留降级控制事件；
+        // 续跑沿用既有快照，不重复留痕）。
+        let createdRoles = null
         // #74：BLOCKED（探针失败）恢复 = 同一逻辑运行修改 Provider/Model → 新 Revision
         // → 重新 Probe → Resume；不是新启，也不是崩溃残留派生。
         let probeResume = false
@@ -3248,8 +3266,10 @@ return {
               dsl: v.sanitized,
               script: c.script,
               roleDir: args.roleDir || c.roleDir || '',
+              roles: c.roles,
               config: logicalRunConfig(),
             })
+            createdRoles = c.roles
           }
         } else {
           const latest = latestLogicalRunForTask(logicalTaskId)
@@ -3278,8 +3298,22 @@ return {
               dsl: v.sanitized,
               script: c.script,
               roleDir: args.roleDir || c.roleDir || '',
+              roles: c.roles,
               config: logicalRunConfig(),
               derivedFrom: latest ? latest.logical_run_id : null,
+            })
+            createdRoles = c.roles
+          }
+        }
+        // FIX-226（§6.3/§9.4）：新建逻辑运行时如存在未内联的角色（角色文件读不到或编译产物
+        // 超尺寸闸门被拒绝内联），留一条控制事件——降级必须可见，不得静默假装已冻结。
+        // 只在新建时留痕，续跑沿用 Rev1 快照已有条目，不重复记事件。
+        if (createdRoles) {
+          const degraded = createdRoles.filter((r) => r && r.inlined === false)
+          if (degraded.length) {
+            controlEvent(logicalRec, 'role_inline_degraded', {
+              roles: degraded.map((r) => ({ id: String(r.id || ''), reason: String(r.reason || 'unreadable') })),
+              detail: '以下角色未能在编译期内联，本 Run 对这些角色仍走读文件路径（未冻结）：' + degraded.map((r) => r.id).join('、'),
             })
           }
         }

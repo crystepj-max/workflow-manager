@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { readFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -333,7 +334,7 @@ test('S5 内置角色正文编译期内联：ROLE_DEFS 注入 + roleRef 优先�
   assert.ok(script.includes('const ROLE_DEFS = '), '编译脚本应注入 ROLE_DEFS')
   assert.ok(script.includes(JSON.stringify(devContent)), '内置角色 dev 正文应内联进 ROLE_DEFS（临时编译自包含，不依赖 dsh/roles 存在）')
   assert.ok(script.includes("typeof ROLE_DEFS === 'undefined' ? undefined : ROLE_DEFS[name]"), 'roleRef 应优先读内联定义；stale 产物缺 ROLE_DEFS 声明时 typeof 三元守卫显式回退 undefined（评论 3900312838）')
-  assert.ok(script.includes('【角色定义】（内置角色，编译期内联'), '内联分支应有明确标识')
+  assert.ok(script.includes("BUILTIN_ROLE_IDS.indexOf(name) >= 0 ? '内置角色，编译期内联，与打包快照同源'"), '内联分支应有明确标识（内置身份）')
   // 注入覆盖：测试/宿主可显式传 builtinRoleDefs（不依赖磁盘角色源）
   const { script: s2 } = compileBlueprint(bp, { builtinRoleIds: ['dev'], builtinRoleDefs: { dev: '内联测试正文\n' } })
   assert.ok(s2.includes(JSON.stringify('内联测试正文\n')), 'opts.builtinRoleDefs 可注入覆盖磁盘读取')
@@ -364,6 +365,75 @@ test('S6 内联仅限蓝图引用内置角色：最小图产物 < 128KB 体积�
   const { script: s12 } = compileBlueprint(twelve)
   const resp12 = JSON.stringify({ ok: true, script: s12, meta: {} })
   assert.ok(Buffer.byteLength(resp12, 'utf8') < 1024 * 1024, '12 角色全用图的 JSON 响应 < 编译路径 1MB 捕获上限（host.js runNode maxBytes）')
+})
+
+// ── FIX-226（决策 3=A）：自定义角色正文编译期内联 —— 冻结单位是内容，不是路径 ──
+// 现状证据：自定义角色（builtin:false，当前即 dispatcher）此前只把路径写进快照、运行期
+// 「工作区优先」读文件；等待期间改 dsh/roles/<id>.md 会让已存在的运行中途换规矩。
+// 本切片把「本图实际引用到的全部角色」一并编译期内联，并在产物超尺寸闸门时显式降级。
+function makeRolesDir({ dispatcher }) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'vwf-roles-'))
+  const src = path.join(here, '..', '..', 'dsh', 'roles')
+  for (const f of readdirSync(src)) {
+    if (f.endsWith('.md')) writeFileSync(path.join(dir, f), readFileSync(path.join(src, f), 'utf8'), 'utf8')
+  }
+  if (dispatcher !== undefined) writeFileSync(path.join(dir, 'dispatcher.md'), dispatcher, 'utf8')
+  return dir
+}
+
+test('S7 自定义角色正文编译期内联：dispatcher（builtin:false）随图内联，等待期间改文件不影响已编译产物', () => {
+  const original = readFileSync(path.join(here, '..', '..', 'dsh', 'roles', 'dispatcher.md'), 'utf8')
+  const dir = makeRolesDir({ dispatcher: original })
+  try {
+    const { script, roles } = compileBlueprint(bp, { rolesDir: dir })
+    assert.ok(script.includes(JSON.stringify(original)), '自定义角色 dispatcher 正文应内联进 ROLE_DEFS')
+    const disp = roles.find((r) => r.id === 'dispatcher')
+    assert.ok(disp, '角色元信息应含 dispatcher')
+    assert.equal(disp.builtin, false, 'dispatcher 身份仍为自定义（身份切分不变）')
+    assert.equal(disp.inlined, true, 'dispatcher 应已内联')
+    assert.equal(disp.bytes, Buffer.byteLength(original, 'utf8'), '字节数为内联正文的实况字节')
+    assert.equal(disp.digest, createHash('sha256').update(original, 'utf8').digest('hex'), '摘要与内联正文同源')
+    // 等待期间改写角色文件：已编译产物不受影响（冻结），再编译则读到新内容（AC-03）
+    writeFileSync(path.join(dir, 'dispatcher.md'), original + '\n【已改版】\n', 'utf8')
+    assert.ok(script.includes(JSON.stringify(original)), '已编译产物仍持原正文（冻结）')
+    assert.ok(!script.includes('【已改版】'), '已编译产物不含改写后的内容')
+    const { script: fresh, roles: freshRoles } = compileBlueprint(bp, { rolesDir: dir })
+    assert.ok(fresh.includes('【已改版】'), '重新编译读到改写后的角色正文（新运行不受影响）')
+    assert.notEqual(freshRoles.find((r) => r.id === 'dispatcher').digest, disp.digest, '新编译的角色摘要随内容变化')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('S8 内联尺寸闸门：产物超限即拒绝内联自定义角色并显式降级（inlined:false + reason），不静默截断', () => {
+  const original = readFileSync(path.join(here, '..', '..', 'dsh', 'roles', 'dispatcher.md'), 'utf8')
+  const dir = makeRolesDir({})
+  try {
+    // 闸门压到极小值以稳定命中「超尺寸」分支（真实默认 960KB，见 INLINE_ROLE_DEFS_OUTPUT_LIMIT_BYTES）
+    const { script, roles } = compileBlueprint(bp, { rolesDir: dir, inlineOutputLimitBytes: 1024 })
+    const disp = roles.find((r) => r.id === 'dispatcher')
+    assert.equal(disp.inlined, false, '超尺寸闸门命中：自定义角色不内联')
+    assert.equal(disp.reason, 'over_size_gate', '降级原因如实标注为超尺寸闸门')
+    assert.equal(disp.digest, null, '未内联则无内容摘要（不得编造）')
+    assert.ok(!script.includes(JSON.stringify(original)), '降级后脚本不含自定义角色正文')
+    // 降级只作用于自定义角色：内置角色内联维持既有行为
+    for (const id of ['dev', 'review', 'test', 'accept', 'closeout']) {
+      assert.equal(roles.find((r) => r.id === id).inlined, true, '内置角色 ' + id + ' 内联不受闸门影响')
+    }
+    assert.ok(script.includes('dsh/roles/') || script.includes("'dsh/roles/'"), '降级后仍保留读文件路径兜底')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('S9 角色文件读不到：该角色记 inlined:false/unreadable，其余角色正常内联，编译不失败', () => {
+  const dir = makeRolesDir({})
+  try {
+    rmSync(path.join(dir, 'dispatcher.md'), { force: true })
+    const { script, roles } = compileBlueprint(bp, { rolesDir: dir })
+    const disp = roles.find((r) => r.id === 'dispatcher')
+    assert.equal(disp.inlined, false, '读不到的角色不得标记为已内联')
+    assert.equal(disp.reason, 'unreadable', '降级原因如实标注为文件读不到')
+    assert.equal(disp.digest, null, '无正文则无摘要')
+    assert.ok(script.includes('const ROLE_DEFS = '), '编译仍成功并保留 ROLE_DEFS')
+    assert.ok(roles.find((r) => r.id === 'dev').inlined, '其余角色不受影响')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('S4 内置角色清单：单一事实源为 manifest（dsh/roles/builtin-roles.json），解析失败 loud-fail', () => {
