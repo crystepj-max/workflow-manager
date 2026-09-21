@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 180,
+  "revision": 182,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2883,7 +2883,7 @@
       "source": "会话录入：CHORE-260 施工顺序第 6 步（M7 基准产物治理）",
       "source_ref": "github#260",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "已合并",
       "priority": "P2",
       "env_group": null,
       "env_role": null,
@@ -2891,13 +2891,16 @@
       "branch": "fix/ci-260-m7-benchmark-artifacts",
       "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m7",
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "becc0c98a00212026c04c4c549706fe37fe983eb",
+        "merged_at": "2026-09-21T13:56:56Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T13:56:56.000Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": false,
       "created_at": "2026-09-21T13:43:31.577Z",
-      "updated_at": "2026-09-21T13:52:34.414Z",
+      "updated_at": "2026-09-21T13:58:09.464Z",
       "spec_path": "docs/tasks/specs/CHORE-279-ci-260-m7-benchmark-artifacts/task-spec-V1.md"
     }
   ],
