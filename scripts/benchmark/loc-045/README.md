@@ -10,6 +10,14 @@
 | `PARTIAL` | 部分真实样本或等待人工 |
 | `COMPLETE_RESEARCH` | 满足规格的真实执行与证据要求 |
 
+## 冻结基线的不可变性
+
+`config/freeze-manifest.json` 连同 `results/prepared/`、`reports/` 是 LOC-045 的**基线快照**，冻结于清单中 `frozen_at` / `repo_head` 所示时点。
+
+- 它们**不随 `templates/` 演进回填**：冻结之后发生的模板变更不会反映到这里——这是「冻结」的应有语义，不是缺陷。
+- 要开始新一轮实验，请**显式重新冻结**（`node scripts/benchmark/loc-045/bin/loc-045-freeze.mjs`）；需保留旧基线时先另存副本。
+- **自动化测试不得改写**这些文件：测试路径须把输出指向临时目录（见 `scripts/test/loc-045-benchmark.test.mjs`，经 `configRoot` / `resultsDir` / `reportsDir` 注入）。
+
 ## 命令（仓库根目录）
 
 ```bash

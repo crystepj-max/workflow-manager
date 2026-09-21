@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 177,
+  "revision": 180,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2391,7 +2391,7 @@
       "source": "github-issue",
       "source_ref": "https://github.com/crystepj-max/workflow-manager/issues/226",
       "baseline": "V1",
-      "status": "已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FIX-226",
       "env_role": "独立",
@@ -2399,13 +2399,16 @@
       "branch": null,
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "2be544135839c9e893620b398449fd5a118bc317",
+        "merged_at": "2026-09-21T21:32:17+08:00"
+      },
       "github_sync": "#226",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T13:40:00Z",
-      "updated_at": "2026-09-20T02:23:44.771Z",
+      "updated_at": "2026-09-21T13:47:13.556Z",
       "spec_path": "docs/tasks/specs/FIX-226-custom-role-freeze/task-spec-V1.md"
     },
     {
@@ -2867,6 +2870,35 @@
       "created_at": "2026-09-21T11:01:55.524Z",
       "updated_at": "2026-09-21T11:18:16.630Z",
       "spec_path": "docs/tasks/specs/CHORE-276-ci-260-m6-clock-injection/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-279",
+      "type": "CHORE",
+      "remote": "github#279",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CI 可信度 M7 基准产物：测试隔离写入，冻结记录保持不可变（CHORE-260 子票 6）",
+      "slug": "ci-260-m7-benchmark-artifacts",
+      "source": "会话录入：CHORE-260 施工顺序第 6 步（M7 基准产物治理）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P2",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "fix/ci-260-m7-benchmark-artifacts",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m7",
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-21T13:43:31.577Z",
+      "updated_at": "2026-09-21T13:52:34.414Z",
+      "spec_path": "docs/tasks/specs/CHORE-279-ci-260-m7-benchmark-artifacts/task-spec-V1.md"
     }
   ],
   "updated_at": "2026-09-20T16:10:00.000Z"
