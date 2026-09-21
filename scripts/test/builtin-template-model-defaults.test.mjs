@@ -14,7 +14,9 @@ const PROVIDER = 'deepseek-official';
 // 默认档模型（开发/执行/门禁/收口等非验证节点）
 const DEFAULT_MODEL = 'deepseek-flash';
 // 验证角色模型（承担独立验证或回归职责的节点：收敛审查 / 审核 / 测试 / 回归验证 / 评估）
-const VERIFY_MODEL = 'deepseek-v4-flash';
+// FIX-234：deepseek-v4-flash 已从配置删除（真机 MODEL_NOT_CONFIGURED 实证），
+// 验证角色默认模型改为现存配置 deepseek-v4.1-flash（基线 V1 决策，2026-09-20）。
+const VERIFY_MODEL = 'deepseek-v4.1-flash';
 
 // LOC-019 需求基线 V1 §6 逐模板映射表：四套内置模板默认绑定 DeepSeek 化
 const EXPECTED = {
