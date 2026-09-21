@@ -116,6 +116,41 @@ export function machineCode() {
   return String(os.hostname() || 'local').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'local'
 }
 
+/**
+ * 宿主/agent 自报名字的变量，按可信度排序，值即 agent 名称。
+ * 只读「运行期确实存在」的变量——身份取自环境事实，不取自人工配置，
+ * 避免「配置写了别人的名字」这种伪留痕（与施工认领身份同一口径）。
+ */
+const AGENT_SELF_REPORTED_VARS = ['AI_AGENT_NAME', 'CLIENT_INFO_IDE_TYPE']
+
+/** 兜底：工作树根的身份文件（git 忽略），供不自报名字的 agent 写一次。 */
+export const AGENT_IDENTITY_FILE = '.agent-identity'
+
+/**
+ * 解析当前会话的 agent 名称。三级取值，命中即返回；取不到返回 null，**不猜、不留空默认值**：
+ *   1. 宿主自报变量（`AI_AGENT_NAME` 显式覆盖 → `CLIENT_INFO_IDE_TYPE` 宿主标识）
+ *   2. 通用约定变量（任何 `*_AGENT_NAME`，新 agent 按约定命名即可自动被识别）
+ *   3. 工作树根 `.agent-identity` 文件
+ * 返回 null 的调用方必须显式告警，禁止静默留空（历史 87/88 条记录空的根因）。
+ */
+export function agentName(env = process.env, repo = process.cwd()) {
+  for (const key of AGENT_SELF_REPORTED_VARS) {
+    const v = String(env[key] ?? '').trim()
+    if (v) return v
+  }
+  for (const [key, value] of Object.entries(env)) {
+    if (!/_AGENT_NAME$/.test(key)) continue
+    const v = String(value ?? '').trim()
+    if (v) return v
+  }
+  const file = path.join(repo, AGENT_IDENTITY_FILE)
+  if (fs.existsSync(file)) {
+    const v = fs.readFileSync(file, 'utf-8').trim()
+    if (v) return v
+  }
+  return null
+}
+
 let ghRunner = defaultGhRunner
 function defaultGhRunner(args) {
   return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -194,6 +229,7 @@ export function newRecord({
   type = 'FEAT',
   remote = null,
   legacyId = null,
+  repo = null,
 }) {
   if (!name) throw new Error('任务名称必填（--name）')
   return {
@@ -202,7 +238,7 @@ export function newRecord({
     remote,
     legacy_id: legacyId,
     origin_machine: machineCode(),
-    origin_agent: process.env.AI_AGENT_NAME ?? null,
+    origin_agent: agentName(process.env, repo ?? process.cwd()),
     name,
     slug: slug || slugify(name),
     source,
@@ -400,8 +436,15 @@ export function allocate(repo, { name, slug, source, sourceRef, baseline, type =
       console.error(`[warn] 远端发号失败（${err.message}），已降级为临时号 ${taskId}，联网后请换取正式号`)
     }
   }
-  const record = newRecord({ name, source, sourceRef, baseline, taskId, type: t, remote, slug })
+  const record = newRecord({ name, source, sourceRef, baseline, taskId, type: t, remote, slug, repo })
   if (priority) record.priority = priority
+  if (!record.origin_agent) {
+    console.error(
+      '[warn] 未识别到 agent 身份，本条归属只能记到机器码 ' +
+        `${record.origin_machine}。请让会话自报身份（任一 *_AGENT_NAME 环境变量），` +
+        `或在仓库根写入 ${AGENT_IDENTITY_FILE} 后重跑——静默留空会让并行会话无法区分。`,
+    )
+  }
   registry.tasks.push(record)
   saveRegistry(repo, registry)
   return record

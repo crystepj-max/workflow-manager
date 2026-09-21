@@ -247,6 +247,38 @@ test('releaseIssue：摘「施工中」+ 留结束评论；重复释放幂等', 
   assert.equal(r2.code, 'already-released')
 })
 
+// FIX-245：认领/释放都必须把 --repo 传进身份解析，否则 .agent-identity 兜底会去 cwd 里找，
+// 在「repo ≠ cwd」时静默取不到身份（Bugbot 审查第 1 条）。
+test('claimIssue / releaseIssue：.agent-identity 兜底按 repo 解析，而非 cwd', () => {
+  const repo = tmpRepo()
+  writeRegistry(repo, [rec('FIX-901', 'github#901')])
+  fs.writeFileSync(path.join(repo, '.agent-identity'), 'WorkBuddy\n')
+
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-issues-cwd-'))
+  const prevCwd = process.cwd()
+  const saved = { AI_AGENT_NAME: process.env.AI_AGENT_NAME, CLIENT_INFO_IDE_TYPE: process.env.CLIENT_INFO_IDE_TYPE }
+  delete process.env.AI_AGENT_NAME
+  delete process.env.CLIENT_INFO_IDE_TYPE
+  process.chdir(elsewhere)
+
+  try {
+    const fake = fakeGh()
+    const claim = withGh(fake, () => claimIssue({ repo, taskId: 'FIX-901', runId: 'fix-901-r1', actor: 'tester', dryRun: true }))
+    assert.equal(claim.ok, true)
+    assert.match(claim.worker, /WorkBuddy/, '认领身份须按 repo 解析 .agent-identity')
+
+    withGh(fake, () => claimIssue({ repo, taskId: 'FIX-901', runId: 'fix-901-r1', actor: 'tester' }))
+    withGh(fake, () => releaseIssue({ repo, taskId: 'FIX-901', runId: 'fix-901-r1', actor: 'tester' }))
+    assert.match(fake.issue(901).comments.at(-1).body, /WorkBuddy/, '释放评论的施工人须按 repo 解析 .agent-identity')
+  } finally {
+    process.chdir(prevCwd)
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+})
+
 test('releaseIssue：释放后 ready 标签保留（任务回到可施工）', () => {
   const repo = tmpRepo()
   writeRegistry(repo, [rec('FIX-224', 'github#224')])
