@@ -16,10 +16,10 @@ packages/dsh-visual-workflow/
 │   ├── host.test.mjs      # host 单测（双根加载/校验/编译/撞名/RPC/回退/异源）
 │   ├── client.smoke.mjs   # jsdom 冒烟
 │   ├── static-bundle.test.mjs  # 无 harness 静态 Host / dist apply
-│   └── dist-fresh.test.mjs     # dist 新鲜度 + dsh-tools 版本对齐
+│   └── dist-fresh.test.mjs     # dist 新鲜度 + dsh-tools 声明可移植/同源校验
 ├── verify.sh              # 本地质量闸门（build + 新鲜度 + 版本 + 包测试）
 ├── docs/EDITOR-MIGRATION.md
-└── package.json           # @deepseek-ai/dsh-tools 对齐宿主 DSH v0.1.1-rc.2
+└── package.json           # @deepseek-ai/dsh-tools 对齐宿主发行版（本机同源由开发机软链保证）
 ```
 
 ## 开发模式：动态插件快速迭代
@@ -130,9 +130,11 @@ bash verify.sh                        # Gate1–4：版本对齐 + 构建 + 新�
 
 ## 版本策略（dsh-tools ↔ 宿主）
 
-- 插件 `@deepseek-ai/dsh-tools` **固定 `0.1.1-rc.2`**，与本地/官方最新宿主 **DSH v0.1.1-rc.2** 对齐（npm dist-tag `next`）。
-- 用途仅限静态 bundle 的 `defineTool` 兜底（动态模式走 `harness.defineTool`）。`defineTool` 工厂签名自 rc.7 / rc.8 / 0.1.1-rc.2 保持兼容。
-- Minke 0.2.0 宿主本体仍内嵌 `dsh-tools@0.1.0-rc.8`。插件不再把 rc.7 混入 rc.8/0.1.1 宿主闭包；静态模式用本包自己的 0.1.1-rc.2 副本整形工具对象，再经 `ctx.tools.register` 交给宿主。
+- 插件 `@deepseek-ai/dsh-tools` **声明发行版本号**（当前 `0.1.1-rc.2`），仓库内**不写本机路径**：受管 `file:` 绝对路径只在一台机器上成立，换机 / CI 上会安装成悬空链接、包测试必红（2026-09-20 事故）。
+- **本机同源由开发环境保证，不进仓库文件**：需要与宿主同源的开发机上，把 `node_modules/@deepseek-ai/dsh-tools` 软链（或 `npm link`）到宿主工作区副本 `deepseek-harness/packages/core/tools`。
+- 为什么必须同源：宿主 DSH v0.1.6 起工具调度器以 `Symbol.for('@deepseek-ai/dsh-tools.scheduler')` **全局注册**，而 npm 已发布副本（含 `0.1.6-alpha.2`）仍是实例级 `Symbol(...)`。link 挂载的插件按真实路径解析依赖，旧副本与宿主符号不同源 → `registry[TOOL_RUNTIME_SCHEDULER]` 取不到 → 工具执行崩（`Cannot read properties of undefined (reading 'prepare')`，2026-09-19 wf-explore DeepSeek 测试事故）。profile 回退解析只覆盖安装在 profile 内的插件，帮不到 link 挂载的本插件。
+- 用途仅限静态 bundle 的 `defineTool` 兜底（动态模式走 `harness.defineTool`）。宿主换版本后需回归确认 `defineTool` 工厂签名兼容。`tests/dist-fresh.test.mjs` T4 校验「声明不得含本机路径 + 与发行版对齐」，并在本机已软链到宿主副本时进一步校验调度器符号为全局注册。
+- 待办：宿主发布含全局符号注册的 dsh-tools 版本后，本行同批升到该版本，即可去掉开发机软链步骤。
 - 改 `src/` 后若未 `npm run build`，`npm run check:dist` / `verify.sh` / 包测试会失败，避免再出现 issue-33 的过期 `dist/host-entry.mjs`。
 
 ## 与 pkg-19 的主要差异

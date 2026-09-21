@@ -1,0 +1,22 @@
+{
+  "task_id": "CHORE-279",
+  "run_id": "fix/ci-260-m7-benchmark-artifacts",
+  "task_name": "CI 可信度 M7 基准产物：测试隔离写入，冻结记录保持不可变（CHORE-260 子票 6）",
+  "branch": "fix/ci-260-m7-benchmark-artifacts",
+  "status": "已合并",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "acceptance_state": "no_record",
+  "acceptance_note": "本 Run 未登记 acceptance_package：轻量路线缺前置引用须在验收包内用 evidence_gaps 声明（契约 §8.3），或该任务先于签收动作",
+  "merge": {
+    "commit": "becc0c98a00212026c04c4c549706fe37fe983eb",
+    "merged_at": "2026-09-21T13:56:56Z",
+    "issue": null
+  },
+  "stages": [],
+  "evidence": null,
+  "no_run_evidence": true,
+  "note": "该任务先于 Run 证据链机制落地（无分支与 .agent-runs 记录），本摘要依据登记册与归档规格生成。",
+  "generated_at": "2026-09-21T13:58:36.853Z"
+}
