@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 184,
+  "revision": 188,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2145,7 +2145,7 @@
     {
       "task_id": "CHORE-113",
       "type": "CHORE",
-      "remote": "cnb#113",
+      "remote": "cnb#113 + github#289",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2165,18 +2165,18 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#289",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T12:30:26.872Z",
-      "updated_at": "2026-09-19T13:20:59.713Z",
+      "updated_at": "2026-09-21T15:41:38.851Z",
       "spec_path": "docs/tasks/specs/CHORE-113-issue-75-reconcile-closeout/task-spec-V1.md"
     },
     {
       "task_id": "FEAT-114",
       "type": "FEAT",
-      "remote": "cnb#114",
+      "remote": "cnb#114 + github#290",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2194,12 +2194,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#290",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T12:30:35.922Z",
-      "updated_at": "2026-09-19T13:21:10.090Z",
+      "updated_at": "2026-09-21T15:41:38.854Z",
       "spec_path": "docs/tasks/specs/FEAT-114-editor-completion-mapping-paths/task-spec-V1.md"
     },
     {
@@ -2223,12 +2223,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "not-applicable",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T12:30:44.617Z",
-      "updated_at": "2026-09-19T13:20:59.669Z"
+      "updated_at": "2026-09-21T15:41:38.856Z"
     },
     {
       "task_id": "FEAT-75",
@@ -2503,7 +2503,7 @@
     {
       "task_id": "CHORE-112",
       "type": "CHORE",
-      "remote": "cnb#112",
+      "remote": "cnb#112 + github#288",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2521,12 +2521,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#288",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T10:48:06.793Z",
-      "updated_at": "2026-09-19T10:48:06.793Z"
+      "updated_at": "2026-09-21T15:41:38.842Z"
     },
     {
       "task_id": "FIX-233",
