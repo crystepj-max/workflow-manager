@@ -118,7 +118,7 @@ if (testPackages.length === 0) {
       runInPkg(pkg.scripts.test, pkg.dir);
       pass('包测试全绿：' + pkg.name);
     } catch (e) {
-      fail('包测试失败（' + pkg.name + '）：' + String(e.stdout || e.message).split('\n').slice(-4).join('\n'));
+      fail(e.stdout ? summarizeTestFailure(e.stdout, '包测试失败（' + pkg.name + '）') : '包测试失败（' + pkg.name + '）：' + e.message);
     }
   }
 }
