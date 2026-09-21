@@ -10,6 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 「批次前对账（CHORE-73）」以 baseRef=main 读主干合并事实（collectMergeFacts）。
+          # 默认 fetch-depth: 1 的浅克隆下 main/origin/main 均不存在，对账必抛异常
+          # （fatal: ambiguous argument 'main'），M4 机械验收因此失败。
+          fetch-depth: 0
+      - name: 确保 main 引用可用（PR 场景 checkout 的是 merge ref，本地无 main）
+        run: git rev-parse --verify --quiet main || git fetch --no-tags origin main:refs/heads/main
       - uses: actions/setup-node@v4
         with:
           node-version: 24
