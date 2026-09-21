@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 171,
+  "revision": 173,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2835,6 +2835,35 @@
       "created_at": "2026-09-21T06:25:14.782Z",
       "updated_at": "2026-09-21T06:38:01.959Z",
       "spec_path": "docs/tasks/specs/CHORE-273-ci-260-m4-acceptance-script/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-276",
+      "type": "CHORE",
+      "remote": "github#276",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CI 可信度 M6 挂钟依赖：断言改为业务事实 + 阈值可注入（CHORE-260 子票 5）",
+      "slug": "ci-260-m6-clock-injection",
+      "source": "会话录入：CHORE-260 施工顺序第 5 步（M6 挂钟确定性化）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P2",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "fix/ci-260-m6-clock-injection",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m6",
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-21T11:01:55.524Z",
+      "updated_at": "2026-09-21T11:12:21.866Z",
+      "spec_path": "docs/tasks/specs/CHORE-276-ci-260-m6-clock-injection/task-spec-V1.md"
     }
   ],
   "updated_at": "2026-09-20T16:10:00.000Z"

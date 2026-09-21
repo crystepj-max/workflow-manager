@@ -460,6 +460,7 @@ async function main() {
   const children = new Map()       // taskId -> {child, watchdogTimer, killTimer}
   const launched = new Set()       // 已真实拉起（含 init 失败）的任务
   const initFailures = []
+  const watchdogFired = new Set()  // 看门狗触发过的任务：进入输出，供断言「业务事实」而非挂钟（CHORE-260 · M6）
 
   // ----- 会话拉起与监工 -----
 
@@ -487,7 +488,7 @@ async function main() {
         try { entry.child.kill('SIGKILL') } catch { /* 已退出 */ }
       }
     }, 10_000)
-    entry.watchdogFired = true
+    watchdogFired.add(taskId)
     releaseSlot(taskId, {
       to: 'BLOCKED',
       blockedNode: 'session',
@@ -715,6 +716,8 @@ async function main() {
       blocked: state.blocked.map((t) => t.id),
       completed: state.completed.map((t) => t.id),
       excluded: state.excluded,
+      // 看门狗触发事实（业务结果）：据此断言「挂起会话已被终止」，不再依赖挂钟阈值（CHORE-260 · M6）
+      watchdogFired: [...watchdogFired],
       validate: validateOk,
       batchJsonPath, reportPath,
     }, null, 2))
