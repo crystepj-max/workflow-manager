@@ -8,10 +8,11 @@ import { summarizeExperimentStatus } from './metrics.mjs'
 
 const BENCH_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-export function prepareExperiment({ benchRoot = BENCH_ROOT, resultsDir } = {}) {
+export function prepareExperiment({ benchRoot = BENCH_ROOT, resultsDir, configRoot } = {}) {
   const registry = loadTaskRegistry(benchRoot)
   const freeze = computeFreeze({ benchRoot })
-  writeFreezeManifest(benchRoot, freeze)
+  const cfgRoot = configRoot ?? benchRoot
+  writeFreezeManifest(cfgRoot, freeze)
   const outDir = resultsDir ?? join(benchRoot, 'results/prepared')
   mkdirSync(outDir, { recursive: true })
   const trials = listPlannedTrials(registry)
@@ -21,7 +22,7 @@ export function prepareExperiment({ benchRoot = BENCH_ROOT, resultsDir } = {}) {
   }
   return {
     status: 'PREPARED',
-    freeze_manifest: join(benchRoot, 'config/freeze-manifest.json'),
+    freeze_manifest: join(cfgRoot, 'config/freeze-manifest.json'),
     planned_runs: trials.length,
     results_dir: outDir,
     message: '实验准备完成：已生成冻结摘要与 NOT_EXECUTED 占位记录；未执行真实模型调用，不得宣称收益。',

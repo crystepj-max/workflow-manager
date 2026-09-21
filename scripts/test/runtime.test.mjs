@@ -288,7 +288,13 @@ test('T1 模板回归-幸福路径：门禁挂起后通过 → DONE；分流零�
   assert.deepEqual(agentCalls.map((c) => c.label), ['调度', '开发', '测试', '审核', '人工验收'], '分流节点应被折叠，零出场')
   const dispatchPrompt = agentCalls[0].prompt
   assert.ok(dispatchPrompt.includes('【本节点应产出 Formal Artifact】') && dispatchPrompt.includes('dispatch-result.json'), '文件契约注入')
-  assert.ok(dispatchPrompt.includes('【角色定义】') && dispatchPrompt.includes('dsh/roles/dispatcher.md'), '角色台词注入')
+  // FIX-226（决策 3=A）：自定义角色 dispatcher 现在编译期内联正文（不再只给路径），
+  // 等待期间改工作区角色文件不影响本 Run——断言注入的是角色文件正文本身。
+  const dispatcherContent = readFileSync(path.join(tplDir, '..', 'dsh', 'roles', 'dispatcher.md'), 'utf8')
+  assert.ok(dispatcherContent.trim().length > 0, '夹具卫生：dispatcher.md 非空')
+  assert.ok(dispatchPrompt.includes('【角色定义】（自定义角色，编译期内联，运行起始冻结）'), '自定义角色内联分支标识')
+  assert.ok(dispatchPrompt.includes(dispatcherContent), '自定义角色台词注入（编译期内联正文，逐字一致）')
+  assert.ok(!dispatchPrompt.includes('dsh/roles/dispatcher.md'), '已内联的自定义角色不再走读文件路径')
   // 人工通过 → 收口 → DONE
   const r2 = await runTpl({ 收口: { status: 'done', summary: 's' } }, {
     entry: 'accept', approved: true, startRound: 0, history: result.history, feedback: '',

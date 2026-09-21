@@ -4671,6 +4671,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       }
 
       // 快照修订：生效修订与历史修订都保留可查（Provider / Model 变更留下新修订）
+      // FIX-226：角色条目随之呈现——列出本 Run 引用的角色与内容摘要前 8 位，并明确区分
+      // 「已冻结（编译期内联）」与「未冻结（降级读文件）」；旧运行无条目时显示占位，
+      // 不用空白冒充「已冻结」。
+      // 声明为函数声明（与 renderSnapshotsCard 同级）：详情页在更早的渲染路径上就会调用
+      // 这些渲染辅助，const 箭头函数会落入 TDZ（Cannot access before initialization）。
+      function roleEntriesText(s) {
+        const entries = (s && s.roles && Array.isArray(s.roles.entries)) ? s.roles.entries : []
+        if (!entries.length) return t('rdRolesNone')
+        return entries.map((r) => String(r.id) + '@' + String(r.digest || '').slice(0, 8)
+          + (r.inlined ? '' : '（' + t('rdRoleNotInlined') + '）')).join(' · ')
+      }
       function renderSnapshotsCard() {
         const snaps = (lr && lr.snapshots) || []
         return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
@@ -4678,13 +4689,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('div', { style: { padding: '8px 14px 12px' } },
             snaps.length ? h('table', { className: 'vwf-table' },
               h('thead', null, h('tr', null,
-                h('th', null, t('rdColRevision')), h('th', null, t('rdColActive')), h('th', null, t('rdColTime')), h('th', null, t('rdColProviderModel'))
+                h('th', null, t('rdColRevision')), h('th', null, t('rdColActive')), h('th', null, t('rdColTime')), h('th', null, t('rdColProviderModel')), h('th', null, t('rdColRoles'))
               )),
               h('tbody', null, snaps.map((s) => h('tr', { key: 'snap' + s.revision },
                 h('td', null, t('rdVersionShort', { n: s.revision })),
                 h('td', null, s.active ? t('rdSegmentActive') : '—'),
                 h('td', null, fmtAt(s.created_at)),
-                h('td', null, h('div', { className: 'vwf-muted-sm' }, Object.keys(s.provider_model || {}).map((nid) => nid + '=' + String((s.provider_model[nid] || {}).provider || 'default') + '/' + String((s.provider_model[nid] || {}).model || 'default')).join(' · ') || '—'))
+                h('td', null, h('div', { className: 'vwf-muted-sm' }, Object.keys(s.provider_model || {}).map((nid) => nid + '=' + String((s.provider_model[nid] || {}).provider || 'default') + '/' + String((s.provider_model[nid] || {}).model || 'default')).join(' · ') || '—')),
+                h('td', null, h('div', { className: 'vwf-muted-sm' }, roleEntriesText(s)))
               )))
             ) : h('div', { className: 'vwf-muted-sm' }, t('rdNoSnapshots'))
           )

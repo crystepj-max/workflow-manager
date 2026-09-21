@@ -465,19 +465,36 @@ return {
     }
 
     // ── 校验管道：sanitize（DSL 形态归一）→ 逆投影蓝图 → 内核 validateBlueprint ──
-    // JSON tab / wf_run 可能直接传蓝图落盘格式（displayName / bindings.models）：先投影为 DSL
+    // JSON tab / wf_run 可能直接传蓝图落盘格式（displayName）：先投影为 DSL。
+    // FIX-233：蓝图形态判据只认 displayName——「DSL + 顶层 bindings.models」是合法混合形态
+    // （LOC-014 覆盖合成双写、显式部分绑定），不得据此改走蓝图重投影：projectToVwf 按
+    // 蓝图语义重建节点模型，会丢弃未列入 bindings.models 节点的内联 model（真机 UAT 实证）。
+    // 混合形态走 DSL 直传，顶层绑定仅对缺完整内联模型的节点兜底合并（内联权威，双写一致）。
     function ingestToDsl(raw, core) {
       if (!raw || typeof raw !== 'object') return raw
-      const hasBindings = !!(raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object' && Object.keys(raw.bindings.models).length)
-      if (typeof raw.displayName !== 'string' && !hasBindings) {
+      if (typeof raw.displayName !== 'string') {
+        const hasBindings = !!(raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object' && Object.keys(raw.bindings.models).length)
+        let dsl = raw
+        if (hasBindings && Array.isArray(raw.nodes)) {
+          const models = raw.bindings.models
+          dsl = {
+            ...raw,
+            nodes: raw.nodes.map((n) => {
+              if (!n || typeof n !== 'object') return n
+              if (n.model && n.model.provider && n.model.model) return n
+              const b = models[n.id]
+              return (b && b.provider && b.model) ? { ...n, model: { provider: b.provider, model: b.model } } : n
+            }),
+          }
+        }
         // DSL 形态直传：异源档位旧布尔经内核口径归一为三态字符串（LOC-021），
         // 避免 sanitized/落盘残留 true/false 与「蓝图单一事实源=三态字符串」漂移。
-        if (raw.heteroCheck === true) return { ...raw, heteroCheck: 'weak' }
-        if (raw.heteroCheck === false) return { ...raw, heteroCheck: 'off' }
-        return raw
+        if (dsl.heteroCheck === true) return { ...dsl, heteroCheck: 'weak' }
+        if (dsl.heteroCheck === false) return { ...dsl, heteroCheck: 'off' }
+        return dsl
       }
       if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return raw
-      return core.projectToVwf({ ...raw, displayName: typeof raw.displayName === 'string' ? raw.displayName : (raw.name || raw.id || '') })
+      return core.projectToVwf({ ...raw, displayName: raw.displayName })
     }
     // 保存前清洗：entry 依拓扑归一、failure 边剔除 when、maxRounds 取整
     function sanitizeDsl(dsl, core) {
@@ -569,6 +586,8 @@ return {
           const out = JSON.parse(r.stdout)
           if (!out.ok) return { ok: false, detail: '编译器返回错误：' + (out.error || '未知') }
           const result = { ok: true, script: out.script, meta: out.meta || metaFromDsl(dsl) }
+          // FIX-226：角色元信息（身份 / 是否内联 / 内容摘要）随译文带出，由调用方写 Rev1 快照
+          if (Array.isArray(out.roles)) result.roles = out.roles
           const roleDir = await findRoleDir(dsl.id)
           if (roleDir) result.roleDir = roleDir
           return result
@@ -815,12 +834,25 @@ return {
       // Rev 1 冻结：工作流定义 + 角色（编译产物内联角色正文与路由）+ Provider/Model
       // 绑定 + 运行关键配置。修订仅 Provider/Model，不改脚本，故后续修订以 script_ref
       // 指向 Rev 1，不再复制。
+      // FIX-226：角色条目除路径外还记身份与内容摘要（哪几个角色、摘要值、是否内联）——
+      // 快照能回答「本 Run 用的是哪一版角色」；inlined:false 即该角色未冻结（降级为读
+      // 文件路径，见启动时的 role_inline_degraded 控制事件）。
       rec.snapshots.push({
         revision: 1,
         created_at: now,
         active: true,
         workflow: { id: String((info.dsl && info.dsl.id) || info.templateId || ''), name: String((info.dsl && info.dsl.name) || ''), dsl: info.dsl || null },
-        roles: { role_dir: String(info.roleDir || '') },
+        roles: {
+          role_dir: String(info.roleDir || ''),
+          entries: Array.isArray(info.roles) ? info.roles.map((r) => ({
+            id: String((r && r.id) || ''),
+            builtin: !!(r && r.builtin),
+            inlined: !!(r && r.inlined),
+            digest: (r && r.digest) ? String(r.digest) : null,
+            bytes: (r && Number.isFinite(r.bytes)) ? r.bytes : 0,
+            reason: (r && r.inlined ? null : ((r && r.reason) ? String(r.reason) : 'unreadable')),
+          })) : [],
+        },
         script: info.script || null,
         provider_model: providerModel,
         config: info.config || {},
@@ -2666,7 +2698,10 @@ return {
     //（闸门按 mismatch 拒绝，不当 legacy 放行）。
     //  - verifyBranch 节点强制加发 proof；dependencies 来自 resolved_inputs（LOC-034），
     //    不再从 Store 全量推导。段内 [vwf-attempt] 的 ri 由 attempt-ledger 写入
-    //    logicalRec.resolved_inputs_map；段末扫描回退时用 legacy 规则补上游节点引用。
+    //    logicalRec.resolved_inputs_map；段末扫描回退时按上游节点补引用，并如实标
+    //    host_bound（宿主回填，非节点声明）。
+    //  - 回填项只给 producer：同批内上游 node_result 先于 proof 落库，Store 侧据此钉到
+    //    其正式 Revision。不得自造 tmp-exec 引用——摘要对不上会让整批 commit 中止。
     function resolvedInputsFor(logicalRec, nodeId, results, isProof, newKeys) {
       const riMap = logicalRec.resolved_inputs_map || {}
       if (riMap[nodeId]) return riMap[nodeId]
@@ -2676,7 +2711,6 @@ return {
       const items = upstream.filter((k) => results[k] != null).map((k) => ({
         binding: 'from_' + k,
         producer: String(k),
-        version_ref: 'tmp-exec:1:00000000',
       }))
       const sync = logicalRec.last_gate_sync
       if (sync && sync.record_id && sync.record_revision) {
@@ -2686,7 +2720,7 @@ return {
           version_ref: 'record:' + sync.record_id + '@' + sync.record_revision,
         })
       }
-      return { mode: 'legacy', items }
+      return { mode: 'host_bound', items }
     }
     async function nodeRecordEntries(logicalRec, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
       const logicalRunId = logicalRec.logical_run_id
@@ -3178,6 +3212,9 @@ return {
         }
         let logicalRec = null
         let logicalTrigger = 'start'
+        // FIX-226：本次是否新建了逻辑运行（新建才写 Rev1 角色条目并留降级控制事件；
+        // 续跑沿用既有快照，不重复留痕）。
+        let createdRoles = null
         // #74：BLOCKED（探针失败）恢复 = 同一逻辑运行修改 Provider/Model → 新 Revision
         // → 重新 Probe → Resume；不是新启，也不是崩溃残留派生。
         let probeResume = false
@@ -3229,8 +3266,10 @@ return {
               dsl: v.sanitized,
               script: c.script,
               roleDir: args.roleDir || c.roleDir || '',
+              roles: c.roles,
               config: logicalRunConfig(),
             })
+            createdRoles = c.roles
           }
         } else {
           const latest = latestLogicalRunForTask(logicalTaskId)
@@ -3259,8 +3298,22 @@ return {
               dsl: v.sanitized,
               script: c.script,
               roleDir: args.roleDir || c.roleDir || '',
+              roles: c.roles,
               config: logicalRunConfig(),
               derivedFrom: latest ? latest.logical_run_id : null,
+            })
+            createdRoles = c.roles
+          }
+        }
+        // FIX-226（§6.3/§9.4）：新建逻辑运行时如存在未内联的角色（角色文件读不到或编译产物
+        // 超尺寸闸门被拒绝内联），留一条控制事件——降级必须可见，不得静默假装已冻结。
+        // 只在新建时留痕，续跑沿用 Rev1 快照已有条目，不重复记事件。
+        if (createdRoles) {
+          const degraded = createdRoles.filter((r) => r && r.inlined === false)
+          if (degraded.length) {
+            controlEvent(logicalRec, 'role_inline_degraded', {
+              roles: degraded.map((r) => ({ id: String(r.id || ''), reason: String(r.reason || 'unreadable') })),
+              detail: '以下角色未能在编译期内联，本 Run 对这些角色仍走读文件路径（未冻结）：' + degraded.map((r) => r.id).join('、'),
             })
           }
         }

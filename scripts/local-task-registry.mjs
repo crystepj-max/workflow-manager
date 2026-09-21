@@ -8,6 +8,7 @@
  * CLI:
  *   node scripts/local-task-registry.mjs allocate --name <任务名称> [--slug <x>] [--source <来源>] [--source-ref <x>] [--repo <path>]
  *   node scripts/local-task-registry.mjs set --task LOC-001 [--status <状态>] [--baseline V1] [--branch <b>] [--worktree <p>] [--merge-commit <sha>] [--github-sync <x>] [--repo <path>]
+ *   node scripts/local-task-registry.mjs mark-ready --task FIX-224 [--repo <path>]   # 打 ready-for-agent（远端可施工信号）
  *   node scripts/local-task-registry.mjs board [--repo <path>]
  *   node scripts/local-task-registry.mjs list [--github-sync pending] [--repo <path>]
  *   node scripts/local-task-registry.mjs show --task LOC-001 [--repo <path>]
@@ -22,7 +23,7 @@ import os from 'node:os'
 export const TASK_ID_PREFIX = 'LOC-'
 export const ID_PATTERN = /^LOC-(\d{3,})$/
 
-// 新编号（2026-09-16 起）：<类型>-<远端 issue 号>，号由 CNB 服务端分配，本机不自己算。
+// 新编号（2026-09-16 起）：<类型>-<远端 issue 号>，号由 GitHub 服务端分配，本机不自己算。
 // FEAT 需求迭代 / FIX 缺陷修复 / CHORE 维护性（文档、脚本、口径收敛、测试补齐）
 export const TASK_TYPES = ['FEAT', 'FIX', 'CHORE']
 export const TYPE_LABELS = { FEAT: '需求迭代', FIX: '缺陷修复', CHORE: '维护性' }
@@ -66,17 +67,49 @@ export function slugify(name, fallback = 'task') {
   return s || fallback
 }
 
-// —— 远端发号（CNB）——
-// 任务编号由 CNB 建 issue 时服务端分配，本机不再自己算号，从根上消除双机/多会话撞号。
-// 仓库 slug 从 git remote 的 cnb 远端解析，不写死。
-export function resolveRemoteSlug(repo) {
+// —— 远端发号（GitHub 主源）——
+// 任务编号由 GitHub 建 issue 时服务端分配，本机不再自己算号，从根上消除双机/多会话撞号。
+// 主源仓库 slug 按「URL 主机是 github.com」从 git remote 里识别，不写死远端名：
+// 本仓库的主源远端叫 origin，另有 cnb（灾备镜像）与 mirror（本地镜像）两个非主源远端。
+const GITHUB_TYPE_LABEL = { FEAT: 'enhancement', FIX: 'bug', CHORE: 'chore' }
+
+export function remoteUrls(repo) {
   try {
-    const url = execFileSync('git', ['-C', repo, 'remote', 'get-url', 'cnb'], { encoding: 'utf8' }).trim()
-    const m = /^[a-z]+:\/\/[^/]+\/(.+?)(?:\.git)?$/i.exec(url)
-    return m ? m[1] : null
+    const out = execFileSync('git', ['-C', repo, 'remote', '-v'], { encoding: 'utf8' })
+    const map = {}
+    for (const line of out.split('\n')) {
+      const m = /^(\S+)\s+(\S+)\s+\(fetch\)$/.exec(line.trim())
+      if (m && !(m[1] in map)) map[m[1]] = m[2]
+    }
+    return map
   } catch {
-    return null
+    return {}
   }
+}
+
+/** GitHub 仓库 URL → `owner/repo`；非 GitHub 地址返回 null。 */
+export function githubSlugOf(url) {
+  const s = String(url || '').trim()
+  const m =
+    /^(?:https?:\/\/|ssh:\/\/)(?:[^@]+@)?github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/i.exec(s) ||
+    /^[^@\s]+@github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/i.exec(s)
+  return m ? m[1] : null
+}
+
+/** 主源 GitHub 远端；无 GitHub 远端时返回 null（CNB 是灾备镜像，不参与发号）。 */
+export function resolveGitHubRemote(repo) {
+  const candidates = Object.entries(remoteUrls(repo))
+    .map(([name, url]) => ({ name, slug: githubSlugOf(url) }))
+    .filter((x) => x.slug)
+  if (candidates.length === 0) return null
+  // fork 布局下可能同时有多个 GitHub 远端：优先约定俗成的主源名，保证跨机器结果稳定
+  return candidates.find((x) => x.name === 'origin') || candidates.find((x) => x.name === 'github') || candidates[0]
+}
+
+// 兼容既有调用名：返回发号远端（GitHub 主源）的仓库 slug，取不到返回 null。
+export function resolveRemoteSlug(repo) {
+  const target = resolveGitHubRemote(repo)
+  return target ? target.slug : null
 }
 
 export function machineCode() {
@@ -84,9 +117,56 @@ export function machineCode() {
 }
 
 /**
- * 在 CNB 建 issue 并取得服务端分配的编号。
+ * 宿主/agent 自报名字的变量，按可信度排序，值即 agent 名称。
+ * 只读「运行期确实存在」的变量——身份取自环境事实，不取自人工配置，
+ * 避免「配置写了别人的名字」这种伪留痕（与施工认领身份同一口径）。
+ */
+const AGENT_SELF_REPORTED_VARS = ['AI_AGENT_NAME', 'CLIENT_INFO_IDE_TYPE']
+
+/** 兜底：工作树根的身份文件（git 忽略），供不自报名字的 agent 写一次。 */
+export const AGENT_IDENTITY_FILE = '.agent-identity'
+
+/**
+ * 解析当前会话的 agent 名称。三级取值，命中即返回；取不到返回 null，**不猜、不留空默认值**：
+ *   1. 宿主自报变量（`AI_AGENT_NAME` 显式覆盖 → `CLIENT_INFO_IDE_TYPE` 宿主标识）
+ *   2. 通用约定变量（任何 `*_AGENT_NAME`，新 agent 按约定命名即可自动被识别）
+ *   3. 工作树根 `.agent-identity` 文件
+ * 返回 null 的调用方必须显式告警，禁止静默留空（历史 87/88 条记录空的根因）。
+ */
+export function agentName(env = process.env, repo = process.cwd()) {
+  for (const key of AGENT_SELF_REPORTED_VARS) {
+    const v = String(env[key] ?? '').trim()
+    if (v) return v
+  }
+  for (const [key, value] of Object.entries(env)) {
+    if (!/_AGENT_NAME$/.test(key)) continue
+    const v = String(value ?? '').trim()
+    if (v) return v
+  }
+  const file = path.join(repo, AGENT_IDENTITY_FILE)
+  if (fs.existsSync(file)) {
+    const v = fs.readFileSync(file, 'utf-8').trim()
+    if (v) return v
+  }
+  return null
+}
+
+let ghRunner = defaultGhRunner
+function defaultGhRunner(args) {
+  return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+}
+
+/** 注入 gh 执行器（测试替身，不触网）；与 delivery-closeout-host 的 setCnbRunner 同形态。 */
+export function setGhRunner(fn) {
+  ghRunner = fn || defaultGhRunner
+}
+
+/**
+ * 在 GitHub 主源建 issue 并取得服务端分配的编号。
+ * 输出是 issue URL（形如 https://github.com/<owner>/<repo>/issues/<N>），从尾段取号；
+ * `gh issue create` 不支持 --json，故不依赖结构化输出。
  * @returns {number} issue 编号
- * @throws 远端不可达或建 issue 失败时抛错，由调用方降级为临时号
+ * @throws 无 GitHub 远端、`gh` 未登录或建 issue 失败时抛错，由调用方降级为临时号
  */
 export function remoteAllocate({
   type = 'FEAT',
@@ -95,19 +175,16 @@ export function remoteAllocate({
   priority = null,
   repo = process.cwd(),
 } = {}) {
-  const slug = resolveRemoteSlug(repo)
-  if (!slug) throw new Error('未找到 cnb 远端，无法向远端申请编号')
-  const args = [
-    'issues', 'create-issue',
-    '--repo', slug,
-    '--title', name,
-    '--labels', String(type).toLowerCase(),
-    '--body', body,
-    '--verbose',
-  ]
-  if (priority) args.push('--priority', priority)
-  const out = execFileSync('cnb', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
-  const m = /"number"\s*:\s*"?(\d+)"?/.exec(out)
+  const target = resolveGitHubRemote(repo)
+  if (!target) throw new Error('未找到 GitHub 主源远端，无法向远端申请编号（禁止回落 CNB 发号）')
+  const args = ['issue', 'create', '--repo', target.slug, '--title', String(name ?? '')]
+  const label = GITHUB_TYPE_LABEL[String(type).toUpperCase()]
+  if (label) args.push('--label', label)
+  if (body) args.push('--body', body)
+  // GitHub 无优先级参数：priority 只记在登记册，不映射到远端
+  const out = String(ghRunner(args) ?? '').trim()
+  const last = out.split('\n').filter(Boolean).pop() || ''
+  const m = /\/issues\/(\d+)\/?$/.exec(last)
   if (!m) throw new Error('远端未返回 issue 编号')
   return Number(m[1])
 }
@@ -152,6 +229,7 @@ export function newRecord({
   type = 'FEAT',
   remote = null,
   legacyId = null,
+  repo = null,
 }) {
   if (!name) throw new Error('任务名称必填（--name）')
   return {
@@ -160,7 +238,7 @@ export function newRecord({
     remote,
     legacy_id: legacyId,
     origin_machine: machineCode(),
-    origin_agent: process.env.AI_AGENT_NAME ?? null,
+    origin_agent: agentName(process.env, repo ?? process.cwd()),
     name,
     slug: slug || slugify(name),
     source,
@@ -322,8 +400,9 @@ function issueBody({ name, source, sourceRef, baseline }) {
 }
 
 /**
- * 分配任务编号：默认向 CNB 申请（服务端发号，双机/多会话不会撞号）；
+ * 分配任务编号：默认向 GitHub 主源申请（服务端发号，双机/多会话不会撞号）；
  * 远端不可达或显式 --offline 时降级为临时号，remote 记为 pending，联网后须换取正式号。
+ * 禁止回落 CNB 发号：CNB 已是灾备镜像，不再签发任务号。
  */
 export function allocate(repo, { name, slug, source, sourceRef, baseline, type = 'FEAT', priority = null, offline = false }) {
   const t = String(type).toUpperCase()
@@ -336,10 +415,10 @@ export function allocate(repo, { name, slug, source, sourceRef, baseline, type =
     taskId = tmpId(registry.tasks)
     remote = 'pending'
   } else if (!remoteSlug) {
-    // 未配置 cnb 远端（如临时目录、测试仓）：沿用旧的本地序号，并明确标注无远端锚点。
+    // 未配置 GitHub 主源远端（如临时目录、测试仓）：沿用旧的本地序号，并明确标注无远端锚点。
     taskId = formatId(nextSeq(registry.tasks))
     remote = 'none'
-    console.error(`[warn] 未配置 cnb 远端，已用本地序号 ${taskId}；该号无远端锚点，双机并行可能撞号`)
+    console.error(`[warn] 未配置 GitHub 主源远端，已用本地序号 ${taskId}；该号无远端锚点，双机并行可能撞号`)
   } else {
     try {
       const number = remoteAllocate({
@@ -350,15 +429,22 @@ export function allocate(repo, { name, slug, source, sourceRef, baseline, type =
         repo,
       })
       taskId = `${t}-${number}`
-      remote = `cnb#${number}`
+      remote = `github#${number}`
     } catch (err) {
       taskId = tmpId(registry.tasks)
       remote = 'pending'
       console.error(`[warn] 远端发号失败（${err.message}），已降级为临时号 ${taskId}，联网后请换取正式号`)
     }
   }
-  const record = newRecord({ name, source, sourceRef, baseline, taskId, type: t, remote, slug })
+  const record = newRecord({ name, source, sourceRef, baseline, taskId, type: t, remote, slug, repo })
   if (priority) record.priority = priority
+  if (!record.origin_agent) {
+    console.error(
+      '[warn] 未识别到 agent 身份，本条归属只能记到机器码 ' +
+        `${record.origin_machine}。请让会话自报身份（任一 *_AGENT_NAME 环境变量），` +
+        `或在仓库根写入 ${AGENT_IDENTITY_FILE} 后重跑——静默留空会让并行会话无法区分。`,
+    )
+  }
   registry.tasks.push(record)
   saveRegistry(repo, registry)
   return record
@@ -382,13 +468,15 @@ export function writeBoard(repo) {
 }
 
 // —— CLI ——
-function main(argv) {
+async function main(argv) {
   const cmd = argv[0]
   const get = (f) => {
     const i = argv.indexOf(f)
     return i >= 0 ? argv[i + 1] : undefined
   }
   const repo = path.resolve(get('--repo') || process.cwd())
+  // 函数作用域：mark-ready / set / show 都按 --task 取任务标识
+  const taskId = get('--task')
 
   if (cmd === 'allocate') {
     const name = get('--name')
@@ -415,7 +503,6 @@ function main(argv) {
   }
 
   if (cmd === 'set') {
-    const taskId = get('--task')
     if (!taskId) {
       console.error(
         '用法: set --task LOC-001 [--status <状态>] [--baseline V1] [--branch <b>] [--merge-commit <sha>] [--github-sync <x>]\n' +
@@ -447,6 +534,26 @@ function main(argv) {
     return
   }
 
+  if (cmd === 'mark-ready') {
+    // 「满足开工条件」的远端信号（FEAT-237）：把 ready-for-agent 打到该任务的 GitHub issue 上。
+    // 定义落档（status=本地已定义/已定义）之后跑一次；幂等，可反复执行。
+    if (!taskId) {
+      console.error('用法: mark-ready --task <任务标识> [--repo <path>] [--dry-run]\n' +
+        '        在任务的 GitHub issue 上打「可施工」标签（ready-for-agent）；无 github#N 锚点时报错并给出换号指引。')
+      process.exit(2)
+    }
+    const { markReady } = await import('./github-issues.mjs')
+    let r
+    try {
+      r = markReady({ repo, taskId, dryRun: argv.includes('--dry-run') })
+    } catch (e) {
+      r = { ok: false, code: 'remote-failed', reason: String((e && e.message) || e).slice(0, 300) }
+    }
+    console.log(JSON.stringify(r, null, 2))
+    if (!r.ok) console.error(`[error] 未打上「可施工」标签（${r.code}）：${r.reason}`)
+    process.exit(r.ok ? 0 : 1)
+  }
+
   if (cmd === 'board') {
     const p = writeBoard(repo)
     console.log(JSON.stringify({ board: p }, null, 2))
@@ -461,7 +568,6 @@ function main(argv) {
   }
 
   if (cmd === 'show') {
-    const taskId = get('--task')
     const rec = loadRegistry(repo).tasks.find((r) => r.task_id === taskId)
     if (!rec) {
       console.error(`任务不存在：${taskId}`)
@@ -471,10 +577,17 @@ function main(argv) {
     return
   }
 
-  console.error('用法: allocate | set | board | list | show')
+  console.error('用法: allocate | set | mark-ready | board | list | show')
   process.exit(2)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2))
+  // 刻意**不用**顶层 await：mark-ready 会 `await import('./github-issues.mjs')`，而后者反向
+  // import 本模块。若本模块的求值被顶层 await 挂起，反向 import 会等一个永不完成的模块求值 →
+  // 死锁（现象：exit 13「unsettled top-level await」、stdout 全空）。
+  // 浮空 promise 让本模块先求值完成，动态 import 即可正常解析。
+  main(process.argv.slice(2)).catch((e) => {
+    console.error(e?.stack || String(e))
+    process.exit(1)
+  })
 }

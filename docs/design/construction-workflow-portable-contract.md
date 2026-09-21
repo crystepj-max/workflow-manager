@@ -1,6 +1,6 @@
 # 建设 · 完整功能开发 Portable Contract
 
-> **版本**：**v0.1.9 + M2 overlay（2026-09-19）** —— 正文七阶段证据底物仍以 v0.1.8 冻结为准（v0.1.9 仅追加 §9.6 收敛记录，不改语义）；**产品可见单任务交付主链以** `docs/design/ai-task-define-delivery/single-task-delivery-m2.md` **为准（定义外置）**。  
+> **版本**：**v0.1.10 + M2 overlay（2026-09-19）** —— 正文七阶段证据底物以 v0.1.10 冻结为准（v0.1.9 为**纯放宽**：验收包存在性分层，`record_version` 仍钉 `v0.1.8`，历史记录全部继续合法；v0.1.10 仅追加 §9.6 收敛记录，不改任何语义）；**产品可见单任务交付主链以** `docs/design/ai-task-define-delivery/single-task-delivery-m2.md` **为准（定义外置）**。  
 > **M2 与 Portable 七阶段差异（接手者必读，唯一权威）**：[`m2-vs-portable-delivery.md`](m2-vs-portable-delivery.md) —— 其他文档须引用该文，不得再写第二套「当前主链」。
 > **来源**：#102（epic，A1–A5 节为本契约的决断依据）、#103（本契约的任务 issue）；M2 对接《AI 任务定义与批量交付 V0.1》
 > **消费者**：DSH Execution Profile（#105）、External Coding Agent Profile（#104，Codex/Cursor）
@@ -115,7 +115,7 @@ requirements -> design -> dev -> review -> test -> human acceptance -> closeout
 ### 3.6 Human Acceptance — 人工验收
 
 - **目的**：人工对交付成果做正式业务签收。这是主链上唯一的固定人工业务节点；**AI 不代签**。
-- **输入**：acceptance package——requirements baseline + design package + dev handoff + review proof + test proof（+ Integration Checkpoint 结果，规则见 §7）。
+- **输入**：acceptance package——本 Run **实际产生**的前置记录引用（requirements baseline、design package、dev handoff、review proof、test proof）+ Integration Checkpoint 结果（规则见 §7、§8.3）。**存在性分层（v0.1.9）**：`dev_handoff` 与 checkpoint 恒必备；其余四类允许缺失，但每一处缺失必须在 `assembled.evidence_gaps` 声明原因并经**人工知情批准**——缺失不得用伪造评审/测试记录填补。
 - **输出**（人工，非 Role）：acceptance decision——`accept` / `reject` / `conditional_pass`（M2 严格三态；`reject` 必须附 feedback 及其根因指向；`conditional_pass` 必须附优化意见 feedback）。
 - **Proof**：acceptance proof——验收人、结论、时间、verified HEAD。
 - **回退根因**：reject 按 feedback 根因路由（默认 **Dev**；暴露设计/需求问题按根因回对应 Stage）。**人工打回不消耗自动回退额度**，但计入 Run 历史。
@@ -314,7 +314,7 @@ Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, 
 | 字段 | 语义 |
 |---|---|
 | `record_type` | 七者之一 |
-| `record_version` | 记录 schema 版本（以文档头版本行为准，见 §9.3） |
+| `record_version` | 记录 schema 版本（以文档头版本行为准，见 §9.3）。**前移规则（v0.1.9 明确）**：仅在会让已入库记录**失效**的破坏性变更时前移；纯放宽（新增可选字段、收窄必填）不前移，以免 `.agent-runs/` 在盘记录与 examples 突然全部校验失败。当前仍为 `v0.1.8` |
 | `created_at` | ISO 8601 时间 |
 | `produced_by` | 产生者 Role/会话标识 |
 | `run` | §7.1 portable run identity 全量内嵌 |
@@ -330,12 +330,13 @@ Controller 的路由动作限定为：`proceed`（前进）/ `rollback(<stage>, 
 - **dev_handoff**：改动摘要 + **整体 `outcome`**（`handoff_ready` / `blocked` / `design_issue` / `requirements_issue`，§6.3 基元）+ 自验清单；`outcome=blocked` 必须附 `blocked_reason`（供 `hold(<reason>)` 路由与恢复判定）；`outcome=handoff_ready` 要求自验清单非空且无 fail/blocked 项（§3.3 完成判定）；`design_issue`/`requirements_issue` 为根因上报，由 Controller 按 §4.1 路由；
 - **review_proof / test_proof**：结论 + 逐项 findings（带根因分类 dev/design/requirements，§4.1）+ `verified_branch`/`verified_head` + `independent_session=true`（不变量 2，review 与 test 同样要求）；条件约束：`request_changes`/`fail` 必须至少含一条 finding；`pass` 必须带非空且逐项全 pass 的验收映射；`blocked` 必须带 `blocked_reason`（供 `hold(<reason>)` 路由与恢复判定，§6.4）；
 - **acceptance_package**：`assembled`（**五类前置记录引用**：baseline / design package / dev handoff / review proof / test proof + checkpoint 结果）+ 人工决策状态机（`awaiting_decision` → `decided`，两态字段互斥；`decided` 必含 `verified_branch`/`verified_head`；`reject` 必含 `feedback` 与 `rejection_root_cause`；AI 不得代签）。`assembled.integration_checkpoint` 为结构化记录：`target_ref` / `target_head_at_check` / `target_advanced` / `proofs_state`（`target_advanced=true` ⇒ `proofs_state=rerun_completed`，§7.3 可机检）。Controller 在**呈递或签收前**必须校验证据链：① 各引用记录 `record_type` 与产生 Stage 正确；② `accept` 与 `conditional_pass` 均要求 review `verdict=approve` 且 test `verdict=pass`；`conditional_pass` 另须 `feedback` 记录优化意见（M2；**禁止**用历史 `user_accepted`/未达标知情接受冒充有条件通过）；③ 全部引用同 Run / 同 workspace lineage（标识字段非空才可比较）；④ 各 Proof `verified_head` 与当前 HEAD 一致（否则按 §7.3 重跑）；⑤ 引用 baseline `status=confirmed` 且无残留 gaps；⑥ 引用 design `outcome=package_ready`（命中过条件门的必须已带 Decision Record 与呈递时的 `decision_request`，且 `chosen` 属于呈递候选集）；⑦ 引用 dev `outcome=handoff_ready`；⑧ test `acceptance_mapping` 与引用 baseline 的验收标准逐条**完整且无重复**对应（防漏测项；`user_accepted` 场景下该项为「完整映射 + 已知差异说明」）；⑨ 引用 review/test 的 `produced_by` 必须与引用 dev handoff 的 `produced_by` 不同（§2 不变量 2 的机器可校验形式，配合各自 `independent_session=true`）——任一不满足即不得呈递或签收；
+  - **存在性分层（v0.1.9，CHORE-110）**：`assembled` 的恒必填只有 `dev_handoff_ref` 与 `integration_checkpoint`；其余四类引用允许缺失，缺失时须⑩ 在 `evidence_gaps` 逐类声明（键集合与「未提供的引用」**精确相等**——漏报＝静默绕过评审，多报＝谎称缺失，均拒），⑪ 每条声明带 `reason` + 人工 `acknowledged_by` + `acknowledged_at`，且 `acknowledged_by` **不得等于本记录 `produced_by`**（§5 禁 AI 代签的机检形式），⑫ `status=decided` 时须带 `decided_by_evidence`（签署的可核对来源，否则 `decided_by` 只是不可核对的断言）。②/⑤/⑥/⑧/⑨ 对**已声明缺失**的一侧转 N/A，对其余仍照常生效；**五类齐全时不得声明缺失**，正式路线口径一字不降。**明文禁止**为通过校验伪造 `review_proof` / `test_proof` 或冒充独立评审——缺证据只有「声明缺失 + 人工知情批准」一条合法出路；
 - **closeout_summary**：交付清单 + 集成结果（PR / merge commit 至少其一）+ **`acceptance_package_ref`（必须指向已 `decided` 的验收包）** + `acceptance_outcome`（`accept` / `conditional_pass`）+ `records_retained=true`。Controller 归档前双重校验：① 引用包 `status=decided`；② 引用包 `decision` ∈ {`accept`, `conditional_pass`} 且与 `acceptance_outcome` 一致——引用包 `decision=reject` 时**不得归档**，按 §3.6 打回根因路由。
 
 ### 8.4 Schema、示例与机械校验
 
 - Schema：`docs/design/construction-workflow/handoff.schema.json`（JSON Schema draft-07）
-- 示例：`docs/design/construction-workflow/examples/01…07-*.json`（七类各一；取材于本契约开发 Run 的真实场景，其中 review/test/acceptance/closeout 为 **schema 演示值**，不代表本 Run 已发生对应的独立审核、测试或人工签收记录）。示例链统一绑定到 **v0.1.1 内容完成点 HEAD（`c8d8625`）**：patch 级修订不前移示例链的 HEAD 绑定（各记录 `record_version` 随 schema 升级，但 `run.current_head`/`verified_head` 保持钉扎），仅 major/minor 语义变更时重新生成示例链
+- 示例：`docs/design/construction-workflow/examples/01…07-*.json`（七类各一；取材于本契约开发 Run 的真实场景，其中 review/test/acceptance/closeout 为 **schema 演示值**，不代表本 Run 已发生对应的独立审核、测试或人工签收记录），另有 `08-acceptance-package-lightweight.json`——验收包**存在性分层**（契约 §3.6/§8.3）的轻量档变体示例，同样为演示值。示例链统一绑定到 **v0.1.1 内容完成点 HEAD（`c8d8625`）**：patch 级修订不前移示例链的 HEAD 绑定（各记录 `record_version` 按 §8.2 前移规则处理——**纯放宽不前移**，破坏性变更才前移；`run.current_head`/`verified_head` 始终钉扎），仅 major/minor 语义变更时重新生成示例链
 - 机械校验（可执行验证）：
 
 ```bash
@@ -393,7 +394,8 @@ Closeout 归档时，七类记录与全部 Proof 必须保留并可按 `run_id` 
 | v0.1.6 | 2026-08-30 | Codex Review 修复（八）：acceptance 证据链第 ⑨ 项（review/test 的 produced_by 必须异于 dev 产生者）、feedback/ blocked_reason 非空白约束、decision options ≥1 且 name 非空、全部字符串列表项拒绝空白项、§9.3 冻结标记改为以文档头为单一事实源 | PR #115 Review |
 | v0.1.7 | 2026-08-30 | Codex Review 修复（九）：design 新增 `decision_request` 待决决策包（question/options/recommendation，§5.3），与已决 `decision` 分离并存——pending 门挂起时人工可见完整候选方案；`integration_checkpoint` 结构化（target_advanced ⇒ proofs_state=rerun_completed 可机检）；§8.2 record_version 行改为引用文档头单一事实源 | PR #115 Review |
 | v0.1.8 | 2026-08-30 | Codex Review 修复（十，收口轮）：checkpoint `target_advanced` 须由 Controller 从实际仓库状态计算（§7.3）、已决 gated package 强制保留 `decision_request` 且 `chosen` 属呈递候选集（§5.3 防换选项）、`tradeoffs` 非空白；**范围外加固类建议登记为遗留事项（另建 issue）** | PR #115 Review |
-| v0.1.9 | 2026-09-19 | 追加 §9.6「#105 Bootstrap shim 收敛记录」：九项 shim 逐项回写正式机制落点与 main 落地证据，`construction-bootstrap` 执行 Profile 随 #82 正式 Built-in（`wf-construction-full-feature`）落地退役。**纯收敛事实回写，不改主链结构、人工门与额度语义**（§9.3 冻结解除条件未触发） | #102 #105 #82 |
+| v0.1.9 | 2026-09-19 | CHORE-110 验收包**存在性分层**（纯放宽，`record_version` 保持 `v0.1.8` 使在盘 453 个记录与 examples 不失效）：`assembled` 恒必填收窄为 `dev_handoff_ref` + `integration_checkpoint`，其余四类引用可缺但须在 `evidence_gaps` 声明并附人工知情批准（§3.6、§8.3 新增 ⑩⑪⑫）；明文禁止伪造评审/测试记录；§8.2 明确 `record_version` 前移规则 | CHORE-110（DT-01 裁定 A·b3） |
+| v0.1.10 | 2026-09-19 | 追加 §9.6「#105 Bootstrap shim 收敛记录」：九项 shim 逐项回写正式机制落点与 main 落地证据，`construction-bootstrap` 执行 Profile 随 #82 正式 Built-in（`wf-construction-full-feature`）落地退役。**纯收敛事实回写，不改主链结构、人工门与额度语义**（§9.3 冻结解除条件未触发） | #102 #105 #82 |
 
 ### 9.4 #103 九条验收清单证据映射
 

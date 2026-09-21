@@ -18,6 +18,9 @@ package-lock.json
 # 会话脚手架与参考副本（不入库）
 .scratch/
 
+# 本机 agent 身份标记（各会话自报/兜底写入，机器相关，不入库）
+.agent-identity
+
 # 生成物（不可手改，改动蓝图后重生成）
 .generated/
 .generated.check/

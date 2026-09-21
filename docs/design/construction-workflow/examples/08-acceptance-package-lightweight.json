@@ -1,0 +1,58 @@
+{
+  "record_type": "acceptance_package",
+  "record_version": "v0.1.8",
+  "created_at": "2026-09-19T06:00:00Z",
+  "produced_by": "dsh:construction-bootstrap",
+  "run": {
+    "run_id": "chore-110-r1",
+    "issue_or_task_identity": "#CHORE-110",
+    "workspace_id": "wt-dev-chore-110-r1",
+    "repository": "crystepj-max/workflow-manager",
+    "base_ref": "main",
+    "base_commit": "5dea84a659e96d6e17a12252c6dad10f7d726af7",
+    "work_branch": "dev-chore-110-r1",
+    "current_head": "5dea84a659e96d6e17a12252c6dad10f7d726af7",
+    "stage": "human_acceptance",
+    "attempt": 1
+  },
+  "payload": {
+    "status": "decided",
+    "assembled": {
+      "requirements_baseline_ref": "examples/01-requirements-baseline.json",
+      "dev_handoff_ref": "examples/03-dev-handoff.json",
+      "evidence_gaps": {
+        "design_package": {
+          "reason": "轻量路线无独立设计节点：施工口径由 CHORE-110 规格 §7 与 DT-01 裁定直接确定",
+          "acknowledged_by": "human:maintainer",
+          "acknowledged_at": "2026-09-19T05:55:00Z",
+          "acknowledgment_ref": "docs/tasks/specs/CHORE-110-acceptance-package-schema/decision-tickets/DT-01-lightweight-acceptance-record.md 裁定结果"
+        },
+        "review_proof": {
+          "reason": "轻量路线未设独立评审会话；不得为凑齐引用伪造评审记录（契约 §8.3）",
+          "acknowledged_by": "human:maintainer",
+          "acknowledged_at": "2026-09-19T05:55:00Z",
+          "acknowledgment_ref": "CHORE-110 验收呈递会话（人工选择方案 A·b3 并批准缺独立评审）"
+        },
+        "test_proof": {
+          "reason": "轻量路线未设独立测试会话，由仓库测试套件代跑",
+          "acknowledged_by": "human:maintainer",
+          "acknowledged_at": "2026-09-19T05:55:00Z",
+          "acknowledgment_ref": "CHORE-110 验收呈递会话"
+        }
+      },
+      "integration_checkpoint": {
+        "target_ref": "main",
+        "target_head_at_check": "5dea84a659e96d6e17a12252c6dad10f7d726af7",
+        "target_advanced": false,
+        "proofs_state": "still_valid",
+        "notes": "轻量档示例：本 Run 无独立 Proof，checkpoint 仍必填以机检 target 是否前进（契约 §7.3）"
+      }
+    },
+    "decision": "accept",
+    "decided_by": "human:maintainer",
+    "decided_at": "2026-09-19T06:05:00Z",
+    "decided_by_evidence": "docs/tasks/CHORE-110-acceptance-package-schema.md 验收记录（人工在会话中作出 accept）",
+    "verified_branch": "dev-chore-110-r1",
+    "verified_head": "5dea84a659e96d6e17a12252c6dad10f7d726af7"
+  }
+}

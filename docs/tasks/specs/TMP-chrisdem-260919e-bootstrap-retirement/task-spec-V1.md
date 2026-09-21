@@ -38,7 +38,7 @@
 - Profile 目录与安装脚本删除；
 - 新增 `docs/runbooks/construction-dsh/runbook.md`（DSH 轨道命令序列，与 `construction-external/` 对称）；
 - 全部命令使用仓库内 `scripts/`，`$CWF_ASSETS` 不再是任何现行文档的依赖；
-- 九项 shim 收敛记录写入 `construction-workflow-portable-contract.md` §9.6，文档头版本行 v0.1.8 → v0.1.9；
+- 九项 shim 收敛记录写入 `construction-workflow-portable-contract.md` §9.6，文档头版本行 → **v0.1.10**（v0.1.9 已被上游 CHORE-110 占用，合并时让号）；
 - 机械验收断言改指新 runbook；同步脚本不再携带该 Profile。
 
 ## 7. 功能范围
@@ -109,7 +109,7 @@
 - **R-1（低）**：断言载体从 skill 改到 runbook，若将来 runbook 更名，M2 机械验收需同步——已在脚本注释里写明退役出处。
 - **R-2（中，用户可感知）**：旧触发词（「建设工作流」「construction」「用建设工作流跑 issue」）不再有任何入口承接。改触发词要动蓝图 `description`，属已发布产物变更并牵动 `release:verify` 与产品验收，本任务未做，留人工决定。
 - **R-3（低）**：安装态脱离本仓时无 `cwf-*.mjs` 兜底（D-2 的已知代价）。
-- **R-4（低）**：契约升 v0.1.9 可能让人误读为语义变更——已在版本行与 §9.6 双处写明"不改语义、未触发冻结解除条件"。
+- **R-4（低）**：契约升 v0.1.10 可能让人误读为语义变更——已在版本行与 §9.6 双处写明"不改语义、未触发冻结解除条件"。
 
 ## 18. 已知限制
 

@@ -8,7 +8,7 @@ import path, { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
-  gatherFacts, planActions, executeCloseout, resolveTargetAdapter, setGitRunner, setCnbRunner,
+  gatherFacts, planActions, executeCloseout, resolveTargetAdapter, setGitRunner, setCnbRunner, setGhRunner,
 } from '../delivery-closeout-host.mjs'
 import { operationsGet } from '../operations-host.mjs'
 
@@ -32,11 +32,12 @@ const BASE = {
 // CHORE-106：cnb 适配器对 close-task 走真实远端执行，测试统一用替身不触网。
 // 真实形态见 delivery-closeout-host.mjs 的 defaultCnbRunner（调用 cnb CLI）。
 const ISSUE_PARAMS = { 'close-task': { remote_repo: 'owner/repo', remote_issue: 42 } }
-setCnbRunner((args) => {
+const cnbStub = (args) => {
   if (args[0] === 'issues' && args[1] === 'get-issue') return { ok: true, stdout: JSON.stringify({ state: 'open' }) }
   if (args[0] === 'issues' && args[1] === 'update-issue') return { ok: true, stdout: '{}' }
   return { ok: false, stderr: 'unexpected cnb call: ' + args.join(' ') }
-})
+}
+setCnbRunner(cnbStub)
 
 test('D1 非 Git 本地交付：required_actions 为空，无 Git 调用，可 DELIVERED（UAT-01 / AC-01）', () => {
   const dir = opsDir()
@@ -137,7 +138,7 @@ test('D3 必要 merge 失败不得 DELIVERED；可选清理失败可交付并列
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('D4 目标 GitHub 报 capability_unavailable 且不调用 CNB（UAT-03 / AC-01 后半）', () => {
+test('D4 目标 GitHub 走 GitHub 适配器：close-task 经 gh 执行且零 CNB 调用（CHORE-111 验收 6）', () => {
   setGitRunner((args) => {
     if (args[0] === 'remote' && args[2] === 'github') return { ok: true, stdout: 'git@github.com:o/r.git' }
     if (args[0] === 'remote' && args[2] === 'cnb') return { ok: true, stdout: 'https://cnb.cool/o/r.git' }
@@ -145,24 +146,114 @@ test('D4 目标 GitHub 报 capability_unavailable 且不调用 CNB（UAT-03 / AC
     return { ok: false }
   })
   const t = resolveTargetAdapter('/repo', 'dev', { delivery_scope: 'git' })
-  assert.equal(t.ok, false)
-  assert.equal(t.code, 'capability_unavailable')
+  assert.equal(t.ok, true, 'GitHub 适配器已接线，不再报 capability_unavailable')
   assert.equal(t.adapter, 'github')
-  const planned = planActions({
-    run_id: 'gh',
-    delivery_scope: 'git',
-    candidate_ref: { workspace_path: '/repo', branch: 'dev' },
+  assert.equal(t.target_ref, 'github/o/r')
+  const ghCalls = []
+  setGhRunner((args) => {
+    ghCalls.push(args.join(' '))
+    if (args[1] === 'view') return { ok: true, stdout: JSON.stringify({ state: 'OPEN' }) }
+    return { ok: true, stdout: 'https://github.com/o/r/issues/42' }
   })
-  assert.equal(planned.action_plan.blocked, true)
-  const result = executeCloseout({
-    run_id: 'gh',
-    delivery_scope: 'git',
-    operations_dir: opsDir(),
-    candidate_ref: { workspace_path: '/repo', branch: 'dev' },
-    authorization_ref: 'auth',
+  setCnbRunner(() => { throw new Error('GitHub 收口不得回落灾备镜像 CNB') })
+  try {
+    const planned = planActions({
+      run_id: 'gh',
+      delivery_scope: 'git',
+      candidate_ref: { workspace_path: '/repo', branch: 'dev' },
+    })
+    assert.notEqual(planned.action_plan.blocked, true, '目标可交付，计划不得 blocked')
+    const dir = opsDir()
+    const result = executeCloseout({
+      run_id: 'gh',
+      delivery_scope: 'git',
+      operations_dir: dir,
+      candidate_ref: { workspace_path: '/repo', head: 'abc123', branch: 'dev' },
+      authorization_ref: 'auth-2026-09-19#1',
+      action_params: { 'close-task': { remote_repo: 'o/r', remote_issue: 42 } },
+      include_cleanup: false,
+    })
+    assert.equal(result.status, 'DELIVERED')
+    assert.equal(result.delivery_status, 'DELIVERED')
+    assert.deepEqual(ghCalls, ['issue view 42 --repo o/r --json state', 'issue close 42 --repo o/r'])
+    rmSync(dir, { recursive: true, force: true })
+  } finally {
+    setCnbRunner(cnbStub)
+    setGhRunner(null)
+  }
+})
+
+test('D4b 机器配置仍指向灾备镜像时按 GitHub 主源解析并留痕（UAT-03 / 验收 6）', () => {
+  setGitRunner((args) => {
+    if (args[0] === 'remote' && args[2] === 'origin') return { ok: true, stdout: 'https://github.com/crystepj-max/workflow-manager.git' }
+    if (args[0] === 'remote' && args[2] === 'cnb') return { ok: true, stdout: 'https://cnb.cool/chris.ai/workflow-manager.git' }
+    if (args[0] === 'config' && args[2] === 'remote.pushDefault') return { ok: true, stdout: 'cnb' }
+    return { ok: false }
   })
-  assert.equal(result.status, 'capability_unavailable')
-  assert.equal(result.delivery_status, 'NOT_DELIVERED')
+  const t = resolveTargetAdapter('/repo', 'dev', { delivery_scope: 'git' })
+  assert.equal(t.adapter, 'github', 'pushDefault=cnb 不得把对外动作发到灾备镜像')
+  assert.equal(t.target_ref, 'github/crystepj-max/workflow-manager')
+  assert.match(t.push_default_conflict, /remote\.pushDefault=cnb/)
+  assert.match(t.push_default_conflict, /人工执行 git config/)
+})
+
+test('D4c GitHub issue 已关闭时只确认，不重复发关闭请求（WR-012 防重）', () => {
+  setGitRunner((args) => {
+    if (args[0] === 'remote' && args[2] === 'origin') return { ok: true, stdout: 'https://github.com/o/r.git' }
+    if (args[0] === 'config') return { ok: false }
+    return { ok: false }
+  })
+  const calls = []
+  setGhRunner((args) => {
+    calls.push(args.join(' '))
+    if (args[1] === 'view') return { ok: true, stdout: JSON.stringify({ state: 'CLOSED' }) }
+    return { ok: true, stdout: '' }
+  })
+  try {
+    const dir = opsDir()
+    const result = executeCloseout({
+      run_id: 'gh-closed',
+      delivery_scope: 'git',
+      operations_dir: dir,
+      candidate_ref: { workspace_path: '/repo', head: 'abc123', branch: 'dev' },
+      authorization_ref: 'auth-1',
+      action_params: { 'close-task': { remote_repo: 'o/r', remote_issue: 42 } },
+      include_cleanup: false,
+    })
+    assert.equal(result.status, 'DELIVERED')
+    assert.deepEqual(calls, ['issue view 42 --repo o/r --json state'], '已关闭的 issue 不再发第二次关闭')
+    rmSync(dir, { recursive: true, force: true })
+  } finally {
+    setGhRunner(null)
+  }
+})
+
+test('D4d GitHub 关闭失败时判 NOT_DELIVERED 并列待人工关闭，不回落 CNB（验收 6/7）', () => {
+  setGitRunner((args) => {
+    if (args[0] === 'remote' && args[2] === 'origin') return { ok: true, stdout: 'https://github.com/o/r.git' }
+    return { ok: false }
+  })
+  setCnbRunner(() => { throw new Error('不得回落 CNB') })
+  setGhRunner(() => ({ ok: false, stderr: 'gh: HTTP 401' }))
+  try {
+    const dir = opsDir()
+    const result = executeCloseout({
+      run_id: 'gh-fail',
+      delivery_scope: 'git',
+      operations_dir: dir,
+      candidate_ref: { workspace_path: '/repo', head: 'abc123', branch: 'dev' },
+      authorization_ref: 'auth-1',
+      action_params: { 'close-task': { remote_repo: 'o/r', remote_issue: 42 } },
+      include_cleanup: false,
+    })
+    assert.equal(result.delivery_status, 'NOT_DELIVERED', '必要动作失败不得判已交付')
+    assert.equal(result.pending_manual_close.length, 1)
+    assert.equal(result.pending_manual_close[0].hint, 'gh issue close 42 --repo o/r')
+    rmSync(dir, { recursive: true, force: true })
+  } finally {
+    setCnbRunner(cnbStub)
+    setGhRunner(null)
+  }
 })
 
 test('D5 候选未改；脏工作区/活跃成员不回收（UAT-04 / AC-04）', () => {

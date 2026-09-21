@@ -2,7 +2,7 @@
 
 > **定位**：本文件只给 **DSH 轨道的操作序列**——按什么顺序敲哪些命令、现场纪律是什么。
 > **产品主链语义权威**：`docs/design/ai-task-define-delivery/single-task-delivery-m2.md`（阶段、返工上限 3、验收严格三态、定义外置）。
-> **证据与记录语义权威**：`docs/design/construction-workflow-portable-contract.md`（含 §8.3 呈递/签收前九项证据链校验、§7.3 Integration Checkpoint）。
+> **证据与记录语义权威**：`docs/design/construction-workflow-portable-contract.md`（含 §8.3 呈递/签收前证据链校验 ①–⑫、§7.3 Integration Checkpoint）。
 > **现场布局权威**：`docs/design/workspace-directory-convention.md` + 本仓实例化说明（worktree 锚定、路径派生、决策六）。
 > **执行 Profile**：正式内置蓝图 `templates/wf-construction-full-feature.json` → 生成 `.generated/wf-construction-full-feature/`，安装态 skill `wf-construction-full-feature`。
 > 本 runbook **不复制**上述语义；冲突时以上述权威为准。
@@ -102,7 +102,7 @@ node scripts/cwf-checkpoint.mjs .agent-runs/<run_id>
 node scripts/cwf-evidence-verify.mjs .agent-runs/<run_id>
 ```
 
-3. 交接包 schema 校验由 `cwf-record` / `formal-records` 写入时自动调用（内核 `scripts/cwf-validate.mjs`，无独立 CLI）。证据链九项校验（§8.3 ①–⑨）**任一不满足即不得呈递或签收**。
+3. 交接包 schema 校验由 `cwf-record` / `formal-records` 写入时自动调用（内核 `scripts/cwf-validate.mjs`，无独立 CLI）。证据链校验（§8.3 ①–⑫，含 CHORE-110 的存在性分层 ⑩–⑫）**任一不满足即不得呈递或签收**。
 4. Issue / 本地任务卡 → **等待验收**；Run → `WAITING_HUMAN`；呈递 UAT 卡与验收包，**AI 不代签**。
    本地轨道同步登记册（合并门禁要求此状态）：
 

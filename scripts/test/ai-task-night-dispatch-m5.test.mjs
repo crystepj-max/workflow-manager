@@ -21,6 +21,8 @@ function buildProject({ taskIds, extraTasks = [] }) {
     fs.mkdirSync(path.join(proj, '.scratch/specs', id), { recursive: true })
     fs.copyFileSync(path.join(m3Fixtures, fx, 'issue-basics.md'), path.join(proj, 'docs/tasks', `${id}-defined.md`))
     fs.copyFileSync(path.join(m3Fixtures, fx, 'task-spec-V1.md'), path.join(proj, '.scratch/specs', id, 'task-spec-V1.md'))
+    // 少了这份，preflight 定义门禁 PREFLIGHT_DEF_CHECK_MISSING 会把候选全部挡在拉起之前
+    fs.copyFileSync(path.join(m3Fixtures, fx, 'definition-check.md'), path.join(proj, '.scratch/specs', id, 'definition-check.md'))
     return {
       task_id: id, name: `测试任务${id}`, status: '已定义', slug: 'defined',
       deps: [], env_group: id, env_role: '独立', priority: null,
@@ -59,10 +61,14 @@ function writeSchedule(proj, overrides = {}) {
   return p
 }
 
+// 子进程硬超时只用于兜底「测试挂死」，不承担时序断言职责；2 核 CI runner 上给足余量，
+// 并允许经环境变量注入（CHORE-260 · M6）。
+const SUBPROCESS_TIMEOUT_MS = Number(process.env.VWF_TEST_TIMEOUT_MS || 120_000)
+
 function runDispatcher(schedulePath, { args = [], env = {} } = {}) {
   return spawnSync(process.execPath, [dispatcher, schedulePath, ...args], {
     encoding: 'utf8',
-    timeout: 60_000,
+    timeout: SUBPROCESS_TIMEOUT_MS,
     env: { ...process.env, ...env },
   })
 }
@@ -126,13 +132,15 @@ test('M5 看门狗：会话挂起超时被终止并记受阻，名额不泄漏',
   const proj = buildProject({ taskIds: ['FIX-A'] })
   const { machinePath, planEnv } = writeMachine(proj, { plan: { 'FIX-A': { hang: true } } })
   const schedulePath = writeSchedule(proj, { machineConfig: machinePath, watchdogMinutes: 0.03 })
+  // 0.03 分钟（≈1.8s）只是「让看门狗尽快触发」的夹具输入，不承载时序断言：会话恒挂，
+  // 看门狗是唯一终止手段，「是否触发」由下面的 watchdogFired 断言覆盖。
 
-  const t0 = Date.now()
   const r = runDispatcher(schedulePath, { args: ['--now'], env: { FAKE_AGENT_PLAN: planEnv } })
-  const elapsed = Date.now() - t0
   const out = readJsonOut(r)
   assert.equal(out.mode, 'real')
-  assert.ok(elapsed < 20_000, `看门狗批次耗时 ${elapsed}ms，疑似未终止挂起会话`)
+  // 断言「看门狗确实触发」这一业务事实，而非「在 N 秒内跑完」——挂钟阈值在 2 核 CI
+  // runner 上会把偶发慢变成假失败，而假超时会让闸门变成误报源（CHORE-260 · M6）。
+  assert.deepEqual(out.watchdogFired, ['FIX-A'], '看门狗须记录触发事实')
   assert.deepEqual(out.blocked, ['FIX-A'])
   const report = fs.readFileSync(out.reportPath, 'utf8')
   assert.match(report, /看门狗超时/)

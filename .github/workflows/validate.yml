@@ -9,10 +9,27 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
+      # 「批次前对账（CHORE-73）」以 baseRef=main 读主干合并事实（registry-reconcile 的
+      # collectMergeFacts 执行 `git log main`）。默认 fetch-depth: 1 的浅克隆下
+      # main/origin/main 均不存在 → 对账抛 `fatal: ambiguous argument 'main'` → 报告落成
+      # 「对账失败（不阻塞批次）」降级文案 → M4 机械验收失败。故此处取完整历史。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # PR 场景 checkout 的是 merge ref，本地无 main 分支引用，仍需补一步。
+      - name: 确保 main 引用可用（对账读主干事实所需）
+        run: git rev-parse --verify --quiet main || git fetch --no-tags origin main:refs/heads/main
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # 收口链用例（local-task-merge 系列）会经产品代码执行真实 `git commit`，
+      # 而产品代码不覆盖子进程 env（local-task-merge.mjs:50），身份只能来自环境。
+      # Linux runner 不像 macOS 会由 username/hostname 自动推导身份，
+      # 缺这条会报 `Author identity unknown`，7 个用例在 CI 上永不通过。
+      - name: 配置 git 提交身份（供收口链用例做真实 commit）
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: install（workspace 提升 packages/* 依赖）
         run: npm install
       - name: generate（生产物供校验与 vwf 加载）

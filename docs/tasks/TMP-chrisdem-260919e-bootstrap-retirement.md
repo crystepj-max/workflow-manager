@@ -22,7 +22,7 @@
 | 定义时间 | 2026-09-19（用户以开工指令 + 两项裁定给出基线） |
 | GitHub 同步 | pending |
 
-未登记进 `docs/tasks/registry.json`、未重写 `docs/tasks/BOARD.md`：发号源正由 CHORE-111 迁移且该票仍「待确认」，规则未生效；且本检出上 `registry.json` / `BOARD.md` 已有其他在途会话的未提交改动，`allocate` 会覆盖他们的工作。正式号换取与看板重写留待发号口径落定后单独处理。
+未登记进 `docs/tasks/registry.json`、未重写 `docs/tasks/BOARD.md`：本任务立卡时 CHORE-111 仍「待确认」，且该检出上 `registry.json` / `BOARD.md` 已有其他在途会话的未提交改动，`allocate` 会覆盖他们的工作。🟡 **合并上游后情况已变**：CHORE-111 于 2026-09-20 收口（`已合并`，`remote=cnb#111 + github#215`），`scripts/local-task-registry.mjs` 的发号源已是 **GitHub 服务端**——正式号换取现在会**在 GitHub 建 issue**（对外可见产物），故仍留人工决定，不自行发号。
 
 ## 摘要（三要素）
 
@@ -56,7 +56,7 @@
 ## 影响与已知遗留（待人工决定是否另立任务）
 
 - 🟡 **触发词损失**：旧 Bootstrap skill 的触发词含「建设工作流」「construction」「用建设工作流跑 issue」「construction-bootstrap」；正式生成 skill 的触发词来自模板 `displayName`「完整功能开发」与模板 id。改触发词要动蓝图 `description`（属已发布产物，牵动 release:verify 与产品验收），本任务未做。
-- 🟡 契约文档头版本行进到 **v0.1.9**（仅追加 §9.6 收敛记录，正文七阶段语义仍按 v0.1.8 冻结，未触发 §9.3 冻结解除条件）。
+- 🟡 契约文档头版本行进到 **v0.1.10**（上游 CHORE-110 已占 v0.1.9，合并时让号并保留两行历史）。仅追加 §9.6 收敛记录，正文七阶段语义不变，未触发 §9.3 冻结解除条件。
 - 🟡 `AGENTS.md` 的 VWF 开发双轨段仍写「独立开发 DSH Home `~/.dsh-workflow-dev`」，与决策六的单实例口径并存——那是插件开发轨的既有表述，不属本任务范围，未顺手清理。
 - 🟡 **连带影响（本任务引入，未自行处理）**：改 `dsh/roles/dev.md` 与 `dsh/roles/closeout.md` 会改到编译进 `.generated/*/script.mjs` 的角色正文，四套内置模板的编译摘要随之变化，`scripts/benchmark/loc-045/config/freeze-manifest.json` 记录的 `template_digests` 因此过期。重新冻结属 LOC-045 基准主人的动作（`npm run benchmark:loc-045:freeze`），不在退役提交里夹带。
 - 🔴 **附带发现（先于本任务存在）**：该 freeze manifest 在本任务动工前就已与仓库不一致——`scripts/generate.mjs` 未被本任务改动，其实算摘要 `5ca5ff4b…` 与 manifest 记录的 `script_digest` `fc0940db…` 不符。另：跑 `node --test scripts/test/*.test.mjs` 会把 52 个 LOC-045 已跟踪产物（`results/prepared/*`、`reports/research-report.*`、freeze manifest）就地重写；本会话已全部 `git checkout --` 还原，未纳入提交。这两件事建议各自另立任务。
@@ -71,3 +71,4 @@
 |---|---|---|
 | 2026-09-19 | 施工中 | 独立开工会话完成承载比对取证，呈递两项去向裁定；用户落定后在 `dev-tmp-chrisdem-260919e-r1` 施工：新建 DSH runbook、契约 §9.6 回写、22 处引用与脚本改写、删除 Profile 目录与安装脚本 |
 | 2026-09-19 | 施工中（修正引用归属） | 人工纠正后补 D-5：`dsh/roles/dev.md:54` 的环境纪律改指回**约定文档决策六**（先前误指新 runbook），`AGENTS.md` 明确区分「口径权威=决策六 / 命令序列=runbook」。回归：generate + 漂移检查 + M2 机械验收 + M2 测试全绿。边界同步收紧：**不自行推远端、不自行建 PR、不关闭 #102**（此前一次推送尝试已被权限闸门拦下，未重试） |
+| 2026-09-19 | 收口：合并上游后校正 | 收口授权到位，`git merge origin/main`（`5dea84a`→`8b2675f`，205 文件）后逐项核对 4 个重叠文件，修掉两处因上游推进而失真的地方：① **契约版本号撞车**——上游 CHORE-110 已用 v0.1.9，本任务让号到 **v0.1.10**，两行历史并存（唯一的冲突文件即此，已解）；② **§8.3 证据链由 9 项扩到 ①–⑫**，新 runbook 两处「九项校验」措辞随之前移。另更正一处事实错误：本仓 review 引擎已切 **Cursor Bugbot**，入口是 PR 评论 `/pr-review next`（Controller 再发 `@cursor review`），此前我按旧 workflow 文本误判为「无 Cursor 接线」。 |

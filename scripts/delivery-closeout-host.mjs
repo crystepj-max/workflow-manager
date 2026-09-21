@@ -5,8 +5,8 @@
 // 阶段二（授权后）：planActions + executeCloseout —— 按动作计划调用 LOC-032
 // execute-or-reconcile；必要动作失败不得 DELIVERED；可选清理失败记 cleanup_pending。
 //
-// V1 适配器：local/no-op（非 Git 纯本地交付）、cnb（沿用仓库 cnb 远端与既有 CLI 封装）。
-// 目标 GitHub 或未知适配器 → capability_unavailable，不回落到 CNB。
+// 适配器：local/no-op（非 Git 纯本地交付）、github（主源，经 `gh` CLI）、cnb（灾备镜像，沿用既有 CLI 封装）。
+// 未知适配器 → capability_unavailable。GitHub 与 CNB 互不回落：主源动作失败绝不改发灾备镜像。
 //
 // 用法：
 //   node scripts/delivery-closeout-host.mjs gather-facts '<json>'
@@ -21,9 +21,9 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { operationsExecute, registerProvider } from './operations-host.mjs'
 import { recycleRun } from './cwf-env-recycle.mjs'
+import { githubSlugOf } from './local-task-registry.mjs'
 
-const KNOWN_ADAPTERS = ['local', 'no-op', 'cnb']
-const UNAVAILABLE_ADAPTERS = ['github']
+const KNOWN_ADAPTERS = ['local', 'no-op', 'cnb', 'github']
 const DEFAULT_GIT_ACTIONS = ['create-review', 'merge', 'close-task']
 const OPTIONAL_CLEANUP = 'cleanup-env'
 
@@ -57,7 +57,7 @@ function git(args, cwd) {
   return gitRunner(args, cwd)
 }
 
-// ── 可注入 CNB 远端执行器（测试替身 / 真实 cnb CLI）──────────────────────────
+// ── 可注入远端执行器（测试替身 / 真实 CLI）───────────────────────────────────
 // CHORE-106：close-task 必须产生真实远端效果。执行器可注入，测试不触网；
 // 真实形态调用 `cnb` CLI，凭据沿用平台既有登录态（与 remote-issue-sync 同通道）。
 let cnbRunner = defaultCnbRunner
@@ -68,6 +68,21 @@ export function setCnbRunner(fn) {
 function defaultCnbRunner(args) {
   try {
     const out = execFileSync('cnb', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+    return { ok: true, stdout: out }
+  } catch (e) {
+    return { ok: false, stderr: String((e && e.stderr) || (e && e.message) || e), code: e && e.status }
+  }
+}
+
+// CHORE-111：GitHub 为主源，close-task 经 `gh` CLI 产生真实远端效果；同样可注入不触网。
+let ghRunner = defaultGhRunner
+export function setGhRunner(fn) {
+  ghRunner = fn || defaultGhRunner
+}
+
+function defaultGhRunner(args) {
+  try {
+    const out = execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
     return { ok: true, stdout: out }
   } catch (e) {
     return { ok: false, stderr: String((e && e.stderr) || (e && e.message) || e), code: e && e.status }
@@ -96,6 +111,19 @@ function cnbIssueState(repo, issue) {
   const state = String((parsed && (parsed.state || (parsed.data && parsed.data.state))) || '').toLowerCase()
   if (state === 'closed') return 'closed'
   if (state === 'open') return 'open'
+  return 'unknown'
+}
+
+// GitHub 侧 issue 状态（WR-012 防重的前提）：closed / open / unknown
+function ghIssueState(repo, issue) {
+  const r = ghRunner(['issue', 'view', String(issue), '--repo', repo, '--json', 'state'])
+  if (!r.ok || !r.stdout) return 'unknown'
+  try {
+    const parsed = JSON.parse(r.stdout)
+    const state = String((parsed && parsed.state) || '').toLowerCase()
+    if (state === 'closed') return 'closed'
+    if (state === 'open') return 'open'
+  } catch { /* 输出不是 JSON：状态不可确认，交由 ops 层 reconcile */ }
   return 'unknown'
 }
 
@@ -192,11 +220,103 @@ function ensureCnbProvider() {
   }
 }
 
+// ── GitHub 适配器（CHORE-111：主源）─────────────────────────────────────────
+// 与 cnb 适配器同形态、并存不覆盖其行为：close-task 走真实 `gh` 调用；
+// create-review / merge 沿用既有约定——真实 Git/PR 动作由调用方在收口之外完成，
+// 这里只登记效果，不代为创建或合并 PR（避免对外动作重复执行）。
+const githubStoreFile = (operationsDir) => requireText(operationsDir, 'operations_dir') + '/provider-github.json'
+
+const githubProvider = (() => {
+  const empty = () => ({ effects: {}, execute_calls_total: 0, reconcile_calls_total: 0, replays: 0, git_calls: 0 })
+  function load(operationsDir) {
+    const file = githubStoreFile(operationsDir)
+    if (!existsSync(file)) return { file, store: empty() }
+    const data = JSON.parse(readFileSync(file, 'utf8'))
+    return { file, store: { ...empty(), ...data, effects: data.effects && typeof data.effects === 'object' ? data.effects : {} } }
+  }
+  function save(file, store) {
+    const tmp = file + '.' + process.pid + '.' + randomUUID().slice(0, 8) + '.tmp'
+    writeFileSync(tmp, JSON.stringify(store, null, 2) + '\n')
+    renameSync(tmp, file)
+  }
+  return {
+    id: 'github',
+    supports_idempotency_key: true,
+    execute(input) {
+      const { operations_dir, logical_action, target, params, idempotency_key } = input || {}
+      mkdirSync(operations_dir, { recursive: true })
+      const { file, store } = load(operations_dir)
+      store.execute_calls_total += 1
+      store.git_calls += 1
+      const existing = store.effects[idempotency_key]
+      if (existing) {
+        store.replays += 1
+        save(file, store)
+        return { status: 'confirmed_success', remote_ref: existing.remote_ref, result: existing.result, replayed: true }
+      }
+      if (params && params.simulate_failure === true) {
+        return { status: 'confirmed_failure', error: params.failure_message || 'github simulated failure' }
+      }
+      if (logical_action === 'close-task') {
+        const located = closeTaskTarget(params)
+        if (!located) {
+          return {
+            status: 'confirmed_failure',
+            error: 'close-task 缺少远端 issue 定位（remote_repo + remote_issue）：无法自动关闭，须人工关闭 GitHub issue',
+          }
+        }
+        const state = ghIssueState(located.repo, located.issue)
+        if (state === 'unknown') {
+          return { status: 'unknown', detail: '无法确认 GitHub issue ' + located.repo + '#' + located.issue + ' 的当前状态' }
+        }
+        // WR-012 防重：已关闭则只确认，不再发一次关闭请求
+        if (state === 'open') {
+          const closed = ghRunner(['issue', 'close', String(located.issue), '--repo', located.repo])
+          if (!closed.ok) {
+            return { status: 'confirmed_failure', error: '关闭 GitHub issue 失败：' + String(closed.stderr || closed.stdout || '').slice(0, 300) }
+          }
+        }
+        const remote_ref = { system: 'github', id: 'github-issue-' + located.issue, version: 1, target: located.repo + '#' + located.issue }
+        const result = { logical_action, target, params: params ?? null, remote_repo: located.repo, remote_issue: located.issue, issue_state: 'closed', prior_state: state }
+        store.effects[idempotency_key] = { logical_action, target, remote_ref, result, created_at: new Date().toISOString() }
+        save(file, store)
+        return { status: 'confirmed_success', remote_ref, result }
+      }
+      const n = Object.keys(store.effects).length + 1
+      const remote_ref = { system: 'github', id: 'github-' + logical_action + '-' + n, version: 1, target }
+      const result = { logical_action, target, params: params ?? null, pushed_head: params?.head || null }
+      store.effects[idempotency_key] = { logical_action, target, remote_ref, result, created_at: new Date().toISOString() }
+      save(file, store)
+      return { status: 'confirmed_success', remote_ref, result }
+    },
+    reconcile(input) {
+      try {
+        const { operations_dir, idempotency_key } = input || {}
+        const { file, store } = load(operations_dir)
+        store.reconcile_calls_total += 1
+        save(file, store)
+        const effect = store.effects[idempotency_key]
+        if (effect) return { status: 'confirmed_success', remote_ref: effect.remote_ref, result: effect.result }
+        return { status: 'confirmed_not_executed', detail: 'github 无此幂等键的效果记录' }
+      } catch (e) {
+        return { status: 'unknown', detail: 'github 效果日志不可读：' + String((e && e.message) || e) }
+      }
+    },
+  }
+})()
+
+let githubRegistered = false
+function ensureGithubProvider() {
+  if (!githubRegistered) {
+    registerProvider('github', githubProvider)
+    githubRegistered = true
+  }
+}
+
 // ── 目标解析：读 remote.pushDefault / 分支上游，不硬编码 origin ───────────────
 export function resolveTargetAdapter(repoPath, workBranch, overrides = {}) {
   if (overrides.target_adapter) {
     const id = String(overrides.target_adapter)
-    if (UNAVAILABLE_ADAPTERS.indexOf(id) >= 0) return { ok: false, code: 'capability_unavailable', adapter: id, reason: '目标适配器 ' + id + ' V1 未接线' }
     if (KNOWN_ADAPTERS.indexOf(id) < 0) return { ok: false, code: 'capability_unavailable', adapter: id, reason: '未知适配器 ' + id }
     return { ok: true, adapter: id, target_ref: overrides.target_ref || id, is_git: id !== 'local' && id !== 'no-op' }
   }
@@ -217,15 +337,23 @@ export function resolveTargetAdapter(repoPath, workBranch, overrides = {}) {
     const url = git(['remote', 'get-url', name], repoPath)
     if (url.ok && url.stdout) remotes[name] = url.stdout
   }
-  if (remoteName === 'github' || (remoteName && remoteName.includes('github'))) {
-    return { ok: false, code: 'capability_unavailable', adapter: 'github', reason: '目标 GitHub 适配器 V1 未接线，不回落 CNB' }
+  // CHORE-111 主源优先：仓库只要配了 GitHub 远端就以 GitHub 为交付目标。机器本地 `remote.pushDefault`
+  // 可能仍写着 cnb（灾备镜像），不得据此把对外动作发到镜像仓库——差异如实记录在 push_default_conflict，
+  // 配置本身属机器状态，改不改由人工决定，本脚本不改 git config。
+  const githubName =
+    ['github', 'origin'].find((name) => githubSlugOf(remotes[name])) ||
+    Object.keys(remotes).find((name) => githubSlugOf(remotes[name]))
+  if (githubName) {
+    const slug = githubSlugOf(remotes[githubName])
+    const resolved = { ok: true, adapter: 'github', target_ref: 'github/' + slug, remote: githubName, is_git: true }
+    if (remoteName && remoteName !== githubName) {
+      resolved.push_default_conflict = 'remote.pushDefault=' + remoteName + '，已按 GitHub 主源解析；如需改配置请人工执行 git config remote.pushDefault ' + githubName
+    }
+    return resolved
   }
   if (remotes.cnb) {
     const slug = remotes.cnb.replace(/\.git$/, '').split('/').slice(-2).join('/')
     return { ok: true, adapter: 'cnb', target_ref: 'cnb/' + slug, remote: 'cnb', is_git: true }
-  }
-  if (remoteName && UNAVAILABLE_ADAPTERS.indexOf(remoteName) >= 0) {
-    return { ok: false, code: 'capability_unavailable', adapter: remoteName, reason: '目标适配器 ' + remoteName + ' V1 未接线' }
   }
   return { ok: true, adapter: 'local', target_ref: remoteName ? remoteName + '/local' : 'local/git-no-remote', is_git: true }
 }
@@ -349,6 +477,7 @@ export function planActions(input) {
 // ── 阶段二：执行收口 ─────────────────────────────────────────────────────────
 export function executeCloseout(input) {
   ensureCnbProvider()
+  ensureGithubProvider()
   const runId = requireText((input || {}).run_id, 'run_id')
   const operations_dir = requireText((input || {}).operations_dir, 'operations_dir')
   mkdirSync(operations_dir, { recursive: true })
@@ -392,24 +521,11 @@ export function executeCloseout(input) {
         message: '必要动作缺少有效授权：已整理交付事实，等待授权后执行',
       }
     }
-    if (plan.target_adapter === 'github' || UNAVAILABLE_ADAPTERS.indexOf(plan.target_adapter) >= 0) {
-      return {
-        ok: true,
-        status: 'capability_unavailable',
-        delivery_report: facts.delivery_report,
-        action_plan: plan,
-        action_results: [],
-        cleanup_pending: [],
-        pending_manual_close: [],
-        git_calls: gitCallLog.length,
-        delivery_status: 'NOT_DELIVERED',
-      }
-    }
     const action_results = []
     // CHORE-106：close-task 未确认成功时，显式落「待人工关闭」，不让缺口静默消失
     const pending_manual_close = []
     let requiredFailed = false
-    const provider = plan.target_adapter === 'cnb' ? 'cnb' : 'local-count'
+    const provider = plan.target_adapter === 'cnb' || plan.target_adapter === 'github' ? plan.target_adapter : 'local-count'
     for (const action of plan.required_actions) {
       if (action === OPTIONAL_CLEANUP) continue
       const scope = authScopeFor(action, plan.target_ref)
@@ -438,7 +554,9 @@ export function executeCloseout(input) {
           remote_issue: located ? located.issue : (execInput.params && execInput.params.remote_issue) || null,
           reason: (result && (result.error || result.detail)) || (result && result.code) || 'close-task 未确认成功',
           hint: located
-            ? 'cnb issues update-issue --repo ' + located.repo + ' --number ' + located.issue + ' --state closed --state-reason completed'
+            ? (plan.target_adapter === 'github'
+                ? 'gh issue close ' + located.issue + ' --repo ' + located.repo
+                : 'cnb issues update-issue --repo ' + located.repo + ' --number ' + located.issue + ' --state closed --state-reason completed')
             : '补 remote_repo/remote_issue 后重跑收口，或人工关闭远端 issue',
         })
       }
