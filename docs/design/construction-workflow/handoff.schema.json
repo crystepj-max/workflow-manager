@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "docs/design/construction-workflow/handoff.schema.json",
   "title": "Construction Workflow Portable Handoff / Evidence Record",
-  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（v0.1.8，#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
+  "description": "建设·完整功能开发 Portable Contract 七类交接/证据包统一 schema（契约 v0.1.9：CHORE-110 验收包存在性分层，纯放宽；record_version 仍钉 v0.1.8 使在盘历史记录与 examples 不失效。#113 + #115 Review 修复；#78 Formal Records 的兼容前身）",
   "type": "object",
   "additionalProperties": false,
   "required": ["record_type", "record_version", "created_at", "produced_by", "run", "payload"],
@@ -148,6 +148,27 @@
       "description": "非空白字符串（proof 绑定等，契约 §7.3）",
       "type": "string",
       "pattern": "\\S"
+    },
+    "evidenceGapEntry": {
+      "description": "一类前置记录缺失的显式声明（CHORE-110 存在性分层；契约 §3.6/§8.3）。禁止用伪造记录替代本声明；acknowledged_by 不得等于验收记录 produced_by（禁 AI 代签，cwf-evidence-verify 机检）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "acknowledged_by", "acknowledged_at"],
+      "properties": {
+        "reason": {
+          "description": "为什么本 Run 没有产生该记录（如：轻量路线未设独立评审节点 / 单人多阶段推进）",
+          "$ref": "#/definitions/nonEmptyText"
+        },
+        "acknowledged_by": {
+          "description": "知情并批准该缺失的人工标识（不是产生记录的 Agent）",
+          "$ref": "#/definitions/nonEmptyText"
+        },
+        "acknowledged_at": { "$ref": "#/definitions/isoDateTime" },
+        "acknowledgment_ref": {
+          "description": "知情批准的可核对来源（收口报告条目 / 会话确认位置）",
+          "$ref": "#/definitions/nonEmptyText"
+        }
+      }
     },
     "requirementsBaselinePayload": {
       "type": "object",
@@ -594,23 +615,39 @@
       "properties": {
         "status": { "enum": ["awaiting_decision", "decided"] },
         "assembled": {
-          "description": "证据汇总：§3.6 定义的五类前置记录引用 + Integration Checkpoint 结果",
+          "description": "证据汇总：本 Run 实际存在的前置记录引用 + Integration Checkpoint 结果。四类前置引用允许缺失，但每个缺失都必须在 evidence_gaps 显式声明并经人工知情批准（CHORE-110 存在性分层；契约 §3.6/§8.3）",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "requirements_baseline_ref",
-            "design_package_ref",
-            "dev_handoff_ref",
-            "review_proof_ref",
-            "test_proof_ref",
-            "integration_checkpoint"
-          ],
+          "required": ["dev_handoff_ref", "integration_checkpoint"],
           "properties": {
-            "requirements_baseline_ref": { "$ref": "#/definitions/nonEmptyText" },
-            "design_package_ref": { "$ref": "#/definitions/nonEmptyText" },
+            "requirements_baseline_ref": {
+              "description": "本 Run 未产生 requirements_baseline 记录时省略，并须在 evidence_gaps.requirements_baseline 声明",
+              "$ref": "#/definitions/nonEmptyText"
+            },
+            "design_package_ref": {
+              "description": "本 Run 未产生 design_package 记录时省略，并须在 evidence_gaps.design_package 声明",
+              "$ref": "#/definitions/nonEmptyText"
+            },
             "dev_handoff_ref": { "$ref": "#/definitions/nonEmptyText" },
-            "review_proof_ref": { "$ref": "#/definitions/nonEmptyText" },
-            "test_proof_ref": { "$ref": "#/definitions/nonEmptyText" },
+            "review_proof_ref": {
+              "description": "本 Run 无独立评审记录时省略，并须在 evidence_gaps.review_proof 声明；禁止为凑齐引用伪造评审记录",
+              "$ref": "#/definitions/nonEmptyText"
+            },
+            "test_proof_ref": {
+              "description": "本 Run 无独立测试记录时省略，并须在 evidence_gaps.test_proof 声明；禁止为凑齐引用伪造测试记录",
+              "$ref": "#/definitions/nonEmptyText"
+            },
+            "evidence_gaps": {
+              "description": "缺失前置记录的显式声明：键集合必须与「未提供的引用」精确相等（多报与漏报均由 cwf-evidence-verify 判失败）",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "requirements_baseline": { "$ref": "#/definitions/evidenceGapEntry" },
+                "design_package": { "$ref": "#/definitions/evidenceGapEntry" },
+                "review_proof": { "$ref": "#/definitions/evidenceGapEntry" },
+                "test_proof": { "$ref": "#/definitions/evidenceGapEntry" }
+              }
+            },
             "integration_checkpoint": {
             "description": "结构化 checkpoint 结果（契约 §7.3）：target 已前进时必须已重跑受影响 Proof",
             "type": "object",
@@ -632,7 +669,35 @@
               "properties": { "proofs_state": { "const": "rerun_completed" } }
             }
           }
-          }
+          },
+          "allOf": [
+            {
+              "description": "存在性分层（CHORE-110）：任一前置引用缺失 ⇒ 必须给出 evidence_gaps 声明",
+              "if": {
+                "not": {
+                  "required": [
+                    "requirements_baseline_ref",
+                    "design_package_ref",
+                    "review_proof_ref",
+                    "test_proof_ref"
+                  ]
+                }
+              },
+              "then": { "required": ["evidence_gaps"] }
+            },
+            {
+              "description": "五类齐全（正式路线）⇒ 不得声明缺失，校验口径一字不降",
+              "if": {
+                "required": [
+                  "requirements_baseline_ref",
+                  "design_package_ref",
+                  "review_proof_ref",
+                  "test_proof_ref"
+                ]
+              },
+              "then": { "not": { "required": ["evidence_gaps"] } }
+            }
+          ]
         },
         "decision": {
           "description": "人工验收严格三态（M2 / 公共契约 §6）：accept=通过、reject=退回、conditional_pass=有条件通过（基线已做对，优化进下一轮定义）。禁止再用 user_accepted 表达有条件通过。",
@@ -640,6 +705,10 @@
         },
         "decided_by": { "$ref": "#/definitions/nonEmptyText" },
         "decided_at": { "$ref": "#/definitions/isoDateTime" },
+        "decided_by_evidence": {
+          "description": "签署的可核对来源（收口报告条目 / 会话确认位置）。带 evidence_gaps 的轻量档且 status=decided 时必须提供——缺失时 decided_by 只是不可核对的断言，等同 AI 代签（契约 §5；由 cwf-evidence-verify 机检）",
+          "$ref": "#/definitions/nonEmptyText"
+        },
         "feedback": { "$ref": "#/definitions/nonEmptyText" },
         "rejection_root_cause": { "$ref": "#/definitions/rootCause" },
         "verified_branch": { "$ref": "#/definitions/nonEmptyText" },
@@ -654,6 +723,7 @@
               { "required": ["decision"] },
               { "required": ["decided_by"] },
               { "required": ["decided_at"] },
+              { "required": ["decided_by_evidence"] },
               { "required": ["feedback"] },
               { "required": ["rejection_root_cause"] },
               { "required": ["verified_head"] }

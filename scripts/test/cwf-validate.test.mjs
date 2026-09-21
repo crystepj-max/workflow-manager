@@ -111,3 +111,74 @@ test('负例探针：user_accepted 已废弃', () => {
   }, 'human_acceptance')
   assert.ok(validateRecord(schema, ua).length > 0)
 })
+
+// —— CHORE-110 存在性分层（契约 §3.6/§8.3；规格 §7.1）——
+
+const gapEntry = { reason: '轻量路线未设独立评审节点', acknowledged_by: 'human:song', acknowledged_at: '2026-08-30T08:00:00Z' }
+const lightAssembled = ({ review_proof: gapEntry, test_proof: gapEntry })
+const withoutProofs = (() => {
+  const a = { ...assembled }
+  delete a.review_proof_ref
+  delete a.test_proof_ref
+  return a
+})()
+
+// 根 oneOf 会把分支内的具体错误压成一句「oneOf 必须恰好匹配 1 个分支」，
+// 要断言到字段级须直接对 payload 定义校验（definitions 随包传入供 $ref 解析）。
+const payloadSchema = { $ref: '#/definitions/acceptancePackagePayload', definitions: schema.definitions }
+const pErrs = (payload) => validateRecord(payloadSchema, payload)
+
+test('分层正例：五类齐全的正式路线记录继续合法（record_version 不前移，历史记录不失效）', () => {
+  assert.equal(schema.properties.record_version.const, 'v0.1.8')
+  assert.deepEqual(validateRecord(schema, rec('acceptance_package', { status: 'awaiting_decision', assembled }, 'human_acceptance')), [])
+})
+
+test('分层正例：轻量档缺 review/test 引用 + evidence_gaps 声明合法', () => {
+  const payload = { status: 'awaiting_decision', assembled: { ...withoutProofs, evidence_gaps: lightAssembled } }
+  assert.deepEqual(validateRecord(schema, rec('acceptance_package', payload, 'human_acceptance')), [])
+})
+
+test('分层负例：缺前置引用但未声明 evidence_gaps → 拒', () => {
+  const errs = pErrs({ status: 'awaiting_decision', assembled: withoutProofs })
+  assert.ok(errs.some(e => e.includes('缺少必需属性 evidence_gaps')), errs.join('; '))
+})
+
+test('分层负例：五类齐全却声明缺失 → 拒（正式路线不得借分层放水）', () => {
+  const errs = validateRecord(schema, rec('acceptance_package', {
+    status: 'awaiting_decision', assembled: { ...assembled, evidence_gaps: lightAssembled },
+  }, 'human_acceptance'))
+  assert.ok(errs.length > 0, '五类齐全时不得带 evidence_gaps')
+})
+
+test('分层负例：缺失声明缺人工知情批准 → 拒', () => {
+  const errs = pErrs({
+    status: 'awaiting_decision',
+    assembled: { ...withoutProofs, evidence_gaps: { review_proof: { reason: '无评审节点' }, test_proof: gapEntry } },
+  })
+  assert.ok(errs.some(e => e.includes('acknowledged_by')), errs.join('; '))
+  assert.ok(errs.some(e => e.includes('acknowledged_at')), errs.join('; '))
+})
+
+test('分层负例：evidence_gaps 出现非法键 → 拒', () => {
+  const errs = pErrs({
+    status: 'awaiting_decision',
+    assembled: { ...withoutProofs, evidence_gaps: { review_proof: gapEntry, test_proof: gapEntry, dev_handoff: gapEntry } },
+  })
+  assert.ok(errs.some(e => e.includes('不允许额外属性 dev_handoff')), errs.join('; '))
+})
+
+test('分层负例：dev_handoff_ref 与 integration_checkpoint 仍必填（不放水到无交接）', () => {
+  const errs = pErrs({
+    status: 'awaiting_decision',
+    assembled: { evidence_gaps: { requirements_baseline: gapEntry, design_package: gapEntry, review_proof: gapEntry, test_proof: gapEntry } },
+  })
+  assert.ok(errs.some(e => e.includes('缺少必需属性 dev_handoff_ref')), errs.join('; '))
+  assert.ok(errs.some(e => e.includes('缺少必需属性 integration_checkpoint')), errs.join('; '))
+})
+
+test('分层负例：awaiting_decision 态不得带 decided_by_evidence', () => {
+  const errs = pErrs({
+    status: 'awaiting_decision', assembled: { ...withoutProofs, evidence_gaps: lightAssembled }, decided_by_evidence: 'x',
+  })
+  assert.ok(errs.length > 0, '未签收态不得预先落签署凭据')
+})

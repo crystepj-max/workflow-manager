@@ -465,19 +465,36 @@ return {
     }
 
     // ── 校验管道：sanitize（DSL 形态归一）→ 逆投影蓝图 → 内核 validateBlueprint ──
-    // JSON tab / wf_run 可能直接传蓝图落盘格式（displayName / bindings.models）：先投影为 DSL
+    // JSON tab / wf_run 可能直接传蓝图落盘格式（displayName）：先投影为 DSL。
+    // FIX-233：蓝图形态判据只认 displayName——「DSL + 顶层 bindings.models」是合法混合形态
+    // （LOC-014 覆盖合成双写、显式部分绑定），不得据此改走蓝图重投影：projectToVwf 按
+    // 蓝图语义重建节点模型，会丢弃未列入 bindings.models 节点的内联 model（真机 UAT 实证）。
+    // 混合形态走 DSL 直传，顶层绑定仅对缺完整内联模型的节点兜底合并（内联权威，双写一致）。
     function ingestToDsl(raw, core) {
       if (!raw || typeof raw !== 'object') return raw
-      const hasBindings = !!(raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object' && Object.keys(raw.bindings.models).length)
-      if (typeof raw.displayName !== 'string' && !hasBindings) {
+      if (typeof raw.displayName !== 'string') {
+        const hasBindings = !!(raw.bindings && raw.bindings.models && typeof raw.bindings.models === 'object' && Object.keys(raw.bindings.models).length)
+        let dsl = raw
+        if (hasBindings && Array.isArray(raw.nodes)) {
+          const models = raw.bindings.models
+          dsl = {
+            ...raw,
+            nodes: raw.nodes.map((n) => {
+              if (!n || typeof n !== 'object') return n
+              if (n.model && n.model.provider && n.model.model) return n
+              const b = models[n.id]
+              return (b && b.provider && b.model) ? { ...n, model: { provider: b.provider, model: b.model } } : n
+            }),
+          }
+        }
         // DSL 形态直传：异源档位旧布尔经内核口径归一为三态字符串（LOC-021），
         // 避免 sanitized/落盘残留 true/false 与「蓝图单一事实源=三态字符串」漂移。
-        if (raw.heteroCheck === true) return { ...raw, heteroCheck: 'weak' }
-        if (raw.heteroCheck === false) return { ...raw, heteroCheck: 'off' }
-        return raw
+        if (dsl.heteroCheck === true) return { ...dsl, heteroCheck: 'weak' }
+        if (dsl.heteroCheck === false) return { ...dsl, heteroCheck: 'off' }
+        return dsl
       }
       if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return raw
-      return core.projectToVwf({ ...raw, displayName: typeof raw.displayName === 'string' ? raw.displayName : (raw.name || raw.id || '') })
+      return core.projectToVwf({ ...raw, displayName: raw.displayName })
     }
     // 保存前清洗：entry 依拓扑归一、failure 边剔除 when、maxRounds 取整
     function sanitizeDsl(dsl, core) {
@@ -2666,7 +2683,10 @@ return {
     //（闸门按 mismatch 拒绝，不当 legacy 放行）。
     //  - verifyBranch 节点强制加发 proof；dependencies 来自 resolved_inputs（LOC-034），
     //    不再从 Store 全量推导。段内 [vwf-attempt] 的 ri 由 attempt-ledger 写入
-    //    logicalRec.resolved_inputs_map；段末扫描回退时用 legacy 规则补上游节点引用。
+    //    logicalRec.resolved_inputs_map；段末扫描回退时按上游节点补引用，并如实标
+    //    host_bound（宿主回填，非节点声明）。
+    //  - 回填项只给 producer：同批内上游 node_result 先于 proof 落库，Store 侧据此钉到
+    //    其正式 Revision。不得自造 tmp-exec 引用——摘要对不上会让整批 commit 中止。
     function resolvedInputsFor(logicalRec, nodeId, results, isProof, newKeys) {
       const riMap = logicalRec.resolved_inputs_map || {}
       if (riMap[nodeId]) return riMap[nodeId]
@@ -2676,7 +2696,6 @@ return {
       const items = upstream.filter((k) => results[k] != null).map((k) => ({
         binding: 'from_' + k,
         producer: String(k),
-        version_ref: 'tmp-exec:1:00000000',
       }))
       const sync = logicalRec.last_gate_sync
       if (sync && sync.record_id && sync.record_revision) {
@@ -2686,7 +2705,7 @@ return {
           version_ref: 'record:' + sync.record_id + '@' + sync.record_revision,
         })
       }
-      return { mode: 'legacy', items }
+      return { mode: 'host_bound', items }
     }
     async function nodeRecordEntries(logicalRec, dsl, results, newKeys, segNo, ws, snap, controlEvent) {
       const logicalRunId = logicalRec.logical_run_id

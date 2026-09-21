@@ -14,6 +14,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateRecord, deepEqual } from './cwf-validate.mjs'
 import { parseBudget } from './cwf-run-init.mjs'
+import { generateEvidenceSummary } from './workspace-evidence-summary.mjs'
 import { mainCheckout, worktreePathFor } from './workspace-paths.mjs'
 
 const RECORD_TYPES = [
@@ -203,6 +204,30 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
   writeFileSync(indexPath, JSON.stringify(index, null, 2) + '\n')
   saveRun(runDir, run)
   console.log(`${out} valid（stage=${run.stage} attempt=${run.attempt}）`)
+
+  // 签收即刷新永久层摘要（CHORE-110）：摘要在收口时生成，若签收发生在其后，
+  // 归档摘要会永远停在 awaiting_decision/null——而 .agent-runs/ 按 7 天保留期清理，
+  // 摘要一过期，真实的签署人与时间就永久取不回来了（CHORE-36 实测）。
+  if (recordType === 'acceptance_package' && record.payload?.status === 'decided') {
+    refreshArchivedSummary(runDir, run)
+  }
+}
+
+function refreshArchivedSummary(runDir, run) {
+  const taskId = String(run.issue_or_task_identity || '').replace(/^#/, '').trim()
+  if (!taskId) return
+  const main = (() => {
+    try { return mainCheckout(repoRoot(runDir)) } catch { return null }
+  })()
+  if (!main) return
+  const summaryPath = join(main, 'docs/tasks/archive', taskId, 'evidence-summary.json')
+  if (!existsSync(summaryPath)) return // 尚未收口归档：合并时由 local-task-merge 生成，无需在此提前造
+  try {
+    generateEvidenceSummary({ root: main, taskId, runId: run.run_id })
+    console.log(`已刷新归档摘要：docs/tasks/archive/${taskId}/evidence-summary.json（签收人已落值）`)
+  } catch (e) {
+    console.error(`⚠️ 归档摘要刷新失败（验收记录已写入，但永久层仍为旧快照，须手工重跑 workspace-evidence-summary.mjs ${taskId}）：${e.message}`)
+  }
 }
 
 // 交付工作区解析（P2「产物锚定主检出」的配套口径，loc-014-r1 实测补齐）：

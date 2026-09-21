@@ -75,11 +75,17 @@ function checkOk(result, id) {
   return c ? c.ok : null
 }
 
-test('正例：完整合法证据链全部九项通过', () => {
+test('正例：完整合法证据链全部十二项通过', () => {
   const result = verifyEvidenceChain(makeRunDir(), { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } })
   assert.equal(result.ok, true, JSON.stringify(result.checks, null, 1))
-  // 契约九项 + ⑩ 时间序 + ⑪ conditional_pass 磁盘复核
-  assert.equal(result.checks.length, 11)
+  // 原九项 + CHORE-110 的 ⑩ 配对 / ⑪ 知情批准 / ⑫ 签署凭据 + FIX-220 的 ⑬ 时间序 / ⑭ conditional_pass 磁盘复核
+  assert.equal(result.checks.length, 14)
+  assert.deepEqual(result.checks.map(c => c.id),
+    ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫', '⑬', '⑭'])
+  // 五类齐全属正式路线：不得声明缺失，⑩/⑪/⑫ 明确落 N/A 而非静默通过
+  assert.equal(result.checks.find(c => c.id === '⑩').detail, '五类引用齐全，不得声明缺失')
+  assert.equal(result.checks.find(c => c.id === '⑪').detail, '无缺失声明')
+  assert.equal(result.checks.find(c => c.id === '⑫').detail, 'N/A（无缺失声明或尚未签收）')
 })
 
 test('① record_type 与 Stage 映射错配被拒', () => {
@@ -241,18 +247,18 @@ const decidedWith = (extra) => (rs) => {
   Object.assign(p, { status: 'decided', decision: 'conditional_pass', decided_by: 'human', decided_at: '2026-09-01T00:00:00Z', verified_branch: BRANCH, verified_head: HEAD, ...extra })
 }
 
-test('⑪ conditional_pass 缺 feedback（绕过 cwf-record 直接落盘）被拒', () => {
+test('⑭ conditional_pass 缺 feedback（绕过 cwf-record 直接落盘）被拒', () => {
   const r = verifyEvidenceChain(makeRunDir(decidedWith({})), { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } })
-  assert.equal(checkOk(r, '⑪'), false)
+  assert.equal(checkOk(r, '⑭'), false)
   assert.equal(r.ok, false)
 })
 
-test('⑪ conditional_pass 带 feedback 放行；accept 不要求 feedback', () => {
+test('⑭ conditional_pass 带 feedback 放行；accept 不要求 feedback', () => {
   const withFb = verifyEvidenceChain(makeRunDir(decidedWith({ feedback: '下一轮补批量清除' })), { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } })
-  assert.equal(checkOk(withFb, '⑪'), true)
+  assert.equal(checkOk(withFb, '⑭'), true)
   assert.equal(withFb.ok, true, JSON.stringify(withFb.checks, null, 1))
   const plainAccept = verifyEvidenceChain(makeRunDir(decidedWith({ decision: 'accept' })), { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } })
-  assert.equal(checkOk(plainAccept, '⑪'), true)
+  assert.equal(checkOk(plainAccept, '⑭'), true)
 })
 
 test('⑥ 已决 design 的 decision.question 与呈递问题不一致被拒（防事后换问题）', () => {
@@ -268,47 +274,148 @@ test('⑥ 已决 design 的 decision.question 与呈递问题不一致被拒（�
   assert.match(r.checks.find(c => c.id === '⑥').detail, /question/)
 })
 
-// ── FIX-220 ⑩：签收时刻不得早于所验提交（D-1/D-2/D-4）─────────────────────
+// ── FIX-220 ⑬：签收时刻不得早于所验提交（D-1/D-2/D-4）─────────────────────
 const L = { head: HEAD, branch: BRANCH, targetHead: HEAD }
 const decidedOn = (at) => (rs) => {
   const p = rs['acceptance_package.a1.json'].payload
   Object.assign(p, { status: 'decided', decision: 'accept', decided_by: 'human', decided_at: at, feedback: 'x', verified_branch: BRANCH, verified_head: HEAD })
 }
 
-test('⑩-b 签收早于所验提交 → 判失败，detail 给出倒挂分钟数与两个时间戳', () => {
+test('⑬-b 签收早于所验提交 → 判失败，detail 给出倒挂分钟数与两个时间戳', () => {
   const r = verifyEvidenceChain(makeRunDir(decidedOn('2026-09-10T09:30:00Z')), { live: { ...L, commitDate: '2026-09-10T14:18:32Z' } })
-  assert.equal(checkOk(r, '⑩'), false)
-  assert.match(r.checks.find(c => c.id === '⑩').detail, /倒挂 288 分钟|倒挂 289 分钟/)
+  assert.equal(checkOk(r, '⑬'), false)
+  assert.match(r.checks.find(c => c.id === '⑬').detail, /倒挂 288 分钟|倒挂 289 分钟/)
   assert.equal(r.ok, false)
 })
 
-test('⑩-b 提交早于签收 → 放行（零容差只在真倒挂时生效）', () => {
+test('⑬-b 提交早于签收 → 放行（零容差只在真倒挂时生效）', () => {
   const r = verifyEvidenceChain(makeRunDir(decidedOn('2026-09-10T09:30:00Z')), { live: { ...L, commitDate: '2026-09-10T08:00:00Z' } })
-  assert.equal(checkOk(r, '⑩'), true)
+  assert.equal(checkOk(r, '⑬'), true)
   assert.equal(r.ok, true, JSON.stringify(r.checks, null, 1))
 })
 
-test('⑩-b 分钟级倒挂同样失败（D-2 不设阈值）', () => {
+test('⑬-b 分钟级倒挂同样失败（D-2 不设阈值）', () => {
   const r = verifyEvidenceChain(makeRunDir(decidedOn('2026-09-08T00:42:24Z')), { live: { ...L, commitDate: '2026-09-08T00:55:19Z' } })
-  assert.equal(checkOk(r, '⑩'), false)
+  assert.equal(checkOk(r, '⑬'), false)
 })
 
-test('⑩-b 提交本地不可达 → 显式报「未评估」但不阻断（D-4）', () => {
+test('⑬-b 提交本地不可达 → 显式报「未评估」但不阻断（D-4）', () => {
   const r = verifyEvidenceChain(makeRunDir(decidedOn('2026-09-10T09:30:00Z')))
-  const c = r.checks.find(c => c.id === '⑩')
+  const c = r.checks.find(c => c.id === '⑬')
   assert.equal(c.ok, true)
   assert.match(c.detail, /未评估/)
 })
 
-test('⑩-a 记录 created_at 早于所载签收 → 只出提示，不改整链结论', () => {
+test('⑬-a 记录 created_at 早于所载签收 → 只出提示，不改整链结论', () => {
   // 信封 created_at 固定 2026-08-31T00:00:00Z；把签收放在其后
   const r = verifyEvidenceChain(makeRunDir(decidedOn('2026-09-01T00:00:00Z')), { live: { ...L, commitDate: '2026-08-30T00:00:00Z' } })
-  assert.equal(checkOk(r, '⑩'), true)
-  assert.match(r.checks.find(c => c.id === '⑩').detail, /提示.*created_at/)
+  assert.equal(checkOk(r, '⑬'), true)
+  assert.match(r.checks.find(c => c.id === '⑬').detail, /提示.*created_at/)
 })
 
-test('⑩ awaiting_decision 无 decided_at → 未评估不失败', () => {
+test('⑬ awaiting_decision 无 decided_at → 未评估不失败', () => {
   const r = verifyEvidenceChain(makeRunDir(), { live: L })
-  assert.equal(checkOk(r, '⑩'), true)
+  assert.equal(checkOk(r, '⑬'), true)
   assert.equal(r.ok, true, JSON.stringify(r.checks, null, 1))
+})
+// —— CHORE-110 存在性分层：轻量档的引擎行为（规格 §7.2）——
+
+const GAP_HUMAN = (who = 'human:song') => ({
+  review_proof: { reason: '轻量路线未设独立评审节点', acknowledged_by: who, acknowledged_at: '2026-08-31T00:00:00Z' },
+  test_proof: { reason: '轻量路线未设独立测试节点', acknowledged_by: who, acknowledged_at: '2026-08-31T00:00:00Z' },
+})
+
+// 把夹具改成轻量档：撤掉 review/test 引用（夹具里对应记录仍在盘上，用于验「谎称缺失」），
+// 默认落到已签收态并带可核对签署来源。
+function toLight(rs, { gaps = GAP_HUMAN(), signed = true, evidence = 'closeout.md §验收' } = {}) {
+  const p = rs['acceptance_package.a1.json'].payload
+  delete p.assembled.review_proof_ref
+  delete p.assembled.test_proof_ref
+  if (gaps) p.assembled.evidence_gaps = gaps
+  if (signed) {
+    p.status = 'decided'
+    p.decision = 'accept'
+    p.decided_by = 'human:song'
+    p.decided_at = '2026-08-31T01:00:00Z'
+    p.verified_branch = BRANCH
+    p.verified_head = HEAD
+    if (evidence) p.decided_by_evidence = evidence
+  }
+}
+
+const LIVE = { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } }
+
+test('轻量档正例：缺 review/test 且已人工知情批准 → 全项通过', () => {
+  const r = verifyEvidenceChain(makeRunDir(rs => toLight(rs)), LIVE)
+  assert.equal(r.ok, true, JSON.stringify(r.checks, null, 1))
+  assert.match(checkOk(r, '②') && r.checks.find(c => c.id === '②').detail, /N\/A/)
+  assert.equal(r.checks.find(c => c.id === '⑨').detail, 'N/A：无独立评审/测试记录（须见 ⑪ 知情批准）')
+  assert.equal(r.checks.find(c => c.id === '⑩').detail, '已声明缺失 review_proof/test_proof')
+  assert.equal(checkOk(r, '⑪'), true)
+  assert.equal(checkOk(r, '⑫'), true)
+})
+
+test('轻量档负例：撤掉引用却未声明 evidence_gaps → ⑩ 拒（不许静默绕过评审）', () => {
+  const r = verifyEvidenceChain(makeRunDir(rs => toLight(rs, { gaps: null })), LIVE)
+  assert.equal(checkOk(r, '⑩'), false)
+  assert.match(r.checks.find(c => c.id === '⑩').detail, /未声明缺失=review_proof\/test_proof/)
+  assert.equal(r.ok, false)
+})
+
+test('轻量档负例：引用其实在却声明缺失（谎称没评审）→ ⑩ 拒', () => {
+  const r = verifyEvidenceChain(makeRunDir(rs => {
+    toLight(rs)
+    rs['acceptance_package.a1.json'].payload.assembled.review_proof_ref = 'review_proof.a1.json'
+  }), LIVE)
+  assert.equal(checkOk(r, '⑩'), false)
+  assert.match(r.checks.find(c => c.id === '⑩').detail, /多报=review_proof/)
+})
+
+test('轻量档负例：知情批准人就是产生验收记录的会话 → ⑪ 拒（AI 代签）', () => {
+  const r = verifyEvidenceChain(makeRunDir(rs => toLight(rs, { gaps: GAP_HUMAN('dsh:dev') })), LIVE)
+  assert.equal(checkOk(r, '⑪'), false)
+  assert.match(r.checks.find(c => c.id === '⑪').detail, /代签/)
+})
+
+test('轻量档负例：已签收但无签署凭据 → ⑫ 拒', () => {
+  const r = verifyEvidenceChain(makeRunDir(rs => toLight(rs, { evidence: null })), LIVE)
+  assert.equal(checkOk(r, '⑫'), false)
+  assert.match(r.checks.find(c => c.id === '⑫').detail, /缺 decided_by_evidence/)
+})
+
+test('轻量档边界：尚未签收时 ⑫ 记 N/A，不因缺签署报错', () => {
+  const r = verifyEvidenceChain(makeRunDir(rs => toLight(rs, { signed: false })), LIVE)
+  assert.equal(checkOk(r, '⑫'), true)
+  assert.equal(r.checks.find(c => c.id === '⑫').detail, 'N/A（无缺失声明或尚未签收）')
+})
+
+test('PR Review 回归：缺引用又未声明时不得崩在 ⑧（Cursor Round 1 A 类）', () => {
+  // 复现：撤掉 test_proof_ref + requirements_baseline_ref，但 evidence_gaps 只声明 design_package
+  // → 缺失未被声明，na() 为假；修复前 ⑧ 走 else 分支读 test.payload 抛 TypeError，
+  //   校验器整体崩溃，⑩ 的「漏报」判定根本没机会执行。
+  const r = verifyEvidenceChain(makeRunDir(rs => {
+    const a = rs['acceptance_package.a1.json'].payload.assembled
+    delete a.test_proof_ref
+    delete a.requirements_baseline_ref
+    a.evidence_gaps = { design_package: GAP_HUMAN().review_proof }
+  }), LIVE)
+  assert.equal(checkOk(r, '⑧'), false, '⑧ 须判失败而不是抛异常')
+  assert.match(r.checks.find(c => c.id === '⑧').detail, /未声明缺失/)
+  assert.equal(checkOk(r, '⑩'), false, '⑩ 须同时报未声明与多报')
+  assert.match(r.checks.find(c => c.id === '⑩').detail, /未声明缺失/)
+  assert.match(r.checks.find(c => c.id === '⑩').detail, /多报=design_package/)
+  assert.equal(r.ok, false)
+})
+
+test('轻量档边界：只缺一侧时另一侧仍按原口径校验（现存 test 非 pass 被拒）', () => {
+  const r = verifyEvidenceChain(makeRunDir(rs => {
+    toLight(rs)
+    const p = rs['acceptance_package.a1.json'].payload
+    p.assembled.test_proof_ref = 'test_proof.a1.json'
+    p.assembled.evidence_gaps = { review_proof: GAP_HUMAN().review_proof }
+    rs['test_proof.a1.json'].payload.verdict = 'fail'
+    rs['test_proof.a1.json'].payload.findings = [{ finding: 'f', root_cause: 'dev' }]
+  }), LIVE)
+  assert.equal(checkOk(r, '②'), false)
+  assert.equal(r.ok, false)
 })

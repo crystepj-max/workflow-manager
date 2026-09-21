@@ -164,6 +164,23 @@ function tightenCapabilities(base, declared) {
 }
 
 // macOS 参考配置：sandbox-exec 可用且能拒绝工作区外写入 → enforced；否则 unavailable。
+// FIX-235 探针口径（故障机 2026-09-20 实测修正）：
+// ① profile 用「写入范围收紧」形态：(allow default) + deny 区外 file-write*。
+//    旧参考配置用 (deny default)，而当前 macOS 进程启动需读 dyld 闭包（/usr/lib、
+//    /private/var/db/dyld 等），全被 deny → canary SIGABRT(134)，insideAllowed 恒 false
+//    → 恒判 unavailable，机制从未在真机生效。
+// ② 区外拒绝证据必须是 file-write 本身：exec 保持放行（allow default），touch 死于写入拒绝
+//    而非 exec 拒绝（旧配置只放行 /bin/echo 的 exec，量错了目标）。
+// ③ 探测目录先落盘再 realpath 嵌入 profile：seatbelt 按解析后路径匹配
+//    （/tmp → /private/tmp 等软链场景直接拼字符串会误判）。
+export function buildProbeProfile(insideRealPath) {
+  return [
+    '(version 1)',
+    '(allow default)',
+    '(deny file-write* (require-not (subpath "' + insideRealPath + '")))',
+  ].join('\n')
+}
+
 export function probeIsolationCapability(options = {}) {
   const platform = options.platform || process.platform
   const force = options.force_guarantee
@@ -184,26 +201,28 @@ export function probeIsolationCapability(options = {}) {
     return { guarantee: ISOLATION_GUARANTEE.UNAVAILABLE, platform, backend: null, evidence: { reason: 'sandbox-exec 不可用' } }
   }
   const probeDir = options.probe_root || join(process.cwd(), '.scratch', 'ni-probe-' + Date.now())
-  const outside = join(probeDir, 'outside')
-  const inside = join(probeDir, 'inside')
+  mkdirSync(probeDir, { recursive: true })
+  // seatbelt 按解析后路径匹配：先落盘再 realpath，软链（/tmp、cwd 软链）不下沉到 profile
+  const probeDirReal = realpathSync(probeDir)
+  const outside = join(probeDirReal, 'outside')
+  const inside = join(probeDirReal, 'inside')
   mkdirSync(outside, { recursive: true })
   mkdirSync(inside, { recursive: true })
   const targetOutside = join(outside, 'canary.txt')
-  const profile = [
-    '(version 1)',
-    '(deny default)',
-    '(allow file-write* (subpath "' + inside + '"))',
-    '(allow file-read* (subpath "' + inside + '"))',
-    '(allow process-exec (literal "/bin/echo"))',
-    '(allow process-fork)',
-  ].join('\n')
-  let outsideBlocked = false
+  const targetInside = join(inside, 'canary.txt')
+  const profile = buildProbeProfile(inside)
   let insideAllowed = false
+  let insideWrite = false
+  let outsideBlocked = false
   try {
     try {
       execFileSync('sandbox-exec', ['-p', profile, '/bin/echo', 'ok'], { encoding: 'utf-8', cwd: inside, stdio: ['ignore', 'pipe', 'pipe'] })
       insideAllowed = true
-    } catch { /* inside probe failed */ }
+    } catch { /* 区内进程无法在沙箱内启动 */ }
+    try {
+      execFileSync('sandbox-exec', ['-p', profile, '/usr/bin/touch', targetInside], { encoding: 'utf-8', cwd: inside, stdio: ['ignore', 'pipe', 'pipe'] })
+      insideWrite = existsSync(targetInside)
+    } catch { /* 区内写入被拒：profile 不成立 */ }
     try {
       execFileSync('sandbox-exec', ['-p', profile, '/usr/bin/touch', targetOutside], { encoding: 'utf-8', cwd: inside, stdio: ['ignore', 'pipe', 'pipe'] })
     } catch {
@@ -216,19 +235,19 @@ export function probeIsolationCapability(options = {}) {
       try { rmSync(probeDir, { recursive: true, force: true }) } catch { /* ignore */ }
     }
   }
-  if (insideAllowed && outsideBlocked) {
+  if (insideAllowed && insideWrite && outsideBlocked) {
     return {
       guarantee: ISOLATION_GUARANTEE.ENFORCED,
       platform,
       backend: 'sandbox-exec',
-      evidence: { insideAllowed, outsideBlocked },
+      evidence: { insideAllowed, insideWrite, outsideBlocked },
     }
   }
   return {
     guarantee: ISOLATION_GUARANTEE.UNAVAILABLE,
     platform,
     backend: 'sandbox-exec',
-    evidence: { insideAllowed, outsideBlocked, reason: '探针未同时满足区内外读写边界' },
+    evidence: { insideAllowed, insideWrite, outsideBlocked, reason: '探针未同时满足：区内进程可跑、区内可写、区外写入被拒' },
   }
 }
 

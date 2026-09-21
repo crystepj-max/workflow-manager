@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { generateEvidenceSummary } from '../workspace-evidence-summary.mjs'
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const recordScript = join(repo, 'scripts/cwf-record.mjs')
@@ -651,4 +652,113 @@ test('write：baseline 三要素原样冻结放行；换内容走前进 attempt 
   const changed = { ...same, goal: '第二版目标文本', baseline_revision: 'V2' }
   assert.equal(run(['write', runDir, 'requirements_baseline', mk('b3.json', changed), '--produced-by', 'test-suite', '--stage', 'requirements', '--attempt', '2']).code, 0)
   assert.ok(existsSync(join(runDir, 'requirements_baseline.a1.json')), '旧 attempt 修订必须保留')
+})
+// —— CHORE-110：轻量档验收包可登记 + 签收刷新永久层 ——
+
+const CKPT = { target_ref: 'main', target_head_at_check: 'abc', target_advanced: false, proofs_state: 'still_valid' }
+const GAPS = {
+  review_proof: { reason: '轻量路线未设独立评审节点', acknowledged_by: 'human:song', acknowledged_at: '2026-09-19T00:00:00Z' },
+  test_proof: { reason: '轻量路线未设独立测试节点', acknowledged_by: 'human:song', acknowledged_at: '2026-09-19T00:00:00Z' },
+}
+
+test('write：轻量档验收包（缺 review/test + evidence_gaps）可登记并落盘', () => {
+  const { root, runDir } = makeRunDir()
+  const realHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const payload = join(runDir, 'ap-light.json')
+  writeFileSync(payload, JSON.stringify({
+    status: 'decided',
+    assembled: { requirements_baseline_ref: 'requirements_baseline.a1.json', dev_handoff_ref: 'dev_handoff.a1.json', integration_checkpoint: CKPT, evidence_gaps: GAPS },
+    decision: 'accept', decided_by: 'human:song', decided_at: '2026-09-19T01:00:00Z',
+    decided_by_evidence: 'closeout.md §验收', verified_branch: 'dev-cwf-test-01', verified_head: realHead,
+  }))
+  const r = run(['write', runDir, 'acceptance_package', payload, '--produced-by', 'test-suite', '--stage', 'human_acceptance'])
+  assert.equal(r.code, 0, r.out)
+  assert.ok(existsSync(join(runDir, 'acceptance_package.a1.json')))
+})
+
+test('write：轻量档缺 evidence_gaps 声明时被 schema 拒绝（不许静默绕过评审）', () => {
+  const { root, runDir } = makeRunDir()
+  const realHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const payload = join(runDir, 'ap-nogap.json')
+  writeFileSync(payload, JSON.stringify({
+    status: 'decided',
+    assembled: { dev_handoff_ref: 'dev_handoff.a1.json', integration_checkpoint: CKPT },
+    decision: 'accept', decided_by: 'human:song', decided_at: '2026-09-19T01:00:00Z',
+    decided_by_evidence: 'closeout.md §验收', verified_branch: 'dev-cwf-test-01', verified_head: realHead,
+  }))
+  const r = run(['write', runDir, 'acceptance_package', payload, '--produced-by', 'test-suite', '--stage', 'human_acceptance'])
+  assert.equal(r.code, 1)
+  assert.match(r.out, /acceptance_package 校验失败/)
+  assert.equal(existsSync(join(runDir, 'acceptance_package.a1.json')), false)
+})
+
+test('write：签收 decided 时刷新已归档摘要，让签署人进永久层（CHORE-36 类回归）', () => {
+  const { root, runDir } = makeRunDir()
+  const realHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf-8' }).trim()
+  const archDir = join(root, 'docs/tasks/archive/999')
+  mkdirSync(archDir, { recursive: true })
+  // 收口时生成的旧快照：签收发生在后，摘要停在 null——本次 write 必须把它刷回来
+  writeFileSync(join(archDir, 'evidence-summary.json'), JSON.stringify({
+    task_id: '999', run_id: 'cwf-test-01', decision: null, decided_by: null, decided_at: null,
+  }, null, 2))
+  const payload = join(runDir, 'ap.json')
+  writeFileSync(payload, JSON.stringify({
+    status: 'decided',
+    assembled: { dev_handoff_ref: 'dev_handoff.a1.json', integration_checkpoint: CKPT, evidence_gaps: GAPS },
+    decision: 'accept', decided_by: 'human:song', decided_at: '2026-09-19T01:00:00Z',
+    decided_by_evidence: 'closeout.md §验收', verified_branch: 'dev-cwf-test-01', verified_head: realHead,
+  }))
+  const r = run(['write', runDir, 'acceptance_package', payload, '--produced-by', 'test-suite', '--stage', 'human_acceptance'])
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.out, /已刷新归档摘要/)
+  const refreshed = JSON.parse(readFileSync(join(archDir, 'evidence-summary.json'), 'utf-8'))
+  assert.equal(refreshed.decided_by, 'human:song')
+  assert.equal(refreshed.acceptance_state, 'decided')
+})
+
+test('摘要：登记册无 branch 时按任务标识反查唯一 Run（LOC-032/033 类）', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cwf-sum-'))
+  mkdirSync(join(root, 'docs/tasks'), { recursive: true })
+  writeFileSync(join(root, 'docs/tasks/registry.json'), JSON.stringify({
+    tasks: [{ task_id: 'TIER-1', status: '已合并', branch: null }],
+  }))
+  const dir = join(root, '.agent-runs', 'tier-1-r1')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'run.json'), JSON.stringify({ run_id: 'tier-1-r1', issue_or_task_identity: '#TIER-1' }))
+  writeFileSync(join(dir, 'acceptance_package.a1.json'), JSON.stringify({
+    record_type: 'acceptance_package', record_version: 'v0.1.8', created_at: '2026-09-19T00:00:00Z',
+    produced_by: 'test-suite', run: { run_id: 'tier-1-r1', stage: 'human_acceptance' },
+    payload: { status: 'decided', assembled: { dev_handoff_ref: 'x', integration_checkpoint: CKPT, evidence_gaps: GAPS }, decision: 'accept', decided_by: 'human:song', decided_at: '2026-09-19T01:00:00Z' },
+  }))
+  writeFileSync(join(dir, 'index.json'), JSON.stringify({ acceptance_package: 'acceptance_package.a1.json' }))
+  const { summaryJson } = generateEvidenceSummary({ root, taskId: 'TIER-1', now: () => new Date('2026-09-19T02:00:00Z') })
+  assert.equal(summaryJson.run_id, 'tier-1-r1')
+  assert.equal(summaryJson.run_id_source, 'discovered_from_agent_runs')
+  assert.equal(summaryJson.decided_by, 'human:song')
+  assert.equal(summaryJson.acceptance_state, 'decided')
+})
+
+test('摘要：多个 Run 声明同一任务时报错不猜', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cwf-sum2-'))
+  mkdirSync(join(root, 'docs/tasks'), { recursive: true })
+  writeFileSync(join(root, 'docs/tasks/registry.json'), JSON.stringify({ tasks: [{ task_id: 'TIER-2', branch: null }] }))
+  for (const rid of ['tier-2-r1', 'tier-2-r2']) {
+    const dir = join(root, '.agent-runs', rid)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'run.json'), JSON.stringify({ run_id: rid, issue_or_task_identity: '#TIER-2' }))
+  }
+  assert.throws(() => generateEvidenceSummary({ root, taskId: 'TIER-2' }), /多个 Run 声明同一任务/)
+})
+
+test('摘要：无验收包时显式标 no_record 并给成因，不再静默 null（CHORE-106 类）', () => {
+  const { root, runDir } = makeRunDir()
+  mkdirSync(join(root, 'docs/tasks'), { recursive: true })
+  writeFileSync(join(root, 'docs/tasks/registry.json'), JSON.stringify({
+    tasks: [{ task_id: '999', status: '等待验收', branch: 'dev-cwf-test-01' }],
+  }))
+  writeFileSync(join(runDir, 'index.json'), JSON.stringify({}))
+  const { summaryJson } = generateEvidenceSummary({ root, taskId: '999', runId: 'cwf-test-01', now: () => new Date('2026-09-19T02:00:00Z') })
+  assert.equal(summaryJson.decided_by, null)
+  assert.equal(summaryJson.acceptance_state, 'no_record')
+  assert.match(summaryJson.acceptance_note, /evidence_gaps/)
 })

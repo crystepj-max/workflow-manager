@@ -22,6 +22,51 @@ let failures = 0;
 const fail = (msg) => { failures++; console.log('❌ ' + msg); };
 const pass = (msg) => console.log('✅ ' + msg);
 
+// 失败摘要：此前只截输出的最后 4 行，正好把「哪个用例失败」整段截掉，
+// CI 上只剩 `operator: 'strictEqual'` 这类残片，无法定位（CHORE-112 登记项）。
+// spec 报告器失败清单形如：`test at 文件:行:1` / `✖ 名称 (12.3ms)` / `  AssertionError: 消息`；
+// TAP 下名称行是 `not ok N - 名称`。两种都认，解析不到时退回输出尾部而不是静默少报。
+const summarizeTestFailure = (out, label) => {
+  const clip = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const lines = String(out || '').split('\n');
+  const items = [];
+  const nameRe = /^\s*(?:✖ |not ok \d+ - )(.+?)(?:\s+\([\d.]+m?s\))?\s*$/;
+  for (let i = 0; i < lines.length; i++) {
+    const m = nameRe.exec(lines[i]);
+    if (!m) continue;
+    const name = m[1].trim();
+    if (!name || name === 'failing tests:') continue;
+    let where = '';
+    for (let j = i - 1; j >= 0 && j >= i - 2; j--) {
+      const w = /^test at (\S+)/.exec(lines[j]);
+      if (w) { where = w[1]; break }
+    }
+    let err = '';
+    for (let k = i + 1; k <= i + 6 && k < lines.length; k++) {
+      const l = lines[k];
+      if (!l.trim()) continue;
+      if (/^\s*(?:at |ℹ|\u2716|\u2714|not ok )/.test(l)) break;
+      err = clip(l, 220);
+      break;
+    }
+    items.push({ name, where, err });
+  }
+  if (!items.length) return label + '：未从输出解析到失败用例，输出尾部：\n' + lines.slice(-10).join('\n');
+  // 同一用例会出现两次（正文一次 + 失败清单一次），保留带错误行的那条
+  const byName = new Map();
+  for (const it of items) {
+    const prev = byName.get(it.name);
+    if (!prev || (!prev.err && it.err) || (it.err.length > (prev.err || '').length)) byName.set(it.name, it);
+  }
+  const merged = [...byName.values()];
+  const shown = merged.slice(0, 15);
+  const body = shown.map((it) => '  ✖ ' + it.name +
+    (it.where ? '\n      位置：' + it.where : '') +
+    (it.err ? '\n      错误：' + it.err : '')).join('\n');
+  return label + '（' + merged.length + ' 个用例）：\n' + body +
+    (merged.length > shown.length ? '\n  …另有 ' + (merged.length - shown.length) + ' 个未展开' : '');
+};
+
 // ① 蓝图校验 + 等价断言（正式内置 + custom-seeds 历史种子）
 const tplAbs = listBlueprintJsonFiles(TPL_DIR);
 console.log('—— ① 蓝图校验（' + tplAbs.length + ' 份）——');
@@ -65,7 +110,7 @@ try {
   execFileSync(process.execPath, ['--test', 'scripts/test/*.test.mjs'], { cwd: root, stdio: 'pipe', shell: true });
   pass('引擎层测试全绿');
 } catch (e) {
-  fail('引擎层测试失败：' + String(e.stdout || e.message).split('\n').slice(-4).join('\n'));
+  fail(e.stdout ? summarizeTestFailure(e.stdout, '引擎层测试失败') : '引擎层测试失败：' + e.message);
 }
 // ③′ 包测试：自动发现 packages/* 下所有带 test 脚本的包。
 // 新增包会自动纳入，无需在此登记——此前硬编码单个包名导致
@@ -100,7 +145,7 @@ if (testPackages.length === 0) {
       runInPkg(pkg.scripts.test, pkg.dir);
       pass('包测试全绿：' + pkg.name);
     } catch (e) {
-      fail('包测试失败（' + pkg.name + '）：' + String(e.stdout || e.message).split('\n').slice(-4).join('\n'));
+      fail(e.stdout ? summarizeTestFailure(e.stdout, '包测试失败（' + pkg.name + '）') : '包测试失败（' + pkg.name + '）：' + e.message);
     }
   }
 }

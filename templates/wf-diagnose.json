@@ -163,6 +163,28 @@
       "label": "审核",
       "verifyBranch": true,
       "goal": "对照 `diagnosis-report.md` 与 `fix-report.md` 审核修复：修改是否与根因对应、是否最小、原始 feedback signal 场景是否被覆盖、是否引入新问题。结论四选一：APPROVE（通过，交回归验证）/ FIX_ISSUES（修复本身有问题，退修复）/ ROOT_CAUSE_REFUTED（审核证据推翻根因结论，回缺陷诊断）/ BLOCKED。不得代行修复。将审查报告写入 `review-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "inputs": [
+        {
+          "name": "diagnosis_root_cause",
+          "from": "$.results.diagnose.root_cause",
+          "required": true,
+          "default": "（尚无根因结论）",
+          "artifact": "diagnosis-report.md"
+        },
+        {
+          "name": "fix_summary",
+          "from": "$.results.fix.summary",
+          "required": true,
+          "default": "（尚无修复结论）",
+          "artifact": "fix-report.md"
+        },
+        {
+          "name": "fix_changed",
+          "from": "$.results.fix.changed",
+          "required": true,
+          "default": "（尚无变更清单）"
+        }
+      ],
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -218,6 +240,28 @@
       "label": "回归验证",
       "verifyBranch": true,
       "goal": "以原始 feedback signal 为第一回归输入验证修复：缺陷场景不再复现，且既有行为无回归（运行与修改相关的既有测试）。回归产物以本节点 output 声明的 `regression-report.md` 为准，不套用其他模板的报告名；发现业务源码合并冲突时不自行解决，记录后回修复节点。结论四选一：PASS（回归通过，交收口）/ FIX_ISSUES（修复未生效或引入新问题，退修复）/ ROOT_CAUSE_REFUTED（回归证据推翻根因结论，回缺陷诊断）/ BLOCKED。不得修改被测代码。将回归证据写入 `regression-report.md`；最终回复只输出本节点 schema 对应 JSON。",
+      "inputs": [
+        {
+          "name": "diagnosis_root_cause",
+          "from": "$.results.diagnose.root_cause",
+          "required": true,
+          "default": "（尚无根因结论）"
+        },
+        {
+          "name": "fix_changed",
+          "from": "$.results.fix.changed",
+          "required": true,
+          "default": "（尚无变更清单）",
+          "artifact": "fix-report.md"
+        },
+        {
+          "name": "review_verdict_reason",
+          "from": "$.results.review.verdict_reason",
+          "required": true,
+          "default": "（尚无审核结论）",
+          "artifact": "review-report.md"
+        }
+      ],
       "output": {
         "outcomePath": "$.route",
         "schema": {
@@ -413,11 +457,11 @@
       },
       "review": {
         "provider": "deepseek-official",
-        "model": "deepseek-v4-flash"
+        "model": "deepseek-v4.1-flash"
       },
       "regression": {
         "provider": "deepseek-official",
-        "model": "deepseek-v4-flash"
+        "model": "deepseek-v4.1-flash"
       },
       "closeout": {
         "provider": "deepseek-official",

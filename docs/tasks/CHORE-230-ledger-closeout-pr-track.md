@@ -16,7 +16,7 @@
 | 前置依赖 | 无 |
 | 施工环境组 | CHORE-230 |
 | 施工环境角色 | 独立 |
-| 无人值守许可 | 允许（实施与自动检查免问；**合并需人工批准**） |
+| 无人值守许可 | 允许 |
 | 任务规格位置 | `docs/tasks/specs/CHORE-230-ledger-closeout-pr-track/task-spec-V1.md`（入库） |
 | 定义时间 | 2026-09-20 |
 | GitHub 同步 | synced#230 |

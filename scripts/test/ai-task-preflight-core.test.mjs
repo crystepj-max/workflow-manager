@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { runPreflight } from '../ai-task-preflight-check.mjs'
+import { runPreflight, specOpenItemsZero } from '../ai-task-preflight-check.mjs'
 
 function tmpdir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-core-'))
@@ -83,4 +83,22 @@ test('runPreflight：Run 绑定版本不一致进入 failures', async () => {
   const r = await runPreflight(basicsPath, specPath, { runBaseline: 'V2', repo: dir })
   assert.equal(r.ok, false)
   assert.ok(r.failures.some((f) => f.includes('Run 绑定版本不一致')))
+})
+
+test('runPreflight：需求基线缺失时记失败而非崩溃（2026-09-20 夜批评估回归）', async () => {
+  const dir = tmpdir()
+  const fields = { ...BASE }
+  delete fields['需求基线版本']
+  const { basicsPath, specPath } = writeBasics(dir, fields)
+  // 规格含版本号而卡缺基线：修复前对 null baseline 调 toUpperCase 会抛 TypeError
+  const r = await runPreflight(basicsPath, specPath, { runBaseline: 'V1', repo: dir })
+  assert.equal(r.ok, false)
+  assert.ok(r.failures.some((f) => f.includes('需求基线版本缺失或非法')))
+})
+
+test('specOpenItemsZero：加粗零（**0**）变体可识别', () => {
+  assert.equal(specOpenItemsZero('未决产品事项：**0**。'), true)
+  assert.equal(specOpenItemsZero('> 未决产品事项：**0**。'), true)
+  assert.equal(specOpenItemsZero('未决产品事项：0。'), true)
+  assert.equal(specOpenItemsZero('未决产品事项：2。'), false)
 })
