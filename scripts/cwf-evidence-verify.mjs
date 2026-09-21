@@ -271,7 +271,7 @@ export function verifyEvidenceChain(runDir, { live = null } = {}) {
       : `evidence_gaps 非空且 status=decided，但缺 decided_by_evidence（decided_by=${ap.payload?.decided_by}）`)
   }
 
-  // ⑩ 时间序：人不可能签收一个当时还不存在的提交
+  // ⑬ 时间序：人不可能签收一个当时还不存在的提交
   {
     const decidedRaw = ap.payload?.decided_at
     const decidedAt = Date.parse(decidedRaw ?? '')
@@ -292,15 +292,15 @@ export function verifyEvidenceChain(runDir, { live = null } = {}) {
     } else {
       detail10 = `ok（提交早于签收 ${Math.floor((decidedAt - cd) / 60000)} 分钟）`
     }
-    // ⑩-a 反向软判（D-1）：记录不得早于它所记载的签收——只提示，不参与整链结论
+    // ⑬-a 反向软判（D-1）：记录不得早于它所记载的签收——只提示，不参与整链结论
     const recCreated = Date.parse(ap.created_at ?? '')
     if (Number.isFinite(decidedAt) && Number.isFinite(recCreated) && recCreated < decidedAt) {
       detail10 += `；提示：记录 created_at(${ap.created_at}) 早于所载签收 ${decidedRaw}，偏离 ${Math.round((decidedAt - recCreated) / 60000)} 分钟（跨机时钟偏差与回填皆可能，不阻断）`
     }
-    check('⑩', '时间序：签收不得早于所验提交', ok10, detail10)
+    check('⑬', '时间序：签收不得早于所验提交', ok10, detail10)
   }
 
-  // ⑪ conditional_pass 必须带非空 feedback（契约 §8.3 ②）。schema 已约束经 cwf-record 的写入，
+  // ⑭ conditional_pass 必须带非空 feedback（契约 §8.3 ②）。schema 已约束经 cwf-record 的写入，
   // 此处复核磁盘记录本身——直接改文件或手搓记录会绕过 schema，只有整链校验能兜住
   {
     const d = ap.payload?.decision
@@ -312,7 +312,7 @@ export function verifyEvidenceChain(runDir, { live = null } = {}) {
         ok11 = false; detail11 = 'conditional_pass 缺 feedback：优化意见未落记录，等同把有条件通过洗成普通通过（契约 §8.3 ②）'
       }
     }
-    check('⑪', 'conditional_pass 附非空 feedback', ok11, detail11)
+    check('⑭', 'conditional_pass 附非空 feedback', ok11, detail11)
   }
 
   return { ok: checks.every(c => c.ok), checks }
