@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 151,
+  "revision": 152,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2698,6 +2698,35 @@
       "created_at": "2026-09-21T03:38:18.569Z",
       "updated_at": "2026-09-21T03:39:29.285Z",
       "spec_path": "docs/tasks/specs/CHORE-260-ci-trustworthiness/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-262",
+      "type": "CHORE",
+      "remote": "github#262",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CI 可信度 M5 回归修复：降级告警断言收敛（CHORE-260 子票 1）",
+      "slug": "ci-260-m5-warning-assert",
+      "source": "会话录入：CHORE-260 施工顺序第 1 步（M5 回归）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P0",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "fix/ci-260-m5-warning-assert",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m5",
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-21T04:30:14.407Z",
+      "updated_at": "2026-09-21T04:33:29.563Z",
+      "spec_path": "docs/tasks/specs/CHORE-262-ci-260-m5-warning-assert/task-spec-V1.md"
     },
     {
       "task_id": "CHORE-264",
