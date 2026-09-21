@@ -78,7 +78,8 @@ function checkOk(result, id) {
 test('正例：完整合法证据链全部九项通过', () => {
   const result = verifyEvidenceChain(makeRunDir(), { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } })
   assert.equal(result.ok, true, JSON.stringify(result.checks, null, 1))
-  assert.equal(result.checks.length, 9)
+  // 契约九项 + ⑩ 时间序 + ⑪ conditional_pass 磁盘复核
+  assert.equal(result.checks.length, 11)
 })
 
 test('① record_type 与 Stage 映射错配被拒', () => {
@@ -232,4 +233,82 @@ test('⑨ review/test 与 dev 同源被拒', () => {
     rs['review_proof.a1.json'].produced_by = 'dsh:dev'
   }))
   assert.equal(checkOk(r, '⑨'), false)
+})
+
+// ── FIX-220：呈递一致性与有条件通过的磁盘复核 ──────────────────────────────
+const decidedWith = (extra) => (rs) => {
+  const p = rs['acceptance_package.a1.json'].payload
+  Object.assign(p, { status: 'decided', decision: 'conditional_pass', decided_by: 'human', decided_at: '2026-09-01T00:00:00Z', verified_branch: BRANCH, verified_head: HEAD, ...extra })
+}
+
+test('⑪ conditional_pass 缺 feedback（绕过 cwf-record 直接落盘）被拒', () => {
+  const r = verifyEvidenceChain(makeRunDir(decidedWith({})), { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } })
+  assert.equal(checkOk(r, '⑪'), false)
+  assert.equal(r.ok, false)
+})
+
+test('⑪ conditional_pass 带 feedback 放行；accept 不要求 feedback', () => {
+  const withFb = verifyEvidenceChain(makeRunDir(decidedWith({ feedback: '下一轮补批量清除' })), { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } })
+  assert.equal(checkOk(withFb, '⑪'), true)
+  assert.equal(withFb.ok, true, JSON.stringify(withFb.checks, null, 1))
+  const plainAccept = verifyEvidenceChain(makeRunDir(decidedWith({ decision: 'accept' })), { live: { head: HEAD, branch: BRANCH, targetHead: HEAD } })
+  assert.equal(checkOk(plainAccept, '⑪'), true)
+})
+
+test('⑥ 已决 design 的 decision.question 与呈递问题不一致被拒（防事后换问题）', () => {
+  const r = verifyEvidenceChain(makeRunDir(rs => {
+    const p = rs['design_package.json'].payload
+    p.outcome = 'package_ready'
+    p.decision_required = true
+    p.decision_required_reasons = ['r']
+    p.decision_request = { question: '该选哪个方案？', options: [{ name: 'A', tradeoffs: 't' }], recommendation: 'A' }
+    p.decision = { question: '换成另一个问题？', options: [{ name: 'A', tradeoffs: 't' }], chosen: 'A', rationale: 'r', decided_by: 'x', decided_at: '2026-08-31T00:00:00Z' }
+  }))
+  assert.equal(checkOk(r, '⑥'), false)
+  assert.match(r.checks.find(c => c.id === '⑥').detail, /question/)
+})
+
+// ── FIX-220 ⑩：签收时刻不得早于所验提交（D-1/D-2/D-4）─────────────────────
+const L = { head: HEAD, branch: BRANCH, targetHead: HEAD }
+const decidedOn = (at) => (rs) => {
+  const p = rs['acceptance_package.a1.json'].payload
+  Object.assign(p, { status: 'decided', decision: 'accept', decided_by: 'human', decided_at: at, feedback: 'x', verified_branch: BRANCH, verified_head: HEAD })
+}
+
+test('⑩-b 签收早于所验提交 → 判失败，detail 给出倒挂分钟数与两个时间戳', () => {
+  const r = verifyEvidenceChain(makeRunDir(decidedOn('2026-09-10T09:30:00Z')), { live: { ...L, commitDate: '2026-09-10T14:18:32Z' } })
+  assert.equal(checkOk(r, '⑩'), false)
+  assert.match(r.checks.find(c => c.id === '⑩').detail, /倒挂 288 分钟|倒挂 289 分钟/)
+  assert.equal(r.ok, false)
+})
+
+test('⑩-b 提交早于签收 → 放行（零容差只在真倒挂时生效）', () => {
+  const r = verifyEvidenceChain(makeRunDir(decidedOn('2026-09-10T09:30:00Z')), { live: { ...L, commitDate: '2026-09-10T08:00:00Z' } })
+  assert.equal(checkOk(r, '⑩'), true)
+  assert.equal(r.ok, true, JSON.stringify(r.checks, null, 1))
+})
+
+test('⑩-b 分钟级倒挂同样失败（D-2 不设阈值）', () => {
+  const r = verifyEvidenceChain(makeRunDir(decidedOn('2026-09-08T00:42:24Z')), { live: { ...L, commitDate: '2026-09-08T00:55:19Z' } })
+  assert.equal(checkOk(r, '⑩'), false)
+})
+
+test('⑩-b 提交本地不可达 → 显式报「未评估」但不阻断（D-4）', () => {
+  const r = verifyEvidenceChain(makeRunDir(decidedOn('2026-09-10T09:30:00Z')))
+  const c = r.checks.find(c => c.id === '⑩')
+  assert.equal(c.ok, true)
+  assert.match(c.detail, /未评估/)
+})
+
+test('⑩-a 记录 created_at 早于所载签收 → 只出提示，不改整链结论', () => {
+  // 信封 created_at 固定 2026-08-31T00:00:00Z；把签收放在其后
+  const r = verifyEvidenceChain(makeRunDir(decidedOn('2026-09-01T00:00:00Z')), { live: { ...L, commitDate: '2026-08-30T00:00:00Z' } })
+  assert.equal(checkOk(r, '⑩'), true)
+  assert.match(r.checks.find(c => c.id === '⑩').detail, /提示.*created_at/)
+})
+
+test('⑩ awaiting_decision 无 decided_at → 未评估不失败', () => {
+  const r = verifyEvidenceChain(makeRunDir(), { live: L })
+  assert.equal(checkOk(r, '⑩'), true)
+  assert.equal(r.ok, true, JSON.stringify(r.checks, null, 1))
 })
