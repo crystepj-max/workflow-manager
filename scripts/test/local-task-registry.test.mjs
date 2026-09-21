@@ -186,8 +186,10 @@ test('gh 不可达时降级 TMP 并告警；全程不产出 cnb# 形式的号（
     const rec = allocate(repo, { name: '降级探针', type: 'FIX' })
     assert.match(rec.task_id, /^TMP-[a-z0-9]+-\d{6}[a-z]?$/i, '降级为临时号')
     assert.equal(rec.remote, 'pending')
-    assert.equal(warnings.length, 1)
-    assert.match(warnings[0], /已降级为临时号/)
+    // 断言「恰好一条降级告警」：同一路径还可能出现正交的「未识别到 agent 身份」告警
+    // （宿主无指纹时由 FIX-245 引入），故按降级告警本身计数，不再对告警总数设死值（CHORE-260 · M5）。
+    const degradeWarnings = warnings.filter((w) => /已降级为临时号/.test(w))
+    assert.equal(degradeWarnings.length, 1)
   } finally {
     console.error = prevErr
     setGhRunner(null)
