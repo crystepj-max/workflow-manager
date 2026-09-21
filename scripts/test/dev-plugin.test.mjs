@@ -30,6 +30,10 @@ function baseEnv(extra = {}) {
     ...process.env,
     VWF_DEV_DSH_PORT: TEST_PORT,
     DSH_HOME: undefined,
+    // dev-plugin.mjs 在模块顶层即调用 resolvePortState()；不注入探针就会退化为依赖宿主机
+    // lsof——CI runner 无此工具，脚本按 fail-closed 设计直接报「无法核验端口」而中止。
+    // 故默认注入「无监听进程」的确定性替身；需要特定监听结果的用例在 extra 里显式覆盖。
+    VWF_DEV_LSOF_BIN: defaultLsofProbe(),
     ...extra,
   }
 }
@@ -56,6 +60,17 @@ esac
 `)
   chmodSync(lsofPath, 0o755)
   return lsofPath
+}
+
+/** 默认探针（空监听结果）：整个测试文件共用一份，进程退出时清理其临时目录。 */
+let defaultLsofProbePath = null
+function defaultLsofProbe() {
+  if (!defaultLsofProbePath) {
+    const dir = mkdtempSync(join(tmpdir(), 'vwf-dev-plugin-lsof-'))
+    defaultLsofProbePath = fakeLsof(dir)
+    process.on('exit', () => rmSync(dir, { recursive: true, force: true }))
+  }
+  return defaultLsofProbePath
 }
 
 test('start：按固定端口启动（不是 --port 0），并把本任务写入激活登记', () => {
