@@ -22,6 +22,24 @@ let failures = 0;
 const fail = (msg) => { failures++; console.log('❌ ' + msg); };
 const pass = (msg) => console.log('✅ ' + msg);
 
+// 失败摘要：此前只截输出的最后 4 行，正好把「哪个用例失败」整段截掉，
+// CI 上只剩 `operator: 'strictEqual'` 这类残片，无法定位（CHORE-112 登记项）。
+// node --test 默认 spec 报告器给出 `✖ 名称` + `test at 文件:行`；TAP 下是 `not ok N - 名称`，两种都认。
+const summarizeTestFailure = (out, label) => {
+  const text = String(out || '');
+  const names = [...text.matchAll(/^\s*(?:✖ |not ok \d+ - )(.+?)(?:\s+\([\d.]+m?s\))?\s*$/gm)]
+    .map((m) => m[1].trim())
+    .filter((n) => n && n !== 'failing tests:');
+  const where = [...text.matchAll(/^test at (\S+?\.(?:mjs|js))/gm)].map((m) => m[1]);
+  const uniqNames = [...new Set(names)];
+  if (!uniqNames.length) return label + '：未从输出解析到失败用例名，输出尾部：\n' + text.split('\n').slice(-8).join('\n');
+  const uniqWhere = [...new Set(where)];
+  return label + '（' + uniqNames.length + ' 个用例）：\n  ' +
+    uniqNames.slice(0, 15).map((n) => '✖ ' + n).join('\n  ') +
+    (uniqNames.length > 15 ? '\n  …另有 ' + (uniqNames.length - 15) + ' 个' : '') +
+    (uniqWhere.length ? '\n  位置：' + uniqWhere.join('、') : '');
+};
+
 // ① 蓝图校验 + 等价断言（正式内置 + custom-seeds 历史种子）
 const tplAbs = listBlueprintJsonFiles(TPL_DIR);
 console.log('—— ① 蓝图校验（' + tplAbs.length + ' 份）——');
@@ -65,7 +83,7 @@ try {
   execFileSync(process.execPath, ['--test', 'scripts/test/*.test.mjs'], { cwd: root, stdio: 'pipe', shell: true });
   pass('引擎层测试全绿');
 } catch (e) {
-  fail('引擎层测试失败：' + String(e.stdout || e.message).split('\n').slice(-4).join('\n'));
+  fail(e.stdout ? summarizeTestFailure(e.stdout, '引擎层测试失败') : '引擎层测试失败：' + e.message);
 }
 // ③′ 包测试：自动发现 packages/* 下所有带 test 脚本的包。
 // 新增包会自动纳入，无需在此登记——此前硬编码单个包名导致
