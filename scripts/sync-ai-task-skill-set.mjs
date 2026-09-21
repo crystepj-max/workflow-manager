@@ -20,9 +20,10 @@ if (!fs.existsSync(targetRoot)) {
   process.exit(1)
 }
 
+// M2 建设交付不再向通用仓复制 Bootstrap Profile（原 construction-bootstrap 已随 #102 退役）：
+// 入口 = workflow-manager 的正式内置蓝图与其生成 Skill，通用会话按 skill-set.md 的落点说明使用。
 const pairs = [
   ['dsh/skills/requirements-analysis', 'my-skills/requirements-analysis'],
-  ['dsh/skills/construction-bootstrap', 'my-skills/construction-bootstrap'],
   ['dsh/skills/execution-plan', 'my-skills/execution-plan'],
 ]
 
@@ -41,21 +42,9 @@ function copyDir(src, dst) {
 // 安装态配套资产：技能脱离本仓库后仍需执行的脚本与文档
 const assetScripts = {
   'requirements-analysis': ['local-task-registry.mjs', 'task-card-parse.mjs'],
-  'construction-bootstrap': [
-    ...fs.readdirSync(path.join(wmRoot, 'scripts')).filter(n => /^cwf-.*\.mjs$/.test(n)),
-    'ai-task-preflight-check.mjs',
-    'ai-task-workspace-env.mjs',
-    'workspace-isolation.mjs',
-    'formal-records.mjs',
-    'formal-artifacts.cjs',
-    'local-task-registry.mjs',
-    'local-task-merge.mjs',
-    'task-card-parse.mjs',
-  ],
   'execution-plan': ['ai-task-execution-plan.mjs', 'ai-task-preflight-check.mjs', 'ai-task-scheduled-trigger.mjs', 'task-card-parse.mjs'],
 }
 const assetDocs = {
-  'construction-bootstrap': ['single-task-delivery-m2', 'public-task-contract', 'preflight-check', 'uat-card-template', 'task-workspace-env'],
   'execution-plan': ['execution-plan-m3', 'scheduled-trigger-m4', 'public-task-contract', 'skill-set'],
 }
 
@@ -82,10 +71,6 @@ for (const [relSrc, relDst] of pairs) {
       fs.mkdirSync(path.join(assetDir, 'ai-task-define-delivery'), { recursive: true })
       for (const n of assetDocs[name]) fs.copyFileSync(path.join(wmRoot, 'docs/design/ai-task-define-delivery', n + '.md'), path.join(assetDir, 'ai-task-define-delivery', n + '.md'))
     }
-    if (name === 'construction-bootstrap') {
-      fs.copyFileSync(path.join(wmRoot, 'docs/design/construction-workflow/handoff.schema.json'), path.join(assetDir, 'handoff.schema.json'))
-      fs.copyFileSync(path.join(wmRoot, 'docs/design/construction-workflow-portable-contract.md'), path.join(assetDir, 'construction-workflow-portable-contract.md'))
-    }
   }
   const hashes = {}
   function recordFiles(dir) {
@@ -106,12 +91,12 @@ fs.writeFileSync(
   setReadme,
   `# AI 任务交付 Skill 集合（从 workflow-manager 同步）
 
-本目录说明 + 下列三个 skill 构成通用集合；到点开跑（M4）不另建 Skill，见 \`execution-plan\` 内说明。
+本目录说明 + 下列两个 skill（M1/M3）构成通用集合；到点开跑（M4）不另建 Skill，见 \`execution-plan\` 内说明。
 
 | 代号 | Skill 目录 | 作用 |
 |---|---|---|
 | M1 | \`requirements-analysis\` | 谈到「已定义」 |
-| M2 | \`construction-bootstrap\` | 启动「完整功能开发」单任务交付（蓝图真源在 workflow-manager） |
+| M2 | （不复制）| 入口在 workflow-manager：正式内置模板 \`wf-construction-full-feature\` 与其生成 Skill（\`npm run install:builtin-skills\`）；原 \`construction-bootstrap\` 已随 #102 收敛退役 |
 | M3 | \`execution-plan\` | 批量调度；定时 = 到点再调本入口 |
 | M4 | （无独立 Skill） | 到点启动脚本在 workflow-manager：\`scripts/ai-task-scheduled-trigger.mjs\` |
 

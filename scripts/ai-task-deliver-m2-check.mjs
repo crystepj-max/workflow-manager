@@ -39,19 +39,18 @@ read('docs/design/ai-task-define-delivery/task-workspace-env.md')
 
 ok(fs.existsSync(path.join(root, 'scripts/ai-task-workspace-env.mjs')), '缺少 ai-task-workspace-env.mjs')
 
-const skill = read('dsh/skills/construction-bootstrap/SKILL.md')
-ok(/实施前检查/.test(skill), '建设 Skill 须含实施前检查')
-ok(/已定义/.test(skill), '建设 Skill 须从已定义开工')
-ok(/conditional_pass|有条件通过/.test(skill), '建设 Skill 须含有条件通过')
-ok(/auto_rework_limit\s*=\s*3|上限\*\*3\*\*|返工上限\*\*3\*\*/.test(skill), '建设 Skill 须写明返工 3')
-ok(/ai-task-workspace-env|施工环境/.test(skill), '建设 Skill 须提及施工环境/工作区解析')
-ok(!/本 Profile 主链尚未跳过 requirements/.test(skill), '不得再声称主链尚未跳过 requirements')
-
-const runbook = read('dsh/skills/construction-bootstrap/runbook.md')
-ok(/实施前检查/.test(runbook) && /UAT/.test(runbook), 'runbook 须含实施前检查与 UAT')
-ok(/conditional_pass/.test(runbook), 'runbook 须含 conditional_pass')
-ok(/workspace-env|施工环境/.test(runbook), 'runbook 须含施工环境解析')
-ok(/user_accepted/.test(runbook) === false || /禁止.*user_accepted|废弃.*user_accepted/.test(runbook), 'runbook 不得仍把 user_accepted 当正式路径')
+// M2 交付入口的载体 = 正式内置蓝图 + DSH 轨道 runbook。
+// 原 `dsh/skills/construction-bootstrap/`（Bootstrap 执行 Profile）已随 #102 收敛退役，
+// 九项 shim 的逐项收敛记录见 construction-workflow-portable-contract.md §9.6。
+const runbook = read('docs/runbooks/construction-dsh/runbook.md')
+ok(/实施前检查/.test(runbook) && /UAT/.test(runbook), 'DSH runbook 须含实施前检查与 UAT')
+ok(/已定义/.test(runbook), 'DSH runbook 须从已定义开工')
+ok(/conditional_pass|有条件通过/.test(runbook), 'DSH runbook 须含有条件通过')
+ok(/auto_rework_limit\s*=\s*3|上限\*\*3\*\*|返工上限\*\*3\*\*|上限 3/.test(runbook), 'DSH runbook 须写明返工 3')
+ok(/ai-task-workspace-env|施工环境/.test(runbook), 'DSH runbook 须提及施工环境/工作区解析')
+ok(/wf_run/.test(runbook), 'DSH runbook 须以 wf_run 为起跑入口（引擎驱动，不由会话手工路由）')
+ok(/user_accepted/.test(runbook) === false || /禁止.*user_accepted|废弃.*user_accepted/.test(runbook), 'DSH runbook 不得仍把 user_accepted 当正式路径')
+ok(!/construction-bootstrap/.test(runbook), 'DSH runbook 不得再指向已退役的 construction-bootstrap Profile')
 
 const schema = read('docs/design/construction-workflow/handoff.schema.json')
 ok(/"conditional_pass"/.test(schema), 'schema 须含 conditional_pass')

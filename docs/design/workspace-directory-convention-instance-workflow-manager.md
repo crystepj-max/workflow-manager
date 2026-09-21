@@ -42,22 +42,22 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 
 ## 2. 本位实际链路：谁在建、谁在回收
 
-依据 `dsh/skills/construction-bootstrap/runbook.md`（建设工作流单任务交付 Runbook，产品主链权威为 `docs/design/ai-task-define-delivery/single-task-delivery-m2.md`）。
+依据 `docs/runbooks/construction-dsh/runbook.md`（建设工作流 DSH 轨道命令序列；原 `dsh/skills/construction-bootstrap/runbook.md` 已随 #102 退役，见 `construction-workflow-portable-contract.md` §9.6。产品主链权威为 `docs/design/ai-task-define-delivery/single-task-delivery-m2.md`）。下文「runbook §n」均指该文件小节。
 
 ### 2.1 创建侧（现状：两个入口）
 
 | 环节 | 时点 | 命令 | 出处 |
 |---|---|---|---|
 | ① 分配任务标识 | 需求分析完成、进入「已定义」 | `node scripts/local-task-registry.mjs allocate --name "..." --source ...` | `docs/tasks/README.md` |
-| ② 建分支 + 工作区 + 运行目录 | **Run 引导**（实施前检查通过之后） | GitHub 轨道：`node scripts/cwf-run-init.mjs <issue编号> <run_id>`；本地轨道：`node scripts/cwf-run-init.mjs <任务标识> <run_id> --local-base` | runbook §0（第 18 / 24 行） |
-| ③ 环境组解析（多任务并行） | 紧接 ②，实施前检查通过后 | `node scripts/ai-task-workspace-env.mjs resolve --store <dir> --task <标识> --env <组> --role <独立\|成员> --deps <无\|列表>` | runbook §1 第 5 步（第 60–69 行） |
+| ② 建分支 + 工作区 + 运行目录 | **Run 引导**（实施前检查通过之后） | GitHub 轨道：`node scripts/cwf-run-init.mjs <issue编号> <run_id>`；本地轨道：`node scripts/cwf-run-init.mjs <任务标识> <run_id> --local-base` | runbook §0（Run 引导·双轨命令） |
+| ③ 环境组解析（多任务并行） | 紧接 ②，实施前检查通过后 | `node scripts/ai-task-workspace-env.mjs resolve --store <dir> --task <标识> --env <组> --role <独立\|成员> --deps <无\|列表>` | runbook §1（环境组解析） |
 
-**创建侧的硬前置门禁**：`node scripts/ai-task-preflight-check.mjs <issue-basics快照> <task-spec路径> --run-baseline <版本>`（runbook §1 第 3 步）。失败则 Run → `BLOCKED`、**停止、不进入开发**。
+**创建侧的硬前置门禁**：`node scripts/ai-task-preflight-check.mjs <issue-basics快照> <task-spec路径> --run-baseline <版本>`（runbook §1）。失败则 Run → `BLOCKED`、**停止、不进入开发**。
 
 **两条已存在但关键的规定**（应保留并强化）：
 
-- runbook §0 第 34 行：*「之后全部工作在该 worktree 内进行；任何 git / npm 命令一律 `git -C <worktree>` 或先 `cd <worktree>` 并核对 `git rev-parse --abbrev-ref HEAD` = `run.json.work_branch`，不一致即停（不得在主检出或别的 worktree 里"顺手"执行）」* —— 这条纪律约束了「在哪里干活」。
-- runbook §1 第 60 行括注：**「批量调度不得代劳」**环境解析。
+- runbook §0（Run 引导）：*「之后全部工作在该 worktree 内进行；任何 git / npm 命令一律 `git -C <worktree>` 或先 `cd <worktree>`，并核对 `git rev-parse --abbrev-ref HEAD` = `run.json.work_branch`，不一致即停（不得在主检出或别的 worktree 里"顺手"执行）」* —— 这条纪律约束了「在哪里干活」。
+- runbook §1 括注：**「批量调度不得代劳」**环境解析。
 
 > 🟡 **缺口**：上述纪律只约束了「在哪里干活」，**没有约束「产物写到哪里」**。这正是通用模板 §1.6 锚定机制要补的后半句。
 
@@ -66,7 +66,7 @@ purposes: 把通用模板填入本项目实际取值；并登记存量任务与�
 | 入口 | 命令 / 位置 | 覆盖范围 |
 |---|---|---|
 | 环境回收 | `npm run dev:plugin -- stop --task <run_id>`（登记注销）→ `scripts/cwf-env-recycle.mjs recycle <runDir> --report ...`（收口角色第 5 条） | 本任务命名空间精确匹配项（旧独占 Home 遗留 + 工作区记录 + 登记册条目） |
-| 环境组清理 | `scripts/ai-task-workspace-env.mjs mark-completed` + `maybe-cleanup`（runbook 第 177–184 行） | 同组全部完成时清理工作区 |
+| 环境组清理 | `scripts/ai-task-workspace-env.mjs mark-completed` + `maybe-cleanup`（runbook §6.2） | 同组全部完成时清理工作区 |
 | 任务合并 | `scripts/local-task-merge.mjs --task ... --branch ... --decision accept --run-id ...`（本地轨道） | 合并 + 归档 2 件 |
 | 收口角色 | `dsh/roles/closeout.md` 第 6 条 `git worktree remove` + `git branch -D` | 工作区与分支（阶段二口径） |
 
