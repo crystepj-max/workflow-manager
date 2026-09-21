@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 222,
+  "revision": 223,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2943,7 +2943,7 @@
       "source": "会话录入：CHORE-260 施工顺序第 7 步（M8）",
       "source_ref": "github#260",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": null,
       "env_role": null,
@@ -2951,13 +2951,16 @@
       "branch": "dev-ci-260-m8-closeout-r1",
       "worktree": "/Users/chris/workspace/workflow-manager-worktrees/dev-ci-260-m8-closeout-r1",
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "b249f10d418537f0ceab4d20688674577c47610a",
+        "merged_at": "2026-09-21T16:06:10Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T16:06:10.000Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": false,
       "created_at": "2026-09-21T15:10:53.801Z",
-      "updated_at": "2026-09-21T15:12:36.670Z",
+      "updated_at": "2026-09-21T16:06:40.949Z",
       "spec_path": "docs/tasks/specs/CHORE-286-ci-260-m8-closeout/task-spec-V1.md"
     }
   ],
