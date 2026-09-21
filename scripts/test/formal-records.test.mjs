@@ -452,3 +452,33 @@ test('#69 多格式 Formal Artifact：html/canvas/flowchart 与 Revision 追加'
   assert.equal(getRecord(store, second.produced_records[0].record_id, 2).body.value.includes('v2'), true)
   assert.deepEqual(second.produced_records[0].dependencies, [{ record_id: second.produced_records[0].record_id, record_revision: 1 }])
 })
+
+test('CHORE-110 一致性：轻量档验收包（缺 review/test）映射时不得被判前置缺失', () => {
+  // PORTABLE_PREDECESSORS.acceptance_package 列五类，但只是「存在即链接」。
+  // 本用例钉住该口径：若日后有人把它收紧成必填闸门，formal-records 就与 schema/契约分叉。
+  const store = createStore()
+  const run = { run_id: 'cwf-tier-map', attempt: 1, current_head: 'abc' }
+  const mapIn = (type, stage, payload) => mapPortableHandoff(store, {
+    record_type: type, record_version: 'v0.1.8', created_at: '2026-09-19T05:00:00Z',
+    produced_by: 'cwf:tier', run: { ...run, stage }, payload,
+  })
+  mapIn('requirements_baseline', 'requirements', { outcome: 'baseline_ready', status: 'confirmed', goal: 'g' })
+  mapIn('dev_handoff', 'dev', { outcome: 'handoff_ready' })
+  const light = mapIn('acceptance_package', 'human_acceptance', {
+    status: 'decided', decision: 'accept',
+    assembled: {
+      requirements_baseline_ref: 'requirements_baseline.json', dev_handoff_ref: 'dev_handoff.json',
+      integration_checkpoint: { target_ref: 'main', target_head_at_check: 'abc', target_advanced: false, proofs_state: 'still_valid' },
+      evidence_gaps: {
+        review_proof: { reason: '轻量路线未设独立评审节点', acknowledged_by: 'human:song', acknowledged_at: '2026-09-19T05:00:00Z' },
+        test_proof: { reason: '轻量路线未设独立测试节点', acknowledged_by: 'human:song', acknowledged_at: '2026-09-19T05:00:00Z' },
+      },
+    },
+  })
+  assert.equal(validateFormalRecord(light).length, 0)
+  const linked = light.dependencies.map(d => d.record_id)
+  assert.ok(linked.includes(portableRecordId('cwf-tier-map', 'requirements_baseline')), '已存在的 baseline 须被链接')
+  assert.ok(linked.includes(portableRecordId('cwf-tier-map', 'dev_handoff')), '已存在的 dev_handoff 须被链接')
+  assert.equal(linked.includes(portableRecordId('cwf-tier-map', 'review_proof')), false, '未产生的 review_proof 不得被虚构为依赖')
+  assert.equal(linked.includes(portableRecordId('cwf-tier-map', 'test_proof')), false, '未产生的 test_proof 不得被虚构为依赖')
+})

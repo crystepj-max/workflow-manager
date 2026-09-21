@@ -71,6 +71,24 @@ function walkFiles(dir, base = dir) {
   return out
 }
 
+function normIdent(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+// 登记册 branch 为空时（远程收口/未回写分支的任务常如此）按任务标识在 .agent-runs/ 里
+// 反查 Run：以 run.json.issue_or_task_identity 为准，唯一命中才采用，多命中一律报错不猜。
+function discoverRunId(root, taskId) {
+  const runsRootDir = join(root, '.agent-runs')
+  if (!existsSync(runsRootDir)) return { runId: null, candidates: [] }
+  const candidates = []
+  for (const name of readdirSync(runsRootDir)) {
+    const run = readJson(join(runsRootDir, name, 'run.json'))
+    if (!run?.run_id) continue
+    if (normIdent(run.issue_or_task_identity) === normIdent(taskId)) candidates.push(run.run_id)
+  }
+  return { runId: candidates.length === 1 ? candidates[0] : null, candidates }
+}
+
 /**
  * 生成证据摘要并写入 <归档目录>/<TASK_ID>/evidence-summary.json。
  * @returns {{summaryJson: object, outPath: string, runDir: string|null, hasEvidence: boolean, stages: object[], fileCount: number, totalBytes: number}}
@@ -80,9 +98,20 @@ export function generateEvidenceSummary({ root, taskId, runId, noRunEvidence = f
   const registry = readJson(join(root, 'docs/tasks/registry.json'))
   const task = registry?.tasks?.find((t) => t.task_id === taskId) || null
 
-  const effectiveRunId = runId || (task?.branch ? task.branch.replace(/^dev-/, '') : null)
+  let effectiveRunId = runId || (task?.branch ? task.branch.replace(/^dev-/, '') : null)
+  let runDiscovered = false
   if (!effectiveRunId && !noRunEvidence) {
-    throw new Error(`无法确定 ${taskId} 的 RUN_ID：登记册 branch 为空，且未提供 runId。若该任务确无 Run 证据链，显式传 noRunEvidence: true`)
+    const found = discoverRunId(root, taskId)
+    if (found.candidates.length > 1) {
+      throw new Error(`无法确定 ${taskId} 的 RUN_ID：.agent-runs 内有多个 Run 声明同一任务（${found.candidates.join(' / ')}），须显式传 --run-id`)
+    }
+    if (found.runId) {
+      effectiveRunId = found.runId
+      runDiscovered = true
+    }
+  }
+  if (!effectiveRunId && !noRunEvidence) {
+    throw new Error(`无法确定 ${taskId} 的 RUN_ID：登记册 branch 为空、未提供 runId，且 .agent-runs 内无匹配本任务的 Run。若该任务确无 Run 证据链，显式传 noRunEvidence: true`)
   }
 
   const runDir = effectiveRunId ? join(root, archivedRoot, effectiveRunId) : null
@@ -116,15 +145,26 @@ export function generateEvidenceSummary({ root, taskId, runId, noRunEvidence = f
   const totalBytes = files.reduce((n, f) => n + f.bytes, 0)
   const acceptance = stages.find((s) => s.record_type === 'acceptance_package')
 
+  // 签署状态显式化（CHORE-110）：三字段为 null 时必须说明原因，不得静默——
+  // 摘要按 7 天保留期后是唯一永久层，静默 null 与「没验收」事后无法区分。
+  const apStatus = acceptance?.summary?.status ?? null
+  const acceptanceState = apStatus || (acceptance ? 'unspecified' : 'no_record')
+  const acceptanceNote = acceptanceState === 'decided' ? null
+    : acceptance ? '验收包存在但尚未记录人工签收（status≠decided）——签署人/时间不得事后补记'
+      : '本 Run 未登记 acceptance_package：轻量路线缺前置引用须在验收包内用 evidence_gaps 声明（契约 §8.3），或该任务先于签收动作'
+
   const summaryJson = {
     task_id: taskId,
     ...(effectiveRunId ? { run_id: effectiveRunId } : {}),
+    ...(runDiscovered ? { run_id_source: 'discovered_from_agent_runs' } : {}),
     ...(task?.name ? { task_name: task.name } : {}),
     ...(task?.branch ? { branch: task.branch } : {}),
     status: task?.status ?? null,
     decision: acceptance?.summary?.decision ?? null,
     decided_by: acceptance?.summary?.decided_by ?? null,
     decided_at: acceptance?.summary?.decided_at ?? null,
+    acceptance_state: acceptanceState,
+    ...(acceptanceNote ? { acceptance_note: acceptanceNote } : {}),
     ...(task?.merge
       ? {
           merge: {
