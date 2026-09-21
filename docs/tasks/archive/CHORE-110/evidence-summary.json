@@ -1,0 +1,30 @@
+{
+  "task_id": "CHORE-110",
+  "task_name": "轻量路线验收包可登记性：acceptance_package schema 放开与签署人留痕",
+  "status": "已合并",
+  "archive_form": "lightweight-remote",
+  "remote_ref": "github#110",
+  "run_id": "chore-110-r1",
+  "branch": "dev-chore-110-r1",
+  "merge": {
+    "commit": "f0d9520295f916ec7d83060aa37db92f1c48779b",
+    "merged_at": "2026-09-21T12:25:30+08:00",
+    "issue": "#255"
+  },
+  "decision": "accept",
+  "decided_by": "松哥",
+  "decided_at": "2026-09-21T01:53:15.240Z",
+  "acceptance_state": "decided",
+  "stages": [
+    "dev_handoff",
+    "acceptance_package"
+  ],
+  "evidence": {
+    "archive_path": ".agent-runs/chore-110-r1",
+    "file_count": 14,
+    "total_bytes": 47683
+  },
+  "generated_by": "CHORE-110 远程收口（PR #255 在 GitHub 合并，非本地 local-task-merge 路径）",
+  "generated_at": "2026-09-21T15:56:50.628Z",
+  "note": "远程收口任务（github#110）：PR 在 GitHub 合并，本地走轻量归档=卡存根+凭据摘要；规格与定义文档留在 docs/tasks/specs/CHORE-110-acceptance-package-schema/。"
+}

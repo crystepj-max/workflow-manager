@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 188,
+  "revision": 189,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2064,21 +2064,27 @@
       "source": "会话录入",
       "source_ref": "",
       "baseline": "V1",
-      "status": "定义中",
+      "status": "已合并",
       "priority": "P2",
       "env_group": null,
       "env_role": null,
       "deps": [],
-      "branch": null,
+      "branch": "dev-chore-110-r1",
       "worktree": null,
-      "runs": [],
-      "merge": null,
+      "runs": [
+        "chore-110-r1"
+      ],
+      "merge": {
+        "commit": "f0d9520295f916ec7d83060aa37db92f1c48779b",
+        "merged_at": "2026-09-21T12:25:30+08:00",
+        "issue": "#255"
+      },
       "github_sync": "synced#110",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T04:25:30.000Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-19T02:53:24.804Z",
-      "updated_at": "2026-09-19T04:06:03.592Z",
+      "updated_at": "2026-09-21T15:56:50.458Z",
       "spec_path": "docs/tasks/specs/CHORE-110-acceptance-package-schema/task-spec-V1.md"
     },
     {
