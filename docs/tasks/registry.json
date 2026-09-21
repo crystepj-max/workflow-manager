@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 168,
+  "revision": 171,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2509,7 +2509,7 @@
       "source": "github-issue",
       "source_ref": "https://github.com/crystepj-max/workflow-manager/issues/233",
       "baseline": "V1",
-      "status": "已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FIX-233",
       "env_role": "独立",
@@ -2517,13 +2517,16 @@
       "branch": null,
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "9ac8de0",
+        "merged_at": "2026-09-21T08:04:13.605Z"
+      },
       "github_sync": "#233",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T08:04:13.605Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-20T15:40:03.828Z",
-      "updated_at": "2026-09-20T15:40:03.828Z",
+      "updated_at": "2026-09-21T08:04:13.610Z",
       "spec_path": "docs/tasks/specs/FIX-233-vwf-templateid-binding-loss/task-spec-V1.md"
     },
     {
@@ -2538,7 +2541,7 @@
       "source": "github-issue",
       "source_ref": "https://github.com/crystepj-max/workflow-manager/issues/234",
       "baseline": "V1",
-      "status": "已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FIX-234",
       "env_role": "独立",
@@ -2546,13 +2549,16 @@
       "branch": null,
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "1effdd2",
+        "merged_at": "2026-09-21T08:04:13.644Z"
+      },
       "github_sync": "#234",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T08:04:13.644Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-20T15:39:23.145Z",
-      "updated_at": "2026-09-20T15:39:23.145Z",
+      "updated_at": "2026-09-21T08:04:13.645Z",
       "spec_path": "docs/tasks/specs/FIX-234-template-default-model-gate/task-spec-V1.md"
     },
     {
@@ -2567,7 +2573,7 @@
       "source": "github-issue",
       "source_ref": "https://github.com/crystepj-max/workflow-manager/issues/235",
       "baseline": "V1",
-      "status": "已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FIX-235",
       "env_role": "独立",
@@ -2575,13 +2581,16 @@
       "branch": null,
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "0151abd",
+        "merged_at": "2026-09-21T08:04:13.678Z"
+      },
       "github_sync": "#235",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T08:04:13.678Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-20T15:39:23.147Z",
-      "updated_at": "2026-09-20T15:39:23.147Z",
+      "updated_at": "2026-09-21T08:04:13.678Z",
       "spec_path": "docs/tasks/specs/FIX-235-node-isolation-probe-fix/task-spec-V1.md"
     },
     {
