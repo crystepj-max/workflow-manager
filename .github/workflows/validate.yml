@@ -13,6 +13,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # 收口链用例（local-task-merge 系列）会经产品代码执行真实 `git commit`，
+      # 而产品代码不覆盖子进程 env（local-task-merge.mjs:50），身份只能来自环境。
+      # Linux runner 不像 macOS 会由 username/hostname 自动推导身份，
+      # 缺这条会报 `Author identity unknown`，7 个用例在 CI 上永不通过。
+      - name: 配置 git 提交身份（供收口链用例做真实 commit）
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: install（workspace 提升 packages/* 依赖）
         run: npm install
       - name: generate（生产物供校验与 vwf 加载）
