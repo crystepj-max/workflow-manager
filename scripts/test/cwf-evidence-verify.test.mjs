@@ -312,6 +312,24 @@ test('轻量档边界：尚未签收时 ⑫ 记 N/A，不因缺签署报错', ()
   assert.equal(r.checks.find(c => c.id === '⑫').detail, 'N/A（无缺失声明或尚未签收）')
 })
 
+test('PR Review 回归：缺引用又未声明时不得崩在 ⑧（Cursor Round 1 A 类）', () => {
+  // 复现：撤掉 test_proof_ref + requirements_baseline_ref，但 evidence_gaps 只声明 design_package
+  // → 缺失未被声明，na() 为假；修复前 ⑧ 走 else 分支读 test.payload 抛 TypeError，
+  //   校验器整体崩溃，⑩ 的「漏报」判定根本没机会执行。
+  const r = verifyEvidenceChain(makeRunDir(rs => {
+    const a = rs['acceptance_package.a1.json'].payload.assembled
+    delete a.test_proof_ref
+    delete a.requirements_baseline_ref
+    a.evidence_gaps = { design_package: GAP_HUMAN().review_proof }
+  }), LIVE)
+  assert.equal(checkOk(r, '⑧'), false, '⑧ 须判失败而不是抛异常')
+  assert.match(r.checks.find(c => c.id === '⑧').detail, /未声明缺失/)
+  assert.equal(checkOk(r, '⑩'), false, '⑩ 须同时报未声明与多报')
+  assert.match(r.checks.find(c => c.id === '⑩').detail, /未声明缺失/)
+  assert.match(r.checks.find(c => c.id === '⑩').detail, /多报=design_package/)
+  assert.equal(r.ok, false)
+})
+
 test('轻量档边界：只缺一侧时另一侧仍按原口径校验（现存 test 非 pass 被拒）', () => {
   const r = verifyEvidenceChain(makeRunDir(rs => {
     toLight(rs)

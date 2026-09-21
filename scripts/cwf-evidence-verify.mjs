@@ -185,6 +185,11 @@ export function verifyEvidenceChain(runDir, { live = null } = {}) {
   if (na('test_proof') || na('requirements_baseline')) {
     const naSide = [na('test_proof') && 'test', na('requirements_baseline') && 'baseline'].filter(Boolean).join('/')
     check('⑧', '验收映射完整无重复（缺失转 N/A）', true, `N/A：${naSide} 已声明缺失`)
+  } else if (!test || !baseline) {
+    // 引用缺失但未在 evidence_gaps 声明：判失败而非崩在此处——否则 ⑩ 的「漏报」永远没机会报
+    const undeclared = [['test_proof', test], ['requirements_baseline', baseline]].filter(([, r]) => !r).map(([rt]) => rt)
+    check('⑧', '验收映射完整无重复（accept/conditional_pass 场景全 pass）', false,
+      `记录不可解析且未声明缺失：${undeclared.join('/')}（⑩ 将同时判失败）`)
   } else {
     const want = baseline?.payload?.acceptance || []
     const mapping = (test?.payload?.acceptance_mapping || []).map(m => m.acceptance_item)
