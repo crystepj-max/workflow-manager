@@ -26,17 +26,31 @@ jobs:
       - name: generate（生产物供校验与 vwf 加载）
         run: npm run generate
       # 【临时诊断，定位后即移除】M4 在 CI 上间歇失败（本地恒过），且 validate.mjs 会裁剪
-      # 明细。此处保留完整输出，并单独复现「批次前对账」段的生成，取回报告原文。
-      - name: 诊断：M4 取证（完整输出 + 报告原文）
+      # 明细。此处保留完整输出，并直接探「批次前对账」段的生成路径与异常。
+      - name: 诊断：M4 取证（完整输出 + 报告原文 + 对账异常）
         continue-on-error: true
         run: |
           echo "===== 1) 直接跑 M4 检查脚本 ====="
           node scripts/ai-task-scheduled-m4-check.mjs || true
           echo "===== 2) 单独跑 trigger --now 并打印报告原文 ====="
           mkdir -p /tmp/m4probe
-          printf '%s' '{"runAt":"2020-01-01T00:00:00.000Z","batch":"scripts/test/fixtures/ai-task-scheduled-m4/batch.json","simulate":"scripts/test/fixtures/ai-task-scheduled-m4/events-scene1.json","reportOut":"/tmp/m4probe/report.md"}' > /tmp/m4probe/sched.json
+          cat > /tmp/m4probe/sched.json <<EOF
+          {
+            "runAt": "2020-01-01T00:00:00.000Z",
+            "batch": "$PWD/scripts/test/fixtures/ai-task-scheduled-m4/batch.json",
+            "simulate": "$PWD/scripts/test/fixtures/ai-task-scheduled-m4/events-scene1.json",
+            "reportOut": "/tmp/m4probe/report.md"
+          }
+          EOF
           node scripts/ai-task-scheduled-trigger.mjs /tmp/m4probe/sched.json --now > /tmp/m4probe/out.json 2> /tmp/m4probe/err.txt || true
           echo "----- trigger stderr -----"; cat /tmp/m4probe/err.txt || true
-          echo "----- 报告原文（批次前对账段应在此）-----"; cat /tmp/m4probe/report.md || true
+          echo "----- 报告原文 -----"; cat /tmp/m4probe/report.md || true
+          echo "===== 3) 直接探 reconcilePlan 是否抛异常 ====="
+          node --input-type=module -e "import { reconcilePlan } from './scripts/registry-reconcile.mjs'; try { const a = reconcilePlan(process.cwd(), 'main'); console.log('PLAN OK toMerge=' + a.toMerge.length + ' suspicious=' + a.suspicious.length); } catch (e) { console.log('PLAN THREW: ' + (e && e.stack || e)); }" || true
+          echo "===== 4) git 环境 ====="
+          echo "shallow=$(git rev-parse --is-shallow-repository)"
+          git branch -a | head -20
+          git rev-parse --verify main 2>&1 | head -2
+          git rev-parse --verify origin/main 2>&1 | head -2
       - name: validate（蓝图校验 + 重生成一致性 + 引擎/包测试（含运行时排练厅））
         run: npm run validate
