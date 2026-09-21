@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 157,
+  "revision": 159,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2794,6 +2794,35 @@
       "created_at": "2026-09-21T06:06:53.844Z",
       "updated_at": "2026-09-21T06:11:39.200Z",
       "spec_path": "docs/tasks/specs/CHORE-268-ci-260-m2-port-probe/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-273",
+      "type": "CHORE",
+      "remote": "github#273",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CI 可信度 M4 机械验收：为 CI 提供可对账环境（完整克隆 + main 引用）（CHORE-260 子票 4）",
+      "slug": "ci-260-m4-acceptance-script",
+      "source": "会话录入：CHORE-260 施工顺序第 4 步（M4 取证与修复）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "fix/ci-260-m4-acceptance-script",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m4",
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-21T06:25:14.782Z",
+      "updated_at": "2026-09-21T06:26:46.319Z",
+      "spec_path": "docs/tasks/specs/CHORE-273-ci-260-m4-acceptance-script/task-spec-V1.md"
     }
   ],
   "updated_at": "2026-09-20T16:10:00.000Z"

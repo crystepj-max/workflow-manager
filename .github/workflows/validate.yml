@@ -9,7 +9,16 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
+      # 「批次前对账（CHORE-73）」以 baseRef=main 读主干合并事实（registry-reconcile 的
+      # collectMergeFacts 执行 `git log main`）。默认 fetch-depth: 1 的浅克隆下
+      # main/origin/main 均不存在 → 对账抛 `fatal: ambiguous argument 'main'` → 报告落成
+      # 「对账失败（不阻塞批次）」降级文案 → M4 机械验收失败。故此处取完整历史。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # PR 场景 checkout 的是 merge ref，本地无 main 分支引用，仍需补一步。
+      - name: 确保 main 引用可用（对账读主干事实所需）
+        run: git rev-parse --verify --quiet main || git fetch --no-tags origin main:refs/heads/main
       - uses: actions/setup-node@v4
         with:
           node-version: 24
