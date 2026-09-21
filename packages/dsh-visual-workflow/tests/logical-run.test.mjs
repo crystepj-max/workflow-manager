@@ -626,3 +626,95 @@ test('#79 Codex R2 ③：派生运行按自身 logical_run_id 分配 workspace',
   await drain()
   assert.deepEqual(allocCalls, ['issue-wsid', 'issue-wsid#2'], '两次分配分别用原始 id 与派生 id')
 })
+
+// ── FIX-226：角色正文的运行期冻结（快照记角色身份/摘要 + 降级可见）───────────────
+// 编译器随译文返回的角色元信息写入 Rev1 快照：哪几个角色、内容摘要、是否内联。
+// 未内联（角色文件读不到 / 产物超尺寸闸门降级）时必须留控制事件，不得静默假装已冻结。
+const ROLES_COMPILE_OUTPUT = {
+  ok: true,
+  script: '//MOCK-SCRIPT-ROLES',
+  meta: { name: 'mock', description: 'mock', phases: [] },
+  roles: [
+    { id: 'explore', builtin: false, inlined: true, bytes: 3401, digest: 'a'.repeat(64), reason: null },
+    { id: 'closeout', builtin: true, inlined: false, bytes: 0, digest: null, reason: 'unreadable' },
+  ],
+}
+
+function rolesEnv(eng, compileOutput) {
+  const fs = makeFs({
+    [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+    [USER_DIR + '/logical-run-spec.json']: JSON.stringify(SPEC_BLUEPRINT, null, 2) + '\n',
+    [SKILL_ROOT + '/logical-run-spec/script.mjs']: '//MOCK-SCRIPT',
+  })
+  const sub = makeSubprocess({
+    fs,
+    spawnHandler: (spec) => {
+      const argv = spec.argv.join(' ')
+      if (argv.includes('generate.mjs') && argv.includes(' compile ')) {
+        return { stdout: JSON.stringify(compileOutput), exitCode: 0 }
+      }
+      return undefined
+    },
+  })
+  return env({ subprocess: sub, extra: { workflowEngine: eng, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
+}
+
+test('FIX-226：Rev1 快照记角色身份/摘要/是否内联（可回答「本 Run 用的是哪一版角色」）', async () => {
+  const eng = makeEngine()
+  const { events, definedTools, fs } = rolesEnv(eng, ROLES_COMPILE_OUTPUT)
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const p = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-roles' })
+  await until(() => eng.starts.length >= 1, '启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-1', 'DONE', { results: { explore: { verdict: 'PASS' }, closeout: { result: 'ok' } } })
+  await p
+  await drain()
+
+  const rec = readLogical(fs, 'issue-roles')
+  const entries = rec.snapshots[0].roles.entries
+  assert.equal(entries.length, 2, '角色条目随译文写入 Rev1 快照')
+  assert.deepEqual(entries[0], { id: 'explore', builtin: false, inlined: true, digest: 'a'.repeat(64), bytes: 3401, reason: null }, '已内联角色记身份与内容摘要')
+  assert.equal(entries[1].id, 'closeout')
+  assert.equal(entries[1].inlined, false, '未内联角色如实记 inlined:false')
+  assert.equal(entries[1].digest, null, '未内联角色无摘要（不得编造）')
+  assert.equal(entries[1].reason, 'unreadable', '降级原因随条目保留')
+  // Rev N 修订沿用 Rev1 角色条目（角色冻结不随 Provider/Model 变更）
+  assert.deepEqual(rec.snapshots[0].roles.role_dir, '', 'role_dir 仍按原字段记录')
+  assert.ok(rec.control_events.some((e) => e.type === 'role_inline_degraded'), '降级必须留控制事件（不得静默假装已冻结）')
+  const ev = rec.control_events.find((e) => e.type === 'role_inline_degraded')
+  assert.deepEqual(ev.roles, [{ id: 'closeout', reason: 'unreadable' }], '控制事件点名未冻结角色与原因')
+})
+
+test('FIX-226：全部角色已内联时不留降级控制事件（正常路径不噪声）', async () => {
+  const eng = makeEngine()
+  const ok = JSON.parse(JSON.stringify(ROLES_COMPILE_OUTPUT))
+  ok.roles = ok.roles.map((r) => Object.assign({}, r, { inlined: true, bytes: 100, digest: 'b'.repeat(64), reason: null }))
+  const { events, definedTools, fs } = rolesEnv(eng, ok)
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const p = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-roles-ok' })
+  await until(() => eng.starts.length >= 1, '启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-1', 'DONE', { results: { explore: { verdict: 'PASS' }, closeout: { result: 'ok' } } })
+  await p
+  await drain()
+
+  const rec = readLogical(fs, 'issue-roles-ok')
+  assert.equal(rec.snapshots[0].roles.entries.every((r) => r.inlined), true, '全部角色已内联')
+  assert.ok(!rec.control_events.some((e) => e.type === 'role_inline_degraded'), '无降级则无控制事件')
+})
+
+test('FIX-226：旧形态编译输出无角色元信息时快照记为无条目（不编造已冻结）', async () => {
+  const eng = makeEngine()
+  const { events, definedTools, fs } = rolesEnv(eng, { ok: true, script: '//OLD', meta: { name: 'mock', description: 'mock', phases: [] } })
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const p = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-roles-old' })
+  await until(() => eng.starts.length >= 1, '启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
+  settleRun(eng, events, 'run-1', 'DONE', { results: { explore: { verdict: 'PASS' }, closeout: { result: 'ok' } } })
+  await p
+  await drain()
+
+  const rec = readLogical(fs, 'issue-roles-old')
+  assert.deepEqual(rec.snapshots[0].roles.entries, [], '无角色元信息时条目为空，不编造摘要')
+  assert.ok(!rec.control_events.some((e) => e.type === 'role_inline_degraded'), '无元信息不等于降级，不误报控制事件')
+})
