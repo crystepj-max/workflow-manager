@@ -45,12 +45,18 @@ const PLAIN_BP = (() => {
   return bp
 })()
 
-const until = async (fn, label, ms = 8000) => {
+// 轮询上界与轮询间隔都可经环境变量注入：CI runner 只有 2 核，本用例要跑真实 node 子进程
+// 做冻结/核验（真实 fs + crypto），争用下耗时可远超本机；把上界做成可配置，而不是把
+// 偶发慢直接判成失败（CHORE-260 · M6）。
+const UNTIL_MS = Number(process.env.VWF_TEST_UNTIL_MS || 30_000)
+const UNTIL_POLL_MS = Number(process.env.VWF_TEST_POLL_MS || 5)
+
+const until = async (fn, label, ms = UNTIL_MS) => {
   const t0 = Date.now()
   for (;;) {
     if (await fn()) return
     if (Date.now() - t0 > ms) throw new Error('until 超时：' + (label || ''))
-    await new Promise((r) => setTimeout(r, 5))
+    await new Promise((r) => setTimeout(r, UNTIL_POLL_MS))
   }
 }
 const readLogical = (fs, id) => JSON.parse(fs._files.get(LOGICAL_DIR + '/' + encodeURIComponent(id) + '.json'))

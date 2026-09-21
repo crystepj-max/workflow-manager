@@ -62,9 +62,9 @@ const runs = runsRoot(root)
 const archiveRoot = join(root, 'docs', 'tasks', 'archive')
 const now = Date.now()
 
-// —— 分类：到期可清 / 未到期 / 证据缺失拒删 / 孤儿目录 ——
+// —— 分类：到期可清 / 到期但明细已不存在（只需登记） / 证据缺失拒处理 / 孤儿目录 ——
 const due = []
-const pending = []
+const alreadyGone = []
 const blocked = []
 const claimed = new Set()
 
@@ -79,13 +79,18 @@ for (const t of registry.tasks || []) {
     ? readdirSync(runs).filter((n) => n === runId || n.startsWith(`${runId}-`)).map((n) => join(runs, n))
     : []
   for (const p of targets) claimed.add(p)
-  if (cleared || !expired || targets.length === 0) {
-    if (!cleared && expired && targets.length === 0) pending.push({ task: t, why: '到期但已无明细目录（可能已手工清理）' })
-    continue
-  }
+  if (cleared || !expired) continue
   const summary = join(archiveRoot, t.task_id, 'evidence-summary.json')
   if (!existsSync(summary)) {
-    blocked.push({ task: t, targets, why: `缺证据摘要 ${summary}（约定 §1.8 删除前置条件，拒绝删除）` })
+    // 约定 §1.8：摘要缺失时拒绝任何清理动作（防止误删唯一副本）。
+    blocked.push({ task: t, targets, why: `缺证据摘要 ${summary}（约定 §1.8 前置条件，拒绝清理与登记）` })
+    continue
+  }
+  if (targets.length === 0) {
+    // CHORE-286：明细本就不存在时，原实现只列 pending 而不登记，导致登记册永远停在
+    // 「未清理」——D-9 因此长期报红且**无法用本脚本消除**（缺口曾以「潜在」记录，
+    // 2026-09-21 实测被触发）。无明细即无残留，且摘要齐备（可回溯），按已清理登记。
+    alreadyGone.push({ task: t })
     continue
   }
   due.push({ task: t, targets })
@@ -110,13 +115,14 @@ for (const { task, targets } of due) {
   console.log(`🔴 ${task.task_id} 到期于 ${task.evidence_expires_at}（${(bytes / 1024).toFixed(0)} KB）`)
   for (const p of targets) console.log(`     - ${p}`)
 }
-if (pending.length) {
+if (alreadyGone.length) {
   console.log()
-  for (const { task, why } of pending) console.log(`⚪ ${task.task_id}：${why}`)
+  for (const { task } of alreadyGone)
+    console.log(`⚪ ${task.task_id} 到期于 ${task.evidence_expires_at}：明细目录已不存在（摘要齐备，按已清理登记）`)
 }
 if (blocked.length) {
   console.log()
-  for (const { task, why } of blocked) console.log(`⛔ ${task.task_id} 拒绝删除：${why}`)
+  for (const { task, why } of blocked) console.log(`⛔ ${task.task_id} 拒绝处理：${why}`)
 }
 if (orphans.length) {
   console.log()
@@ -125,7 +131,7 @@ if (orphans.length) {
 }
 
 // —— 执行 ——
-if (apply && due.length) {
+if (apply && (due.length || alreadyGone.length)) {
   console.log()
   console.log('—— 执行清理 ——')
   for (const { task, targets } of due) {
@@ -140,9 +146,13 @@ if (apply && due.length) {
     update(root, task.task_id, { evidence_cleared_at: new Date().toISOString() })
     console.log(`  ✅ 登记册已标记 ${task.task_id} 明细已清理`)
   }
-} else if (due.length) {
+  for (const { task } of alreadyGone) {
+    update(root, task.task_id, { evidence_cleared_at: new Date().toISOString() })
+    console.log(`  ✅ 登记册已标记 ${task.task_id} 明细已清理（无残留目录）`)
+  }
+} else if (due.length || alreadyGone.length) {
   console.log()
-  console.log(`（预演结束。加 --apply 执行上述 ${due.length} 项清理）`)
+  console.log(`（预演结束。加 --apply 执行上述 ${due.length} 项清理${alreadyGone.length ? ` + ${alreadyGone.length} 项登记` : ''}）`)
 }
 
 process.exit(blocked.length ? 1 : 0)

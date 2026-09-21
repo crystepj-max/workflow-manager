@@ -32,7 +32,7 @@ node scripts/workflow-conformance/run.mjs --json /tmp/loc-042-report.json
 | 层 | 状态来源 | 说明 |
 |---|---|---|
 | 自动契约 | `run.mjs` + `workflow-conformance.test.mjs` | 七探针、负例、消费链、夹具 |
-| 真实安装 DSH E2E | 人工 | 按 construction-bootstrap runbook；本任务不代部署 |
+| 真实安装 DSH E2E | 人工 | 按 `docs/runbooks/construction-dsh/runbook.md`；本任务不代部署 |
 | 真实模型行为 | 人工 | 替身通过不等于线上质量 |
 | 人工验收 | uat-card | 三态签收，Agent 不得代签 |
 

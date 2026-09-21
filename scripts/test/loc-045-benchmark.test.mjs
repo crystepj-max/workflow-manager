@@ -48,8 +48,8 @@ test('freeze manifest captures digests', () => {
 test('prepare experiment creates NOT_EXECUTED trial records', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'loc045-prep-'))
   const benchTmp = join(tmp, 'bench')
-  // use real bench root but isolated results
-  const result = prepareExperiment({ benchRoot: BENCH_ROOT, resultsDir: join(tmp, 'results') })
+  // use real bench root but isolated results/config so the repo stays clean
+  const result = prepareExperiment({ benchRoot: BENCH_ROOT, resultsDir: join(tmp, 'results'), configRoot: join(tmp, 'config') })
   assert.equal(result.status, 'PREPARED')
   assert.equal(result.planned_runs, 48)
   const summary = getExperimentSummary(BENCH_ROOT)
@@ -58,13 +58,16 @@ test('prepare experiment creates NOT_EXECUTED trial records', () => {
 })
 
 test('research report status is PREPARED without real runs', () => {
-  prepareExperiment({ benchRoot: BENCH_ROOT })
+  const tmp = mkdtempSync(join(tmpdir(), 'loc045-report-'))
+  // 全部写入走临时目录：入库的冻结清单与占位记录是本实验的不可变基线，测试不得改写它们
+  prepareExperiment({ benchRoot: BENCH_ROOT, resultsDir: join(tmp, 'results'), configRoot: join(tmp, 'config') })
   const report = buildResearchReport({ benchRoot: BENCH_ROOT })
   assert.equal(report.status, 'PREPARED')
   assert.equal(report.ac_mapping['AC-04'].met, true)
   assert.match(report.ac_mapping['AC-01'].note, /NOT_EXECUTED|未执行/)
-  const { jsonPath } = writeResearchReport({ benchRoot: BENCH_ROOT, resultsDir: join(BENCH_ROOT, 'results/prepared') })
+  const { jsonPath } = writeResearchReport({ benchRoot: BENCH_ROOT, reportsDir: join(tmp, 'reports') })
   assert.ok(jsonPath.endsWith('research-report.json'))
+  rmSync(tmp, { recursive: true, force: true })
 })
 
 test('metrics helpers', () => {

@@ -1,0 +1,22 @@
+{
+  "task_id": "CHORE-276",
+  "run_id": "fix/ci-260-m6-clock-injection",
+  "task_name": "CI 可信度 M6 挂钟依赖：断言改为业务事实 + 阈值可注入（CHORE-260 子票 5）",
+  "branch": "fix/ci-260-m6-clock-injection",
+  "status": "已合并",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "acceptance_state": "no_record",
+  "acceptance_note": "本 Run 未登记 acceptance_package：轻量路线缺前置引用须在验收包内用 evidence_gaps 声明（契约 §8.3），或该任务先于签收动作",
+  "merge": {
+    "commit": "c8842c6fb550fcf463190ec327a75034e9f946e6",
+    "merged_at": "2026-09-21T11:16:42.344Z",
+    "issue": null
+  },
+  "stages": [],
+  "evidence": null,
+  "no_run_evidence": true,
+  "note": "该任务先于 Run 证据链机制落地（无分支与 .agent-runs 记录），本摘要依据登记册与归档规格生成。",
+  "generated_at": "2026-09-21T11:17:24.617Z"
+}

@@ -20,7 +20,7 @@ M2 与 Portable 七阶段关系：**唯一权威** [`m2-vs-portable-delivery.md`
 
 | 能力 | 状态 | 入口 / 版本 | 证据 |
 |---|---|---|---|
-| M2 单任务交付（定义外置） | **Current** | `dsh/skills/construction-bootstrap/` + 蓝图 `wf-construction-full-feature` | [`single-task-delivery-m2.md`](ai-task-define-delivery/single-task-delivery-m2.md)；[`templates/wf-construction-full-feature.json`](../../templates/wf-construction-full-feature.json)；[`scripts/ai-task-preflight-check.mjs`](../../scripts/ai-task-preflight-check.mjs) |
+| M2 单任务交付（定义外置） | **Current** | 蓝图 `wf-construction-full-feature` + 其生成 Skill（DSH 轨道命令序列 `docs/runbooks/construction-dsh/runbook.md`） | [`single-task-delivery-m2.md`](ai-task-define-delivery/single-task-delivery-m2.md)；[`templates/wf-construction-full-feature.json`](../../templates/wf-construction-full-feature.json)；[`scripts/ai-task-preflight-check.mjs`](../../scripts/ai-task-preflight-check.mjs) |
 | Portable 七阶段 Stage 语义 | **Legacy**（证据底物） | `construction-workflow-portable-contract` §2–§3 | [`construction-workflow-portable-contract.md`](construction-workflow-portable-contract.md)；**非** M2 主链 — 见 [`m2-vs-portable-delivery.md`](m2-vs-portable-delivery.md) |
 | 旧自定义建设种子 | **Legacy** | `dev-workflow-2-0` / `default-workflow` | [`templates/custom-seeds/`](../../templates/custom-seeds/)；恢复说明见 [`m2-vs-portable-delivery.md`](m2-vs-portable-delivery.md) §4 |
 | 批量调度 M3 / 定时 M4 | **Current** | `execution-plan` skill + `scripts/ai-task-scheduled-trigger.mjs` | [`execution-plan-m3.md`](ai-task-define-delivery/execution-plan-m3.md)；[`scripts/test/fixtures/ai-task-scheduled-m4/`](../../scripts/test/fixtures/ai-task-scheduled-m4/) |

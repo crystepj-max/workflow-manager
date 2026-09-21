@@ -5,6 +5,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 // 统一校验内核（候选二 T-IMP-13，CJS 单文件——引擎 import / 宿主 vm eval 双形态）
 import validatorCore from './validate-core.cjs';
@@ -76,6 +77,36 @@ export function loadBuiltinRoleDefs(ids, rolesDir = DEFAULT_ROLES_DIR, io = fs) 
     if (content != null) out[id] = content;
   }
   return out;
+}
+
+// ---------- FIX-226：被引用角色正文的编译期内联（内置 + 自定义同权）----------
+// 决策 3=A：本图实际引用到的**全部**角色在编译期内联进 ROLE_DEFS，运行期不再依赖工作区
+// 文件。自定义角色（builtin:false，当前即 dispatcher）此前只把路径写进快照、运行期按
+// 「工作区优先」读文件，等待期间改 dsh/roles/<id>.md 就会让已存在的运行中途换规矩——冻结
+// 形同不存在。本切片撤销当年「编辑工作区角色种子即对 bundled run 生效」的兼容取舍。
+//
+// 尺寸闸门（§9.3/§9.4/§11）：内联后编译产物超过上限则拒绝内联**自定义**角色并显式降级
+// （快照记 inlined:false + 控制事件），绝不静默截断脚本。上限口径 = 宿主编译通道捕获上限
+// 1MB（host.js GENERATOR compile maxBytes）留出 JSON 外壳（script + meta + 包装）余量；
+// 现有生成物 133–151KB、全部角色正文合计 64KB，正常路径距闸门很远。
+export const INLINE_ROLE_DEFS_OUTPUT_LIMIT_BYTES = 960 * 1024;
+
+// 被引用自定义角色（不在内置清单内的 profile）正文装配：读不到时跳过（诚实降级为读文件
+// 路径，由调用方在角色元信息里记 inlined:false + reason），不抛错、不影响编译。
+export function loadReferencedCustomRoleDefs(profiles, builtinRoleIds, rolesDir = DEFAULT_ROLES_DIR, io = fs) {
+  const builtin = new Set(builtinRoleIds);
+  const out = {};
+  for (const id of profiles) {
+    if (builtin.has(id)) continue;
+    const content = readRoleFileSafe(rolesDir, id, io);
+    if (content != null) out[id] = content;
+  }
+  return out;
+}
+
+// 角色内容摘要（§6.2/§9.2）：与内联正文同源计算，回答「本 Run 用的是哪一版角色」。
+export function roleContentDigest(content) {
+  return createHash('sha256').update(String(content), 'utf8').digest('hex');
 }
 
 // ---------- vwf 侧投影（候选一：兼容保留既有 named export） ----------
@@ -248,9 +279,15 @@ export function compileBlueprint(bp, opts = {}) {
   // 内联会让最小临时图编译产物 >65KB，超过宿主 runNode stdout maxBytes:64*1024 捕获
   // 上限（host.js:137），JSON.parse 前被截断/拒绝，vwf.script / wf_run 临时图崩溃。
   const referencedProfiles = new Set((bp.nodes || []).map((n) => n && n.profile).filter(Boolean))
-  const allDefs = opts.builtinRoleDefs || loadBuiltinRoleDefs(builtinRoleIds);
+  // 角色源目录：opts.rolesDir 可注入（测试用），内置与自定义角色共用同一目录口径。
+  const rolesDir = opts.rolesDir || DEFAULT_ROLES_DIR;
+  const allDefs = opts.builtinRoleDefs || loadBuiltinRoleDefs(builtinRoleIds, rolesDir);
   const builtinRoleDefs = {};
   for (const id of Object.keys(allDefs)) if (referencedProfiles.has(id)) builtinRoleDefs[id] = allDefs[id];
+  // FIX-226（决策 3=A）：自定义角色正文与内置角色同源同机制一并内联——运行期不再读工作区
+  // 文件，等待期间改 dsh/roles/<id>.md 对已存在的运行不再生效。读不到/超尺寸闸门时降级。
+  const customRoleDefs = loadReferencedCustomRoleDefs(referencedProfiles, builtinRoleIds, rolesDir);
+  const inlineRoleDefs = Object.assign({}, builtinRoleDefs, customRoleDefs);
 
   const lines = [
     'const __VWF_WS_DEFAULTS__ = {}',
@@ -349,7 +386,7 @@ export function compileBlueprint(bp, opts = {}) {
     // 内置角色清单（单一事实源 = dsh/roles/builtin-roles.json）：roleRef 据此决定内置/自定义读取优先级
     'const BUILTIN_ROLE_IDS = ' + JSON.stringify(builtinRoleIds),
     // 内置角色正文（#129 遗留项 2）：编译期内联，临时编译自包含；缺失时 roleRef 走读路径回退
-    'const ROLE_DEFS = ' + JSON.stringify(builtinRoleDefs),
+    'const ROLE_DEFS = ' + JSON.stringify(inlineRoleDefs),
     'const BYID = {}',
     'for (const n of NODES) BYID[n.id] = n',
     ...buildSchemaProtocolEmbedLines(bp),
@@ -543,18 +580,20 @@ export function compileBlueprint(bp, opts = {}) {
     'function roleRef(name) {',
     opts.noRole
       ? '  return \'【角色定义】原型模式：本节点无角色文件要求，以 goal 为唯一依据。\\n\''
-      // 内置角色正文优先内联（#129 遗留项 2）：编译期内联 = 打包快照同源，临时编译
-      // 自包含；stale 产物缺 ROLE_DEFS 声明时（typeof 三元守卫，评论 3900312838）
-      // 显式回退 undefined 走读文件路径——`ROLE_DEFS && …` 会抛 ReferenceError，
+      // 角色正文编译期内联（#129 遗留项 2 内置 + FIX-226 自定义）：临时/未保存图自包含，
+      // 且已开始的运行在等待期间改角色文件不再换规矩（冻结单位是内容不是路径）。
+      // stale 产物缺 ROLE_DEFS 声明时（typeof 三元守卫，评论 3900312838）显式回退
+      // undefined 走读文件路径——`ROLE_DEFS && …` 会抛 ReferenceError，
       // `typeof !== 'undefined' && …` 会得到 false（而非 undefined）误触发内联分支。
-      // 自定义角色（如迁移后的 dispatcher）不在 ROLE_DEFS，继续走工作区优先读路径。
+      // 内联未命中（读不到 / 超尺寸闸门降级 / 旧运行无内联）才走下方读路径兜底。
       : [
           '  const _def = typeof ROLE_DEFS === \'undefined\' ? undefined : ROLE_DEFS[name]',
-          '  if (_def !== undefined) return \'【角色定义】（内置角色，编译期内联，与打包快照同源）：\\n\' + _def',
+          '  if (_def !== undefined) return \'【角色定义】（\' + (BUILTIN_ROLE_IDS.indexOf(name) >= 0 ? \'内置角色，编译期内联，与打包快照同源\' : \'自定义角色，编译期内联，运行起始冻结\') + \'）：\\n\' + _def',
           '  const _b = BUILTIN_ROLE_IDS.indexOf(name) >= 0',
         ].join('\n'),
     // 读路径兜底（内置/自定义身份切分，Codex PR#124 第四轮 P1）：内置先打包快照再工作区，
-    // 自定义先工作区再打包快照（如迁移后的 dispatcher，编辑种子到工作区后对 bundled run 生效）。
+    // 自定义先工作区再打包快照。FIX-226 后本兜底只服务「未内联」情形（角色文件编译期读不到、
+    // 尺寸闸门降级、或早于本改动创建且 Rev1 脚本无内联正文的旧运行）——属如实降级，不静默。
     '  const _ws = \'dsh/roles/\' + name + \'.md\'',
     '  const _bundle = (A.roleDir || \'dsh/roles\') + \'/\' + name + \'.md\'',
     '  const _order = _b ? [_bundle, _ws] : [_ws, _bundle]',
@@ -1549,7 +1588,39 @@ export function compileBlueprint(bp, opts = {}) {
     '}',
     'return finishRun()',
   );
-  return { script: lines.join('\n'), folds };
+  // FIX-226 尺寸闸门（§9.4/§11）：内联自定义角色后编译产物超过上限 → 拒绝**自定义角色**
+  // 内联并显式降级（快照记 inlined:false + 控制事件），绝不静默截断脚本；内置角色内联
+  // 维持既有行为不回退（其体积已被 S6 的既有卫生命覆盖）。
+  // ROLE_DEFS 在脚本中只出现这一行、且无其他消费者，故就地改写该行即可准确反映闸门结果。
+  const inlineGateBytes = opts.inlineOutputLimitBytes || INLINE_ROLE_DEFS_OUTPUT_LIMIT_BYTES;
+  const customIds = Object.keys(customRoleDefs).sort();
+  let script = lines.join('\n');
+  let degradedBySize = [];
+  if (customIds.length && Buffer.byteLength(script, 'utf8') > inlineGateBytes) {
+    degradedBySize = customIds;
+    const i = lines.findIndex((l) => l.indexOf('const ROLE_DEFS = ') === 0);
+    if (i >= 0) lines[i] = 'const ROLE_DEFS = ' + JSON.stringify(builtinRoleDefs);
+    script = lines.join('\n');
+  }
+  // 角色元信息（§6.2/§9.2/§9.4）：身份 + 是否内联 + 内容摘要（与内联正文同源），随编译
+  // 返回值交给宿主写入 Rev1 快照——回答「本 Run 用的是哪一版角色」。
+  const builtinSet = new Set(builtinRoleIds);
+  const roles = [...referencedProfiles].sort().map((id) => {
+    const builtin = builtinSet.has(id);
+    // 超尺寸闸门命中时自定义角色虽读到正文也不在内联集合内——inlined 必须反映产物实况，
+    // 否则快照会宣称「已冻结」而脚本里其实没有正文。
+    const content = degradedBySize.indexOf(id) >= 0 ? undefined : inlineRoleDefs[id];
+    const inlined = typeof content === 'string';
+    return {
+      id,
+      builtin,
+      inlined,
+      bytes: inlined ? Buffer.byteLength(content, 'utf8') : 0,
+      digest: inlined ? roleContentDigest(content) : null,
+      reason: inlined ? null : (degradedBySize.indexOf(id) >= 0 ? 'over_size_gate' : 'unreadable'),
+    };
+  });
+  return { script, folds, roles };
 }
 
 // ---------- LOC-040：模板能力摘要（生成 Skill runbook，禁止全模板泛化 merge/PR） ----------
@@ -1981,8 +2052,10 @@ function main() {
       process.exit(1);
     }
     try {
-      const { script } = compileBlueprint(bp);
-      console.log(JSON.stringify({ ok: true, script, meta: buildMeta(bp) }));
+      const { script, roles } = compileBlueprint(bp);
+      // FIX-226：随译文返回角色元信息（身份/内联与否/内容摘要），宿主据此写 Rev1 快照
+      // 并在降级时留控制事件。
+      console.log(JSON.stringify({ ok: true, script, meta: buildMeta(bp), roles }));
     } catch (e) {
       console.error(JSON.stringify({ ok: false, error: '编译失败：' + String((e && e.message) || e) }));
       process.exit(1);

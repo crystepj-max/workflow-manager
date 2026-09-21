@@ -139,7 +139,7 @@ node scripts/test/runtime-integration-e2e.mjs
 - [ ] Container/Remote Provider
 - [ ] Portable Contract 业务语义正文修改
 - [ ] #14/#19 重做
-- [ ] construction-bootstrap shim 退役（#105）
+- [ ] construction-bootstrap shim 退役（#105）—— **本任务明确不做**；该项已于 2026-09-19 由 #102 收口完成，逐项收敛记录见 `construction-workflow-portable-contract.md` §9.6
 
 ## Codex Round 1 修复（PR #150）
 

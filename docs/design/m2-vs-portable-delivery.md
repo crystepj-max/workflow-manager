@@ -1,6 +1,6 @@
 # M2 单任务交付与 Portable 旧七阶段关系（权威说明）
 
-> **用途**：接手者只需读本文，即可区分「当前 M2 主链」「Portable 契约七阶段证据底物」与「Legacy 自定义种子入口」。其他指南（`construction-bootstrap`、生成 Skill、`CONTEXT.md`）**引用本文**，不得再写第二套互相矛盾的主链叙事。
+> **用途**：接手者只需读本文，即可区分「当前 M2 主链」「Portable 契约七阶段证据底物」与「Legacy 自定义种子入口」。其他指南（`docs/runbooks/construction-dsh/`、`docs/runbooks/construction-external/`、生成 Skill、`CONTEXT.md`）**引用本文**，不得再写第二套互相矛盾的主链叙事。
 
 | 元数据 | 值 |
 |---|---|
@@ -12,7 +12,7 @@
 
 ## 1. 三句话结论
 
-1. **当前 M2 产品可见主链**（新任务默认入口）：`实施前检查 → 开发 → 收敛审查 → 测试 → UAT 验收卡 → WAITING_HUMAN → 人工三态 → 收口`。定义外置，**不含**需求分析/方案设计人工门。权威：`single-task-delivery-m2.md`；执行 Skill：`dsh/skills/construction-bootstrap/`；内置蓝图：`wf-construction-full-feature`。
+1. **当前 M2 产品可见主链**（新任务默认入口）：`实施前检查 → 开发 → 收敛审查 → 测试 → UAT 验收卡 → WAITING_HUMAN → 人工三态 → 收口`。定义外置，**不含**需求分析/方案设计人工门。权威：`single-task-delivery-m2.md`；内置蓝图：`wf-construction-full-feature`（入口 = 其生成 Skill；DSH 轨道命令序列见 `docs/runbooks/construction-dsh/runbook.md`）。
 2. **Portable 旧七阶段**是 **证据与 Stage 语义底物**（requirements → design → dev → review → test → human acceptance → closeout），用于理解交接包字段、Proof 绑定与旧 Run 恢复；**不是**当前 M2 产品主链。权威：`construction-workflow-portable-contract.md` §0.1 overlay 已声明冲突裁决。
 3. **Legacy 自定义种子**（`dev-workflow-2-0` / `default-workflow`）保留旧叙事与 `manualCheck` 验收节点，供 **已有 Run 只读恢复**；不得把其七阶段表述成「当前 M2 主链」。
 
@@ -20,7 +20,7 @@
 
 | 维度 | M2 当前主链 | Portable 七阶段（契约底物） | Legacy 种子 |
 |---|---|---|---|
-| 产品入口 | `construction-bootstrap` + `wf-construction-full-feature` | 契约 §2 固定顺序（含 requirements/design） | `dev-workflow-2-0` / `default-workflow` 生成 Skill |
+| 产品入口 | `wf-construction-full-feature`（内置蓝图 + 生成 Skill） | 契约 §2 固定顺序（含 requirements/design） | `dev-workflow-2-0` / `default-workflow` 生成 Skill |
 | 定义阶段 | **外置**（`requirements-analysis` 产出「已定义」） | requirements Stage 在链内 | 链内 dispatch/三要素（旧） |
 | 人工验收 | `uat` → `$human-decision` 严格三态 | human acceptance Stage | `accept` 节点 `manualCheck` |
 | 收口 | `closeout`（仅验收通过后） | closeout Stage | `closeout`（旧种子含 PR 合并叙事） |
@@ -31,7 +31,7 @@
 
 1. 任务经「需求分析」落到 **已定义**（本地任务规格 Vn + Definition Check 通过）。
 2. 执行 `node scripts/ai-task-preflight-check.mjs <任务卡> <规格> --run-baseline Vn`；通过后在本任务隔离 worktree 施工。
-3. 在 DSH 或等效会话调用 **`wf_run`**（首选）或回退 `workflow` 工具，模板 **`wf-construction-full-feature`**；Run 目录与证据按 `construction-bootstrap/runbook.md`。
+3. 在 DSH 或等效会话调用 **`wf_run`**（首选）或回退 `workflow` 工具，模板 **`wf-construction-full-feature`**；Run 引导、证据呈递与收口命令序列按 `docs/runbooks/construction-dsh/runbook.md`。
 4. 到达 **WAITING_HUMAN** 后停止，等人工 UAT 三态；**不得**跳过 UAT 直接 closeout。
 
 ## 4. 旧 Portable / Legacy Run：如何恢复
@@ -40,7 +40,7 @@
 
 | 场景 | 识别 | 恢复入口 | 不要做的事 |
 |---|---|---|---|
-| 旧 `dev-workflow-2-0` / `default-workflow` Run | run 元数据 / 模板 id 为上述种子 | 同一 `taskId` + `wf_run`/`workflow` **续跑**；`entry` 指向挂起节点；角色以 Run 内快照为准 | 不要用 M2 `construction-bootstrap` 主链覆盖旧 Run 阶段名 |
+| 旧 `dev-workflow-2-0` / `default-workflow` Run | run 元数据 / 模板 id 为上述种子 | 同一 `taskId` + `wf_run`/`workflow` **续跑**；`entry` 指向挂起节点；角色以 Run 内快照为准 | 不要用 M2 建设主链覆盖旧 Run 阶段名 |
 | Portable 契约交接包 | `handoff.schema.json` 型证据、`stage` 字段为 requirements/design/… | 按 `construction-workflow-portable-contract.md` §3 Stage 读 Proof；Controller 路由见契约 §5 | 不要把 requirements/design 当成 M2 必跑门 |
 | M2 建设 Run 受阻 | `status=BLOCKED` + `termination.reason_code` | 同 `taskId` + `entry=<termination.resume_node>`；`NEEDS_REDEFINE` 须重定义后 **新 Run** | 不要用 `approved:true` 跳过 UAT |
 
@@ -49,7 +49,7 @@
 ## 5. 与其他文档的引用关系
 
 - `construction-workflow-portable-contract.md` §0.1：已指向本文与 M2 overlay；七阶段正文保留为证据底物。
-- `dsh/skills/construction-bootstrap/SKILL.md`：产品主链摘要链接本文。
+- `docs/runbooks/construction-dsh/runbook.md`：DSH 轨道命令序列只引用本文与契约，不复制主链语义（原 `dsh/skills/construction-bootstrap/` 已随 #105 收敛退役，见契约 §9.6）。
 - 四模板 **生成 Skill**（`.generated/*/SKILL.md`）：「模板能力摘要」节链接本文与能力索引。
 - `CONTEXT.md`：术语层链接本文，fanout / wf_run 等 Current 事实以能力索引为准。
 

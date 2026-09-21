@@ -7,7 +7,7 @@
 | 代号 | 用户怎么叫 | 形态 | 职责 |
 |---|---|---|---|
 | **M1** | 做需求分析 / 定义任务 | **配套 Skill** | 把模糊需求谈到「已定义」（未决=0） |
-| **M2** | 完整功能开发 / 单任务交付 | **内置工作流模板** + 启动 Skill | 从「已定义」无人值守施工到等待验收 |
+| **M2** | 完整功能开发 / 单任务交付 | **内置工作流模板**（自动生成可调用 Skill） | 从「已定义」无人值守施工到等待验收 |
 | **M3** | 执行计划 / 批量开工 | **配套 Skill** | 选任务、快照、并发、补位、批次汇总 |
 | **M4** | 预约夜间开跑 / 到点开工 | **到点启动**（唤起 M3，不新建 Skill） | 到点后自动开跑并留下夜间报告 |
 
@@ -34,7 +34,8 @@ node scripts/sync-ai-task-skill-set.mjs /path/to/my-agent-skills
 |---|---|
 | M1 Skill | `dsh/skills/requirements-analysis/` |
 | M2 内置模板 | `templates/wf-construction-full-feature.json` → 生成 `.generated/wf-construction-full-feature/` |
-| M2 启动 Skill | `dsh/skills/construction-bootstrap/` |
+| M2 启动 Skill | 由蓝图生成：`.generated/wf-construction-full-feature/`（`npm run install:builtin-skills` 安装） |
+| M2 DSH 轨道命令序列 | `docs/runbooks/construction-dsh/runbook.md` |
 | M3 Skill | `dsh/skills/execution-plan/` |
 | M4 到点启动 | `scripts/ai-task-scheduled-trigger.mjs` |
 | M4 产品短文 | `docs/design/ai-task-define-delivery/scheduled-trigger-m4.md` |
@@ -45,11 +46,11 @@ node scripts/sync-ai-task-skill-set.mjs /path/to/my-agent-skills
 | 件 | 路径 |
 |---|---|
 | M1 | `my-skills/requirements-analysis/` |
-| M2 启动 Skill | `my-skills/construction-bootstrap/` |
+| M2 | （不复制）入口 = workflow-manager 生成的内置 Skill 与 DSH 轨道 runbook；原 `my-skills/construction-bootstrap/` 随 #105 收敛退役，见 portable contract §9.6 |
 | M3（含 M4 用法说明） | `my-skills/execution-plan/` |
 | 集合说明 | `my-skills/ai-task-skill-set/README.md` |
 
-> 内置工作流**蓝图**与到点启动脚本只住在 workflow-manager；通用仓保留可调用的 Skill 入口。
+> 内置工作流**蓝图**、生成 Skill 与到点启动脚本只住在 workflow-manager；通用仓只保留 M1/M3 这类不谈工程现场的 Skill 入口。
 
 ## 合入与试用顺序
 

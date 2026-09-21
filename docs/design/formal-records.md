@@ -78,7 +78,7 @@ Node Result 可以产生 **0..n** 条 Formal Record（验收要求「可产生�
 | `acceptance_package` | `proof_decision` | 上述五类 |
 | `closeout_summary` | `result` | `acceptance_package` |
 
-映射后 `provenance.portable` 保留源 `record_type` / `record_version` / `run_id` / `attempt` / `created_at`，历史 Dogfood Run 可追溯。不删除 construction-bootstrap shim。
+映射后 `provenance.portable` 保留源 `record_type` / `record_version` / `run_id` / `attempt` / `created_at`，历史 Dogfood Run 可追溯。本交付范围内不删除 construction-bootstrap shim；该 Profile 已于 2026-09-19 随 #102 收口退役（见 `construction-workflow-portable-contract.md` §9.6），**本节的映射与可追溯要求不变**。
 
 ## 7. 模块边界
 

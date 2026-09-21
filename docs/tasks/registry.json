@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 155,
+  "revision": 225,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -29,9 +29,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-23T13:53:57.247Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-16T13:53:57.590Z",
+      "updated_at": "2026-09-21T16:01:21.561Z",
       "spec_path": "docs/tasks/archive/CHORE-36/task-spec-V1.md",
       "leftovers": "重入完成：3 轮审查 approve / 3 轮测试 pass / checkpoint rerun_completed / 证据链①~⑨全通过"
     },
@@ -62,9 +62,9 @@
       "github_sync": "synced#203",
       "evidence_expires_at": "2026-09-24T15:21:57.001Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-18T18:05:48.699Z",
+      "updated_at": "2026-09-21T16:01:21.594Z",
       "spec_path": "docs/tasks/archive/CHORE-37/task-spec-V1.md"
     },
     {
@@ -94,9 +94,9 @@
       "github_sync": "synced#204",
       "evidence_expires_at": "2026-09-25T17:32:22.445Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-18T18:05:48.703Z",
+      "updated_at": "2026-09-21T16:01:21.596Z",
       "spec_path": "docs/tasks/archive/CHORE-38/task-spec-V1.md"
     },
     {
@@ -130,6 +130,34 @@
       "created_at": "2026-09-16T09:13:19.894Z",
       "updated_at": "2026-09-16T10:20:28.083Z",
       "spec_path": "docs/tasks/archive/CHORE-73/task-spec-V1.md"
+    },
+    {
+      "task_id": "FEAT-283",
+      "type": "FEAT",
+      "remote": "github#283",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "zcode",
+      "name": "隔离保证等级观测性：运行档案结构化落盘 + 界面显示（含非独立取证标识）",
+      "slug": "isolation-observability-ui",
+      "source": "会话录入（松哥 2026-09-21：与 #235 待判定 2 的界面显示合并立 backlog 票）",
+      "source_ref": "UAT uat-fix233-r2 实证：logical-runs/runs/records 三处均无 isolation_guarantee 字段",
+      "baseline": "V1",
+      "status": "定义中",
+      "priority": "P2",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-21T14:07:22.505Z",
+      "updated_at": "2026-09-21T14:07:22.505Z"
     },
     {
       "task_id": "FIX-65",
@@ -255,9 +283,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-23T08:30:59.225Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-16T05:07:05.820Z",
-      "updated_at": "2026-09-16T08:30:59.477Z",
+      "updated_at": "2026-09-21T16:01:21.596Z",
       "spec_path": "docs/tasks/archive/FIX-72/task-spec-V1.md"
     },
     {
@@ -444,10 +472,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.644Z",
-      "updated_at": "2026-09-12T15:39:57.536Z",
+      "updated_at": "2026-09-21T16:01:21.631Z",
       "evidence_expires_at": "2026-09-18T03:44:46.532Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.553Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-009",
@@ -472,10 +500,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.693Z",
-      "updated_at": "2026-09-12T15:39:57.537Z",
+      "updated_at": "2026-09-21T16:01:21.634Z",
       "evidence_expires_at": "2026-09-18T04:06:10.099Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.589Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-010",
@@ -495,10 +523,10 @@
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.750Z",
-      "updated_at": "2026-09-12T15:40:14.263Z",
+      "updated_at": "2026-09-21T16:01:21.635Z",
       "evidence_expires_at": "2026-09-19T03:20:00.000Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.592Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-011",
@@ -523,10 +551,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.805Z",
-      "updated_at": "2026-09-12T15:39:57.538Z",
+      "updated_at": "2026-09-21T16:01:21.636Z",
       "evidence_expires_at": "2026-09-19T03:22:44.741Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.594Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-012",
@@ -551,10 +579,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.861Z",
-      "updated_at": "2026-09-12T15:39:57.538Z",
+      "updated_at": "2026-09-21T16:01:21.639Z",
       "evidence_expires_at": "2026-09-19T03:23:44.133Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.597Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-013",
@@ -579,11 +607,11 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.905Z",
-      "updated_at": "2026-09-12T15:39:57.538Z",
+      "updated_at": "2026-09-21T16:01:21.639Z",
       "spec_path": "docs/tasks/archive/LOC-013/task-spec-V1.md",
       "evidence_expires_at": "2026-09-19T15:01:54.049Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.599Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-014",
@@ -606,10 +634,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.952Z",
-      "updated_at": "2026-09-14T07:17:38.271Z",
+      "updated_at": "2026-09-21T16:01:21.640Z",
       "evidence_expires_at": "2026-09-20T11:01:12.081Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true,
+      "evidence_cleared_at": "2026-09-21T15:39:08.600Z",
+      "branch_retained": false,
       "spec_path": "docs/tasks/archive/LOC-014/task-spec-V2.md"
     },
     {
@@ -640,11 +668,11 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.001Z",
-      "updated_at": "2026-09-12T15:39:57.539Z",
+      "updated_at": "2026-09-21T16:01:21.641Z",
       "spec_path": "docs/tasks/archive/LOC-015/task-spec-V3.md",
       "evidence_expires_at": "2026-09-19T10:33:45.453Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.602Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-016",
@@ -699,10 +727,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.094Z",
-      "updated_at": "2026-09-12T15:39:57.540Z",
+      "updated_at": "2026-09-21T16:01:21.645Z",
       "evidence_expires_at": "2026-09-19T15:37:04.712Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.604Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-018",
@@ -761,10 +789,10 @@
       },
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-20T14:28:29.328Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true,
+      "evidence_cleared_at": "2026-09-21T15:39:08.605Z",
+      "branch_retained": false,
       "created_at": "2026-09-13T10:29:51.556Z",
-      "updated_at": "2026-09-14T07:17:38.279Z",
+      "updated_at": "2026-09-21T16:01:21.647Z",
       "spec_path": "docs/tasks/archive/LOC-019/task-spec-V1.md"
     },
     {
@@ -788,10 +816,10 @@
       },
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-21T07:14:42.767Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true,
+      "evidence_cleared_at": "2026-09-21T15:39:08.606Z",
+      "branch_retained": false,
       "created_at": "2026-09-13T11:41:20.330Z",
-      "updated_at": "2026-09-14T07:55:21.910Z",
+      "updated_at": "2026-09-21T16:01:21.648Z",
       "spec_path": "docs/tasks/archive/LOC-020/task-spec-V1.md"
     },
     {
@@ -817,10 +845,10 @@
       },
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-21T10:16:40.949Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true,
+      "evidence_cleared_at": "2026-09-21T15:39:08.608Z",
+      "branch_retained": false,
       "created_at": "2026-09-13T11:42:54.384Z",
-      "updated_at": "2026-09-14T10:29:15.178Z",
+      "updated_at": "2026-09-21T16:01:21.651Z",
       "spec_path": ".scratch/LOC-021-hetero-mode/task-spec-V1.md"
     },
     {
@@ -871,9 +899,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-22T15:08:14.462Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-14T02:31:54.017Z",
-      "updated_at": "2026-09-15T15:08:39.307Z",
+      "updated_at": "2026-09-21T16:01:21.622Z",
       "spec_path": "docs/tasks/archive/LOC-023/task-spec-V2.md"
     },
     {
@@ -1518,9 +1546,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-24T14:05:16.146Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-15T06:07:19.780Z",
-      "updated_at": "2026-09-17T14:13:09.749Z",
+      "updated_at": "2026-09-21T16:01:21.623Z",
       "spec_path": "docs/tasks/specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md",
       "type": "CHORE",
       "remote": "cnb#63"
@@ -1869,9 +1897,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-18T16:13:32.448Z",
-      "updated_at": "2026-09-19T04:01:50.485Z",
+      "updated_at": "2026-09-21T16:01:21.626Z",
       "spec_path": "cnb#104 issue 正文（轻量卡，暂不落独立规格）"
     },
     {
@@ -1930,9 +1958,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-26T02:46:07.377Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-18T18:05:53.882Z",
-      "updated_at": "2026-09-19T02:46:07.534Z",
+      "updated_at": "2026-09-21T16:01:21.627Z",
       "spec_path": "docs/tasks/archive/CHORE-106/task-spec-V1.md"
     },
     {
@@ -2036,21 +2064,27 @@
       "source": "会话录入",
       "source_ref": "",
       "baseline": "V1",
-      "status": "定义中",
+      "status": "已合并",
       "priority": "P2",
       "env_group": null,
       "env_role": null,
       "deps": [],
-      "branch": null,
+      "branch": "dev-chore-110-r1",
       "worktree": null,
-      "runs": [],
-      "merge": null,
+      "runs": [
+        "chore-110-r1"
+      ],
+      "merge": {
+        "commit": "f0d9520295f916ec7d83060aa37db92f1c48779b",
+        "merged_at": "2026-09-21T12:25:30+08:00",
+        "issue": "#255"
+      },
       "github_sync": "synced#110",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T04:25:30.000Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": true,
       "created_at": "2026-09-19T02:53:24.804Z",
-      "updated_at": "2026-09-19T04:06:03.592Z",
+      "updated_at": "2026-09-21T16:14:55.882Z",
       "spec_path": "docs/tasks/specs/CHORE-110-acceptance-package-schema/task-spec-V1.md"
     },
     {
@@ -2117,7 +2151,7 @@
     {
       "task_id": "CHORE-113",
       "type": "CHORE",
-      "remote": "cnb#113",
+      "remote": "cnb#113 + github#289",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2137,18 +2171,18 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#289",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T12:30:26.872Z",
-      "updated_at": "2026-09-19T13:20:59.713Z",
+      "updated_at": "2026-09-21T15:41:38.851Z",
       "spec_path": "docs/tasks/specs/CHORE-113-issue-75-reconcile-closeout/task-spec-V1.md"
     },
     {
       "task_id": "FEAT-114",
       "type": "FEAT",
-      "remote": "cnb#114",
+      "remote": "cnb#114 + github#290",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2166,12 +2200,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#290",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T12:30:35.922Z",
-      "updated_at": "2026-09-19T13:21:10.090Z",
+      "updated_at": "2026-09-21T15:41:38.854Z",
       "spec_path": "docs/tasks/specs/FEAT-114-editor-completion-mapping-paths/task-spec-V1.md"
     },
     {
@@ -2195,12 +2229,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "not-applicable",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T12:30:44.617Z",
-      "updated_at": "2026-09-19T13:20:59.669Z"
+      "updated_at": "2026-09-21T15:41:38.856Z"
     },
     {
       "task_id": "FEAT-75",
@@ -2391,7 +2425,7 @@
       "source": "github-issue",
       "source_ref": "https://github.com/crystepj-max/workflow-manager/issues/226",
       "baseline": "V1",
-      "status": "已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FIX-226",
       "env_role": "独立",
@@ -2399,13 +2433,16 @@
       "branch": null,
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "2be544135839c9e893620b398449fd5a118bc317",
+        "merged_at": "2026-09-21T21:32:17+08:00"
+      },
       "github_sync": "#226",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T13:40:00Z",
-      "updated_at": "2026-09-20T02:23:44.771Z",
+      "updated_at": "2026-09-21T13:47:13.556Z",
       "spec_path": "docs/tasks/specs/FIX-226-custom-role-freeze/task-spec-V1.md"
     },
     {
@@ -2464,15 +2501,15 @@
       "github_sync": "synced#237",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-20T12:50:36.989Z",
-      "updated_at": "2026-09-20T14:35:10.158Z",
+      "updated_at": "2026-09-21T16:01:21.629Z",
       "spec_path": "docs/tasks/specs/FEAT-237-github-task-source-claim/task-spec-V1.md"
     },
     {
       "task_id": "CHORE-112",
       "type": "CHORE",
-      "remote": "cnb#112",
+      "remote": "cnb#112 + github#288",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2490,12 +2527,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#288",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T10:48:06.793Z",
-      "updated_at": "2026-09-19T10:48:06.793Z"
+      "updated_at": "2026-09-21T15:41:38.842Z"
     },
     {
       "task_id": "FIX-233",
@@ -2509,7 +2546,7 @@
       "source": "github-issue",
       "source_ref": "https://github.com/crystepj-max/workflow-manager/issues/233",
       "baseline": "V1",
-      "status": "已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FIX-233",
       "env_role": "独立",
@@ -2517,13 +2554,16 @@
       "branch": null,
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "9ac8de0",
+        "merged_at": "2026-09-21T08:04:13.605Z"
+      },
       "github_sync": "#233",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T08:04:13.605Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-20T15:40:03.828Z",
-      "updated_at": "2026-09-20T15:40:03.828Z",
+      "updated_at": "2026-09-21T08:04:13.610Z",
       "spec_path": "docs/tasks/specs/FIX-233-vwf-templateid-binding-loss/task-spec-V1.md"
     },
     {
@@ -2538,7 +2578,7 @@
       "source": "github-issue",
       "source_ref": "https://github.com/crystepj-max/workflow-manager/issues/234",
       "baseline": "V1",
-      "status": "已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FIX-234",
       "env_role": "独立",
@@ -2546,13 +2586,16 @@
       "branch": null,
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "1effdd2",
+        "merged_at": "2026-09-21T08:04:13.644Z"
+      },
       "github_sync": "#234",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T08:04:13.644Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-20T15:39:23.145Z",
-      "updated_at": "2026-09-20T15:39:23.145Z",
+      "updated_at": "2026-09-21T08:04:13.645Z",
       "spec_path": "docs/tasks/specs/FIX-234-template-default-model-gate/task-spec-V1.md"
     },
     {
@@ -2567,7 +2610,7 @@
       "source": "github-issue",
       "source_ref": "https://github.com/crystepj-max/workflow-manager/issues/235",
       "baseline": "V1",
-      "status": "已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": "FIX-235",
       "env_role": "独立",
@@ -2575,13 +2618,16 @@
       "branch": null,
       "worktree": null,
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "0151abd",
+        "merged_at": "2026-09-21T08:04:13.678Z"
+      },
       "github_sync": "#235",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T08:04:13.678Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-20T15:39:23.147Z",
-      "updated_at": "2026-09-20T15:39:23.147Z",
+      "updated_at": "2026-09-21T08:04:13.678Z",
       "spec_path": "docs/tasks/specs/FIX-235-node-isolation-probe-fix/task-spec-V1.md"
     },
     {
@@ -2726,9 +2772,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-28T05:01:00.000Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": false,
       "created_at": "2026-09-21T04:30:14.407Z",
-      "updated_at": "2026-09-21T05:05:37.474Z",
+      "updated_at": "2026-09-21T06:38:01.948Z",
       "spec_path": "docs/tasks/specs/CHORE-262-ci-260-m5-warning-assert/task-spec-V1.md"
     },
     {
@@ -2758,11 +2804,171 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-28T05:03:29.000Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": false,
       "created_at": "2026-09-21T04:39:11.800Z",
-      "updated_at": "2026-09-21T05:05:37.477Z",
+      "updated_at": "2026-09-21T06:38:01.957Z",
       "spec_path": "docs/tasks/specs/CHORE-264-ci-260-m3-workspace-exempt/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-268",
+      "type": "CHORE",
+      "remote": "github#268",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CI 可信度 M2 端口核验：测试注入确定性探针，不依赖宿主机 lsof（CHORE-260 子票 3）",
+      "slug": "ci-260-m2-port-probe",
+      "source": "会话录入：CHORE-260 施工顺序第 3 步（M2 端口核验）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "已合并",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "fix/ci-260-m2-port-probe",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m2",
+      "runs": [],
+      "merge": {
+        "commit": "f510850af3e33470d351cd381dfcc752a690b538",
+        "merged_at": "2026-09-21T06:11:07Z"
+      },
+      "github_sync": "pending",
+      "evidence_expires_at": "2026-09-28T06:11:07.000Z",
+      "evidence_cleared_at": null,
+      "branch_retained": false,
+      "created_at": "2026-09-21T06:06:53.844Z",
+      "updated_at": "2026-09-21T06:38:01.958Z",
+      "spec_path": "docs/tasks/specs/CHORE-268-ci-260-m2-port-probe/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-273",
+      "type": "CHORE",
+      "remote": "github#273",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CI 可信度 M4 机械验收：为 CI 提供可对账环境（完整克隆 + main 引用）（CHORE-260 子票 4）",
+      "slug": "ci-260-m4-acceptance-script",
+      "source": "会话录入：CHORE-260 施工顺序第 4 步（M4 取证与修复）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "已合并",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "fix/ci-260-m4-acceptance-script",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m4",
+      "runs": [],
+      "merge": {
+        "commit": "d52e30858e14f4b03d679c5b903767f84ffc2d6b",
+        "merged_at": "2026-09-21T06:29:21Z"
+      },
+      "github_sync": "pending",
+      "evidence_expires_at": "2026-09-28T06:29:21.000Z",
+      "evidence_cleared_at": null,
+      "branch_retained": false,
+      "created_at": "2026-09-21T06:25:14.782Z",
+      "updated_at": "2026-09-21T06:38:01.959Z",
+      "spec_path": "docs/tasks/specs/CHORE-273-ci-260-m4-acceptance-script/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-276",
+      "type": "CHORE",
+      "remote": "github#276",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CI 可信度 M6 挂钟依赖：断言改为业务事实 + 阈值可注入（CHORE-260 子票 5）",
+      "slug": "ci-260-m6-clock-injection",
+      "source": "会话录入：CHORE-260 施工顺序第 5 步（M6 挂钟确定性化）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "已合并",
+      "priority": "P2",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "fix/ci-260-m6-clock-injection",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m6",
+      "runs": [],
+      "merge": {
+        "commit": "c8842c6fb550fcf463190ec327a75034e9f946e6",
+        "merged_at": "2026-09-21T11:15:22Z"
+      },
+      "github_sync": "pending",
+      "evidence_expires_at": "2026-09-28T11:15:22.000Z",
+      "evidence_cleared_at": null,
+      "branch_retained": false,
+      "created_at": "2026-09-21T11:01:55.524Z",
+      "updated_at": "2026-09-21T11:18:16.630Z",
+      "spec_path": "docs/tasks/specs/CHORE-276-ci-260-m6-clock-injection/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-279",
+      "type": "CHORE",
+      "remote": "github#279",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CI 可信度 M7 基准产物：测试隔离写入，冻结记录保持不可变（CHORE-260 子票 6）",
+      "slug": "ci-260-m7-benchmark-artifacts",
+      "source": "会话录入：CHORE-260 施工顺序第 6 步（M7 基准产物治理）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "已合并",
+      "priority": "P2",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "fix/ci-260-m7-benchmark-artifacts",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m7",
+      "runs": [],
+      "merge": {
+        "commit": "becc0c98a00212026c04c4c549706fe37fe983eb",
+        "merged_at": "2026-09-21T13:56:56Z"
+      },
+      "github_sync": "pending",
+      "evidence_expires_at": "2026-09-28T13:56:56.000Z",
+      "evidence_cleared_at": null,
+      "branch_retained": false,
+      "created_at": "2026-09-21T13:43:31.577Z",
+      "updated_at": "2026-09-21T13:58:09.464Z",
+      "spec_path": "docs/tasks/specs/CHORE-279-ci-260-m7-benchmark-artifacts/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-286",
+      "type": "CHORE",
+      "remote": "github#286",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CHORE-260 M8 收口归档完整性：D-8/D-9/D-10 历史欠账收敛（子票 7）",
+      "slug": "ci-260-m8-closeout",
+      "source": "会话录入：CHORE-260 施工顺序第 7 步（M8）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "已合并",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "dev-ci-260-m8-closeout-r1",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/dev-ci-260-m8-closeout-r1",
+      "runs": [],
+      "merge": {
+        "commit": "b249f10d418537f0ceab4d20688674577c47610a",
+        "merged_at": "2026-09-21T16:06:10Z"
+      },
+      "github_sync": "pending",
+      "evidence_expires_at": "2026-09-28T16:06:10.000Z",
+      "evidence_cleared_at": null,
+      "branch_retained": false,
+      "created_at": "2026-09-21T15:10:53.801Z",
+      "updated_at": "2026-09-21T16:06:40.949Z",
+      "spec_path": "docs/tasks/specs/CHORE-286-ci-260-m8-closeout/task-spec-V1.md"
     }
   ],
-  "updated_at": "2026-09-20T16:10:00.000Z"
+  "updated_at": "2026-09-21T15:27:01.184Z"
 }

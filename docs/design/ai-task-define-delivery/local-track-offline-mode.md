@@ -2,7 +2,7 @@
 
 > **状态**：已拍板（2026-09-08，松哥）并已落地。三个决策点全部按推荐 A 执行：① 新增「本地已定义」状态；② 一任务一提交合并；③ 本地镜像仓库备份（异地托管放第二阶段）。
 > **适用**：GitHub 账户暂停、issue/PR 不可用的窗口期
-> **影响范围**：需求分析入口（`dsh/skills/requirements-analysis`）+ 单任务交付（`dsh/skills/construction-bootstrap`）
+> **影响范围**：需求分析入口（`dsh/skills/requirements-analysis`）+ 单任务交付（内置蓝图 `wf-construction-full-feature`，命令序列 `docs/runbooks/construction-dsh/runbook.md`）
 > **设计原则**：不新建第二套流程，只在现有流程上做「入口扩展」与「落点切换」；GitHub 恢复后可原样回填，不需要重做。
 
 ---
@@ -24,7 +24,7 @@ GitHub 恢复后，用本地登记册批量补建 issue / PR，已有历史不�
 | 1 | 需求入口 | 只认 issue 作为需求源 | 本地/口述需求无处落档 | `requirements-analysis/SKILL.md` §0 |
 | 2 | 定义落档 | 「已定义」要求 issue 基本信息写入成功 | **任务永远无法进入「已定义」，无法开工** | `SKILL.md` §7.2、契约 §5 |
 | 3 | 开工建工作区 | 建分支前先 `git fetch origin main` | 拉取失败，分支建不出来 | `scripts/cwf-run-init.mjs` L109–111 |
-| 4 | 收口 | 「PR/合并按仓库规则」、issue 置为已完成 | 成果合不回主干，状态无处记录 | `construction-bootstrap/runbook.md` §7.3 |
+| 4 | 收口 | 「PR/合并按仓库规则」、issue 置为已完成 | 成果合不回主干，状态无处记录 | `docs/runbooks/construction-dsh/runbook.md` §6.3 |
 
 **已经不依赖 GitHub 的环节**（无需改动）：证据记录、集成检查、证据链校验、返工记账、批量排程脚本（`cwf-record` / `cwf-checkpoint` / `cwf-evidence-verify` / `ai-task-execution-plan` 均无 GitHub 调用）。
 

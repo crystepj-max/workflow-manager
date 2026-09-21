@@ -1,0 +1,20 @@
+{
+  "task_id": "FIX-234",
+  "task_name": "内置模板默认模型绑定更新（6 节点指向已删除配置）与默认绑定机器闸门",
+  "status": "已合并",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "acceptance_state": "no_record",
+  "acceptance_note": "本 Run 未登记 acceptance_package：轻量路线缺前置引用须在验收包内用 evidence_gaps 声明（契约 §8.3），或该任务先于签收动作",
+  "merge": {
+    "commit": "1effdd2",
+    "merged_at": "2026-09-21T08:04:13.644Z",
+    "issue": null
+  },
+  "stages": [],
+  "evidence": null,
+  "no_run_evidence": true,
+  "note": "该任务先于 Run 证据链机制落地（无分支与 .agent-runs 记录），本摘要依据登记册与归档规格生成。",
+  "generated_at": "2026-09-21T15:13:44.130Z"
+}

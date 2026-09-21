@@ -102,7 +102,7 @@ export function buildResearchReport({ benchRoot = BENCH_ROOT, resultsDir } = {})
 export function writeResearchReport(opts = {}) {
   const benchRoot = opts.benchRoot ?? BENCH_ROOT
   const report = buildResearchReport({ benchRoot, ...opts })
-  const dir = join(benchRoot, 'reports')
+  const dir = opts.reportsDir ?? join(benchRoot, 'reports')
   mkdirSync(dir, { recursive: true })
   const jsonPath = join(dir, 'research-report.json')
   const mdPath = join(dir, 'research-report.md')
