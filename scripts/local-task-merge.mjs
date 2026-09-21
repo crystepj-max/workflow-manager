@@ -33,10 +33,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { loadRegistry, update, writeBoard, STATUS_LOCAL_DEFINED, STATUS_WAITING_ACCEPTANCE, STATUS_MERGED } from './local-task-registry.mjs'
+import { loadRegistry, update, writeBoard, githubSlugOf, STATUS_LOCAL_DEFINED, STATUS_WAITING_ACCEPTANCE, STATUS_MERGED } from './local-task-registry.mjs'
 import { field, parseSpecVersion, TASK_FIELDS } from './task-card-parse.mjs'
 import { mainCheckout, worktreePathFor, runDirFor } from './workspace-paths.mjs'
 import { generateEvidenceSummary } from './workspace-evidence-summary.mjs'
+// 锚点解析唯一实现 = remote-anchors（FEAT-237 抽出，收口与 issue 通道共用）
+import { parseRemoteAnchors } from './remote-anchors.mjs'
+
+export { parseRemoteAnchors }
 
 export const MERGEABLE_DECISIONS = new Set(['accept', 'conditional_pass'])
 export const PRE_MERGE_STATUS = STATUS_WAITING_ACCEPTANCE
@@ -66,6 +70,38 @@ function worktreeStatus(cwd) {
 function specVersionOf(specPath) {
   // 版本解析唯一实现 = task-card-parse（LOC-002）；此处只负责读文件。
   return parseSpecVersion(fs.readFileSync(specPath, 'utf-8'), specPath)
+}
+
+/**
+ * 平台名 → 该平台上本仓库的 `owner/repo`。
+ * 平台名与 git 远端名不是一回事：主源在 GitHub 时远端通常叫 `origin`，按 `github` 直查会取不到。
+ */
+export function remoteRepoSlug(repo, system) {
+  const names = system === 'github' ? ['github', 'origin'] : [system]
+  for (const name of names) {
+    let url = ''
+    try {
+      url = git(['remote', 'get-url', name], repo).trim()
+    } catch {
+      continue // 该远端名不存在，换下一个候选
+    }
+    if (!url) continue
+    if (system === 'github') {
+      const slug = githubSlugOf(url)
+      if (slug) return slug // URL 确认是 GitHub 才认，避免把别的平台 slug 当主源
+      continue
+    }
+    return url.replace(/\.git$/, '').split('/').slice(-2).join('/')
+  }
+  return null
+}
+
+/** 待人工关闭提示：按平台给该平台真实可执行的命令，取不到仓库时退回人工描述。 */
+export function closeTaskHint(system, repoSlug, issue) {
+  if (!repoSlug) return `人工关闭 ${system} issue #${issue}`
+  if (system === 'github') return `gh issue close ${issue} --repo ${repoSlug}`
+  if (system === 'cnb') return `cnb issues update-issue --repo ${repoSlug} --number ${issue} --state closed --state-reason completed`
+  return `人工关闭 ${system} issue #${issue}（${repoSlug}）`
 }
 
 export function buildCommitMessage({
@@ -387,28 +423,19 @@ export function runMerge({
 
   // CHORE-106 / DT-01（裁定 A）：本地脚本路线**不**执行远端关闭，但必须把缺口显式列出，
   // 否则「代码已合入主干、issue 一直开着」会静默累积（2026-09-19 实测人工补关 18 个）。
+  // CHORE-111：锚点解析放宽为平台无关，并对双锚点任务逐个列出——只取第一个会让另一侧常开。
   const pendingManualClose = []
   try {
     const registry = loadRegistry(repo)
     const record = registry.tasks.find((r) => r.task_id === taskId)
-    const remote = record && record.remote ? String(record.remote) : ''
-    const m = remote.match(/^([a-z]+)#(\d+)$/i)
-    if (m) {
-      const system = m[1].toLowerCase()
-      const num = Number(m[2])
-      let repoSlug = null
-      try {
-        const url = git(['remote', 'get-url', system], repo).trim()
-        repoSlug = url.replace(/\.git$/, '').split('/').slice(-2).join('/')
-      } catch { /* 远端不可读时用占位 */ }
+    for (const anchor of parseRemoteAnchors(record && record.remote)) {
+      const repoSlug = remoteRepoSlug(repo, anchor.system)
       pendingManualClose.push({
         action: 'close-task',
-        system,
-        remote_issue: num,
+        system: anchor.system,
+        remote_issue: anchor.issue,
         reason: '本地收口脚本路线不执行远端关闭（DT-01 裁定 A）',
-        hint: repoSlug
-          ? `cnb issues update-issue --repo ${repoSlug} --number ${num} --state closed --state-reason completed`
-          : `人工关闭 ${system} issue #${num}`,
+        hint: closeTaskHint(anchor.system, repoSlug, anchor.issue),
       })
     }
   } catch { /* 登记册不可读不阻塞合并主路径 */ }

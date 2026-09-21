@@ -15,7 +15,7 @@
 
 1. 读取验收报告（`accept-report.md`）、审核报告（`review-report.md`）、测试报告（`test-report.md`）与开发交接（`dev-report.md`）的最新终态。
 2. **事实整理（只读）**：产出 `delivery_report`（或写入 `cleanup-report.md` 的「交付事实」段）——列候选版本/摘要、证明引用、人工验收决定、限制与未完成项。**发现必须改候选时退回修改及重新证明，不在收口偷改。** 非 Git 本地交付默认 `required_actions=[]`，可完成纯本地交付。
-3. **动作计划**：据已批准交付范围与仓库配置填写 `required_actions`、`optional_actions`、`authorization_ref`、`target_adapter`、`target_ref`、`candidate_ref`。选择推送目标前须读 `remote.pushDefault`/分支上游及显式目标，**不硬编码 origin/gh**。目标 GitHub 或未知适配器时记 `capability_unavailable`，不回落发布到 CNB。
+3. **动作计划**：据已批准交付范围与仓库配置填写 `required_actions`、`optional_actions`、`authorization_ref`、`target_adapter`、`target_ref`、`candidate_ref`。选择推送目标前须读 `remote.pushDefault`/分支上游及显式目标，**不硬编码 origin/gh**。主源是 GitHub（`github` 适配器经 `gh` 执行 `close-task`），CNB 只是灾备镜像：仓库配了 GitHub 远端时按主源解析，即使 `remote.pushDefault` 仍写着 `cnb`（差异记入 `push_default_conflict`，脚本不改 git 配置）。未知适配器记 `capability_unavailable`。**GitHub 与 CNB 互不回落**：主源动作失败不得改发灾备镜像。
 4. **授权与执行**：必要动作经 LOC-032 `execute-or-reconcile`（`vwf.operations.*` / `scripts/delivery-closeout-host.mjs closeout`）执行；执行前验证授权对象、范围、版本与目标匹配，**有效授权复用、不重复询问**；缺必要授权时保留报告并等待，不重复整理。必要动作失败或结果不确定时**不得 DELIVERED**；可选清理失败记 `cleanup_pending`，交付事实不倒退。
 5. **一致性收口（只读核对）**：核对代码/文档/路线图/规则与候选一致，确认无遗留死代码与格式漂移；只整理事实，不改业务代码或报告结论。
 6. **交接产物汇总**：整理本轮全部报告与产物清单，产出 `cleanup-report.md`，说明归档位置、逐动作状态与后续事项。

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * 任务登记册 ↔ 远端（CNB）issue 同步
+ * 任务登记册 ↔ GitHub 主源 issue 同步
  *
  * 用途：
  *   1. 为已在本地登记、但远端还没有 issue 的活跃任务批量建 issue，并把 issue 号回填登记册；
  *   2. 换号：把远端不可达时产生的临时号（TMP-*，remote=pending）换成正式号。
  *
- * 编号原则：编号由 CNB 服务端分配（建 issue 时返回），本机不自己算号，
+ * 编号原则：编号由 GitHub 服务端分配（建 issue 时返回），本机不自己算号，
  * 因此双机并行与多 AI 会话并行都不会撞号。详见
  * docs/design/ai-task-define-delivery/task-id-and-remote-sync-proposal.md
  *
@@ -109,9 +109,9 @@ function apply(repo, only, forcedType) {
         t.task_id = `${type}-${number}`
       }
       t.type = type
-      t.remote = `cnb#${number}`
+      t.remote = `github#${number}`
       t.updated_at = new Date().toISOString()
-      done.push(`${t.task_id} → cnb#${number}`)
+      done.push(`${t.task_id} → github#${number}`)
     } catch (err) {
       failed.push(`${t.task_id}: ${err.message}`)
     }
@@ -136,7 +136,7 @@ function reissue(repo, taskId, type) {
   t.legacy_id = t.legacy_id ?? t.task_id
   t.task_id = `${nextType}-${number}`
   t.type = nextType
-  t.remote = `cnb#${number}`
+  t.remote = `github#${number}`
   t.updated_at = new Date().toISOString()
   saveRegistry(repo, registry)
   writeBoard(repo)

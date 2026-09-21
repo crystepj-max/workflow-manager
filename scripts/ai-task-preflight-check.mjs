@@ -41,7 +41,7 @@ export function strictDefinitionCheck(text) {
 
 /** @param {string} spec */
 export function specOpenItemsZero(spec) {
-  return /未决产品事项[^\n]*[：:]\s*0\b/.test(spec)
+  return /未决产品事项[^\n]*[：:]\s*(\*\*)?0\b/.test(spec)
     || /未决[^。\n]*为\s*\*\*0\*\*/.test(spec)
     || /未决事项\s*=\s*0/.test(spec)
     || /\|[^\n]*未决[^\n]*\|\s*0\s*\|/.test(spec)
@@ -181,13 +181,14 @@ export async function runPreflight(issuePath, specPath, opts = {}) {
     if (plan.action === 'block') failReason(plan.reason, 'PREFLIGHT_ENV_BLOCKED', 'envStore')
   }
 
+  // baseline 缺失/非法已在上方 failReason 记录，这里跳过比对以免对 null 调方法崩溃
   const specVersion = parseSpecVersion(spec, specPath)
   if (!specVersion) failReason('本地任务规格无法解析版本号', 'PREFLIGHT_SPEC_VERSION_MISSING', 'spec')
-  else if (specVersion.toUpperCase() !== baseline.toUpperCase()) {
+  else if (baseline && specVersion.toUpperCase() !== baseline.toUpperCase()) {
     failReason(`版本不一致：Issue=${baseline} 规格=${specVersion}`, 'PREFLIGHT_VERSION_MISMATCH', TASK_FIELDS.BASELINE)
   }
 
-  if (runBaseline && runBaseline.toUpperCase() !== baseline.toUpperCase()) {
+  if (runBaseline && baseline && runBaseline.toUpperCase() !== baseline.toUpperCase()) {
     failReason(`Run 绑定版本不一致：Run=${runBaseline} Issue=${baseline}`, 'PREFLIGHT_RUN_BASELINE_MISMATCH', 'runBaseline')
   }
 

@@ -79,25 +79,28 @@ npm test
 
 提交信息使用项目历史中已有的简洁前缀：`feat:`、`fix:`、`docs:`；必要时添加范围，例如 `feat(workflow): ...`。每次提交只处理一个清晰主题。合并请求应说明对用户或工作流程的影响，列出已运行的校验命令，说明蓝图或生成结果是否受到影响，并关联对应任务或问题。修改可视化编辑器时，应附上截图或录屏。
 
-## Codex PR Review 收敛规则
+## PR Review 收敛规则（Cursor Bugbot）
 
-本节约束所有能够在 GitHub PR 上触发 Codex Review 的 Agent；它独立于本地工作流、Run 和回退额度。目标是让 PR 审查围绕当前 Issue 的完成条件收敛，并把 **Codex PR Review Controller 作为 Agent 的唯一 Review 入口**，禁止通过直接 `@codex review` 或无限追加轮次把一个 PR 扩张成无边界的持续改进任务。
+本节约束所有能够在 GitHub PR 上发起 PR 评审的 Agent；它独立于本地工作流、Run 和回退额度。评审引擎已从停用的 Codex 切换为 **Cursor Bugbot**，触发词为 `@cursor review`（等价别名 `bugbot run`；以 Cursor 设置页 Manual-Only 文案为准，由 Controller 用单一常量 `TRIGGER_COMMAND` 发出，公开文档另有不带 `@` 的 `cursor review` 写法，真实生效形式以冒烟为准）。目标是让 PR 审查围绕当前 Issue 的完成条件收敛，并把 **PR Review Controller 作为 Agent 的唯一 Review 入口**，禁止通过直接 `@cursor review` 评论或无限追加轮次把一个 PR 扩张成无边界的持续改进任务。
 
-- Agent **不得直接发表评论 `@codex review`**。所有由 Agent 发起的 Codex PR Review 必须通过 PR 评论命令 `/codex-review next` 进入 Controller；Controller 负责轮次、HEAD 去重、提示词和额度状态。
-- **Round 1 是正式 PR 的强制 Gate。** 对所有由 Agent 负责、准备合并到 `main` 的非 Draft PR，PR 创建后或 Draft 转为 Ready 后，Agent 必须先检查 PR 时间线是否已有 Codex PR Review Controller 状态；若尚无成功的 Controller Review 记录，必须立即执行 `/codex-review next` 发起第 1 轮完整审查。内部工作流的 Review/Test、CI、人工检查均不能替代这一 PR Gate。若标准流程需要在 closeout 阶段创建 PR，可进入 closeout 完成 PR 创建与 Ready；但未完成至少 1 轮 Controller Codex Review 前，Agent **不得合并 PR、不得宣布 closeout 完成，也不得结束该 PR 任务**。
-- 一个 PR 默认最多允许 **3 轮自动 Codex Review**。服务报错、超时或明确的工具故障只能使用 `/codex-review retry` 重试；retry 仅限同一 HEAD 的服务/工具故障，不得借 retry 绕过业务轮次。
-- 第 1 轮是完整审查：Controller 应围绕当前 PR 的需求符合性、正确性、回归风险、证据与必要边界条件发起审查。
-- 每条 Review 意见都必须先分类再处理：
+> 命令命名空间已于 2026-09-20 由历史的 `/codex-review` 改名为 `/pr-review`（DT-01 裁定 B）；旧命令 `/codex-review` 即刻失效、无兼容期，在途 PR 需改用 `/pr-review`。注意：脚本内部审计标记 `codex-review-controller-*` 与文件名 `scripts/codex-review-controller.mjs`、workflow 文件名仍保留旧名（非用户可见、改之会丢在途 PR 状态或增无谓 churn）。
+
+- Agent **不得直接发表评论 `@cursor review`（或 `bugbot run`）**。所有由 Agent 发起的 PR 评审必须通过 PR 评论命令 `/pr-review next` 进入 Controller；Controller 负责轮次计数、HEAD 去重、额度状态，并以其触发身份发出触发评论。
+- **仓库侧 Bugbot 配置基线（缺一即可能静默无响应或越权，须先核对再判定 Review 是否发生）**：Trigger Mode 保持 **Manual Only**（否则每次 push 自动评审会把无限循环带回）；**Autofix 保持 Off**（评审引擎只读——一旦自动改码并推送，会越过本仓库人工验收与推送授权边界）；**PR Summaries 建议关闭**（PR 描述是本仓库收口证据，不得由外部工具生成/改写）；已连接仓库、启用 Bugbot 并配好被接受的触发身份 Secret `PR_REVIEW_TRIGGER_TOKEN`（`github-actions[bot]` 身份能否被接受尚未官方确认，必要时用 fine-grained PAT）。若 `/pr-review next` 后 Bugbot 未真正开始评审，Agent 应把「评审未发生」报告为治理/配置阻塞并交人工，而不是自行重试或旁路触发。
+- **Round 1 是正式 PR 的强制 Gate。** 对所有由 Agent 负责、准备合并到 `main` 的非 Draft PR，PR 创建后或 Draft 转为 Ready 后，Agent 必须先检查 PR 时间线是否已有 PR Review Controller 状态；若尚无成功的 Controller Review 记录，必须立即执行 `/pr-review next` 发起第 1 轮。仓库侧 Review Draft PRs 关闭，且 Manual 触发在 Draft 上能否生效尚待冒烟确认——Agent 须**先把 PR 转为 Ready 再申请 Review**，不得把 Draft 上「发了没反应」当成静默失败反复重试。内部工作流的 Review/Test、CI、人工检查均不能替代这一 PR Gate。若标准流程需要在 closeout 阶段创建 PR，可进入 closeout 完成 PR 创建与 Ready；但未完成至少 1 轮 Controller Review 前，Agent **不得合并 PR、不得宣布 closeout 完成，也不得结束该 PR 任务**。
+- 一个 PR 默认最多允许 **3 轮自动 Review**。服务报错、超时或明确的工具故障只能使用 `/pr-review retry` 重试；retry 仅限同一 HEAD 的服务/工具故障，不得借 retry 绕过业务轮次。
+- 轮次语义（轮次计数、去重、额度、可审计记录）仍由 Controller 承担；但 **评审聚焦口径改为常驻规则文件 `.cursor/BUGBOT.md`**——Bugbot 不接受单条触发评论里的临时提示词，因此原「第 1/2/3 轮差异化提示词」不再是给评审引擎的指令，Controller 只在 PR 中留轮次状态评论作审计。
+- 每条 Review 意见都必须先分类再处理（该口径同时写进 `.cursor/BUGBOT.md` 供 Bugbot 执行，事实源以本节为准）：
   - **A · 当前阻塞**：当前 Issue 验收条件未满足、当前 PR 引入的回归、会导致当前交付明显不正确或不安全的问题。本 PR 必须修复。
   - **B · 后续事项**：问题成立，但属于历史问题、额外增强、需要扩大范围才能解决，或不影响当前 Issue 完成。登记独立 Issue / backlog，本 PR 不继续扩张。
   - **C · 不采纳**：偏好型建议、收益不足、与当前目标无关或判断不成立。说明理由后结束该意见。
-- 第 2、3 轮属于**收敛审查**。Agent 修复本轮 A 类问题并产生新的 PR HEAD 后，只能再次执行 `/codex-review next`；不得自行拼接或直接发送新的 `@codex review` 指令。Controller 分别负责第 2 轮“验证上一轮 A 类修复 + 本轮新阻塞”和第 3 轮“只看当前验收失败/明显回归/合并前阻塞”的收敛提示词。
-- 同一 HEAD 上重复执行 `/codex-review next` 应被拒绝。若上一轮只是 Codex 服务/工具故障，使用 `/codex-review retry`；若是业务 Review 已完成，则必须先处理 A 类问题并形成新 HEAD，才能进入下一轮。
-- **任何 Agent 都不得自行追加 Review 额度。** 当默认 3 轮耗尽后，Agent 必须停止自动 Review 与自动扩大修改，向人工呈递：剩余 A 类阻塞、已完成验证、继续 Review 的收益/风险，以及可选命令 `/codex-review extend 1 <明确原因>`；Agent 本身不得执行该 extend 命令。
-- `/codex-review extend 1 <明确原因>` 是人工决策命令。人工追加后只增加 **1 轮有限额度**，且追加动作本身不得自动触发 Review；Agent 只能围绕人工允许继续解决的具体阻塞项修改并形成新 HEAD，随后再使用 `/codex-review next`。
-- 第 3 轮后若已无 A 类阻塞项，且当前 Issue 验收条件、测试和仓库质量门均满足，应进入收口/合并，不得以“Codex 可能还能找到更多建议”为理由继续审查。
-- 如果 PR 时间线出现**未由 Controller 触发的 Codex Review**（例如人工直接 `@codex review`、仓库原生自动 Review 或其他旁路），Agent 不得据此自动开启新一轮修复→Review 循环，也不得用它自行增加 Controller 额度；应先按 A/B/C 分类当前意见，并把旁路事件报告为治理异常。是否追加正式 Controller 轮次由现有额度和人工决策决定。
-- PR 的完成标准是：**当前 Issue 定义的问题已解决、验收条件满足、必要验证通过、没有已知的当前范围阻塞项。** “Codex 再也提不出新建议”不是完成标准。
+- 第 2、3 轮属于**收敛审查**——「只看上次评审之后的新改动」由仓库级 **Incremental Review（On）** 天然承担，不在提示词或规则里重复要求，避免两套口径；分类聚焦纪律见 `.cursor/BUGBOT.md`。Agent 修复本轮 A 类问题并产生新的 PR HEAD 后，只能再次执行 `/pr-review next`；不得自行拼接或直接发送新的触发评论。
+- 同一 HEAD 上重复执行 `/pr-review next` 应被拒绝。若上一轮只是 Bugbot 服务/工具故障，使用 `/pr-review retry`；若是业务 Review 已完成，则必须先处理 A 类问题并形成新 HEAD，才能进入下一轮。
+- **任何 Agent 都不得自行追加 Review 额度。** 当默认 3 轮耗尽后，Agent 必须停止自动 Review 与自动扩大修改，向人工呈递：剩余 A 类阻塞、已完成验证、继续 Review 的收益/风险，以及可选命令 `/pr-review extend 1 <明确原因>`；Agent 本身不得执行该 extend 命令。
+- `/pr-review extend 1 <明确原因>` 是人工决策命令。人工追加后只增加 **1 轮有限额度**，且追加动作本身不得自动触发 Review；Agent 只能围绕人工允许继续解决的具体阻塞项修改并形成新 HEAD，随后再使用 `/pr-review next`。
+- 第 3 轮后若已无 A 类阻塞项，且当前 Issue 验收条件、测试和仓库质量门均满足，应进入收口/合并，不得以“Bugbot 可能还能找到更多建议”为理由继续审查。
+- 如果 PR 时间线出现**未由 Controller 触发的 Bugbot 动作**（例如人工直接 `@cursor review`、仓库侧自动评审未关闭、Bugbot 改写了 PR 描述、或其他旁路），Agent 不得据此自动开启新一轮修复→Review 循环，也不得用它自行增加 Controller 额度；应先按 A/B/C 分类当前意见，并把旁路事件（含「自动评审未关闭」「PR 描述被外部改写」等配置异常）报告为治理异常。是否追加正式 Controller 轮次由现有额度和人工决策决定。
+- PR 的完成标准是：**当前 Issue 定义的问题已解决、验收条件满足、必要验证通过、没有已知的当前范围阻塞项。** “Bugbot 再也提不出新建议”不是完成标准。
 
 ## 配置与安全
 

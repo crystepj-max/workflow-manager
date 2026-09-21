@@ -241,6 +241,8 @@ export function dependencyCoverageFor({ type, mode, inputDeps, dependency_source
   if (type === 'proof') {
     if (dependency_source === 'legacy' && inputDeps.length === 0) return DEPENDENCY_COVERAGE.INCOMPLETE
     if (mode === 'legacy') return DEPENDENCY_COVERAGE.INCOMPLETE
+    // host_bound（宿主段末回填，非节点声明）：已钉到上游正式 Record 即算覆盖，无依赖仍不覆盖
+    if (mode === 'host_bound') return inputDeps.length > 0 ? DEPENDENCY_COVERAGE.COMPLETE : DEPENDENCY_COVERAGE.INCOMPLETE
     return inputDeps.length > 0 ? DEPENDENCY_COVERAGE.COMPLETE : DEPENDENCY_COVERAGE.INCOMPLETE
   }
   if (mode === 'declared') {

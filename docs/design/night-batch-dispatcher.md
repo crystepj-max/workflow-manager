@@ -45,6 +45,53 @@ node scripts/ai-task-dispatcher.mjs <schedule.json路径>
 换项目 = 换 `project` 字段（及其 `machine.json` 里对应配置）；换 AI 工具 = 换命令模板。
 其余不变。
 
+## 任务源：本地登记册 ∩ GitHub 可施工标签（FEAT-237）
+
+批量施工池由**两个来源的交集**决定，两个来源各自承担不可替代的职责：
+
+| 来源 | 提供的事实 | 缺了会怎样 |
+|---|---|---|
+| 本地登记册 `docs/tasks/registry.json` + 任务卡 + 规格 | 任务**真的有定义材料**（preflight 门禁：规格齐备、无人值守允许、依赖已合并） | 会把「只在远端有个标题」的任务拉进无人值守批次 |
+| GitHub issue 标签 `ready-for-agent` | 任务**在远端被标记为可施工**，且是跨机器可读的唯一信号 | 无法跨机器判断「哪些任务现在可以开工」 |
+
+判定分四态（`planTaskSourceAdmission`，纯函数）：
+
+| 判定 | 条件 | 处置 |
+|---|---|---|
+| `claimed` | issue 带 `施工中` | 硬排除，理由写明认领人 |
+| `no-anchor` | 登记册 `remote` 无 `github#N` | 默认放行并在报告标注（历史 LOC-/TMP- 与离线仓依赖此路径）；`taskSource.requireAnchor=true` 时排除 |
+| `ready` | issue 带 `ready-for-agent` | 放行 |
+| `not-ready` | 有锚点但没有标签 | 定义门禁通过后**自动补标**再放行；补标失败即排除 |
+
+补标刻意排在定义门禁**之后**：标签语义是「需求清晰可执行」，在门禁之前补标会把过不了门禁的任务标记成可施工。
+
+`machine.json` 里的开关（整段可省略，省略即退回「仅本地登记册」的旧行为）：
+
+```json
+"taskSource": {
+  "readyLabel": "ready-for-agent",
+  "wipLabel": "施工中",
+  "labelSync": true,
+  "onUnavailable": "block",
+  "requireAnchor": false
+}
+```
+
+- `onUnavailable`：`block`（默认）＝远端不可信时**整批不开工**并退出码 1；`local-only` ＝降级为仅本地候选，报告显著标注降级。默认选择 block 的理由：失去认领互斥保护后重复施工的代价高于空跑一夜。
+- 批次目录会留一份 `task-source.json`（当次看到的全部就绪 issue），事后可对账「为什么这个任务没跑」。
+
+## 施工认领互斥（FEAT-237）
+
+`cwf-run-init` 开工时对目标 issue 执行「标签 + assignee + 认领评论」三件套：
+
+- 标签 `施工中`、assignee = `gh` 当前登录账号、评论含施工人 / 机器 / run / 分支 / 时间；
+- 认领标记 `<!-- wip-claim:<机器>/<run_id> -->`，同 run 重跑幂等（`reused`，不重复评论）；
+- **已被他人认领 → 拒绝开工（exit 1）**，并指出认领人；
+- 并发认领：评论写入后重读，当前窗口（最后一次释放之后）内最早的 claim 标记胜出，后到者 `claim-raced` 让位且不摘标签；
+- 无 GitHub 远端 / gh 不可用 / 任务无锚点时只告警不阻断（本地轨道与离线仓仍可开工）；`--no-claim` 显式跳过。
+
+释放（收口或人工接手）用 `node scripts/github-issues.mjs release --task <id>`：摘掉 `施工中`、留一条结束评论，`ready-for-agent` 保留。
+
 ## 会话结束契约
 
 每个施工会话退出前必须写 `<runDir>/release-event.json`：
