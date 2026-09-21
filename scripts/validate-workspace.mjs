@@ -361,9 +361,13 @@ if (registry) {
     const bad = [];
     for (const t of withField) {
       if (!t.branch) continue;
-      const exists = git(['rev-parse', '--verify', '--quiet', `refs/heads/${t.branch}`]) !== null;
-      if (t.branch_retained && !exists) bad.push(`${t.task_id} 标记保留分支但分支不存在：${t.branch}`);
-      if (!t.branch_retained && exists) bad.push(`${t.task_id} 标记不保留分支但分支仍存在：${t.branch}`);
+      // CHORE-286 决策 B：以**远端共享真值**为准（此前核验 `refs/heads/<branch>` 本地引用）。
+      // 本地引用使本检查在 CI 上不可能通过：runner 只检出单个 ref，故任何标「保留分支」的
+      // 任务都必然被判违规，与登记册数据是否干净无关。远端引用由 `.github/workflows/validate.yml`
+      // 的显式 fetch 保证可得；本地执行前请先 `git fetch`。
+      const exists = git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${t.branch}`]) !== null;
+      if (t.branch_retained && !exists) bad.push(`${t.task_id} 标记保留分支但远端不存在：${t.branch}`);
+      if (!t.branch_retained && exists) bad.push(`${t.task_id} 标记不保留分支但远端仍存在：${t.branch}`);
     }
     record('D-10', `收口口径一致（已启用 ${withField.length} 条）`, bad.length === 0, bad.length ? bad : ['全部一致']);
   }

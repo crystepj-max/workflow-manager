@@ -19,6 +19,12 @@ jobs:
       # PR 场景 checkout 的是 merge ref，本地无 main 分支引用，仍需补一步。
       - name: 确保 main 引用可用（对账读主干事实所需）
         run: git rev-parse --verify --quiet main || git fetch --no-tags origin main:refs/heads/main
+      # D-10「收口口径一致」以**远端共享真值**为准（CHORE-286 决策 B）：核验
+      # `refs/remotes/origin/<branch>`。checkout 只会取到它需要的那一个 ref，若不显式拉取
+      # 全部分支引用，则任何标「保留分支」的任务都会因本地无该引用而被误判——这正是本条
+      # 检查此前在 CI 上不可能通过的原因（与登记册数据是否干净无关）。
+      - name: 拉取远端分支引用（D-10 核验共享真值所需）
+        run: git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*'
       - uses: actions/setup-node@v4
         with:
           node-version: 24
