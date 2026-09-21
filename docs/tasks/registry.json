@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 217,
+  "revision": 222,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -31,7 +31,7 @@
       "evidence_cleared_at": null,
       "branch_retained": false,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-21T15:36:40.045Z",
+      "updated_at": "2026-09-21T16:01:21.561Z",
       "spec_path": "docs/tasks/archive/CHORE-36/task-spec-V1.md",
       "leftovers": "重入完成：3 轮审查 approve / 3 轮测试 pass / checkpoint rerun_completed / 证据链①~⑨全通过"
     },
@@ -64,7 +64,7 @@
       "evidence_cleared_at": null,
       "branch_retained": false,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-21T15:36:40.063Z",
+      "updated_at": "2026-09-21T16:01:21.594Z",
       "spec_path": "docs/tasks/archive/CHORE-37/task-spec-V1.md"
     },
     {
@@ -96,7 +96,7 @@
       "evidence_cleared_at": null,
       "branch_retained": false,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-21T15:36:40.065Z",
+      "updated_at": "2026-09-21T16:01:21.596Z",
       "spec_path": "docs/tasks/archive/CHORE-38/task-spec-V1.md"
     },
     {
@@ -130,6 +130,34 @@
       "created_at": "2026-09-16T09:13:19.894Z",
       "updated_at": "2026-09-16T10:20:28.083Z",
       "spec_path": "docs/tasks/archive/CHORE-73/task-spec-V1.md"
+    },
+    {
+      "task_id": "FEAT-283",
+      "type": "FEAT",
+      "remote": "github#283",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "zcode",
+      "name": "隔离保证等级观测性：运行档案结构化落盘 + 界面显示（含非独立取证标识）",
+      "slug": "isolation-observability-ui",
+      "source": "会话录入（松哥 2026-09-21：与 #235 待判定 2 的界面显示合并立 backlog 票）",
+      "source_ref": "UAT uat-fix233-r2 实证：logical-runs/runs/records 三处均无 isolation_guarantee 字段",
+      "baseline": "V1",
+      "status": "定义中",
+      "priority": "P2",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": null,
+      "worktree": null,
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-21T14:07:22.505Z",
+      "updated_at": "2026-09-21T14:07:22.505Z"
     },
     {
       "task_id": "FIX-65",
@@ -257,7 +285,7 @@
       "evidence_cleared_at": null,
       "branch_retained": false,
       "created_at": "2026-09-16T05:07:05.820Z",
-      "updated_at": "2026-09-21T15:36:40.069Z",
+      "updated_at": "2026-09-21T16:01:21.596Z",
       "spec_path": "docs/tasks/archive/FIX-72/task-spec-V1.md"
     },
     {
@@ -444,7 +472,7 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.644Z",
-      "updated_at": "2026-09-21T15:39:08.584Z",
+      "updated_at": "2026-09-21T16:01:21.631Z",
       "evidence_expires_at": "2026-09-18T03:44:46.532Z",
       "evidence_cleared_at": "2026-09-21T15:39:08.553Z",
       "branch_retained": false
@@ -472,7 +500,7 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.693Z",
-      "updated_at": "2026-09-21T15:39:08.590Z",
+      "updated_at": "2026-09-21T16:01:21.634Z",
       "evidence_expires_at": "2026-09-18T04:06:10.099Z",
       "evidence_cleared_at": "2026-09-21T15:39:08.589Z",
       "branch_retained": false
@@ -495,7 +523,7 @@
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.750Z",
-      "updated_at": "2026-09-21T15:39:08.593Z",
+      "updated_at": "2026-09-21T16:01:21.635Z",
       "evidence_expires_at": "2026-09-19T03:20:00.000Z",
       "evidence_cleared_at": "2026-09-21T15:39:08.592Z",
       "branch_retained": false
@@ -523,7 +551,7 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.805Z",
-      "updated_at": "2026-09-21T15:39:08.595Z",
+      "updated_at": "2026-09-21T16:01:21.636Z",
       "evidence_expires_at": "2026-09-19T03:22:44.741Z",
       "evidence_cleared_at": "2026-09-21T15:39:08.594Z",
       "branch_retained": false
@@ -551,7 +579,7 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.861Z",
-      "updated_at": "2026-09-21T15:39:08.597Z",
+      "updated_at": "2026-09-21T16:01:21.639Z",
       "evidence_expires_at": "2026-09-19T03:23:44.133Z",
       "evidence_cleared_at": "2026-09-21T15:39:08.597Z",
       "branch_retained": false
@@ -579,7 +607,7 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.905Z",
-      "updated_at": "2026-09-21T15:39:08.599Z",
+      "updated_at": "2026-09-21T16:01:21.639Z",
       "spec_path": "docs/tasks/archive/LOC-013/task-spec-V1.md",
       "evidence_expires_at": "2026-09-19T15:01:54.049Z",
       "evidence_cleared_at": "2026-09-21T15:39:08.599Z",
@@ -606,7 +634,7 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.952Z",
-      "updated_at": "2026-09-21T15:39:08.600Z",
+      "updated_at": "2026-09-21T16:01:21.640Z",
       "evidence_expires_at": "2026-09-20T11:01:12.081Z",
       "evidence_cleared_at": "2026-09-21T15:39:08.600Z",
       "branch_retained": false,
@@ -640,7 +668,7 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.001Z",
-      "updated_at": "2026-09-21T15:39:08.603Z",
+      "updated_at": "2026-09-21T16:01:21.641Z",
       "spec_path": "docs/tasks/archive/LOC-015/task-spec-V3.md",
       "evidence_expires_at": "2026-09-19T10:33:45.453Z",
       "evidence_cleared_at": "2026-09-21T15:39:08.602Z",
@@ -699,7 +727,7 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.094Z",
-      "updated_at": "2026-09-21T15:39:08.604Z",
+      "updated_at": "2026-09-21T16:01:21.645Z",
       "evidence_expires_at": "2026-09-19T15:37:04.712Z",
       "evidence_cleared_at": "2026-09-21T15:39:08.604Z",
       "branch_retained": false
@@ -764,7 +792,7 @@
       "evidence_cleared_at": "2026-09-21T15:39:08.605Z",
       "branch_retained": false,
       "created_at": "2026-09-13T10:29:51.556Z",
-      "updated_at": "2026-09-21T15:39:08.605Z",
+      "updated_at": "2026-09-21T16:01:21.647Z",
       "spec_path": "docs/tasks/archive/LOC-019/task-spec-V1.md"
     },
     {
@@ -791,7 +819,7 @@
       "evidence_cleared_at": "2026-09-21T15:39:08.606Z",
       "branch_retained": false,
       "created_at": "2026-09-13T11:41:20.330Z",
-      "updated_at": "2026-09-21T15:39:08.606Z",
+      "updated_at": "2026-09-21T16:01:21.648Z",
       "spec_path": "docs/tasks/archive/LOC-020/task-spec-V1.md"
     },
     {
@@ -820,7 +848,7 @@
       "evidence_cleared_at": "2026-09-21T15:39:08.608Z",
       "branch_retained": false,
       "created_at": "2026-09-13T11:42:54.384Z",
-      "updated_at": "2026-09-21T15:39:08.609Z",
+      "updated_at": "2026-09-21T16:01:21.651Z",
       "spec_path": ".scratch/LOC-021-hetero-mode/task-spec-V1.md"
     },
     {
@@ -873,7 +901,7 @@
       "evidence_cleared_at": null,
       "branch_retained": false,
       "created_at": "2026-09-14T02:31:54.017Z",
-      "updated_at": "2026-09-21T15:36:40.095Z",
+      "updated_at": "2026-09-21T16:01:21.622Z",
       "spec_path": "docs/tasks/archive/LOC-023/task-spec-V2.md"
     },
     {
@@ -1520,7 +1548,7 @@
       "evidence_cleared_at": null,
       "branch_retained": false,
       "created_at": "2026-09-15T06:07:19.780Z",
-      "updated_at": "2026-09-21T15:36:40.096Z",
+      "updated_at": "2026-09-21T16:01:21.623Z",
       "spec_path": "docs/tasks/specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md",
       "type": "CHORE",
       "remote": "cnb#63"
@@ -1871,7 +1899,7 @@
       "evidence_cleared_at": null,
       "branch_retained": false,
       "created_at": "2026-09-18T16:13:32.448Z",
-      "updated_at": "2026-09-21T15:36:40.097Z",
+      "updated_at": "2026-09-21T16:01:21.626Z",
       "spec_path": "cnb#104 issue 正文（轻量卡，暂不落独立规格）"
     },
     {
@@ -1932,7 +1960,7 @@
       "evidence_cleared_at": null,
       "branch_retained": false,
       "created_at": "2026-09-18T18:05:53.882Z",
-      "updated_at": "2026-09-21T15:36:40.100Z",
+      "updated_at": "2026-09-21T16:01:21.627Z",
       "spec_path": "docs/tasks/archive/CHORE-106/task-spec-V1.md"
     },
     {
@@ -2117,7 +2145,7 @@
     {
       "task_id": "CHORE-113",
       "type": "CHORE",
-      "remote": "cnb#113",
+      "remote": "cnb#113 + github#289",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2137,18 +2165,18 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#289",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T12:30:26.872Z",
-      "updated_at": "2026-09-19T13:20:59.713Z",
+      "updated_at": "2026-09-21T15:41:38.851Z",
       "spec_path": "docs/tasks/specs/CHORE-113-issue-75-reconcile-closeout/task-spec-V1.md"
     },
     {
       "task_id": "FEAT-114",
       "type": "FEAT",
-      "remote": "cnb#114",
+      "remote": "cnb#114 + github#290",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2166,12 +2194,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#290",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T12:30:35.922Z",
-      "updated_at": "2026-09-19T13:21:10.090Z",
+      "updated_at": "2026-09-21T15:41:38.854Z",
       "spec_path": "docs/tasks/specs/FEAT-114-editor-completion-mapping-paths/task-spec-V1.md"
     },
     {
@@ -2195,12 +2223,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "not-applicable",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T12:30:44.617Z",
-      "updated_at": "2026-09-19T13:20:59.669Z"
+      "updated_at": "2026-09-21T15:41:38.856Z"
     },
     {
       "task_id": "FEAT-75",
@@ -2469,13 +2497,13 @@
       "evidence_cleared_at": null,
       "branch_retained": false,
       "created_at": "2026-09-20T12:50:36.989Z",
-      "updated_at": "2026-09-21T15:36:40.102Z",
+      "updated_at": "2026-09-21T16:01:21.629Z",
       "spec_path": "docs/tasks/specs/FEAT-237-github-task-source-claim/task-spec-V1.md"
     },
     {
       "task_id": "CHORE-112",
       "type": "CHORE",
-      "remote": "cnb#112",
+      "remote": "cnb#112 + github#288",
       "legacy_id": null,
       "origin_machine": "chrisdem",
       "origin_agent": null,
@@ -2493,12 +2521,12 @@
       "worktree": null,
       "runs": [],
       "merge": null,
-      "github_sync": "pending",
+      "github_sync": "synced#288",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-19T10:48:06.793Z",
-      "updated_at": "2026-09-19T10:48:06.793Z"
+      "updated_at": "2026-09-21T15:41:38.842Z"
     },
     {
       "task_id": "FIX-233",
@@ -2933,5 +2961,5 @@
       "spec_path": "docs/tasks/specs/CHORE-286-ci-260-m8-closeout/task-spec-V1.md"
     }
   ],
-  "updated_at": "2026-09-20T16:10:00.000Z"
+  "updated_at": "2026-09-21T15:27:01.184Z"
 }
