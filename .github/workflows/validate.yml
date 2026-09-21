@@ -25,5 +25,15 @@ jobs:
         run: npm install
       - name: generate（生产物供校验与 vwf 加载）
         run: npm run generate
+      # 【临时诊断，定位后即移除】M4 在 CI 上间歇失败（本地恒过），且 validate.mjs 会裁剪
+      # 明细。此处单跑 3 次并保留完整 stdout/stderr，用于区分「稳定断言失败」与「并发竞态」。
+      - name: 诊断：单独运行 M4 机械验收脚本 3 次（完整输出）
+        continue-on-error: true
+        run: |
+          for i in 1 2 3; do
+            echo "===== M4 run $i ====="
+            node scripts/ai-task-scheduled-m4-check.mjs
+            echo "M4 exit=$?"
+          done
       - name: validate（蓝图校验 + 重生成一致性 + 引擎/包测试（含运行时排练厅））
         run: npm run validate
