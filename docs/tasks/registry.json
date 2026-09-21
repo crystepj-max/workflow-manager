@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 152,
+  "revision": 154,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2711,7 +2711,7 @@
       "source": "会话录入：CHORE-260 施工顺序第 1 步（M5 回归）",
       "source_ref": "github#260",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "已合并",
       "priority": "P0",
       "env_group": null,
       "env_role": null,
@@ -2719,13 +2719,16 @@
       "branch": "fix/ci-260-m5-warning-assert",
       "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m5",
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "3ca2281084c939b4ae09c439f80085b7cd89a24e",
+        "merged_at": "2026-09-21T05:01:00Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T05:01:00.000Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-21T04:30:14.407Z",
-      "updated_at": "2026-09-21T04:33:29.563Z",
+      "updated_at": "2026-09-21T05:05:37.474Z",
       "spec_path": "docs/tasks/specs/CHORE-262-ci-260-m5-warning-assert/task-spec-V1.md"
     },
     {
@@ -2740,7 +2743,7 @@
       "source": "会话录入：CHORE-260 施工顺序第 2 步（M3 治理区布局）",
       "source_ref": "github#260",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "已合并",
       "priority": "P0",
       "env_group": null,
       "env_role": null,
@@ -2748,13 +2751,16 @@
       "branch": "fix/ci-260-m3-workspace-exempt",
       "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m3",
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "0ddffed89da4b057e7880a75fe3b8d055121ab2c",
+        "merged_at": "2026-09-21T05:03:29Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T05:03:29.000Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-21T04:39:11.800Z",
-      "updated_at": "2026-09-21T04:41:38.600Z",
+      "updated_at": "2026-09-21T05:05:37.477Z",
       "spec_path": "docs/tasks/specs/CHORE-264-ci-260-m3-workspace-exempt/task-spec-V1.md"
     }
   ],
