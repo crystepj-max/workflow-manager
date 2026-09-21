@@ -12,11 +12,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'validate-workspace.mjs')
+
+// 夹具根必须落在「治理区」：macOS 的 os.tmpdir() 是 /var/folders/…（判治理区，用例通过），
+// 而 Linux 的 os.tmpdir() 就是 /tmp —— 正是 validate-workspace 的例外区前缀
+// （scripts/validate-workspace.mjs 的 EXEMPT_ABS_PREFIXES）。夹具一旦落进例外区，
+// 违规只计警告，本文件用例成片误判（CHORE-260 · M3）。故改用仓库内被 Git 忽略的
+// .scratch/ 作平台无关的确定根，不再依赖宿主 tmpdir。
+const FIXTURE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '.scratch', 'ws-ctx-fixtures')
 
 const GIT_ENV = {
   ...process.env,
@@ -40,7 +46,8 @@ function gOk(args, cwd) {
 
 /** 建一个「主检出 + 三个链接工作区」的临时仓库，返回各路径。 */
 function fixture() {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-ctx-'))
+  fs.mkdirSync(FIXTURE_ROOT, { recursive: true })
+  const base = fs.mkdtempSync(path.join(FIXTURE_ROOT, 'ws-ctx-'))
   const repo = path.join(base, 'repo')
   fs.mkdirSync(repo)
   gOk(['init', '-b', 'main'], repo)

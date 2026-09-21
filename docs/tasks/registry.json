@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 151,
+  "revision": 152,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2727,6 +2727,35 @@
       "created_at": "2026-09-21T04:30:14.407Z",
       "updated_at": "2026-09-21T04:33:29.563Z",
       "spec_path": "docs/tasks/specs/CHORE-262-ci-260-m5-warning-assert/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-264",
+      "type": "CHORE",
+      "remote": "github#264",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CI 可信度 M3 治理区布局：测试夹具不再落进 /tmp 豁免区（CHORE-260 子票 2）",
+      "slug": "ci-260-m3-workspace-exempt",
+      "source": "会话录入：CHORE-260 施工顺序第 2 步（M3 治理区布局）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P0",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "fix/ci-260-m3-workspace-exempt",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m3",
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-21T04:39:11.800Z",
+      "updated_at": "2026-09-21T04:41:38.600Z",
+      "spec_path": "docs/tasks/specs/CHORE-264-ci-260-m3-workspace-exempt/task-spec-V1.md"
     }
   ],
   "updated_at": "2026-09-20T16:10:00.000Z"
