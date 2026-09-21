@@ -50,5 +50,11 @@
     "file_count": 21,
     "total_bytes": 17788
   },
-  "generated_at": "2026-09-17T14:05:15.990Z"
+  "generated_at": "2026-09-17T14:05:15.990Z",
+  "merge": {
+    "commit": "adc22e852f40a04e527797ee5f9fa4193e921a05",
+    "merged_at": "2026-09-17T14:05:16.045Z"
+  },
+  "archive_form": "lightweight-remote",
+  "remote_ref": "cnb#62"
 }

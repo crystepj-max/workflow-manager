@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 189,
+  "revision": 224,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -29,9 +29,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-23T13:53:57.247Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-16T13:53:57.590Z",
+      "updated_at": "2026-09-21T16:01:21.561Z",
       "spec_path": "docs/tasks/archive/CHORE-36/task-spec-V1.md",
       "leftovers": "重入完成：3 轮审查 approve / 3 轮测试 pass / checkpoint rerun_completed / 证据链①~⑨全通过"
     },
@@ -62,9 +62,9 @@
       "github_sync": "synced#203",
       "evidence_expires_at": "2026-09-24T15:21:57.001Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-18T18:05:48.699Z",
+      "updated_at": "2026-09-21T16:01:21.594Z",
       "spec_path": "docs/tasks/archive/CHORE-37/task-spec-V1.md"
     },
     {
@@ -94,9 +94,9 @@
       "github_sync": "synced#204",
       "evidence_expires_at": "2026-09-25T17:32:22.445Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-16T00:03:29.832Z",
-      "updated_at": "2026-09-18T18:05:48.703Z",
+      "updated_at": "2026-09-21T16:01:21.596Z",
       "spec_path": "docs/tasks/archive/CHORE-38/task-spec-V1.md"
     },
     {
@@ -283,9 +283,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-23T08:30:59.225Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-16T05:07:05.820Z",
-      "updated_at": "2026-09-16T08:30:59.477Z",
+      "updated_at": "2026-09-21T16:01:21.596Z",
       "spec_path": "docs/tasks/archive/FIX-72/task-spec-V1.md"
     },
     {
@@ -472,10 +472,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.644Z",
-      "updated_at": "2026-09-12T15:39:57.536Z",
+      "updated_at": "2026-09-21T16:01:21.631Z",
       "evidence_expires_at": "2026-09-18T03:44:46.532Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.553Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-009",
@@ -500,10 +500,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.693Z",
-      "updated_at": "2026-09-12T15:39:57.537Z",
+      "updated_at": "2026-09-21T16:01:21.634Z",
       "evidence_expires_at": "2026-09-18T04:06:10.099Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.589Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-010",
@@ -523,10 +523,10 @@
       "merge": null,
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.750Z",
-      "updated_at": "2026-09-12T15:40:14.263Z",
+      "updated_at": "2026-09-21T16:01:21.635Z",
       "evidence_expires_at": "2026-09-19T03:20:00.000Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.592Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-011",
@@ -551,10 +551,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.805Z",
-      "updated_at": "2026-09-12T15:39:57.538Z",
+      "updated_at": "2026-09-21T16:01:21.636Z",
       "evidence_expires_at": "2026-09-19T03:22:44.741Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.594Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-012",
@@ -579,10 +579,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.861Z",
-      "updated_at": "2026-09-12T15:39:57.538Z",
+      "updated_at": "2026-09-21T16:01:21.639Z",
       "evidence_expires_at": "2026-09-19T03:23:44.133Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.597Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-013",
@@ -607,11 +607,11 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.905Z",
-      "updated_at": "2026-09-12T15:39:57.538Z",
+      "updated_at": "2026-09-21T16:01:21.639Z",
       "spec_path": "docs/tasks/archive/LOC-013/task-spec-V1.md",
       "evidence_expires_at": "2026-09-19T15:01:54.049Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.599Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-014",
@@ -634,10 +634,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:39.952Z",
-      "updated_at": "2026-09-14T07:17:38.271Z",
+      "updated_at": "2026-09-21T16:01:21.640Z",
       "evidence_expires_at": "2026-09-20T11:01:12.081Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true,
+      "evidence_cleared_at": "2026-09-21T15:39:08.600Z",
+      "branch_retained": false,
       "spec_path": "docs/tasks/archive/LOC-014/task-spec-V2.md"
     },
     {
@@ -668,11 +668,11 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.001Z",
-      "updated_at": "2026-09-12T15:39:57.539Z",
+      "updated_at": "2026-09-21T16:01:21.641Z",
       "spec_path": "docs/tasks/archive/LOC-015/task-spec-V3.md",
       "evidence_expires_at": "2026-09-19T10:33:45.453Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.602Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-016",
@@ -727,10 +727,10 @@
       },
       "github_sync": "pending",
       "created_at": "2026-09-10T16:28:40.094Z",
-      "updated_at": "2026-09-12T15:39:57.540Z",
+      "updated_at": "2026-09-21T16:01:21.645Z",
       "evidence_expires_at": "2026-09-19T15:37:04.712Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true
+      "evidence_cleared_at": "2026-09-21T15:39:08.604Z",
+      "branch_retained": false
     },
     {
       "task_id": "LOC-018",
@@ -789,10 +789,10 @@
       },
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-20T14:28:29.328Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true,
+      "evidence_cleared_at": "2026-09-21T15:39:08.605Z",
+      "branch_retained": false,
       "created_at": "2026-09-13T10:29:51.556Z",
-      "updated_at": "2026-09-14T07:17:38.279Z",
+      "updated_at": "2026-09-21T16:01:21.647Z",
       "spec_path": "docs/tasks/archive/LOC-019/task-spec-V1.md"
     },
     {
@@ -816,10 +816,10 @@
       },
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-21T07:14:42.767Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true,
+      "evidence_cleared_at": "2026-09-21T15:39:08.606Z",
+      "branch_retained": false,
       "created_at": "2026-09-13T11:41:20.330Z",
-      "updated_at": "2026-09-14T07:55:21.910Z",
+      "updated_at": "2026-09-21T16:01:21.648Z",
       "spec_path": "docs/tasks/archive/LOC-020/task-spec-V1.md"
     },
     {
@@ -845,10 +845,10 @@
       },
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-21T10:16:40.949Z",
-      "evidence_cleared_at": null,
-      "branch_retained": true,
+      "evidence_cleared_at": "2026-09-21T15:39:08.608Z",
+      "branch_retained": false,
       "created_at": "2026-09-13T11:42:54.384Z",
-      "updated_at": "2026-09-14T10:29:15.178Z",
+      "updated_at": "2026-09-21T16:01:21.651Z",
       "spec_path": ".scratch/LOC-021-hetero-mode/task-spec-V1.md"
     },
     {
@@ -899,9 +899,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-22T15:08:14.462Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-14T02:31:54.017Z",
-      "updated_at": "2026-09-15T15:08:39.307Z",
+      "updated_at": "2026-09-21T16:01:21.622Z",
       "spec_path": "docs/tasks/archive/LOC-023/task-spec-V2.md"
     },
     {
@@ -1546,9 +1546,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-24T14:05:16.146Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-15T06:07:19.780Z",
-      "updated_at": "2026-09-17T14:13:09.749Z",
+      "updated_at": "2026-09-21T16:01:21.623Z",
       "spec_path": "docs/tasks/specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md",
       "type": "CHORE",
       "remote": "cnb#63"
@@ -1897,9 +1897,9 @@
       "github_sync": "pending",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-18T16:13:32.448Z",
-      "updated_at": "2026-09-19T04:01:50.485Z",
+      "updated_at": "2026-09-21T16:01:21.626Z",
       "spec_path": "cnb#104 issue 正文（轻量卡，暂不落独立规格）"
     },
     {
@@ -1958,9 +1958,9 @@
       "github_sync": "pending",
       "evidence_expires_at": "2026-09-26T02:46:07.377Z",
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-18T18:05:53.882Z",
-      "updated_at": "2026-09-19T02:46:07.534Z",
+      "updated_at": "2026-09-21T16:01:21.627Z",
       "spec_path": "docs/tasks/archive/CHORE-106/task-spec-V1.md"
     },
     {
@@ -2084,7 +2084,7 @@
       "evidence_cleared_at": null,
       "branch_retained": true,
       "created_at": "2026-09-19T02:53:24.804Z",
-      "updated_at": "2026-09-21T15:56:50.458Z",
+      "updated_at": "2026-09-21T16:14:55.882Z",
       "spec_path": "docs/tasks/specs/CHORE-110-acceptance-package-schema/task-spec-V1.md"
     },
     {
@@ -2501,9 +2501,9 @@
       "github_sync": "synced#237",
       "evidence_expires_at": null,
       "evidence_cleared_at": null,
-      "branch_retained": true,
+      "branch_retained": false,
       "created_at": "2026-09-20T12:50:36.989Z",
-      "updated_at": "2026-09-20T14:35:10.158Z",
+      "updated_at": "2026-09-21T16:01:21.629Z",
       "spec_path": "docs/tasks/specs/FEAT-237-github-task-source-claim/task-spec-V1.md"
     },
     {
@@ -2936,6 +2936,38 @@
       "created_at": "2026-09-21T13:43:31.577Z",
       "updated_at": "2026-09-21T13:58:09.464Z",
       "spec_path": "docs/tasks/specs/CHORE-279-ci-260-m7-benchmark-artifacts/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-286",
+      "type": "CHORE",
+      "remote": "github#286",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CHORE-260 M8 收口归档完整性：D-8/D-9/D-10 历史欠账收敛（子票 7）",
+      "slug": "ci-260-m8-closeout",
+      "source": "会话录入：CHORE-260 施工顺序第 7 步（M8）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "已合并",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "dev-ci-260-m8-closeout-r1",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/dev-ci-260-m8-closeout-r1",
+      "runs": [],
+      "merge": {
+        "commit": "b249f10d418537f0ceab4d20688674577c47610a",
+        "merged_at": "2026-09-21T16:06:10Z"
+      },
+      "github_sync": "pending",
+      "evidence_expires_at": "2026-09-28T16:06:10.000Z",
+      "evidence_cleared_at": null,
+      "branch_retained": false,
+      "created_at": "2026-09-21T15:10:53.801Z",
+      "updated_at": "2026-09-21T16:06:40.949Z",
+      "spec_path": "docs/tasks/specs/CHORE-286-ci-260-m8-closeout/task-spec-V1.md"
     }
   ],
   "updated_at": "2026-09-21T15:27:01.184Z"
