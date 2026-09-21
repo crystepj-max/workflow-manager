@@ -87,11 +87,13 @@ test('saveRegistry：正常读写路径 revision 递增不抛错', () => {
 
 // ----- 漏标校验（2026-09-21 重复施工事故回归）-----
 
-test('issueNumberOf：认 GitHub 锚点，cnb 等非 GitHub 锚点不误报', () => {
+test('issueNumberOf：认 GitHub 锚点，双锚点取 GitHub 侧，cnb 等非 GitHub 锚点不误报', () => {
   assert.equal(issueNumberOf({ remote: 'GitHub #233' }), 233)
   assert.equal(issueNumberOf({ remote: 'github#230' }), 230)
+  assert.equal(issueNumberOf({ remote: 'cnb#111 + github#215' }), 215, '双锚点必须取 GitHub 侧')
   assert.equal(issueNumberOf({ remote: null, github_sync: 'synced#208' }), 208)
   assert.equal(issueNumberOf({ remote: 'cnb#36', github_sync: 'pending' }), null)
+  assert.equal(issueNumberOf({ remote: 'cnb#36', github_sync: 'synced#233' }), 233, 'remote 无 GitHub 时回退 sync')
   assert.equal(issueNumberOf({}), null)
 })
 

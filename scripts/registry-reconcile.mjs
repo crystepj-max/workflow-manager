@@ -29,6 +29,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 import { loadRegistry, saveRegistry, writeBoard } from './local-task-registry.mjs'
+import { githubAnchorOf } from './remote-anchors.mjs'
 
 const MERGED_STATUS = '已合并'
 
@@ -86,19 +87,13 @@ const WIP_LABEL = '施工中' // 与 cwf-run-init / machine.json taskSource.wipL
 const TASK_REF_RE = /((?:FEAT|FIX|CHORE|LOC)-\d+)/i
 const OPENABLE_STATUSES = new Set(['已定义', '本地已定义'])
 
-/** 从任务的远端锚点字段提取 GitHub issue 号；非 GitHub 锚点（如 cnb#N）返回 null */
+/** 从任务的远端锚点字段提取 GitHub issue 号；复用 githubAnchorOf 正确解析双锚点，非 GitHub 锚点返回 null */
 export function issueNumberOf(task) {
-  const r = String(task.remote || '')
-  if (/github/i.test(r)) {
-    const m = /#(\d+)/.exec(r)
-    if (m) return Number(m[1])
-  }
-  const s = String(task.github_sync || '')
-  if (/github|synced/i.test(s)) {
-    const m = /#(\d+)/.exec(s)
-    if (m) return Number(m[1])
-  }
-  return null
+  const fromRemote = githubAnchorOf(String(task.remote || ''))
+  if (fromRemote) return fromRemote
+  // github_sync 兜底只认精确形态（synced#N / #N），避免把其他系统的号当 GitHub
+  const m = /^(?:synced)?#(\d+)$/i.exec(String(task.github_sync || '').trim())
+  return m ? Number(m[1]) : null
 }
 
 /**
@@ -194,7 +189,7 @@ export function realListWipIssueNumbers(repo) {
   const m = /github\.com[/:](.+?\/.+?)(?:\.git)?\/?$/.exec(url)
   if (!m) return null // 非 GitHub 远端：无标签体系，降级
   try {
-    const out = execFileSync('gh', ['issue', 'list', '--repo', m[1], `--label=${WIP_LABEL}`, '--state', 'all', '--json', 'number'], { encoding: 'utf8' })
+    const out = execFileSync('gh', ['issue', 'list', '--repo', m[1], `--label=${WIP_LABEL}`, '--state', 'all', '--limit', '500', '--json', 'number'], { encoding: 'utf8' })
     return new Set(JSON.parse(out).map((i) => i.number))
   } catch {
     return null
