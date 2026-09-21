@@ -126,7 +126,7 @@ try {
   }
   if (audit.suspicious.length) {
     reconcileLines.push(
-      `⚠️ 可疑差异 ${audit.suspicious.length} 条（登记记已合并但主干无痕迹，须人工核对）：`,
+      `⚠️ 可疑差异 ${audit.suspicious.length} 条（含登记/主干不一致与本地施工痕迹漏标，须人工核对）：`,
       ...audit.suspicious.map((s) => `  - ${s.task_id}｜${s.note}`),
     )
   }

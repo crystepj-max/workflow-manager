@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   ISOLATION_GUARANTEE, NODE_ROLE_CAPABILITIES,
-  probeIsolationCapability, resolveNodeCapabilities, prepareNodeContext,
+  probeIsolationCapability, buildProbeProfile, resolveNodeCapabilities, prepareNodeContext,
   writeInZone, publishProbe, runPrivilegeProbes,
   verifyCandidateUnchanged, canIssueIndependentProof,
 } from '../node-isolation.mjs'
@@ -196,4 +196,38 @@ test('node-isolation-host：prepareNode + publishProbe + canIssueProof', () => {
   assert.equal(pub.result.ok, false)
   const proof = hostCall('canIssueProof', { isolation_guarantee: ISOLATION_GUARANTEE.ENFORCED, profile: 'review' })
   assert.equal(proof.decision.ok, true)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FIX-235 回归：探针 profile 与三判定（区内进程可跑 / 区内可写 / 区外写入被拒）
+// 根因：旧参考配置 (deny default) 下当前 macOS 进程启动读 dyld 闭包即被拒，
+// canary SIGABRT(134)，insideAllowed 恒 false → 恒 unavailable（故障机 2026-09-20 实证）。
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('FIX-235 profile：写入范围收紧型（allow default + deny 区外 file-write*）', () => {
+  const profile = buildProbeProfile('/private/tmp/ni-inside')
+  assert.ok(profile.includes('(version 1)'), '含版本声明')
+  assert.ok(profile.includes('(allow default)'), '默认放行（不锁 dyld 闭包，进程可启动）')
+  assert.ok(
+    profile.includes('(deny file-write* (require-not (subpath "/private/tmp/ni-inside")))'),
+    '写入拒绝排除区内子路径：' + profile,
+  )
+  assert.ok(!profile.includes('(deny default)'), '不得再使用 (deny default)')
+})
+
+test('FIX-235 语义回归：非 darwin 平台判 unavailable 且不执行探针', () => {
+  const r = probeIsolationCapability({ platform: 'linux', probe_root: join(fixtureRoot, 'ni-should-not-exist') })
+  assert.equal(r.guarantee, ISOLATION_GUARANTEE.UNAVAILABLE)
+  assert.equal(r.backend, null)
+  assert.equal(existsSync(join(fixtureRoot, 'ni-should-not-exist')), false, '非 darwin 不落探测目录')
+})
+
+test('FIX-235 真机探针：darwin 上输出 enforced 且三证据齐全（AC-03，非 darwin 跳过）', { skip: process.platform !== 'darwin' }, () => {
+  const probeRoot = join(fixtureRoot, 'ni-live-' + Date.now())
+  const r = probeIsolationCapability({ probe_root: probeRoot })
+  assert.equal(r.guarantee, ISOLATION_GUARANTEE.ENFORCED, JSON.stringify(r.evidence))
+  assert.equal(r.evidence.insideAllowed, true, '区内进程可跑')
+  assert.equal(r.evidence.insideWrite, true, '区内写入成功')
+  assert.equal(r.evidence.outsideBlocked, true, '区外写入被拒（file-write 本身，非 exec）')
+  assert.equal(existsSync(probeRoot), false, '探针现场默认清理')
 })

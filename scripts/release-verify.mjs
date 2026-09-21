@@ -54,6 +54,14 @@ const stages = [
     cwd: repoRoot,
   },
   {
+    // FIX-234 真机层核对：提供模型目录（--catalog / TEMPLATE_BINDING_CATALOG）时逐节点
+    // 核对内置模板默认绑定；未提供 = 产品 DSH 不可达 → 段内显式跳过（exit 0），不静默绿。
+    name: '内置模板默认绑定核对（FIX-234）',
+    command: process.execPath,
+    args: ['scripts/template-binding-audit.mjs'],
+    cwd: repoRoot,
+  },
+  {
     name: '运行项目测试',
     command: npm,
     args: ['test'],
