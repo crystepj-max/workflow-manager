@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 173,
+  "revision": 177,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2848,7 +2848,7 @@
       "source": "会话录入：CHORE-260 施工顺序第 5 步（M6 挂钟确定性化）",
       "source_ref": "github#260",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "已合并",
       "priority": "P2",
       "env_group": null,
       "env_role": null,
@@ -2856,13 +2856,16 @@
       "branch": "fix/ci-260-m6-clock-injection",
       "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m6",
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "c8842c6fb550fcf463190ec327a75034e9f946e6",
+        "merged_at": "2026-09-21T11:15:22Z"
+      },
       "github_sync": "pending",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-28T11:15:22.000Z",
       "evidence_cleared_at": null,
-      "branch_retained": null,
+      "branch_retained": false,
       "created_at": "2026-09-21T11:01:55.524Z",
-      "updated_at": "2026-09-21T11:12:21.866Z",
+      "updated_at": "2026-09-21T11:18:16.630Z",
       "spec_path": "docs/tasks/specs/CHORE-276-ci-260-m6-clock-injection/task-spec-V1.md"
     }
   ],
