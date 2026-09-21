@@ -79,6 +79,14 @@ npm test
 
 提交信息使用项目历史中已有的简洁前缀：`feat:`、`fix:`、`docs:`；必要时添加范围，例如 `feat(workflow): ...`。每次提交只处理一个清晰主题。合并请求应说明对用户或工作流程的影响，列出已运行的校验命令，说明蓝图或生成结果是否受到影响，并关联对应任务或问题。修改可视化编辑器时，应附上截图或录屏。
 
+## 任务归属记录（agent 身份）
+
+仓库要求「**谁提交的就记谁**」：任务登记册的 `origin_agent` 与施工认领身份必须反映**真实执行会话的 agent**，而不是人工手填的名字。身份解析统一走 `agentName()`（`scripts/local-task-registry.mjs`），取值顺序为：① `AI_AGENT_NAME` 显式覆盖 → ② `CLIENT_INFO_IDE_TYPE` 宿主自报 → ③ 任何 `*_AGENT_NAME` 变量 → ④ 仓库根 `.agent-identity`（本机标记，已被 Git 忽略）→ ⑤ 取不到则返回 null。
+
+- **不允许静默留空**：`allocate` 在取不到身份时必须在 stderr 显式告警。若你在输出里看到该告警，应让当前会话自报身份（设置任一 `*_AGENT_NAME` 环境变量）或写入 `.agent-identity` 后重跑，不要直接接受一条无归属的记录。
+- **不允许手写身份**：不得用 `set` / `update` 把 `origin_agent` 改成无法由环境事实佐证的名字——那等于伪造留痕。
+- 同一台机器上所有 agent 的 `machineCode()` 相同，**机器码无法区分 agent**，因此 `origin_agent` 是单机多会话并行时唯一的区分依据，必须被正确填充。
+
 ## PR Review 收敛规则（Cursor Bugbot）
 
 本节约束所有能够在 GitHub PR 上发起 PR 评审的 Agent；它独立于本地工作流、Run 和回退额度。评审引擎已从停用的 Codex 切换为 **Cursor Bugbot**，触发词为 `@cursor review`（等价别名 `bugbot run`；以 Cursor 设置页 Manual-Only 文案为准，由 Controller 用单一常量 `TRIGGER_COMMAND` 发出，公开文档另有不带 `@` 的 `cursor review` 写法，真实生效形式以冒烟为准）。目标是让 PR 审查围绕当前 Issue 的完成条件收敛，并把 **PR Review Controller 作为 Agent 的唯一 Review 入口**，禁止通过直接 `@cursor review` 评论或无限追加轮次把一个 PR 扩张成无边界的持续改进任务。
