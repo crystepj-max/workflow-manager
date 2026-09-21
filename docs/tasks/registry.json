@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 146,
+  "revision": 149,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2669,6 +2669,35 @@
       "created_at": "2026-09-21T02:20:56.793Z",
       "updated_at": "2026-09-21T02:27:02.550Z",
       "spec_path": "docs/tasks/specs/FIX-254-ci-git-identity/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-260",
+      "type": "CHORE",
+      "remote": "github#260",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CI 可信度专项：validate 闸门全部红灯机制盘点与收敛（身份/端口核验/治理区布局/M4/挂钟依赖/基准产物改写）",
+      "slug": "ci-trustworthiness",
+      "source": "会话录入：松哥要求对 CI 校验失败项做全面判断并立专项",
+      "source_ref": "",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "docs/ci-trustworthiness",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-trust-audit",
+      "runs": [],
+      "merge": null,
+      "github_sync": "synced#260",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-21T03:38:18.569Z",
+      "updated_at": "2026-09-21T03:39:29.285Z",
+      "spec_path": "docs/tasks/specs/CHORE-260-ci-trustworthiness/task-spec-V1.md"
     }
   ],
   "updated_at": "2026-09-20T16:10:00.000Z"
