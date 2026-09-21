@@ -1,0 +1,22 @@
+{
+  "task_id": "CHORE-273",
+  "run_id": "fix/ci-260-m4-acceptance-script",
+  "task_name": "CI 可信度 M4 机械验收：为 CI 提供可对账环境（完整克隆 + main 引用）（CHORE-260 子票 4）",
+  "branch": "fix/ci-260-m4-acceptance-script",
+  "status": "已合并",
+  "decision": null,
+  "decided_by": null,
+  "decided_at": null,
+  "acceptance_state": "no_record",
+  "acceptance_note": "本 Run 未登记 acceptance_package：轻量路线缺前置引用须在验收包内用 evidence_gaps 声明（契约 §8.3），或该任务先于签收动作",
+  "merge": {
+    "commit": "d52e30858e14f4b03d679c5b903767f84ffc2d6b",
+    "merged_at": "2026-09-21T06:29:21Z",
+    "issue": null
+  },
+  "stages": [],
+  "evidence": null,
+  "no_run_evidence": true,
+  "note": "该任务先于 Run 证据链机制落地（无分支与 .agent-runs 记录），本摘要依据登记册与归档规格生成。",
+  "generated_at": "2026-09-21T06:32:50.082Z"
+}
