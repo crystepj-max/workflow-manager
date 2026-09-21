@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 154,
+  "revision": 156,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2762,6 +2762,35 @@
       "created_at": "2026-09-21T04:39:11.800Z",
       "updated_at": "2026-09-21T05:05:37.477Z",
       "spec_path": "docs/tasks/specs/CHORE-264-ci-260-m3-workspace-exempt/task-spec-V1.md"
+    },
+    {
+      "task_id": "CHORE-268",
+      "type": "CHORE",
+      "remote": "github#268",
+      "legacy_id": null,
+      "origin_machine": "chrisdem",
+      "origin_agent": "WorkBuddy",
+      "name": "CI 可信度 M2 端口核验：测试注入确定性探针，不依赖宿主机 lsof（CHORE-260 子票 3）",
+      "slug": "ci-260-m2-port-probe",
+      "source": "会话录入：CHORE-260 施工顺序第 3 步（M2 端口核验）",
+      "source_ref": "github#260",
+      "baseline": "V1",
+      "status": "本地已定义",
+      "priority": "P1",
+      "env_group": null,
+      "env_role": null,
+      "deps": [],
+      "branch": "fix/ci-260-m2-port-probe",
+      "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-260-m2",
+      "runs": [],
+      "merge": null,
+      "github_sync": "pending",
+      "evidence_expires_at": null,
+      "evidence_cleared_at": null,
+      "branch_retained": null,
+      "created_at": "2026-09-21T06:06:53.844Z",
+      "updated_at": "2026-09-21T06:09:03.834Z",
+      "spec_path": "docs/tasks/specs/CHORE-268-ci-260-m2-port-probe/task-spec-V1.md"
     }
   ],
   "updated_at": "2026-09-20T16:10:00.000Z"
