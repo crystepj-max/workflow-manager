@@ -262,7 +262,7 @@ export function claimIssue({ repo, taskId, runId, branch = null, actor = null, d
     return { ok: false, code: 'no-anchor', reason: `任务 ${taskId} 无 github#N 锚点（remote=${record.remote ?? 'null'}），无法远端认领` }
   }
 
-  const ident = workerIdentity({ actor: actor ?? currentActor(), agent: agentName() })
+  const ident = workerIdentity({ actor: actor ?? currentActor(), agent: agentName(process.env, repo) })
   const claimKey = `${ident.machine}/${runId}`
   if (dryRun) return { ok: true, code: 'dry-run', issue: number, worker: ident.worker, claimKey }
 
@@ -309,7 +309,7 @@ export function releaseIssue({ repo, taskId, runId = null, reason = '', outcome 
   if (!record) return { ok: false, code: 'no-task', reason: `登记册无此任务：${taskId}` }
   if (!number) return { ok: false, code: 'no-anchor', reason: `任务 ${taskId} 无 github#N 锚点，无远端标签可释放` }
 
-  const ident = workerIdentity({ actor: actor ?? currentActor(), agent: agentName() })
+  const ident = workerIdentity({ actor: actor ?? currentActor(), agent: agentName(process.env, repo) })
   if (dryRun) return { ok: true, code: 'dry-run', issue: number }
 
   const before = viewIssue({ slug, number })
