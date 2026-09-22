@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": 224,
+  "revision": 226,
   "tasks": [
     {
       "task_id": "CHORE-36",
@@ -2699,7 +2699,7 @@
       "source": "会话录入：排查 PR #218 CI 红时定位到 runner 缺提交者身份",
       "source_ref": "",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": null,
       "env_role": null,
@@ -2707,13 +2707,16 @@
       "branch": "fix/ci-git-identity",
       "worktree": "/Users/chris/workspace/workflow-manager-worktrees/fix-ci-git-identity",
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "8260bc4f80ed1e073e40c5b3ddbd6bda966c6d22",
+        "merged_at": "2026-09-22T00:21:44.090Z"
+      },
       "github_sync": "synced#254",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-29T00:21:44.090Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-21T02:20:56.793Z",
-      "updated_at": "2026-09-21T02:27:02.550Z",
+      "updated_at": "2026-09-22T00:21:44.130Z",
       "spec_path": "docs/tasks/specs/FIX-254-ci-git-identity/task-spec-V1.md"
     },
     {
@@ -2728,7 +2731,7 @@
       "source": "会话录入：松哥要求对 CI 校验失败项做全面判断并立专项",
       "source_ref": "",
       "baseline": "V1",
-      "status": "本地已定义",
+      "status": "已合并",
       "priority": "P1",
       "env_group": null,
       "env_role": null,
@@ -2736,13 +2739,16 @@
       "branch": "docs/ci-trustworthiness",
       "worktree": "/Users/chris/workspace/workflow-manager-worktrees/ci-trust-audit",
       "runs": [],
-      "merge": null,
+      "merge": {
+        "commit": "cdc268f",
+        "merged_at": "2026-09-22T00:21:44.187Z"
+      },
       "github_sync": "synced#260",
-      "evidence_expires_at": null,
+      "evidence_expires_at": "2026-09-29T00:21:44.187Z",
       "evidence_cleared_at": null,
       "branch_retained": null,
       "created_at": "2026-09-21T03:38:18.569Z",
-      "updated_at": "2026-09-21T03:39:29.285Z",
+      "updated_at": "2026-09-22T00:21:44.188Z",
       "spec_path": "docs/tasks/specs/CHORE-260-ci-trustworthiness/task-spec-V1.md"
     },
     {
