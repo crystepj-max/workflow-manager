@@ -91,6 +91,19 @@ test('正例探针：conditional_pass 有条件通过通道', () => {
   assert.equal(validateRecord(schema, cp).length, 0)
 })
 
+test('负例探针：conditional_pass 缺 feedback 被 schema 拒（V-7 固化既有规则）', () => {
+  const noFb = rec('acceptance_package', {
+    status: 'decided', assembled, decision: 'conditional_pass', decided_by: 'x',
+    decided_at: '2026-08-30T08:00:00Z', verified_branch: 'b', verified_head: 'h',
+  }, 'human_acceptance')
+  assert.ok(validateRecord(schema, noFb).length > 0, 'conditional_pass 无 feedback 必须校验失败')
+  const blankFb = rec('acceptance_package', {
+    status: 'decided', assembled, decision: 'conditional_pass', decided_by: 'x', feedback: '   ',
+    decided_at: '2026-08-30T08:00:00Z', verified_branch: 'b', verified_head: 'h',
+  }, 'human_acceptance')
+  assert.ok(validateRecord(schema, blankFb).length > 0, 'feedback 全空白同样不得放行（nonEmptyText 只禁 \S）')
+})
+
 test('负例探针：user_accepted 已废弃', () => {
   const ua = rec('acceptance_package', {
     status: 'decided', assembled, decision: 'user_accepted', decided_by: 'x',

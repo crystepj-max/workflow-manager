@@ -584,6 +584,75 @@ test('write：proof 绑定与真实工作区比对（不一致拒绝，一致放
   assert.equal(ok.code, 0, ok.out)
 })
 
+// ── FIX-220：成熟刷新的呈递保护（契约 §3.6 / §5.3）────────────────────────
+function designPayload(decReq, decision) {
+  const p = {
+    summary: '既有摘要文本', outcome: 'package_ready', decision_required: true,
+    decision_required_reasons: ['命中条件门'],
+  }
+  if (decReq) p.decision_request = decReq
+  if (decision) p.decision = decision
+  return p
+}
+const REQ_A = { question: '该选哪个方案？', options: [{ name: 'A', tradeoffs: 't' }, { name: 'B', tradeoffs: 't' }], recommendation: 'A' }
+const DEC_A = { question: '该选哪个方案？', options: [{ name: 'A', tradeoffs: 't' }, { name: 'B', tradeoffs: 't' }], chosen: 'A', rationale: '选 A 的理由文本', decided_by: 'human', decided_at: '2026-08-30T08:00:00Z' }
+
+test('write：design 门成熟刷新不得替换已呈递的 decision_request（§3.6/§5.3）', () => {
+  const { runDir } = makeRunDir()
+  const mk = (name, payload) => { const f = join(runDir, name); writeFileSync(f, JSON.stringify(payload)); return f }
+  const pending = designPayload(REQ_A, null)
+  pending.outcome = 'decision_required'
+  assert.equal(run(['write', runDir, 'design_package', mk('d1.json', pending), '--produced-by', 'test-suite', '--stage', 'design']).code, 0)
+  // 把呈递过的候选集换一份再答——必须拒
+  const swapped = designPayload({ ...REQ_A, options: [{ name: 'A', tradeoffs: 't' }, { name: 'C', tradeoffs: 't' }] }, DEC_A)
+  const r = run(['write', runDir, 'design_package', mk('d2.json', swapped), '--produced-by', 'test-suite', '--stage', 'design'])
+  assert.equal(r.code, 1)
+  assert.match(r.out, /不得替换已呈递的 decision_request/)
+})
+
+test('write：design 门原样保留 decision_request 的成熟刷新放行（防保护过头）', () => {
+  const { runDir } = makeRunDir()
+  const mk = (name, payload) => { const f = join(runDir, name); writeFileSync(f, JSON.stringify(payload)); return f }
+  const pending = designPayload(REQ_A, null)
+  pending.outcome = 'decision_required'
+  assert.equal(run(['write', runDir, 'design_package', mk('d1.json', pending), '--produced-by', 'test-suite', '--stage', 'design']).code, 0)
+  assert.equal(run(['write', runDir, 'design_package', mk('d2.json', designPayload(REQ_A, DEC_A)), '--produced-by', 'test-suite', '--stage', 'design']).code, 0)
+})
+
+test('E-2 场景经实测不可达：decision_required 缺 decision_request 已被 schema 拒（保护无需处理）', () => {
+  const { runDir } = makeRunDir()
+  const f = join(runDir, 'd1.json')
+  writeFileSync(f, JSON.stringify({ summary: '既有摘要文本', outcome: 'decision_required', decision_required: true, decision_required_reasons: ['命中条件门'] }))
+  const r = run(['write', runDir, 'design_package', f, '--produced-by', 'test-suite', '--stage', 'design'])
+  assert.equal(r.code, 1)
+  assert.match(r.out, /校验失败/)
+})
+
+test('write：baseline draft→confirmed 不得改动已呈递的三要素', () => {
+  const { runDir } = makeRunDir()
+  const mk = (name, payload) => { const f = join(runDir, name); writeFileSync(f, JSON.stringify(payload)); return f }
+  // 契约 §3.1：awaiting_human_input 必须显式带非空 gaps（schema 强制）
+  const draft = { goal: '原目标文本', scope: { include: ['含'], exclude: ['不含'] }, acceptance: ['验收项一'], gaps: [{ element: '验收口径未定', suggestion: '补一条可验收入口' }], outcome: 'awaiting_human_input', status: 'draft' }
+  assert.equal(run(['write', runDir, 'requirements_baseline', mk('b1.json', draft), '--produced-by', 'test-suite', '--stage', 'requirements']).code, 0)
+  const tampered = { ...draft, gaps: [], goal: '换过的目标文本', outcome: 'baseline_ready', status: 'confirmed', baseline_revision: 'V1', human_confirmation: { confirmed_by: 'human', confirmed_at: '2026-08-30T08:00:00Z' } }
+  const r = run(['write', runDir, 'requirements_baseline', mk('b2.json', tampered), '--produced-by', 'test-suite', '--stage', 'requirements'])
+  assert.equal(r.code, 1)
+  assert.match(r.out, /不得改动已呈递的基线三要素/)
+})
+
+test('write：baseline 三要素原样冻结放行；换内容走前进 attempt 通道（R-2）', () => {
+  const { runDir } = makeRunDir()
+  const mk = (name, payload) => { const f = join(runDir, name); writeFileSync(f, JSON.stringify(payload)); return f }
+  // 契约 §3.1：awaiting_human_input 必须显式带非空 gaps（schema 强制）
+  const draft = { goal: '原目标文本', scope: { include: ['含'], exclude: ['不含'] }, acceptance: ['验收项一'], gaps: [{ element: '验收口径未定', suggestion: '补一条可验收入口' }], outcome: 'awaiting_human_input', status: 'draft' }
+  assert.equal(run(['write', runDir, 'requirements_baseline', mk('b1.json', draft), '--produced-by', 'test-suite', '--stage', 'requirements']).code, 0)
+  const same = { ...draft, gaps: [], outcome: 'baseline_ready', status: 'confirmed', baseline_revision: 'V1', human_confirmation: { confirmed_by: 'human', confirmed_at: '2026-08-30T08:00:00Z' } }
+  assert.equal(run(['write', runDir, 'requirements_baseline', mk('b2.json', same), '--produced-by', 'test-suite', '--stage', 'requirements']).code, 0)
+  // 内容确需变更：前进 attempt，旧修订保留
+  const changed = { ...same, goal: '第二版目标文本', baseline_revision: 'V2' }
+  assert.equal(run(['write', runDir, 'requirements_baseline', mk('b3.json', changed), '--produced-by', 'test-suite', '--stage', 'requirements', '--attempt', '2']).code, 0)
+  assert.ok(existsSync(join(runDir, 'requirements_baseline.a1.json')), '旧 attempt 修订必须保留')
+})
 // —— CHORE-110：轻量档验收包可登记 + 签收刷新永久层 ——
 
 const CKPT = { target_ref: 'main', target_head_at_check: 'abc', target_advanced: false, proofs_state: 'still_valid' }

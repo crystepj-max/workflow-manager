@@ -145,6 +145,26 @@ function cmdWrite(runDir, recordType, payloadPath, flags) {
       console.error('awaiting→decided 刷新不得改写已呈递的 assembled 证据包（契约 §3.6：签收对象即呈递版本）')
       process.exit(1)
     }
+    // design 门成熟刷新：人工答的那份问题与候选集不得被换掉（§3.6/§5.3）
+    if (recordType === 'design_package'
+        && existing.payload?.decision_request
+        && record.payload?.decision_request
+        && !deepEqual(existing.payload.decision_request, record.payload.decision_request)) {
+      console.error('design 门成熟刷新不得替换已呈递的 decision_request（契约 §3.6/§5.3：人工裁决对象即呈递那份，换问题/换候选集等同伪造过门）')
+      process.exit(1)
+    }
+    // baseline 冻结：draft→confirmed 不得改动呈递给人工确认的三要素（§3.6/§5.1）。
+    // 确需变更走前进 attempt——旧修订按 §8.5 原样保留，即事后无需新增 supersedes 字段也可追溯
+    if (recordType === 'requirements_baseline'
+        && existing.payload?.status === 'draft'
+        && record.payload?.status === 'confirmed') {
+      const presented = { goal: existing.payload.goal, scope: existing.payload.scope, acceptance: existing.payload.acceptance }
+      const freezing = { goal: record.payload.goal, scope: record.payload.scope, acceptance: record.payload.acceptance }
+      if (!deepEqual(presented, freezing)) {
+        console.error('baseline draft→confirmed 不得改动已呈递的基线三要素 goal/scope/acceptance（契约 §3.6：人工确认对象即呈递那份）——确需变更请前进 attempt 保留旧修订')
+        process.exit(1)
+      }
+    }
   }
 
   // closeout 收口双重校验（契约 §8.3）：所引验收包必须已 decided、非 reject、

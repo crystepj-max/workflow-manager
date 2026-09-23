@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 证据链机器校验引擎（契约 §8.3 九项呈递/签收前校验；M2 验收三态）
+// 证据链机器校验引擎（契约 §8.3 九项呈递/签收前校验 + ⑩ 时间序 + ⑪ feedback 磁盘复核；M2 验收三态）
 // 用法：node scripts/cwf-evidence-verify.mjs <runDir>
 //   accept / conditional_pass 均要求 review approve + test pass（有条件通过 ≠ 知情接受未达标）
 // 输出逐项 JSON 判定；exit 0 全部通过，exit 1 任一失败
@@ -51,6 +51,20 @@ function liveTarget(runDir, run) {
     return execFileSync('git', ['rev-parse', `origin/${run.base_ref}`], { cwd: wt, encoding: 'utf-8' }).trim()
   } catch {
     return null // 离线/归档态：跳过实况比对
+  }
+}
+
+function commitDateOf(runDir, sha) {
+  // 取 git 自证的 author 日期（rebase/amend 只改 committer，author 更抗改写）。
+  // 非十六进制直接拒查：避免把记录里的字符串当 revision 表达式传给 git。取不到返回 NaN，由 ⑩ 显式报「未评估」
+  if (typeof sha !== 'string' || !/^[0-9a-fA-F]{4,40}$/.test(sha)) return NaN
+  try {
+    const out = execFileSync('git', ['show', '-s', '--format=%aI', sha], {
+      cwd: join(runDir, '..', '..'), encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim()
+    return Date.parse(out)
+  } catch {
+    return NaN
   }
 }
 
@@ -168,10 +182,12 @@ export function verifyEvidenceChain(runDir, { live = null } = {}) {
       ok6 = false; detail6 = '命中条件门但无 Decision Record'
     } else if (!design.payload.decision_request) {
       ok6 = false; detail6 = '命中条件门但缺 decision_request（呈递候选集丢失）'
-    } else if (design.payload.decision_request) {
+    } else {
       const names = design.payload.decision_request.options.map(o => o.name)
       if (!names.includes(design.payload.decision.chosen)) {
         ok6 = false; detail6 = `chosen(${design.payload.decision.chosen}) 不在呈递候选集 ${names}`
+      } else if (design.payload.decision.question !== design.payload.decision_request.question) {
+        ok6 = false; detail6 = `decision.question 与呈递的 decision_request.question 不一致（人工答的那份被事后替换）`
       }
     }
   }
@@ -253,6 +269,50 @@ export function verifyEvidenceChain(runDir, { live = null } = {}) {
     check('⑫', '轻量档签署带可核对来源', ok12, ok12
       ? (needs ? 'ok' : 'N/A（无缺失声明或尚未签收）')
       : `evidence_gaps 非空且 status=decided，但缺 decided_by_evidence（decided_by=${ap.payload?.decided_by}）`)
+  }
+
+  // ⑬ 时间序：人不可能签收一个当时还不存在的提交
+  {
+    const decidedRaw = ap.payload?.decided_at
+    const decidedAt = Date.parse(decidedRaw ?? '')
+    const sha = ap.payload?.verified_head
+    const cd = live && 'commitDate' in live
+      ? Date.parse(live.commitDate)
+      : (Number.isFinite(decidedAt) ? commitDateOf(runDir, sha) : NaN)
+    let ok10 = true
+    let detail10
+    if (!Number.isFinite(decidedAt)) {
+      detail10 = '未评估：无 decided_at（awaiting_decision 形态本无签收时刻）'
+    } else if (!Number.isFinite(cd)) {
+      // D-4：不可达只显式报出、不阻断——否则归档/离线态整链永远红（实测 56/88 条不可评估）
+      detail10 = `未评估：verified_head(${String(sha).slice(0, 12)}) 提交时刻本地不可达`
+    } else if (cd > decidedAt) {
+      ok10 = false
+      detail10 = `倒挂 ${Math.floor((cd - decidedAt) / 60000)} 分钟：签收 ${decidedRaw} 早于所验提交 ${new Date(cd).toISOString()}（D-2 零容差，分钟级同样判失败）`
+    } else {
+      detail10 = `ok（提交早于签收 ${Math.floor((decidedAt - cd) / 60000)} 分钟）`
+    }
+    // ⑬-a 反向软判（D-1）：记录不得早于它所记载的签收——只提示，不参与整链结论
+    const recCreated = Date.parse(ap.created_at ?? '')
+    if (Number.isFinite(decidedAt) && Number.isFinite(recCreated) && recCreated < decidedAt) {
+      detail10 += `；提示：记录 created_at(${ap.created_at}) 早于所载签收 ${decidedRaw}，偏离 ${Math.round((decidedAt - recCreated) / 60000)} 分钟（跨机时钟偏差与回填皆可能，不阻断）`
+    }
+    check('⑬', '时间序：签收不得早于所验提交', ok10, detail10)
+  }
+
+  // ⑭ conditional_pass 必须带非空 feedback（契约 §8.3 ②）。schema 已约束经 cwf-record 的写入，
+  // 此处复核磁盘记录本身——直接改文件或手搓记录会绕过 schema，只有整链校验能兜住
+  {
+    const d = ap.payload?.decision
+    let ok11 = true
+    let detail11 = d === 'conditional_pass' ? 'ok' : `decision=${d}——不要求 feedback`
+    if (d === 'conditional_pass') {
+      const fb = ap.payload?.feedback
+      if (typeof fb !== 'string' || !/\S/.test(fb)) {
+        ok11 = false; detail11 = 'conditional_pass 缺 feedback：优化意见未落记录，等同把有条件通过洗成普通通过（契约 §8.3 ②）'
+      }
+    }
+    check('⑭', 'conditional_pass 附非空 feedback', ok11, detail11)
   }
 
   return { ok: checks.every(c => c.ok), checks }

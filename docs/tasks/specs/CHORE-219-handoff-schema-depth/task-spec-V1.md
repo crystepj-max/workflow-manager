@@ -68,6 +68,8 @@
 
 `nonEmptyText`、`isoDateTime`、`portableRunIdentity` 的既有语义；任何 enum/const 字段；七类记录的字段增删；引擎脚本；runbook 流程。
 
+> **实证支持（2026-09-21 复核）**：标识类字段在真实记录里会承载叙述——`.agent-runs/cwf-74-r1/acceptance_package.a4.json` 的 `decided_by` 实际值为 61 字符（`crystepj-max（用户，2026-09-10 开发 DSH 调试验收通过：…）`）。这佐证本票**只给内容字段挂下限、不动 `nonEmptyText`** 的切分是对的：给标识/绑定字段加长度约束（无论下限还是上限）都会误伤既成事实的记法。
+
 ## 9. 业务规则
 
 - R-1 下限按 JS `.length` 计（与校验器一致），中文一字计 1。
@@ -144,7 +146,7 @@ Controller 写 `requirements_baseline` → `cwf-record` 校验 → 若 `baseline
 
 ## 18. 已知限制
 
-- 任务标识仍是草稿临时号：登记册里同日已有他方 `260919a/b/c` 草稿且本会话不代写 `registry.json`/`BOARD.md`（并发写风险）；GitHub 建 issue 在当前权限模式被分类器拦截，正式号待授权后补。
+- 任务标识已定稿：正式号 GitHub #219（2026-09-21 经松哥授权在 GitHub 补建，草稿号沿革见卡面）。🟡 **卡片入库未完成**：`git add` 被权限分类器以「共享主检出索引受保护」拦下，规格现为未跟踪态，`validate:task-context` 对本报 `spec-untracked`；由谁在何处提交待松哥定。
 - 本仓校验器不支持 `format`，所以版本号只能用 pattern 近似，无法表达 semver 语义比较。
 
 ## 19. 版本历史
