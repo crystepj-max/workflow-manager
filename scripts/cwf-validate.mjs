@@ -135,9 +135,13 @@ function validate(schema, data, path, rootSchema, errors, depth) {
     }
   }
   if (schema.oneOf) {
-    const matches = schema.oneOf.filter(sub => subValidates(sub, data, rootSchema, depth + 1))
-    if (matches.length !== 1) {
-      errors.push(`${fmtPath(path)}: oneOf 必须恰好匹配 1 个分支（实际 ${matches.length}）`)
+    const branchErrors = schema.oneOf.map(sub => collectErrors(sub, data, path, rootSchema, depth + 1))
+    const matchCount = branchErrors.filter(errs => errs.length === 0).length
+    if (matchCount !== 1) {
+      errors.push(`${fmtPath(path)}: oneOf 必须恰好匹配 1 个分支（实际 ${matchCount}）`)
+      if (matchCount === 0) {
+        appendOneOfNearestCauses(errors, path, schema.oneOf, branchErrors, data)
+      }
     }
   }
   if (schema.if) {
@@ -156,10 +160,63 @@ function validate(schema, data, path, rootSchema, errors, depth) {
   }
 }
 
-function subValidates(schema, data, rootSchema, depth) {
+function collectErrors(schema, data, path, rootSchema, depth) {
   const errors = []
-  validate(schema, data, '(sub)', rootSchema, errors, depth)
-  return errors.length === 0
+  validate(schema, data, path, rootSchema, errors, depth)
+  return errors
+}
+
+function subValidates(schema, data, rootSchema, depth) {
+  return collectErrors(schema, data, '(sub)', rootSchema, depth).length === 0
+}
+
+/** 从 oneOf 分支 schema 取可读标签（优先 properties.*.const，否则 #index） */
+function oneOfBranchLabel(sub, index) {
+  if (sub && typeof sub === 'object' && sub.properties && typeof sub.properties === 'object') {
+    for (const sch of Object.values(sub.properties)) {
+      if (sch && typeof sch === 'object' && sch.const !== undefined) {
+        return String(sch.const)
+      }
+    }
+  }
+  return `#${index}`
+}
+
+/** 分支顶层 const 判别字段是否与 data 一致（无 const 判别则视为候选） */
+function oneOfDiscriminatorMatches(sub, data) {
+  if (!sub || typeof sub !== 'object' || !sub.properties) return true
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return true
+  for (const [key, sch] of Object.entries(sub.properties)) {
+    if (!sch || typeof sch !== 'object' || sch.const === undefined) continue
+    if (!(key in data) || !deepEqual(data[key], sch.const)) return false
+  }
+  return true
+}
+
+/**
+ * oneOf 全不匹配时追加各（候选）分支最近因。
+ * 有判别字段命中的分支优先；否则回退到错误数最少的分支，避免把其它 record_type 的 const 噪声全刷出来。
+ */
+function appendOneOfNearestCauses(errors, path, branches, branchErrors, data) {
+  const indexed = branches.map((sub, i) => ({
+    i,
+    label: oneOfBranchLabel(sub, i),
+    errs: branchErrors[i],
+    discOk: oneOfDiscriminatorMatches(sub, data),
+  }))
+  let selected = indexed.filter(b => b.discOk && b.errs.length > 0)
+  if (selected.length === 0) {
+    const min = Math.min(...indexed.map(b => b.errs.length))
+    selected = indexed.filter(b => b.errs.length === min)
+  }
+  const prefix = `${fmtPath(path)}: `
+  for (const b of selected) {
+    // 每分支最多 3 条最近因，去掉与汇总行重复的路径前缀噪音
+    for (const err of b.errs.slice(0, 3)) {
+      const detail = err.startsWith(prefix) ? err.slice(prefix.length) : err
+      errors.push(`${fmtPath(path)}: 分支 ${b.label}：${detail}`)
+    }
+  }
 }
 
 function resolveRef(ref, rootSchema) {

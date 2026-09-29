@@ -182,3 +182,38 @@ test('分层负例：awaiting_decision 态不得带 decided_by_evidence', () => 
   })
   assert.ok(errs.length > 0, '未签收态不得预先落签署凭据')
 })
+
+// —— WFM-64 / #251：根 oneOf 全不匹配时须回溯分支最近因 ——
+
+const rbDraftBase = {
+  goal: 'g', scope: { include: ['a'], exclude: ['b'] }, acceptance: ['x'], gaps: [], status: 'draft',
+}
+
+test('oneOf 真因：缺 outcome 时须指出 required，不得只报实际 0 个分支', () => {
+  const errs = validateRecord(schema, rec('requirements_baseline', rbDraftBase, 'requirements'))
+  assert.ok(errs.length > 0, '缺 outcome 必须拒')
+  assert.ok(errs.some(e => /oneOf 必须恰好匹配 1 个分支（实际 0）/.test(e)), errs.join('; '))
+  assert.ok(
+    errs.some(e => /分支\s*requirements_baseline/.test(e) && /outcome/.test(e) && /缺少必需属性|required/.test(e)),
+    `应回溯 requirements_baseline 分支缺 outcome，实际：${errs.join('; ')}`,
+  )
+})
+
+test('oneOf 真因：awaiting_human_input + 空 gaps 须指出 gaps 约束，不得只报实际 0 个分支', () => {
+  const errs = validateRecord(schema, rec('requirements_baseline', {
+    ...rbDraftBase, outcome: 'awaiting_human_input',
+  }, 'requirements'))
+  assert.ok(errs.length > 0, '空 gaps 挂起必须拒')
+  assert.ok(errs.some(e => /oneOf 必须恰好匹配 1 个分支（实际 0）/.test(e)), errs.join('; '))
+  assert.ok(
+    errs.some(e => /分支\s*requirements_baseline/.test(e) && /gaps/.test(e) && /minItems|非空/.test(e)),
+    `应回溯 requirements_baseline 分支 gaps 约束，实际：${errs.join('; ')}`,
+  )
+})
+
+test('oneOf 真因对照：baseline_ready + 空 gaps 仍合法', () => {
+  const errs = validateRecord(schema, rec('requirements_baseline', {
+    ...rbDraftBase, outcome: 'baseline_ready',
+  }, 'requirements'))
+  assert.deepEqual(errs, [])
+})
