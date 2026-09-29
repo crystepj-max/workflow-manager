@@ -88,28 +88,42 @@ npm test
 - **不允许手写身份**：不得用 `set` / `update` 把 `origin_agent` 改成无法由环境事实佐证的名字——那等于伪造留痕。
 - 同一台机器上所有 agent 的 `machineCode()` 相同，**机器码无法区分 agent**，因此 `origin_agent` 是单机多会话并行时唯一的区分依据，必须被正确填充。
 
-## PR Review 收敛规则（Cursor Bugbot）
+## 仓库级 PR 审查规则（Multica「PR 审查」Agent）
 
-本节约束所有能够在 GitHub PR 上发起 PR 评审的 Agent；它独立于本地工作流、Run 和回退额度。评审引擎已从停用的 Codex 切换为 **Cursor Bugbot**，触发词为 `@cursor review`（等价别名 `bugbot run`；以 Cursor 设置页 Manual-Only 文案为准，由 Controller 用单一常量 `TRIGGER_COMMAND` 发出，公开文档另有不带 `@` 的 `cursor review` 写法，真实生效形式以冒烟为准）。目标是让 PR 审查围绕当前 Issue 的完成条件收敛，并把 **PR Review Controller 作为 Agent 的唯一 Review 入口**，禁止通过直接 `@cursor review` 评论或无限追加轮次把一个 PR 扩张成无边界的持续改进任务。
+本节适用于由 Agent 负责、准备合入 `main` 的 PR。唯一仓库级审查入口是 Multica 中现有的「PR 审查」Agent（ID：`c895067b-44bf-4fb9-bc64-af7a7cccb4a8`）。审查 Agent 必须与实施 Agent 不同；若身份相同，暂停派发并交项目负责人处理，严禁自审。Draft PR 也可审查；审查 Agent 只读审查，不改码、不合并，也不提交 GitHub 的正式 `APPROVE` / `REQUEST_CHANGES` Review 状态。它在 Multica 审核 Task 和 GitHub PR 普通评论中发布同一份报告。该报告是审查证据，不代替用户验收、GitHub 正式 approval 或其他仓库保护规则。
 
-> 命令命名空间已于 2026-09-20 由历史的 `/codex-review` 改名为 `/pr-review`（DT-01 裁定 B）；旧命令 `/codex-review` 即刻失效、无兼容期，在途 PR 需改用 `/pr-review`。注意：脚本内部审计标记 `codex-review-controller-*` 与文件名 `scripts/codex-review-controller.mjs`、workflow 文件名仍保留旧名（非用户可见、改之会丢在途 PR 状态或增无谓 churn）。
+### 创建并派发审核 Task
 
-- Agent **不得直接发表评论 `@cursor review`（或 `bugbot run`）**。所有由 Agent 发起的 PR 评审必须通过 PR 评论命令 `/pr-review next` 进入 Controller；Controller 负责轮次计数、HEAD 去重、额度状态，并以其触发身份发出触发评论。
-- **仓库侧 Bugbot 配置基线（缺一即可能静默无响应或越权，须先核对再判定 Review 是否发生）**：Trigger Mode 保持 **Manual Only**（否则每次 push 自动评审会把无限循环带回）；**Autofix 保持 Off**（评审引擎只读——一旦自动改码并推送，会越过本仓库人工验收与推送授权边界）；**PR Summaries 建议关闭**（PR 描述是本仓库收口证据，不得由外部工具生成/改写）；已连接仓库、启用 Bugbot 并配好被接受的触发身份 Secret `PR_REVIEW_TRIGGER_TOKEN`（`github-actions[bot]` 身份能否被接受尚未官方确认，必要时用 fine-grained PAT）。若 `/pr-review next` 后 Bugbot 未真正开始评审，Agent 应把「评审未发生」报告为治理/配置阻塞并交人工，而不是自行重试或旁路触发。
-- **Round 1 是正式 PR 的强制 Gate。** 对所有由 Agent 负责、准备合并到 `main` 的非 Draft PR，PR 创建后或 Draft 转为 Ready 后，Agent 必须先检查 PR 时间线是否已有 PR Review Controller 状态；若尚无成功的 Controller Review 记录，必须立即执行 `/pr-review next` 发起第 1 轮。仓库侧 Review Draft PRs 关闭，且 Manual 触发在 Draft 上能否生效尚待冒烟确认——Agent 须**先把 PR 转为 Ready 再申请 Review**，不得把 Draft 上「发了没反应」当成静默失败反复重试。内部工作流的 Review/Test、CI、人工检查均不能替代这一 PR Gate。若标准流程需要在 closeout 阶段创建 PR，可进入 closeout 完成 PR 创建与 Ready；但未完成至少 1 轮 Controller Review 前，Agent **不得合并 PR、不得宣布 closeout 完成，也不得结束该 PR 任务**。
-- 一个 PR 默认最多允许 **3 轮自动 Review**。服务报错、超时或明确的工具故障只能使用 `/pr-review retry` 重试；retry 仅限同一 HEAD 的服务/工具故障，不得借 retry 绕过业务轮次。
-- 轮次语义（轮次计数、去重、额度、可审计记录）仍由 Controller 承担；但 **评审聚焦口径改为常驻规则文件 `.cursor/BUGBOT.md`**——Bugbot 不接受单条触发评论里的临时提示词，因此原「第 1/2/3 轮差异化提示词」不再是给评审引擎的指令，Controller 只在 PR 中留轮次状态评论作审计。
-- 每条 Review 意见都必须先分类再处理（该口径同时写进 `.cursor/BUGBOT.md` 供 Bugbot 执行，事实源以本节为准）：
-  - **A · 当前阻塞**：当前 Issue 验收条件未满足、当前 PR 引入的回归、会导致当前交付明显不正确或不安全的问题。本 PR 必须修复。
-  - **B · 后续事项**：问题成立，但属于历史问题、额外增强、需要扩大范围才能解决，或不影响当前 Issue 完成。登记独立 Issue / backlog，本 PR 不继续扩张。
-  - **C · 不采纳**：偏好型建议、收益不足、与当前目标无关或判断不成立。说明理由后结束该意见。
-- 第 2、3 轮属于**收敛审查**——「只看上次评审之后的新改动」由仓库级 **Incremental Review（On）** 天然承担，不在提示词或规则里重复要求，避免两套口径；分类聚焦纪律见 `.cursor/BUGBOT.md`。Agent 修复本轮 A 类问题并产生新的 PR HEAD 后，只能再次执行 `/pr-review next`；不得自行拼接或直接发送新的触发评论。
-- 同一 HEAD 上重复执行 `/pr-review next` 应被拒绝。若上一轮只是 Bugbot 服务/工具故障，使用 `/pr-review retry`；若是业务 Review 已完成，则必须先处理 A 类问题并形成新 HEAD，才能进入下一轮。
-- **任何 Agent 都不得自行追加 Review 额度。** 当默认 3 轮耗尽后，Agent 必须停止自动 Review 与自动扩大修改，向人工呈递：剩余 A 类阻塞、已完成验证、继续 Review 的收益/风险，以及可选命令 `/pr-review extend 1 <明确原因>`；Agent 本身不得执行该 extend 命令。
-- `/pr-review extend 1 <明确原因>` 是人工决策命令。人工追加后只增加 **1 轮有限额度**，且追加动作本身不得自动触发 Review；Agent 只能围绕人工允许继续解决的具体阻塞项修改并形成新 HEAD，随后再使用 `/pr-review next`。
-- 第 3 轮后若已无 A 类阻塞项，且当前 Issue 验收条件、测试和仓库质量门均满足，应进入收口/合并，不得以“Bugbot 可能还能找到更多建议”为理由继续审查。
-- 如果 PR 时间线出现**未由 Controller 触发的 Bugbot 动作**（例如人工直接 `@cursor review`、仓库侧自动评审未关闭、Bugbot 改写了 PR 描述、或其他旁路），Agent 不得据此自动开启新一轮修复→Review 循环，也不得用它自行增加 Controller 额度；应先按 A/B/C 分类当前意见，并把旁路事件（含「自动评审未关闭」「PR 描述被外部改写」等配置异常）报告为治理异常。是否追加正式 Controller 轮次由现有额度和人工决策决定。
-- PR 的完成标准是：**当前 Issue 定义的问题已解决、验收条件满足、必要验证通过、没有已知的当前范围阻塞项。** “Bugbot 再也提不出新建议”不是完成标准。
+每个审查轮次使用一个明确关联交付 Task 的 Multica 子 Task。Task 描述必须包含：交付 Task、仓库、PR URL、base 分支及 SHA、待审的完整 head SHA、当前交付的验收条件、审查范围和只读约束。先运行 `multica issue children <delivery-task-id> --output json`，查找同一 PR/head 是否已有审核 Task；对匹配 Task 读取 `multica issue get <review-task-id> --output json` 及其评论，确认负责人和报告，避免重复派发或重复审查。
+
+若当前 PR/head 尚无已完成报告：先在交付 Task 所属项目中创建一个**未指派、`backlog`** 状态的子 Task（在当前工作目录写 `./pr-review-task.md` 作为完整描述文件）：
+
+```bash
+multica issue create --title "PR review: <delivery-key> PR #<number> round <N> (<short-head>)" --description-file ./pr-review-task.md --parent <delivery-task-id> --project <project-id> --status backlog --output json
+```
+
+然后读取新 Task，并扫描其评论，确认关联信息完整、尚未有人接手；之后按顺序指派并显式派发，不能把指派描述成 GitHub 强制 Gate：
+
+```bash
+multica issue get <review-task-id> --output json
+multica issue comment list <review-task-id> --roots-only --summary --compact --output json
+multica issue assign <review-task-id> --to-id c895067b-44bf-4fb9-bc64-af7a7cccb4a8
+multica issue status <review-task-id> todo
+```
+
+使用 `multica issue pull-requests <delivery-task-id> --output json` 回读链接状态。PR 标题应含交付 Task 的可路由 key（例如 `WFM-120: ...`）；不要仅在 PR 正文裸写 key 来期待自动关联，也不要用 `Closes` 让审查 PR 意外关闭交付 Task。
+
+### 审查、去重与有限复审
+
+- 审查开始和发布报告前都核对 PR 实际 head SHA。报告必须写完整 SHA；head 在审查中或发布前变化时，报告记为 `BLOCKED`，不得用它放行。
+- 对同一 PR 和同一完整 head SHA，只审查、发布一份报告。已有报告时不重跑；若双通道有一处缺失，只将已有报告原文补到缺少的通道，不创建重复轮次。head 改变后，旧报告不能作为当前版本的放行凭据；为新 head 建新的子 Task，保留轮次记录。
+- 结论只能是 `APPROVE`、`REQUEST_CHANGES` 或 `BLOCKED`。每条意见按以下分类：**A · 当前阻塞**：未满足当前验收、引入回归或明显不正确/不安全，必须修复；**B · 后续事项**：问题成立但属历史问题、额外增强或需扩大范围，移到独立 Task/backlog；**C · 不采纳**：偏好、收益不足、不相关或判断不成立，说明理由。
+- 每份报告在 Multica Task 和 PR 普通评论中原文一致，至少包含结论、PR URL、base SHA、reviewed head SHA、A/B/C 项及理由、审查范围/局限和必要验证。不得把普通评论称作 GitHub 正式 approval。
+- 每个 PR 最多 3 轮常规报告。第三轮后若无 A 类阻塞且交付验收、必要测试和 CI 均满足，进入收口；若仍有 A 类阻塞，停止派发并呈递人工：阻塞项、已完成验证、继续审查的收益/风险及建议范围。仅人工明确授权时可追加**最后 1 轮**，总上限为 4 轮；授权必须说明理由及允许处理的阻塞/范围。Agent 不得自行追加额度，不能再申请第五轮。
+
+### 合并前人工核对
+
+合并前由交付负责人核对当前 Issue 验收、相称的测试与当前 head 的 CI、用户授权和 GitHub PR 的真实状态，并确认：报告双通道均可读且内容一致、结论为 `APPROVE`、报告中的完整 head SHA 等于 PR 当前 head、没有未解决的 A 类阻塞。任何一项缺失、阻塞或发生 head 漂移都必须停止合并并按上述规则复审。此流程依赖 Task/人员核对，**不是 Multica 服务端原子门禁，也不是 GitHub Ruleset 自动强制**。
 
 ## 配置与安全
 
