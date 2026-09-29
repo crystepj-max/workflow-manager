@@ -338,7 +338,13 @@ if (registry) {
   }
 }
 
-// —— D-9 无超期证据残留（依赖登记册字段，未启用时提示）——
+// —— D-9 证据保留期（历史证据债报告；2026-09-29 职责切分）——
+// 切分（W0 决策）：旧 Task 登记册是冻结的历史账本，其「合并后七天」证据清理时钟
+// 不再使产品校验 / release 自动变红。本检查只读登记册字段（未扫描磁盘，CI runner 上
+// `.agent-runs/` 被 Git 忽略、明细不可见），超期红灯在产品校验链内无法靠真实清理消除，
+// 只能靠伪填 evidence_cleared_at（禁止）。历史债仍必须可见：超期未清项逐条列为警告
+// （不计失败），标注判定性质、可执行核查入口（scripts/task-runs-cleanup.mjs，默认只读
+// 预演）与处置责任；--apply 属独立执行关口，不在产品校验链内。D-8/D-10 等语义不变。
 if (registry) {
   const withField = (registry.tasks || []).filter((t) => t.evidence_expires_at);
   if (withField.length === 0) {
@@ -347,8 +353,17 @@ if (registry) {
     const now = Date.now();
     const expired = withField
       .filter((t) => !t.evidence_cleared_at && Date.parse(t.evidence_expires_at) < now)
-      .map((t) => `${t.task_id} 到期于 ${t.evidence_expires_at}，明细未清理`);
-    record('D-9', `无超期证据残留（已启用 ${withField.length} 条）`, expired.length === 0, expired.length ? expired : ['无超期项']);
+      .map((t) => `${t.task_id} 到期于 ${t.evidence_expires_at}，超期未登记清理`);
+    if (expired.length === 0) {
+      record('D-9', `无超期证据残留（已启用 ${withField.length} 条）`, true, ['无超期项']);
+    } else {
+      warn('D-9', `历史证据债：超期未清 ${expired.length} 条（不阻断产品校验）`, [
+        ...expired,
+        `判定来源：登记册 evidence_expires_at / evidence_cleared_at 字段（未扫描磁盘；共启用 ${withField.length} 条）`,
+        '核查入口：node scripts/task-runs-cleanup.mjs（默认只读预演；--apply 为独立执行关口）',
+        '处置：历史账本证据债由任务治理负责人跟进，不在产品校验链内自动执行',
+      ]);
+    }
   }
 }
 

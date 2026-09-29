@@ -13,6 +13,7 @@
     "release:verify": "node scripts/release-verify.mjs",
     "validate": "node scripts/validate.mjs && node scripts/validate-task-spec-sync.mjs && node scripts/validate-workspace.mjs",
     "validate:workspace": "node scripts/validate-workspace.mjs",
+    "evidence:report": "node scripts/task-runs-cleanup.mjs",
     "validate:task-context": "node scripts/validate-task-spec-sync.mjs",
     "sync:remote-issues": "node scripts/remote-issue-sync.mjs",
     "prototype:ui": "node packages/dsh-visual-workflow/prototypes/ui-workbench/serve.mjs",
