@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * M4 到点启动：只负责判断是否到点，然后唤起同一套 Execution Plan（M3），
- * 并落盘「夜间批次报告」。不得复制资格筛选 / 排序 / 并发 / 补位逻辑。
+ * M4 到点触发：默认 fail-closed；仅显式 --preview 时运行只读 Execution Plan（M3）。
+ * 不负责旧任务账本写入、Task claim 或实施 Run 派发。
  *
  * 用法：
- *   node scripts/ai-task-scheduled-trigger.mjs <schedule.json> [--now] [--wait-ms N]
+ *   node scripts/ai-task-scheduled-trigger.mjs <schedule.json> [--now] [--wait-ms N] [--preview]
  *
  * schedule.json:
  * {
@@ -14,15 +14,16 @@
  *   "reportOut": "optional/night-batch-report.md"
  * }
  *
- * --now：忽略未到点，立即唤起（机械对照 / 强制到点）
- * --wait-ms：未到点时最多等待毫秒数；到点后启动。0 或不写则未到点直接 pending 退出。
+ * --now：忽略未到点；不会绕过默认 fail-closed
+ * --wait-ms：未到点时最多等待毫秒数；0 或不写则未到点直接 pending 退出。
+ * --preview：显式运行只读计划预览并写报告，不认领任务或启动实施 Run。
  */
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { reconcilePlan, apply as reconcileApply } from './registry-reconcile.mjs'
+import { reconcilePlan } from './registry-reconcile.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
@@ -30,12 +31,13 @@ const planScript = path.join(__dirname, 'ai-task-execution-plan.mjs')
 
 const argv = process.argv.slice(2)
 if (argv.length < 1 || argv[0].startsWith('-')) {
-  console.error('用法: node scripts/ai-task-scheduled-trigger.mjs <schedule.json> [--now] [--wait-ms N]')
+  console.error('用法: node scripts/ai-task-scheduled-trigger.mjs <schedule.json> [--now] [--wait-ms N] [--preview]')
   process.exit(2)
 }
 
 const schedulePath = path.resolve(argv[0])
 const forceNow = argv.includes('--now')
+const previewOnly = argv.includes('--preview')
 let waitMs = 0
 const wIdx = argv.indexOf('--wait-ms')
 if (wIdx >= 0) waitMs = Number(argv[wIdx + 1] || 0)
@@ -76,6 +78,40 @@ const reportOut = path.resolve(
   schedule.reportOut || 'night-batch-report.md',
 )
 
+function canonicalOutputPath(filePath) {
+  if (fs.existsSync(filePath)) return fs.realpathSync(filePath)
+  const parent = path.dirname(filePath)
+  return path.join(
+    fs.existsSync(parent) ? fs.realpathSync(parent) : path.resolve(parent),
+    path.basename(filePath),
+  )
+}
+
+const protectedOutputPaths = [
+  path.join(root, 'docs/tasks/registry.json'),
+  path.join(root, 'docs/tasks/BOARD.md'),
+].map(canonicalOutputPath)
+
+function stop(reasonCode, message) {
+  console.log(JSON.stringify({
+    ok: false,
+    blocked: true,
+    milestone: 'M4',
+    trigger: 'scheduled',
+    forceNow,
+    runAt: runAt.toISOString(),
+    reasonCode,
+    message,
+    effects: {
+      registryBoardWrites: false,
+      githubWrites: false,
+      planInvoked: false,
+      implementationRunStarted: false,
+    },
+  }, null, 2))
+  process.exit(1)
+}
+
 function sleep(ms) {
   const end = Date.now() + ms
   while (Date.now() < end) {
@@ -106,24 +142,28 @@ if (!forceNow && checkedAt.getTime() < runAt.getTime()) {
   }
 }
 
+if (!previewOnly) {
+  stop(
+    'legacy_scheduler_disabled',
+    '旧版定时自动执行已停用：当前平台契约未证明同一 Task 的服务端独占实施 Claim，也未证明旧 Run 停止后的安全接管；Owner、并发和依赖状态无法由本入口权威确认。未执行对账写回、M3 计划、GitHub 写入或实施 Run。仅可使用 --preview 查看只读诊断。',
+  )
+}
+
+if (protectedOutputPaths.includes(canonicalOutputPath(reportOut))) {
+  stop(
+    'protected_report_path',
+    '拒绝把预览报告写入 docs/tasks/registry.json 或 docs/tasks/BOARD.md；请选择独立报告路径。',
+  )
+}
+
 const invokedAt = new Date().toISOString()
 
-// CHORE-73：夜间批次开头先跑对账——以主干合并事实回写登记册，消除调度判据滞后
-// （LOC-028 被跳过根因：登记册状态回写滞后于实际合并，调度按旧账误判依赖未完成）。
-// 对账失败不阻塞批次（按现有登记册继续），可疑差异只提示人工核对。
+// Read-only diagnosis for an explicit preview; never write findings back to the legacy ledger.
 const repoRoot = path.resolve(__dirname, '..')
 const reconcileLines = []
 try {
   const audit = reconcilePlan(repoRoot, 'main')
-  if (audit.toMerge.length > 0) {
-    const changed = reconcileApply(repoRoot, 'main')
-    reconcileLines.push(
-      `对账：自动回写 ${changed.length} 条（登记册已更新，收口/提交时一并入库）`,
-      ...changed.map((c) => `  - ${c}`),
-    )
-  } else {
-    reconcileLines.push('对账：账实一致，无需回写')
-  }
+  reconcileLines.push(`只读诊断：${audit.toMerge.length} 条主干合并事实未回写；registry/BOARD 保持不变`)
   if (audit.suspicious.length) {
     reconcileLines.push(
       `⚠️ 可疑差异 ${audit.suspicious.length} 条（含登记/主干不一致与本地施工痕迹漏标，须人工核对）：`,
@@ -131,7 +171,7 @@ try {
     )
   }
 } catch (e) {
-  reconcileLines.push(`对账失败（不阻塞批次）：${e.message}`)
+  reconcileLines.push(`只读诊断不可用：${e.message}；本预览不会据此派发或回退旧账本`)
 }
 
 const planArgs = [planScript, batchPath]
@@ -154,12 +194,13 @@ try {
 
 const nightReport = [
   '【夜间批次报告】',
-  `说明：本报告由到点触发产生；调度规则来自同一套 Execution Plan（未另写筛选/排序/补位）。`,
+  '说明：本报告仅为显式只读计划预览；未认领任务、未派发任务、未启动实施 Run。',
+  '调度规则来自同一套 Execution Plan；本预览不会回写 registry/BOARD。',
   `预约到点时刻：${runAt.toISOString()}`,
   `实际启动时间：${invokedAt}`,
-  `强制到点对照：${forceNow ? '是' : '否'}`,
+  `强制到点预览：${forceNow ? '是' : '否'}`,
   '',
-  '【批次前对账（CHORE-73）】',
+  '【批次前只读诊断】',
   ...reconcileLines,
   '',
   planOut.summaryText || '(无汇总文本)',
@@ -171,7 +212,9 @@ fs.writeFileSync(reportOut, nightReport, 'utf8')
 const result = {
   ok: true,
   milestone: 'M4',
-  trigger: 'scheduled',
+  trigger: 'scheduled-preview',
+  previewOnly: true,
+  implementationRunStarted: false,
   forceNow,
   runAt: runAt.toISOString(),
   invokedAt,
@@ -186,6 +229,7 @@ const result = {
     completed: planOut.completed,
     excluded: planOut.excluded,
   },
+  message: '仅生成只读计划预览；未认领任务、未派发实施 Run。',
 }
 
 console.log(JSON.stringify(result, null, 2))

@@ -71,8 +71,6 @@ import {
 import { fetchTaskSource, markReady } from './github-issues.mjs'
 import { loadRegistry } from './local-task-registry.mjs'
 import { runDirFor, worktreePathFor } from './workspace-paths.mjs'
-import { fireWatchdog, pollChildrenOnce, releaseAfterExit } from './ai-task-session-supervise.mjs'
-import { writePinnedReport } from './ai-task-pinned-write.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PROMPT_TEMPLATE = path.join(__dirname, 'night-batch-session-prompt.md')
@@ -265,323 +263,6 @@ function stopDispatch(payload) {
   process.exit(1)
 }
 
-/** 受保护账本等路径：写入前校验真实目标；拒绝符号链接写穿与不可靠竞态。 */
-function assertSafeReportPath(filePath, protectedLedgerPaths, {
-  forceNow = false,
-  previewOnly = false,
-  trustedBatchReal = null,
-  frozenBatch = null,
-} = {}) {
-  const abs = path.resolve(filePath)
-  if (fs.existsSync(abs)) {
-    let st
-    try { st = fs.lstatSync(abs) } catch (e) {
-      stopDispatch({
-        forceNow, previewOnly, reasonCode: 'protected_report_path',
-        message: `无法校验输出路径 ${abs}：${e.message}`,
-        effects: { planInvoked: true },
-      })
-    }
-    if (st.isSymbolicLink()) {
-      let linkTarget = ''
-      try { linkTarget = fs.readlinkSync(abs) } catch { /* ignore */ }
-      stopDispatch({
-        forceNow, previewOnly, reasonCode: 'protected_report_path',
-        message: `拒绝写入符号链接输出路径 ${abs}（→ ${linkTarget}）；禁止指向 registry/BOARD 或其他保护文件。`,
-        effects: { planInvoked: true },
-      })
-    }
-  }
-  let real
-  try {
-    real = canonicalOutputPath(abs)
-  } catch (e) {
-    stopDispatch({
-      forceNow, previewOnly, reasonCode: 'protected_report_path',
-      message: `无法解析输出路径 ${abs}：${e.message}`,
-      effects: { planInvoked: true },
-    })
-  }
-  if (protectedLedgerPaths.includes(real)) {
-    stopDispatch({
-      forceNow, previewOnly, reasonCode: 'protected_report_path',
-      message: '拒绝把预览/批次产物写入 docs/tasks/registry.json 或 docs/tasks/BOARD.md；请使用独立批次目录。',
-      effects: { planInvoked: true },
-    })
-  }
-  // 必须落在冻结的可信批次目录内（挡住父目录别名指向任意外部保护目录）
-  if (trustedBatchReal) {
-    const under = real === trustedBatchReal
-      || real.startsWith(trustedBatchReal.endsWith(path.sep) ? trustedBatchReal : trustedBatchReal + path.sep)
-    if (!under) {
-      stopDispatch({
-        forceNow, previewOnly, reasonCode: 'protected_report_path',
-        message: `拒绝写入可信批次目录之外的路径：${real}（可信根 ${trustedBatchReal}）`,
-        effects: { planInvoked: true },
-      })
-    }
-  }
-  if (frozenBatch) {
-    try {
-      const dirSt = fs.lstatSync(frozenBatch.path)
-      if (dirSt.isSymbolicLink()) {
-        stopDispatch({
-          forceNow, previewOnly, reasonCode: 'protected_report_path',
-          message: `批次目录在写入前被替换为符号链接：${frozenBatch.path}`,
-          effects: { planInvoked: true },
-        })
-      }
-      if (dirSt.dev !== frozenBatch.dev || dirSt.ino !== frozenBatch.ino) {
-        stopDispatch({
-          forceNow, previewOnly, reasonCode: 'protected_report_path',
-          message: `批次目录身份在写入前发生变化（TOCTOU）：${frozenBatch.path}`,
-          effects: { planInvoked: true },
-        })
-      }
-      const dirReal = fs.realpathSync(frozenBatch.path)
-      if (dirReal !== frozenBatch.real) {
-        stopDispatch({
-          forceNow, previewOnly, reasonCode: 'protected_report_path',
-          message: `批次目录真实路径在写入前漂移：${dirReal} ≠ ${frozenBatch.real}`,
-          effects: { planInvoked: true },
-        })
-      }
-    } catch (e) {
-      stopDispatch({
-        forceNow, previewOnly, reasonCode: 'protected_report_path',
-        message: `无法复验批次目录：${e.message}`,
-        effects: { planInvoked: true },
-      })
-    }
-  }
-  return real
-}
-
-/**
- * 从文件系统根走到目标：每一级都必须是真实目录，并绑定 dev/ino。
- * 项目根上方的祖先符号链接（alias → real，根自身仍是真目录）不能绕过。
- * 符号链接、别名、非目录，或两次读取身份不一致时 fail-closed。
- * allowMissingSuffix：批次目录尚未创建时，只绑定已经存在的祖先。
- */
-function describePathChain(absPath, { allowMissingSuffix = false } = {}) {
-  const lexical = path.resolve(absPath)
-  const parts = lexical.split(path.sep).filter(Boolean)
-  let cur = path.sep
-  const rows = []
-  let deepest = path.sep
-  for (const part of parts) {
-    cur = path.join(cur, part)
-    let st
-    try {
-      st = fs.lstatSync(cur)
-    } catch (e) {
-      if (allowMissingSuffix && e && e.code === 'ENOENT') break
-      throw new Error(`无法校验路径链 ${cur}：${e.message}`)
-    }
-    if (st.isSymbolicLink()) {
-      let linkTarget = ''
-      try { linkTarget = fs.readlinkSync(cur) } catch { /* ignore */ }
-      throw new Error(`拒绝路径链上的符号链接（含项目根及其祖先）：${cur}${linkTarget ? ` → ${linkTarget}` : ''}`)
-    }
-    if (!st.isDirectory()) {
-      throw new Error(`路径链上存在非目录，无法可靠绑定：${cur}`)
-    }
-    rows.push(`${st.dev}:${st.ino}`)
-    deepest = cur
-  }
-  if (rows.length === 0) throw new Error(`无法绑定路径身份：${lexical}`)
-  let real
-  try {
-    real = fs.realpathSync(deepest)
-  } catch (e) {
-    throw new Error(`无法解析真实路径 ${deepest}：${e.message}`)
-  }
-  if (real !== deepest) {
-    throw new Error(`路径与真实身份不一致（别名或符号链接）：${deepest} ≠ ${real}`)
-  }
-  if (!allowMissingSuffix && deepest !== lexical) {
-    throw new Error(`路径未完整绑定：${lexical}`)
-  }
-  return { lexical, real, identity: rows.join('|') }
-}
-
-function assertNoSymlinkInChain(absPath, opts = {}, chainOpts = {}) {
-  let first
-  let second
-  try {
-    first = describePathChain(absPath, chainOpts)
-    second = describePathChain(absPath, chainOpts)
-  } catch (e) {
-    stopDispatch({
-      ...opts, reasonCode: 'protected_report_path',
-      message: e.message,
-      effects: { planInvoked: true },
-    })
-  }
-  if (first.identity !== second.identity || first.real !== second.real) {
-    stopDispatch({
-      ...opts, reasonCode: 'protected_report_path',
-      message: `路径身份在校验期间发生变化，无法可靠绑定：${path.resolve(absPath)}`,
-      effects: { planInvoked: true },
-    })
-  }
-  if (chainOpts.frozenIdentity && chainOpts.frozenIdentity !== first.identity) {
-    stopDispatch({
-      ...opts, reasonCode: 'protected_report_path',
-      message: `路径身份与打开时冻结值不符：${path.resolve(absPath)}`,
-      effects: { planInvoked: true },
-    })
-  }
-  return first.identity
-}
-
-/**
- * 在 main/.scratch/night-batches 下创建/校验可信批次目录。
- * 拒绝目录本身、项目根及其全部祖先为符号链接，并冻结 dev/ino/realpath 供后续写入复验。
- */
-function ensureTrustedBatchDir(mainCheckout, batchDir, opts = {}) {
-  const projectIdentity = assertNoSymlinkInChain(mainCheckout, opts, {
-    frozenIdentity: opts.projectIdentity,
-  })
-  assertNoSymlinkInChain(batchDir, opts, { allowMissingSuffix: true })
-  const scratch = path.join(mainCheckout, '.scratch')
-  const batches = path.join(scratch, 'night-batches')
-  for (const dir of [scratch, batches]) {
-    if (fs.existsSync(dir)) {
-      const st = fs.lstatSync(dir)
-      if (st.isSymbolicLink()) {
-        stopDispatch({
-          ...opts, reasonCode: 'protected_report_path',
-          message: `拒绝使用符号链接的批次祖先目录：${dir}`,
-          effects: { planInvoked: true },
-        })
-      }
-      if (!st.isDirectory()) {
-        stopDispatch({
-          ...opts, reasonCode: 'protected_report_path',
-          message: `批次祖先路径不是目录：${dir}`,
-          effects: { planInvoked: true },
-        })
-      }
-    } else {
-      fs.mkdirSync(dir, { recursive: true })
-      const st = fs.lstatSync(dir)
-      if (st.isSymbolicLink()) {
-        stopDispatch({
-          ...opts, reasonCode: 'protected_report_path',
-          message: `创建后批次祖先目录为符号链接：${dir}`,
-          effects: { planInvoked: true },
-        })
-      }
-    }
-  }
-  const batchesReal = fs.realpathSync(batches)
-  const mainReal = fs.realpathSync(mainCheckout)
-  if (!batchesReal.startsWith(mainReal + path.sep)) {
-    stopDispatch({
-      ...opts, reasonCode: 'protected_report_path',
-      message: `night-batches 真实路径越出项目主检出：${batchesReal}`,
-      effects: { planInvoked: true },
-    })
-  }
-
-  if (fs.existsSync(batchDir)) {
-    const st = fs.lstatSync(batchDir)
-    if (st.isSymbolicLink()) {
-      stopDispatch({
-        ...opts, reasonCode: 'protected_report_path',
-        message: `拒绝批次目录为符号链接（可指向任意外部保护目录）：${batchDir}`,
-        effects: { planInvoked: true },
-      })
-    }
-    if (!st.isDirectory()) {
-      stopDispatch({
-        ...opts, reasonCode: 'protected_report_path',
-        message: `批次路径不是目录：${batchDir}`,
-        effects: { planInvoked: true },
-      })
-    }
-  } else {
-    // 父目录已核为真实目录；非 recursive 创建叶子，避免沿途跟随未知链接
-    fs.mkdirSync(batchDir, { recursive: false })
-  }
-
-  const st = fs.lstatSync(batchDir)
-  if (st.isSymbolicLink()) {
-    stopDispatch({
-      ...opts, reasonCode: 'protected_report_path',
-      message: `创建后批次目录为符号链接：${batchDir}`,
-      effects: { planInvoked: true },
-    })
-  }
-  const batchDirReal = fs.realpathSync(batchDir)
-  assertNoSymlinkInChain(batchDir, opts)
-  assertNoSymlinkInChain(mainCheckout, opts, { frozenIdentity: projectIdentity })
-  if (!(batchDirReal === batchesReal || batchDirReal.startsWith(batchesReal + path.sep))) {
-    stopDispatch({
-      ...opts, reasonCode: 'protected_report_path',
-      message: `批次目录真实路径不在 night-batches 下：${batchDirReal}`,
-      effects: { planInvoked: true },
-    })
-  }
-  return {
-    path: batchDir,
-    real: batchDirReal,
-    dev: st.dev,
-    ino: st.ino,
-  }
-}
-
-/**
- * 安全落盘：写入前与写入后均校验真实目标；已存在符号链接则 fail-closed。
- * 无法在校验与写入间可靠防竞态时拒绝写报告。
- */
-function writeFileSafe(filePath, content, protectedLedgerPaths, opts = {}) {
-  assertSafeReportPath(filePath, protectedLedgerPaths, opts)
-  const abs = path.resolve(filePath)
-  const parent = path.dirname(abs)
-  const base = path.basename(abs)
-  // 禁止沿路径 mkdir/rename；父目录必须已是冻结批次根
-  if (opts.frozenBatch && path.resolve(parent) !== path.resolve(opts.frozenBatch.path)) {
-    stopDispatch({
-      forceNow: opts.forceNow, previewOnly: opts.previewOnly,
-      reasonCode: 'protected_report_path',
-      message: `报告文件必须直接位于可信批次目录内：${abs}`,
-      effects: { planInvoked: true },
-    })
-  }
-  assertSafeReportPath(filePath, protectedLedgerPaths, opts)
-  if (opts.projectRoot) {
-    assertNoSymlinkInChain(opts.projectRoot, opts, { frozenIdentity: opts.projectIdentity })
-  }
-  assertNoSymlinkInChain(parent, opts)
-  if (!opts.frozenBatch) {
-    stopDispatch({
-      forceNow: opts.forceNow, previewOnly: opts.previewOnly,
-      reasonCode: 'protected_report_path',
-      message: `拒绝写入未冻结身份的批次目录：${abs}`,
-      effects: { planInvoked: true },
-    })
-  }
-  // Node 打开目录并核对冻结 dev/ino 后，才把该 fd 交给写入器。身份不符则不写。
-  const pinned = writePinnedReport({
-    directory: parent,
-    basename: base,
-    content,
-    dev: opts.frozenBatch.dev,
-    ino: opts.frozenBatch.ino,
-  })
-  if (!pinned.ok) {
-    stopDispatch({
-      forceNow: opts.forceNow, previewOnly: opts.previewOnly,
-      reasonCode: 'protected_report_path',
-      message: `拒绝写入报告路径（目录身份不符或钉扎失败）：${abs}：${pinned.message}`,
-      effects: { planInvoked: true },
-    })
-  }
-  assertSafeReportPath(abs, protectedLedgerPaths, opts)
-}
-
 async function main() {
   const argv = process.argv.slice(2)
   if (argv.length < 1 || argv[0].startsWith('-')) {
@@ -603,8 +284,6 @@ async function main() {
   if (!schedule.project) { console.error('schedule.json 须含 project'); process.exit(2) }
   const main = path.resolve(expandPath(schedule.project))
   if (!fs.existsSync(main)) { console.error(`找不到项目主检出：${main}`); process.exit(2) }
-  // 打开时绑定项目根及全部祖先。祖先别名在任何批次写入之前拒绝。
-  const projectIdentity = assertNoSymlinkInChain(main, { forceNow, previewOnly })
   const maxConcurrency = Number(schedule.maxConcurrency)
   if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) { console.error('maxConcurrency 必须为正整数'); process.exit(2) }
   const startAt = parseTime(schedule.startAt, 'startAt')
@@ -645,9 +324,7 @@ async function main() {
   const protectedLedgerPaths = [
     path.join(main, 'docs/tasks/registry.json'),
     path.join(main, 'docs/tasks/BOARD.md'),
-  ].map((p) => (fs.existsSync(p) ? fs.realpathSync(p) : path.resolve(p)))
-
-  let safeWriteOpts = { forceNow, previewOnly }
+  ].map(canonicalOutputPath)
 
   const machineEntry = loadMachineConfig(schedule, main)
   if (dryRun) {
@@ -677,8 +354,7 @@ async function main() {
   let remoteSnapshot = null
   let remoteSourceError = null
   let admission = null
-  // 只读预览：不走 GitHub/远端 shell（含 taskSource 拉取与任意 remoteIssueCommand）
-  if (taskSource.enabled && !previewOnly) {
+  if (taskSource.enabled) {
     try {
       remoteSnapshot = fetchTaskSource({
         repo: main,
@@ -697,16 +373,6 @@ async function main() {
       onUnavailable: taskSource.onUnavailable,
       requireAnchor: taskSource.requireAnchor,
     })
-  } else if (taskSource.enabled && previewOnly) {
-    admission = planTaskSourceAdmission({
-      registryTasks: loadRegistry(main).tasks,
-      candidates: collected.candidates,
-      readyIssues: [],
-      claimedBy: new Map(),
-      remoteError: '只读预览：跳过远端 GitHub/shell 调用',
-      onUnavailable: 'local-only',
-      requireAnchor: false,
-    })
   }
 
   // 远端任务源的硬排除项（他人已认领 / 无锚点且 requireAnchor）在门禁之前就摘掉，
@@ -715,22 +381,8 @@ async function main() {
   const localCandidates = collected.candidates.filter((c) => !remoteHardExcluded.has(c.id))
 
   const batchDir = path.join(main, '.scratch/night-batches', `${localDate(startAt || new Date())}-${batchName}`)
-  const frozenBatch = ensureTrustedBatchDir(main, batchDir, { forceNow, previewOnly, projectIdentity })
-  safeWriteOpts = {
-    forceNow,
-    previewOnly,
-    trustedBatchReal: frozenBatch.real,
-    frozenBatch,
-    projectRoot: main,
-    projectIdentity,
-  }
+  fs.mkdirSync(batchDir, { recursive: true })
   const batchJsonPath = path.join(batchDir, 'batch.json')
-  const taskSourceJsonPath = path.join(batchDir, 'task-source.json')
-  const reportPathEarly = path.join(batchDir, 'report.md')
-  // 首次写入前校验全部报告路径（含已存在的符号链接写穿）
-  for (const p of [batchJsonPath, taskSourceJsonPath, reportPathEarly]) {
-    assertSafeReportPath(p, protectedLedgerPaths, safeWriteOpts)
-  }
   const batchCandidates = localCandidates.map((c) => {
     const rel = (p) => (p ? path.relative(batchDir, path.resolve(main, p)) : '（registry 未登记，路径缺失）')
     return { id: c.id, name: c.name, registryStatus: c.registryStatus, priority: c.priority, issueBasics: rel(c.issueBasics), taskSpec: rel(c.taskSpec) }
@@ -748,28 +400,23 @@ async function main() {
     },
     candidates: batchCandidates,
   }
-  writeFileSafe(batchJsonPath, JSON.stringify(snapshot, null, 2) + '\n', protectedLedgerPaths, safeWriteOpts)
+  fs.writeFileSync(batchJsonPath, JSON.stringify(snapshot, null, 2) + '\n', 'utf8')
   if (remoteSnapshot) {
     // 远端快照留档：本批到底看到哪些「可施工」issue，事后可对账
-    writeFileSafe(taskSourceJsonPath, JSON.stringify({
+    fs.writeFileSync(path.join(batchDir, 'task-source.json'), JSON.stringify({
       capturedAt: nowIso(),
       slug: remoteSnapshot.slug,
       readyLabel: taskSource.readyLabel,
       wipLabel: taskSource.wipLabel,
       ready: remoteSnapshot.ready.map((i) => ({ number: i.number, title: i.title, labels: i.labels, assignees: i.assignees })),
-    }, null, 2) + '\n', protectedLedgerPaths, safeWriteOpts)
+    }, null, 2) + '\n', 'utf8')
   }
 
   // 2) 远端核验（报告性 best-effort；失败只记录，不影响本批）
-  //    只读预览：完全不执行任意远端 shell 命令（含 machine.remoteIssueCommand）。
   let remoteCheck = '未配置 remoteIssueCommand，本批未做远端核验'
-  let githubShellInvoked = false
-  if (previewOnly) {
-    remoteCheck = '只读预览：已跳过全部远端 shell / GitHub 命令（含 remoteIssueCommand）'
-  } else if (taskSource.enabled) {
+  if (taskSource.enabled) {
     remoteCheck = '已由 taskSource（GitHub 任务源通道）承担，见上一节'
   } else if (machine.remoteIssueCommand) {
-    githubShellInvoked = true
     const r = spawnSync(String(machine.remoteIssueCommand), { shell: true, cwd: main, encoding: 'utf8', timeout: 60_000 })
     remoteCheck = r.status === 0
       ? `已执行远端查询（截选）：${String(r.stdout || '').trim().split('\n').slice(0, 8).join(' ⏎ ')}`
@@ -882,19 +529,11 @@ async function main() {
 
   function releaseSlot(taskId, row) {
     const entry = children.get(taskId)
-    if (entry && entry.child.exitCode === null && entry.child.signalCode === null) {
-      releaseAfterExit({
-        entry,
-        taskId,
-        row,
-        killEscalationMs: 10_000,
-        onRelease: (id, next) => releaseSlot(id, next),
-      })
-      return
-    }
     if (entry) {
       clearTimeout(entry.watchdogTimer)
-      if (entry.killTimer) clearTimeout(entry.killTimer)
+      if (entry.child.exitCode === null && entry.child.signalCode === null) {
+        try { entry.child.kill('SIGTERM') } catch { /* 已退出 */ }
+      }
       children.delete(taskId)
     }
     const r = applyRelease(state, { taskId, ...row })
@@ -903,21 +542,22 @@ async function main() {
   }
 
   function watchdogFire(taskId) {
-    fireWatchdog({
-      taskId,
-      children,
-      sites,
-      watchdogMinutes,
-      watchdogFired,
-      onRelease: (id, row) => releaseSlot(id, row),
-    })
-  }
-
-  function pollOnce() {
-    pollChildrenOnce({
-      children,
-      sites,
-      onRelease: (id, row) => releaseSlot(id, row),
+    const entry = children.get(taskId)
+    if (!entry) return
+    const s = sites.get(taskId) || {}
+    entry.child.kill('SIGTERM')
+    entry.killTimer = setTimeout(() => {
+      if (entry.child.exitCode === null && entry.child.signalCode === null) {
+        try { entry.child.kill('SIGKILL') } catch { /* 已退出 */ }
+      }
+    }, 10_000)
+    watchdogFired.add(taskId)
+    releaseSlot(taskId, {
+      to: 'BLOCKED',
+      blockedNode: 'session',
+      reason: `看门狗超时（>${watchdogMinutes} 分钟），已终止会话；日志：${path.join(s.runDir || '', 'session.log')}`,
+      reworkCount: null,
+      nextStep: '人工查看 session.log 判断是否可重试',
     })
   }
 
@@ -1002,26 +642,20 @@ async function main() {
   // ----- 模拟 / 只读预览模式（不碰真实会话、不写旧账本） -----
 
   if (simulatePath || dryRun) {
-    // endAt 已过则不开新任务，剩余队列如实进入 leftover（与真实路径语义一致）
-    if (!endAt || new Date() < endAt) {
-      fillCapacity(state)
-    }
+    fillCapacity(state)
     if (simulatePath) {
       const events = JSON.parse(fs.readFileSync(simulatePath, 'utf8'))
       for (const ev of events) {
         if (ev.op !== 'release') continue
-        if (endAt && new Date() >= endAt) break
         const r = applyRelease(state, ev)
         if (!r.handled && r.reason === 'not-running') continue
         if (!r.handled && r.reason === 'unknown-status') { console.error(`未知释放状态: ${ev.to}`); process.exit(1) }
-        if (!endAt || new Date() < endAt) fillCapacity(state)
+        fillCapacity(state)
       }
     }
     const endedAt = nowIso()
     const leftoverLabel = previewOnly
-      ? (endAt && new Date() >= endAt
-        ? '未启动（超出 endAt 截止，未开新任务）'
-        : '未启动（只读预览：未认领、未补标、未拉起实施 Run）')
+      ? '未启动（只读预览：未认领、未补标、未拉起实施 Run）'
       : (simulatePath ? '未启动（模拟事件排队，非真实拉起）' : '未启动（预演排队计划，真实批次按并发逐个补位）')
     const report = buildReport({
       schedule: { ...schedule, project: main }, permission, state, sites,
@@ -1034,30 +668,28 @@ async function main() {
       previewOnly,
     })
     const reportPath = path.join(batchDir, 'report.md')
-    writeFileSafe(reportPath, report, protectedLedgerPaths, safeWriteOpts)
-    // 预览路径不得执行远端 shell；若误调用则不得自报 githubWrites:0
-    const githubWrites = previewOnly ? 0 : (githubShellInvoked ? null : 0)
-    if (previewOnly && githubShellInvoked) {
+    if (protectedLedgerPaths.includes(canonicalOutputPath(reportPath))
+      || protectedLedgerPaths.includes(canonicalOutputPath(batchJsonPath))) {
       stopDispatch({
-        forceNow, previewOnly: true,
-        reasonCode: 'preview_remote_shell_forbidden',
-        message: '只读预览路径不得执行远端 shell 命令；检测到 remoteIssueCommand 已被调用。',
-        effects: { planInvoked: true, githubWrites: true },
+        forceNow,
+        previewOnly: true,
+        reasonCode: 'protected_report_path',
+        message: '拒绝把预览产物写入 docs/tasks/registry.json 或 docs/tasks/BOARD.md；请使用独立批次目录。',
+        effects: { planInvoked: true },
       })
     }
+    fs.writeFileSync(reportPath, report, 'utf8')
     console.log(JSON.stringify({
       ok: true, milestone: 'M5',
       mode: previewOnly ? 'preview' : (simulatePath ? 'simulate' : 'dry-run'),
       previewOnly: Boolean(previewOnly),
       implementationRunStarted: false,
       agentSessionSpawned: false,
-      githubWrites: githubWrites === null ? 'unknown' : githubWrites,
-      githubShellInvoked: Boolean(githubShellInvoked),
+      githubWrites: 0,
       registryBoardWrites: false,
       autoPhaseDone: autoPhaseDone(state),
       snapshotIds: state.snapshot.map((t) => t.id),
       launchOrder: state.launchLog.filter((e) => e.action === 'launch').map((e) => e.taskId),
-      leftoverQueue: state.queue,
       waiting: state.waiting.map((t) => t.id),
       blocked: state.blocked.map((t) => t.id),
       completed: state.completed.map((t) => t.id),
@@ -1066,8 +698,7 @@ async function main() {
       batchJsonPath, reportPath,
     }, null, 2))
     const taskSourceBlocked = Boolean(taskSource.enabled && admission && admission.blocked)
-    const endAtLeftover = Boolean(endAt && new Date() >= endAt && state.queue.length > 0)
-    process.exit((simulatePath && !autoPhaseDone(state)) || taskSourceBlocked || endAtLeftover ? 1 : 0)
+    process.exit((simulatePath && !autoPhaseDone(state)) || taskSourceBlocked ? 1 : 0)
   }
 
   // 真实唤起路径：在 Claim/接管实证前保持不可达（默认 fail-closed；--preview 已走上方只读分支）。
