@@ -104,11 +104,7 @@ node scripts/cwf-evidence-verify.mjs .agent-runs/<run_id>
 
 3. 交接包 schema 校验由 `cwf-record` / `formal-records` 写入时自动调用（内核 `scripts/cwf-validate.mjs`，无独立 CLI）。证据链校验（§8.3 ①–⑫，含 CHORE-110 的存在性分层 ⑩–⑫）**任一不满足即不得呈递或签收**。
 4. Issue / 本地任务卡 → **等待验收**；Run → `WAITING_HUMAN`；呈递 UAT 卡与验收包，**AI 不代签**。
-   本地轨道同步登记册（合并门禁要求此状态）：
-
-```bash
-node scripts/local-task-registry.mjs set --task <任务标识> --status 等待验收 --branch <工作分支>
-```
+   本地轨道登记册已降级为只读存档（W8 P0-C）：状态变更改在 Multica 平台操作（`multica issue status <id> in_review` 等）；旧 `local-task-registry set` 写命令已 fail-closed（原因码 `legacy_registry_write_disabled`）。
 
 5. 无人工操作 → 保持等待；跨日从**原 Run** 恢复，禁止另起丢失上下文的新 Run。
 
@@ -171,12 +167,7 @@ node scripts/task-runs-cleanup.mjs --apply    # 执行清理（摘要缺失的�
 
 证据明细按登记册 `evidence_expires_at`（合并时间 + 7 天）保留，到期后清理（决策二）。
 
-**6.6 本地轨道收尾**：把「有条件通过」的优化意见登记为新的候选任务（分配新号），不改已合并基线：
-
-```bash
-node scripts/local-task-registry.mjs allocate --name "<优化任务名>" --source 会话录入
-node scripts/local-task-registry.mjs board
-```
+**6.6 本地轨道收尾**：把「有条件通过」的优化意见登记为新的候选任务，不改已合并基线。旧 `local-task-registry allocate/board` 写命令已 fail-closed（W8 P0-C，原因码 `legacy_registry_write_disabled`）；新候选任务一律在 Multica 平台建任务（`multica issue create`），本地登记册不再发号、不再重写看板。
 
 ---
 

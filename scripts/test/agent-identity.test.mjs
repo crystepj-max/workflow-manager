@@ -3,18 +3,31 @@ import test from 'node:test'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { agentName, machineCode, newRecord, AGENT_IDENTITY_FILE } from '../local-task-registry.mjs'
-
-const CLI = path.resolve(import.meta.dirname, '..', 'local-task-registry.mjs')
+import { agentName, machineCode, newRecord, allocate, AGENT_IDENTITY_FILE } from '../local-task-registry.mjs'
 
 function tmpRepo() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-identity-'))
 }
 
-/** 固定环境：只保留运行 node 所需的变量，避免把测试机自身的 agent 痕迹带进来。 */
-function cleanEnv(extra = {}) {
-  return { PATH: process.env.PATH, HOME: process.env.HOME, ...extra }
+/**
+ * 函数级固定身份环境：暂时摘除运行环境的自报身份变量（AI_AGENT_NAME /
+ * CLIENT_INFO_IDE_TYPE / 任何 *_AGENT_NAME），避免测试机自身痕迹混进断言。
+ * （旧版两个用例经 CLI allocate 子进程覆盖；CLI 写命令自 W8 P0-C fail-closed
+ * 后改走函数级，告警与「不伪造归属」语义不变。）
+ */
+function withoutAgentEnv(run) {
+  const removed = []
+  for (const k of Object.keys(process.env)) {
+    if (k === 'AI_AGENT_NAME' || k === 'CLIENT_INFO_IDE_TYPE' || /_AGENT_NAME$/.test(k)) {
+      removed.push([k, process.env[k]])
+      delete process.env[k]
+    }
+  }
+  try {
+    return run()
+  } finally {
+    for (const [k, v] of removed) process.env[k] = v
+  }
 }
 
 function readRegistry(repo) {
@@ -60,26 +73,38 @@ test('newRecord：origin_agent 由 agentName 填充，与机器码并列留痕',
 })
 
 // 归属静默留空是历史缺陷（88 条记录里 87 条为空）。取不到身份必须出声，
-// 而不是安静写一条无归属的记录。走真实子进程，覆盖参数解析与 stderr 告警层。
-test('CLI allocate：取不到 agent 身份时在 stderr 告警，且不伪造身份', () => {
+// 而不是安静写一条无归属的记录。
+test('allocate：取不到 agent 身份时在 stderr 告警，且不伪造身份', () => {
   const repo = tmpRepo()
-  const r = spawnSync(process.execPath, [CLI, 'allocate', '--name', '无身份样例', '--type', 'FIX', '--offline', '--repo', repo], {
-    encoding: 'utf8',
-    env: cleanEnv(),
-  })
-  assert.equal(r.status, 0, `allocate 不应失败：${r.stderr}`)
-  assert.match(r.stderr, /未识别到 agent 身份/)
-  assert.equal(readRegistry(repo).tasks.at(-1).origin_agent, null, '取不到身份时不得编造归属')
+  const errors = []
+  const prevErr = console.error
+  console.error = (msg) => errors.push(String(msg))
+  try {
+    const rec = withoutAgentEnv(() => allocate(repo, { name: '无身份样例', type: 'FIX', offline: true }))
+    assert.equal(rec.origin_agent, null, '取不到身份时不得编造归属')
+    assert.match(errors.join('\n'), /未识别到 agent 身份/)
+    assert.equal(readRegistry(repo).tasks.at(-1).origin_agent, null)
+  } finally {
+    console.error = prevErr
+  }
 })
 
-test('CLI allocate：会话自报身份时静默记录，且登记册带 agent 名', () => {
+test('allocate：会话自报身份时静默记录，且登记册带 agent 名', () => {
   const repo = tmpRepo()
-  const r = spawnSync(process.execPath, [CLI, 'allocate', '--name', '有身份样例', '--type', 'FIX', '--offline', '--repo', repo], {
-    encoding: 'utf8',
-    env: cleanEnv({ AI_AGENT_NAME: 'ZCODE' }),
-  })
-  assert.equal(r.status, 0, `allocate 不应失败：${r.stderr}`)
-  assert.doesNotMatch(r.stderr, /未识别到 agent 身份/)
-  assert.equal(JSON.parse(r.stdout).origin_agent, 'ZCODE')
-  assert.equal(readRegistry(repo).tasks.at(-1).origin_agent, 'ZCODE')
+  const had = 'AI_AGENT_NAME' in process.env
+  const prev = process.env.AI_AGENT_NAME
+  const errors = []
+  const prevErr = console.error
+  console.error = (msg) => errors.push(String(msg))
+  process.env.AI_AGENT_NAME = 'ZCODE'
+  try {
+    const rec = allocate(repo, { name: '有身份样例', type: 'FIX', offline: true })
+    assert.equal(rec.origin_agent, 'ZCODE')
+    assert.doesNotMatch(errors.join('\n'), /未识别到 agent 身份/)
+    assert.equal(readRegistry(repo).tasks.at(-1).origin_agent, 'ZCODE')
+  } finally {
+    console.error = prevErr
+    if (had) process.env.AI_AGENT_NAME = prev
+    else delete process.env.AI_AGENT_NAME
+  }
 })
