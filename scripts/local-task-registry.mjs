@@ -11,7 +11,8 @@
  *
  * 已退役写命令（fail-closed，稳定原因码 legacy_registry_write_disabled，W8 P0-C）：
  *   allocate / set / mark-ready / board —— 任务身份/状态/Run 以 Multica 平台为唯一真源，
- *   本地登记册与看板降级为只读存档，CLI 不再提供任何写入口（不写文件、不调 GitHub）。
+ *   本 CLI 不再提供任何写入口（不写文件、不调 GitHub）。导出函数及其程序化调用者
+ *   不在此列，其写路径的处置另列后续切片。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -468,9 +469,10 @@ export function writeBoard(repo) {
 }
 
 // —— 旧写入口退役（W8 P0-C）——
-// Multica 平台是任务身份/状态/Run 的唯一真源；本地 registry.json 与 BOARD.md 降级为只读存档。
+// Multica 平台是任务身份/状态/Run 的唯一真源；本模块 CLI 不再提供写入口。
 // 四个 CLI 写命令在任何本地文件写入或 GitHub 调用之前统一拒绝：非零退出 + 稳定原因码。
-// 仅作用于 CLI 层：导出函数（allocate/update/writeBoard 等）与其程序化调用者行为不变。
+// 仅作用于 CLI 层：导出函数（allocate/update/writeBoard 等）与其程序化调用者
+// （registry-reconcile、local-task-merge、task-runs-cleanup 等）行为不变，写路径处置另列切片。
 const LEGACY_WRITE_REASON = 'legacy_registry_write_disabled'
 const RETIRED_WRITE_COMMANDS = new Set(['allocate', 'set', 'mark-ready', 'board'])
 
@@ -483,7 +485,7 @@ function rejectRetiredWrite(cmd) {
         command: cmd,
         reason:
           '本地任务登记 CLI 写入口已退役：任务身份/状态/Run 以 Multica 平台为唯一真源，' +
-          'registry.json 与 BOARD.md 为只读存档，本命令未写任何文件、未调用 GitHub。',
+          '本命令未写任何文件、未调用 GitHub。',
         remediation:
           '任务登记与状态变更改用 multica CLI（multica issue create/update/status）；只读查询仍可用 list/show。',
       },
