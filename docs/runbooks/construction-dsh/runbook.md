@@ -143,7 +143,7 @@ node scripts/ai-task-workspace-env.mjs maybe-cleanup  --store <目录> --env <�
 **6.3 合并成果**（先跑门禁，冲突即中止且不改主干）：
 
 - **GitHub 轨道**：按仓库规则开 PR 并合并；Issue → 已完成。
-- **本地轨道**：合并入口随 W8 退役（WFM-157）：`local-task-registry set` 写命令已 fail-closed（原因码 `legacy_registry_write_disabled`），`local-task-merge` 要求的登记册「等待验收」状态从此没有 CLI 写入口，尚未标记该状态的存量任务会在门禁被拒。存量本地任务改走 **GitHub 轨道**（开 PR 合并）或由人工裁定收口；`docs/design/ai-task-define-delivery/local-track-offline-mode.md` §7.1/§7.4 门禁清单仅作历史参考。
+- **本地轨道**：旧本地合并入口暂停使用（W8 P0-C，WFM-157）：与 §4 一致，登记状态一律以 Multica 平台为准；`local-task-registry set` 写命令已 fail-closed（原因码 `legacy_registry_write_disabled`），旧合并路径 `local-task-merge` 门禁要求的登记册「等待验收」状态目前没有可用 CLI 写入口，尚未标记该状态的存量任务会被门禁拒绝。存量本地任务在 WFM-124 对合并流程作出后续决策前**暂停合并操作**，如有合并/收口需求经 Multica 任务升级协调者裁定；本切片未改动 `local-task-merge` 及其状态语义，`docs/design/ai-task-define-delivery/local-track-offline-mode.md` §7.1/§7.4 门禁清单仅作历史参考。
   工作区清理口径不变（决策 0001 §6 / 约定 §1.7.1）：**删工作区、留分支**——工作区可再生、分支不可再生；删除不带 `--force`，工作区脏则拒绝并只登记遗留项；删除后追加 `git worktree prune` 兜底注销失效登记。
 
 **6.4 收口后复核**：合并完成后由**执行体（AI）立即**执行验收卡「收口后复核」区各项，把执行时间 / 命令 / 实际结果 / 结论回填该区与 `closeout_summary`；**不得留空、不得静默跳过**。失败如实记录：属真缺陷 → 另立任务（不在本轮静默修）；属环境或时机不成立 → 写明原因与后续触发条件。本条是收口动作的内容，**不新增主链阶段或状态**。
