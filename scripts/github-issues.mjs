@@ -1,31 +1,33 @@
 #!/usr/bin/env node
 /**
- * GitHub issue 通道（唯一真源）：批量任务源筛选 + 施工认领互斥。
+ * GitHub issue 通道：**任务管理写入口已停用，仅保留只读与纯函数**。
  *
- * 把三件事收在一处，避免各脚本各自裸调 `gh`：
- *   1. 任务源筛选信号——`ready-for-agent`（需求清晰可执行，可交 agent 施工）；
- *   2. 施工认领信号——`施工中` 标签 + assignee + 认领评论「三件套」；
- *   3. 施工人身份——`gh` 当前登录账号 + 本机机器码 + AI 会话名 + run_id。
+ * 治理口径（W8 迁移，WFM-166）：Multica Task 是任务身份 / 状态 / 负责人 / 关系 / 施工互斥的
+ * 唯一真源；GitHub 只留 PR / commit / review / CI 等代码交付事实，不再当第二套任务账本。
+ * 因此旧「批量任务源筛选 + 施工认领互斥」的**写**路径整体 fail-closed，读路径与纯函数保留。
  *
- * 三条不可动摇的口径：
- *   - **gh 执行器可注入**（`setGhRunner`），单测离线断言，不触网；
- *   - **认领互斥靠评论二次确认**：标签检查与标签写入之间没有原子性，故认领后再读一次评论，
- *     以 claim 标记出现最早者为准；后到者主动让位（`ok:false, code:'claim-raced'`），
- *     不覆盖先到者的标签——「宁可少开工，不可重复施工」；
- *   - **失败不得静默降级**（CHORE-111 口径）：任何远端动作失败都返回明确 code + reason，
- *     由调用方决定阻断或告警，禁止悄悄按「无标签」继续。
+ * 已停用（fail-closed，稳定原因码 `legacy_github_issue_write_disabled`，CLI 非零退出）：
+ *   - API：markReady、claimIssue、releaseIssue
+ *   - CLI：mark-ready、claim、release
+ *   以上在**任何 GitHub / registry / BOARD 或其他外部写之前**即拒绝，绝不先调 `gh` 探测或打标。
+ *   施工互斥改由 Multica 人工单写者把关；本模块不提供原子互斥或跨机器安全保证。
+ *
+ * 仍保留（只读 / 纯函数，供任务源快照与既有调用方使用）：
+ *   - API：listReadyIssues、viewIssue、listLabels、fetchTaskSource、repoSlug、currentActor、
+ *          workerIdentity、claimKeysInWindow、remoteAnchorOfTask、issueUrl、setGhRunner 等
+ *   - CLI：list-ready、show
+ *   只读动作仍按原口径可注入 `gh` 执行器（`setGhRunner`，离线单测不触网）；读失败仍如实抛错，
+ *   由调用方决定阻断或降级（CHORE-111 口径），不得静默降级。
  *
  * CLI:
- *   node scripts/github-issues.mjs mark-ready --task FIX-224 [--repo <path>]
- *   node scripts/github-issues.mjs claim --task FIX-224 --run-id fix-224-r1 [--branch <b>] [--repo <path>]
- *   node scripts/github-issues.mjs release --task FIX-224 --run-id fix-224-r1 --reason <原因> [--repo <path>]
  *   node scripts/github-issues.mjs list-ready [--repo <path>]
  *   node scripts/github-issues.mjs show --task FIX-224 [--repo <path>]
+ *   # 旧写命令（mark-ready / claim / release）保留为拒绝壳：稳定返回停用原因码并以非零退出。
  */
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { loadRegistry, resolveGitHubRemote, machineCode, agentName } from './local-task-registry.mjs'
+import { loadRegistry, resolveGitHubRemote, machineCode } from './local-task-registry.mjs'
 import { githubAnchorOf } from './remote-anchors.mjs'
 
 export const READY_LABEL = 'ready-for-agent'
@@ -35,6 +37,25 @@ export const WIP_LABEL = '施工中'
 export const LABEL_META = {
   [READY_LABEL]: { color: '0e8a16', description: '需求清晰可执行，可交给 agent 施工' },
   [WIP_LABEL]: { color: 'fbca04', description: '已有施工人认领，正在施工；他人请勿重复认领' },
+}
+
+// 旧任务管理写入口的稳定停用原因码（对外契约，勿改字面）：调用方据此识别与阻断。
+export const LEGACY_GITHUB_ISSUE_WRITE_DISABLED = 'legacy_github_issue_write_disabled'
+
+/**
+ * 写入口统一拒绝壳：在任何 GitHub / registry / BOARD 或其他外部写之前 fail-closed。
+ * 不调用 `gh`、不探测 issue 状态、不打标签；只返回可识别的稳定原因码 + 说明。
+ */
+function legacyIssueWriteDisabled(entry) {
+  return {
+    ok: false,
+    code: LEGACY_GITHUB_ISSUE_WRITE_DISABLED,
+    entry,
+    reason:
+      `旧 GitHub issue 任务管理写入口已停用（${entry}）：任务身份 / 状态 / 负责人 / 施工互斥以 Multica 为准，` +
+      `GitHub 仅留 PR/commit/review/CI 交付事实；本入口不再写 issue 标签 / assignee / 评论，也不再调用 gh。` +
+      `开工互斥须先在 Multica 确保人工单写者（此处没有原子互斥或跨机器安全保证）。`,
+  }
 }
 
 // ---------- gh 执行器（可注入） ----------
@@ -229,111 +250,34 @@ function holderOf(issue, fallback = '未知施工人') {
   return a ? `${a}（assignee）` : fallback
 }
 
-// ---------- 认领 / 释放 ----------
-
-function claimBody({ worker, claimKey, runId, branch, at, issueNumber }) {
-  return [
-    `## 🔧 施工中认领（${claimKey}）`,
-    '',
-    '| 项 | 值 |',
-    '|---|---|',
-    `| 施工人 | \`${worker}\` |`,
-    `| run | \`${runId}\` |`,
-    `| 分支 | \`${branch || '（未提供）'}\` |`,
-    `| 认领时间 | ${at} |`,
-    `| issue | #${issueNumber} |`,
-    '',
-    '> 本任务已被上述施工人认领（标签 `施工中`）。请勿重复认领；进展确认请直接找上方施工人。',
-    claimMarker(claimKey),
-  ].join('\n')
-}
+// ---------- 认领 / 释放（写入口已停用） ----------
 
 /**
- * 开工认领：打 `施工中` + assignee + 认领评论，并用评论做并发二次确认。
+ * 开工认领：**写入口已停用**。在任何 GitHub / registry / BOARD 或其他外部写之前 fail-closed，
+ * 不打 `施工中` 标签、不指派 assignee、不留认领评论，也不调用 `gh`。
+ * 仍保留只读的 `no-task` / `no-anchor` 前置判定（仅读登记册，不碰 gh），便于调用方区分「任务不存在」
+ * 与「写入口停用」。施工互斥由 Multica 人工单写者把关。
  *
- * @returns {{ ok: boolean, code: string, reused?: boolean, holder?: string, issue?: number, reason?: string }}
- *   code: claimed | reused | claimed-by-other | claim-raced | issue-not-open | no-anchor | dry-run
+ * @returns {{ ok: boolean, code: string, reason: string, issue?: number }}
  */
-export function claimIssue({ repo, taskId, runId, branch = null, actor = null, dryRun = false }) {
-  const slug = repoSlug(repo)
+export function claimIssue({ repo, taskId, runId = null, branch = null, actor = null, dryRun = false }) {
   const { record, issue: number } = remoteAnchorOfTask(repo, taskId)
   if (!record) return { ok: false, code: 'no-task', reason: `登记册无此任务：${taskId}` }
   if (!number) {
     return { ok: false, code: 'no-anchor', reason: `任务 ${taskId} 无 github#N 锚点（remote=${record.remote ?? 'null'}），无法远端认领` }
   }
-
-  const ident = workerIdentity({ actor: actor ?? currentActor(), agent: agentName(process.env, repo) })
-  const claimKey = `${ident.machine}/${runId}`
-  if (dryRun) return { ok: true, code: 'dry-run', issue: number, worker: ident.worker, claimKey }
-
-  ensureLabels({ slug, labels: [WIP_LABEL, READY_LABEL] })
-  const before = viewIssue({ slug, number })
-  if (before.state && before.state !== 'OPEN') {
-    return { ok: false, code: 'issue-not-open', issue: number, reason: `issue #${number} 状态 ${before.state}，不可认领` }
-  }
-  if (before.labels.includes(WIP_LABEL)) {
-    if (claimKeysInWindow(before.comments).includes(claimKey)) {
-      return { ok: true, code: 'reused', reused: true, issue: number, worker: ident.worker, claimKey }
-    }
-    const holder = holderOf(before, claimKey)
-    return { ok: false, code: 'claimed-by-other', issue: number, holder, reason: `issue #${number} 已被 ${holder} 认领（标签 ${WIP_LABEL}）` }
-  }
-
-  addLabels({ slug, number, labels: [WIP_LABEL] })
-  const assign = addAssignees({ slug, number, logins: [ident.actor] })
-  commentIssue({
-    slug, number,
-    body: claimBody({
-      worker: ident.worker, claimKey, runId, branch,
-      at: new Date().toISOString(), issueNumber: number,
-    }),
-  })
-
-  // 并发二次确认：评论写入后重读，当前窗口内 claim 标记最早者胜出；
-  // 不是自己就让位（不撤标签，保护先到者）。
-  const after = viewIssue({ slug, number })
-  const holders = claimKeysInWindow(after.comments)
-  if (holders.length > 0 && holders[0] !== claimKey) {
-    return { ok: false, code: 'claim-raced', issue: number, holder: holders[0], reason: `并发认领竞争：${holders[0]} 先到，本会话让位` }
-  }
-  return { ok: true, code: 'claimed', issue: number, worker: ident.worker, claimKey, assigned: assign.ok, assignReason: assign.ok ? null : assign.reason }
+  return legacyIssueWriteDisabled('claimIssue')
 }
 
 /**
- * 施工结束释放：去掉 `施工中` 标签并留一条结束评论。
- * 标签不存在时视为已释放（幂等），不报错。
+ * 施工结束释放：**写入口已停用**。不摘 `施工中` 标签、不摘 assignee、不留结束评论，也不调用 `gh`。
+ * 保留只读的 `no-task` / `no-anchor` 前置判定。
  */
 export function releaseIssue({ repo, taskId, runId = null, reason = '', outcome = '', actor = null, dryRun = false }) {
-  const slug = repoSlug(repo)
   const { record, issue: number } = remoteAnchorOfTask(repo, taskId)
   if (!record) return { ok: false, code: 'no-task', reason: `登记册无此任务：${taskId}` }
   if (!number) return { ok: false, code: 'no-anchor', reason: `任务 ${taskId} 无 github#N 锚点，无远端标签可释放` }
-
-  const ident = workerIdentity({ actor: actor ?? currentActor(), agent: agentName(process.env, repo) })
-  if (dryRun) return { ok: true, code: 'dry-run', issue: number }
-
-  const before = viewIssue({ slug, number })
-  if (!before.labels.includes(WIP_LABEL)) {
-    return { ok: true, code: 'already-released', issue: number }
-  }
-  removeLabels({ slug, number, labels: [WIP_LABEL] })
-  // 一并摘 assignee：否则「已释放」的 issue 还挂着上任施工人，下一任认领前后
-  // 批次报告都会把现任认领人指认错（Bugbot #240 第 3 条）
-  removeAssignees({ slug, number, logins: before.assignees })
-  commentIssue({
-    slug, number,
-    body: [
-      `## 🔓 施工结束（${outcome || '已释放'}）`,
-      '',
-      `- 施工人：\`${ident.worker}\``,
-      runId ? `- run：\`${runId}\`` : null,
-      reason ? `- 说明：${reason}` : null,
-      `- 时间：${new Date().toISOString()}`,
-      '',
-      releaseMarker,
-    ].filter((x) => x !== null).join('\n'),
-  })
-  return { ok: true, code: 'released', issue: number }
+  return legacyIssueWriteDisabled('releaseIssue')
 }
 
 // ---------- 任务源快照 ----------
@@ -363,9 +307,9 @@ export function fetchTaskSource({ repo, readyLabel = READY_LABEL, wipLabel = WIP
   return { slug, ready, claimed, claimedBy }
 }
 
-/** 给任务打「可施工」标签；幂等，已是就绪状态则 no-op。 */
+/** 给任务打「可施工」标签：**写入口已停用**。在任何外部写之前 fail-closed，不打标签、不调用 `gh`。
+ *  保留只读的 `no-task` / `no-anchor` 前置判定（仅读登记册），其中 `no-anchor` 的换号指引文案保持不变。 */
 export function markReady({ repo, taskId, readyLabel = READY_LABEL, dryRun = false }) {
-  const slug = repoSlug(repo)
   const { record, issue: number } = remoteAnchorOfTask(repo, taskId)
   if (!record) return { ok: false, code: 'no-task', reason: `登记册无此任务：${taskId}` }
   if (!number) {
@@ -376,19 +320,7 @@ export function markReady({ repo, taskId, readyLabel = READY_LABEL, dryRun = fal
       reason: `任务 ${taskId} 无 github#N 锚点（remote=${record.remote ?? 'null'}）：先换取正式号，再打「可施工」标签`,
     }
   }
-  if (dryRun) return { ok: true, code: 'dry-run', issue: number }
-
-  const issue = viewIssue({ slug, number })
-  // 已关闭（或已合并）的 issue 不得再被标记为「可施工」——那会把死任务重新推进施工池
-  if (issue.state && issue.state !== 'OPEN') {
-    return { ok: false, code: 'issue-not-open', issue: number, state: issue.state, reason: `issue #${number} 状态 ${issue.state}，不得打「可施工」标签` }
-  }
-  if (issue.labels.includes(readyLabel)) {
-    return { ok: true, code: 'already-ready', issue: number }
-  }
-  ensureLabels({ slug, labels: [readyLabel] })
-  addLabels({ slug, number, labels: [readyLabel] })
-  return { ok: true, code: 'marked', issue: number, url: issueUrl(slug, number) }
+  return legacyIssueWriteDisabled('markReady')
 }
 
 // ---------- CLI ----------
