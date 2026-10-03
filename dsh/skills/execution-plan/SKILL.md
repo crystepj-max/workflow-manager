@@ -14,10 +14,13 @@ description: "AI 任务批量调度（Execution Plan）：从候选「已定义�
 > 单任务交付（被启动）：建设 Skill / `single-task-delivery-m2.md`
 
 > 🔴 **迁移遗留边界（W8 旧入口退役）**：本 Skill 保留的排序 / 快照 / 并发补位 / 批次汇总
-> 能力仅限显式人工发起的批次。**候选不再取自旧 registry.json / BOARD.md 账本，定时触发（M4）
-> 与 M5 夜间自动派发已退役，不再无人值守开工**；新任务的身份、认领与状态以 Multica Task 为准。
-> 相关停写实现见 PR #355；截至本文基线（2026-10-03，main=`861e5a0`）尚未进入 main，
-> 当前 main 上旧脚本仍可运行——**在任何分支上都不应再使用定时触发或夜间自动派发**。
+> 能力仅限显式人工发起的批次。**迁移目标 / 政策口径：候选不再取自旧 registry.json / BOARD.md
+> 账本，定时触发（M4）与 M5 夜间自动派发退役，不再无人值守开工**；新任务的身份、认领与状态
+> 以 Multica Task 为准。截至本文基线（2026-10-03，main=`861e5a0`），**当前 main 的 M3 实现
+> 仍是旧路径**：批次仍由本地 batch.json 提供 issueBasics / taskSpec 材料路径并运行实施前检查
+> （`runPreflight`），依赖检查仍读取旧登记册（`loadRegistry` / `collectMergeFacts`）——本 PR
+> 只做文档收口，不迁移这些实现。旧入口停写实现见 PR #355，尚未进入 main。
+> **在任何分支上都不应再使用定时触发或夜间自动派发**。
 
 ## 成功标准
 
