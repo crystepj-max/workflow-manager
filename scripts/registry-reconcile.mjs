@@ -13,7 +13,9 @@
  *
  * CLI:
  *   node scripts/registry-reconcile.mjs plan  [--repo <path>] [--base <ref>]   # 只报告差异
- *   node scripts/registry-reconcile.mjs apply [--repo <path>] [--base <ref>]   # 回写「已合并」类差异
+ *   node scripts/registry-reconcile.mjs apply                                  # 已退役（W8 P0-C3）：
+ *       在任何文件/GitHub 写入前以退出码 2 拒绝，原因码 legacy_registry_write_disabled。
+ *       程序化回写仍走导出函数 apply（scheduled-trigger 等显式导入），其退役归后续 W8 切片。
  *
  * 只回写一类差异：git 有合并事实、登记册 status 不是「已合并」。
  * 反向差异（登记册说已合并、git 无痕迹）只报告不动——可能发生在镜像/沙箱缺历史时，
@@ -32,6 +34,9 @@ import { loadRegistry, saveRegistry, writeBoard } from './local-task-registry.mj
 import { githubAnchorOf } from './remote-anchors.mjs'
 
 const MERGED_STATUS = '已合并'
+
+/** W8 P0-C3（WFM-162）：直接 CLI apply 写入口已 fail-closed 的稳定原因码 */
+const LEGACY_WRITE_REASON_CODE = 'legacy_registry_write_disabled'
 
 /** 从提交信息提取任务号：匹配 `(LOC-001 V2)` / `(FEAT-12 V1)` 这类收口尾部 */
 const TASK_REF_IN_SUBJECT = /[(（]((?:LOC-\d{3,}|(?:FEAT|FIX|CHORE)-\d+))\s+V\d+[)）]/
@@ -254,13 +259,15 @@ function main() {
     return
   }
   if (cmd === 'apply') {
-    const changed = applyReconcile(repo, baseRef)
-    // 回写后再审计：漏标校验用回写后的状态，已合并任务不误报
-    const audit = reconcilePlan(repo, baseRef)
-    console.log(JSON.stringify({ changedCount: changed.length, changed, suspicious: audit.suspicious, unclaimedSkipped: audit.unclaimedSkipped }, null, 2))
-    return
+    // W8 P0-C3（WFM-162）：直接 CLI apply 会把任务状态回写旧 registry/BOARD 双账本，已 fail-closed。
+    // 必须在任何文件或 GitHub/CNB 写入前拒绝；程序化回写仍走导出函数 apply，签名与行为不变。
+    console.error(
+      `apply 已退役（旧 registry/BOARD 写入口已封闭）：reasonCode=${LEGACY_WRITE_REASON_CODE}。` +
+        'plan 仍可只读对账；程序化回写走导出函数 apply（后续 W8 切片另行退役）。',
+    )
+    process.exit(2)
   }
-  console.error('用法: registry-reconcile plan | apply [--repo <path>] [--base <ref>]')
+  console.error(`用法: registry-reconcile plan [--repo <path>] [--base <ref>]   # apply 已退役（${LEGACY_WRITE_REASON_CODE}）`)
   process.exit(2)
 }
 
