@@ -271,7 +271,7 @@ node scripts/local-task-registry.mjs allocate --name <任务名称> --type FEAT|
 ```
 
 - 返回 `FEAT-<远端号>` / `FIX-<远端号>` / `CHORE-<远端号>`，同时在 GitHub 主源仓库建好对应 issue，编号即 issue 号，登记册 `remote` 记 `github#<号>`；
-- 远端不可达时降级为临时号 `TMP-<机器码>-<日期><序号>`，联网后用 `node scripts/remote-issue-sync.mjs reissue --task <临时号>` 换取正式号；**禁止静默回落到 CNB 发号**（CNB 自 2026-09-19 起是灾备镜像，不再签发任务号）；
+- 远端不可达时降级为临时号 `TMP-<机器码>-<日期><序号>`；原换号通道 `node scripts/remote-issue-sync.mjs reissue` 已退役（reasonCode `legacy_remote_issue_sync_disabled`），不再由本机自动换取正式号，正式号以 Multica 主源为准；**禁止静默回落到 CNB 发号**（CNB 自 2026-09-19 起是灾备镜像，不再签发任务号）；
 - 历史任务（2026-09-15 及以前）沿用 `LOC-<序号>` 旧号，通过登记册 `remote` / `legacy_id` 字段与远端号双向可查；切换前由 CNB 签发的 `cnb#N` 保留为历史事实，不重编。
 
 成功回报格式：
