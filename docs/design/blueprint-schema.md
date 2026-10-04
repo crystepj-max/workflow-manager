@@ -1,5 +1,7 @@
 # 蓝图 JSON Schema（v1 定稿）
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `default-workflow` / `dev-workflow-2-0` 工作流模板**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`）。
+
 > 工作流统一引擎「单一事实源」契约。本文档是 FR-7（v2 对话式创作）的 AI 编写契约（规格风险 2）。
 > 决策来源：T-01（wayfinder 地图），D1–D6 于 2026-08-19 评审定稿；原型评审台与冒烟断言见 `.scratch/schema-prototype/`（一次性）。
 > 配套事实：`docs/research/mjs-semantics.md`、`docs/research/vwf-host-internals.md`、`docs/research/workflow-tool-contract.md`。

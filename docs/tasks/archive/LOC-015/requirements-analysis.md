@@ -1,5 +1,7 @@
 # LOC-015 需求分析（现状核实 · 缺口 · 决策卡）
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `default-workflow` / `dev-workflow-2-0` 工作流模板与 `dsh/skill/SKILL.md` 技能入口**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`），正式内置角色 12 个，无历史兼容角色。
+
 > 分析对象：`docs/tasks/LOC-015-skill-invocation-runtime.md`（登记册 `LOC-015`，基线 V1，卡上状态「本地已定义」）
 > 采集时间：2026-09-11
 > 结论：**任务方向成立，但卡上残留 1 项未决产品事项**（Skill 入口的接入机制被推迟到施工期决定）。

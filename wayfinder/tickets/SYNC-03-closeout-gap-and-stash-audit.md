@@ -1,5 +1,7 @@
 # 收口缺口根因分析 + 本地 stash 深入审计
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `default-workflow` / `dev-workflow-2-0` 工作流模板及其 `templates/custom-seeds/` 真源**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`）。
+
 > 时间：2026-09-19 01:40（本地会话）
 > 起因：用户提问「为什么这么多 issue 没有关闭？合并 PR 时有关闭关联 issue 吗？从结果看是没有的」
 > 结论：**用户的判断成立**。且根因不是「漏做一次」，而是**契约要求做了、实现在多个层面同时缺位**。

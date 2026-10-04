@@ -1,5 +1,7 @@
 # 建设 · 完整功能开发 Portable Contract
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `default-workflow` / `dev-workflow-2-0` 工作流模板**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`）。
+
 > **版本**：**v0.1.10 + M2 overlay（2026-09-19）** —— 正文七阶段证据底物以 v0.1.10 冻结为准（v0.1.9 为**纯放宽**：验收包存在性分层，`record_version` 仍钉 `v0.1.8`，历史记录全部继续合法；v0.1.10 仅追加 §9.6 收敛记录，不改任何语义）；**产品可见单任务交付主链以** `docs/design/ai-task-define-delivery/single-task-delivery-m2.md` **为准（定义外置）**。  
 > **M2 与 Portable 七阶段差异（接手者必读，唯一权威）**：[`m2-vs-portable-delivery.md`](m2-vs-portable-delivery.md) —— 其他文档须引用该文，不得再写第二套「当前主链」。
 > **来源**：#102（epic，A1–A5 节为本契约的决断依据）、#103（本契约的任务 issue）；M2 对接《AI 任务定义与批量交付 V0.1》

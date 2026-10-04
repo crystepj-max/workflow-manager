@@ -14,15 +14,15 @@ import { runGeneratedScript, makeAgentScript } from '../../../scripts/test/helpe
 
 const here = dirname(fileURLToPath(import.meta.url))
 const RUNS_DIR = DSH_HOME + '/visual-workflow/runs'
-const realGenerated = join(here, '..', '..', '..', '.generated', 'dev-workflow-2-0', 'vwf-dsl.json')
+const realGenerated = join(here, '..', '..', '..', '.generated', 'legacy-baseline', 'vwf-dsl.json')
 // 统一校验内核（候选二 T-IMP-13）：宿主经 fs 读源码求值——wf_run 路径需种入真实内核
 const validatorCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
 
 const MINIMAL_BUILTIN = JSON.stringify({
-  id: 'dev-workflow-2-0', name: '开发工作流 2.0', description: '内置最小样例', entry: 'dispatch',
+  id: 'legacy-baseline', name: '开发工作流 2.0', description: '内置最小样例', entry: 'dispatch',
   control: { maxRounds: 9 },
   nodes: [
-    { id: 'dispatch', profile: 'dispatcher', label: '调度', goal: 'g', model: { provider: 'p1', model: 'm1' } },
+    { id: 'dispatch', profile: 'legacy-role', label: '调度', goal: 'g', model: { provider: 'p1', model: 'm1' } },
     { id: 'closeout', profile: 'closeout', label: '收口', goal: 'g', manualCheck: true, model: { provider: 'p1', model: 'm1' } },
   ],
   edges: [
@@ -47,13 +47,13 @@ function seedRun(id, over = {}) {
 
 function env({ failPattern, extra = {}, seed = {} } = {}) {
   const base = {
-    [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: existsSync(realGenerated) ? readFileSync(realGenerated, 'utf8') : MINIMAL_BUILTIN,
+    [REPO + '/.generated/legacy-baseline/vwf-dsl.json']: existsSync(realGenerated) ? readFileSync(realGenerated, 'utf8') : MINIMAL_BUILTIN,
     [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
   }
   Object.assign(base, seed)
   const fs = makeFs(base)
   const compileScript = existsSync(realGenerated)
-    ? readFileSync(join(here, '..', '..', '..', '.generated', 'dev-workflow-2-0', 'script.mjs'), 'utf8')
+    ? readFileSync(join(here, '..', '..', '..', '.generated', 'legacy-baseline', 'script.mjs'), 'utf8')
     : '//MOCK-SCRIPT'
   const sub = makeSubprocess({ failPattern, fs, compileScript })
   const { handlers, definedTools, events, ctx } = loadHost({ fs, subprocess: sub, sandboxPolicy, ...extra })
@@ -134,7 +134,7 @@ test('#40：wf_run 权威终态（value.status 回写 DONE）落盘；runTag 元
   const eng = makeEngine()
   const { events, definedTools, fs } = engineEnv(eng)
   const wfRun = definedTools.find(t => t.name === 'wf_run')
-  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-40' })
+  const p1 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-40' })
   await until(() => eng.starts.length >= 1, '启动')
   events.get('workflow/start')({ id: 'run-1', meta: { name: '开发工作流 2.0' } })
   settleRun(eng, events, 'run-1', 'DONE')
@@ -143,7 +143,7 @@ test('#40：wf_run 权威终态（value.status 回写 DONE）落盘；runTag 元
   const rec = readRun(fs, 'run-1')
   assert.equal(rec.status, 'DONE', '权威终态 DONE 覆盖事件层 completed 后落盘')
   assert.equal(rec.taskId, 'issue-40', '启动边界登记的 taskId 随快照持久化')
-  assert.equal(rec.workflowId, 'dev-workflow-2-0')
+  assert.equal(rec.workflowId, 'legacy-baseline')
 })
 
 test('#40 AC1：重启后按原 runId 仍可查看终态/阶段/子代理表/日志（数据来自磁盘回载）', async () => {
@@ -151,7 +151,7 @@ test('#40 AC1：重启后按原 runId 仍可查看终态/阶段/子代理表/日
   const engA = makeEngine()
   const a = engineEnv(engA)
   const wfRunA = a.definedTools.find(t => t.name === 'wf_run')
-  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-77' })
+  const p1 = wfRunA.execute({ templateId: 'legacy-baseline', taskId: 'issue-77' })
   await until(() => engA.starts.length >= 1, 'A 启动')
   a.events.get('workflow/start')({ id: 'run-1', meta: { name: '开发工作流 2.0', description: '' } })
   a.events.get('workflow/phase')({ id: 'run-1' }, '验收')
@@ -174,7 +174,7 @@ test('#40 AC1：重启后按原 runId 仍可查看终态/阶段/子代理表/日
   assert.ok(s.state.logs.includes('等待人工验收'), '日志来自磁盘回载')
   assert.deepEqual(s.state.agents.map(x => x.label), ['accept'], '子代理表来自磁盘回载')
   assert.equal(s.state.taskId, 'issue-77')
-  assert.equal(s.state.workflowId, 'dev-workflow-2-0')
+  assert.equal(s.state.workflowId, 'legacy-baseline')
   const list = await call(b.handlers, 'vwf.runs.list', {})
   assert.ok(list.runs.some(r => r.id === 'run-1' && r.taskId === 'issue-77'), '回载记录进入运行清单')
 })
@@ -183,7 +183,7 @@ test('#118 刷新后同一 taskId 仍能读到 WAITING_HUMAN 决策卡', async (
   const engA = makeEngine()
   const a = engineEnv(engA)
   const wfRunA = a.definedTools.find(t => t.name === 'wf_run')
-  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-118' })
+  const p1 = wfRunA.execute({ templateId: 'legacy-baseline', taskId: 'issue-118' })
   await until(() => engA.starts.length >= 1, 'A 启动')
   a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'Human Decision' } })
   const pkg = {
@@ -238,7 +238,7 @@ test('#40：重启后 AWAITING_HUMAN 门禁继续保持同 taskId 互斥；entry
   const engA = makeEngine()
   const a = engineEnv(engA)
   const wfRunA = a.definedTools.find(t => t.name === 'wf_run')
-  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-78' })
+  const p1 = wfRunA.execute({ templateId: 'legacy-baseline', taskId: 'issue-78' })
   await until(() => engA.starts.length >= 1, 'A 启动')
   a.events.get('workflow/start')({ id: 'run-1', meta: { name: '开发工作流 2.0' } })
   settleRun(engA, a.events, 'run-1', 'AWAITING_HUMAN_accept')
@@ -252,11 +252,11 @@ test('#40：重启后 AWAITING_HUMAN 门禁继续保持同 taskId 互斥；entry
   })
   await until(async () => (await call(b.handlers, 'vwf.state', { runId: 'run-1' })).found, 'B 回载 run-1')
   const wfRunB = b.definedTools.find(t => t.name === 'wf_run')
-  const blocked = await wfRunB.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-78' })
+  const blocked = await wfRunB.execute({ templateId: 'legacy-baseline', taskId: 'issue-78' })
   assert.ok(blocked.includes('串行互斥'), '重启后门禁仍占用 taskId：' + blocked)
   assert.equal(engB.starts.length, 0, '被拒调用未触达引擎')
 
-  const p2 = wfRunB.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-78', entry: 'accept', approved: true })
+  const p2 = wfRunB.execute({ templateId: 'legacy-baseline', taskId: 'issue-78', entry: 'accept', approved: true })
   await until(() => engB.starts.length >= 1, 'B 续跑绕过互斥')
   b.events.get('workflow/start')({ id: 'rb-1', meta: { name: '开发工作流 2.0' } })
   const s1 = await call(b.handlers, 'vwf.state', { runId: 'run-1' })
@@ -331,7 +331,7 @@ test('#40 评审修复：未接管门禁不被容量淘汰', async () => {
     const gate = i < 2
     seed[RUNS_DIR + '/' + id + '.json'] = seedRun(id, {
       startedAt: 1000 + i, updatedAt: 1000 + i,
-      ...(gate ? { status: 'AWAITING_HUMAN_b', phase: 'b', taskId: 'task-gate-' + i, workflowId: 'dev-workflow-2-0' } : {}),
+      ...(gate ? { status: 'AWAITING_HUMAN_b', phase: 'b', taskId: 'task-gate-' + i, workflowId: 'legacy-baseline' } : {}),
     })
   }
   const { fs } = env({ seed })
@@ -412,7 +412,7 @@ test('#40 评审修复：重启中断的 running 快照不永久占用同 taskId
   await until(async () => { s = await call(b.handlers, 'vwf.state', { runId: 'stuck-1' }); return s.found }, '回载 stuck-1')
   assert.equal(s.state.status, 'running', '历史展示保留原状态')
   // 中断快照（进程死亡、无门禁语义）不得永久占用 taskId
-  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'task-stuck' })
+  const p1 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'task-stuck' })
   await until(() => engB.starts.length >= 1, '新启动被放行')
   b.events.get('workflow/start')({ id: 'rb-1', meta: { name: 'x' } })
   settleRun(engB, b.events, 'rb-1', 'DONE')
@@ -426,7 +426,7 @@ test('#40 评审修复：回载窗口外的门禁保持互斥并可接管回写�
     const id = 'gate-' + String(i).padStart(2, '0')
     seed[RUNS_DIR + '/' + id + '.json'] = seedRun(id, {
       status: 'AWAITING_HUMAN_b', phase: 'b',
-      taskId: 'task-gate-' + String(i).padStart(2, '0'), workflowId: 'dev-workflow-2-0',
+      taskId: 'task-gate-' + String(i).padStart(2, '0'), workflowId: 'legacy-baseline',
       startedAt: 7000 + i, updatedAt: 7000 + i,
     })
   }
@@ -434,11 +434,11 @@ test('#40 评审修复：回载窗口外的门禁保持互斥并可接管回写�
   const b = env({ seed, extra: { workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
   const wfRun = b.definedTools.find(t => t.name === 'wf_run')
   // gate-00 最旧、在回载窗口外（幽灵门禁）：execute 先等回载完成再判定互斥
-  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'task-gate-00' })
+  const blocked = await wfRun.execute({ templateId: 'legacy-baseline', taskId: 'task-gate-00' })
   assert.ok(blocked.includes('串行互斥'), '幽灵门禁占用互斥：' + blocked)
   assert.ok(blocked.includes('gate-00'), '提示占用的 runId')
   // entry 续跑放行并接管；接管标记经按需水合回写磁盘
-  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'task-gate-00', entry: 'b', approved: true })
+  const p2 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'task-gate-00', entry: 'b', approved: true })
   await until(() => engB.starts.length >= 1, '续跑绕过互斥')
   b.events.get('workflow/start')({ id: 'rb-1', meta: { name: 'x' } })
   settleRun(engB, b.events, 'rb-1', 'DONE')
@@ -452,7 +452,7 @@ test('#119 回载窗口外 completed HD 幽灵记录仍占互斥', async () => {
   const seed = {
     [RUNS_DIR + '/hd-ghost.json']: seedRun('hd-ghost', {
       status: 'completed', phase: 'work',
-      taskId: 'task-hd-ghost', workflowId: 'dev-workflow-2-0',
+      taskId: 'task-hd-ghost', workflowId: 'legacy-baseline',
       startedAt: 1000, updatedAt: 1000,
       decision_id: 'task-hd-ghost:work:0',
       decision_package: pkg,
@@ -464,17 +464,17 @@ test('#119 回载窗口外 completed HD 幽灵记录仍占互斥', async () => {
     const id = 'fill-' + String(i).padStart(2, '0')
     seed[RUNS_DIR + '/' + id + '.json'] = seedRun(id, {
       status: 'DONE', phase: 'closeout',
-      taskId: 'task-fill-' + i, workflowId: 'dev-workflow-2-0',
+      taskId: 'task-fill-' + i, workflowId: 'legacy-baseline',
       startedAt: 8000 + i, updatedAt: 8000 + i,
     })
   }
   const engB = makeEngine('rb-')
   const b = env({ seed, extra: { workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
   const wfRun = b.definedTools.find((t) => t.name === 'wf_run')
-  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'task-hd-ghost' })
+  const blocked = await wfRun.execute({ templateId: 'legacy-baseline', taskId: 'task-hd-ghost' })
   assert.ok(String(blocked).includes('串行互斥'), '窗口外 completed HD 须占用：' + blocked)
   const p2 = wfRun.execute({
-    templateId: 'dev-workflow-2-0', taskId: 'task-hd-ghost',
+    templateId: 'legacy-baseline', taskId: 'task-hd-ghost',
     decision_id: 'task-hd-ghost:work:0', user_choice: 'STOP',
   })
   await until(() => engB.starts.length >= 1, '幽灵 completed HD 可 decision_id 续跑')
@@ -489,7 +489,7 @@ test('#120 重启后 WAITING_HUMAN 仍占用，Package 可读取，decision_id �
   const a = engineEnv(engA)
   const wfRunA = a.definedTools.find((t) => t.name === 'wf_run')
   const pkg = { why: '等人', current_state: '待拍板', options: [{ id: 'STOP' }], subsequent_effects: { STOP: '停' } }
-  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-hd-re' })
+  const p1 = wfRunA.execute({ templateId: 'legacy-baseline', taskId: 'issue-hd-re' })
   await until(() => engA.starts.length >= 1, 'A 启动')
   a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(engA, a.events, 'run-1', 'WAITING_HUMAN', {
@@ -512,9 +512,9 @@ test('#120 重启后 WAITING_HUMAN 仍占用，Package 可读取，decision_id �
   assert.equal(s.state.decision_id, 'issue-hd-re:work:0')
   assert.equal(s.state.decision_package.why, '等人')
   const wfRunB = b.definedTools.find((t) => t.name === 'wf_run')
-  const blocked = await wfRunB.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-hd-re' })
+  const blocked = await wfRunB.execute({ templateId: 'legacy-baseline', taskId: 'issue-hd-re' })
   assert.ok(blocked.includes('串行互斥'), blocked)
-  const p2 = wfRunB.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-hd-re', decision_id: 'issue-hd-re:work:0', user_choice: 'STOP' })
+  const p2 = wfRunB.execute({ templateId: 'legacy-baseline', taskId: 'issue-hd-re', decision_id: 'issue-hd-re:work:0', user_choice: 'STOP' })
   await until(() => engB.starts.length >= 1, 'decision_id 续跑')
   b.events.get('workflow/start')({ id: 'rb-1', meta: { name: 'x' } })
   settleRun(engB, b.events, 'rb-1', 'STOPPED')
@@ -528,7 +528,7 @@ test('#120 刷新后 decision_id 续跑从落盘带回 blocked_edge 与 results'
   const a = engineEnv(engA)
   const wfRunA = a.definedTools.find((t) => t.name === 'wf_run')
   const pkg = { why: '额度耗尽', current_state: '待加预算', options: [{ id: 'ADD_BUDGET' }], subsequent_effects: { ADD_BUDGET: '沿被拦边再走' } }
-  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-hd-snap' })
+  const p1 = wfRunA.execute({ templateId: 'legacy-baseline', taskId: 'issue-hd-snap' })
   await until(() => engA.starts.length >= 1, 'A 启动')
   a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(engA, a.events, 'run-1', 'WAITING_HUMAN', {
@@ -558,7 +558,7 @@ test('#120 刷新后 decision_id 续跑从落盘带回 blocked_edge 与 results'
     return s.found
   }, 'B 回载 run-1')
   const wfRunB = b.definedTools.find((t) => t.name === 'wf_run')
-  const p2 = wfRunB.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-hd-snap', decision_id: 'issue-hd-snap:work:0', user_choice: 'ADD_BUDGET' })
+  const p2 = wfRunB.execute({ templateId: 'legacy-baseline', taskId: 'issue-hd-snap', decision_id: 'issue-hd-snap:work:0', user_choice: 'ADD_BUDGET' })
   await until(() => engB.starts.length >= 1, '仅 decision_id 续跑')
   const passed = engB.starts[0].args
   assert.equal(passed.decision_id, 'issue-hd-snap:work:0')
@@ -585,7 +585,7 @@ test('#122 刷新后 decision_id 与 Package 仍在；业务 Result 续跑同一
   const engA = makeEngine()
   const a = engineEnv(engA)
   const wfRunA = a.definedTools.find((t) => t.name === 'wf_run')
-  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-e2e' })
+  const p1 = wfRunA.execute({ templateId: 'legacy-baseline', taskId: 'issue-e2e' })
   await until(() => engA.starts.length >= 1, 'A 启动')
   a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(engA, a.events, 'run-1', halt.result.status, {
@@ -611,7 +611,7 @@ test('#122 刷新后 decision_id 与 Package 仍在；业务 Result 续跑同一
   assert.equal(s.state.decision_package.why, halt.result.decision_package.why)
   const wfRunB = b.definedTools.find((t) => t.name === 'wf_run')
   const p2 = wfRunB.execute({
-    templateId: 'dev-workflow-2-0', taskId: 'issue-e2e',
+    templateId: 'legacy-baseline', taskId: 'issue-e2e',
     decision_id: halt.result.decision_id, user_choice: 'SHIP',
   })
   await until(() => engB.starts.length >= 1, 'SHIP 续跑')
@@ -644,7 +644,7 @@ test('#119 迟到 workflow/end 不得盖掉 WAITING_HUMAN；空 results 续跑�
   const wfRunA = a.definedTools.find((t) => t.name === 'wf_run')
   const pkg = { why: '等人', current_state: '待拍板', options: [{ id: 'USER_ACCEPTED' }], subsequent_effects: { USER_ACCEPTED: '完成且不改写' } }
   const outcome = { status: 'confirm', why: '需要你决定是否发版', current_state: '改动已齐，待拍板' }
-  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'hd-accept' })
+  const p1 = wfRunA.execute({ templateId: 'legacy-baseline', taskId: 'hd-accept' })
   await until(() => engA.starts.length >= 1, 'A 启动')
   a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(engA, a.events, 'run-1', 'WAITING_HUMAN', {
@@ -669,7 +669,7 @@ test('#119 迟到 workflow/end 不得盖掉 WAITING_HUMAN；空 results 续跑�
   await until(async () => (await call(b.handlers, 'vwf.state', { runId: 'run-1' })).found, 'B 回载')
   const wfRunB = b.definedTools.find((t) => t.name === 'wf_run')
   const p2 = wfRunB.execute({
-    templateId: 'dev-workflow-2-0', taskId: 'hd-accept',
+    templateId: 'legacy-baseline', taskId: 'hd-accept',
     decision_id: 'hd-accept:work:0', user_choice: 'USER_ACCEPTED',
     results: {},
   })
@@ -688,7 +688,7 @@ test('#119 迟到 completed 落盘的 HD 仍占互斥，禁止无 decision_id �
   const wfRunA = a.definedTools.find((t) => t.name === 'wf_run')
   const pkg = { why: '等人', current_state: '待拍板', options: [{ id: 'STOP' }], subsequent_effects: { STOP: '停' } }
   const outcome = { status: 'confirm', why: '需要你决定是否发版', current_state: '改动已齐，待拍板' }
-  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'hd-stale-completed' })
+  const p1 = wfRunA.execute({ templateId: 'legacy-baseline', taskId: 'hd-stale-completed' })
   await until(() => engA.starts.length >= 1, 'A 启动')
   a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(engA, a.events, 'run-1', 'WAITING_HUMAN', {
@@ -712,13 +712,13 @@ test('#119 迟到 completed 落盘的 HD 仍占互斥，禁止无 decision_id �
   })
   await until(async () => (await call(b.handlers, 'vwf.state', { runId: 'run-1' })).found, 'B 回载 completed HD')
   const wfRunB = b.definedTools.find((t) => t.name === 'wf_run')
-  const blocked = await wfRunB.execute({ templateId: 'dev-workflow-2-0', taskId: 'hd-stale-completed' })
+  const blocked = await wfRunB.execute({ templateId: 'legacy-baseline', taskId: 'hd-stale-completed' })
   assert.equal(typeof blocked, 'string')
   assert.match(String(blocked), /串行互斥/)
   assert.equal(engB.starts.length, 0, '无 decision_id 不得新开')
 
   const p2 = wfRunB.execute({
-    templateId: 'dev-workflow-2-0', taskId: 'hd-stale-completed',
+    templateId: 'legacy-baseline', taskId: 'hd-stale-completed',
     decision_id: 'hd-stale-completed:work:0', user_choice: 'STOP',
   })
   await until(() => engB.starts.length >= 1, '带 decision_id 续跑')
@@ -744,7 +744,7 @@ test('#119 冻结 args 时仍回填 results（DSH tools deepFreeze）', async ()
   const wfRunA = a.definedTools.find((t) => t.name === 'wf_run')
   const pkg = { why: '等人', current_state: '待拍板', options: [{ id: 'SHIP' }, { id: 'STOP' }], subsequent_effects: { SHIP: '去收口', STOP: '停' } }
   const outcome = { status: 'confirm', why: '需要你决定是否发版', current_state: '改动已齐，待拍板' }
-  const p1 = wfRunA.execute({ templateId: 'dev-workflow-2-0', taskId: 'hd-frozen' })
+  const p1 = wfRunA.execute({ templateId: 'legacy-baseline', taskId: 'hd-frozen' })
   await until(() => engA.starts.length >= 1, 'A 启动')
   a.events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(engA, a.events, 'run-1', 'WAITING_HUMAN', {
@@ -766,7 +766,7 @@ test('#119 冻结 args 时仍回填 results（DSH tools deepFreeze）', async ()
   await until(async () => (await call(b.handlers, 'vwf.state', { runId: 'run-1' })).found, 'B 回载')
   const wfRunB = b.definedTools.find((t) => t.name === 'wf_run')
   const frozen = freezeArgs({
-    templateId: 'dev-workflow-2-0',
+    templateId: 'legacy-baseline',
     taskId: 'hd-frozen',
     decision_id: 'hd-frozen:work:0',
     user_choice: 'USER_ACCEPTED',

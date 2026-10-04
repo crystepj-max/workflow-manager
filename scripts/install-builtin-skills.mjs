@@ -24,7 +24,7 @@ const { validateBlueprint } = validatorCore
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const DEFAULT_TEMPLATES_DIR = path.resolve(__dirname, '..', 'templates')
 
-/** 正式内置 = templates/*.json；custom-seeds/ 是历史迁出的自定义种子，不算内置 */
+/** 正式内置 = templates/ 下的全部蓝图 JSON */
 export function listBuiltinBlueprintFiles(templatesDir = DEFAULT_TEMPLATES_DIR) {
   return fs.readdirSync(templatesDir)
     .filter((f) => f.endsWith('.json'))

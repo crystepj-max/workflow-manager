@@ -17,7 +17,7 @@ const {
 } = validatorCore;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const good = JSON.parse(readFileSync(path.join(here, '../../templates/custom-seeds/dev-workflow-2-0.json'), 'utf8'));
+const good = JSON.parse(readFileSync(path.join(here, 'fixtures/legacy-baseline.json'), 'utf8'));
 const fanoutGood = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'));
 
 function nonProtocolWarnings(r) {
@@ -26,7 +26,7 @@ function nonProtocolWarnings(r) {
 
 test('投影往返：蓝图 → DSL → 蓝图 与原蓝图语义等价（verifyBranch / bindings / 业务规则字段无损）', () => {
   const { projectToVwf, projectToBlueprint } = validatorCore;
-  for (const file of ['../../templates/custom-seeds/dev-workflow-2-0.json', '../../templates/custom-seeds/default-workflow.json', 'fixtures/construction-rollback-mini.json']) {
+  for (const file of ['fixtures/legacy-baseline.json', 'fixtures/construction-rollback-mini.json']) {
     const bp = JSON.parse(readFileSync(path.join(here, file), 'utf8'));
     const back = projectToBlueprint(projectToVwf(bp));
     const norm = (b) => JSON.parse(JSON.stringify({
@@ -47,7 +47,7 @@ test('防回退：validate-core 的投影导出与 projection-core 为同一实�
   assert.equal(validatorCore.projectToBlueprint, projectionCore.projectToBlueprint);
 });
 
-test('S1 合法蓝图（dev-workflow-2-0 全量）通过校验', () => {
+test('S1 合法蓝图（legacy-baseline 全量）通过校验', () => {
   const r = validateBlueprint(good);
   assert.equal(r.ok, true, JSON.stringify(r.errors));
   assert.equal(r.counts.nodes, 8);
@@ -113,7 +113,7 @@ test('worker 出现 items/failOn 拒绝，fanout failOn 缺省 all 与非负整�
 test('fanout results 表达式只能引用 success 路径上的前序节点', () => {
   const b = JSON.parse(JSON.stringify(fanoutGood));
   b.entry = 'source';
-  b.nodes.unshift({ id: 'source', profile: 'dispatcher', goal: '准备数组' });
+  b.nodes.unshift({ id: 'source', profile: 'legacy-role', goal: '准备数组' });
   b.edges.unshift({ from: 'source', to: 'fan', on: 'success' });
   b.nodes[1].items = '$.results.source.payload.items';
   assert.equal(validateBlueprint(b).ok, true, JSON.stringify(validateBlueprint(b).errors));
@@ -343,7 +343,7 @@ test('S1 异源 T5：无 dev/review 节点的蓝图跳过异源校验', () => {
   const b = {
     id: 'no-dev-review', displayName: '无 dev/review（fixture）', entry: 'dispatch',
     nodes: [
-      { id: 'dispatch', profile: 'dispatcher', goal: 'x',
+      { id: 'dispatch', profile: 'legacy-role', goal: 'x',
         output: { schema: { type: 'object', properties: { complete: { type: 'boolean' } }, required: ['complete'], additionalProperties: false } } },
       { id: 'test', profile: 'test', goal: 'x',
         output: { schema: { type: 'object', properties: { result: { type: 'string' } }, required: ['result'], additionalProperties: false } } },

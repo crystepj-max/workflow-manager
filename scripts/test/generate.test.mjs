@@ -8,37 +8,37 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { compileBlueprint, generateAll, generateUserSkill, projectToVwf, skillWrap, writeUserSkill, collectBuiltinRoles, loadBuiltinRoleIds, loadBuiltinRoleDefs } from '../generate.mjs';
+import { generateBaseline, generateInTemp, loadBaseline, makeFixtureRolesDir } from './helpers/baseline-harness.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tplDir = path.join(here, '../../templates');
-const seedsDir = path.join(tplDir, 'custom-seeds');
-const bp = JSON.parse(readFileSync(path.join(seedsDir, 'dev-workflow-2-0.json'), 'utf8'));
+const bp = loadBaseline();
 const fanoutBp = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'));
 
-test('S2 生成器：产物四件套齐全', () => {
+test('S2 生成器：内置模板产物四件套齐全', () => {
   const { files, report } = generateAll(tplDir);
-  const id = 'dev-workflow-2-0';
-  for (const rel of ['script.mjs', 'vwf-dsl.json', 'SKILL.md', 'meta.json']) {
-    assert.ok(files.has(id + '/' + rel), '缺产物：' + rel);
-  }
   const ids = report.map((r) => r.id).sort();
-  assert.ok(ids.includes('wf-construction-full-feature'), '正式内置建设模板应产出');
-  assert.ok(ids.includes('dev-workflow-2-0') && ids.includes('default-workflow'), '历史自定义种子应产出');
+  assert.deepEqual(ids, ['wf-construction-full-feature', 'wf-diagnose', 'wf-explore', 'wf-optimize'], '正式内置模板应全部产出');
+  for (const id of ids) {
+    for (const rel of ['script.mjs', 'vwf-dsl.json', 'SKILL.md', 'meta.json']) {
+      assert.ok(files.has(id + '/' + rel), '缺产物：' + id + '/' + rel);
+    }
+  }
   assert.ok(report.every((r) => r.ok), '全部蓝图生成成功');
 });
 
 test('S2 生成器：route 折叠识别（FOLDS 注入）', () => {
-  const { files, report } = generateAll(tplDir);
-  const seeded = report.find((r) => r.id === 'dev-workflow-2-0');
-  assert.ok(seeded, '历史种子 dev-workflow-2-0 在报告中');
+  const { files, report } = generateBaseline();
+  const seeded = report.find((r) => r.id === 'legacy-baseline');
+  assert.ok(seeded, '历史种子 legacy-baseline 在报告中');
   assert.deepEqual(seeded.folds, ['route']);
-  const script = files.get('dev-workflow-2-0/script.mjs');
+  const script = files.get('legacy-baseline/script.mjs');
   assert.ok(script.includes('"route"'), '脚本应内嵌 FOLDS 含 route');
 });
 
 test('S2 生成器：vwf-dsl 注入模型绑定（bindings 编译期固化）', () => {
-  const { files } = generateAll(tplDir);
-  const dsl = JSON.parse(files.get('dev-workflow-2-0/vwf-dsl.json'));
+  const { files } = generateBaseline();
+  const dsl = JSON.parse(files.get('legacy-baseline/vwf-dsl.json'));
   const dev = dsl.nodes.find((n) => n.id === 'dev');
   assert.equal(dev.model.model, 'deepseek-v4-pro');
   const accept = dsl.nodes.find((n) => n.id === 'accept');
@@ -46,9 +46,9 @@ test('S2 生成器：vwf-dsl 注入模型绑定（bindings 编译期固化）', 
 });
 
 test('S2 生成器：业务规则字段进 vwf DSL（候选二 Q7 修订），节点级 verifyBranch 随 DSL 往返', () => {
-  const { files } = generateAll(tplDir);
-  const dsl = JSON.parse(files.get('dev-workflow-2-0/vwf-dsl.json'));
-  const bp = JSON.parse(readFileSync(path.join(seedsDir, 'dev-workflow-2-0.json'), 'utf8'));
+  const { files } = generateBaseline();
+  const dsl = JSON.parse(files.get('legacy-baseline/vwf-dsl.json'));
+  const bp = loadBaseline();
   const gated = bp.nodes.filter((n) => n.verifyBranch).map((n) => n.id);
   assert.ok(gated.length >= 1, '夹具须含 verifyBranch 节点');
   assert.deepEqual(dsl.nodes.filter((n) => n.verifyBranch).map((n) => n.id), gated,
@@ -58,27 +58,27 @@ test('S2 生成器：业务规则字段进 vwf DSL（候选二 Q7 修订），�
   assert.equal(dsl.control.maxRounds, 9);
 });
 
-test('S2 生成器：bundleRoles 蓝图角色自包含分发（默认工作流用户级内置模板）', () => {
-  const { files, report } = generateAll(tplDir);
-  const rep = report.find((r) => r.id === 'default-workflow');
-  assert.ok(rep && rep.ok, 'default-workflow 生成成功');
-  assert.ok(files.has('default-workflow/roles/dispatcher.md'), '角色包随模板分发：dispatcher.md');
-  assert.ok(files.has('default-workflow/roles/review.md'), '角色包随模板分发：review.md');
-  const dsl = JSON.parse(files.get('default-workflow/vwf-dsl.json'));
+test('S2 生成器：bundleRoles 蓝图角色自包含分发', () => {
+  const { files, report } = generateInTemp({ 'legacy-baseline.json': { ...bp, bundleRoles: true } }, { withRoles: true });
+  const rep = report.find((r) => r.id === 'legacy-baseline');
+  assert.ok(rep && rep.ok, 'legacy-baseline 生成成功');
+  assert.ok(files.has('legacy-baseline/roles/legacy-role.md'), '角色包随模板分发：legacy-role.md');
+  assert.ok(files.has('legacy-baseline/roles/review.md'), '角色包随模板分发：review.md');
+  const dsl = JSON.parse(files.get('legacy-baseline/vwf-dsl.json'));
   assert.equal(dsl.bundleRoles, true, 'DSL 投影携带 bundleRoles 标记');
-  assert.ok(files.get('default-workflow/SKILL.md').includes('默认工作流'), 'SKILL.md 触发词含 displayName');
+  assert.ok(files.get('legacy-baseline/SKILL.md').includes('测试基座（旧式边）'), 'SKILL.md 触发词含 displayName');
 });
 
 test('S2 生成器：SKILL.md 触发词含 displayName 与 id', () => {
-  const { files } = generateAll(tplDir);
-  const skill = files.get('dev-workflow-2-0/SKILL.md');
-  assert.ok(skill.includes('name: dev-workflow-2-0'));
-  assert.ok(skill.includes('开发工作流 2.0'));
+  const { files } = generateBaseline();
+  const skill = files.get('legacy-baseline/SKILL.md');
+  assert.ok(skill.includes('name: legacy-baseline'));
+  assert.ok(skill.includes('测试基座（旧式边）'));
 });
 
 test('S2 生成器：幂等（两次调用产物完全一致）', () => {
-  const a = generateAll(tplDir);
-  const b = generateAll(tplDir);
+  const a = generateBaseline();
+  const b = generateBaseline();
   assert.deepEqual([...a.files.keys()].sort(), [...b.files.keys()].sort());
   for (const [rel, content] of a.files) {
     assert.equal(content, b.files.get(rel), '产物不一致：' + rel);
@@ -178,13 +178,13 @@ test('S2 generateUserSkill：用户模板 → 自包含 skill 三件套（T-03 s
     assert.ok(files.has(rel), '缺产物：' + rel);
   }
   const skill = files.get('SKILL.md');
-  assert.ok(skill.includes('name: dev-workflow-2-0'), 'skill frontmatter name');
-  assert.ok(skill.includes('开发工作流 2.0'), 'skill 触发词（displayName）');
+  assert.ok(skill.includes('name: legacy-baseline'), 'skill frontmatter name');
+  assert.ok(skill.includes('测试基座（旧式边）'), 'skill 触发词（displayName）');
   const script = files.get('script.mjs');
   assert.ok(script.includes('AWAITING_HUMAN_'), 'script 含人工门禁语义');
   assert.ok(script.includes('超限归因'), 'script 含超限归因（auto-reschedule）');
   const meta = JSON.parse(files.get('meta.json'));
-  assert.equal(meta.name, 'vwf-dev-workflow-2-0');
+  assert.equal(meta.name, 'vwf-legacy-baseline');
 });
 
 test('#117 生成 skill 不再写死不通过去开发或不经门禁去收口', () => {
@@ -197,12 +197,6 @@ test('#117 生成 skill 不再写死不通过去开发或不经门禁去收口',
 test('#119 coerceStructured 仅对 object/array schema 解析 JSON 字符串', () => {
   const { script } = compileBlueprint(bp);
   assert.equal(script.includes("if (root !== 'object' && root !== 'array') return v"), true);
-});
-
-test('#117 手写主会话手册同样不再写死这两跳', () => {
-  const handbook = readFileSync(path.join(here, '../../dsh/skill/SKILL.md'), 'utf8');
-  assert.equal(handbook.includes('entry=closeout'), false, '手册不得写死通过 → entry=closeout');
-  assert.equal(handbook.includes('entry=dev'), false, '手册不得写死不通过 → entry=dev');
 });
 
 test('#117 主会话 README 不再写死不通过去开发或不经门禁去收口', () => {
@@ -244,7 +238,7 @@ test('C4 原子写盘-成功：三件套落盘且与 generateUserSkill 内容一
       assert.equal(readFileSync(path.join(r.dir, rel), 'utf8'), generateUserSkill(bp).get(rel), rel + ' 内容一致')
     }
     const kids = fs.readdirSync(tmp)
-    assert.deepEqual(kids, ['dev-workflow-2-0'], '无暂存目录残留')
+    assert.deepEqual(kids, ['legacy-baseline'], '无暂存目录残留')
   } finally { rmTmp(tmp) }
 })
 
@@ -266,7 +260,7 @@ test('C4 原子写盘-中途失败：暂存与已写文件零残留（注入第 
 test('C4 原子写盘-更新失败：旧版本目录不受影响（换入未发生）', () => {
   const tmp = makeTmp()
   try {
-    const finalDir = path.join(tmp, 'dev-workflow-2-0')
+    const finalDir = path.join(tmp, 'legacy-baseline')
     fs.mkdirSync(finalDir, { recursive: true })
     fs.writeFileSync(path.join(finalDir, 'OLD.md'), '旧版本')
     let writes = 0
@@ -287,22 +281,23 @@ test('C4 原子写盘-更新失败：旧版本目录不受影响（换入未发�
 test('S3 用户 skill 捆绑蓝图引用的内置角色定义（issue-81，产品工作区无 dsh/roles/ 时自定义工作流可运行）', () => {
   const tmp = makeTmp()
   try {
-    const r = writeUserSkill(bp, tmp, realIo)
+    // 角色源 = 内置角色 + 测试专用自定义角色（基座节点引用了后者）
+    const rolesSrc = makeFixtureRolesDir()
+    const r = writeUserSkill(bp, tmp, realIo, rolesSrc)
     assert.equal(r.ok, true, r.error)
-    // 蓝图引用了哪些内置角色就从蓝图取，新增节点或角色时无需再来此处补名单
+    // 蓝图引用了哪些角色就从蓝图取，新增节点或角色时无需再来此处补名单
     const rolesDir = path.join(r.dir, 'roles')
     const roleFiles = fs.readdirSync(rolesDir).sort()
     const referenced = [...new Set((bp.nodes || []).map((n) => n.profile).filter(Boolean))].sort()
-    assert.ok(referenced.length > 0, '测试用蓝图应至少引用一个内置角色')
+    assert.ok(referenced.length > 0, '测试用蓝图应至少引用一个角色')
     for (const id of referenced) {
       assert.ok(roleFiles.includes(id + '.md'), '角色已捆绑：' + id)
     }
     // 内容与源一致（逐个引用的角色都比，而不是只抽查某一个）
-    const srcDir = path.join(here, '..', '..', 'dsh', 'roles')
     for (const id of referenced) {
       assert.equal(
         readFileSync(path.join(r.dir, 'roles', id + '.md'), 'utf8'),
-        readFileSync(path.join(srcDir, id + '.md'), 'utf8'),
+        readFileSync(path.join(rolesSrc, id + '.md'), 'utf8'),
         id + ' 内容与源一致'
       )
     }
@@ -368,48 +363,53 @@ test('S6 内联仅限蓝图引用内置角色：最小图产物 < 128KB 体积�
 })
 
 // ── FIX-226（决策 3=A）：自定义角色正文编译期内联 —— 冻结单位是内容，不是路径 ──
-// 现状证据：自定义角色（builtin:false，当前即 dispatcher）此前只把路径写进快照、运行期
+// 现状证据：自定义角色（builtin:false，当前即 legacy-role）此前只把路径写进快照、运行期
 // 「工作区优先」读文件；等待期间改 dsh/roles/<id>.md 会让已存在的运行中途换规矩。
 // 本切片把「本图实际引用到的全部角色」一并编译期内联，并在产物超尺寸闸门时显式降级。
-function makeRolesDir({ dispatcher }) {
+const FIXTURE_ROLES = path.join(here, 'fixtures', 'roles')
+function makeRolesDir({ legacyRole } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'vwf-roles-'))
   const src = path.join(here, '..', '..', 'dsh', 'roles')
   for (const f of readdirSync(src)) {
     if (f.endsWith('.md')) writeFileSync(path.join(dir, f), readFileSync(path.join(src, f), 'utf8'), 'utf8')
   }
-  if (dispatcher !== undefined) writeFileSync(path.join(dir, 'dispatcher.md'), dispatcher, 'utf8')
+  // 测试专用自定义角色（非内置）
+  for (const f of readdirSync(FIXTURE_ROLES)) {
+    writeFileSync(path.join(dir, f), readFileSync(path.join(FIXTURE_ROLES, f), 'utf8'), 'utf8')
+  }
+  if (legacyRole !== undefined) writeFileSync(path.join(dir, 'legacy-role.md'), legacyRole, 'utf8')
   return dir
 }
 
-test('S7 自定义角色正文编译期内联：dispatcher（builtin:false）随图内联，等待期间改文件不影响已编译产物', () => {
-  const original = readFileSync(path.join(here, '..', '..', 'dsh', 'roles', 'dispatcher.md'), 'utf8')
-  const dir = makeRolesDir({ dispatcher: original })
+test('S7 自定义角色正文编译期内联：legacy-role（builtin:false）随图内联，等待期间改文件不影响已编译产物', () => {
+  const original = readFileSync(path.join(FIXTURE_ROLES, 'legacy-role.md'), 'utf8')
+  const dir = makeRolesDir({ legacyRole: original })
   try {
     const { script, roles } = compileBlueprint(bp, { rolesDir: dir })
-    assert.ok(script.includes(JSON.stringify(original)), '自定义角色 dispatcher 正文应内联进 ROLE_DEFS')
-    const disp = roles.find((r) => r.id === 'dispatcher')
-    assert.ok(disp, '角色元信息应含 dispatcher')
-    assert.equal(disp.builtin, false, 'dispatcher 身份仍为自定义（身份切分不变）')
-    assert.equal(disp.inlined, true, 'dispatcher 应已内联')
+    assert.ok(script.includes(JSON.stringify(original)), '自定义角色 legacy-role 正文应内联进 ROLE_DEFS')
+    const disp = roles.find((r) => r.id === 'legacy-role')
+    assert.ok(disp, '角色元信息应含 legacy-role')
+    assert.equal(disp.builtin, false, 'legacy-role 身份仍为自定义（身份切分不变）')
+    assert.equal(disp.inlined, true, 'legacy-role 应已内联')
     assert.equal(disp.bytes, Buffer.byteLength(original, 'utf8'), '字节数为内联正文的实况字节')
     assert.equal(disp.digest, createHash('sha256').update(original, 'utf8').digest('hex'), '摘要与内联正文同源')
     // 等待期间改写角色文件：已编译产物不受影响（冻结），再编译则读到新内容（AC-03）
-    writeFileSync(path.join(dir, 'dispatcher.md'), original + '\n【已改版】\n', 'utf8')
+    writeFileSync(path.join(dir, 'legacy-role.md'), original + '\n【已改版】\n', 'utf8')
     assert.ok(script.includes(JSON.stringify(original)), '已编译产物仍持原正文（冻结）')
     assert.ok(!script.includes('【已改版】'), '已编译产物不含改写后的内容')
     const { script: fresh, roles: freshRoles } = compileBlueprint(bp, { rolesDir: dir })
     assert.ok(fresh.includes('【已改版】'), '重新编译读到改写后的角色正文（新运行不受影响）')
-    assert.notEqual(freshRoles.find((r) => r.id === 'dispatcher').digest, disp.digest, '新编译的角色摘要随内容变化')
+    assert.notEqual(freshRoles.find((r) => r.id === 'legacy-role').digest, disp.digest, '新编译的角色摘要随内容变化')
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('S8 内联尺寸闸门：产物超限即拒绝内联自定义角色并显式降级（inlined:false + reason），不静默截断', () => {
-  const original = readFileSync(path.join(here, '..', '..', 'dsh', 'roles', 'dispatcher.md'), 'utf8')
+  const original = readFileSync(path.join(FIXTURE_ROLES, 'legacy-role.md'), 'utf8')
   const dir = makeRolesDir({})
   try {
     // 闸门压到极小值以稳定命中「超尺寸」分支（真实默认 960KB，见 INLINE_ROLE_DEFS_OUTPUT_LIMIT_BYTES）
     const { script, roles } = compileBlueprint(bp, { rolesDir: dir, inlineOutputLimitBytes: 1024 })
-    const disp = roles.find((r) => r.id === 'dispatcher')
+    const disp = roles.find((r) => r.id === 'legacy-role')
     assert.equal(disp.inlined, false, '超尺寸闸门命中：自定义角色不内联')
     assert.equal(disp.reason, 'over_size_gate', '降级原因如实标注为超尺寸闸门')
     assert.equal(disp.digest, null, '未内联则无内容摘要（不得编造）')
@@ -425,9 +425,9 @@ test('S8 内联尺寸闸门：产物超限即拒绝内联自定义角色并显�
 test('S9 角色文件读不到：该角色记 inlined:false/unreadable，其余角色正常内联，编译不失败', () => {
   const dir = makeRolesDir({})
   try {
-    rmSync(path.join(dir, 'dispatcher.md'), { force: true })
+    rmSync(path.join(dir, 'legacy-role.md'), { force: true })
     const { script, roles } = compileBlueprint(bp, { rolesDir: dir })
-    const disp = roles.find((r) => r.id === 'dispatcher')
+    const disp = roles.find((r) => r.id === 'legacy-role')
     assert.equal(disp.inlined, false, '读不到的角色不得标记为已内联')
     assert.equal(disp.reason, 'unreadable', '降级原因如实标注为文件读不到')
     assert.equal(disp.digest, null, '无正文则无摘要')
@@ -440,7 +440,7 @@ test('S4 内置角色清单：单一事实源为 manifest（dsh/roles/builtin-ro
   const ids = loadBuiltinRoleIds()
   assert.ok(ids.length >= 12, `内置角色不少于 12 个（实际 ${ids.length}）`)
   assert.ok(ids.includes('requirements') && ids.includes('synthesizer'), '含新增角色')
-  assert.ok(!ids.includes('dispatcher'), 'dispatcher 已迁出内置')
+  assert.ok(!ids.includes('legacy-role'), '自定义角色（测试夹具）不得进入内置清单')
   // 来源证明：不再反向解析 host.js 源码——传入任何字符串都被当作 manifest 路径处理
   assert.throws(() => loadBuiltinRoleIds('const BUILTIN_ROLES = []'), /解析失败/, '非路径输入按 manifest 读取失败报错')
   assert.throws(() => loadBuiltinRoleIds(''), /解析失败/, '空路径报错')

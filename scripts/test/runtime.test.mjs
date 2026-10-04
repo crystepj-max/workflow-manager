@@ -9,11 +9,12 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { compileBlueprint, generateAll } from '../generate.mjs'
+import { loadBaseline, makeFixtureRolesDir } from './helpers/baseline-harness.mjs'
 import { runGeneratedScript, makeAgentScript } from './helpers/runtime-harness.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const tplDir = path.join(here, '../../templates')
-const tpl = JSON.parse(readFileSync(path.join(tplDir, 'custom-seeds', 'dev-workflow-2-0.json'), 'utf8'))
+const tpl = JSON.parse(readFileSync(path.join(here, 'fixtures', 'legacy-baseline.json'), 'utf8'))
 const mini = JSON.parse(readFileSync(path.join(here, 'fixtures/hello-blueprint.json'), 'utf8'))
 const fanoutFixture = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'))
 
@@ -223,8 +224,8 @@ test('F8 折叠通用语义：两路同路径条件分流节点零出场、按�
   const foldBp = {
     id: 'fold-test', displayName: '折叠测试', entry: 'start',
     nodes: [
-      { id: 'start', profile: 'dispatcher', goal: 'x', output: { schema: { type: 'object', properties: { go: { type: 'boolean' } }, required: ['go'], additionalProperties: false }, successCondition: '$.go == true' } },
-      { id: 'route', profile: 'dispatcher', goal: 'r' },
+      { id: 'start', profile: 'legacy-role', goal: 'x', output: { schema: { type: 'object', properties: { go: { type: 'boolean' } }, required: ['go'], additionalProperties: false }, successCondition: '$.go == true' } },
+      { id: 'route', profile: 'legacy-role', goal: 'r' },
       { id: 'a', profile: 'dev', goal: 'a' },
       { id: 'b', profile: 'dev', goal: 'b' },
     ],
@@ -250,7 +251,7 @@ test('F9 走通性-死胡同兜底：判定失败且无 failure 边 → 明确�
   // 专测运行时兜底——compileDsh 不做校验，直接编译执行
   const deadBp = {
     id: 'dead-test', displayName: '死胡同测试', entry: 's',
-    nodes: [{ id: 's', profile: 'dispatcher', goal: 'x', output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false }, successCondition: '$.ok == true' } }],
+    nodes: [{ id: 's', profile: 'legacy-role', goal: 'x', output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false }, successCondition: '$.ok == true' } }],
     edges: [{ from: 's', to: '$end', on: 'success' }],
   }
   const { result } = await runEngine(deadBp, { s: { ok: false } })
@@ -267,9 +268,8 @@ test('F10 机制可参数化：startRound/history/feedback 续跑参数生效', 
   assert.ok(agentCalls[0].prompt.includes('请重做'), '反馈应注入下一轮台词')
 })
 
-// ---------- 第二层 · 模板级回归（内置蓝图 dev-workflow-2-0，非框架契约） ----------
-const { files } = generateAll(tplDir)
-const tplScript = files.get('dev-workflow-2-0/script.mjs')
+// ---------- 第二层 · 模板级回归（内置蓝图 legacy-baseline，非框架契约） ----------
+const tplScript = compileBlueprint(tpl, { rolesDir: makeFixtureRolesDir() }).script
 const runTpl = (table, args = {}) => {
   const agent = makeAgentScript(table)
   return runGeneratedScript(tplScript, { args, agent })
@@ -288,13 +288,13 @@ test('T1 模板回归-幸福路径：门禁挂起后通过 → DONE；分流零�
   assert.deepEqual(agentCalls.map((c) => c.label), ['调度', '开发', '测试', '审核', '人工验收'], '分流节点应被折叠，零出场')
   const dispatchPrompt = agentCalls[0].prompt
   assert.ok(dispatchPrompt.includes('【本节点应产出 Formal Artifact】') && dispatchPrompt.includes('dispatch-result.json'), '文件契约注入')
-  // FIX-226（决策 3=A）：自定义角色 dispatcher 现在编译期内联正文（不再只给路径），
+  // FIX-226（决策 3=A）：自定义角色 legacy-role 现在编译期内联正文（不再只给路径），
   // 等待期间改工作区角色文件不影响本 Run——断言注入的是角色文件正文本身。
-  const dispatcherContent = readFileSync(path.join(tplDir, '..', 'dsh', 'roles', 'dispatcher.md'), 'utf8')
-  assert.ok(dispatcherContent.trim().length > 0, '夹具卫生：dispatcher.md 非空')
+  const legacyRoleContent = readFileSync(path.join(here, 'fixtures', 'roles', 'legacy-role.md'), 'utf8')
+  assert.ok(legacyRoleContent.trim().length > 0, '夹具卫生：legacy-role.md 非空')
   assert.ok(dispatchPrompt.includes('【角色定义】（自定义角色，编译期内联，运行起始冻结）'), '自定义角色内联分支标识')
-  assert.ok(dispatchPrompt.includes(dispatcherContent), '自定义角色台词注入（编译期内联正文，逐字一致）')
-  assert.ok(!dispatchPrompt.includes('dsh/roles/dispatcher.md'), '已内联的自定义角色不再走读文件路径')
+  assert.ok(dispatchPrompt.includes(legacyRoleContent), '自定义角色台词注入（编译期内联正文，逐字一致）')
+  assert.ok(!dispatchPrompt.includes('dsh/roles/legacy-role.md'), '已内联的自定义角色不再走读文件路径')
   // 人工通过 → 收口 → DONE
   const r2 = await runTpl({ 收口: { status: 'done', summary: 's' } }, {
     entry: 'accept', approved: true, startRound: 0, history: result.history, feedback: '',
@@ -503,6 +503,10 @@ test('T8 契约一致性：dsh/roles/*.md 反引号文件名 ⊆ 全部模板 ou
       if (n.output && n.output.files && typeof n.output.files === 'object') Object.keys(n.output.files).forEach((p) => declared.add(p))
     })
   }
+  // 测试基座（旧式边形态，已移出模板资产）同样纳入声明集合
+  ;(loadBaseline().nodes || []).forEach((n) => {
+    if (n.output && n.output.files && typeof n.output.files === 'object') Object.keys(n.output.files).forEach((p) => declared.add(p))
+  })
   // 角色（#81）只表达能力，不声明产物契约：具体产物文件名由所在模板的
   // output.files 提供。探索模板（#82）落地其蓝图时再引入自己的产物名。
   const rolesDir = path.join(here, '../../dsh/roles')

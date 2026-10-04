@@ -595,7 +595,7 @@ function validateBlueprint(bp, opts) {
   const requireModels = !!(opts && opts.requireModels)
 
   if (!bp || typeof bp !== 'object') return { ok: false, errors: [{ at: '$', message: '蓝图必须是对象' }], warnings: [] }
-  if (typeof bp.id !== 'string' || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(bp.id)) err('$.id', 'id 必填且为 kebab-case（小写英文+连字符），如 dev-workflow-2-0')
+  if (typeof bp.id !== 'string' || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(bp.id)) err('$.id', 'id 必填且为 kebab-case（小写英文+连字符），如 wf-diagnose')
   if (typeof bp.displayName !== 'string' || !bp.displayName.trim()) err('$.displayName', 'displayName（中文展示名）必填非空 —— 生成 skill 的触发词之一（FR-6）')
   if (bp.name !== undefined && bp.name !== bp.id) err('$.name', 'name 与 id 必须一致（单标识方案，D1），或删除 name')
   if (bp.onMaxRounds !== undefined && !ON_MAX_ROUNDS.includes(bp.onMaxRounds)) err('$.onMaxRounds', 'onMaxRounds ∈ { return, auto-reschedule }')

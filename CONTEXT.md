@@ -13,7 +13,7 @@
 - **节点 / 边 / 入口 / $end**：蓝图图结构。边分 success（成功/打回后继续）与 failure（打回/终止）两类。
 - **角色库（Role Library）**：供工作流节点选择与管理角色的目录，由正式内置角色与自定义角色组成；角色身份与节点结果契约彼此独立。
 - **内置角色（Built-in Role）**：产品定义的正式角色，机器 ID 与展示顺序稳定，始终可选、只读，可作为创建自定义角色的起点。
-- **自定义角色（Custom Role）**：用户可创建和维护的角色；历史 `dispatcher` 属于自定义角色，迁移后仍保持既有引用可解析。
+- **自定义角色（Custom Role）**：用户可创建和维护的角色（`builtin=false`，可编辑 / 删除）；正式内置角色为 12 个，没有历史兼容角色。
 
 ## 引擎层（框架，与业务无关）
 
@@ -83,7 +83,7 @@
 ## 插件界面层（编辑器与运行看板）
 
 - **工作流面板**：DSH 设置页注入的 `settings.section`（`client.js` 末尾 `slots.inject`），内含两个页签。
-- **模板库（templates 页签）**：工作流清单（一行一个模板）。正式内置标 builtin 且只读（蓝图真源 `templates/*.json`，当前含建设 · 完整功能开发）；历史两套 `default-workflow` / `dev-workflow-2-0` 真源在 `templates/custom-seeds/`，已迁为自定义（无内置标签，可编辑/删除）。操作 = 新建 / 编辑 / 删除。
+- **模板库（templates 页签）**：工作流清单（一行一个模板）。正式内置标 builtin 且只读——蓝图真源 `templates/*.json`，当前 4 个（完整功能开发、诊断 · 缺陷修复、探索 · 多视角探索、优化 · 快速迭代），生成物在 `.generated/<id>/`；只有用户模板可编辑/删除，落盘 `~/.dsh/visual-workflow/templates/<id>.json`（builtin=false）。操作 = 新建 / 编辑 / 删除。
 - **运行看板（dashboard 页签）**：每 3 秒轮询 `vwf.runs.list` + `vwf.state`，呈现**运行列表**（可点选切换）、
   当前 run 的状态/阶段、只读画布（节点按状态染色，按 workflowId 匹配模板 DSL）、**子代理表格**与
   最近 20 条日志。**与模板库无关**（两者常被混指）。
@@ -136,7 +136,7 @@
   看板可续跑 / 暂停 / 指导。**回退**：`wf_run` 条件注册（引擎可达才注册，`host.js:2155`），
   不可用时才改用内置 `workflow` 工具执行编译产物——**此时脚本返回值只回到主会话、插件进程
   拿不到**，看板只能看到事件流（阶段 / 子代理 / 日志），运行记录退化为单段且 `completion=null`；
-  runbook 要求此时必须如实提示用户记录退化（`dsh/skill/SKILL.md` 运行步骤 3）。
+  runbook 要求此时必须如实提示用户记录退化（`.generated/<id>/SKILL.md` 运行步骤 3）。
   注：编辑器「获取脚本」按钮已不在当前界面（`host.js:1534`：面板不再暴露预览/准备运行按钮）。
 - **`runs`**：`host.js` 里订阅 `workflow/*` 事件积累的运行记录。内存 Map + 落盘
   `~/.dsh/visual-workflow/runs/<runId>.json`（#40 起持久化）：事件驱动合并写（每 run 至多一个

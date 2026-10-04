@@ -15,7 +15,7 @@
 | 生成器（内置） | `scripts/generate.mjs` | `npm run generate` → `.generated/<id>/{script.mjs, vwf-dsl.json, SKILL.md, meta.json}` |
 | 生成器（用户 skill） | `scripts/generate.mjs user <蓝图json> <skillDir>` | **已实现**：校验 + 生成自包含三件套（SKILL.md/script.mjs/meta.json）到 `<skillDir>/<id>/` |
 | 校验器 | `scripts/validate-blueprint.mjs` | 规则全集含**异源规则 7**（**LOC-021 修订 T-06**：按蓝图 `heteroCheck` 档位 关/弱/强 判定，不再全局强制，返回 `{ok, errors, warnings}`） |
-| 历史自定义种子蓝图 | `templates/custom-seeds/dev-workflow-2-0.json` | 已退出内置身份（#82）；7 节点/13 边，bindings 异源 |
+| 正式内置蓝图 | `templates/*.json`（当前 4 个） | 内置模板的唯一事实源；生成产物在 `.generated/<id>/`，`npm run generate` 重建 |
 | 等价断言 | `scripts/equivalence.mjs` | 10 项断言（CI 用） |
 | 测试 | `scripts/test/` | 32 测试全绿（含异源 T1-T5、generateUserSkill） |
 
@@ -70,7 +70,7 @@ node <repo>/scripts/generate.mjs user ~/.dsh/visual-workflow/templates/<id>.json
 ### 1.5 验证路径（创造模式会话内）
 
 1. `npm run generate`（先产出 `.generated/`）→ `cordis_run` 激活插件。
-2. RPC 冒烟：`vwf.workflows.list`（应见内置 `dev-workflow-2-0`，builtin=true）。
+2. RPC 冒烟：`vwf.workflows.list`（应见 4 个内置模板，builtin=true）。
 3. `vwf.workflows.save`：新蓝图（无 dev/review 的简单模板）→ list 出现（builtin=false）；重启宿主（或重新激活插件）后 list 仍在（**AC-3 落盘**）；`~/.dsh/skills/<id>/SKILL.md` 存在（save 即闭环）。
 4. 撞名：save 同名内置 → 拒绝；同名用户（另存为）→ 拒绝提示改名。
 5. `remove` 用户模板 → 蓝图与 skill 同步消失；remove 内置 → 拒绝。

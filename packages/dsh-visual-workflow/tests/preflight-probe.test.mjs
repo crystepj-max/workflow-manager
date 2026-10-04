@@ -137,7 +137,7 @@ function engineEnv(eng, opts = {}) {
 const EDITOR_DSL = {
   id: 't1', name: '编辑器图', entry: 'a', control: { maxRounds: 3 },
   nodes: [
-    { id: 'a', profile: 'dispatcher', label: 'A', goal: '目标A', model: { provider: 'p1', model: 'm1' }, output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, successCondition: '$.ok == true' } },
+    { id: 'a', profile: 'legacy-role', label: 'A', goal: '目标A', model: { provider: 'p1', model: 'm1' }, output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, successCondition: '$.ok == true' } },
     { id: 'b', profile: 'dev', label: 'B', goal: '目标B', model: { provider: 'p1', model: 'm1' } },
   ],
   edges: [
@@ -230,7 +230,7 @@ test('vwf.probe：错误分类映射（quota/rate_limit/timeout/model_unavailabl
     models: { p1: ['quota', 'rl', 'to', 'mu', 'pd', 'un', 'nw', 'pv', 'q2', 'n4'] },
   })
   const { handlers } = env({ extra: { llm } })
-  const mk = (model) => ({ ...EDITOR_DSL, nodes: [{ id: 'a', profile: 'dispatcher', label: 'A', goal: 'g', model: { provider: 'p1', model: model } }], edges: [{ from: 'a', to: '$end', on: 'success' }] })
+  const mk = (model) => ({ ...EDITOR_DSL, nodes: [{ id: 'a', profile: 'legacy-role', label: 'A', goal: 'g', model: { provider: 'p1', model: model } }], edges: [{ from: 'a', to: '$end', on: 'success' }] })
   const cases = {
     quota: 'quota', rl: 'rate_limit', to: 'timeout', mu: 'model_unavailable', pd: 'permission_denied', un: 'provider_unreachable',
     nw: 'provider_unreachable', pv: 'provider_error', q2: 'quota', n4: 'model_unavailable',
@@ -252,7 +252,7 @@ test('vwf.probe：终态 finish 误报回归（UAT-01 实测）——zai 余额�
     models: { p1: ['zai', 'zai2', 'codex'] },
   })
   const { handlers } = env({ extra: { llm } })
-  const mk = (model) => ({ ...EDITOR_DSL, nodes: [{ id: 'a', profile: 'dispatcher', label: 'A', goal: 'g', model: { provider: 'p1', model: model } }], edges: [{ from: 'a', to: '$end', on: 'success' }] })
+  const mk = (model) => ({ ...EDITOR_DSL, nodes: [{ id: 'a', profile: 'legacy-role', label: 'A', goal: 'g', model: { provider: 'p1', model: model } }], edges: [{ from: 'a', to: '$end', on: 'success' }] })
   for (const model of ['zai', 'zai2', 'codex']) {
     const r = await call(handlers, 'vwf.probe', { dsl: mk(model), force: true })
     assert.equal(r.ok, false, model + ' 不得判可用')
@@ -427,7 +427,7 @@ test('vwf.probe：请求形态护栏——fake 按宿主形态拒绝裸字符串
 test('vwf.probe：配置判定——已删除的 Provider/Model 报未配置且不发真实调用', async () => {
   const llm = makeLlm({ providers: ['deepseek-official'], models: { 'deepseek-official': ['deepseek-v4.1-flash'] } })
   const { handlers } = env({ extra: { llm } })
-  const mk = (provider, model) => ({ ...EDITOR_DSL, nodes: [{ id: 'a', profile: 'dispatcher', label: 'A', goal: 'g', model: { provider: provider, model: model } }], edges: [{ from: 'a', to: '$end', on: 'success' }] })
+  const mk = (provider, model) => ({ ...EDITOR_DSL, nodes: [{ id: 'a', profile: 'legacy-role', label: 'A', goal: 'g', model: { provider: provider, model: model } }], edges: [{ from: 'a', to: '$end', on: 'success' }] })
   // 已删除配置的模型：上游也许仍能应答，但配置已失效 → 必须报未配置（用户口径）
   const goneModel = await call(handlers, 'vwf.probe', { dsl: mk('deepseek-official', 'deepseek-v4-pro') })
   assert.equal(goneModel.ok, false)

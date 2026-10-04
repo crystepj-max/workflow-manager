@@ -1,5 +1,7 @@
 # Skill 调用入口接入 Logical Run Runtime（本地任务规格）
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `dsh/skill/SKILL.md` 技能入口**已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`），正式内置角色 12 个，无历史兼容角色。
+
 | 元数据 | 值 |
 |---|---|
 | 需求基线版本 | V3 |

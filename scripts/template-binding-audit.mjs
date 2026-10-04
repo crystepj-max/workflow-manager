@@ -13,8 +13,7 @@
 // 未提供目录 = 「产品 DSH 不可达」→ 显式跳过并留痕（exit 0，不静默绿、不误报红）。
 //
 // 退出码：0 = 全部命中或显式跳过；1 = 存在过期绑定（输出逐节点失败清单）。
-// 审计范围：四套正式内置模板（与 builtin-template-model-defaults 映射表同口径）；
-// 历史自定义模板（default-workflow / dev-workflow-2-0）为用户自管资产，不在本审计内。
+// 审计范围：templates/ 下的全部正式内置模板（与 builtin-template-model-defaults 映射表同口径）。
 
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'

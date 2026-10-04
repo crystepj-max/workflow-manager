@@ -1,5 +1,7 @@
 # v1 实施任务清单（三要素化，dev-workflow-2.0 dispatch 输入）
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `default-workflow` / `dev-workflow-2-0` 工作流模板**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`）。
+
 > 来源：`docs/工作流统一引擎需求规格.md`（FR/AC）+ wayfinder 地图（`wayfinder/MAP.md`，T-01~T-07 决策）。
 > 每项含三要素（任务目标 / 涉及范围 / 验收标准）——可直接作为 dev-workflow-2.0 的 dispatch 输入。
 > 分层：**引擎层**（纯 node，普通模式）· **插件层**（Cordis，创造模式会话）· **收口层**。

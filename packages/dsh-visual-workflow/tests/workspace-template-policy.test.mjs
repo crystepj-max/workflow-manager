@@ -70,7 +70,7 @@ test('LOC-009：workspace 声明校验 —— 非法 template_id / resource_kind
 // ── host 侧：模板映射与 resource_kind 传参（stub 包装脚本子进程）─────────
 const MINI_DSL = (extra = {}) => ({
   id: 'my-flow', name: '自定义流', entry: 'a',
-  nodes: [{ id: 'a', profile: 'dispatcher', label: 'a', goal: 'g', model: { provider: 'p1', model: 'm1' } }],
+  nodes: [{ id: 'a', profile: 'legacy-role', label: 'a', goal: 'g', model: { provider: 'p1', model: 'm1' } }],
   edges: [{ from: 'a', to: '$end', on: 'success' }],
   ...extra,
 })

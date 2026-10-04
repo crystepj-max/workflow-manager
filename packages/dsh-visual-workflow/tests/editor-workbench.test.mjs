@@ -70,7 +70,7 @@ const PLAIN_DSL = {
   id: 'wf1', name: '测试流', description: 'seed', entry: 'node-1',
   control: { maxRounds: 9 },
   nodes: [
-    { id: 'node-1', profile: 'dispatcher', label: '节点1', goal: 'g' },
+    { id: 'node-1', profile: 'legacy-role', label: '节点1', goal: 'g' },
     { id: 'node-2', profile: 'dev', label: '节点2', goal: 'g2' },
   ],
   edges: [{ from: 'node-1', to: 'node-2', on: 'success' }],
@@ -80,14 +80,14 @@ const BUILTIN_DSL = {
   id: 'wf-builtin', name: '内置流程', description: '内置模板', entry: 'b1',
   control: { maxRounds: 3 },
   nodes: [
-    { id: 'b1', profile: 'dispatcher', label: '内置步骤一', goal: 'g' },
+    { id: 'b1', profile: 'legacy-role', label: '内置步骤一', goal: 'g' },
     { id: 'b2', profile: 'dev', label: '内置步骤二', goal: 'g2' },
   ],
   edges: [{ from: 'b1', to: 'b2', on: 'success' }],
 }
 
 const ROLES = [
-  { id: 'dispatcher', name: '调度', summary: '分发', builtin: true },
+  { id: 'legacy-role', name: '调度', summary: '分发', builtin: true },
   { id: 'dev', name: '开发', summary: '实现', builtin: true },
   { id: 'tester', name: '测试', summary: '检查', builtin: true },
   { id: 'reviewer', name: '审核', summary: '复核', builtin: true },
@@ -1004,7 +1004,7 @@ test('V-12 画布自上而下：入口在上、下游节点在下；同级兄弟
   const parallelDsl = {
     id: 'vf-vertical', name: '纵向布局', entry: 'a', control: { maxRounds: 3 },
     nodes: [
-      { id: 'a', label: '安排', profile: 'dispatcher', goal: 'g' },
+      { id: 'a', label: '安排', profile: 'legacy-role', goal: 'g' },
       { id: 'b1', label: '分支一', profile: 'dev', goal: 'g' },
       { id: 'b2', label: '分支二', profile: 'dev', goal: 'g' },
     ],

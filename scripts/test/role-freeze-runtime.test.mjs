@@ -3,7 +3,7 @@
 //   AC-01 等待期间改写角色文件，恢复后节点角色正文仍是运行时那一版
 //   AC-02 同一运行重复恢复三次，三次读到的角色正文完全一致
 //   AC-03 新建运行读到修改后的角色正文（冻结只作用于已存在的运行）
-// 方法：真实编译 dev-workflow-2-0（其 dispatch/route 节点用自定义角色 dispatcher），
+// 方法：真实编译 legacy-baseline（其 dispatch/route 节点用自定义角色 legacy-role），
 // 在独立角色源目录里改写角色文件，再用同一份已编译译文真实执行——断言注入 prompt 的
 // 角色正文逐字不变（不是字符串嗅探，而是运行时实际注入文本）。
 import { test } from 'node:test'
@@ -18,9 +18,10 @@ import { runGeneratedScript, makeAgentScript } from './helpers/runtime-harness.m
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(here, '..', '..')
 const ROLES_SRC = path.join(root, 'dsh', 'roles')
-const tpl = JSON.parse(readFileSync(path.join(root, 'templates', 'custom-seeds', 'dev-workflow-2-0.json'), 'utf8'))
+const tpl = JSON.parse(readFileSync(path.join(root, 'scripts', 'test', 'fixtures', 'legacy-baseline.json'), 'utf8'))
 
-const ORIGINAL = readFileSync(path.join(ROLES_SRC, 'dispatcher.md'), 'utf8')
+const FIXTURE_ROLES = path.join(here, 'fixtures', 'roles')
+const ORIGINAL = readFileSync(path.join(FIXTURE_ROLES, 'legacy-role.md'), 'utf8')
 const EDITED = ORIGINAL + '\n\n【已改版】本轮只做只读研究\n'
 
 const ROLE_MARK = '【角色定义】（自定义角色，编译期内联，运行起始冻结）：\n'
@@ -30,6 +31,10 @@ function makeRolesDir() {
   const dir = mkdtempSync(path.join(tmpdir(), 'vwf-freeze-'))
   for (const f of readdirSync(ROLES_SRC)) {
     if (f.endsWith('.md')) writeFileSync(path.join(dir, f), readFileSync(path.join(ROLES_SRC, f), 'utf8'), 'utf8')
+  }
+  // 测试专用自定义角色（非内置）
+  for (const f of readdirSync(FIXTURE_ROLES)) {
+    writeFileSync(path.join(dir, f), readFileSync(path.join(FIXTURE_ROLES, f), 'utf8'), 'utf8')
   }
   return dir
 }
@@ -63,7 +68,7 @@ test('AC-01 等待期间改写角色文件，已编译运行仍按运行时那�
   try {
     const { script } = compileBlueprint(tpl, { rolesDir: dir })
     // 编译之后（= 运行已开始）改写工作区角色文件
-    writeFileSync(path.join(dir, 'dispatcher.md'), EDITED, 'utf8')
+    writeFileSync(path.join(dir, 'legacy-role.md'), EDITED, 'utf8')
 
     const agent = makeAgentScript(TABLE)
     await runGeneratedScript(script, { args: {}, agent })
@@ -78,7 +83,7 @@ test('AC-02 同一运行重复恢复三次，三次读到的角色正文完全�
   const dir = makeRolesDir()
   try {
     const { script } = compileBlueprint(tpl, { rolesDir: dir })
-    writeFileSync(path.join(dir, 'dispatcher.md'), EDITED, 'utf8')
+    writeFileSync(path.join(dir, 'legacy-role.md'), EDITED, 'utf8')
 
     const seen = []
     for (let i = 0; i < 3; i++) {
@@ -97,7 +102,7 @@ test('AC-03 新建运行读到修改后的角色正文（冻结只作用于已�
   const dir = makeRolesDir()
   try {
     const first = compileBlueprint(tpl, { rolesDir: dir })
-    writeFileSync(path.join(dir, 'dispatcher.md'), EDITED, 'utf8')
+    writeFileSync(path.join(dir, 'legacy-role.md'), EDITED, 'utf8')
     // 已有运行不受影响
     const a1 = makeAgentScript(TABLE)
     await runGeneratedScript(first.script, { args: {}, agent: a1 })
@@ -110,8 +115,8 @@ test('AC-03 新建运行读到修改后的角色正文（冻结只作用于已�
     await runGeneratedScript(second.script, { args: {}, agent: a2 })
     assert.equal(injectedRoleDef(dispatchPrompt(a2)), EDITED, '新建运行读到修改后的角色正文')
     assert.notEqual(
-      second.roles.find((r) => r.id === 'dispatcher').digest,
-      first.roles.find((r) => r.id === 'dispatcher').digest,
+      second.roles.find((r) => r.id === 'legacy-role').digest,
+      first.roles.find((r) => r.id === 'legacy-role').digest,
       '新编译的角色摘要随内容变化（快照可回答「本 Run 用的是哪一版」）',
     )
   } finally { rmSync(dir, { recursive: true, force: true }) }
@@ -120,9 +125,9 @@ test('AC-03 新建运行读到修改后的角色正文（冻结只作用于已�
 test('AC-05 角色文件读不到：运行仍继续，角色降级为读文件路径（不崩溃）', async () => {
   const dir = makeRolesDir()
   try {
-    rmSync(path.join(dir, 'dispatcher.md'), { force: true })
+    rmSync(path.join(dir, 'legacy-role.md'), { force: true })
     const { script, roles } = compileBlueprint(tpl, { rolesDir: dir })
-    const disp = roles.find((r) => r.id === 'dispatcher')
+    const disp = roles.find((r) => r.id === 'legacy-role')
     assert.equal(disp.inlined, false, '读不到即未内联')
     assert.equal(disp.reason, 'unreadable', '降级原因如实标注')
 
@@ -131,6 +136,6 @@ test('AC-05 角色文件读不到：运行仍继续，角色降级为读文件�
     assert.equal(result.status, 'AWAITING_HUMAN_accept', '运行仍能走到人工门禁（不因角色读不到而失败）')
     const prompt = dispatchPrompt(agent)
     assert.ok(!prompt.includes(ROLE_MARK), '未内联时不出现内联标记')
-    assert.ok(prompt.includes('dsh/roles/dispatcher.md'), '降级为读文件路径提示（如实告知未冻结）')
+    assert.ok(prompt.includes('dsh/roles/legacy-role.md'), '降级为读文件路径提示（如实告知未冻结）')
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })

@@ -45,9 +45,6 @@ test('validateManifest：非法清单一律抛错（fail-closed）', () => {
   const badDef = JSON.parse(JSON.stringify(manifest))
   badDef.builtins[2].definition = '../escape.md'
   assert.throws(() => validateManifest(badDef), /definition/)
-  const dpIn = JSON.parse(JSON.stringify(manifest))
-  dpIn.builtins.push({ id: 'dispatcher', name: 'x', summary: 'y', definition: 'dsh/roles/dispatcher.md', builtin: true, readonly: true })
-  assert.throws(() => validateManifest(dpIn), /dispatcher 不得为内置/)
 })
 
 // ── list ─────────────────────────────────────────────────────────────────
@@ -68,14 +65,14 @@ test('list：内置在前、工作区自定义按 id 序居中、打包回退排
         { id: 'dev', content: '工作区旧 dev 摘要\n工作区旧正文' }, // 与内置同 id → 不进入自定义分组
         { id: 'aaa-custom', content: 'a 摘要\na 正文' },
       ],
-      bundled: [{ id: 'dispatcher', content: '调度首行\n其余' }],
+      bundled: [{ id: 'legacy-role', content: '调度首行\n其余' }],
     }),
   }
   const r = await lib().execute({ operation: 'list', facts })
   const ids = r.roles.map((x) => x.id)
   assert.equal(ids.indexOf('aaa-custom') < ids.indexOf('zzz-custom'), true, '自定义按 id 升序')
   assert.equal(ids.filter((x) => x === 'dev').length, 1, '内置 id 不重复出现在自定义分组')
-  assert.equal(ids.indexOf('dispatcher'), ids.length - 1, '打包回退排最后')
+  assert.equal(ids.indexOf('legacy-role'), ids.length - 1, '打包回退排最后')
   const dp = r.roles[r.roles.length - 1]
   assert.equal(dp.builtin, false)
   assert.equal(dp.summary, '调度首行', '打包回退摘要取首个非空行')
@@ -160,7 +157,7 @@ test('get：自定义读工作区；打包回退只读可见；未知 id 报「�
   const l = lib()
   let r = await l.execute({ operation: 'get', id: 'my-role', facts: { catalog: catalog({ workspace: [{ id: 'my-role', content: 'c\n' }] }) } })
   assert.deepEqual({ id: r.role.id, builtin: r.role.builtin, content: r.role.content }, { id: 'my-role', builtin: false, content: 'c\n' })
-  r = await l.execute({ operation: 'get', id: 'dispatcher', facts: { catalog: catalog({ bundled: [{ id: 'dispatcher', content: '调度正文\n' }] }) } })
+  r = await l.execute({ operation: 'get', id: 'legacy-role', facts: { catalog: catalog({ bundled: [{ id: 'legacy-role', content: '调度正文\n' }] }) } })
   assert.equal(r.role.builtin, false)
   assert.equal(r.role.content, '调度正文\n')
   r = await l.execute({ operation: 'get', id: 'ghost', facts: { catalog: catalog() } })
@@ -226,7 +223,7 @@ test('usage：草稿取代同 id 持久化版本；无 id 草稿独立计入；�
 // ── validateName ─────────────────────────────────────────────────────────
 test('validateName：完整规则集（含首尾点与 Windows 保留名）+ 唯一性', async () => {
   const l = lib()
-  const facts = { catalog: catalog({ workspace: [{ id: 'taken', content: 'x' }], bundled: [{ id: 'dispatcher', content: 'x' }] }) }
+  const facts = { catalog: catalog({ workspace: [{ id: 'taken', content: 'x' }], bundled: [{ id: 'legacy-role', content: 'x' }] }) }
   const bad = async (name, re) => {
     const r = await l.execute({ operation: 'validateName', name, facts })
     assert.equal(r.ok, false, `应拒绝：${JSON.stringify(name)}`)
@@ -242,7 +239,7 @@ test('validateName：完整规则集（含首尾点与 Windows 保留名）+ 唯
   await bad('com1', /系统保留名/)
   await bad('dev', /已存在同名角色/)
   await bad('Taken', /已存在同名角色/)       // 大小写不敏感
-  await bad('dispatcher', /已存在同名角色/)  // 打包回退角色计入唯一性
+  await bad('legacy-role', /已存在同名角色/)  // 打包回退角色计入唯一性
   const ok = await l.execute({ operation: 'validateName', name: '新角色', facts })
   assert.equal(ok.ok, true)
   // excludeId 排除自身（重命名场景）
@@ -292,9 +289,9 @@ test('change update：只读/存在性/重命名保护顺序与线上一致', as
   r = await l.execute({ operation: 'change', action: 'update', id: 'ghost', name: 'ghost', content: 'x', facts: { capabilities: caps, catalog: ws, workflows: noUsage } })
   assert.match(r.errors[0].message, /自定义角色不存在：ghost/)
   // 打包回退角色可编辑（种子到工作区）
-  r = await l.execute({ operation: 'change', action: 'update', id: 'dispatcher', name: 'dispatcher', content: '新内容', facts: { capabilities: caps, catalog: catalog({ bundled: [{ id: 'dispatcher', content: '旧\n' }] }), workflows: noUsage } })
+  r = await l.execute({ operation: 'change', action: 'update', id: 'legacy-role', name: 'legacy-role', content: '新内容', facts: { capabilities: caps, catalog: catalog({ bundled: [{ id: 'legacy-role', content: '旧\n' }] }), workflows: noUsage } })
   assert.equal(r.ok, true)
-  assert.deepEqual(r.effect, { kind: 'write', id: 'dispatcher', content: '新内容\n' })
+  assert.deepEqual(r.effect, { kind: 'write', id: 'legacy-role', content: '新内容\n' })
   // 仅写法差异重命名拒绝
   r = await l.execute({ operation: 'change', action: 'update', id: 'my-role', name: 'My-Role', content: 'x', facts: { capabilities: caps, catalog: ws, workflows: noUsage } })
   assert.match(r.errors[0].message, /仅大小写或写法不同/)
@@ -341,7 +338,7 @@ test('change remove：只读/引用阻止（含草稿提示）/打包回退不�
   assert.match(r.errors[0].message, /仍被 2 个节点使用（含未保存草稿的引用）/)
   assert.equal(r.usage.count, 2)
   // 打包回退角色不可删除
-  r = await l.execute({ operation: 'change', action: 'remove', id: 'dispatcher', facts: { capabilities: caps, catalog: catalog({ bundled: [{ id: 'dispatcher', content: 'x' }] }), workflows: { state: 'ok', records: [] } } })
+  r = await l.execute({ operation: 'change', action: 'remove', id: 'legacy-role', facts: { capabilities: caps, catalog: catalog({ bundled: [{ id: 'legacy-role', content: 'x' }] }), workflows: { state: 'ok', records: [] } } })
   assert.match(r.errors[0].message, /定义来自内置模板自带的角色包/)
   // 不存在
   r = await l.execute({ operation: 'change', action: 'remove', id: 'ghost', facts: { capabilities: caps, catalog: ws, workflows: { state: 'ok', records: [] } } })
@@ -375,10 +372,10 @@ test('readRoleFileSafe：路径穿越返回 null，不读目录外文件', () =>
   assert.equal(readRoleFileSafe('/roles', 'bad id!', io), null)
 })
 
-test('collectReferencedRoleFiles：打包被引用且文件存在的角色（含自定义 dispatcher）', () => {
-  const io = { readFileSync: (p) => (p.endsWith('dispatcher.md') ? '调度正文' : (p.endsWith('dev.md') ? '开发正文' : (() => { throw new Error('ENOENT') })())) }
-  const bp = { nodes: [{ profile: 'dev' }, { profile: 'dispatcher' }, { profile: 'ghost' }] }
+test('collectReferencedRoleFiles：打包被引用且文件存在的角色（含自定义 legacy-role）', () => {
+  const io = { readFileSync: (p) => (p.endsWith('legacy-role.md') ? '调度正文' : (p.endsWith('dev.md') ? '开发正文' : (() => { throw new Error('ENOENT') })())) }
+  const bp = { nodes: [{ profile: 'dev' }, { profile: 'legacy-role' }, { profile: 'ghost' }] }
   const out = collectReferencedRoleFiles(bp, '/roles', io)
-  assert.deepEqual(Array.from(out.keys()).sort(), ['roles/dev.md', 'roles/dispatcher.md'])
-  assert.equal(out.get('roles/dispatcher.md'), '调度正文', '自定义角色随 skill 自包含（不得过滤为仅内置）')
+  assert.deepEqual(Array.from(out.keys()).sort(), ['roles/dev.md', 'roles/legacy-role.md'])
+  assert.equal(out.get('roles/legacy-role.md'), '调度正文', '自定义角色随 skill 自包含（不得过滤为仅内置）')
 })

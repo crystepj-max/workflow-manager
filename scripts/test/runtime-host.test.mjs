@@ -11,12 +11,13 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { generateAll, generateUserSkill, projectToVwf } from '../generate.mjs'
+import { generateBaseline } from './helpers/baseline-harness.mjs'
 import { runGeneratedScript, makeAgentScript } from './helpers/runtime-harness.mjs'
 import { loadHost } from '../../packages/dsh-visual-workflow/tests/helpers/load-host.mjs'
 import { REPO, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } from '../../packages/dsh-visual-workflow/tests/helpers/fake-services.mjs'
@@ -24,11 +25,11 @@ import { REPO, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } fro
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(here, '../..')
 const tplDir = path.join(root, 'templates')
-const tpl = JSON.parse(readFileSync(path.join(tplDir, 'custom-seeds', 'dev-workflow-2-0.json'), 'utf8'))
+const tpl = JSON.parse(readFileSync(path.join(here, 'fixtures', 'legacy-baseline.json'), 'utf8'))
 const mini = JSON.parse(readFileSync(path.join(here, 'fixtures/hello-blueprint.json'), 'utf8'))
-const { files } = generateAll(tplDir)
-const tplVwfDsl = files.get('dev-workflow-2-0/vwf-dsl.json')
-const tplScript = files.get('dev-workflow-2-0/script.mjs')
+const { files } = generateBaseline()
+const tplVwfDsl = files.get('legacy-baseline/vwf-dsl.json')
+const tplScript = files.get('legacy-baseline/script.mjs')
 
 // wf_run 驱动环境：假 fs/子进程/引擎，捕获 engine.start 收到的 script/meta
 // （统一校验内核 T-IMP-13：假 fs 默认种入真实 validate-core.cjs 源码）
@@ -58,13 +59,13 @@ const runTool = async (tool, args) => JSON.parse(await tool.execute(args))
 test('H1 内置模板现编译优先：wf_run(templateId) 走同一 CLI 编译管道（磁盘旧产物不再直接执行）', async () => {
   const { tool, captured, sub } = wfRunEnv({
     fsSeed: {
-      [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: tplVwfDsl,
-      [REPO + '/.generated/dev-workflow-2-0/script.mjs']: tplScript,
+      [REPO + '/.generated/legacy-baseline/vwf-dsl.json']: tplVwfDsl,
+      [REPO + '/.generated/legacy-baseline/script.mjs']: tplScript,
       // 兼容角色（builtin:false）靠产物旁 roles/ 走读文件路径：现编译不得丢 roleDir
-      [REPO + '/.generated/dev-workflow-2-0/roles/dispatcher.md']: '# dispatcher 角色包',
+      [REPO + '/.generated/legacy-baseline/roles/legacy-role.md']: '# legacy-role 角色包',
     },
   })
-  const out = await runTool(tool, { templateId: 'dev-workflow-2-0', taskId: 't' })
+  const out = await runTool(tool, { templateId: 'legacy-baseline', taskId: 't' })
   assert.equal(out.stopReason, 'completed')
   // UAT-80 实证：磁盘产物可能出自旧版生成器（如 agent cwd 契约收紧前），直接执行
   // 会与引擎不兼容。现编译优先后，templateId 与 dsl/RPC 同走 CLI 管道，一致性由
@@ -72,7 +73,7 @@ test('H1 内置模板现编译优先：wf_run(templateId) 走同一 CLI 编译�
   assert.equal(captured.script, '//MOCK-SCRIPT', '引擎收到 CLI 编译译文')
   assert.notEqual(captured.script, tplScript, '磁盘旧产物不再直接执行')
   assert.ok(sub._calls.find((c) => c.join(' ').includes('generate.mjs') && c.join(' ').includes('--inline')), '已 spawn generate.mjs compile --inline')
-  assert.equal(captured.args.roleDir, REPO + '/.generated/dev-workflow-2-0/roles', '现编译仍随译文返回 roles/ 角色包（兼容角色可读）')
+  assert.equal(captured.args.roleDir, REPO + '/.generated/legacy-baseline/roles', '现编译仍随译文返回 roles/ 角色包（兼容角色可读）')
 })
 
 test('H2 用户模板现编译优先：过期 save 闭环产物不再直接执行', async () => {
@@ -200,6 +201,6 @@ test('H6 CLI 集成：generate.mjs compile 真实执行，产物可被排练厅�
     })
     assert.equal(b.result.status, 'DONE')
   } finally {
-    execFileSync('/bin/rm', ['-rf', tmp], { cwd: root })
+    rmSync(tmp, { recursive: true, force: true })
   }
 })
