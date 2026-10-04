@@ -5,13 +5,14 @@
  * GitHub 不可用时替代 issue tracker：分配任务标识、记录来源与范围、
  * 跟踪状态、重写看板、列出待同步 GitHub 的任务。
  *
- * CLI:
- *   node scripts/local-task-registry.mjs allocate --name <任务名称> [--slug <x>] [--source <来源>] [--source-ref <x>] [--repo <path>]
- *   node scripts/local-task-registry.mjs set --task LOC-001 [--status <状态>] [--baseline V1] [--branch <b>] [--worktree <p>] [--merge-commit <sha>] [--github-sync <x>] [--repo <path>]
- *   node scripts/local-task-registry.mjs mark-ready --task FIX-224 [--repo <path>]   # 打 ready-for-agent（远端可施工信号）
- *   node scripts/local-task-registry.mjs board [--repo <path>]
+ * CLI（只读）:
  *   node scripts/local-task-registry.mjs list [--github-sync pending] [--repo <path>]
  *   node scripts/local-task-registry.mjs show --task LOC-001 [--repo <path>]
+ *
+ * 已退役写命令（fail-closed，稳定原因码 legacy_registry_write_disabled，W8 P0-C）：
+ *   allocate / set / mark-ready / board —— 任务身份/状态/Run 以 Multica 平台为唯一真源，
+ *   本 CLI 不再提供任何写入口（不写文件、不调 GitHub）。导出函数及其程序化调用者
+ *   不在此列，其写路径的处置另列后续切片。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -467,9 +468,38 @@ export function writeBoard(repo) {
   return boardPath
 }
 
+// —— 旧写入口退役（W8 P0-C）——
+// Multica 平台是任务身份/状态/Run 的唯一真源；本模块 CLI 不再提供写入口。
+// 四个 CLI 写命令在任何本地文件写入或 GitHub 调用之前统一拒绝：非零退出 + 稳定原因码。
+// 仅作用于 CLI 层：导出函数（allocate/update/writeBoard 等）与其程序化调用者
+// （registry-reconcile、local-task-merge、task-runs-cleanup 等）行为不变，写路径处置另列切片。
+const LEGACY_WRITE_REASON = 'legacy_registry_write_disabled'
+const RETIRED_WRITE_COMMANDS = new Set(['allocate', 'set', 'mark-ready', 'board'])
+
+function rejectRetiredWrite(cmd) {
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        code: LEGACY_WRITE_REASON,
+        command: cmd,
+        reason:
+          '本地任务登记 CLI 写入口已退役：任务身份/状态/Run 以 Multica 平台为唯一真源，' +
+          '本命令未写任何文件、未调用 GitHub。',
+        remediation:
+          '任务登记与状态变更改用 multica CLI（multica issue create/update/status）；只读查询仍可用 list/show。',
+      },
+      null,
+      2,
+    ),
+  )
+  process.exit(2)
+}
+
 // —— CLI ——
 async function main(argv) {
   const cmd = argv[0]
+  if (RETIRED_WRITE_COMMANDS.has(cmd)) rejectRetiredWrite(cmd)
   const get = (f) => {
     const i = argv.indexOf(f)
     return i >= 0 ? argv[i + 1] : undefined
@@ -577,7 +607,7 @@ async function main(argv) {
     return
   }
 
-  console.error('用法: allocate | set | mark-ready | board | list | show')
+  console.error('用法: list | show   # 写命令 allocate/set/mark-ready/board 已退役（legacy_registry_write_disabled）')
   process.exit(2)
 }
 
