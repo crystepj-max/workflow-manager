@@ -1,4 +1,11 @@
-# 夜间批量施工调度器（M5 真实唤起）使用说明
+# 夜间批量施工调度器（M5）使用说明
+
+> **WFM-131（2026-09-29）/ WFM-133（2026-09-30）fail-closed：** 在 Multica 原子 Claim / 停旧后安全接管未获实证前，
+> `scripts/ai-task-dispatcher.mjs` **默认拒绝**自动认领、补 `ready-for-agent` 标签、启动实施 Run
+> 或回写 `docs/tasks/registry.json` / `docs/tasks/BOARD.md`。缺少 Owner、Multica 事实、依赖或并发证明时给出可理解原因。
+> 仅显式 `--preview` 可跑只读候选/计划诊断（强制 dry-run 语义，**不执行任意远端 shell**——含 `machine.remoteIssueCommand` 与预览期 GitHub 拉取；GitHub 写调用为零）。
+> 批次产物在首次写入前校验路径。项目根、项目根的全部祖先、批次目录和报告文件都必须是真实目录；祖先符号链接（alias → real，根自身仍是真目录）或无法可靠绑定的路径一律拒绝写入。Node 打开目录并核对冻结的目录身份后，才把该句柄交给写入器；身份不符则不写。看门狗和释放事件都要等子进程真正退出后才让出名额。真实 CLI 派发入口仍 fail-closed。
+> 单独 `--now` / `--dry-run` / `--simulate` **不会**绕过该闸门。本项不宣称自动派发能力已迁到 Multica。
 
 ## 它解决什么问题
 
@@ -36,14 +43,15 @@
 }
 ```
 
-3. 定时器（cron / launchd / ZCode CronCreate / 任何调度器）只做一件事：
+3. 定时器（cron / launchd / ZCode CronCreate / 任何调度器）当前会命中 fail-closed。
+   只读诊断请显式：
 
 ```bash
-node scripts/ai-task-dispatcher.mjs <schedule.json路径>
+node scripts/ai-task-dispatcher.mjs <schedule.json路径> --preview
 ```
 
 换项目 = 换 `project` 字段（及其 `machine.json` 里对应配置）；换 AI 工具 = 换命令模板。
-其余不变。
+其余不变。未经 Claim/接管实证，不得恢复无人值守真实唤起。
 
 ## 任务源：本地登记册 ∩ GitHub 可施工标签（FEAT-237）
 
@@ -138,8 +146,8 @@ node scripts/ai-task-dispatcher.mjs <schedule.json路径>
 
 ## 验证状态
 
-- `scripts/test/ai-task-candidate-collect-m5.test.mjs`：采集闸门 6 项
-- `scripts/test/ai-task-night-dispatch-m5.test.mjs`：调度器端到端 6 项
-  （并发补位、看门狗、释放契约、dry-run、endAt 截止、未到点 pending）
-- 真实拉起链路的 CLI 命令模板属每机器配置，首次启用建议先用
-  `--dry-run` 看计划，再挑白天用 1 个小任务实测一次真实唤起。
+- `scripts/test/ai-task-candidate-collect-m5.test.mjs`：采集闸门（只读算法）保留
+- `scripts/test/ai-task-night-dispatch-m5.test.mjs` → `scripts/ai-task-night-dispatch-m5-check.mjs`：
+  默认 fail-closed、重复触发阻断、registry-only 候选不可派发、显式 `--preview` 只读、
+  GitHub 写调用为零、`registry.json` / `BOARD.md` 哈希不变
+- 真实拉起链路在 Claim/接管实证前保持关闭；只读诊断用 `--preview`。

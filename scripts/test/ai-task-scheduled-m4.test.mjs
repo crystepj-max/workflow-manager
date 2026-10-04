@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
-test('M4 机械验收脚本通过', () => {
+test('M4 拒绝旧账本调度并保留只读预览', () => {
   const r = spawnSync(process.execPath, [path.join(root, 'scripts/ai-task-scheduled-m4-check.mjs')], {
     encoding: 'utf8',
     cwd: root,
