@@ -9,11 +9,12 @@
 //   env_resources 只登记「本任务插件命名空间 + 固定端口」；隔离由「插件注册名带任务
 //   命名空间」+「同一时刻只允许一个任务激活插件」纪律承担。
 //
-// 施工认领（FEAT-237）：开工前在对应 GitHub issue 上打 `施工中` 标签 + assignee + 认领评论
-// （施工人 = gh 登录账号 @ 机器码），目的是让「不同施工人同时选中同一任务」在远端可见并互斥。
-// 已被他人认领 → **拒绝开工**（exit 1），不做静默绕过；确认要接手请先 `github-issues release`
-// 释放对方认领（或人工摘标签）。无 GitHub 远端 / gh 不可用 / 任务无 github 锚点时只告警不阻断，
-// 本地轨道与离线仓仍可开工（`--no-claim` 可显式跳过）。
+// 施工认领：**旧 GitHub 写入口已停用**（W8 迁移，WFM-166）。原先「开工前在 GitHub issue 上打
+// `施工中` 标签 + assignee + 认领评论」的跨机器互斥，随 GitHub 退为「只留代码交付事实」、
+// Multica Task 成为任务身份/状态/负责人/互斥的唯一真源而整体 fail-closed：本命令不再写旧 claim，
+// 也不据此阻断开工。创建 workspace/branch、Logical Run/run.json 与 env_resources 的现有产品行为不变。
+// ⚠️ 此处**没有原子互斥、也没有跨机器安全保证**——开工前须由人工在 Multica 确保同一任务只有一个写者
+// （单写者闸门）。`--no-claim` 仍保留为本地自测的显式跳过。
 
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
@@ -23,33 +24,31 @@ import {
   mainCheckout, worktreePathFor, runDirFor, runsRoot,
   DEV_DSH_PORT, pluginNamespaceFor,
 } from './workspace-paths.mjs'
-import { claimIssue } from './github-issues.mjs'
 
 const DEFAULT_BUDGET = 3
 
 /**
- * 开工认领（FEAT-237）：把「谁在施工」写进远端 issue，形成跨机器互斥。
+ * 开工认领：**旧 GitHub 写入口已停用**（W8 迁移，WFM-166）。
  *
- * 只有「已被他人认领」是硬拒绝；其余失败（无远端、gh 不可用、无锚点）降级为告警，
- * 否则本地轨道与测试环境会被远端可用性绑死。
+ * 「施工中」标签 + assignee + 认领评论曾是跨机器施工互斥的手段；随着 GitHub 退为「只留代码
+ * 交付事实」、Multica Task 成为任务身份/状态/负责人/互斥的唯一真源，这条写路径整体 fail-closed。
+ * 本函数不再写旧 claim、也不再调用 gh，更不添加新 lock / registry / 接管机制。
  *
- * @returns {{ status: 'claimed'|'reused'|'skipped'|'warn'|'blocked', ... }}
+ * 如实告知边界：此处**没有原子互斥、也没有跨机器安全保证**——开工前须由人工在 Multica 确保
+ * 同一实施任务只有一个写者（单写者闸门）。`--no-claim` 仍作为本地自测的显式跳过。
+ *
+ * @returns {{ status: 'skipped'|'retired', ... }}
  */
 export function claimForRun({ repo, taskId, runId, branch = null, enabled = true, actor = null }) {
   if (!enabled) return { status: 'skipped', reason: '--no-claim' }
-  let r
-  try {
-    r = claimIssue({ repo, taskId, runId, branch, actor })
-  } catch (e) {
-    return { status: 'warn', reason: String((e && e.message) || e).slice(0, 300) }
+  return {
+    status: 'retired',
+    reason: 'legacy_github_issue_write_disabled',
+    warning:
+      '旧 GitHub 施工认领（施工中 标签 / assignee / 认领评论）已停用：cwf-run-init 不再写旧 claim。' +
+      '任务身份 / 状态 / 负责人 / 施工互斥以 Multica 为准；开工前须先在 Multica 确保人工单写者——' +
+      '此处没有原子互斥，也没有跨机器安全保证。',
   }
-  if (r.ok) return { status: r.code === 'reused' ? 'reused' : 'claimed', issue: r.issue, worker: r.worker, claimKey: r.claimKey, assigned: r.assigned ?? null }
-  // 「已被他人认领」与「issue 已关闭」都是硬拒绝：前者防重复施工，后者防空转死任务
-  // （已关闭的 issue 说明任务已收口或作废，开工只会产出无人要的提交）
-  if (r.code === 'claimed-by-other' || r.code === 'claim-raced' || r.code === 'issue-not-open') {
-    return { status: 'blocked', issue: r.issue, holder: r.holder ?? null, reason: r.reason }
-  }
-  return { status: 'warn', issue: r.issue || null, reason: r.reason || r.code }
 }
 
 export function envResourcesFor(runId) {
@@ -221,25 +220,11 @@ function main() {
     process.exit(1)
   }
 
-  // 施工认领（FEAT-237）：必须在建分支/建现场之前完成——被拒时不该留下任何垃圾现场
+  // 施工认领已停用：不再写旧 GitHub claim，也不据此阻断开工——互斥以 Multica 人工单写者为准。
+  // 建分支/建现场照常进行（现有产品行为不变），只把「旧 claim 停用、单写者靠人工把关」如实提示出来。
   const claim = claimForRun({ repo: main, taskId: issue, runId, branch, enabled: claimEnabled })
-  if (claim.status === 'blocked') {
-    if (claim.holder) {
-      console.error(`开工被拒：issue #${claim.issue} 已被 ${claim.holder} 认领（标签「施工中」），同一任务不重复施工。`)
-      console.error(`  确认要接手：先释放对方认领 —— node scripts/github-issues.mjs release --task ${issue} --reason "接手"（或人工摘标签），再重跑本命令。`)
-    } else {
-      console.error(`开工被拒：${claim.reason || `issue #${claim.issue} 不可认领`}`)
-      console.error(`  请先核对远端 issue 状态与登记册；确属误判再人工处理。`)
-    }
-    console.error('  本机自测、不需要远端互斥：加 --no-claim。')
-    process.exit(1)
-  }
-  if (claim.status === 'warn') {
-    console.error(`[warn] 远端施工认领未生效（${claim.reason}）；本 Run 继续，但跨机器「防重复施工」保护本轮不生效`)
-  } else if (claim.status === 'claimed') {
-    console.error(`[info] 已认领 issue #${claim.issue}：施工人 ${claim.worker}${claim.assigned === false ? '（assignee 未设置成功，不影响标签与评论）' : ''}`)
-  } else if (claim.status === 'reused') {
-    console.error(`[info] issue #${claim.issue} 已由本 Run 认领（幂等复用，不重复评论）`)
+  if (claim.status === 'retired') {
+    console.error(`[warn] ${claim.warning}`)
   }
 
   const identity = {
@@ -285,12 +270,11 @@ function main() {
     rollback_history: [],
     task_id_namespace: runId,
     env_resources: envResourcesFor(runId),
-    // 施工认领留痕（FEAT-237）：本地 run.json 也能回答「谁在施工这个任务」
-    remote_issue: claim.issue ?? null,
+    // 施工认领留痕：旧 GitHub claim 已停用，run.json 如实记录停用状态；
+    // 互斥以 Multica 人工单写者为准，此处不写远端标签/assignee/评论。
     claim: {
       status: claim.status,
-      worker: claim.worker ?? null,
-      claim_key: claim.claimKey ?? null,
+      reason: claim.reason ?? null,
       at: new Date().toISOString(),
     },
     created_at: new Date().toISOString(),
