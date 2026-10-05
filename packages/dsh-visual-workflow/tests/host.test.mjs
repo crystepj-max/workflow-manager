@@ -2,20 +2,25 @@
 // 异源硬规则（T-IMP-07）/ 角色回退
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const realGenerated = join(here, '..', '..', '..', '.generated', 'legacy-baseline', 'vwf-dsl.json')
+// 「真实生成物」防线：基座经真实生成器编译得到的内存产物。基座不参与生成与安装，
+// 不会落到 .generated/，因此不能按磁盘固定路径读取（否则防线恒定跳过）。
+const _baselineGenerated = generateBaseline()
+const REAL_GENERATED_DSL = _baselineGenerated.files.get('legacy-baseline/vwf-dsl.json')
+const REAL_GENERATED_SCRIPT = _baselineGenerated.files.get('legacy-baseline/script.mjs')
 
 // ── 共享假服务（helpers/fake-services.mjs）与共享加载器（helpers/load-host.mjs）──
 import { loadHost, ROLE_CORE_SEED } from './helpers/load-host.mjs'
+import { generateBaseline } from '../../../scripts/test/helpers/baseline-harness.mjs'
 import { REPO, SESSION_REPO, HOME, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 
 const call = async (handlers, method, args) => handlers.get(method)(args)
 const MINIMAL_BUILTIN = JSON.stringify({
-  id: 'legacy-baseline', name: '开发工作流 2.0', description: '内置最小样例', entry: 'dispatch',
+  id: 'legacy-baseline', name: '测试基座样例', description: '内置最小样例', entry: 'dispatch',
   control: { maxRounds: 9 },
   nodes: [
     { id: 'dispatch', profile: 'legacy-role', label: '调度', goal: 'g', model: { provider: 'p1', model: 'm1' } },
@@ -61,7 +66,7 @@ function nonProtocolWarnings(r) {
 
 function seedFs(extra = {}) {
   const seed = {
-    [REPO + '/.generated/legacy-baseline/vwf-dsl.json']: existsSync(realGenerated) ? readFileSync(realGenerated, 'utf8') : MINIMAL_BUILTIN,
+    [REPO + '/.generated/legacy-baseline/vwf-dsl.json']: REAL_GENERATED_DSL,
     ...VALIDATOR_KERNEL_SEED,
   }
   Object.assign(seed, extra)
@@ -71,9 +76,7 @@ function seedFs(extra = {}) {
 function env({ failPattern, extra = {} } = {}) {
   const fs = seedFs()
   // 统一编译器管道（T-IMP-12）：vwf.script 走 CLI compile——模拟输出用真实生成物（存在时）
-  const compileScript = existsSync(realGenerated)
-    ? readFileSync(join(here, '..', '..', '..', '.generated', 'legacy-baseline', 'script.mjs'), 'utf8')
-    : '//MOCK-SCRIPT'
+  const compileScript = REAL_GENERATED_SCRIPT
   const sub = makeSubprocess({ failPattern, fs, compileScript })
   const { handlers, definedTools, events, ctx } = loadHost({ fs, subprocess: sub, sandboxPolicy, ...extra })
   return { handlers, definedTools, events, ctx, fs, sub }
@@ -137,10 +140,8 @@ test('AC-2：生成物模板从 .generated/ 目录加载为内置（host.js 无�
   assert.equal(s.ok, true, JSON.stringify(s.errors))
   const compileCall = sub._calls.find(c => c.join(' ').includes('generate.mjs') && c.join(' ').includes(' compile '))
   assert.ok(compileCall, 'vwf.script 经 CLI compile 取统一译文')
-  if (existsSync(realGenerated)) {
-    assert.ok(s.script.includes('AWAITING_HUMAN_'), '统一译文含人工验收门禁语义')
-    assert.ok(s.script.includes('const MAX_ROUNDS = 9'))
-  }
+  assert.ok(s.script.includes('AWAITING_HUMAN_'), '统一译文含人工验收门禁语义')
+  assert.ok(s.script.includes('const MAX_ROUNDS = 9'))
 })
 
 test('内置根优先取发起 agent 会话 cwd（agentless 兜底 sandboxPolicy.workspaceRoot）', async () => {
@@ -154,7 +155,7 @@ test('内置根优先取发起 agent 会话 cwd（agentless 兜底 sandboxPolicy
   const list = await call(handlers, 'vwf.workflows.list')
   const shipped = list.find(w => w.id === 'legacy-baseline')
   assert.ok(shipped && shipped.builtin === true, '生成物模板从会话 cwd 的 .generated/ 加载为内置')
-  assert.equal(shipped.name, '开发工作流 2.0')
+  assert.equal(shipped.name, '测试基座样例')
   // 无 agents 时兜底 sandboxPolicy.workspaceRoot（env() 默认路径覆盖）
 })
 
@@ -194,8 +195,7 @@ test('apply 无 initiator（浏览器审批激活）→ 后续模型调用实时
   assert.ok(list.some(w => w.id === 'legacy-baseline' && w.builtin === true), 'knownCwd 历史兜底生效')
 })
 
-test('真实生成物 .generated/legacy-baseline/vwf-dsl.json 校验通过（编译已并入统一管道）', async (t) => {
-  if (!existsSync(realGenerated)) { t.skip('缺少 .generated/（先 npm run generate）'); return }
+test('真实生成物 vwf-dsl.json（基座经真实生成器编译）校验通过（编译已并入统一管道）', async () => {
   const { handlers } = env()
   const list = await call(handlers, 'vwf.workflows.list')
   const builtin = list.find(w => w.id === 'legacy-baseline')
@@ -298,7 +298,7 @@ test('生成物模板只读：save 覆盖同 id 被拒，另存为新 id 落盘�
   const list = await call(handlers, 'vwf.workflows.list')
   const builtin = list.find(w => w.id === 'legacy-baseline')
   assert.ok(builtin && builtin.builtin === true, '生成物模板一律内置')
-  const saved = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ id: 'legacy-baseline', name: '开发工作流 2.0', description: '用户覆盖' }), currentId: 'legacy-baseline' })
+  const saved = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ id: 'legacy-baseline', name: '测试基座样例', description: '用户覆盖' }), currentId: 'legacy-baseline' })
   assert.equal(saved.ok, false, '内置模板不可覆盖')
   assert.ok(saved.errors.some(e => e.message.includes('内置模板只读')), JSON.stringify(saved.errors))
   const asNew = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ id: 'legacy-baseline-copy', name: '副本' }) })
@@ -1471,10 +1471,10 @@ test('#19 T1：wf_run 启动登记 taskId/workflowId；runs.list 最新在前；
   assert.equal(eng.starts.length, 0)
   const p1 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-12' })
   await until(() => eng.starts.length >= 1, '第一次启动放行')
-  events.get('workflow/start')({ id: 'run-1', meta: { name: '开发工作流 2.0' } })
+  events.get('workflow/start')({ id: 'run-1', meta: { name: '测试基座样例' } })
   const p2 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-13' })
   await until(() => eng.starts.length >= 2, '不同 taskId 并行放行')
-  events.get('workflow/start')({ id: 'run-2', meta: { name: '开发工作流 2.0' } })
+  events.get('workflow/start')({ id: 'run-2', meta: { name: '测试基座样例' } })
   // 交错事件：两个 run 各自 phase/log/agent 互不相干
   events.get('workflow/phase')({ id: 'run-1' }, '调度')
   events.get('workflow/phase')({ id: 'run-2' }, '开发')

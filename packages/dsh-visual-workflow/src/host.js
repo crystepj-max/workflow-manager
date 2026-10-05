@@ -415,7 +415,7 @@ return {
       }
       return next
     }
-    // 查找：用户覆盖（整份）→ 未删除的历史生成物 → 正式内置（⊕ 模型覆盖层）
+    // 查找：用户覆盖（整份）→ 正式内置（⊕ 模型覆盖层）
     // userDir 整份覆盖优先（已是用户自定义资产，D3-2）：模型覆盖层对其忽略。
     async function findWorkflow(id) {
       if (!id || typeof id !== 'string') return null
@@ -2290,7 +2290,7 @@ return {
       }
       return { files: out, state: 'ok' }
     }
-    // 打包角色包回退：bundleRoles 模板产物旁的 roles/ 快照（含已迁出内置集合的兼容角色）
+    // 打包角色包回退：用户模板 bundleRoles 产物旁的 roles/ 快照
     async function bundledLegacyRoles() {
       const out = new Map()
       const d = await homeDirs()
@@ -2339,7 +2339,7 @@ return {
     async function detailFacts(lib) {
       return { includeContent: true, catalog: await collectRoleCatalog(), builtinBodies: await collectBuiltinBodies(lib) }
     }
-    // 引用事实：正式内置 + 用户模板 + 未删除的历史生成物 + 可选开放草稿；strict 读取失败 fail-closed
+    // 引用事实：正式内置 + 用户模板 + 可选开放草稿；strict 读取失败 fail-closed
     async function collectWorkflowFacts(draftDsl) {
       try {
         const mapNodes = (dsl) => ((dsl && dsl.nodes) || []).map((n) => ({ id: n.id, label: n.label, profile: n.profile }))

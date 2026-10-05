@@ -3,7 +3,7 @@
 // 内存 miss 磁盘回落 / 容量淘汰 / 损坏文件容错 / 落盘失败隔离
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -11,15 +11,19 @@ import { loadHost } from './helpers/load-host.mjs'
 import { REPO, DSH_HOME, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 import { compileBlueprint } from '../../../scripts/generate.mjs'
 import { runGeneratedScript, makeAgentScript } from '../../../scripts/test/helpers/runtime-harness.mjs'
+import { generateBaseline } from '../../../scripts/test/helpers/baseline-harness.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const RUNS_DIR = DSH_HOME + '/visual-workflow/runs'
-const realGenerated = join(here, '..', '..', '..', '.generated', 'legacy-baseline', 'vwf-dsl.json')
+// 「真实生成物」防线：基座经真实生成器编译得到的内存产物（基座不落 .generated/）
+const _baselineGenerated = generateBaseline()
+const REAL_GENERATED_DSL = _baselineGenerated.files.get('legacy-baseline/vwf-dsl.json')
+const REAL_GENERATED_SCRIPT = _baselineGenerated.files.get('legacy-baseline/script.mjs')
 // 统一校验内核（候选二 T-IMP-13）：宿主经 fs 读源码求值——wf_run 路径需种入真实内核
 const validatorCoreSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
 
 const MINIMAL_BUILTIN = JSON.stringify({
-  id: 'legacy-baseline', name: '开发工作流 2.0', description: '内置最小样例', entry: 'dispatch',
+  id: 'legacy-baseline', name: '测试基座样例', description: '内置最小样例', entry: 'dispatch',
   control: { maxRounds: 9 },
   nodes: [
     { id: 'dispatch', profile: 'legacy-role', label: '调度', goal: 'g', model: { provider: 'p1', model: 'm1' } },
@@ -47,14 +51,12 @@ function seedRun(id, over = {}) {
 
 function env({ failPattern, extra = {}, seed = {} } = {}) {
   const base = {
-    [REPO + '/.generated/legacy-baseline/vwf-dsl.json']: existsSync(realGenerated) ? readFileSync(realGenerated, 'utf8') : MINIMAL_BUILTIN,
+    [REPO + '/.generated/legacy-baseline/vwf-dsl.json']: REAL_GENERATED_DSL,
     [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
   }
   Object.assign(base, seed)
   const fs = makeFs(base)
-  const compileScript = existsSync(realGenerated)
-    ? readFileSync(join(here, '..', '..', '..', '.generated', 'legacy-baseline', 'script.mjs'), 'utf8')
-    : '//MOCK-SCRIPT'
+  const compileScript = REAL_GENERATED_SCRIPT
   const sub = makeSubprocess({ failPattern, fs, compileScript })
   const { handlers, definedTools, events, ctx } = loadHost({ fs, subprocess: sub, sandboxPolicy, ...extra })
   return { handlers, definedTools, events, ctx, fs, sub }
@@ -136,7 +138,7 @@ test('#40：wf_run 权威终态（value.status 回写 DONE）落盘；runTag 元
   const wfRun = definedTools.find(t => t.name === 'wf_run')
   const p1 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-40' })
   await until(() => eng.starts.length >= 1, '启动')
-  events.get('workflow/start')({ id: 'run-1', meta: { name: '开发工作流 2.0' } })
+  events.get('workflow/start')({ id: 'run-1', meta: { name: '测试基座样例' } })
   settleRun(eng, events, 'run-1', 'DONE')
   await p1
   await drain()
@@ -153,7 +155,7 @@ test('#40 AC1：重启后按原 runId 仍可查看终态/阶段/子代理表/日
   const wfRunA = a.definedTools.find(t => t.name === 'wf_run')
   const p1 = wfRunA.execute({ templateId: 'legacy-baseline', taskId: 'issue-77' })
   await until(() => engA.starts.length >= 1, 'A 启动')
-  a.events.get('workflow/start')({ id: 'run-1', meta: { name: '开发工作流 2.0', description: '' } })
+  a.events.get('workflow/start')({ id: 'run-1', meta: { name: '测试基座样例', description: '' } })
   a.events.get('workflow/phase')({ id: 'run-1' }, '验收')
   a.events.get('workflow/log')({ id: 'run-1' }, '等待人工验收')
   a.events.get('workflow/agent-start')({ id: 'run-1' }, { seq: 1, label: 'accept', phase: '验收' })
@@ -240,7 +242,7 @@ test('#40：重启后 AWAITING_HUMAN 门禁继续保持同 taskId 互斥；entry
   const wfRunA = a.definedTools.find(t => t.name === 'wf_run')
   const p1 = wfRunA.execute({ templateId: 'legacy-baseline', taskId: 'issue-78' })
   await until(() => engA.starts.length >= 1, 'A 启动')
-  a.events.get('workflow/start')({ id: 'run-1', meta: { name: '开发工作流 2.0' } })
+  a.events.get('workflow/start')({ id: 'run-1', meta: { name: '测试基座样例' } })
   settleRun(engA, a.events, 'run-1', 'AWAITING_HUMAN_accept')
   await p1
   await drain()
@@ -258,7 +260,7 @@ test('#40：重启后 AWAITING_HUMAN 门禁继续保持同 taskId 互斥；entry
 
   const p2 = wfRunB.execute({ templateId: 'legacy-baseline', taskId: 'issue-78', entry: 'accept', approved: true })
   await until(() => engB.starts.length >= 1, 'B 续跑绕过互斥')
-  b.events.get('workflow/start')({ id: 'rb-1', meta: { name: '开发工作流 2.0' } })
+  b.events.get('workflow/start')({ id: 'rb-1', meta: { name: '测试基座样例' } })
   const s1 = await call(b.handlers, 'vwf.state', { runId: 'run-1' })
   assert.equal(s1.state.supersededBy, 'rb-1', '重启后旧门禁被续跑接管')
   settleRun(engB, b.events, 'rb-1', 'DONE')

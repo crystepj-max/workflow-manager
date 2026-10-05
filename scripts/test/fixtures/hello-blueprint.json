@@ -17,7 +17,7 @@
   "nodes": [
     {
       "id": "dispatch",
-      "profile": "dispatcher",
+      "profile": "legacy-role",
       "goal": "x",
       "output": {
         "schema": {
