@@ -4,7 +4,7 @@ description: "AI 任务批量调度（Execution Plan）：从候选「已定义�
 ---
 
 # Execution Plan｜批量调度（M3）
-> 本 Skill 属「AI 任务交付」集合（见 `docs/design/ai-task-define-delivery/skill-set.md`）；通用副本同步至 my-agent-skills（下游同步与宿主安装态截至 2026-10-03 未验证，见文末说明）。
+> 本 Skill 属「AI 任务交付」集合（见 `docs/design/ai-task-define-delivery/skill-set.md`）；通用副本同步至 my-agent-skills（下游同步与宿主安装态截至 2026-10-04，main=`c9c08cb8` 仍未验证，见文末说明）。
 
 
 本 skill **只负责「哪些任务现在开始」**，不负责把需求谈清楚，也不负责单任务施工。
@@ -16,11 +16,13 @@ description: "AI 任务批量调度（Execution Plan）：从候选「已定义�
 > 🔴 **迁移遗留边界（W8 旧入口退役）**：本 Skill 保留的排序 / 快照 / 并发补位 / 批次汇总
 > 能力仅限显式人工发起的批次。**迁移目标 / 政策口径：候选不再取自旧 registry.json / BOARD.md
 > 账本，定时触发（M4）与 M5 夜间自动派发退役，不再无人值守开工**；新任务的身份、认领与状态
-> 以 Multica Task 为准。截至本文基线（2026-10-03，main=`861e5a0`），**当前 main 的 M3 实现
-> 仍是旧路径**：批次仍由本地 batch.json 提供 issueBasics / taskSpec 材料路径并运行实施前检查
-> （`runPreflight`），依赖检查仍读取旧登记册（`loadRegistry` / `collectMergeFacts`）——本 PR
-> 只做文档收口，不迁移这些实现。旧入口停写实现见 PR #355，尚未进入 main。
-> **在任何分支上都不应再使用定时触发或夜间自动派发**。
+> 以 Multica Task 为准。截至本文基线（2026-10-04，main=`c9c08cb8`），**当前 main 的 M3 手工
+> 批次实现仍是旧路径**：批次仍由本地 batch.json 提供 issueBasics / taskSpec 材料路径并运行
+> 实施前检查（`runPreflight`），依赖检查仍读取旧登记册（`loadRegistry` / `collectMergeFacts`）
+> ——本 PR 只做文档收口，不迁移这些实现。定时触发与 M5 调度的停写已随 PR #355 进入 main
+> 生效：默认 fail-closed（`legacy_scheduler_disabled` / `legacy_dispatcher_disabled`），
+> 仅显式 `--preview` 提供只读诊断，不派发、不写入。**任何分支上都不应再用定时触发或夜间
+> 自动派发开工。**
 
 ## 成功标准
 
@@ -73,9 +75,9 @@ description: "AI 任务批量调度（Execution Plan）：从候选「已定义�
 批量开工 / Execution Plan（并发=2）
 ```
 
-定时触发（M4，已退役）：原设计为到点再次调用本 Skill / 同一执行计划脚本，不另写调度内核（历史产品说明：`docs/design/ai-task-define-delivery/scheduled-trigger-m4.md`）。旧触发脚本 `ai-task-scheduled-trigger.mjs` 已退役，不再用于预约或到点派发；其停写实现见 PR #355，进入 main 之前脚本仍可运行，但任何分支上都不应再使用。
+定时触发（M4，已退役）：原设计为到点再次调用本 Skill / 同一执行计划脚本，不另写调度内核（历史产品说明：`docs/design/ai-task-define-delivery/scheduled-trigger-m4.md`）。旧触发脚本 `ai-task-scheduled-trigger.mjs` 的停写已随 PR #355 在 main 生效：默认拒绝（`legacy_scheduler_disabled`），不再用于预约或到点派发；仅显式 `--preview` 提供只读 Execution Plan 诊断，不唤起施工、不写入任何文件。
 
-**批次前对账（CHORE-73，已退役）**：原流程要求触发脚本唤起执行计划前，先以主干合并事实回写登记册（`registry-reconcile` 的 plan/apply），防止调度按旧账误判依赖。随旧账本停写，`registry-reconcile.mjs apply` 已退役（停写见 PR #358）；`registry-reconcile.mjs plan` 保持只读，可继续用于人工核对主干合并与旧登记册的历史差异，对账结果只供阅读，不回写，也不再作为批次前置步骤。手工跑执行计划无需再执行任何对账命令：
+**批次前对账（CHORE-73，已退役）**：原流程要求触发脚本唤起执行计划前，先以主干合并事实回写登记册（`registry-reconcile` 的 plan/apply），防止调度按旧账误判依赖。旧账本已停写：`registry-reconcile.mjs apply` 在 main 上以退出码 2 拒绝并输出 `legacy_registry_write_disabled`（PR #358，已生效）；`registry-reconcile.mjs plan` 保持只读，可继续用于人工核对主干合并与旧登记册的历史差异，对账结果只供阅读，不回写，也不再作为批次前置步骤。手工跑执行计划无需再执行任何对账命令：
 
 ```bash
 node scripts/ai-task-execution-plan.mjs path/to/batch.json
@@ -98,6 +100,6 @@ node scripts/ai-task-execution-plan.mjs path/to/batch.json
 
 使用前检查 `source-manifest.json` 和相应脚本、模板；缺少资料先恢复同版本完整技能，不要求用户反复补无关环境。
 
-> 🟡 同步状态（UNKNOWN）：截至本文基线（2026-10-03，main=`861e5a0`），本次收口尚未同步至
+> 🟡 同步状态（UNKNOWN）：截至本文更新基线（2026-10-04，main=`c9c08cb8`），本次收口尚未同步至
 > my-agent-skills，各宿主的安装路径与实际加载版本也未验证；一切以 workflow-manager 本仓库
 > 源文件为准，不得假定下游副本已是最新。
