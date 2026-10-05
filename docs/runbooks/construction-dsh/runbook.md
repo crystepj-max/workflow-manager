@@ -104,11 +104,7 @@ node scripts/cwf-evidence-verify.mjs .agent-runs/<run_id>
 
 3. 交接包 schema 校验由 `cwf-record` / `formal-records` 写入时自动调用（内核 `scripts/cwf-validate.mjs`，无独立 CLI）。证据链校验（§8.3 ①–⑫，含 CHORE-110 的存在性分层 ⑩–⑫）**任一不满足即不得呈递或签收**。
 4. Issue / 本地任务卡 → **等待验收**；Run → `WAITING_HUMAN`；呈递 UAT 卡与验收包，**AI 不代签**。
-   本地轨道同步登记册（合并门禁要求此状态）：
-
-```bash
-node scripts/local-task-registry.mjs set --task <任务标识> --status 等待验收 --branch <工作分支>
-```
+   本地轨道登记册已降级为只读存档（W8 P0-C）：状态变更改在 Multica 平台操作（`multica issue status <id> in_review` 等）；旧 `local-task-registry set` 写命令已 fail-closed（原因码 `legacy_registry_write_disabled`）。
 
 5. 无人工操作 → 保持等待；跨日从**原 Run** 恢复，禁止另起丢失上下文的新 Run。
 
@@ -147,15 +143,8 @@ node scripts/ai-task-workspace-env.mjs maybe-cleanup  --store <目录> --env <�
 **6.3 合并成果**（先跑门禁，冲突即中止且不改主干）：
 
 - **GitHub 轨道**：按仓库规则开 PR 并合并；Issue → 已完成。
-- **本地轨道**：一任务一提交合并回本地主干：
-
-```bash
-node scripts/local-task-merge.mjs --task <任务标识> --branch <工作分支> \
-  --decision accept|conditional_pass [--scope <范围>] [--feedback <优化意见>] \
-  --run-id <run_id> [--mirror <镜像远程名>] [--dry-run]
-```
-
-门禁清单与合并后自动动作见 `docs/design/ai-task-define-delivery/local-track-offline-mode.md` §7.1/§7.4。**删工作区、留分支**（阶段一口径，决策 0001 §6 / 约定 §1.7.1）：工作区可再生、分支不可再生；删除不带 `--force`，工作区脏则拒绝并只登记遗留项，不阻塞合并；删除后追加 `git worktree prune` 兜底注销失效登记。
+- **本地轨道**：旧本地合并入口暂停使用（W8 P0-C，WFM-157）：与 §4 一致，登记状态一律以 Multica 平台为准；`local-task-registry set` 写命令已 fail-closed（原因码 `legacy_registry_write_disabled`），旧合并路径 `local-task-merge` 门禁要求的登记册「等待验收」状态目前没有可用 CLI 写入口，尚未标记该状态的存量任务会被门禁拒绝。存量本地任务在 WFM-124 对合并流程作出后续决策前**暂停合并操作**，如有合并/收口需求经 Multica 任务升级协调者裁定；本切片未改动 `local-task-merge` 及其状态语义，`docs/design/ai-task-define-delivery/local-track-offline-mode.md` §7.1/§7.4 门禁清单仅作历史参考。
+  工作区清理口径不变（决策 0001 §6 / 约定 §1.7.1）：**删工作区、留分支**——工作区可再生、分支不可再生；删除不带 `--force`，工作区脏则拒绝并只登记遗留项；删除后追加 `git worktree prune` 兜底注销失效登记。
 
 **6.4 收口后复核**：合并完成后由**执行体（AI）立即**执行验收卡「收口后复核」区各项，把执行时间 / 命令 / 实际结果 / 结论回填该区与 `closeout_summary`；**不得留空、不得静默跳过**。失败如实记录：属真缺陷 → 另立任务（不在本轮静默修）；属环境或时机不成立 → 写明原因与后续触发条件。本条是收口动作的内容，**不新增主链阶段或状态**。
 
@@ -171,12 +160,7 @@ node scripts/task-runs-cleanup.mjs --apply    # 执行清理（摘要缺失的�
 
 证据明细按登记册 `evidence_expires_at`（合并时间 + 7 天）保留，到期后清理（决策二）。
 
-**6.6 本地轨道收尾**：把「有条件通过」的优化意见登记为新的候选任务（分配新号），不改已合并基线：
-
-```bash
-node scripts/local-task-registry.mjs allocate --name "<优化任务名>" --source 会话录入
-node scripts/local-task-registry.mjs board
-```
+**6.6 本地轨道收尾**：把「有条件通过」的优化意见登记为新的候选任务，不改已合并基线。旧 `local-task-registry allocate/board` 写命令已 fail-closed（W8 P0-C，原因码 `legacy_registry_write_disabled`）；新候选任务一律在 Multica 平台建任务（`multica issue create`），本地登记册不再发号、不再重写看板。
 
 ---
 
