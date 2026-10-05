@@ -20,9 +20,10 @@ description: "AI 任务批量调度（Execution Plan）：从候选「已定义�
 > 批次实现仍是旧路径**：批次仍由本地 batch.json 提供 issueBasics / taskSpec 材料路径并运行
 > 实施前检查（`runPreflight`），依赖检查仍读取旧登记册（`loadRegistry` / `collectMergeFacts`）
 > ——本 PR 只做文档收口，不迁移这些实现。定时触发与 M5 调度的停写已随 PR #355 进入 main
-> 生效：默认 fail-closed（`legacy_scheduler_disabled` / `legacy_dispatcher_disabled`），
-> 仅显式 `--preview` 提供只读诊断，不派发、不写入。**任何分支上都不应再用定时触发或夜间
-> 自动派发开工。**
+> 生效：默认 fail-closed（`legacy_scheduler_disabled` / `legacy_dispatcher_disabled`）。
+> 仅显式 `--preview` 提供预览诊断：不认领、不派发、不启动施工 Run，也不回写 registry/BOARD
+> 旧账本（受保护路径拒绝）；但会在指定位置写出独立的预览报告文件，并非零写入。
+> **任何分支上都不应再用定时触发或夜间自动派发开工。**
 
 ## 成功标准
 
@@ -75,7 +76,7 @@ description: "AI 任务批量调度（Execution Plan）：从候选「已定义�
 批量开工 / Execution Plan（并发=2）
 ```
 
-定时触发（M4，已退役）：原设计为到点再次调用本 Skill / 同一执行计划脚本，不另写调度内核（历史产品说明：`docs/design/ai-task-define-delivery/scheduled-trigger-m4.md`）。旧触发脚本 `ai-task-scheduled-trigger.mjs` 的停写已随 PR #355 在 main 生效：默认拒绝（`legacy_scheduler_disabled`），不再用于预约或到点派发；仅显式 `--preview` 提供只读 Execution Plan 诊断，不唤起施工、不写入任何文件。
+定时触发（M4，已退役）：原设计为到点再次调用本 Skill / 同一执行计划脚本，不另写调度内核（历史产品说明：`docs/design/ai-task-define-delivery/scheduled-trigger-m4.md`）。旧触发脚本 `ai-task-scheduled-trigger.mjs` 的停写已随 PR #355 在 main 生效：默认拒绝（`legacy_scheduler_disabled`），不再用于预约或到点派发。仅显式 `--preview` 提供只读 Execution Plan 诊断：不唤起施工、不回写 registry/BOARD 旧账本（受保护路径拒绝）；但会写出独立的预览报告文件（默认 `night-batch-report.md`，可由预约单 `reportOut` 指定）。
 
 **批次前对账（CHORE-73，已退役）**：原流程要求触发脚本唤起执行计划前，先以主干合并事实回写登记册（`registry-reconcile` 的 plan/apply），防止调度按旧账误判依赖。旧账本已停写：`registry-reconcile.mjs apply` 在 main 上以退出码 2 拒绝并输出 `legacy_registry_write_disabled`（PR #358，已生效）；`registry-reconcile.mjs plan` 保持只读，可继续用于人工核对主干合并与旧登记册的历史差异，对账结果只供阅读，不回写，也不再作为批次前置步骤。手工跑执行计划无需再执行任何对账命令：
 
