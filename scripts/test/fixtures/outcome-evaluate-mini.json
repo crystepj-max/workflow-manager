@@ -6,7 +6,7 @@
   "nodes": [
     {
       "id": "intake",
-      "profile": "dispatcher",
+      "profile": "legacy-role",
       "goal": "接入任务",
       "output": {
         "outcomePath": "$.go",

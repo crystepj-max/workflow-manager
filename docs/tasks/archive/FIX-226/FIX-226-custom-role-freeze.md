@@ -1,5 +1,7 @@
 # FIX-226｜自定义角色正文的运行期冻结（角色快照仍指向可变路径）
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `dispatcher` 角色与 `default-workflow` / `dev-workflow-2-0` 工作流模板**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`），正式内置角色 12 个，无历史兼容角色。
+
 ## 任务基本信息
 
 | 字段 | 值 |

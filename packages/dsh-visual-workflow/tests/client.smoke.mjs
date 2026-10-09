@@ -67,7 +67,7 @@ const SEED_DSL = {
   entry: 'node-1',
   control: { maxRounds: 9 },
   nodes: [
-    { id: 'node-1', profile: 'dispatcher', label: '节点1' },
+    { id: 'node-1', profile: 'legacy-role', label: '节点1' },
   ],
   edges: [
     { from: 'node-1', to: '$end', on: 'success' },
@@ -77,8 +77,8 @@ const SEED_DSL = {
 // ── 角色库假数据（issue-58）───────────────────────────────────────────────
 const roleState = {
   roles: [
-    // issue-81：dispatcher 已退出内置身份，迁为自定义角色
-    { id: 'dispatcher', name: '调度', summary: '调度角色', builtin: false, content: '调度角色正文\n职责：调度。\n' },
+    // issue-81：legacy-role 已退出内置身份，迁为自定义角色
+    { id: 'legacy-role', name: '调度', summary: '调度角色', builtin: false, content: '调度角色正文\n职责：调度。\n' },
     { id: 'dev', name: '开发', summary: '开发角色', builtin: true, content: '开发角色正文\n' },
     { id: '需求分析师', name: '需求分析师', summary: '需求拆解', builtin: false, content: '需求分析正文\n' },
   ],
@@ -1130,7 +1130,7 @@ test('防重叠：跨节点边与回边路走外围车道，标签避开中间�
     entry: 'start',
     control: { maxRounds: 9 },
     nodes: [
-      { id: 'start', profile: 'dispatcher', label: '开始' },
+      { id: 'start', profile: 'legacy-role', label: '开始' },
       { id: 'middle', profile: 'dev', label: '汇总' },
       { id: 'review', profile: 'review', label: '复核' },
     ],
@@ -1286,7 +1286,7 @@ test('防重叠：入口变化会触发画布布局重算', async () => {
     entry,
     control: { maxRounds: 9 },
     nodes: [
-      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'a', profile: 'legacy-role', label: 'A' },
       { id: 'b', profile: 'dev', label: 'B' },
     ],
     edges: [{ from: 'a', to: '$end', on: 'success' }],
@@ -1386,7 +1386,7 @@ test('两级序号：同级多节点显示 m.1 / m.2 且左右并排（V-12 纵�
     entry: 'a',
     control: { maxRounds: 9 },
     nodes: [
-      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'a', profile: 'legacy-role', label: 'A' },
       { id: 'b1', profile: 'dev', label: 'B1' },
       { id: 'b2', profile: 'review', label: 'B2' },
     ],
@@ -1431,7 +1431,7 @@ test('自环边：布局不进入死循环，终点仍在节点上边框水平�
     entry: 'a',
     control: { maxRounds: 9 },
     nodes: [
-      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'a', profile: 'legacy-role', label: 'A' },
       { id: 'b', profile: 'dev', label: 'B' },
     ],
     edges: [
@@ -1640,7 +1640,7 @@ test('角色库：管理入口 → 内置/自定义分区 → 查看内置 → �
   assert.ok(viewBtns.length >= 1, '内置角色提供查看入口')
   assert.equal(Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '查看详情').length, 0, '不再并列「查看详情」入口')
   const editBtns = Array.from(mgr.querySelectorAll('button')).filter(b => b.textContent === '编辑')
-  // issue-81 后自定义角色为 dispatcher + 需求分析师两个；内置仅剩 dev，不提供编辑入口
+  // issue-81 后自定义角色为 legacy-role + 需求分析师两个；内置仅剩 dev，不提供编辑入口
   assert.ok(editBtns.length === 2, '内置角色不提供编辑入口（仅自定义）')
   // 查看内置角色：只读 + 基于此角色创建
   await act(async () => {
@@ -1865,9 +1865,9 @@ test('角色库删除 fail-closed：usage 返回 ok:false 时不弹出删除确�
   })
   await openRolesTab(fresh)
   const mgr = fresh.querySelector('[data-vwf-roles-tab]')
-  // 用零引用的 dispatcher 行：usage 服务故障（ok:false 解析）时点删除
+  // 用零引用的 legacy-role 行：usage 服务故障（ok:false 解析）时点删除
   state.failUsage = 'resolved'
-  const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, 'dispatcher'))
+  const row = Array.from(mgr.querySelectorAll('.vwf-role-row')).find(r => byText(r, 'legacy-role'))
   await act(async () => {
     Array.from(row.querySelectorAll('button')).find(b => b.textContent === '删除').click()
     await flush()
@@ -1875,7 +1875,7 @@ test('角色库删除 fail-closed：usage 返回 ok:false 时不弹出删除确�
   })
   assert.ok(!byText(mgr, '确认删除') && !mgr.querySelector('.vwf-dialog-mask'), 'usage ok:false 时不得进入删除确认')
   assert.ok(byText(mgr, '引用统计失败'), '展示引用统计失败原因')
-  assert.ok(roleState.roles.some(r => r.id === 'dispatcher'), '角色未被删除')
+  assert.ok(roleState.roles.some(r => r.id === 'legacy-role'), '角色未被删除')
   state.failUsage = false
   await act(async () => { freshRoot.unmount(); fresh.remove() })
 })
@@ -1959,10 +1959,10 @@ test('一键检测结果条：整体结论 + 一级节点 + 同列二级节点�
       },
     },
     nodes: [
-      { id: 'a', label: '需求分析', profile: 'dispatcher', goal: 'g' },
-      { id: 'b1', label: '开发1', profile: 'dispatcher', goal: 'g' },
-      { id: 'b2', label: '开发2', profile: 'dispatcher', goal: 'g' },
-      { id: 'c', label: '收口', profile: 'dispatcher', goal: 'g' },
+      { id: 'a', label: '需求分析', profile: 'legacy-role', goal: 'g' },
+      { id: 'b1', label: '开发1', profile: 'legacy-role', goal: 'g' },
+      { id: 'b2', label: '开发2', profile: 'legacy-role', goal: 'g' },
+      { id: 'c', label: '收口', profile: 'legacy-role', goal: 'g' },
     ],
     edges: [
       { from: 'a', to: 'b1', on: 'success' },

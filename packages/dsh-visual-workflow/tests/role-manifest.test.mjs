@@ -88,14 +88,11 @@ test('manifest：12 个内置角色的定义文件全部存在', () => {
   }
 })
 
-test('manifest：dispatcher 登记为兼容角色（builtin:false），且不与内置冲突', () => {
+test('manifest：兼容角色清单为空且不与内置冲突（历史兼容角色已全部移除）', () => {
   const m = loadManifest()
   const builtinIds = new Set(m.builtins.map((r) => r.id))
-  assert.ok(!builtinIds.has('dispatcher'), 'dispatcher 不得出现在 builtins（issue-81 已迁出）')
   const compat = Array.isArray(m.compatibilityRoles) ? m.compatibilityRoles : []
-  const dp = compat.find((r) => r.id === 'dispatcher')
-  assert.ok(dp, 'dispatcher 必须登记在 compatibilityRoles（历史引用兼容）')
-  assert.equal(dp.builtin, false, 'dispatcher 身份必须是自定义')
+  assert.deepEqual(compat, [], '历史兼容角色已全部移除，清单应为空')
   for (const r of compat) {
     assert.ok(!builtinIds.has(r.id), `兼容角色不得与内置冲突：${r.id}`)
   }

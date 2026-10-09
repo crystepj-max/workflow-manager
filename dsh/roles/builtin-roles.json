@@ -14,7 +14,5 @@
     { "id": "researcher", "name": "专家研究", "summary": "严格按专家任务书指定的视角独立研究，形成有证据、有反证、有边界的明确观点。", "definition": "dsh/roles/researcher.md", "builtin": true, "readonly": true },
     { "id": "synthesizer", "name": "综合分析", "summary": "把多份相互独立的专业判断整合成一张可支持决策的观点地图，不掩盖真实分歧。", "definition": "dsh/roles/synthesizer.md", "builtin": true, "readonly": true }
   ],
-  "compatibilityRoles": [
-    { "id": "dispatcher", "builtin": false, "visibility": "workspace-or-bundle" }
-  ]
+  "compatibilityRoles": []
 }

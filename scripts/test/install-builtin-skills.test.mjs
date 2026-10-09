@@ -78,7 +78,7 @@ test('共享技能池安装：与 DSH 产物同形态，可重复执行', () => 
   } finally { rmTmp(tmp); }
 });
 
-test('内置清单只含正式内置：不含 custom-seeds 历史种子', () => {
+test('内置清单 = templates/ 下的全部正式内置蓝图', () => {
   const files = listBuiltinBlueprintFiles().map((f) => path.basename(f, '.json')).sort();
   assert.deepEqual(files, [...EXPECTED_IDS].sort());
 });

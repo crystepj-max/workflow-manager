@@ -1,5 +1,7 @@
 # R-04 · DSH skill 发现与触发词路由机制
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `dev-workflow-2-0` 工作流模板与 `dsh/install-skill.sh` 技能安装通道**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`），正式内置角色 12 个，无历史兼容角色。
+
 > 调研票 R-04 产物。一手资料：
 > - `@deepseek-ai/dsh-skill-filesystem/lib/index.js`（发现根与 frontmatter 解析）
 > - `@deepseek-ai/dsh-skill/lib/index.js`（skill 名文法、可调用策略）

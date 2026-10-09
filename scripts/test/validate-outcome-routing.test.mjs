@@ -7,8 +7,7 @@ import validatorCore from '../validate-core.cjs'
 
 const { validateBlueprint, deriveEntryCandidates } = validatorCore
 const here = path.dirname(fileURLToPath(import.meta.url))
-const good = JSON.parse(readFileSync(path.join(here, '../../templates/custom-seeds/dev-workflow-2-0.json'), 'utf8'))
-const defaultWf = JSON.parse(readFileSync(path.join(here, '../../templates/custom-seeds/default-workflow.json'), 'utf8'))
+const good = JSON.parse(readFileSync(path.join(here, 'fixtures/legacy-baseline.json'), 'utf8'))
 const hdGood = JSON.parse(readFileSync(path.join(here, 'fixtures/human-decision-blueprint.json'), 'utf8'))
 const fanoutGood = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'))
 const outcomeGood = JSON.parse(readFileSync(path.join(here, 'fixtures/outcome-evaluate-mini.json'), 'utf8'))
@@ -28,8 +27,7 @@ const expectReject = (bp, needle, label) => {
 }
 
 test('#126 旧蓝图零迁移：内置模板与既有 HD/fanout 夹具仍通过', () => {
-  expectOk(good, 'dev-workflow-2-0')
-  expectOk(defaultWf, 'default-workflow')
+  expectOk(good, 'legacy-baseline')
   expectOk(hdGood, 'human-decision-mini')
   expectOk(fanoutGood, 'fanout-example')
 })
@@ -45,7 +43,7 @@ test('#126 L2 自定义 $.decision 合法', () => {
     entry: 'start',
     nodes: [{
       id: 'start',
-      profile: 'dispatcher',
+      profile: 'legacy-role',
       goal: '启动',
       output: {
         outcomePath: '$.go',
@@ -88,7 +86,7 @@ test('#126 L4 boolean 两边合法', () => {
     entry: 'start',
     nodes: [{
       id: 'start',
-      profile: 'dispatcher',
+      profile: 'legacy-role',
       goal: '启动',
       output: {
         outcomePath: '$.go',
@@ -130,7 +128,7 @@ test('#126 工作流内新旧节点并存合法', () => {
     nodes: [
       {
         id: 'legacy',
-        profile: 'dispatcher',
+        profile: 'legacy-role',
         goal: '旧二态',
         output: {
           successCondition: '$.complete == true',
@@ -241,7 +239,7 @@ test('#126 无出口业务自环拒绝；有 PASS 出口的环合法', () => {
     entry: 'start',
     nodes: [{
       id: 'start',
-      profile: 'dispatcher',
+      profile: 'legacy-role',
       goal: '启动',
       output: {
         outcomePath: '$.go',

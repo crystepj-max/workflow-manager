@@ -25,7 +25,7 @@ const BUILTIN_DSL = JSON.stringify({
   entry: 'a',
   control: { maxRounds: 3 },
   nodes: [
-    { id: 'a', profile: 'dispatcher', label: 'A', goal: 'g', model: { provider: 'p1', model: 'm1' } },
+    { id: 'a', profile: 'legacy-role', label: 'A', goal: 'g', model: { provider: 'p1', model: 'm1' } },
     { id: 'b', profile: 'dev', label: 'B', goal: 'g', model: { provider: 'p1', model: 'm1' } },
   ],
   edges: [
@@ -101,15 +101,15 @@ test('LOC-014 容错：坏 JSON 覆盖文件忽略留痕，不阻断模板加载
   assert.equal(nodeModelOf(entry, 'a').provider, 'p1')
 })
 
-test('LOC-014 优先级：用户整份覆盖优先于历史生成物，且覆盖层仅对正式内置生效', async () => {
+test('LOC-014 优先级：内置模板优先于同 id 用户文件，且覆盖层仅对正式内置生效', async () => {
   const userBp = JSON.stringify({
-    id: 'dev-workflow-2-0',
+    id: 'legacy-baseline',
     displayName: '用户整份覆盖版',
     description: 'user full copy',
     entry: 'a',
     control: { maxRounds: 3 },
     nodes: [
-      { id: 'a', profile: 'dispatcher', label: 'A', goal: 'g', model: { provider: 'pu', model: 'mu' } },
+      { id: 'a', profile: 'legacy-role', label: 'A', goal: 'g', model: { provider: 'pu', model: 'mu' } },
       { id: 'b', profile: 'dev', label: 'B', goal: 'g', model: { provider: 'pu', model: 'mu' } },
     ],
     edges: [
@@ -119,17 +119,17 @@ test('LOC-014 优先级：用户整份覆盖优先于历史生成物，且覆盖
     bindings: { models: { a: { provider: 'pu', model: 'mu' } } },
   })
   const { handlers } = env({
-    [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: BUILTIN_DSL.replace(BUILTIN_ID, 'dev-workflow-2-0'),
-    [USER_DIR + '/dev-workflow-2-0.json']: userBp,
-    [OV_DIR + '/dev-workflow-2-0.json']: JSON.stringify({ a: { provider: 'p2', model: 'm2' } }),
+    [REPO + '/.generated/legacy-baseline/vwf-dsl.json']: BUILTIN_DSL.replace(BUILTIN_ID, 'legacy-baseline'),
+    [USER_DIR + '/legacy-baseline.json']: userBp,
+    [OV_DIR + '/legacy-baseline.json']: JSON.stringify({ a: { provider: 'p2', model: 'm2' } }),
   })
   const list = await call(handlers, 'vwf.workflows.list', {})
-  const entry = list.find((w) => w.id === 'dev-workflow-2-0')
-  assert.equal(entry.builtin, false, '同 id 用户整份覆盖在清单中优先于历史生成物')
-  assert.equal(entry.modelOverridden, undefined, '覆盖层不作用于用户自定义资产')
-  assert.equal(entry.name, '用户整份覆盖版', '清单展示用户整份内容而非历史生成物')
-  const save = await call(handlers, 'vwf.workflows.modelOverride.save', { id: 'dev-workflow-2-0', overrides: { a: { provider: 'p2', model: 'm2' } } })
-  assert.equal(save.ok, false, '模型覆盖仅对正式内置开放：历史自定义/用户资产直接编辑')
+  const entry = list.find((w) => w.id === 'legacy-baseline')
+  assert.equal(entry.builtin, true, '生成物模板一律内置；同 id 用户文件不参与优先')
+  assert.equal(entry.modelOverridden, true, '覆盖层对内置模板生效')
+  assert.notEqual(entry.name, '用户整份覆盖版', '同 id 用户文件不得覆盖内置模板')
+  const save = await call(handlers, 'vwf.workflows.modelOverride.save', { id: 'legacy-baseline', overrides: { a: { provider: 'p2', model: 'm2' } } })
+  assert.equal(save.ok, true, '模型覆盖对内置模板开放')
 })
 
 test('LOC-014 RPC save：合法覆盖落盘并可读回', async () => {
@@ -178,7 +178,7 @@ test('LOC-014 安全：路径穿越 / 非法字符 id 三端点拒绝，clear �
     }
   }
   // clear 对非内置合法 id 幂等成功（本机制不会为其写文件，不触碰文件系统）
-  const legacy = await call(handlers, 'vwf.workflows.modelOverride.clear', { id: 'dev-workflow-2-0' })
+  const legacy = await call(handlers, 'vwf.workflows.modelOverride.clear', { id: 'legacy-baseline' })
   assert.equal(legacy.ok, true)
 })
 
@@ -242,7 +242,7 @@ test('FIX-233 回归：显式 DSL + 部分 bindings.models，内联模型与兜�
     dsl: {
       id: 'fix233-partial', name: '部分绑定显式图', entry: 'a', control: { maxRounds: 3 },
       nodes: [
-        { id: 'a', profile: 'dispatcher', label: 'A', goal: 'g', model: { provider: 'p1', model: 'm1' } },
+        { id: 'a', profile: 'legacy-role', label: 'A', goal: 'g', model: { provider: 'p1', model: 'm1' } },
         { id: 'b', profile: 'dev', label: 'B', goal: 'g', model: { provider: 'p1', model: 'm1' } },
         { id: 'c', profile: 'review', label: 'C', goal: 'g' },
       ],
@@ -267,7 +267,7 @@ test('FIX-233 回归：蓝图落盘格式（displayName + bindings.models）仍�
     dsl: {
       displayName: '蓝图形态模板', id: 'fix233-bp', entry: 'a',
       nodes: [
-        { id: 'a', profile: 'dispatcher', label: 'A', goal: 'g' },
+        { id: 'a', profile: 'legacy-role', label: 'A', goal: 'g' },
         { id: 'b', profile: 'dev', label: 'B', goal: 'g' },
       ],
       bindings: { models: { a: { provider: 'p1', model: 'm1' }, b: { provider: 'p1', model: 'm1' } } },

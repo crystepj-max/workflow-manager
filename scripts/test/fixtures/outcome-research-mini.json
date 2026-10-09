@@ -6,7 +6,7 @@
   "nodes": [
     {
       "id": "kickoff",
-      "profile": "dispatcher",
+      "profile": "legacy-role",
       "goal": "启动探索",
       "output": {
         "outcomePath": "$.go",
@@ -20,7 +20,7 @@
     },
     {
       "id": "orchestrate",
-      "profile": "dispatcher",
+      "profile": "legacy-role",
       "goal": "探索统筹",
       "output": {
         "outcomePath": "$.go",

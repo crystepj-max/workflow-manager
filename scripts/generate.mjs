@@ -12,7 +12,7 @@ import validatorCore from './validate-core.cjs';
 // Blueprint ↔ VWF DSL 投影内核（候选一）：生成器与 Host 共用同一份字段契约。
 import projectionCore from './projection-core.cjs';
 // 角色库内核（候选二深化）：内置角色清单唯一事实源 = dsh/roles/builtin-roles.json；
-// 正文安全读取与「被引用角色文件打包」共享内核实现（含自定义角色——dispatcher 等）。
+// 正文安全读取与「被引用角色文件打包」共享内核实现（含用户自定义角色）。
 import roleLibrary from './role-library.cjs';
 import { createRequire } from 'node:module';
 import exploreCoverageCore from './explore-coverage.cjs';
@@ -43,7 +43,7 @@ const DEFAULT_MANIFEST_PATH = path.join(__dirname, '..', 'dsh', 'roles', 'builti
 // ---------- 内置角色清单（单一事实源 = dsh/roles/builtin-roles.json）----------
 // 生成脚本需区分「内置角色」与「自定义角色」：内置角色只读、以打包快照为准（Codex
 // PR#124 第四轮 P1，评论 3889756922），自定义角色以工作区 dsh/roles 为准。清单读
-// manifest 并强校验（schema/顺序不变量/dispatcher 不得为内置），解析失败 loud-fail，
+// manifest 并强校验（schema/顺序不变量/兼容角色不得与内置冲突），解析失败 loud-fail，
 // 禁止静默退化成全部走工作区。不再反向解析 host.js 源码（旧 regex 缝已拆）。
 export function loadBuiltinRoleIds(manifestPath = DEFAULT_MANIFEST_PATH) {
   try {
@@ -81,7 +81,7 @@ export function loadBuiltinRoleDefs(ids, rolesDir = DEFAULT_ROLES_DIR, io = fs) 
 
 // ---------- FIX-226：被引用角色正文的编译期内联（内置 + 自定义同权）----------
 // 决策 3=A：本图实际引用到的**全部**角色在编译期内联进 ROLE_DEFS，运行期不再依赖工作区
-// 文件。自定义角色（builtin:false，当前即 dispatcher）此前只把路径写进快照、运行期按
+// 文件。自定义角色（builtin:false）此前只把路径写进快照、运行期按
 // 「工作区优先」读文件，等待期间改 dsh/roles/<id>.md 就会让已存在的运行中途换规矩——冻结
 // 形同不存在。本切片撤销当年「编辑工作区角色种子即对 bundled run 生效」的兼容取舍。
 //
@@ -1765,11 +1765,8 @@ export function templateGuideSection(bp) {
 }
 
 // ---------- skill 包装（契约 FR-2/FR-6；runbook 覆盖全部返回状态，T-IMP-09） ----------
-/** 正式内置在 templates/<id>.json；历史迁出的自定义种子在 templates/custom-seeds/。 */
+/** 全部蓝图均为正式内置，真源在 templates/<id>.json。 */
 export function blueprintSourceRel(bpId) {
-  if (bpId === 'default-workflow' || bpId === 'dev-workflow-2-0') {
-    return 'templates/custom-seeds/' + bpId + '.json';
-  }
   return 'templates/' + bpId + '.json';
 }
 
@@ -1818,7 +1815,7 @@ export function buildMeta(bp) {
 
 /**
  * 递归收集 templates/ 下所有蓝图 JSON。
- * 原先只扫 templates/ 与 templates/custom-seeds/ 两层，往更深或新目录放蓝图会被漏掉。
+ * 递归收集 templates/ 下所有蓝图 JSON；往更深或新目录放蓝图也不会被漏掉。
  */
 export function listBlueprintJsonFiles(templatesDir) {
   const out = [];
@@ -1902,7 +1899,7 @@ export function generateUserSkill(bp) {
 // 角色源缺失或某角色文件不存在时静默跳过——可能是自定义角色（运行时按工作区 dsh/roles 解析）。
 const DEFAULT_ROLES_DIR = path.join(__dirname, '..', 'dsh', 'roles')
 // 注意命名误导（保留导出名以兼容既有调用与测试）：本函数打包的是「蓝图引用且角色
-// 文件存在」的全部角色，**包含自定义角色**（如已迁出内置的 dispatcher）——绝不能误
+// 文件存在」的全部角色，**包含自定义角色**——绝不能误
 // 改为仅过滤内置，否则用户 skill 的历史自定义角色自包含行为会回归。语义实现已收敛进
 // role-library.cjs 的 collectReferencedRoleFiles（单一实现）。
 export function collectBuiltinRoles(bp, rolesDir = DEFAULT_ROLES_DIR, io = fs) {

@@ -6,7 +6,7 @@
   "nodes": [
     {
       "id": "kickoff",
-      "profile": "dispatcher",
+      "profile": "legacy-role",
       "goal": "启动",
       "output": {
         "outcomePath": "$.go",
@@ -20,7 +20,7 @@
     },
     {
       "id": "intake",
-      "profile": "dispatcher",
+      "profile": "legacy-role",
       "goal": "确认目标",
       "output": {
         "outcomePath": "$.go",

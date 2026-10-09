@@ -94,7 +94,6 @@ function validateManifest(m) {
     if (r.definition !== 'dsh/roles/' + r.id + '.md') throw new Error('内置角色清单解析失败：definition 路径非法：' + r.id)
     if (r.builtin !== true || r.readonly !== true) throw new Error('内置角色清单解析失败：内置角色必须 builtin/readonly：' + r.id)
   }
-  if (seen.has('dispatcher')) throw new Error('内置角色清单解析失败：dispatcher 不得为内置（issue-81 已迁出）')
   const compat = Array.isArray(m.compatibilityRoles) ? m.compatibilityRoles : []
   for (const r of compat) {
     if (!r || typeof r !== 'object' || !r.id) throw new Error('内置角色清单解析失败：兼容角色条目非法')

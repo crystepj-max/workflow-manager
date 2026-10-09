@@ -341,7 +341,7 @@ test('O11 list 汇总 run 内全部操作槽', () => {
 })
 
 // ── O12 生成器：closeout 节点注入恢复防重规则（WR-012 行为层）───────────────
-const seedBp = JSON.parse(readFileSync(join(here, '..', '..', 'templates', 'custom-seeds', 'dev-workflow-2-0.json'), 'utf8'))
+const seedBp = JSON.parse(readFileSync(join(here, 'fixtures', 'legacy-baseline.json'), 'utf8'))
 const fanoutBp = JSON.parse(readFileSync(join(here, 'fixtures', 'fanout-blueprint.json'), 'utf8'))
 
 test('O12 生成器：closeout 节点注入恢复/重试防重规则，非 closeout 蓝图不受影响', () => {

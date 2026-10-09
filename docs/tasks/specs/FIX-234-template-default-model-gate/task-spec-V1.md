@@ -1,5 +1,7 @@
 # 内置模板默认模型绑定更新（6 节点指向已删除配置）与默认绑定机器闸门
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `default-workflow` / `dev-workflow-2-0` 工作流模板**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`）。
+
 | 元数据 | 值 |
 |---|---|
 | 需求基线版本 | V1 |

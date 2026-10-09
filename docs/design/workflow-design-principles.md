@@ -195,9 +195,9 @@ v0.1 运行中只允许修改 Provider / Model，并生成 Snapshot Revision；�
 
 已确认的本轮迁移口径：
 
-- `default-workflow` / `dev-workflow-2-0` **已转为 Custom Workflow**（蓝图在 `templates/custom-seeds/`，列表 `builtin=false`），不再作为系统内置模板；正式内置蓝图仅在 `templates/*.json`；
+- 正式内置蓝图仅在 `templates/*.json`（当前 4 个，见 [`workflow-capability-index.md`](workflow-capability-index.md)）；只有用户模板（`~/.dsh/visual-workflow/templates/<id>.json`，`builtin=false`）可编辑 / 删除；
 - 当前已有内置角色若与新的正式基础角色能力相同，则由新的正式角色替换 / 升级；
-- `dispatcher` 转为 Custom Role，不再占据正式内置身份；
+- 正式内置角色只保留统一评审的 12 个，仓库当前没有历史兼容角色；用户自建角色仍以 Custom 身份存在（`builtin=false`，可编辑 / 删除）；
 - 迁移应尽量保留用户既有引用、Skill 触发兼容和历史运行可追溯性，不因「正式化」直接丢失旧资产。
 
 Built-in Workflow 结构只读；用户可以持久覆盖 Provider / Model。修改 Node、Edge、Role、Goal、Schema、Outcome Routing、Human Decision、回退规则或 Topology 时，必须基于该模板创建 Custom Workflow。由 [#82](https://github.com/crystepj-max/workflow-manager/issues/82) 承接。

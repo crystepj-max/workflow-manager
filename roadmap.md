@@ -166,7 +166,7 @@ Workspace 默认：
 
 探索总研究轮次最多 3 轮（含首次 BROAD）；最多 2 次自动 `NEEDS_RESEARCH -> orchestrate`。
 
-历史 `default-workflow` / `dev-workflow-2-0` 迁为 Custom Workflow；`dispatcher` 迁为 Custom Role。
+历史自定义工作流种子档位已移除：`.generated/` 下的模板一律是正式内置模板（`builtin=true`、只读），只有用户模板（`builtin=false`）可编辑 / 删除；角色库为 12 个正式内置角色，没有历史兼容角色，只有用户自建的自定义角色（`builtin=false`）可编辑 / 删除。
 
 Draft PR #70 已关闭且未合并；仅作为 #81/#82 探索素材，不得 reopen/rebase 或整包 cherry-pick。
 

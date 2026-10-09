@@ -2,23 +2,28 @@
 // 异源硬规则（T-IMP-07）/ 角色回退
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const realGenerated = join(here, '..', '..', '..', '.generated', 'dev-workflow-2-0', 'vwf-dsl.json')
+// 「真实生成物」防线：基座经真实生成器编译得到的内存产物。基座不参与生成与安装，
+// 不会落到 .generated/，因此不能按磁盘固定路径读取（否则防线恒定跳过）。
+const _baselineGenerated = generateBaseline()
+const REAL_GENERATED_DSL = _baselineGenerated.files.get('legacy-baseline/vwf-dsl.json')
+const REAL_GENERATED_SCRIPT = _baselineGenerated.files.get('legacy-baseline/script.mjs')
 
 // ── 共享假服务（helpers/fake-services.mjs）与共享加载器（helpers/load-host.mjs）──
 import { loadHost, ROLE_CORE_SEED } from './helpers/load-host.mjs'
+import { generateBaseline } from '../../../scripts/test/helpers/baseline-harness.mjs'
 import { REPO, SESSION_REPO, HOME, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 
 const call = async (handlers, method, args) => handlers.get(method)(args)
 const MINIMAL_BUILTIN = JSON.stringify({
-  id: 'dev-workflow-2-0', name: '开发工作流 2.0', description: '内置最小样例', entry: 'dispatch',
+  id: 'legacy-baseline', name: '测试基座样例', description: '内置最小样例', entry: 'dispatch',
   control: { maxRounds: 9 },
   nodes: [
-    { id: 'dispatch', profile: 'dispatcher', label: '调度', goal: 'g', model: { provider: 'p1', model: 'm1' } },
+    { id: 'dispatch', profile: 'legacy-role', label: '调度', goal: 'g', model: { provider: 'p1', model: 'm1' } },
     { id: 'closeout', profile: 'closeout', label: '收口', goal: 'g', manualCheck: true, model: { provider: 'p1', model: 'm1' } },
   ],
   edges: [
@@ -30,7 +35,7 @@ const OFFICIAL_BUILTIN = JSON.stringify({
   id: 'official-builtin', name: '正式内置样例', description: '仍占内置身份', entry: 'dispatch',
   control: { maxRounds: 9 },
   nodes: [
-    { id: 'dispatch', profile: 'dispatcher', label: '调度', goal: 'g', model: { provider: 'p1', model: 'm1' } },
+    { id: 'dispatch', profile: 'legacy-role', label: '调度', goal: 'g', model: { provider: 'p1', model: 'm1' } },
   ],
   edges: [
     { from: 'dispatch', to: '$end', on: 'success' },
@@ -61,7 +66,7 @@ function nonProtocolWarnings(r) {
 
 function seedFs(extra = {}) {
   const seed = {
-    [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: existsSync(realGenerated) ? readFileSync(realGenerated, 'utf8') : MINIMAL_BUILTIN,
+    [REPO + '/.generated/legacy-baseline/vwf-dsl.json']: REAL_GENERATED_DSL,
     ...VALIDATOR_KERNEL_SEED,
   }
   Object.assign(seed, extra)
@@ -71,9 +76,7 @@ function seedFs(extra = {}) {
 function env({ failPattern, extra = {} } = {}) {
   const fs = seedFs()
   // 统一编译器管道（T-IMP-12）：vwf.script 走 CLI compile——模拟输出用真实生成物（存在时）
-  const compileScript = existsSync(realGenerated)
-    ? readFileSync(join(here, '..', '..', '..', '.generated', 'dev-workflow-2-0', 'script.mjs'), 'utf8')
-    : '//MOCK-SCRIPT'
+  const compileScript = REAL_GENERATED_SCRIPT
   const sub = makeSubprocess({ failPattern, fs, compileScript })
   const { handlers, definedTools, events, ctx } = loadHost({ fs, subprocess: sub, sandboxPolicy, ...extra })
   return { handlers, definedTools, events, ctx, fs, sub }
@@ -86,7 +89,7 @@ function baseDsl(overrides = {}) {
     entry: 'a',
     control: { maxRounds: 3 },
     nodes: [
-      { id: 'a', profile: 'dispatcher', label: 'A', goal: '目标A', model: { provider: 'p1', model: 'm1' }, output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, successCondition: '$.ok == true' } },
+      { id: 'a', profile: 'legacy-role', label: 'A', goal: '目标A', model: { provider: 'p1', model: 'm1' }, output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, successCondition: '$.ok == true' } },
       { id: 'b', profile: 'dev', label: 'B', goal: '目标B', model: { provider: 'p1', model: 'm1' } },
     ],
     edges: [
@@ -124,12 +127,12 @@ function heteroDsl(devModel, reviewModel, overrides = {}) {
 // T-IMP-06 · 双根加载
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('AC-2：历史模板从 .generated/ 目录加载为自定义（host.js 无硬编码模板）', async () => {
+test('AC-2：生成物模板从 .generated/ 目录加载为内置（host.js 无硬编码模板）', async () => {
   const { handlers, sub } = env()
   const list = await call(handlers, 'vwf.workflows.list')
-  const shipped = list.find(w => w.id === 'dev-workflow-2-0')
+  const shipped = list.find(w => w.id === 'legacy-baseline')
   assert.ok(shipped, '列表包含历史模板')
-  assert.equal(shipped.builtin, false, 'dev-workflow-2-0 已迁为自定义，无内置标签')
+  assert.equal(shipped.builtin, true, '生成物目录的模板一律为内置')
   const v = await call(handlers, 'vwf.validate', { dsl: shipped.dsl })
   assert.equal(v.ok, true, JSON.stringify(v.errors))
   // T-IMP-12：vwf.compile 已删除；vwf.script 走统一编译器管道（CLI compile）
@@ -137,24 +140,22 @@ test('AC-2：历史模板从 .generated/ 目录加载为自定义（host.js 无�
   assert.equal(s.ok, true, JSON.stringify(s.errors))
   const compileCall = sub._calls.find(c => c.join(' ').includes('generate.mjs') && c.join(' ').includes(' compile '))
   assert.ok(compileCall, 'vwf.script 经 CLI compile 取统一译文')
-  if (existsSync(realGenerated)) {
-    assert.ok(s.script.includes('AWAITING_HUMAN_'), '统一译文含人工验收门禁语义')
-    assert.ok(s.script.includes('const MAX_ROUNDS = 9'))
-  }
+  assert.ok(s.script.includes('AWAITING_HUMAN_'), '统一译文含人工验收门禁语义')
+  assert.ok(s.script.includes('const MAX_ROUNDS = 9'))
 })
 
 test('内置根优先取发起 agent 会话 cwd（agentless 兜底 sandboxPolicy.workspaceRoot）', async () => {
   // agents 注入 currentInitiator → session.header.cwd = 会话工作区
-  const sessionFs = makeFs({ [SESSION_REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: MINIMAL_BUILTIN })
+  const sessionFs = makeFs({ [SESSION_REPO + '/.generated/legacy-baseline/vwf-dsl.json']: MINIMAL_BUILTIN })
   const sub = makeSubprocess({ fs: sessionFs })
   const { handlers } = loadHost({
     fs: sessionFs, subprocess: sub, sandboxPolicy,
     agents: { currentInitiator: () => ({ session: { header: { cwd: SESSION_REPO } } }) },
   })
   const list = await call(handlers, 'vwf.workflows.list')
-  const shipped = list.find(w => w.id === 'dev-workflow-2-0')
-  assert.ok(shipped && shipped.builtin === false, '历史模板从会话 cwd 的 .generated/ 加载为自定义')
-  assert.equal(shipped.name, '开发工作流 2.0')
+  const shipped = list.find(w => w.id === 'legacy-baseline')
+  assert.ok(shipped && shipped.builtin === true, '生成物模板从会话 cwd 的 .generated/ 加载为内置')
+  assert.equal(shipped.name, '测试基座样例')
   // 无 agents 时兜底 sandboxPolicy.workspaceRoot（env() 默认路径覆盖）
 })
 
@@ -175,7 +176,7 @@ test('AC-3：save 落盘后新实例（重启宿主等价）仍可 list', async 
 
 test('apply 无 initiator（浏览器审批激活）→ 后续模型调用实时解析会话 cwd', async () => {
   let initiator = null // apply 时无 currentInitiator（knownCwd=null）
-  const liveFs = makeFs({ [SESSION_REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: MINIMAL_BUILTIN })
+  const liveFs = makeFs({ [SESSION_REPO + '/.generated/legacy-baseline/vwf-dsl.json']: MINIMAL_BUILTIN })
   const sub = makeSubprocess({ fs: liveFs })
   const { handlers } = loadHost({
     fs: liveFs, subprocess: sub, sandboxPolicy,
@@ -183,22 +184,21 @@ test('apply 无 initiator（浏览器审批激活）→ 后续模型调用实时
   })
   // 无 initiator 的调用：兜底 sp.workspaceRoot（/repo 无 .generated）→ 内置根空
   let list = await call(handlers, 'vwf.workflows.list')
-  assert.ok(!list.some(w => w.id === 'dev-workflow-2-0'))
+  assert.ok(!list.some(w => w.id === 'legacy-baseline'))
   // 模型发起调用（有 initiator）：实时解析会话 cwd → 内置根出现
   initiator = { session: { header: { cwd: SESSION_REPO } } }
   list = await call(handlers, 'vwf.workflows.list')
-  assert.ok(list.some(w => w.id === 'dev-workflow-2-0' && w.builtin === false), '实时 initiator 生效')
+  assert.ok(list.some(w => w.id === 'legacy-baseline' && w.builtin === true), '实时 initiator 生效')
   // initiator 再次消失（客户端 RPC）：knownCwd 兜底仍能解析
   initiator = null
   list = await call(handlers, 'vwf.workflows.list')
-  assert.ok(list.some(w => w.id === 'dev-workflow-2-0' && w.builtin === false), 'knownCwd 历史兜底生效')
+  assert.ok(list.some(w => w.id === 'legacy-baseline' && w.builtin === true), 'knownCwd 历史兜底生效')
 })
 
-test('真实生成物 .generated/dev-workflow-2-0/vwf-dsl.json 校验通过（编译已并入统一管道）', async (t) => {
-  if (!existsSync(realGenerated)) { t.skip('缺少 .generated/（先 npm run generate）'); return }
+test('真实生成物 vwf-dsl.json（基座经真实生成器编译）校验通过（编译已并入统一管道）', async () => {
   const { handlers } = env()
   const list = await call(handlers, 'vwf.workflows.list')
-  const builtin = list.find(w => w.id === 'dev-workflow-2-0')
+  const builtin = list.find(w => w.id === 'legacy-baseline')
   const v = await call(handlers, 'vwf.validate', { dsl: builtin.dsl })
   assert.equal(v.ok, true, JSON.stringify(v.errors))
 })
@@ -265,7 +265,7 @@ test('撞名：正式内置只读 / 同名用户拒绝提示改名 / currentId �
   assert.equal(list.find(w => w.id === 't1').description, 'v2', '更新覆盖生效')
 })
 
-test('remove：用户模板可删（蓝图+skill 同步删）；正式内置/不存在拒绝；历史模板可删且不再列出', async () => {
+test('remove：用户模板可删（蓝图+skill 同步删）；生成物内置/不存在拒绝', async () => {
   const { handlers, fs, sub } = env()
   plantOfficialBuiltin(fs)
   await call(handlers, 'vwf.workflows.save', { dsl: baseDsl() })
@@ -275,17 +275,16 @@ test('remove：用户模板可删（蓝图+skill 同步删）；正式内置/不
   const rmMissing = await call(handlers, 'vwf.workflows.remove', { id: 'nope' })
   assert.equal(rmMissing.ok, false)
   assert.ok(rmMissing.errors.some(e => e.message.includes('不存在')))
-  const rmShipped = await call(handlers, 'vwf.workflows.remove', { id: 'dev-workflow-2-0' })
-  assert.equal(rmShipped.ok, true)
-  assert.ok(fs._files.has(REMOVED_DIR + '/dev-workflow-2-0'), '删除标记已写入')
-  assert.ok(!(await call(handlers, 'vwf.workflows.list')).some(w => w.id === 'dev-workflow-2-0'), '历史模板删除后不再列出')
+  const rmShipped = await call(handlers, 'vwf.workflows.remove', { id: 'legacy-baseline' })
+  assert.equal(rmShipped.ok, false, '生成物模板属内置只读，不可删')
+  assert.ok(rmShipped.errors.some(e => e.message.includes('内置模板只读')), JSON.stringify(rmShipped.errors))
+  assert.ok((await call(handlers, 'vwf.workflows.list')).some(w => w.id === 'legacy-baseline'), '生成物模板仍在列表中')
   const ok = await call(handlers, 'vwf.workflows.remove', { id: 't1' })
   assert.equal(ok.ok, true)
   assert.ok(!fs._files.has(USER_DIR + '/t1.json'), '蓝图已删')
   const rmCalls = sub._calls.filter(c => c.join(' ').includes('rmSync')).map(c => c.join(' '))
   assert.ok(rmCalls.some(s => s.includes(USER_DIR + '/t1.json')), '蓝图 rm 调用')
   assert.ok(rmCalls.some(s => s.includes(SKILL_ROOT + '/t1')), 'skill 目录 rm 调用')
-  assert.ok(rmCalls.some(s => s.includes(SKILL_ROOT + '/dev-workflow-2-0')), '历史模板同步删 skill')
   // 所有子进程 spawn 必须移除宿主注入的 NODE_OPTIONS（WorkBuddy safe-delete 钩子拦截 rmSync）
   const rmSpecs = sub._specs.filter(s => s.argv.join(' ').includes('rmSync'))
   assert.ok(rmSpecs.length >= 1, 'rmSync spawn 调用存在')
@@ -294,25 +293,19 @@ test('remove：用户模板可删（蓝图+skill 同步删）；正式内置/不
   assert.ok(!list.some(w => w.id === 't1'))
 })
 
-test('历史模板迁为自定义：可保存覆盖用户目录；删除后 save 可重建', async () => {
+test('生成物模板只读：save 覆盖同 id 被拒，另存为新 id 落盘用户目录', async () => {
   const { handlers, fs } = env()
   const list = await call(handlers, 'vwf.workflows.list')
-  const shipped = list.find(w => w.id === 'dev-workflow-2-0')
-  assert.ok(shipped && shipped.builtin === false)
-  const saved = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ id: 'dev-workflow-2-0', name: '开发工作流 2.0', description: '用户覆盖' }), currentId: 'dev-workflow-2-0' })
-  assert.equal(saved.ok, true, JSON.stringify(saved.errors))
-  assert.ok(fs._files.has(USER_DIR + '/dev-workflow-2-0.json'), '覆盖落盘用户目录')
-  const overlay = (await call(handlers, 'vwf.workflows.list')).filter(w => w.id === 'dev-workflow-2-0')
-  assert.equal(overlay.length, 1, '用户覆盖与生成物不重复列出')
-  assert.equal(overlay[0].builtin, false)
-  assert.equal(overlay[0].description, '用户覆盖')
-  const rm = await call(handlers, 'vwf.workflows.remove', { id: 'dev-workflow-2-0' })
-  assert.equal(rm.ok, true)
-  assert.ok(!(await call(handlers, 'vwf.workflows.list')).some(w => w.id === 'dev-workflow-2-0'))
-  const restored = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ id: 'dev-workflow-2-0', name: '开发工作流 2.0' }) })
-  assert.equal(restored.ok, true, JSON.stringify(restored.errors))
-  const again = (await call(handlers, 'vwf.workflows.list')).find(w => w.id === 'dev-workflow-2-0')
-  assert.ok(again && again.builtin === false, '重建后仍为自定义')
+  const builtin = list.find(w => w.id === 'legacy-baseline')
+  assert.ok(builtin && builtin.builtin === true, '生成物模板一律内置')
+  const saved = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ id: 'legacy-baseline', name: '测试基座样例', description: '用户覆盖' }), currentId: 'legacy-baseline' })
+  assert.equal(saved.ok, false, '内置模板不可覆盖')
+  assert.ok(saved.errors.some(e => e.message.includes('内置模板只读')), JSON.stringify(saved.errors))
+  const asNew = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ id: 'legacy-baseline-copy', name: '副本' }) })
+  assert.equal(asNew.ok, true, JSON.stringify(asNew.errors))
+  assert.ok(fs._files.has(USER_DIR + '/legacy-baseline-copy.json'), '另存为新 id 落盘用户目录')
+  const copy = (await call(handlers, 'vwf.workflows.list')).find(w => w.id === 'legacy-baseline-copy')
+  assert.ok(copy && copy.builtin === false, '用户模板标为非内置')
 })
 
 test('findWorkflow：内置优先、用户兜底（经 wf_run 未知模板错误消息验证合并列表）', async () => {
@@ -322,7 +315,7 @@ test('findWorkflow：内置优先、用户兜底（经 wf_run 未知模板错误
   assert.ok(wfRun, 'wf_run 已注册')
   const out = await wfRun.execute({ templateId: 'nope', taskId: 't' })
   assert.ok(out.includes('未知工作流'))
-  assert.ok(out.includes('dev-workflow-2-0'), '内置根在合并列表中')
+  assert.ok(out.includes('legacy-baseline'), '内置根在合并列表中')
   assert.ok(out.includes('t1'), '用户根在合并列表中')
 })
 
@@ -330,7 +323,7 @@ test('wf_run 在 agents 存在但 engine 缺失时仍注册，execute 优雅报�
   const { definedTools } = env({ extra: { agents: { requireInitiator: () => ({}) } } })
   const wfRun = definedTools.find(t => t.name === 'wf_run')
   assert.ok(wfRun, 'wf_run 已注册')
-  const out = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 't' })
+  const out = await wfRun.execute({ templateId: 'legacy-baseline', taskId: 't' })
   assert.ok(out.includes('无法访问 workflowEngine'), out)
 })
 
@@ -424,7 +417,7 @@ test('模型绑定必填：节点缺 model.provider/model.model 报字段级错�
   const v = await call(handlers, 'vwf.validate', {
     dsl: baseDsl({
       nodes: [
-        { id: 'a', profile: 'dispatcher', label: 'A', goal: '目标A' },
+        { id: 'a', profile: 'legacy-role', label: 'A', goal: '目标A' },
         { id: 'b', profile: 'dev', label: 'B', goal: '目标B', model: { provider: 'p1' } },
       ],
     }),
@@ -434,7 +427,7 @@ test('模型绑定必填：节点缺 model.provider/model.model 报字段级错�
   assert.ok(v.errors.some(e => e.message.includes('未绑定模型')), JSON.stringify(v.errors))
   assert.ok(v.fieldErrors['node:a:model.provider'] && v.fieldErrors['node:a:model.model'], '字段级定位 model.provider/model.model')
   assert.ok(v.fieldErrors['node:b:model.model'], '部分缺失同样定位')
-  const s = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ nodes: [{ id: 'a', profile: 'dispatcher', label: 'A', goal: '目标A' }] }) })
+  const s = await call(handlers, 'vwf.workflows.save', { dsl: baseDsl({ nodes: [{ id: 'a', profile: 'legacy-role', label: 'A', goal: '目标A' }] }) })
   assert.equal(s.ok, false, 'save 同样拒绝缺模型模板')
 })
 
@@ -454,7 +447,7 @@ test('多入口节点报错并携带 nodeIds', async () => {
   const { handlers } = env()
   const dsl = baseDsl({
     nodes: [
-      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'a', profile: 'legacy-role', label: 'A' },
       { id: 'b', profile: 'dev', label: 'B' },
       { id: 'c', profile: 'dev', label: 'C' },
     ],
@@ -471,7 +464,7 @@ test('无入口（环形互指）报错', async () => {
   const { handlers } = env()
   const dsl = baseDsl({
     nodes: [
-      { id: 'a', profile: 'dispatcher', label: 'A' },
+      { id: 'a', profile: 'legacy-role', label: 'A' },
       { id: 'b', profile: 'dev', label: 'B' },
     ],
     edges: [
@@ -491,7 +484,7 @@ test('缺 $end / 悬空节点 / 重复 id / 保留 id / 缺 profile 报错', asy
     dsl: {
       id: 't1', name: '测试', entry: 'a',
       nodes: [
-        { id: 'a', profile: 'dispatcher' },
+        { id: 'a', profile: 'legacy-role' },
         { id: 'a', profile: 'dev' },
         { id: '$end', profile: 'x' },
         { id: 'c', profile: '' },
@@ -516,7 +509,7 @@ test('successCondition 路径不在 schema 内报错', async () => {
   const { handlers } = env()
   const dsl = baseDsl({
     nodes: [
-      { id: 'a', profile: 'dispatcher', output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } } }, successCondition: '$.missing == true' } },
+      { id: 'a', profile: 'legacy-role', output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } } }, successCondition: '$.missing == true' } },
     ],
     edges: [{ from: 'a', to: '$end', on: 'success' }],
   })
@@ -529,7 +522,7 @@ test('successCondition 路径不在 schema 内报错', async () => {
 test('successCondition 格式无效报错', async () => {
   const { handlers } = env()
   const dsl = baseDsl({
-    nodes: [{ id: 'a', profile: 'dispatcher', output: { schema: { type: 'object' }, successCondition: 'ok == 1' } }],
+    nodes: [{ id: 'a', profile: 'legacy-role', output: { schema: { type: 'object' }, successCondition: 'ok == 1' } }],
     edges: [{ from: 'a', to: '$end', on: 'success' }],
   })
   const v = await call(handlers, 'vwf.validate', { dsl })
@@ -552,7 +545,7 @@ test('failure 出边最多一条；多 success 出边必须全部带 when', asyn
   const v2 = await call(handlers, 'vwf.validate', {
     dsl: baseDsl({
       nodes: [
-        { id: 'a', profile: 'dispatcher', output: { schema: { type: 'object', properties: { x: { type: 'boolean' } } } } },
+        { id: 'a', profile: 'legacy-role', output: { schema: { type: 'object', properties: { x: { type: 'boolean' } } } } },
         { id: 'b', profile: 'dev' },
         { id: 'c', profile: 'dev' },
       ],
@@ -569,7 +562,7 @@ test('failure 出边最多一条；多 success 出边必须全部带 when', asyn
   const v3 = await call(handlers, 'vwf.validate', {
     dsl: baseDsl({
       nodes: [
-        { id: 'a', profile: 'dispatcher', goal: '目标A', model: { provider: 'p1', model: 'm1' }, output: { schema: { type: 'object', properties: { x: { type: 'boolean' } } } } },
+        { id: 'a', profile: 'legacy-role', goal: '目标A', model: { provider: 'p1', model: 'm1' }, output: { schema: { type: 'object', properties: { x: { type: 'boolean' } } } } },
         { id: 'b', profile: 'dev', goal: '目标B', model: { provider: 'p1', model: 'm1' } },
         { id: 'c', profile: 'dev', goal: '目标C', model: { provider: 'p1', model: 'm1' } },
       ],
@@ -639,7 +632,7 @@ test('vwf.roles 无 fs 服务时内置角色常驻（builtin 标识）', async (
   const { handlers } = loadHost()
   const r = await call(handlers, 'vwf.roles')
   assert.ok(Array.isArray(r.roles))
-  assert.ok(!r.roles.some(x => x.id === 'dispatcher'), 'dispatcher 已退出内置身份（issue-81 迁为自定义）')
+  assert.ok(!r.roles.some(x => x.id === 'legacy-role'), '自定义角色（测试夹具）不在内置清单中')
   assert.ok(r.roles.some(x => x.id === 'closeout'))
   assert.ok(r.roles.length > 0, '无 fs 时内置仍常驻')
   assert.ok(r.roles.every(x => x.builtin === true), '无 fs 时仅内置常驻（数量不写死，随注册表演进）')
@@ -649,7 +642,7 @@ test('vwf.roles 经 fs 服务读工作区 dsh/roles 增强内置摘要（resolve
   // 回归：旧实现把 'dsh/roles' 字符串直接传给 listDir（宿主 fs 服务期望 resolve 后的
   // target），任何真实服务都会抛错回退内置清单——改为按 fs 服务契约取目录。
   const fs = makeFs({
-    [REPO + '/dsh/roles/dispatcher.md']: '你是 2.0 开发工作流的调度 Agent。\n职责：三要素门禁。\n',
+    [REPO + '/dsh/roles/legacy-role.md']: '你是 2.0 开发工作流的调度 Agent。\n职责：三要素门禁。\n',
     [REPO + '/dsh/roles/dev.md']: '你是开发 Agent。\n职责：测试驱动施工。\n',
     [REPO + '/dsh/roles/review.md']: '你是审核 Agent。\n职责：独立审查。\n',
     [REPO + '/dsh/roles/NOT_ROLE.txt']: '不应被识别为角色',
@@ -660,8 +653,8 @@ test('vwf.roles 经 fs 服务读工作区 dsh/roles 增强内置摘要（resolve
   const ids = r.roles.map(x => x.id)
   assert.ok(!ids.some(id => String(id).includes('NOT_ROLE')), '非 .md 文件不识别为角色')
   assert.ok(ids.includes('dev') && ids.includes('closeout'), '内置常驻（不校验完整清单，避免随注册表演进而改测试）')
-  const dp = r.roles.find(x => x.id === 'dispatcher')
-  assert.equal(dp.builtin, false, 'dispatcher 保留文件但归为自定义（issue-81）')
+  const dp = r.roles.find(x => x.id === 'legacy-role')
+  assert.equal(dp.builtin, false, '自定义角色按非内置归组')
   assert.ok(dp.summary.startsWith('你是 2.0'), '摘要取正文首行（跳过 frontmatter/标题）')
 })
 
@@ -689,73 +682,72 @@ test('内置角色注册表结构不变量：id 唯一、为稳定英文，中�
   }
 })
 
-test('dispatcher 迁为自定义后历史引用不丢失：仍可解析、引用仍被统计', async () => {
-  // issue-81 验收第 6 条：dispatcher 退出内置身份，但引用它的历史工作流不能失效。
-  // 迁移做法是不动 dsh/roles/dispatcher.md、只把它移出内置集合，因此 profile
-  // 'dispatcher' 的解析路径完全不变。
+test('自定义角色（非内置）可解析且引用被统计', async () => {
+  // 自定义角色 = 不在内置清单中的角色：正文来自工作区 dsh/roles/<id>.md，
+  // 引用它的工作流节点照常解析，usage 统计可见。
   const fs = makeFs({
-    [REPO + '/dsh/roles/dispatcher.md']: '调度角色正文\n',
+    [REPO + '/dsh/roles/legacy-role.md']: '调度角色正文\n',
     [USER_DIR + '/wf-old.json']: JSON.stringify({
-      id: 'wf-old', displayName: '历史流程', entry: 'n1',
-      nodes: [{ id: 'n1', profile: 'dispatcher', label: '调度', goal: 'g' }],
+      id: 'wf-old', displayName: '使用自定义角色的流程', entry: 'n1',
+      nodes: [{ id: 'n1', profile: 'legacy-role', label: '调度', goal: 'g' }],
       edges: [],
     }),
   })
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
   const r = await call(handlers, 'vwf.roles')
-  const dp = r.roles.find(x => x.id === 'dispatcher')
-  assert.ok(dp, '历史角色仍出现在角色库')
-  assert.equal(dp.builtin, false, '身份已变为自定义')
-  const u = await call(handlers, 'vwf.roles.usage', { id: 'dispatcher' })
+  const dp = r.roles.find(x => x.id === 'legacy-role')
+  assert.ok(dp, '自定义角色出现在角色库')
+  assert.equal(dp.builtin, false, '身份为自定义')
+  const u = await call(handlers, 'vwf.roles.usage', { id: 'legacy-role' })
   assert.equal(u.ok, true)
-  assert.ok(u.count >= 1, `历史引用仍被统计（实际 ${u.count}）`)
+  assert.ok(u.count >= 1, `引用仍被统计（实际 ${u.count}）`)
 })
 
-test('迁移角色在产品工作区经打包快照可见且可编辑（不回写 .generated）', async () => {
-  // Codex PR#124 第二轮 P1：dispatcher 迁出内置后，产品工作区没有 dsh/roles/dispatcher.md，
+test('自定义角色在产品工作区经打包快照可见且可编辑（不回写 .generated）', async () => {
+  // Codex PR#124 第二轮 P1：自定义角色在产品工作区没有 dsh/roles/legacy-role.md 时，
   // 必须仍以「自定义」身份从 bundleRoles 模板的角色包只读回退可见。编辑时种子到工作区
   // dsh/roles/，绝不回写 .generated（生成产物不得承载用户状态）。
   const fs = makeFs({
-    [REPO + '/.generated/default-workflow/roles/dispatcher.md']: '打包快照正文\n',
+    [REPO + '/.generated/demo-tpl/roles/legacy-role.md']: '打包快照正文\n',
   })
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
-  // 1) 产品工作区（无 dsh/roles/dispatcher.md）→ 仍出现在自定义分组
+  // 1) 产品工作区（无 dsh/roles/legacy-role.md）→ 仍出现在自定义分组
   const r = await call(handlers, 'vwf.roles')
-  const dp = r.roles.find(x => x.id === 'dispatcher')
+  const dp = r.roles.find(x => x.id === 'legacy-role')
   assert.ok(dp, '打包回退：迁移角色仍可见')
   assert.equal(dp.builtin, false, '身份为自定义')
   // 2) 详情可取
-  const d = await call(handlers, 'vwf.roles.get', { id: 'dispatcher' })
+  const d = await call(handlers, 'vwf.roles.get', { id: 'legacy-role' })
   assert.equal(d.ok, true)
   assert.equal(d.role.builtin, false)
   assert.equal(d.role.content, '打包快照正文\n', '详情回退到打包快照内容')
   // 3) 编辑 → 种子到工作区 dsh/roles/，.generated 不被改写
-  const upd = await call(handlers, 'vwf.roles.update', { id: 'dispatcher', name: 'dispatcher', content: '编辑后的新内容\n' })
+  const upd = await call(handlers, 'vwf.roles.update', { id: 'legacy-role', name: 'legacy-role', content: '编辑后的新内容\n' })
   assert.equal(upd.ok, true, JSON.stringify(upd.errors || ''))
-  assert.ok(fs._files.has(REPO + '/dsh/roles/dispatcher.md'), '种子到工作区 dsh/roles/')
-  assert.equal(fs._files.get(REPO + '/dsh/roles/dispatcher.md'), '编辑后的新内容\n', '工作区文件为编辑后内容')
-  assert.equal(fs._files.get(REPO + '/.generated/default-workflow/roles/dispatcher.md'), '打包快照正文\n', '.generated 打包快照未被改写')
+  assert.ok(fs._files.has(REPO + '/dsh/roles/legacy-role.md'), '种子到工作区 dsh/roles/')
+  assert.equal(fs._files.get(REPO + '/dsh/roles/legacy-role.md'), '编辑后的新内容\n', '工作区文件为编辑后内容')
+  assert.equal(fs._files.get(REPO + '/.generated/demo-tpl/roles/legacy-role.md'), '打包快照正文\n', '.generated 打包快照未被改写')
 })
 
 test('打包回退角色同名 create 被拒绝（Codex PR#124 第三轮 P2，评论 3889725486）', async () => {
   // 迁移角色经打包快照只读回退可见时，roleNameTaken 必须把它计入唯一性校验，
-  // 避免 vwf.roles.create({name:'dispatcher'}) 静默成功创建同名工作区文件。
+  // 避免 vwf.roles.create({name:'legacy-role'}) 静默成功创建同名工作区文件。
   const fs = makeFs({
-    [REPO + '/.generated/default-workflow/roles/dispatcher.md']: '打包快照正文\n',
+    [REPO + '/.generated/demo-tpl/roles/legacy-role.md']: '打包快照正文\n',
   })
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
-  // 角色库列出 dispatcher（打包回退可见）
+  // 角色库列出 legacy-role（打包回退可见）
   const r = await call(handlers, 'vwf.roles')
-  assert.ok(r.roles.find(x => x.id === 'dispatcher'), '打包回退角色可见')
+  assert.ok(r.roles.find(x => x.id === 'legacy-role'), '打包回退角色可见')
   // create 同名 → 必须拒绝
-  const dup = await call(handlers, 'vwf.roles.create', { name: 'dispatcher', content: '尝试覆盖\n' })
+  const dup = await call(handlers, 'vwf.roles.create', { name: 'legacy-role', content: '尝试覆盖\n' })
   assert.equal(dup.ok, false)
   assert.match(dup.errors[0].message, /同名角色/)
   // 工作区未被静默写入
-  assert.ok(!fs._files.has(REPO + '/dsh/roles/dispatcher.md'), '工作区未被静默写入')
+  assert.ok(!fs._files.has(REPO + '/dsh/roles/legacy-role.md'), '工作区未被静默写入')
 })
 
 test('打包回退角色删除语义：给出明确提示且不被误删（Codex 第四轮 P2）', async () => {
@@ -763,15 +755,15 @@ test('打包回退角色删除语义：给出明确提示且不被误删（Codex
   // 可点删除却必然失败。打包回退角色的定义来自内置模板角色包（生成产物），
   // 只能读取不能删除，应给出可行动的明确提示。
   const fs = makeFs({
-    [REPO + '/.generated/default-workflow/roles/dispatcher.md']: '打包快照正文\n',
+    [REPO + '/.generated/demo-tpl/roles/legacy-role.md']: '打包快照正文\n',
   })
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
-  const rm = await call(handlers, 'vwf.roles.remove', { id: 'dispatcher' })
+  const rm = await call(handlers, 'vwf.roles.remove', { id: 'legacy-role' })
   assert.equal(rm.ok, false, '打包回退角色不可删除')
   assert.match(rm.errors[0].message, /角色包|生成产物/, '提示说明定义来源')
   assert.ok(!/不存在/.test(rm.errors[0].message), '不再误报「自定义角色不存在」')
-  assert.equal(fs._files.get(REPO + '/.generated/default-workflow/roles/dispatcher.md'), '打包快照正文\n', '打包快照未被改动')
+  assert.equal(fs._files.get(REPO + '/.generated/demo-tpl/roles/legacy-role.md'), '打包快照正文\n', '打包快照未被改动')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -780,7 +772,7 @@ test('打包回退角色删除语义：给出明确提示且不被误删（Codex
 
 test('角色库：内置角色常驻置前并带 builtin 标识，工作区额外 .md 归为自定义', async () => {
   const fs = makeFs({
-    [REPO + '/dsh/roles/dispatcher.md']: '内置身份正文\n',
+    [REPO + '/dsh/roles/legacy-role.md']: '内置身份正文\n',
     [REPO + '/dsh/roles/需求分析师.md']: '负责需求拆解。\n',
   })
   const sub = makeSubprocess({ fs })
@@ -790,7 +782,7 @@ test('角色库：内置角色常驻置前并带 builtin 标识，工作区额�
   const lastBuiltin = r.roles.reduce((acc, x, i) => (x.builtin === true ? i : acc), -1)
   assert.ok(lastBuiltin >= 0, '内置角色常驻')
   assert.ok(firstCustom === -1 || lastBuiltin < firstCustom, '内置角色全部排在自定义角色之前')
-  assert.equal(r.roles.find(x => x.id === 'dispatcher').builtin, false, 'dispatcher 已迁为自定义角色')
+  assert.equal(r.roles.find(x => x.id === 'legacy-role').builtin, false, '自定义角色（测试夹具）仍为非内置')
   assert.equal(r.roles.find(x => x.id === '需求分析师').builtin, false, '内置集合之外的 .md 归为自定义')
   assert.equal(r.roles.find(x => x.id === '需求分析师').id, '需求分析师')
 })
@@ -799,7 +791,7 @@ test('角色库 get：内置详情（插件 dist 快照）+ 自定义详情 + �
   const fs = makeFs({
     [REPO + '/packages/dsh-visual-workflow/dist/roles/dev.md']: '内置正文\n',
     [REPO + '/dsh/roles/dev.md']: '工作区旧版不应覆盖内置\n',
-    [REPO + '/dsh/roles/dispatcher.md']: '迁移后的自定义正文\n',
+    [REPO + '/dsh/roles/legacy-role.md']: '迁移后的自定义正文\n',
     [REPO + '/dsh/roles/需求分析师.md']: '自定义正文\n',
   })
   const sub = makeSubprocess({ fs })
@@ -808,10 +800,10 @@ test('角色库 get：内置详情（插件 dist 快照）+ 自定义详情 + �
   assert.equal(b.ok, true)
   assert.equal(b.role.builtin, true)
   assert.equal(b.role.content, '内置正文\n')
-  // issue-81：dispatcher 退出内置后仍可通过 get 取到，只是身份变为自定义
-  const d = await call(handlers, 'vwf.roles.get', { id: 'dispatcher' })
+  // 自定义角色可通过 get 取到，身份为自定义
+  const d = await call(handlers, 'vwf.roles.get', { id: 'legacy-role' })
   assert.equal(d.ok, true)
-  assert.equal(d.role.builtin, false, 'dispatcher 迁为自定义后依然可取，历史引用不失效')
+  assert.equal(d.role.builtin, false, '自定义角色依然可取，引用不失效')
   const c = await call(handlers, 'vwf.roles.get', { id: '需求分析师' })
   assert.equal(c.ok, true)
   assert.equal(c.role.builtin, false)
@@ -876,10 +868,10 @@ test('角色库 create：落盘 dsh/roles/<name>.md；与内置/自定义重名�
   assert.equal(noContent.errors[0].at, 'content')
 })
 
-test('角色库 usage：跨历史模板 + 用户模板统计节点引用', async () => {
+test('角色库 usage：跨内置模板 + 用户模板统计节点引用', async () => {
   const fs = makeFs({
-    [REPO + '/.generated/dev-workflow-2-0/vwf-dsl.json']: JSON.stringify({
-      id: 'dev-workflow-2-0', name: '内置流', entry: 'a',
+    [REPO + '/.generated/legacy-baseline/vwf-dsl.json']: JSON.stringify({
+      id: 'legacy-baseline', name: '内置流', entry: 'a',
       nodes: [
         { id: 'a', profile: '需求分析师', label: 'A' },
         { id: 'b', profile: '需求分析师', label: 'B' },
@@ -900,8 +892,8 @@ test('角色库 usage：跨历史模板 + 用户模板统计节点引用', async
   assert.equal(u.ok, true)
   assert.equal(u.count, 3, '历史模板 2 + 用户模板 1')
   assert.equal(u.refs.length, 2, '按工作流分组')
-  const shippedRef = u.refs.find(x => x.workflowId === 'dev-workflow-2-0')
-  assert.equal(shippedRef.builtin, false, '历史模板引用不再标内置')
+  const shippedRef = u.refs.find(x => x.workflowId === 'legacy-baseline')
+  assert.equal(shippedRef.builtin, true, '生成物模板引用标为内置')
   assert.equal(shippedRef.nodes.length, 2)
 })
 
@@ -936,7 +928,7 @@ test('角色库 update：内容修改全局生效；被引用角色重命名阻�
   assert.equal(ren2.role.id, '闲置角色V2')
   assert.ok(fs._files.has(REPO + '/dsh/roles/闲置角色V2.md'))
   assert.ok(!fs._files.has(REPO + '/dsh/roles/闲置角色.md'), '重命名后旧文件删除')
-  // 内置角色阻止修改（issue-81 后 dispatcher 已非内置，改用仍在内置的 dev）
+  // 内置角色修改被拒（样例用内置角色 dev）
   const builtinUpd = await call(handlers, 'vwf.roles.update', { id: 'dev', name: 'dev', content: 'x' })
   assert.equal(builtinUpd.ok, false)
   assert.match(builtinUpd.errors[0].message, /内置角色只读/)
@@ -954,7 +946,7 @@ test('角色库 remove：内置拒绝；被引用角色阻止并携带引用位�
   })
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
-  // 内置拒绝（issue-81 后 dispatcher 已非内置，改用仍在内置的 dev）
+  // 内置角色删除被拒（样例用内置角色 dev）
   const b = await call(handlers, 'vwf.roles.remove', { id: 'dev' })
   assert.equal(b.ok, false)
   assert.match(b.errors[0].message, /内置角色只读/)
@@ -1194,25 +1186,25 @@ test('角色库 三审修复：roleDir resolve 瞬时失败按 error fail-closed
 
 test('内置模板不再从 ~/.dsh/.generated 猜测加载', async () => {
   const homeDsl = JSON.stringify({
-    id: 'default-workflow', name: '默认工作流', description: '用户级内置', entry: 'n1',
+    id: 'demo-tpl', name: '演示模板', description: '用户级内置', entry: 'n1',
     control: { maxRounds: 9 },
-    nodes: [{ id: 'n1', profile: 'dispatcher', label: '节点1', goal: 'g' }],
+    nodes: [{ id: 'n1', profile: 'legacy-role', label: '节点1', goal: 'g' }],
     edges: [{ from: 'n1', to: '$end', on: 'success' }],
   }, null, 2) + '\n'
   const fs = makeFs({
-    [DSH_HOME + '/.generated/default-workflow/vwf-dsl.json']: homeDsl,
+    [DSH_HOME + '/.generated/demo-tpl/vwf-dsl.json']: homeDsl,
   })
   const sub = makeSubprocess({ fs })
   const { handlers } = loadHost({ fs, subprocess: sub, sandboxPolicy })
   const list = await call(handlers, 'vwf.workflows.list')
-  assert.equal(list.some(x => x.id === 'default-workflow'), false, '宿主根 .generated 不再作为模板来源')
+  assert.equal(list.some(x => x.id === 'demo-tpl'), false, '宿主根 .generated 不再作为模板来源')
 })
 
 test('代码根 .generated 可直接进入模板列表（不依赖异步同步）', async () => {
   const fs = makeFs({
-    [REPO + '/.generated/default-workflow/vwf-dsl.json']: JSON.stringify({
-      id: 'default-workflow', name: '默认工作流', entry: 'n1', control: { maxRounds: 9 },
-      nodes: [{ id: 'n1', profile: 'dispatcher', label: '节点1', goal: 'g' }],
+    [REPO + '/.generated/demo-tpl/vwf-dsl.json']: JSON.stringify({
+      id: 'demo-tpl', name: '演示模板', entry: 'n1', control: { maxRounds: 9 },
+      nodes: [{ id: 'n1', profile: 'legacy-role', label: '节点1', goal: 'g' }],
       edges: [{ from: 'n1', to: '$end', on: 'success' }],
     }),
   })
@@ -1222,7 +1214,7 @@ test('代码根 .generated 可直接进入模板列表（不依赖异步同步�
     agents: { currentInitiator: () => ({ session: { header: { cwd: SESSION_REPO } } }) },
   })
   const list = await call(handlers, 'vwf.workflows.list')
-  assert.ok(list.some(x => x.id === 'default-workflow'), '代码根生成物可直接进入模板列表')
+  assert.ok(list.some(x => x.id === 'demo-tpl'), '代码根生成物可直接进入模板列表')
 })
 
 test('插件根未注入时校验明确失败，不猜测 Home / 仓库路径', async () => {
@@ -1286,13 +1278,13 @@ test('另存为使用代码根生成器，不使用宿主工作目录下的同�
 
 test('apply 不再把仓库 .generated 同步到宿主根', async () => {
   const fs = makeFs({
-    [REPO + '/.generated/default-workflow/vwf-dsl.json']: JSON.stringify({ id: 'default-workflow', bundleRoles: true }),
-    [REPO + '/.generated/default-workflow/roles/dispatcher.md']: '调度角色正文\n',
+    [REPO + '/.generated/demo-tpl/vwf-dsl.json']: JSON.stringify({ id: 'demo-tpl', bundleRoles: true }),
+    [REPO + '/.generated/demo-tpl/roles/legacy-role.md']: '调度角色正文\n',
   })
   const sub = makeSubprocess({ fs })
   loadHost({ fs, subprocess: sub, sandboxPolicy })
   await new Promise(r => setTimeout(r, 30))
-  assert.equal(fs._files.has(DSH_HOME + '/.generated/default-workflow/vwf-dsl.json'), false, '不再同步到 ~/.dsh/.generated')
+  assert.equal(fs._files.has(DSH_HOME + '/.generated/demo-tpl/vwf-dsl.json'), false, '不再同步到 ~/.dsh/.generated')
 })
 
 test('vwf.models 无 llm 服务时返回空 providers', async () => {
@@ -1360,7 +1352,7 @@ test('fanout 投影往返：kind/items/failOn 经 validate/save/list 无损', as
     id: 'fanout-ui', name: '扇出编辑器', entry: 'fan', control: { maxRounds: 3 },
     nodes: [
       {
-        id: 'fan', kind: 'fanout', profile: 'dispatcher', label: '逐项处理',
+        id: 'fan', kind: 'fanout', profile: 'legacy-role', label: '逐项处理',
         goal: '处理 {{item}}', items: '$.args.items', failOn: 1,
         model: { provider: 'p1', model: 'm1' },
         output: { schema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'], additionalProperties: false } },
@@ -1395,7 +1387,7 @@ test('fanout 校验错误按 kind/items/failOn fieldKey 接入宿主', async () 
   const dsl = baseDsl({
     nodes: [
       {
-        id: 'a', kind: 'fanout', profile: 'dispatcher', label: 'A', goal: '缺占位',
+        id: 'a', kind: 'fanout', profile: 'legacy-role', label: 'A', goal: '缺占位',
         items: '$.bad.items', failOn: -1, model: { provider: 'p1', model: 'm1' },
       },
       { id: 'b', profile: 'dev', label: 'B', goal: '目标B', model: { provider: 'p1', model: 'm1' } },
@@ -1477,12 +1469,12 @@ test('#19 T1：wf_run 启动登记 taskId/workflowId；runs.list 最新在前；
   const wfRun = definedTools.find(t => t.name === 'wf_run')
   assert.ok(wfRun, 'wf_run 已注册')
   assert.equal(eng.starts.length, 0)
-  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  const p1 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-12' })
   await until(() => eng.starts.length >= 1, '第一次启动放行')
-  events.get('workflow/start')({ id: 'run-1', meta: { name: '开发工作流 2.0' } })
-  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-13' })
+  events.get('workflow/start')({ id: 'run-1', meta: { name: '测试基座样例' } })
+  const p2 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-13' })
   await until(() => eng.starts.length >= 2, '不同 taskId 并行放行')
-  events.get('workflow/start')({ id: 'run-2', meta: { name: '开发工作流 2.0' } })
+  events.get('workflow/start')({ id: 'run-2', meta: { name: '测试基座样例' } })
   // 交错事件：两个 run 各自 phase/log/agent 互不相干
   events.get('workflow/phase')({ id: 'run-1' }, '调度')
   events.get('workflow/phase')({ id: 'run-2' }, '开发')
@@ -1495,7 +1487,7 @@ test('#19 T1：wf_run 启动登记 taskId/workflowId；runs.list 最新在前；
   assert.equal(list.runs[0].id, 'run-2', '最新在前')
   assert.equal(list.runs[1].id, 'run-1')
   assert.equal(list.runs[1].taskId, 'issue-12')
-  assert.equal(list.runs[1].workflowId, 'dev-workflow-2-0', 'templateId 登记为来源')
+  assert.equal(list.runs[1].workflowId, 'legacy-baseline', 'templateId 登记为来源')
   assert.equal(typeof list.runs[1].startedAt, 'number')
   assert.equal(list.runs[1].supersededBy, '')
 
@@ -1524,20 +1516,20 @@ test('#19 T2（AC2）：同 taskId 进行中二次启动被拒并提示占用 ru
   const eng = makeEngine()
   const { handlers, events, definedTools } = engineEnv(eng)
   const wfRun = definedTools.find(t => t.name === 'wf_run')
-  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  const p1 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-12' })
   await until(() => eng.starts.length >= 1, '首次启动')
   // 互斥不依赖 workflow/start 事件到达（tag.active 空窗回归点）
-  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  const blocked = await wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-12' })
   assert.ok(blocked.includes('串行互斥'), blocked)
   assert.ok(blocked.includes('run-1'), '提示占用中的 runId')
   assert.equal(eng.starts.length, 1, '被拒调用未触达引擎')
-  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-13' })
+  const p2 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-13' })
   await until(() => eng.starts.length >= 2, '不同 taskId 并行放行')
   settleRun(eng, events, 'run-1', 'DONE')
   settleRun(eng, events, 'run-2', 'DONE')
   await Promise.all([p1, p2])
   // 终态后同 taskId 解除互斥，可再次启动
-  const p3 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  const p3 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-12' })
   await until(() => eng.starts.length >= 3, '终态后同 taskId 可再次启动')
   settleRun(eng, events, 'run-3', 'DONE')
   await p3
@@ -1547,7 +1539,7 @@ test('#19 T3（AC3）：AWAITING_HUMAN 占用同 taskId 拒绝新启动；entry 
   const eng = makeEngine()
   const { handlers, events, definedTools } = engineEnv(eng)
   const wfRun = definedTools.find(t => t.name === 'wf_run')
-  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  const p1 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-12' })
   await until(() => eng.starts.length >= 1, '首次启动')
   events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(eng, events, 'run-1', 'AWAITING_HUMAN_accept')
@@ -1555,11 +1547,11 @@ test('#19 T3（AC3）：AWAITING_HUMAN 占用同 taskId 拒绝新启动；entry 
   // 回执契约：引擎原样 completed + value 携带脚本终态（runtime-host H1/H2 钉住）
   assert.ok(receipt1.includes('"stopReason":"completed"') && receipt1.includes('AWAITING_HUMAN_accept'), receipt1)
   // 门禁占用仍互斥（isActiveStatus 兜住 AWAITING_HUMAN_* 终态）
-  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12' })
+  const blocked = await wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-12' })
   assert.ok(blocked.includes('串行互斥'), blocked)
   assert.ok(blocked.includes('entry='), '提示续跑路径')
   // entry 续跑绕过互斥；接管发生在续跑启动边界（start 后同步 supersedeParked）
-  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-12', entry: 'accept', approved: true })
+  const p2 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-12', entry: 'accept', approved: true })
   await until(() => eng.starts.length >= 2, 'entry 续跑绕过互斥')
   events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
   const s1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
@@ -1625,7 +1617,7 @@ test('#19 评审修复：终态正则接受非 ASCII 节点 id 与 fanout cap �
   const { handlers, events, definedTools } = engineEnv(eng)
   const wfRun = definedTools.find(t => t.name === 'wf_run')
   // 非 ASCII 门禁节点 id：AWAITING_HUMAN_验收 必须被权威回写
-  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-19a' })
+  const p1 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-19a' })
   await until(() => eng.starts.length >= 1, '启动1')
   events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(eng, events, 'run-1', 'AWAITING_HUMAN_验收')
@@ -1633,7 +1625,7 @@ test('#19 评审修复：终态正则接受非 ASCII 节点 id 与 fanout cap �
   const s1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
   assert.equal(s1.state.status, 'AWAITING_HUMAN_验收', '非 ASCII 节点 id 的门禁态被回写')
   // fanout cap 失败态：FAILED_ITEM_CAP 同为脚本终态
-  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-19b' })
+  const p2 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-19b' })
   await until(() => eng.starts.length >= 2, '启动2')
   events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
   settleRun(eng, events, 'run-2', 'FAILED_ITEM_CAP')
@@ -1641,7 +1633,7 @@ test('#19 评审修复：终态正则接受非 ASCII 节点 id 与 fanout cap �
   const s2 = await call(handlers, 'vwf.state', { runId: 'run-2' })
   assert.equal(s2.state.status, 'FAILED_ITEM_CAP', 'cap 失败态被回写')
   // 门禁占用互斥对非 ASCII 态同样生效
-  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-19a' })
+  const blocked = await wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-19a' })
   assert.ok(blocked.includes('串行互斥'), 'AWAITING_HUMAN_验收 占用同 taskId 互斥')
 })
 
@@ -1700,7 +1692,7 @@ test('#120 WAITING_HUMAN 占用同 taskId；decision_id 续跑接管并可读取
   const { handlers, events, definedTools } = engineEnv(eng)
   const wfRun = definedTools.find((t) => t.name === 'wf_run')
   const pkg = { why: '等人', current_state: '待拍板', options: [{ id: 'STOP' }], subsequent_effects: { STOP: '停' } }
-  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-hd' })
+  const p1 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-hd' })
   await until(() => eng.starts.length >= 1, '首次启动')
   events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(eng, events, 'run-1', 'WAITING_HUMAN', {
@@ -1714,13 +1706,13 @@ test('#120 WAITING_HUMAN 占用同 taskId；decision_id 续跑接管并可读取
   assert.equal(s1.state.status, 'WAITING_HUMAN')
   assert.equal(s1.state.decision_id, 'issue-hd:work:0')
   assert.equal(s1.state.decision_package.why, '等人')
-  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-hd' })
+  const blocked = await wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-hd' })
   assert.ok(blocked.includes('串行互斥'), blocked)
   const startsBefore = eng.starts.length
-  await assertMutexBlocked(wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-hd', entry: 'work' }), eng, startsBefore, 'WAITING_HUMAN 占用不得被仅 entry 解除')
-  await assertMutexBlocked(wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-hd', decision_id: 'other:work:0', user_choice: 'STOP' }), eng, startsBefore, 'WAITING_HUMAN 占用不得被错误 decision_id 解除')
-  await assertMutexBlocked(wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-hd', entry: 'accept', approved: true }), eng, startsBefore, '残留 entry 协议不得接管 WAITING_HUMAN')
-  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-hd', decision_id: 'issue-hd:work:0', user_choice: 'STOP' })
+  await assertMutexBlocked(wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-hd', entry: 'work' }), eng, startsBefore, 'WAITING_HUMAN 占用不得被仅 entry 解除')
+  await assertMutexBlocked(wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-hd', decision_id: 'other:work:0', user_choice: 'STOP' }), eng, startsBefore, 'WAITING_HUMAN 占用不得被错误 decision_id 解除')
+  await assertMutexBlocked(wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-hd', entry: 'accept', approved: true }), eng, startsBefore, '残留 entry 协议不得接管 WAITING_HUMAN')
+  const p2 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-hd', decision_id: 'issue-hd:work:0', user_choice: 'STOP' })
   await until(() => eng.starts.length >= 2, 'decision_id 续跑绕过互斥')
   events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
   const parked = await call(handlers, 'vwf.state', { runId: 'run-1' })
@@ -1738,14 +1730,14 @@ test('#120 新蓝图续跑拒绝 approved；残留门禁占用行为不变', asy
   assert.ok(String(rejected).includes('禁止 approved'), rejected)
   assert.equal(eng.starts.length, 0, '拒绝 approved 不得启动引擎')
 
-  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-left' })
+  const p1 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-left' })
   await until(() => eng.starts.length >= 1, '残留启动')
   events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(eng, events, 'run-1', 'AWAITING_HUMAN_accept')
   await p1
-  const blocked = await wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-left' })
+  const blocked = await wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-left' })
   assert.ok(blocked.includes('串行互斥'), blocked)
-  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-left', entry: 'accept', approved: true })
+  const p2 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-left', entry: 'accept', approved: true })
   await until(() => eng.starts.length >= 2, '残留 entry 续跑仍放行')
   events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
   const s1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
@@ -1779,14 +1771,14 @@ test('#128 ROUTE_HALTED / ENDED_NO_OUTCOME_EDGE 回写为权威终态且释放�
   const eng = makeEngine()
   const { handlers, events, definedTools } = engineEnv(eng)
   const wfRun = definedTools.find((t) => t.name === 'wf_run')
-  const p1 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-rh' })
+  const p1 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-rh' })
   await until(() => eng.starts.length >= 1, 'ROUTE_HALTED 启动')
   events.get('workflow/start')({ id: 'run-1', meta: { name: 'x' } })
   settleRun(eng, events, 'run-1', 'ROUTE_HALTED', { reason: 'HUMAN_DECISION', node: 'evaluate' })
   await p1
   const s1 = await call(handlers, 'vwf.state', { runId: 'run-1' })
   assert.equal(s1.state.status, 'ROUTE_HALTED', 'value.status 回写覆盖事件层 completed')
-  const p2 = wfRun.execute({ templateId: 'dev-workflow-2-0', taskId: 'issue-rh' })
+  const p2 = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'issue-rh' })
   await until(() => eng.starts.length >= 2, 'ROUTE_HALTED 后同 taskId 可再启动')
   events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
   settleRun(eng, events, 'run-2', 'ENDED_NO_OUTCOME_EDGE')

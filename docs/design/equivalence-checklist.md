@@ -4,11 +4,12 @@
 > 自动化部分：**运行时排练厅套件**（`scripts/test/runtime.test.mjs` + `runtime-host.test.mjs`，进 validate/CI）——
 > 真实执行生成脚本、断言返回体状态机；原 `scripts/equivalence.mjs` 字符串嗅探断言已删除（候选三收口，Q5）。
 > 依据：R-01 语义清单（`docs/research/mjs-semantics.md`）+ T-05 决策（语义等价 + 新契约统一）。
+> **当前实现口径**：本文当时核对的两个对象均已删除——旧手写脚本 `dsh/workflow/dev-workflow-2.0.mjs`（2026-08-20）与种子蓝图 `templates/custom-seeds/dev-workflow-2-0.json`（其后随整个 `templates/custom-seeds/` 档位一并移除）；当前正式内置蓝图只有 `templates/*.json` 的 4 个。本文保留为 T-05 历史收口记录。
 
 ## 核对对象
 
 - 旧：`dsh/workflow/dev-workflow-2.0.mjs`（手写，验收通过后**退役**；**已于 2026-08-20 删除**——neat-freak 收口执行收口步骤 4，入口由生成 skill 承接）
-- 新：`templates/custom-seeds/dev-workflow-2-0.json` + 生成产物 `.generated/dev-workflow-2-0/script.mjs`（行为由运行时排练厅套件持续验证）
+- 新：曾为 `templates/custom-seeds/dev-workflow-2-0.json` + 生成产物 `.generated/dev-workflow-2-0/script.mjs`（**均已删除**；当前正式内置蓝图只有 `templates/*.json` 的 4 个，生成物在 `.generated/<id>/`，行为由运行时排练厅套件持续验证）
 
 ## 8 维度核对清单
 
@@ -34,7 +35,7 @@
 
 1. `npm test` 全绿（含运行时排练厅场景套件：框架级走通性 + 模板级回归 + 双编译器对拍）
 2. 本清单 8 维度逐项人工核对生成脚本（对照 R-01 产物）→ 全勾
-3. 触发词路由实测：新会话以「开发工作流 2.0」/「dev-workflow-2-0」调用生成 skill（FR-6 软路由，规格风险 3）
-4. ✅ 已执行（2026-08-20，neat-freak 收口）：旧 mjs 删除，入口由生成 skill 承接（安装脚本 `dsh/install-skill.sh` 改为从蓝图生成脚本/meta）
+3. 触发词路由实测：新会话以「开发工作流 2.0」/「dev-workflow-2-0」调用生成 skill（FR-6 软路由，规格风险 3）——该 skill 已随种子资产移除，本条为历史记录
+4. ✅ 已执行（2026-08-20，neat-freak 收口）：旧 mjs 删除，入口由生成 skill 承接（安装脚本 `dsh/install-skill.sh` 改为从蓝图生成脚本/meta）——该安装脚本与种子蓝图其后一并删除，内置模板技能现由 `npm run install:builtin-skills` 安装
 
 核对人：__________　日期：__________　结论：通过 / 不通过（附差异说明）

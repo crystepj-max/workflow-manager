@@ -166,7 +166,7 @@ v0.1 不做静默 Backup Provider / Failover。模型不可用时：
 11. `researcher` — 专家研究
 12. `synthesizer` — 综合分析
 
-旧 `dispatcher` 迁移为 Custom Role。共享 Role 不代表共享 Node Outcome Schema；例如优化和探索都使用 evaluator，但各自评价契约与枚举由节点定义。
+正式内置角色只保留统一评审的 12 个。共享 Role 不代表共享 Node Outcome Schema；例如优化和探索都使用 evaluator，但各自评价契约与枚举由节点定义。
 
 ## 9. 四套正式 Built-in Workflow
 
@@ -229,7 +229,11 @@ v0.1 不做静默 Backup Provider / Failover。模型不可用时：
 
 正式 Built-in Workflow 只保留四套新标准。
 
-历史 `default-workflow` 与 `dev-workflow-2-0` 迁为 Custom Workflow；旧 `dispatcher` 迁为 Custom Role。迁移应保留用户引用、Skill 兼容和历史可追溯性。
+历史 `default-workflow`、`dev-workflow-2-0` 与旧 `dispatcher` 已从仓库资产中移除，不再作为 Custom Workflow / Custom Role 保留：
+
+- `.generated/`（真源 `templates/*.json`）下的模板一律是正式内置：`builtin=true`、只读、不可覆盖与删除；
+- 用户自建的工作流模板与角色仍以 Custom 身份存在（`builtin=false`），可在界面中编辑与删除；
+- 移除的历史模板与角色不再随仓库分发，追溯以版本历史与既有运行记录为准。
 
 Draft PR #70 已关闭且未合并；`feat/multi-perspective-exploration` 仅作为 #81/#82 实现素材库。允许选择性复用探索 Prompt / Schema 思路，但不得 reopen/rebase #70，也不得整包 cherry-pick 旧 success/failure 路由、10-role registry 或旧数量测试。
 

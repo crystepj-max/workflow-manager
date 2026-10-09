@@ -9,6 +9,8 @@ blocked-by: []
 resolved: 2026-08-19（charting 会话内联调研，子代理基础设施故障）
 ---
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `default-workflow` / `dev-workflow-2-0` 工作流模板**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`）。
+
 ## Question
 
 `packages/dsh-visual-workflow/src/host.js` 内部机制全貌是什么？——它是生成器（FR-2）与持久化（FR-3）两个决策的事实基础。

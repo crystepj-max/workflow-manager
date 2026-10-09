@@ -1,5 +1,7 @@
 # R-02 · vwf 宿主与 DSL 盘点
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `default-workflow` / `dev-workflow-2-0` 工作流模板**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`）。
+
 > 调研票 R-02 产物。一手资料：`packages/dsh-visual-workflow/src/host.js`（598 行）、`tests/host.test.mjs`、`tests/client.smoke.mjs`、`dsh/README.md`（vwf 章节）。行号均为 host.js 位置。
 
 ## 1. 内置模板结构（TEMPLATES，L29-74）

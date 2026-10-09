@@ -67,7 +67,7 @@ const summarizeTestFailure = (out, label) => {
     (merged.length > shown.length ? '\n  …另有 ' + (merged.length - shown.length) + ' 个未展开' : '');
 };
 
-// ① 蓝图校验 + 等价断言（正式内置 + custom-seeds 历史种子）
+// ① 蓝图校验 + 等价断言（正式内置模板）
 const tplAbs = listBlueprintJsonFiles(TPL_DIR);
 console.log('—— ① 蓝图校验（' + tplAbs.length + ' 份）——');
 for (const abs of tplAbs) {
@@ -77,8 +77,7 @@ for (const abs of tplAbs) {
     fail(bp.id + '：' + v.errors.map((e) => e.at + ' ' + e.message).join('；'));
     continue;
   }
-  const kind = abs.includes(`${path.sep}custom-seeds${path.sep}`) ? '自定义种子' : '正式内置';
-  pass(bp.id + '（' + kind + '）：结构合法（' + v.counts.nodes + ' 节点 / ' + v.counts.edges + ' 边）');
+  pass(bp.id + '（正式内置）：结构合法（' + v.counts.nodes + ' 节点 / ' + v.counts.edges + ' 边）');
   // 等价验证由步骤③的运行时排练厅套件承担（runtime.test.mjs / runtime-host.test.mjs，
   // 真实执行生成脚本断言返回体状态机——替代原字符串嗅探断言）
 }

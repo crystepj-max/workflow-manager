@@ -1,5 +1,7 @@
 # 工作流统一引擎 · 地图（wayfinder:map）
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `default-workflow` / `dev-workflow-2-0` 工作流模板**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`）。
+
 > 本仓库无第三方 issue tracker 文档 → 采用 **local-markdown tracker**：本文件为地图，
 > 票为 `wayfinder/tickets/<ID>-<slug>.md`。前沿（frontier）= status:open 且无未关闭阻塞项的票。
 >

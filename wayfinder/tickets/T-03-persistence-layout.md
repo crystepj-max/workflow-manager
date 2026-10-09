@@ -9,6 +9,8 @@ blocked-by: [R-02]
 resolved: 2026-08-19（grilling 三轮设计树走完，用户逐项确认）
 ---
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `default-workflow` / `dev-workflow-2-0` 工作流模板**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`）。
+
 ## Question
 
 FR-3 落地形态：蓝图存哪里、vwf 的 save/list/remove 如何基于目录工作？

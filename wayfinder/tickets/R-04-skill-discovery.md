@@ -9,6 +9,8 @@ blocked-by: []
 resolved: 2026-08-19（charting 会话内联调研，子代理基础设施故障）
 ---
 
+> ⚠️ 现状追注（2026-10-04）：本文出现的 `default-workflow` / `dev-workflow-2-0` 工作流模板**均已从仓库资产中删除**；此处保留原文仅为历史记录，不代表当前实现。当前实现：正式内置模板 4 个（`wf-construction-full-feature` / `wf-diagnose` / `wf-explore` / `wf-optimize`）。
+
 ## Question
 
 DSH 宿主如何发现 `dsh/skills/*/SKILL.md` 并据触发词路由？——FR-6/NFR-3 要求生成出的 skill 能被 harness 加载识别、`displayName`（中文）/`name`（英文）/别名都能路由到同一 `templateId`；规格风险 3 明确「实现时须验证触发词路由生效」。

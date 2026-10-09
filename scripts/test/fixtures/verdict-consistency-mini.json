@@ -6,7 +6,7 @@
   "nodes": [
     {
       "id": "start",
-      "profile": "dispatcher",
+      "profile": "legacy-role",
       "label": "启动",
       "goal": "接入任务",
       "output": {

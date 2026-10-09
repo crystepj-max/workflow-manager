@@ -201,7 +201,6 @@ return {
           userDir: home + '/visual-workflow/templates',
           // LOC-014 模型覆盖层：一内置模板一文件，键 = 节点id | "$default"，值 = { provider, model }
           modelOverridesDir: home + '/visual-workflow/model-overrides',
-          removedDir: home + '/visual-workflow/removed',
           runsDir: home + '/visual-workflow/runs',
           // 逻辑运行摘要目录（#79）：<logical_run_id>.json 一任务一文件
           logicalRunsDir: home + '/visual-workflow/logical-runs',
@@ -294,9 +293,7 @@ return {
       return roleLibraryPromise
     }
 
-    // ── 模板存储：生成物（只读；历史两套已迁为自定义）+ 用户目录 ─────────────────
-    const LEGACY_CUSTOM_IDS = { 'default-workflow': true, 'dev-workflow-2-0': true }
-    const isLegacyCustomId = (id) => !!LEGACY_CUSTOM_IDS[id]
+    // ── 模板存储：生成物（只读内置）+ 用户目录 ─────────────────────────────────
 
     // strict=true：清单/单文件读取失败即抛出（角色引用统计等破坏性前置不得把失败当空清单）
     async function loadGenerated(strict) {
@@ -324,19 +321,6 @@ return {
           }
         }
       }
-      return out
-    }
-    async function splitGenerated(strict) {
-      const builtins = new Map()
-      const shipped = new Map()
-      for (const [id, dsl] of await loadGenerated(strict)) (isLegacyCustomId(id) ? shipped : builtins).set(id, dsl)
-      return { builtins, shipped }
-    }
-    async function loadRemovedIds() {
-      const out = new Set()
-      const d = fs === undefined ? null : await homeDirs()
-      const entries = d ? await listDirOrNull(d.removedDir) : null
-      for (const ent of entries || []) if (ent && typeof ent.name === 'string' && ent.name) out.add(ent.name)
       return out
     }
     async function loadUserTemplates(strict) {
@@ -431,23 +415,21 @@ return {
       }
       return next
     }
-    // 查找：用户覆盖（整份）→ 未删除的历史生成物 → 正式内置（⊕ 模型覆盖层）
+    // 查找：用户覆盖（整份）→ 正式内置（⊕ 模型覆盖层）
     // userDir 整份覆盖优先（已是用户自定义资产，D3-2）：模型覆盖层对其忽略。
     async function findWorkflow(id) {
       if (!id || typeof id !== 'string') return null
       const bp = (await loadUserTemplates()).get(id)
       if (bp) return (await kernel()).projectToVwf(bp)
-      if ((await loadRemovedIds()).has(id)) return null
-      const { builtins, shipped } = await splitGenerated()
-      const dsl = shipped.get(id) || builtins.get(id) || null
+      const dsl = (await loadGenerated()).get(id) || null
       if (!dsl) return null
       const ov = (await loadModelOverrides()).get(id)
       return ov ? composeModelBindings(dsl, ov) : dsl
     }
-    // 合并三源为清单条目；同 id 用户整份覆盖优先，已删除标记的历史 id 不再列出；
+    // 合并两源为清单条目；同 id 用户整份覆盖优先；
     // 内置条目合成模型覆盖层并携带 modelOverridden 标记（模板库"已覆盖"最小展示，D2）
     async function workflowEntries(strict) {
-      const [{ builtins, shipped }, users, removed, core, overrides] = await Promise.all([splitGenerated(strict), loadUserTemplates(strict), loadRemovedIds(), kernel(), loadModelOverrides()])
+      const [builtins, users, core, overrides] = await Promise.all([loadGenerated(strict), loadUserTemplates(strict), kernel(), loadModelOverrides()])
       const out = []
       const seen = new Set()
       const push = (dsl, name, builtin, extra) => { seen.add(dsl.id); out.push({ id: dsl.id, name: name, description: dsl.description || '', builtin: builtin, dsl: dsl, ...(extra || {}) }) }
@@ -457,7 +439,6 @@ return {
         push(eff, eff.name || dsl.name, true, ov ? { modelOverridden: true } : null)
       }
       for (const bp of users.values()) if (!seen.has(bp.id)) push(core.projectToVwf(bp), bp.displayName, false)
-      for (const dsl of shipped.values()) if (!seen.has(dsl.id) && !removed.has(dsl.id)) push(dsl, dsl.name, false)
       return out
     }
     async function listWorkflows() {
@@ -1911,7 +1892,7 @@ return {
       const id = v.sanitized.id
       const d = fs === undefined ? null : await homeDirs()
       if (!d || !GENERATOR) return fail('宿主文件能力不可用或插件根未注入：无法保存模板')
-      const [{ builtins }, users] = await Promise.all([splitGenerated(), loadUserTemplates()])
+      const [builtins, users] = await Promise.all([loadGenerated(), loadUserTemplates()])
       if (builtins.has(id)) return fail('内置模板只读：' + id + ' 属于内置模板，不能覆盖，请改用新 id（另存为新模板）', '$.id')
       if (users.has(id) && a.currentId !== id) return fail('已存在同名模板 ' + id + '：另存为新模板请修改模板 ID；更新当前模板请保持 ID 不变。', '$.id')
       const file = d.userDir + '/' + id + '.json'
@@ -1922,7 +1903,6 @@ return {
         await rm(file)
         return fail('蓝图校验/技能生成失败（save 已回滚）：' + gen.detail)
       }
-      if (isLegacyCustomId(id)) await rm(d.removedDir + '/' + id)
       return { ok: true, id: id, dsl: v.sanitized, warnings: v.warnings }
     })
     registerRpc('vwf.workflows.remove', async (a) => {
@@ -1930,17 +1910,15 @@ return {
       if (!id || typeof id !== 'string') return fail('缺少模板 id', '$.id')
       const d = fs === undefined ? null : await homeDirs()
       if (!d) return fail('宿主文件能力不可用：无法删除用户模板')
-      if ((await splitGenerated()).builtins.has(id)) return fail('内置模板只读：' + id + ' 属于内置模板，不能删除', '$.id')
+      if ((await loadGenerated()).has(id)) return fail('内置模板只读：' + id + ' 属于内置模板，不能删除', '$.id')
       const file = d.userDir + '/' + id + '.json'
       const existed = (await readTextIfExists(file)) !== null
-      if (!existed && (!isLegacyCustomId(id) || (await loadRemovedIds()).has(id))) return fail('用户模板不存在：' + id, '$.id')
+      if (!existed) return fail('用户模板不存在：' + id, '$.id')
       if (existed) {
         const r = await rm(file)
         if (!r.ok) return fail('模板删除失败：' + r.detail)
       }
       await rm(d.skillRoot + '/' + id)
-      // 历史模板删除后写删除标记，避免生成物再次出现在模板库
-      if (isLegacyCustomId(id)) { try { await writeText(d.removedDir + '/' + id, '') } catch (e) { /* 标记失败不阻断删除 */ } }
       return { ok: true, id: id }
     })
     // ── LOC-014 模型覆盖 RPC：仅内置模板可保存/清除（结构改动仍须另存为自定义）──
@@ -1960,7 +1938,7 @@ return {
       if (fs === undefined) return fail('宿主文件能力不可用：无法保存模型覆盖')
       const d = await homeDirs()
       if (!d) return fail('无法解析 DSH Home：无法保存模型覆盖')
-      if (!(await splitGenerated()).builtins.has(id)) return fail('仅内置模板支持模型覆盖：' + id + ' 不是内置模板（自定义模板请直接编辑其绑定）', '$.id')
+      if (!(await loadGenerated()).has(id)) return fail('仅内置模板支持模型覆盖：' + id + ' 不是内置模板（自定义模板请直接编辑其绑定）', '$.id')
       const ov = sanitizeOverride(a.overrides && typeof a.overrides === 'object' && !Array.isArray(a.overrides) ? a.overrides : {})
       if (!Object.keys(ov).length) return fail('覆盖内容为空：请至少填写一个节点（或默认）的 Provider 与 Model；如需恢复默认请使用清除覆盖', '$.overrides')
       try { await writeText(d.modelOverridesDir + '/' + id + '.json', JSON.stringify(ov, null, 2) + '\n') } catch (e) { return fail('模型覆盖落盘失败：' + errMsg(e)) }
@@ -1974,7 +1952,7 @@ return {
       const d = await homeDirs()
       if (!d) return fail('无法解析 DSH Home：无法清除模型覆盖')
       // 仅正式内置才有本机制写出的覆盖文件：非内置 id 直接幂等成功（不触碰文件系统）
-      if (!(await splitGenerated()).builtins.has(id)) return { ok: true, id }
+      if (!(await loadGenerated()).has(id)) return { ok: true, id }
       const r = await rm(d.modelOverridesDir + '/' + id + '.json')
       if (r && r.ok === false) return fail('模型覆盖清除失败：' + (r.detail || ''))
       return { ok: true, id }
@@ -2312,7 +2290,7 @@ return {
       }
       return { files: out, state: 'ok' }
     }
-    // 打包角色包回退：bundleRoles 模板产物旁的 roles/ 快照（含已迁出内置集合的历史角色如 dispatcher）
+    // 打包角色包回退：用户模板 bundleRoles 产物旁的 roles/ 快照
     async function bundledLegacyRoles() {
       const out = new Map()
       const d = await homeDirs()
@@ -2361,7 +2339,7 @@ return {
     async function detailFacts(lib) {
       return { includeContent: true, catalog: await collectRoleCatalog(), builtinBodies: await collectBuiltinBodies(lib) }
     }
-    // 引用事实：正式内置 + 用户模板 + 未删除的历史生成物 + 可选开放草稿；strict 读取失败 fail-closed
+    // 引用事实：正式内置 + 用户模板 + 可选开放草稿；strict 读取失败 fail-closed
     async function collectWorkflowFacts(draftDsl) {
       try {
         const mapNodes = (dsl) => ((dsl && dsl.nodes) || []).map((n) => ({ id: n.id, label: n.label, profile: n.profile }))
@@ -3109,7 +3087,7 @@ return {
       name: 'wf_run',
       description: '运行一个可视化工作流（DSL 图）：校验并编译为 workflow 脚本后交给引擎执行。args.templateId 用内置/用户模板，或 args.dsl 传自定义图。返回运行状态；Human Decision 以 WAITING_HUMAN 暂停，用 decision_id + user_choice 续跑；残留人工门禁以 AWAITING_HUMAN_<node> 暂停，用 entry + approved 续跑。',
       parameters: {
-        templateId: { type: 'string', description: '内置/用户工作流 id，如 dev-workflow-2-0' },
+        templateId: { type: 'string', description: '内置/用户工作流 id，如 wf-diagnose' },
         dsl: { type: 'object', additionalProperties: true, description: '自定义工作流 DSL（nodes/edges/control）' },
         taskId: { type: 'string', required: true, description: '任务标识，如 issue-12' },
         runDir: { type: 'string', description: 'run 产物目录，缺省 .agent-runs/<taskId>' },
