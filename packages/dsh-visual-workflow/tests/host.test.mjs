@@ -17,6 +17,7 @@ const REAL_GENERATED_SCRIPT = _baselineGenerated.files.get('legacy-baseline/scri
 import { loadHost, ROLE_CORE_SEED } from './helpers/load-host.mjs'
 import { generateBaseline } from '../../../scripts/test/helpers/baseline-harness.mjs'
 import { REPO, SESSION_REPO, HOME, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
+import { createProviderRoutes } from '../../../scripts/node-provider-routes.mjs'
 
 const call = async (handlers, method, args) => handlers.get(method)(args)
 const MINIMAL_BUILTIN = JSON.stringify({
@@ -73,11 +74,11 @@ function seedFs(extra = {}) {
   return makeFs(seed)
 }
 
-function env({ failPattern, extra = {} } = {}) {
+function env({ failPattern, extra = {}, wsHost = null, nodeIsolationHost = null } = {}) {
   const fs = seedFs()
   // 统一编译器管道（T-IMP-12）：vwf.script 走 CLI compile——模拟输出用真实生成物（存在时）
   const compileScript = REAL_GENERATED_SCRIPT
-  const sub = makeSubprocess({ failPattern, fs, compileScript })
+  const sub = makeSubprocess({ failPattern, fs, compileScript, wsHost, nodeIsolationHost })
   const { handlers, definedTools, events, ctx } = loadHost({ fs, subprocess: sub, sandboxPolicy, ...extra })
   return { handlers, definedTools, events, ctx, fs, sub }
 }
@@ -1436,8 +1437,9 @@ function settleRun(eng, events, id, scriptStatus, extra = {}) {
   if (ev) ev({ id }, { stopReason: 'completed' })
 }
 
-function engineEnv(eng) {
-  return env({ extra: { workflowEngine: eng, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
+function engineEnv(eng, options = {}) {
+  const { extra = {}, ...hostOptions } = options
+  return env({ ...hostOptions, extra: { ...extra, workflowEngine: eng, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
 }
 
 // wf_run.execute 内部有校验/编译等多个 await，引擎 start 非同步可达：轮询等待
@@ -1462,6 +1464,68 @@ async function assertMutexBlocked(executePromise, eng, startsBefore, label) {
   if (!settled) throw new Error(label + '：未立即返回互斥错误')
   assert.ok(String(value).includes('串行互斥'), label + '：' + value)
 }
+
+test('wf_run selects the node-isolation provider for every workflow model call', async () => {
+  const eng = makeEngine()
+  const { events, definedTools } = engineEnv(eng)
+  const wfRun = definedTools.find((tool) => tool.name === 'wf_run')
+  assert.ok(wfRun, 'wf_run 已注册')
+  const resultPromise = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'isolated-node-provider' })
+  await until(() => eng.starts.length === 1, '隔离 provider 启动')
+  assert.equal(eng.starts[0].subagentProvider, 'vwf-node-isolated', '所有节点模型调用必须经过节点隔离 provider')
+  settleRun(eng, events, 'run-1', 'DONE')
+  await resultPromise
+})
+
+test('R10 provider 拒绝未登记的隔离路由，且不启动 child 进程', async () => {
+  const { ctx, sub } = env()
+  const provider = ctx.get('subagents').providers.get('vwf-node-isolated')
+  assert.ok(provider, '节点隔离 provider 已注册')
+  const before = sub._specs.length
+  await assert.rejects(provider.start({
+    agentOptions: { provider: 'vwf-node-isolated:' + 'a'.repeat(64), model: 'deepseek-v4-pro' },
+    prompt: [{ type: 'text', text: 'test' }],
+    signal: new AbortController().signal,
+  }), /isolated node route rejected/)
+  assert.equal(sub._specs.length, before, '路由无效时必须在启动任何子进程前拒绝')
+})
+
+test('R10 wf_run 注入逐节点令牌，并在运行结果结算后撤销路由', async () => {
+  const eng = makeEngine()
+  const workspace = {
+    workspace_id: 'r10-workspace', workspace_path: '/tmp/r10-workspace',
+    source_path: '/tmp/r10-source', records_path: '/tmp/r10-workspace/records',
+    work_branch: 'codex/r10', source_revision: 'abc123', workspace_mode: 'ISOLATED_WRITE',
+  }
+  let issuedRoutes = null
+  const wsHost = () => ({ ok: true, workspace })
+  const nodeIsolationHost = (command, input) => {
+    if (command === 'probe') return { ok: true, guarantee: 'enforced', backend: 'test' }
+    if (command === 'createProviderRoutes') {
+      issuedRoutes = createProviderRoutes(input)
+      return issuedRoutes
+    }
+    return { ok: false, error: 'unexpected test command' }
+  }
+  const host = engineEnv(eng, { wsHost, nodeIsolationHost })
+  host.fs._files.set(REPO + '/scripts/workspace-isolation-host.mjs', '// test wrapper')
+  host.fs._files.set(REPO + '/scripts/node-isolation-host.mjs', '// test wrapper')
+  const wfRun = host.definedTools.find((tool) => tool.name === 'wf_run')
+  const resultPromise = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'r10-route-run' })
+  await until(() => eng.starts.length === 1, 'R10 含路由的工作流启动')
+  const runRoutes = eng.starts[0].args.routes
+  assert.ok(runRoutes && Object.keys(runRoutes.nodes).length > 0, 'Host 应把签发令牌交给生成脚本')
+  assert.equal(Object.values(runRoutes.nodes).every((token) => /^[a-f0-9]{64}$/.test(token)), true)
+  assert.equal(issuedRoutes.routes.length, Object.keys(runRoutes.nodes).length)
+  const issuedRoute = issuedRoutes.routes[0]
+  settleRun(eng, host.events, 'run-1', 'DONE')
+  await resultPromise
+  await assert.rejects(host.ctx.get('subagents').providers.get('vwf-node-isolated').start({
+    agentOptions: { provider: 'vwf-node-isolated:' + issuedRoute.token, model: issuedRoute.model },
+    prompt: [{ type: 'text', text: 'test' }],
+    signal: new AbortController().signal,
+  }), /isolated node route rejected/)
+})
 
 test('#19 T1：wf_run 启动登记 taskId/workflowId；runs.list 最新在前；双 run 状态互不串扰', async () => {
   const eng = makeEngine()
@@ -1959,4 +2023,3 @@ test('#93 DSH_HOME：明确 process.env.DSH_HOME 直接优先，不能被成功 
   const probe = sub._calls.find((c) => c.join(' ').includes('process.env.DSH_HOME') && c.join(' ').includes('.homedir'))
   assert.equal(probe, undefined, '明确 DSH_HOME 存在时不应再执行可能回落产品 ~/.dsh 的 probe')
 })
-

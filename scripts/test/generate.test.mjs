@@ -9,11 +9,48 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { compileBlueprint, generateAll, generateUserSkill, projectToVwf, skillWrap, writeUserSkill, collectBuiltinRoles, loadBuiltinRoleIds, loadBuiltinRoleDefs } from '../generate.mjs';
 import { generateBaseline, generateInTemp, loadBaseline, makeFixtureRolesDir } from './helpers/baseline-harness.mjs';
+import { runGeneratedScript } from './helpers/runtime-harness.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tplDir = path.join(here, '../../templates');
 const bp = loadBaseline();
 const fanoutBp = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'));
+
+test('R10：生成的节点与 fanout 模型调用携带宿主签发的路由令牌', async () => {
+  const singleNode = {
+    id: 'r10-route-token', displayName: 'R10 路由令牌', entry: 'work',
+    control: { maxRounds: 2 },
+    nodes: [{
+      id: 'work', profile: 'dev', label: '工作节点', goal: '完成任务',
+      output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false }, successCondition: '$.ok == true' },
+    }],
+    edges: [
+      { from: 'work', to: '$end', on: 'success' },
+      { from: 'work', to: '$end', on: 'failure' },
+    ],
+    bindings: { models: { work: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } } },
+  };
+  const single = compileBlueprint(singleNode);
+  const calls = [];
+  await runGeneratedScript(single.script, {
+    args: { taskId: 'r10-route-token', routes: { nodes: { work: 'opaque-work-token' }, attribution: {} } },
+    agent: async (_prompt, opts) => { calls.push(opts); return { ok: true }; },
+  });
+  assert.equal(calls[0].provider, 'vwf-node-isolated:opaque-work-token');
+  assert.equal(calls[0].model, 'deepseek-v4-pro', '模型名继续使用蓝图绑定');
+
+  const fan = compileBlueprint(fanoutBp);
+  const fanCalls = [];
+  await runGeneratedScript(fan.script, {
+    args: { taskId: 'r10-fanout-route', items: ['a', 'b'], routes: { nodes: { fan: 'opaque-fan-token', finish: 'opaque-finish-token' }, attribution: {} } },
+    agent: async (_prompt, opts) => { fanCalls.push(opts); return { value: 'ok' }; },
+  });
+  assert.deepEqual(fanCalls.slice(0, 2).map((opts) => opts.provider), [
+    'vwf-node-isolated:opaque-fan-token:item:1',
+    'vwf-node-isolated:opaque-fan-token:item:2',
+  ], '扇出子项按序号绑定路由');
+  assert.equal(fanCalls[0].model, 'deepseek-v4-pro');
+});
 
 test('S2 生成器：内置模板产物四件套齐全', () => {
   const { files, report } = generateAll(tplDir);

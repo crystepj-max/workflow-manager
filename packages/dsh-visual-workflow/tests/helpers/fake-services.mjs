@@ -55,7 +55,7 @@ export function makeFs(seed = {}) {
 //（LOC-037）的进程边界替身——宿主侧接线测试可借此驱动真实包装脚本逻辑（仅伪造进程边界，不伪造内核）。
 // spawnHandler：可选自定义进程边界（spec => { stdout, exitCode, stderr } | undefined），
 // 返回 undefined 走默认分支；LOC-027 基线冻结/核验用真实 node 子进程验证字节语义。
-export function makeSubprocess({ failPattern = null, fs = null, compileScript = '//MOCK-SCRIPT', recordsHost = null, wsHost = null, operationsHost = null, deliveryCloseoutHost = null, spawnHandler = null } = {}) {
+export function makeSubprocess({ failPattern = null, fs = null, compileScript = '//MOCK-SCRIPT', recordsHost = null, wsHost = null, nodeIsolationHost = null, operationsHost = null, deliveryCloseoutHost = null, spawnHandler = null } = {}) {
   const calls = []
   const specs = []
   const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
@@ -108,6 +108,8 @@ export function makeSubprocess({ failPattern = null, fs = null, compileScript = 
         ;({ stdout, exitCode } = hostCall(deliveryCloseoutHost, spec))
       } else if (argvStr.includes('workspace-isolation-host.mjs') && wsHost) {
         ;({ stdout, exitCode } = hostCall(wsHost, spec))
+      } else if (argvStr.includes('node-isolation-host.mjs') && nodeIsolationHost) {
+        ;({ stdout, exitCode } = hostCall(nodeIsolationHost, spec))
       } else if (argvStr.includes('rmSync')) {
         if (fs) fs._files.delete(spec.argv[spec.argv.length - 1])
       } else if (failPattern && failPattern.test(argvStr)) {

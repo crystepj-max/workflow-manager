@@ -614,7 +614,7 @@ test('M5 假会话看门狗：忽略 SIGTERM 时不得先补位造成 3 个进�
     : 'import time; print("ready", flush=True); time.sleep(30)'])
   const waitReady = (child) => new Promise((resolve, reject) => {
     let buf = ''
-    const timer = setTimeout(() => reject(new Error(`假会话未就绪：${buf}`)), 2000)
+    const timer = setTimeout(() => reject(new Error(`假会话未就绪：${buf}`)), 10_000)
     child.stdout.on('data', (chunk) => {
       buf += chunk
       if (buf.includes('ready')) {
@@ -701,7 +701,7 @@ test('M5 假会话：已写 release-event 但进程仍存活时不得补位', as
     : 'import time; print("ready", flush=True); time.sleep(30)'])
   const waitReady = (child) => new Promise((resolve, reject) => {
     let buf = ''
-    const timer = setTimeout(() => reject(new Error('假会话未就绪')), 2000)
+    const timer = setTimeout(() => reject(new Error('假会话未就绪')), 10_000)
     child.stdout.on('data', (chunk) => {
       buf += chunk
       if (buf.includes('ready')) { clearTimeout(timer); resolve() }

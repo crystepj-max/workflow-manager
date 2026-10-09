@@ -58,6 +58,15 @@ const schemaProtocolCoreSrc = join(root, '..', '..', 'scripts', 'schema-protocol
 const evaluationBaselineSrc = join(root, '..', '..', 'scripts', 'evaluation-baseline.cjs')
 const stateRecoveryCoreSrc = join(root, '..', '..', 'scripts', 'state-recovery-core.cjs')
 const artifactManifestSrc = join(root, '..', '..', 'scripts', 'artifact-manifest.cjs')
+const nodeProviderCoreSrc = join(root, '..', '..', 'scripts', 'node-provider-core.cjs')
+const nodeIsolationHostClientSrc = join(root, '..', '..', 'scripts', 'node-isolation-host-client.cjs')
+const nodeIsolationSrc = join(root, '..', '..', 'scripts', 'node-isolation.mjs')
+const nodeIsolationLauncherSrc = join(root, '..', '..', 'scripts', 'node-isolation-launcher.mjs')
+const cwfValidateSrc = join(root, '..', '..', 'scripts', 'cwf-validate.mjs')
+const nodeIsolationSchemaSrc = join(root, '..', '..', 'docs', 'design', 'node-isolation', 'schema.json')
+const structuredOutputSrc = join(root, 'src', 'structured-output.mjs')
+const nodeProviderWorkerSrc = join(root, 'src', 'node-provider-worker.mjs')
+const nodeProviderProxySrc = join(root, 'src', 'node-provider-loopback-proxy.mjs')
 const roleManifestSrc = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
 const localesSrc = join(root, 'locales')
 const rolesSrc = join(root, '..', '..', 'dsh', 'roles')
@@ -74,6 +83,15 @@ const schemaProtocolCoreBody = readFileSync(schemaProtocolCoreSrc, 'utf8')
 const evaluationBaselineBody = readFileSync(evaluationBaselineSrc, 'utf8')
 const stateRecoveryCoreBody = readFileSync(stateRecoveryCoreSrc, 'utf8')
 const artifactManifestBody = readFileSync(artifactManifestSrc, 'utf8')
+const nodeProviderCoreBody = readFileSync(nodeProviderCoreSrc, 'utf8')
+const nodeIsolationHostClientBody = readFileSync(nodeIsolationHostClientSrc, 'utf8')
+const nodeIsolationBody = readFileSync(nodeIsolationSrc, 'utf8')
+const nodeIsolationLauncherBody = readFileSync(nodeIsolationLauncherSrc, 'utf8')
+const cwfValidateBody = readFileSync(cwfValidateSrc, 'utf8')
+const nodeIsolationSchemaBody = readFileSync(nodeIsolationSchemaSrc, 'utf8')
+const structuredOutputBody = readFileSync(structuredOutputSrc, 'utf8')
+const nodeProviderWorkerBody = readFileSync(nodeProviderWorkerSrc, 'utf8')
+const nodeProviderProxyBody = readFileSync(nodeProviderProxySrc, 'utf8')
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
 const listNames = (dir, ext) => readdirSync(dir).filter((n) => n.endsWith(ext)).sort()
 // 目录级输入按「文件名 + 大小 + 修改时间」聚合：改名、增删文件、改内容都能被捕获。
@@ -102,6 +120,15 @@ const stamp = {
   evaluationBaseline: sha256(evaluationBaselineBody),
   stateRecoveryCore: sha256(stateRecoveryCoreBody),
   artifactManifest: sha256(artifactManifestBody),
+  nodeProviderCore: sha256(nodeProviderCoreBody),
+  nodeIsolationHostClient: sha256(nodeIsolationHostClientBody),
+  nodeIsolation: sha256(nodeIsolationBody),
+  nodeIsolationLauncher: sha256(nodeIsolationLauncherBody),
+  cwfValidate: sha256(cwfValidateBody),
+  nodeIsolationSchema: sha256(nodeIsolationSchemaBody),
+  structuredOutput: sha256(structuredOutputBody),
+  nodeProviderWorker: sha256(nodeProviderWorkerBody),
+  nodeProviderProxy: sha256(nodeProviderProxyBody),
   locales: dirStamp(localesSrc, '.json'),
   roles: dirStamp(rolesSrc, '.md'),
   // 打包脚本自身也计入：改了包装/压缩逻辑后产物必须重建
@@ -122,6 +149,15 @@ const requiredArtifacts = [
   join(dist, 'evaluation-baseline.cjs'),
   join(dist, 'state-recovery-core.cjs'),
   join(dist, 'artifact-manifest.cjs'),
+  join(dist, 'route.cjs'),
+  join(dist, 'node-isolation-host-client.cjs'),
+  join(dist, 'node-isolation.mjs'),
+  join(dist, 'node-isolation-launcher.mjs'),
+  join(dist, 'cwf-validate.mjs'),
+  join(dist, 'node-isolation-schema.json'),
+  join(dist, 'structured-output.mjs'),
+  join(dist, 'node-provider-worker.mjs'),
+  join(dist, 'node-provider-loopback-proxy.mjs'),
   join(dist, 'projection-core.cjs'),
   join(dist, 'role-library.cjs'),
   join(dist, 'builtin-roles.json'),
@@ -174,8 +210,8 @@ writeFileSync(
   // 这些服务激活前 apply，导致 RPC 路由或工具注册永久错过。
   // #122: subprocess 必须加入 inject——否则 apply 时 ctx.get('subprocess') 返回 undefined，
   // 导致删除模板/子进程调用等操作失败（子进程服务不可用）。
-  // 动态会话插件仍走 harness.handle，不受影响（src 闭包体本身不声明 inject）。
-  `export const inject = ['webServer', 'tools', 'subprocess'];\n` +
+  // 静态 host 需要等待 DSH 节点 provider 与凭据服务就绪后才注册；动态闭包从 src 声明同样的依赖。
+  `export const inject = ['webServer', 'tools', 'subprocess', 'subagents', 'credentials'];\n` +
   `export function apply(ctx) { return plugin.apply(ctx); }\n`
 )
 
@@ -210,6 +246,15 @@ copyFileSync(evaluationBaselineSrc, join(dist, 'evaluation-baseline.cjs'))
 // LOC-035 产物清单纯逻辑内核，随 dist 分发
 copyFileSync(stateRecoveryCoreSrc, join(dist, 'state-recovery-core.cjs'))
 copyFileSync(artifactManifestSrc, join(dist, 'artifact-manifest.cjs'))
+copyFileSync(nodeProviderCoreSrc, join(dist, 'route.cjs'))
+copyFileSync(nodeIsolationHostClientSrc, join(dist, 'node-isolation-host-client.cjs'))
+copyFileSync(nodeIsolationSrc, join(dist, 'node-isolation.mjs'))
+copyFileSync(nodeIsolationLauncherSrc, join(dist, 'node-isolation-launcher.mjs'))
+copyFileSync(cwfValidateSrc, join(dist, 'cwf-validate.mjs'))
+copyFileSync(nodeIsolationSchemaSrc, join(dist, 'node-isolation-schema.json'))
+copyFileSync(structuredOutputSrc, join(dist, 'structured-output.mjs'))
+copyFileSync(nodeProviderWorkerSrc, join(dist, 'node-provider-worker.mjs'))
+copyFileSync(nodeProviderProxySrc, join(dist, 'node-provider-loopback-proxy.mjs'))
 // 角色库内核 + 内置角色清单：静态安装的可信加载源（host.js 只从 pluginRoot/dist 加载）
 copyFileSync(roleLibrarySrc, join(dist, 'role-library.cjs'))
 copyFileSync(roleManifestSrc, join(dist, 'builtin-roles.json'))

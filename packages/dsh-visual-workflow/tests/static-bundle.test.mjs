@@ -64,6 +64,43 @@ test('静态 bundle dist 含 state-recovery-core.cjs 且状态/恢复内核可�
   assert.equal(typeof module.exports.canonicalStopFromResult, 'function')
 })
 
+test('静态 bundle dist 含 route.cjs 且可创建运行期路由登记表', () => {
+  const coreDist = join(here, '..', 'dist', 'route.cjs')
+  assert.ok(existsSync(coreDist), 'dist/route.cjs 必须存在（build 时从 scripts/ 复制）')
+  const module = { exports: {} }
+  new Function('module', 'exports', readFileSync(coreDist, 'utf8'))(module, module.exports)
+  assert.equal(typeof module.exports.createRouteRegistry, 'function')
+})
+
+test('静态 bundle dist 含节点隔离 Host client 适配器', () => {
+  const clientDist = join(here, '..', 'dist', 'node-isolation-host-client.cjs')
+  assert.ok(existsSync(clientDist), 'dist/node-isolation-host-client.cjs 必须存在（build 时从 scripts/ 复制）')
+  const module = { exports: {} }
+  new Function('module', 'exports', readFileSync(clientDist, 'utf8'))(module, module.exports)
+  assert.equal(typeof module.exports.createNodeIsolationHostClient, 'function')
+})
+
+test('静态 bundle dist 含 DSH SDK 结构化输出插件', () => {
+  assert.ok(existsSync(join(here, '..', 'dist', 'structured-output.mjs')))
+})
+
+test('静态 bundle dist 含节点隔离 worker 的完整运行文件', async () => {
+  const dist = join(here, '..', 'dist')
+  for (const name of [
+    'node-provider-worker.mjs',
+    'node-provider-loopback-proxy.mjs',
+    'node-isolation-launcher.mjs',
+    'node-isolation.mjs',
+    'cwf-validate.mjs',
+    'node-isolation-schema.json',
+  ]) {
+    assert.ok(existsSync(join(dist, name)), `dist/${name} 必须存在`)
+  }
+  const isolation = await import(pathToFileURL(join(dist, 'node-isolation.mjs')).href + '?static-bundle-test')
+  assert.equal(isolation.loadNodeIsolationSchema().$schema, 'http://json-schema.org/draft-07/schema#')
+})
+
+
 test('静态 Host：正式 pluginRoot/dist 的投影内核可驱动校验链路', async () => {
   const pluginRoot = '/plugin/static'
   const validatorSrc = readFileSync(join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
@@ -241,7 +278,7 @@ test('T3：静态 bundle dist/host-entry.mjs 在无 harness 时 apply() 走 webS
   assert.equal(registered[0].path, '/dsh-visual-workflow')
 })
 
-test('T3：静态 bundle dist 导出 inject:[\'webServer\', \'tools\', \'subprocess\']——行级激活等待必需服务就绪', async (t) => {
+test('T3：静态 bundle dist 导出 webServer/tools/subprocess/subagents/credentials 依赖——行级激活等待必需服务就绪', async (t) => {
   // 回归：host 行无完整 inject 时会在 webServer/tools/subprocess 激活前 apply，
   // 导致 RPC 路由或工具注册永久错过；#122：缺少 subprocess 会让删除/保存模板报
   // 「子进程服务不可用（node 解析失败）」。
@@ -253,7 +290,7 @@ test('T3：静态 bundle dist 导出 inject:[\'webServer\', \'tools\', \'subproc
     return
   }
   const mod = await import(pathToFileURL(distEntry).href + '?t=' + Date.now())
-  assert.deepEqual(mod.inject, ['webServer', 'tools', 'subprocess'], '静态 host 出口必须声明 webServer/tools/subprocess 依赖')
+  assert.deepEqual(mod.inject, ['webServer', 'tools', 'subprocess', 'subagents', 'credentials'], '静态 host 出口必须声明运行所需的宿主服务')
 })
 
 test('T3：webServer 晚于 apply 激活时经 ctx.inject 延迟注册路由（无 inject 旧安装位兜底）', () => {
@@ -322,6 +359,8 @@ test('Issue #37：消费者先进入 Cordis，webServer/tools 后出现时才一
     ctx.provide('fs', makeFs({})),
     ctx.provide('subprocess', makeSubprocess({})),
     ctx.provide('sandboxPolicy', sandboxPolicy),
+    ctx.provide('subagents', { registerProvider() { return () => {} } }),
+    ctx.provide('credentials', { resolve() { return undefined } }),
   ]
   const fiber = ctx.plugin(mod)
 
@@ -335,7 +374,7 @@ test('Issue #37：消费者先进入 Cordis，webServer/tools 后出现时才一
 
   const disposeTools = ctx.provide('tools', tools)
   await fiber
-  assert.deepEqual(mod.inject, ['webServer', 'tools', 'subprocess'], '静态 bundle 必须声明三个宿主依赖')
+  assert.deepEqual(mod.inject, ['webServer', 'tools', 'subprocess', 'subagents', 'credentials'], '静态 bundle 必须声明五个宿主依赖')
   assert.deepEqual([...activeRoutes.keys()], ['/dsh-visual-workflow'])
   assert.deepEqual([...activeTools.keys()].sort(), ['vwf_debug', 'vwf_workspace', 'wf_control', 'wf_run'])
   assert.equal(routeCalls.length, 1, 'RPC 路由首次只注册一次')

@@ -3,12 +3,13 @@
 
 import {
   ISOLATION_GUARANTEE, NODE_ROLE_CAPABILITIES,
-  probeIsolationCapability, resolveNodeCapabilities, prepareNodeContext,
+  probeIsolationCapability, resolveNodeCapabilities, prepareNodeContext, buildNodeExecutionProfile,
   enforceWrite, enforceRead, writeInZone, readInZone,
   publishProbe, runPrivilegeProbes, verifyCandidateUnchanged, canIssueIndependentProof,
 } from './node-isolation.mjs'
 import { getRunWorkspace } from './workspace-isolation.mjs'
 import { loadRegistryFromWorkRoot } from './workspace-isolation-host-helpers.mjs'
+import { createProviderRoutes } from './node-provider-routes.mjs'
 
 const CMD = process.argv[2]
 const INPUT = process.argv[3] ? JSON.parse(process.argv[3]) : {}
@@ -38,6 +39,10 @@ function resolveWorkspace(workRoot, runId) {
 
 try {
   switch (CMD) {
+    case 'createProviderRoutes': {
+      out(createProviderRoutes(INPUT))
+      break
+    }
     case 'probe': {
       const result = probeIsolationCapability(INPUT || {})
       out({ ok: true, ...result })
@@ -62,6 +67,13 @@ try {
         isolation_guarantee: isolation_guarantee || ISOLATION_GUARANTEE.UNAVAILABLE,
       })
       out({ ok: true, context: ctx })
+      break
+    }
+    case 'buildProfile': {
+      const { context, options } = INPUT || {}
+      if (!context) err('缺少 context')
+      const profile = buildNodeExecutionProfile(context, options || {})
+      out({ ok: true, profile })
       break
     }
     case 'enforceWrite': {

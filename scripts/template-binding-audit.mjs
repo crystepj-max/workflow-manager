@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // FIX-234 内置模板默认绑定核对：逐模板逐节点核对默认 provider/model 是否 ∈ 当前可用模型目录。
-// 背景：模板默认绑定曾静默过期（deepseek-v4-flash 被删，真机 MODEL_NOT_CONFIGURED 才发现），
+// 背景：模板默认绑定曾静默过期（旧 DeepSeek 模型 ID 被移除，真机 MODEL_NOT_CONFIGURED 才发现），
 // 本段把它做成发布前可核对产物（真机层；仓库层锚点 = builtin-template-model-defaults.test.mjs 映射表）。
 //
 // 用法：
 //   node scripts/template-binding-audit.mjs [--catalog <catalog.json>] [--format text|json]
 //
 // 目录文件格式（provider → 可用模型 id 数组）：
-//   { "deepseek-official": ["deepseek-flash", "deepseek-v4.1-flash"] }
+//   { "deepseek-official": ["deepseek-flash", "deepseek-v4-pro"] }
 // 目录来源：产品 DSH 运行时 llm 目录（与运行前探针 listProviders/listModels 同口径）。
 // 可在编辑器控制台执行 vwf.models 后按上式落盘，或由后续官方导出通道生成；
 // 未提供目录 = 「产品 DSH 不可达」→ 显式跳过并留痕（exit 0，不静默绿、不误报红）。
