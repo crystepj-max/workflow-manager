@@ -69,10 +69,26 @@ test('R10：宿主要求隔离时，缺少路由令牌不能退回蓝图模型�
   const compiled = compileBlueprint(blueprint);
   const calls = [];
   await assert.rejects(runGeneratedScript(compiled.script, {
-    args: { taskId: 'r10-required-route', requireIsolatedNodes: true },
+    args: { taskId: 'r10-required-route', routes: { nodes: {}, attribution: {} } },
     agent: async (_prompt, opts) => { calls.push(opts); return { ok: true }; },
   }), /缺少宿主签发的隔离路由/);
   assert.deepEqual(calls, [], '路由令牌缺失时不得调用 agent');
+  assert.doesNotMatch(compiled.script, /else if \(model\.provider\) opts\.provider/,
+    '编译产物不得保留直接 Provider 回退');
+});
+
+test('R10：模型工作流的 Skill 禁止用内置 workflow 工具绕过宿主隔离', () => {
+  const skill = skillWrap(bp);
+  assert.match(skill, /不得改用内置 `workflow` 工具直接执行编译产物/);
+  assert.match(skill, /模型节点必须使用 `wf_run`/);
+
+  const mechanicalOnly = {
+    id: 'mechanical-only', displayName: '机械检查', entry: 'check',
+    nodes: [{ id: 'check', mechanical: 'construction-preflight', profile: 'evaluator' }],
+    edges: [],
+  };
+  assert.match(skillWrap(mechanicalOnly), /改用内置 `workflow` 工具执行编译产物/,
+    '纯机械工作流仍可使用无模型调用的轻量回退');
 });
 
 test('S2 生成器：内置模板产物四件套齐全', () => {

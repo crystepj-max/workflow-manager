@@ -14,6 +14,7 @@ function call(command, input) {
 test('R10 route issuer creates per-node opaque routes shared with attribution', () => {
   const result = call('createRoutes', {
     logical_run_id: 'logical-r10', work_root: '/tmp/wfm-workspaces', isolation_guarantee: 'enforced',
+    model_overrides: { work: { provider: 'p2', model: 'm2' }, $default: { provider: 'pd', model: 'md' } },
     dsl: { nodes: [
       { id: 'work', profile: 'dev', model: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } },
       { id: 'fan:node', profile: 'researcher', model: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } },
@@ -30,6 +31,16 @@ test('R10 route issuer creates per-node opaque routes shared with attribution', 
   assert.equal(result.tokens.attribution.work, result.tokens.nodes.work)
   assert.equal(result.routes.find((route) => route.nodeId === 'work').attributionFolderId, 'route-' + result.tokens.nodes.work.slice(0, 24) + '-attribution')
   assert.equal(result.routes.find((route) => route.nodeId === 'fan:node').nodeId, 'fan:node')
+  assert.deepEqual(
+    { provider: result.routes.find((route) => route.nodeId === 'work').provider, model: result.routes.find((route) => route.nodeId === 'work').model },
+    { provider: 'p2', model: 'm2' },
+    '显式节点模型覆盖仍由宿主解析到隔离路由',
+  )
+  assert.deepEqual(
+    { provider: result.routes.find((route) => route.nodeId === 'fan:node').provider, model: result.routes.find((route) => route.nodeId === 'fan:node').model },
+    { provider: 'pd', model: 'md' },
+    '$default 覆盖未显式指定节点的实际 Provider/Model',
+  )
 })
 
 test('R10 route issuer fails closed for missing isolation and duplicate node ids', () => {

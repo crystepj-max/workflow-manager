@@ -149,8 +149,9 @@ async function issueRun(runId, dsl, modelOverrides, workspace, isolation, homeDi
       startWorker(payload, options) { return hostCall('spawnProviderWorker', payload, options) },
     }
     return activeRoutes.registerRun(runId, issued, runtime)
-  } catch {
-    throw new Error('隔离节点路由签发失败')
+  } catch (error) {
+    const detail = safeDiagnostic(error && error.message ? error.message : error)
+    throw new Error('隔离节点路由签发失败：' + detail)
   }
 }
 

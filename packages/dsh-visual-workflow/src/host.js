@@ -1632,7 +1632,7 @@ return {
     // 成功且段被中止 → 从检查点注入已核验引用自动恢复（返回恢复段结果）。非取消段
     // （无中止能力/竞速）只入档已核验引用，本段不再恢复。
     async function runBaselineGate(env) {
-      const { logicalRec, engineRunId, result, execScript, meta, scriptArgs, parent, segCtl, taskId, ws, wsIdentity, engine: gateEngine } = env
+      const { logicalRec, engineRunId, result, dsl, execScript, meta, scriptArgs, parent, segCtl, taskId, ws, wsIdentity, engine: gateEngine } = env
       const ebc = ebRuns.get(String(engineRunId || ''))
       if (!ebc || !ebc.pending.size) return null
       const versions = [...ebc.pending.keys()].sort((a, b) => a - b)
@@ -1665,7 +1665,14 @@ return {
       const resumeReq = { script: execScript, meta: meta, args: resumeArgs, parent: parent }
       if (resumeCtl) resumeReq.signal = resumeCtl.signal
       if (ws && ws.source_path) { resumeReq.cwd = runArtifactCwd(ws); resumeReq.workspaceRoot = ws.source_path }
-      const resumed = gateEngine.start(resumeReq)
+      let resumed
+      try {
+        const frozenDsl = logicalRec.snapshots && logicalRec.snapshots[0]
+          && logicalRec.snapshots[0].workflow && logicalRec.snapshots[0].workflow.dsl
+        resumed = await startIsolatedSegment(gateEngine, resumeReq, wsIdentity, frozenDsl || dsl, scriptArgs.model_overrides, ws)
+      } catch (e) {
+        return { handled: true, blocked: true, version: version, code: 'EVALUATION_BASELINE_RESUME_START_FAILED', message: '评价基线恢复段安全启动失败：' + errMsg(e) }
+      }
       const resumedId = String(resumed.id)
       const resumedRec = ensureRun(resumedId)
       resumedRec.taskId = taskId
@@ -2457,6 +2464,23 @@ return {
       }
       return isolationProbePromise
     }
+    // 每个执行段都使用新签发的节点路由。上一段结束时 startWorkflow 会撤销其令牌；
+    // 检查点恢复和集成门禁重跑不能沿用旧 scriptArgs.routes。
+    async function startIsolatedSegment(gateEngine, request, logicalRunId, dsl, modelOverrides, ws) {
+      const routeCore = await loadDist('route.cjs')
+      const routes = await routeCore.issueRun(
+        logicalRunId,
+        dsl,
+        modelOverrides,
+        ws,
+        ws ? await probeIsolationGuarantee() : null,
+        homeDirs,
+        niHostCall,
+      )
+      request.args = Object.assign({}, request.args || {}, { routes: routes, requireIsolatedNodes: true })
+      request.subagentProvider = NODE_ISOLATED_PROVIDER
+      return routeCore.startWorkflow(gateEngine, request, logicalRunId)
+    }
 
     // ── 工作区隔离：核心实现 = scripts/workspace-isolation.mjs，经包装脚本子进程调用 ──
     async function wsHostCall(cmd, input, opts) {
@@ -2967,7 +2991,7 @@ return {
             const rerunReq = { script: execScript, meta, args: rerunArgs, parent }
             if (segCtl) rerunReq.signal = segCtl.signal
             if (ws.source_path) { rerunReq.cwd = ws.source_path; rerunReq.workspaceRoot = ws.source_path }
-            const rerun = gateEngine.start(rerunReq)
+            const rerun = await startIsolatedSegment(gateEngine, rerunReq, wsIdentity, dsl, scriptArgs.model_overrides, ws)
             const rerunRunId = String(rerun.id)
             const rerunRec = ensureRun(rerunRunId)
             rerunRec.taskId = taskId
@@ -3663,7 +3687,7 @@ return {
         let baselineGateBlocked = null
         if (logicalRec && !pauseAction) {
           for (let gateIter = 0; gateIter < EB_GATE_MAX_RESUMES; gateIter++) {
-            const g = await runBaselineGate({ logicalRec, engineRunId: currentRunId, result, execScript, meta: c.meta, scriptArgs, parent, segCtl, taskId: logicalTaskId, ws, wsIdentity, engine: engineNow })
+            const g = await runBaselineGate({ logicalRec, engineRunId: currentRunId, result, dsl: v.sanitized, execScript, meta: c.meta, scriptArgs, parent, segCtl, taskId: logicalTaskId, ws, wsIdentity, engine: engineNow })
             if (!g) break
             if (g.blocked) { baselineGateBlocked = g; break }
             if (!g.resumed) break

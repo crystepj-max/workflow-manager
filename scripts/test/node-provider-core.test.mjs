@@ -117,7 +117,19 @@ test('node-provider core refuses incomplete route tables instead of allowing dir
       async () => ({ workspaces: '/tmp/workspaces' }),
       async () => ({ ok: true, tokens: { nodes: {}, attribution: {} }, routes: [], expiresAt: Date.now() + 10_000 }),
     ),
-    /隔离节点路由签发失败/,
+    /隔离节点路由签发失败：route issue incomplete/,
+  )
+  await assert.rejects(
+    issueRun(
+      'run-secret', dsl, undefined, { workspace_id: 'ws' }, { guarantee: 'enforced' },
+      async () => ({ workspaces: '/tmp/workspaces' }),
+      async () => { throw new Error('provider token=secret-' + tokenA) },
+    ),
+    (error) => {
+      assert.match(error.message, /provider token=\[redacted\]/)
+      assert.equal(error.message.includes(tokenA), false, '隔离错误保留原因但必须隐藏令牌')
+      return true
+    },
   )
 })
 

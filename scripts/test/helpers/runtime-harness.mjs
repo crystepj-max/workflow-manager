@@ -71,8 +71,23 @@ export async function runGeneratedScript(script, { args = {}, agent, mechanical 
       return null
     }
   }))
+  const runArgs = Object.assign({}, args)
+  if (!Object.prototype.hasOwnProperty.call(runArgs, 'routes')) {
+    // 排练厅模拟宿主已签发的路由；专门验证缺失路由的用例显式传空表。
+    const match = /^const NODES = (.+)$/m.exec(String(script || ''))
+    let nodes = []
+    try { nodes = match ? JSON.parse(match[1]) : [] } catch { nodes = [] }
+    const nodeRoutes = Object.create(null)
+    const attributionRoutes = Object.create(null)
+    for (const node of nodes) {
+      if (!node || !node.id || node.mechanical) continue
+      nodeRoutes[node.id] = 'test-route-' + node.id
+      attributionRoutes[node.id] = 'test-attribution-' + node.id
+    }
+    runArgs.routes = { nodes: nodeRoutes, attribution: attributionRoutes }
+  }
   const fn = new Function('args', 'agent', 'mechanical', 'parallel', 'pipeline', 'log', 'phase',
     'return (async () => {\n' + script + '\n})()')
-  const result = await fn(args, agent || noAgent, wrappedMechanical, parallel, pipeline, (m) => logs.push(String(m)), (t) => phases.push(String(t)))
+  const result = await fn(runArgs, agent || noAgent, wrappedMechanical, parallel, pipeline, (m) => logs.push(String(m)), (t) => phases.push(String(t)))
   return { result, logs, phases, agentCalls: agent ? agent.calls : [], mechanicalCalls }
 }

@@ -217,7 +217,7 @@ test('W1 主场景：目标前进 → 自动锁/同步/新 Revision/重跑 → �
   after(() => { try { rmSync(recordsHostDir, { recursive: true, force: true }) } catch { /* ignore */ } })
   const realWs = makeRealWsHost({ repo })
   const runIdCapture = []
-  const { tool, fs } = env({
+  const { tool, fs, engine } = env({
     wsHost: realWs,
     recordsHostDir,
     engineCapture: (spec, n) => runIdCapture.push({ n, entry: spec.args.entry, seedKeys: Object.keys(spec.args.results || {}) }),
@@ -262,6 +262,13 @@ test('W1 主场景：目标前进 → 自动锁/同步/新 Revision/重跑 → �
   assert.equal(out.value.decision_id, 'hd-2', '返回的是重跑段的人工等待现场')
   assert.equal(out.runId, 'run-2')
   assert.equal(out.agentsStarted, 4)
+  assert.equal(engine.starts.length, 2)
+  assert.equal(engine.starts[0].subagentProvider, 'vwf-node-isolated')
+  assert.equal(engine.starts[1].subagentProvider, 'vwf-node-isolated', '集成门禁重跑仍使用隔离 Provider')
+  assert.equal(engine.starts[0].args.requireIsolatedNodes, true)
+  assert.equal(engine.starts[1].args.requireIsolatedNodes, true)
+  assert.notEqual(engine.starts[0].args.routes.nodes.review, engine.starts[1].args.routes.nodes.review,
+    '集成门禁重跑必须获得新路由，不能复用已撤销令牌')
   const gate = out.integration_gate
   assert.equal(gate.decision, 'pass')
   assert.equal(gate.syncs.length, 1, '目标前进恰好触发一次同步')
