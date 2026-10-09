@@ -80,11 +80,21 @@ test('node-provider core clears run routes when the workflow engine rejects sync
   assert.throws(() => registry.resolve('vwf-node-isolated:' + tokenA, 'deepseek-v4-pro'), /isolated node route rejected/)
 })
 
-test('node-provider core only issues routes for an enforced workspace and reuses the exact model binding', async () => {
+test('node-provider core refuses non-mechanical nodes when workspace isolation is unavailable', async () => {
   let called = false
   const dsl = { nodes: [{ id: 'worker', profile: 'researcher' }] }
-  assert.equal(await issueRun('run-1', dsl, undefined, null, null, async () => ({}), async () => { called = true }), null)
+  await assert.rejects(
+    issueRun('run-1', dsl, undefined, null, null, async () => ({}), async () => { called = true }),
+    /隔离.*不可用|workspace.*isolation/i,
+  )
+  await assert.rejects(
+    issueRun('run-1', dsl, undefined, { workspace_id: 'ws' }, { guarantee: 'unavailable' }, async () => ({}), async () => { called = true }),
+    /隔离.*不可用|workspace.*isolation/i,
+  )
   assert.equal(called, false)
+
+  assert.equal(await issueRun('run-mechanical', { nodes: [{ id: 'gate', mechanical: 'preflight' }] }, undefined, null, null, async () => ({}), async () => { called = true }), null)
+  assert.equal(called, false, '机械节点不需要模型路由')
 
   const tokens = await issueRun(
     'run-1', dsl, undefined, { workspace_id: 'ws' }, { guarantee: 'enforced' },
@@ -97,6 +107,18 @@ test('node-provider core only issues routes for an enforced workspace and reuses
   assert.equal(called, true)
   assert.equal(tokens.nodes.worker, tokenA)
   clearRun('run-1')
+})
+
+test('node-provider core refuses incomplete route tables instead of allowing direct-provider fallback', async () => {
+  const dsl = { nodes: [{ id: 'worker', profile: 'researcher' }] }
+  await assert.rejects(
+    issueRun(
+      'run-incomplete', dsl, undefined, { workspace_id: 'ws' }, { guarantee: 'enforced' },
+      async () => ({ workspaces: '/tmp/workspaces' }),
+      async () => ({ ok: true, tokens: { nodes: {}, attribution: {} }, routes: [], expiresAt: Date.now() + 10_000 }),
+    ),
+    /隔离节点路由签发失败/,
+  )
 })
 
 test('node-provider core starts a configured isolated worker without forwarding the route token', async () => {

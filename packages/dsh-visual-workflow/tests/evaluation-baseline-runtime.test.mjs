@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
 import { loadHost } from './helpers/load-host.mjs'
-import { REPO, DSH_HOME, makeFs, makeSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
+import { REPO, DSH_HOME, makeFs, makeIsolatedSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
 
 const require = createRequire(import.meta.url)
 
@@ -86,7 +86,7 @@ function env({ template = OPTIMIZE_LIKE, workspaceSource = null, engine = null, 
     if (cmd === 'context') return { ok: true, workspace: null, events: [] }
     return { ok: true }
   }
-  const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', wsHost, spawnHandler: ebSpawnHandler })
+  const sub = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT', wsHost, spawnHandler: ebSpawnHandler })
   const { handlers, definedTools, events, ctx } = loadHost({
     fs, subprocess: sub, sandboxPolicy,
     agents: { requireInitiator: () => ({}), currentInitiator: () => (execCwd ? { session: { header: { cwd: execCwd } } } : null) },

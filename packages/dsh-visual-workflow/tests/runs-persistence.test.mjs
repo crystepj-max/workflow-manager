@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 import { loadHost } from './helpers/load-host.mjs'
-import { REPO, DSH_HOME, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
+import { REPO, DSH_HOME, makeFs, makeIsolatedSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 import { compileBlueprint } from '../../../scripts/generate.mjs'
 import { runGeneratedScript, makeAgentScript } from '../../../scripts/test/helpers/runtime-harness.mjs'
 import { generateBaseline } from '../../../scripts/test/helpers/baseline-harness.mjs'
@@ -57,7 +57,7 @@ function env({ failPattern, extra = {}, seed = {} } = {}) {
   Object.assign(base, seed)
   const fs = makeFs(base)
   const compileScript = REAL_GENERATED_SCRIPT
-  const sub = makeSubprocess({ failPattern, fs, compileScript })
+  const sub = makeIsolatedSubprocess({ failPattern, fs, compileScript })
   const { handlers, definedTools, events, ctx } = loadHost({ fs, subprocess: sub, sandboxPolicy, ...extra })
   return { handlers, definedTools, events, ctx, fs, sub }
 }
@@ -166,7 +166,7 @@ test('#40 AC1：重启后按原 runId 仍可查看终态/阶段/子代理表/日
   // 实例 B：同一磁盘（同一假 fs）重新加载插件 = DSH 进程重启
   const engB = makeEngine('rb-')
   const b = loadHost({
-    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    fs: a.fs, subprocess: makeIsolatedSubprocess({ fs: a.fs }), sandboxPolicy,
     workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
   })
   let s = null
@@ -223,7 +223,7 @@ test('#118 刷新后同一 taskId 仍能读到 WAITING_HUMAN 决策卡', async (
 
   const engB = makeEngine('rb-')
   const b = loadHost({
-    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    fs: a.fs, subprocess: makeIsolatedSubprocess({ fs: a.fs }), sandboxPolicy,
     workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
   })
   let s = null
@@ -249,7 +249,7 @@ test('#40：重启后 AWAITING_HUMAN 门禁继续保持同 taskId 互斥；entry
 
   const engB = makeEngine('rb-')
   const b = loadHost({
-    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    fs: a.fs, subprocess: makeIsolatedSubprocess({ fs: a.fs }), sandboxPolicy,
     workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
   })
   await until(async () => (await call(b.handlers, 'vwf.state', { runId: 'run-1' })).found, 'B 回载 run-1')
@@ -505,7 +505,7 @@ test('#120 重启后 WAITING_HUMAN 仍占用，Package 可读取，decision_id �
 
   const engB = makeEngine('rb-')
   const b = loadHost({
-    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    fs: a.fs, subprocess: makeIsolatedSubprocess({ fs: a.fs }), sandboxPolicy,
     workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
   })
   let s = null
@@ -552,7 +552,7 @@ test('#120 刷新后 decision_id 续跑从落盘带回 blocked_edge 与 results'
 
   const engB = makeEngine('rb-')
   const b = loadHost({
-    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    fs: a.fs, subprocess: makeIsolatedSubprocess({ fs: a.fs }), sandboxPolicy,
     workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
   })
   await until(async () => {
@@ -603,7 +603,7 @@ test('#122 刷新后 decision_id 与 Package 仍在；业务 Result 续跑同一
 
   const engB = makeEngine('rb-')
   const b = loadHost({
-    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    fs: a.fs, subprocess: makeIsolatedSubprocess({ fs: a.fs }), sandboxPolicy,
     workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
   })
   let s = null
@@ -622,7 +622,7 @@ test('#122 刷新后 decision_id 与 Package 仍在；业务 Result 续跑同一
   assert.equal(passed.user_choice, 'SHIP')
   assert.equal(passed.results.work.status, 'confirm')
   const resumed = await runGeneratedScript(script, {
-    args: passed,
+    args: { ...passed, routes: { nodes: { work: 'test-work-route', finish: 'test-finish-route' }, attribution: { work: 'test-work-route', finish: 'test-finish-route' } } },
     agent: makeAgentScript({ 收口: { done: true } }),
   })
   assert.equal(resumed.result.status, 'DONE')
@@ -665,7 +665,7 @@ test('#119 迟到 workflow/end 不得盖掉 WAITING_HUMAN；空 results 续跑�
 
   const engB = makeEngine('rb-')
   const b = loadHost({
-    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    fs: a.fs, subprocess: makeIsolatedSubprocess({ fs: a.fs }), sandboxPolicy,
     workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
   })
   await until(async () => (await call(b.handlers, 'vwf.state', { runId: 'run-1' })).found, 'B 回载')
@@ -709,7 +709,7 @@ test('#119 迟到 completed 落盘的 HD 仍占互斥，禁止无 decision_id �
 
   const engB = makeEngine('rb-')
   const b = loadHost({
-    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    fs: a.fs, subprocess: makeIsolatedSubprocess({ fs: a.fs }), sandboxPolicy,
     workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
   })
   await until(async () => (await call(b.handlers, 'vwf.state', { runId: 'run-1' })).found, 'B 回载 completed HD')
@@ -762,7 +762,7 @@ test('#119 冻结 args 时仍回填 results（DSH tools deepFreeze）', async ()
 
   const engB = makeEngine('rb-')
   const b = loadHost({
-    fs: a.fs, subprocess: makeSubprocess({ fs: a.fs }), sandboxPolicy,
+    fs: a.fs, subprocess: makeIsolatedSubprocess({ fs: a.fs }), sandboxPolicy,
     workflowEngine: engB, agents: { requireInitiator: () => ({}), currentInitiator: () => null },
   })
   await until(async () => (await call(b.handlers, 'vwf.state', { runId: 'run-1' })).found, 'B 回载')
@@ -783,4 +783,3 @@ test('#119 冻结 args 时仍回填 results（DSH tools deepFreeze）', async ()
   settleRun(engB, b.events, 'rb-1', 'DONE', { decision_id: 'hd-frozen:work:0', user_choice: 'USER_ACCEPTED', results: passed.results })
   await p2
 })
-

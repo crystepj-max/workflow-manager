@@ -115,9 +115,11 @@ const activeRoutes = createRouteRegistry()
 let nextRunId = 0
 
 async function issueRun(runId, dsl, modelOverrides, workspace, isolation, homeDirs, hostCall) {
-  if (!workspace || !isolation || isolation.guarantee !== 'enforced') return null
   const nodes = dsl && Array.isArray(dsl.nodes) ? dsl.nodes.filter((node) => node && !node.mechanical) : []
   if (!nodes.length) return null
+  if (!workspace || !isolation || isolation.guarantee !== 'enforced') {
+    throw new Error('隔离节点路由签发失败：workspace isolation 不可用')
+  }
   try {
     const dirs = await homeDirs()
     if (!dirs || typeof dirs.workspaces !== 'string' || !dirs.workspaces.startsWith('/')) throw new Error('workspace root unavailable')
@@ -125,6 +127,12 @@ async function issueRun(runId, dsl, modelOverrides, workspace, isolation, homeDi
       logical_run_id: runId, work_root: dirs.workspaces, isolation_guarantee: 'enforced', dsl, model_overrides: modelOverrides,
     })
     if (!issued || issued.ok !== true) throw new Error('route issue failed')
+    const nodeTokens = issued.tokens && issued.tokens.nodes
+    const attributionTokens = issued.tokens && issued.tokens.attribution
+    if (!nodeTokens || !attributionTokens || nodes.some((node) => (
+      typeof nodeTokens[node.id] !== 'string' || !nodeTokens[node.id]
+      || typeof attributionTokens[node.id] !== 'string' || !attributionTokens[node.id]
+    ))) throw new Error('route issue incomplete')
     const runtime = {
       async prepareNode(route) {
         const result = await hostCall('prepareNode', {

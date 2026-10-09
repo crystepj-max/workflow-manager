@@ -3403,13 +3403,22 @@ return {
         }
         const ws = prepared.workspace || null
         if (ws) log('workspace allocated: ' + ws.workspace_id + ' at ' + ws.workspace_path)
-        else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为')
+        else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失）')
         const isolationProbe = ws ? await probeIsolationGuarantee() : null
         if (isolationProbe) log('node isolation probe: guarantee=' + isolationProbe.guarantee + (isolationProbe.backend ? (' backend=' + isolationProbe.backend) : ''))
         const nodeProviderCore = await loadDist('route.cjs')
-        const nodeRouteTokens = await nodeProviderCore.issueRun(
-          wsIdentity, v.sanitized, modelOverridesForExec, ws, isolationProbe, homeDirs, niHostCall,
-        )
+        let nodeRouteTokens
+        try {
+          nodeRouteTokens = await nodeProviderCore.issueRun(
+            wsIdentity, v.sanitized, modelOverridesForExec, ws, isolationProbe, homeDirs, niHostCall,
+          )
+        } catch (e) {
+          if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
+          logicalSetState(logicalRec, 'FAILED', logicalReason('NODE_ISOLATION_UNAVAILABLE', errMsg(e)))
+          requestLogicalPersist(logicalRec.logical_run_id)
+          log('隔离节点路由不可用（fail closed，拒绝启动）：' + errMsg(e))
+          return '错误：无法为模型节点建立独立运行环境，工作流拒绝启动：' + errMsg(e)
+        }
 
         // LOC-028：人工决策续跑必须由宿主签发 decision_ref（含候选绑定），禁止信任模型自报
         let hostDecisionRef = null
@@ -3479,6 +3488,7 @@ return {
           // 生效——新启透传会让脚本用覆盖模型执行而 Rev1 快照仍记蓝图绑定，归因失真）
           model_overrides: modelOverridesForExec,
           routes: nodeRouteTokens,
+          requireIsolatedNodes: true,
           decision_ref: hostDecisionRef || undefined,
           consumed_decisions: logicalRec ? (logicalRec.consumed_decisions || {}) : undefined,
         }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined, isolationProbe) : {})

@@ -1,3 +1,5 @@
+import { createProviderRoutes } from '../../../../scripts/node-provider-routes.mjs'
+
 // 共享假服务（候选一 T-IMP-12：host.test.mjs 与统一编译器验收套件共用）
 // 与宿主 fs/subprocess/sandboxPolicy 服务同形；makeSubprocess 支持
 // compileScript 分支（模拟 generate.mjs compile 子命令输出）。
@@ -128,6 +130,36 @@ export function makeSubprocess({ failPattern = null, fs = null, compileScript = 
     _specs: specs,
   }
   return sub
+}
+
+// 给会启动模型节点的宿主测试提供真实形态的隔离路由服务。
+// 单测不启动模型 worker，但 wf_run 必须在 engine.start 前证明隔离与路由已建立。
+export function makeIsolatedSubprocess({ fs, workspace = {}, wsHost = null, nodeIsolationHost = null, ...options } = {}) {
+  const baseWorkspace = {
+    workspace_id: 'test-workspace', workspace_path: '/tmp/test-workspace',
+    source_path: '/tmp/test-source', records_path: '/tmp/test-workspace/records',
+    work_branch: 'codex/test', source_revision: 'test', workspace_mode: 'ISOLATED_READ',
+    ...workspace,
+  }
+  const isolatedWsHost = wsHost || ((command, input) => {
+    if (command === 'allocate') {
+      const suffix = String(input.logical_run_id || 'run').replace(/[^a-zA-Z0-9_-]/g, '-')
+      return { ok: true, workspace: { ...baseWorkspace, workspace_id: 'test-' + suffix } }
+    }
+    if (command === 'context') return { ok: true, workspace: null, events: [] }
+    if (command === 'captureCandidate') return { ok: true, candidate: null }
+    return { ok: true }
+  })
+  const isolatedNodeHost = nodeIsolationHost || ((command, input) => {
+    if (command === 'probe') return { ok: true, guarantee: 'enforced', backend: 'test' }
+    if (command === 'createProviderRoutes') return createProviderRoutes(input)
+    return { ok: false, error: 'unexpected test command' }
+  })
+  if (fs && fs._files) {
+    fs._files.set(REPO + '/scripts/workspace-isolation-host.mjs', '// isolated test wrapper')
+    fs._files.set(REPO + '/scripts/node-isolation-host.mjs', '// isolated test wrapper')
+  }
+  return makeSubprocess({ ...options, fs, wsHost: isolatedWsHost, nodeIsolationHost: isolatedNodeHost })
 }
 
 export const sandboxPolicy = { workspaceRoot: REPO, resolve: () => ({ mode: 'danger-full-access', workspaceRoot: REPO }) }

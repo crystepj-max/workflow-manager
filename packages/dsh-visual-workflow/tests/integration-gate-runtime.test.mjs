@@ -15,7 +15,7 @@ import path, { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadHost } from './helpers/load-host.mjs'
-import { REPO, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
+import { REPO, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeIsolatedSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 import { recordsCommit, recordsList, recordsGet, recordsAssertIntegration, recordsAssertCandidates } from '../../../scripts/records-host.mjs'
 import {
   createRegistry, allocateWorkspace, getRunWorkspace, setLifecycle,
@@ -190,7 +190,7 @@ function env({ value, wsHost, recordsHostDir, engineCapture = null, recordsWrap 
     : recordsWrap
       ? (cmd, input) => recordsWrap(cmd, input, realRecordsHost(recordsHostDir)(cmd, input))
       : realRecordsHost(recordsHostDir)
-  const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost: recordSvc, wsHost: wsHost.wsHost })
+  const sub = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost: recordSvc, wsHost: wsHost.wsHost })
   const engine = {
     starts: [],
     start(spec) {
@@ -594,7 +594,7 @@ test('W9 探针恢复不误伤：PROBE_FAILED 的 BLOCKED 不触发闸门拒绝�
     },
   }
   let engineCalls = 0
-  const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost: realRecordsHost(recordsHostDir), wsHost: realWs.wsHost })
+  const sub = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost: realRecordsHost(recordsHostDir), wsHost: realWs.wsHost })
   const { definedTools } = loadHost({
     fs, subprocess: sub, sandboxPolicy, llm,
     workflowEngine: { start() { engineCalls++; return { id: 'run-' + engineCalls, result: Promise.resolve({ stopReason: 'completed', value: { status: 'DONE', user_choice: 'USER_ACCEPTED', results: {}, history: [] }, agentsStarted: 0 }) } } },

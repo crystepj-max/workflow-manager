@@ -52,6 +52,29 @@ test('R10：生成的节点与 fanout 模型调用携带宿主签发的路由令
   assert.equal(fanCalls[0].model, 'deepseek-v4-pro');
 });
 
+test('R10：宿主要求隔离时，缺少路由令牌不能退回蓝图模型直连', async () => {
+  const blueprint = {
+    id: 'r10-required-route', displayName: 'R10 必需路由', entry: 'work',
+    control: { maxRounds: 1 },
+    nodes: [{
+      id: 'work', profile: 'dev', label: '工作节点', goal: '完成任务',
+      output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false }, successCondition: '$.ok == true' },
+    }],
+    edges: [
+      { from: 'work', to: '$end', on: 'success' },
+      { from: 'work', to: '$end', on: 'failure' },
+    ],
+    bindings: { models: { work: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } } },
+  };
+  const compiled = compileBlueprint(blueprint);
+  const calls = [];
+  await assert.rejects(runGeneratedScript(compiled.script, {
+    args: { taskId: 'r10-required-route', requireIsolatedNodes: true },
+    agent: async (_prompt, opts) => { calls.push(opts); return { ok: true }; },
+  }), /缺少宿主签发的隔离路由/);
+  assert.deepEqual(calls, [], '路由令牌缺失时不得调用 agent');
+});
+
 test('S2 生成器：内置模板产物四件套齐全', () => {
   const { files, report } = generateAll(tplDir);
   const ids = report.map((r) => r.id).sort();

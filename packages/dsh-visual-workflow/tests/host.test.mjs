@@ -1438,8 +1438,29 @@ function settleRun(eng, events, id, scriptStatus, extra = {}) {
 }
 
 function engineEnv(eng, options = {}) {
-  const { extra = {}, ...hostOptions } = options
-  return env({ ...hostOptions, extra: { ...extra, workflowEngine: eng, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
+  const { extra = {}, wsHost: requestedWsHost, nodeIsolationHost: requestedNodeIsolationHost, ...hostOptions } = options
+  const workspace = {
+    workspace_id: 'test-workspace', workspace_path: '/tmp/test-workspace',
+    source_path: '/tmp/test-source', records_path: '/tmp/test-workspace/records',
+    work_branch: 'codex/test', source_revision: 'test', workspace_mode: 'ISOLATED_READ',
+  }
+  const wsHost = (command, input) => command === 'allocate'
+    ? { ok: true, workspace: { ...workspace, workspace_id: 'test-' + String(input.logical_run_id || 'run').replace(/[^a-zA-Z0-9_-]/g, '-') } }
+    : { ok: true }
+  const nodeIsolationHost = (command, input) => {
+    if (command === 'probe') return { ok: true, guarantee: 'enforced', backend: 'test' }
+    if (command === 'createProviderRoutes') return createProviderRoutes(input)
+    return { ok: false, error: 'unexpected test command' }
+  }
+  const host = env({
+    ...hostOptions,
+    wsHost: requestedWsHost === undefined ? wsHost : requestedWsHost,
+    nodeIsolationHost: requestedNodeIsolationHost === undefined ? nodeIsolationHost : requestedNodeIsolationHost,
+    extra: { ...extra, workflowEngine: eng, agents: { requireInitiator: () => ({}), currentInitiator: () => null } },
+  })
+  if (requestedWsHost === undefined) host.fs._files.set(REPO + '/scripts/workspace-isolation-host.mjs', '// test wrapper')
+  if (requestedNodeIsolationHost === undefined) host.fs._files.set(REPO + '/scripts/node-isolation-host.mjs', '// test wrapper')
+  return host
 }
 
 // wf_run.execute 内部有校验/编译等多个 await，引擎 start 非同步可达：轮询等待
@@ -1475,6 +1496,15 @@ test('wf_run selects the node-isolation provider for every workflow model call',
   assert.equal(eng.starts[0].subagentProvider, 'vwf-node-isolated', '所有节点模型调用必须经过节点隔离 provider')
   settleRun(eng, events, 'run-1', 'DONE')
   await resultPromise
+})
+
+test('wf_run refuses to start model nodes when the workspace-isolation integration is missing', async () => {
+  const eng = makeEngine()
+  const { definedTools } = env({ extra: { workflowEngine: eng, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
+  const wfRun = definedTools.find((tool) => tool.name === 'wf_run')
+  const result = await wfRun.execute({ templateId: 'legacy-baseline', taskId: 'missing-isolation-host' })
+  assert.equal(eng.starts.length, 0, '隔离未建立时不得启动工作流引擎')
+  assert.match(result, /拒绝启动.*workspace isolation 不可用/)
 })
 
 test('R10 provider 拒绝未登记的隔离路由，且不启动 child 进程', async () => {
@@ -1513,6 +1543,7 @@ test('R10 wf_run 注入逐节点令牌，并在运行结果结算后撤销路由
   const wfRun = host.definedTools.find((tool) => tool.name === 'wf_run')
   const resultPromise = wfRun.execute({ templateId: 'legacy-baseline', taskId: 'r10-route-run' })
   await until(() => eng.starts.length === 1, 'R10 含路由的工作流启动')
+  assert.equal(eng.starts[0].args.requireIsolatedNodes, true, 'VWF Host 必须要求生成脚本强制使用隔离路由')
   const runRoutes = eng.starts[0].args.routes
   assert.ok(runRoutes && Object.keys(runRoutes.nodes).length > 0, 'Host 应把签发令牌交给生成脚本')
   assert.equal(Object.values(runRoutes.nodes).every((token) => /^[a-f0-9]{64}$/.test(token)), true)

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 import { loadHost } from './helpers/load-host.mjs'
-import { REPO, DSH_HOME, makeFs, makeSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
+import { REPO, DSH_HOME, makeFs, makeIsolatedSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const LOGICAL_DIR = DSH_HOME + '/visual-workflow/logical-runs'
@@ -102,7 +102,7 @@ function env({ seed = {}, extra = {}, subprocess = null } = {}) {
   }
   Object.assign(base, seed)
   const fs = makeFs(base)
-  const sub = subprocess || makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
+  const sub = subprocess || makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
   const { handlers, definedTools, events } = loadHost({ fs, subprocess: sub, sandboxPolicy, ...extra })
   return { handlers, definedTools, events, fs, sub }
 }
