@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { dirname, join } from 'node:path'
 import net from 'node:net'
 import { fileURLToPath } from 'node:url'
+import { tmpdir } from 'node:os'
 import {
   ISOLATION_GUARANTEE, NODE_ROLE_CAPABILITIES,
   probeIsolationCapability, buildProbeProfile, resolveNodeCapabilities, prepareNodeContext,
@@ -207,7 +208,7 @@ test('node-isolation-host：prepareNode + publishProbe + canIssueProof', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('FIX-235 profile：节点执行使用默认拒绝与受限读取/写入根', { skip: process.platform !== 'darwin' }, () => {
-  const profileRoot = mkdtempSync(join('/private/tmp', 'ni-profile-'))
+  const profileRoot = mkdtempSync(join(tmpdir(), 'ni-profile-'))
   cleanups.push(() => { try { rmSync(profileRoot, { recursive: true, force: true }) } catch { /* ignore */ } })
   const profile = buildProbeProfile(profileRoot)
   assert.ok(profile.includes('(version 1)'), '含版本声明')
@@ -248,7 +249,7 @@ test('LOC-041 Seatbelt 执行策略：工具与 shell 只能写授权目录', { 
   const { buildNodeExecutionProfile } = await import('../node-isolation.mjs')
   assert.equal(typeof buildNodeExecutionProfile, 'function', '必须有真实节点执行用的 Seatbelt 策略生成器')
 
-  const root = mkdtempSync(join('/private/tmp', 'ni-seatbelt-execution-'))
+  const root = mkdtempSync(join(tmpdir(), 'ni-seatbelt-execution-'))
   cleanups.push(() => { try { rmSync(root, { recursive: true, force: true }) } catch { /* ignore */ } })
   const source = join(root, 'source')
   mkdirSync(source)
@@ -292,7 +293,7 @@ test('LOC-041 Seatbelt 执行策略：工具与 shell 只能写授权目录', { 
     'review context 的写入目录清单不能把只读候选加入白名单',
   )
   const sourceBefore = readFileSync(sourceFile)
-  const outsideFile = join('/private/tmp', 'ni-seatbelt-outside-' + Date.now() + '.txt')
+  const outsideFile = join(tmpdir(), 'ni-seatbelt-outside-' + Date.now() + '.txt')
   const runtimeManifest = join(root, 'runtime-package.json')
   const runtimeSibling = join(root, 'runtime-private.txt')
   writeFileSync(outsideFile, 'outside-secret\n')
@@ -364,7 +365,7 @@ test('SDK DSH 启动接缝：Seatbelt 内运行真实入口且不继承父进程
   const { buildSandboxedDshLaunchSpec } = await import('../node-isolation.mjs')
   assert.equal(typeof buildSandboxedDshLaunchSpec, 'function')
 
-  const root = mkdtempSync(join('/private/tmp', 'ni-dsh-launch-'))
+  const root = mkdtempSync(join(tmpdir(), 'ni-dsh-launch-'))
   cleanups.push(() => { try { rmSync(root, { recursive: true, force: true }) } catch { /* ignore */ } })
   const source = join(root, 'source')
   const runtime = join(root, 'runtime')
@@ -525,7 +526,7 @@ test('SDK DSH 启动接缝：SDK SIGTERM 会结束 Seatbelt 内整个 DSH 进程
   const { buildSandboxedDshLaunchSpec } = await import('../node-isolation.mjs')
   assert.equal(typeof buildSandboxedDshLaunchSpec, 'function')
 
-  const root = mkdtempSync(join('/private/tmp', 'ni-dsh-signal-'))
+  const root = mkdtempSync(join(tmpdir(), 'ni-dsh-signal-'))
   cleanups.push(() => { try { rmSync(root, { recursive: true, force: true }) } catch { /* ignore */ } })
   const runtime = join(root, 'runtime')
   mkdirSync(runtime)
@@ -586,7 +587,7 @@ test('SDK DSH 启动接缝：SDK SIGTERM 会结束 Seatbelt 内整个 DSH 进程
 
 
 test('node-isolation-host：为已准备节点 context 生成默认拒绝策略', { skip: process.platform !== 'darwin' }, () => {
-  const root = mkdtempSync(join('/private/tmp', 'ni-host-profile-'))
+  const root = mkdtempSync(join(tmpdir(), 'ni-host-profile-'))
   cleanups.push(() => { try { rmSync(root, { recursive: true, force: true }) } catch { /* ignore */ } })
   const source = join(root, 'source')
   mkdirSync(source)
