@@ -17,16 +17,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 return {
   name: 'visual-workflow-host',
+  inject: ['subagents', 'credentials'],
   apply(ctx) {
     const engine = ctx.get('workflowEngine')
     const agents = ctx.get('agents')
     const sp = ctx.get('sandboxPolicy')
     let fs = ctx.get('fs')
     let subprocess = ctx.get('subprocess')
-    // 服务可能晚于 apply 注入（静态组合包仅等待 webServer/tools/subprocess）：每次入口重取一次
+    let credentials = ctx.get('credentials')
+    // 非必需服务仍可能晚于 apply 注入：每次入口重取一次
     const refreshServices = () => {
       if (fs === undefined) fs = ctx.get('fs')
       if (subprocess === undefined) subprocess = ctx.get('subprocess')
+      if (credentials === undefined) credentials = ctx.get('credentials')
     }
     const log = (m) => console.log('[vwf] ' + m)
     const errMsg = (e) => String((e && e.message) || e)
@@ -43,6 +46,16 @@ return {
     const asNum = (v, d) => (typeof v === 'number' ? v : d)
     const asObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null)
     const asArr = (v, f) => (Array.isArray(v) ? v.filter(f || ((x) => x && typeof x === 'object')) : [])
+    const NODE_ISOLATED_PROVIDER = 'vwf-node-isolated'
+    const subagents = ctx.get('subagents')
+    if (subagents && subagents.registerProvider) {
+      subagents.registerProvider({
+        name: NODE_ISOLATED_PROVIDER,
+        capabilities: { agentOptions: true, outputSchema: true },
+        inheritsParentContext: false,
+        start(request) { return loadDist('route.cjs').then((m) => m.start(request)) },
+      })
+    }
 
     // ── 双模式注册：动态会话 = harness.handle；静态组合包 = webServer 前缀路由 ──
     // 必须用 typeof 探测未声明标识符：静态 IIFE 无 harness 全局，直接读会 ReferenceError。
@@ -1619,7 +1632,7 @@ return {
     // 成功且段被中止 → 从检查点注入已核验引用自动恢复（返回恢复段结果）。非取消段
     // （无中止能力/竞速）只入档已核验引用，本段不再恢复。
     async function runBaselineGate(env) {
-      const { logicalRec, engineRunId, result, execScript, meta, scriptArgs, parent, segCtl, taskId, ws, wsIdentity, engine: gateEngine } = env
+      const { logicalRec, engineRunId, result, dsl, execScript, meta, scriptArgs, parent, segCtl, taskId, ws, wsIdentity, engine: gateEngine } = env
       const ebc = ebRuns.get(String(engineRunId || ''))
       if (!ebc || !ebc.pending.size) return null
       const versions = [...ebc.pending.keys()].sort((a, b) => a - b)
@@ -1652,7 +1665,14 @@ return {
       const resumeReq = { script: execScript, meta: meta, args: resumeArgs, parent: parent }
       if (resumeCtl) resumeReq.signal = resumeCtl.signal
       if (ws && ws.source_path) { resumeReq.cwd = runArtifactCwd(ws); resumeReq.workspaceRoot = ws.source_path }
-      const resumed = gateEngine.start(resumeReq)
+      let resumed
+      try {
+        const frozenDsl = logicalRec.snapshots && logicalRec.snapshots[0]
+          && logicalRec.snapshots[0].workflow && logicalRec.snapshots[0].workflow.dsl
+        resumed = await startIsolatedSegment(gateEngine, resumeReq, wsIdentity, frozenDsl || dsl, scriptArgs.model_overrides, ws)
+      } catch (e) {
+        return { handled: true, blocked: true, version: version, code: 'EVALUATION_BASELINE_RESUME_START_FAILED', message: '评价基线恢复段安全启动失败：' + errMsg(e) }
+      }
       const resumedId = String(resumed.id)
       const resumedRec = ensureRun(resumedId)
       resumedRec.taskId = taskId
@@ -2424,13 +2444,12 @@ return {
 
     // ── LOC-041 节点隔离：核心 = scripts/node-isolation.mjs，经包装脚本子进程调用 ──
     async function niHostCall(cmd, input, opts) {
-      if (!NODE_ISOLATION_HOST || (await readTextIfExists(NODE_ISOLATION_HOST)) === null) return { ok: false, notFound: true, error: 'node-isolation-host.mjs 未找到（LOC-041 集成未部署）' }
-      const r = await runNode([NODE_ISOLATION_HOST, cmd, JSON.stringify(input || {})], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 256 * 1024 })
-      if (!r.ok) return { ok: false, error: 'node isolation host 调用失败：' + r.detail }
-      try {
-        const parsed = JSON.parse(r.stdout)
-        return parsed.ok ? parsed : Object.assign({ ok: false, error: parsed.error || 'node isolation host 业务错误', detail: parsed.detail }, parsed)
-      } catch (e) { return { ok: false, error: 'node isolation host 输出不可解析：' + errMsg(e), raw: r.stdout } }
+      refreshServices()
+      const m = await loadDist('node-isolation-host-client.cjs')
+      return m.createNodeIsolationHostClient({
+        scriptPath: NODE_ISOLATION_HOST, workerPath: DIST + '/node-provider-worker.mjs',
+        readTextIfExists, runNode, subprocess, resolveNode, credentials,
+      })(cmd, input, opts)
     }
     let isolationProbePromise = null
     async function probeIsolationGuarantee() {
@@ -2444,6 +2463,23 @@ return {
         })
       }
       return isolationProbePromise
+    }
+    // 每个执行段都使用新签发的节点路由。上一段结束时 startWorkflow 会撤销其令牌；
+    // 检查点恢复和集成门禁重跑不能沿用旧 scriptArgs.routes。
+    async function startIsolatedSegment(gateEngine, request, logicalRunId, dsl, modelOverrides, ws) {
+      const routeCore = await loadDist('route.cjs')
+      const routes = await routeCore.issueRun(
+        logicalRunId,
+        dsl,
+        modelOverrides,
+        ws,
+        ws ? await probeIsolationGuarantee() : null,
+        homeDirs,
+        niHostCall,
+      )
+      request.args = Object.assign({}, request.args || {}, { routes: routes, requireIsolatedNodes: true })
+      request.subagentProvider = NODE_ISOLATED_PROVIDER
+      return routeCore.startWorkflow(gateEngine, request, logicalRunId)
     }
 
     // ── 工作区隔离：核心实现 = scripts/workspace-isolation.mjs，经包装脚本子进程调用 ──
@@ -2955,7 +2991,7 @@ return {
             const rerunReq = { script: execScript, meta, args: rerunArgs, parent }
             if (segCtl) rerunReq.signal = segCtl.signal
             if (ws.source_path) { rerunReq.cwd = ws.source_path; rerunReq.workspaceRoot = ws.source_path }
-            const rerun = gateEngine.start(rerunReq)
+            const rerun = await startIsolatedSegment(gateEngine, rerunReq, wsIdentity, dsl, scriptArgs.model_overrides, ws)
             const rerunRunId = String(rerun.id)
             const rerunRec = ensureRun(rerunRunId)
             rerunRec.taskId = taskId
@@ -3391,9 +3427,22 @@ return {
         }
         const ws = prepared.workspace || null
         if (ws) log('workspace allocated: ' + ws.workspace_id + ' at ' + ws.workspace_path)
-        else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为')
+        else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失）')
         const isolationProbe = ws ? await probeIsolationGuarantee() : null
         if (isolationProbe) log('node isolation probe: guarantee=' + isolationProbe.guarantee + (isolationProbe.backend ? (' backend=' + isolationProbe.backend) : ''))
+        const nodeProviderCore = await loadDist('route.cjs')
+        let nodeRouteTokens
+        try {
+          nodeRouteTokens = await nodeProviderCore.issueRun(
+            wsIdentity, v.sanitized, modelOverridesForExec, ws, isolationProbe, homeDirs, niHostCall,
+          )
+        } catch (e) {
+          if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
+          logicalSetState(logicalRec, 'FAILED', logicalReason('NODE_ISOLATION_UNAVAILABLE', errMsg(e)))
+          requestLogicalPersist(logicalRec.logical_run_id)
+          log('隔离节点路由不可用（fail closed，拒绝启动）：' + errMsg(e))
+          return '错误：无法为模型节点建立独立运行环境，工作流拒绝启动：' + errMsg(e)
+        }
 
         // LOC-028：人工决策续跑必须由宿主签发 decision_ref（含候选绑定），禁止信任模型自报
         let hostDecisionRef = null
@@ -3462,6 +3511,8 @@ return {
           // #79: 快照修订的 Provider/Model（Codex R2 ②：active 快照的合并绑定；仅续跑
           // 生效——新启透传会让脚本用覆盖模型执行而 Rev1 快照仍记蓝图绑定，归因失真）
           model_overrides: modelOverridesForExec,
+          routes: nodeRouteTokens,
+          requireIsolatedNodes: true,
           decision_ref: hostDecisionRef || undefined,
           consumed_decisions: logicalRec ? (logicalRec.consumed_decisions || {}) : undefined,
         }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined, isolationProbe) : {})
@@ -3476,7 +3527,7 @@ return {
         // scriptArgs 组装前注入，恢复段节点提示与摘要闸门才能拿到已核验基线）
         if (logicalRec && (isHdResume || isLegacyResume || isPauseResume || probeResume)) Object.assign(args, ebBaselineArgs(logicalRec))
         // Codex R2 ①：续跑执行 Rev 1 冻结脚本（见上方 execScript 说明）
-        const startReq = { script: execScript, meta: c.meta, args: scriptArgs, parent: parent }
+        const startReq = { script: execScript, meta: c.meta, args: scriptArgs, parent: parent, subagentProvider: NODE_ISOLATED_PROVIDER }
         // #80：段取消信号——pause/interrupt 经 vwf.run.control 中止本段（引擎在当前钩子
         // 边界抛 CANCELLED，进行中 agent 自然完成，不硬杀）。宿主不支持 AbortController
         // 时不下发 signal：pause/interrupt 会得到明确失败而不是静默无效。
@@ -3484,7 +3535,7 @@ return {
         if (segCtl) startReq.signal = segCtl.signal
         if (ws && ws.source_path) { startReq.cwd = ws.source_path; startReq.workspaceRoot = ws.source_path }
         let run
-        try { run = engineNow.start(startReq) } catch (e) {
+        try { run = nodeProviderCore.startWorkflow(engineNow, startReq, wsIdentity) } catch (e) {
           if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
           if (logicalRec) {
             logicalSetState(logicalRec, 'FAILED', logicalReason('ENGINE_START_FAILED', errMsg(e)))
@@ -3636,7 +3687,7 @@ return {
         let baselineGateBlocked = null
         if (logicalRec && !pauseAction) {
           for (let gateIter = 0; gateIter < EB_GATE_MAX_RESUMES; gateIter++) {
-            const g = await runBaselineGate({ logicalRec, engineRunId: currentRunId, result, execScript, meta: c.meta, scriptArgs, parent, segCtl, taskId: logicalTaskId, ws, wsIdentity, engine: engineNow })
+            const g = await runBaselineGate({ logicalRec, engineRunId: currentRunId, result, dsl: v.sanitized, execScript, meta: c.meta, scriptArgs, parent, segCtl, taskId: logicalTaskId, ws, wsIdentity, engine: engineNow })
             if (!g) break
             if (g.blocked) { baselineGateBlocked = g; break }
             if (!g.resumed) break

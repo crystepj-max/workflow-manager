@@ -48,6 +48,7 @@ test('T2：重建后的 dist 含双模式守卫，不再无条件调用 harness.
 test('T4：dsh-tools 依赖声明可移植，且与宿主同源（调度器符号未错位）', async () => {
   const pkg = JSON.parse(readFileSync(PKG, 'utf8'))
   const spec = pkg.dependencies['@deepseek-ai/dsh-tools']
+  const sdkClientSpec = pkg.dependencies['@deepseek-ai/dsh-sdk-client']
 
   // 事故护栏（2026-09-20）：受管依赖写本机路径 → 换机 / CI 上安装成悬空链接。
   // 本机同源属开发环境步骤（node_modules 软链 / npm link），不写进仓库文件。
@@ -65,8 +66,20 @@ test('T4：dsh-tools 依赖声明可移植，且与宿主同源（调度器符�
     return
   }
 
-  // 发布态：与宿主发行版对齐（宿主升版须同批改本行）
-  assert.equal(spec, '0.1.1-rc.2', '插件 dsh-tools 必须与宿主发行版对齐，消除 rc.7/rc.8 混用')
+  // 发布态：SDK client / dsh-tools 与宿主发行版使用同一精确版本线。
+  assert.equal(sdkClientSpec, '0.2.0-rc.2', 'SDK client 必须与当前宿主 DSH 版本精确对齐')
+  assert.equal(spec, sdkClientSpec, '插件 dsh-tools 必须与 SDK client / 宿主发行版对齐')
+
+  const npmLock = JSON.parse(readFileSync(join(pkgRoot, 'package-lock.json'), 'utf8'))
+  assert.equal(npmLock.packages[''].dependencies['@deepseek-ai/dsh-sdk-client'], sdkClientSpec, 'npm lock 根依赖须与 manifest 对齐')
+  assert.equal(npmLock.packages[''].dependencies['@deepseek-ai/dsh-tools'], spec, 'npm lock 根依赖须与 manifest 对齐')
+  assert.equal(npmLock.packages['node_modules/@deepseek-ai/dsh-sdk-client'].version, sdkClientSpec, 'npm lock SDK 解析版本须与 manifest 对齐')
+  assert.equal(npmLock.packages['node_modules/@deepseek-ai/dsh-tools'].version, spec, 'npm lock dsh-tools 解析版本须与 manifest 对齐')
+
+  const pnpmLock = readFileSync(join(pkgRoot, 'pnpm-lock.yaml'), 'utf8')
+  const importer = pnpmLock.match(/importers:\n\n  \.:[\s\S]*?\n\npackages:/)?.[0] || ''
+  assert.match(importer, /'@deepseek-ai\/dsh-sdk-client':\n\s+specifier: 0\.2\.0-rc\.2\n\s+version: 0\.2\.0-rc\.2\(/, 'pnpm lock SDK importer 须与 manifest 对齐')
+  assert.match(importer, /'@deepseek-ai\/dsh-tools':\n\s+specifier: 0\.2\.0-rc\.2\n\s+version: 0\.2\.0-rc\.2\(/, 'pnpm lock dsh-tools importer 须与 manifest 对齐')
 
   // 本机若已软链到宿主工作区副本（开发态），必须与宿主同一符号来源：宿主 v0.1.6 起用
   // Symbol.for 全局注册，旧副本用 Symbol() 实例级 → 查找落空、工具执行报

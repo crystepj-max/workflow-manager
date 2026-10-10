@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 import { loadHost } from './helpers/load-host.mjs'
-import { REPO, DSH_HOME, makeFs, makeSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
+import { REPO, DSH_HOME, makeFs, makeIsolatedSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const RUNS_DIR = DSH_HOME + '/visual-workflow/runs'
@@ -75,7 +75,7 @@ function engineEnv(eng) {
     [SKILL_ROOT + '/logical-run-spec/script.mjs']: '//MOCK-SCRIPT',
   })
   const { handlers, definedTools, events } = loadHost({
-    fs, subprocess: makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT' }), sandboxPolicy,
+    fs, subprocess: makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT' }), sandboxPolicy,
     agents: { requireInitiator: () => ({}), currentInitiator: () => null },
     workflowEngine: eng,
   })

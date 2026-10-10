@@ -5,14 +5,14 @@
       "id": 1,
       "name": "s-size-raw-input-to-defined",
       "prompt": "帮我把这个需求分析一下：我们 App 的个人中心里加一个『清除缓存』按钮，点击后清掉本地图片缓存，并显示『已清除 12.3 MB』的提示。",
-      "expected_output": "识别为原始输入→创建 issue 路径；走渐进分析；Definition Check 全过且未决=0；人工确认后落档 Issue 基本信息九字段 + 本地 task-spec-V1；回报『任务已定义』；GitHub 不可用时本地落档并按 Skill §7.2 说明",
+      "expected_output": "识别为会话录入；先分析并确认目标 Multica 项目；Definition Check 全过且未决=0；用户确认后写入 Multica Task、dev-flow.definition.v1 和显式 dev-flow.dependencies.v1；回读后报 Task UUID；CLI 不可用时只交草稿，不建本地登记册",
       "files": []
     },
     {
       "id": 2,
       "name": "m-size-issue-to-uat-slices",
       "prompt": "分析一下这个 issue 并把计划拆成任务清单：https://github.com/example-org/demo-app/issues/42 —— issue 内容为：支持微信扫码登录，需要新增后端鉴权接口、前端登录页二维码展示、回调处理与 token 续期，方案已有大致设计但涉及 3 个模块，预计需要 3-4 个任务依次完成。",
-      "expected_output": "识别为 GitHub issue→更新 issue 路径；按可独立 UAT 的完整功能切片拆分（非纯内部层次）；每切片可写 UAT；前置依赖明确写『无』或具体任务；三要素齐全；未达人工确认前不得标已定义",
+      "expected_output": "识别 GitHub issue 为需求来源而非状态权威；按可独立 UAT 的完整功能切片拆成 Multica Tasks；每切片有 Task UUID、依赖 UUID 和规格；未达人工确认前保持 backlog 且不写有效定义元数据",
       "files": []
     },
     {
@@ -26,7 +26,7 @@
       "id": 4,
       "name": "self-contained-no-subskill-invocation",
       "prompt": "分析一下这个 issue：https://github.com/example-org/demo-app/issues/9 —— issue 内容为：iOS 上登录页白屏，控制台报 Uncaught TypeError: Cannot read properties of undefined (reading 'map')，机型 iPhone 15 / iOS 17。",
-      "expected_output": "全程不调用 skill 工具加载 triage/grill-with-docs/wayfinder/to-tickets；即使它们不可模型调用也能完整产出：分诊结论 + 三要素 + size；发布内容带 AI 免责声明",
+      "expected_output": "全程不调用 skill 工具加载 triage/grill-with-docs/wayfinder/to-tickets；即使它们不可模型调用也能完整产出：分诊结论 + 三要素 + size；GitHub 来源只读，不擅自回写",
       "files": []
     },
     {
@@ -40,14 +40,14 @@
       "id": 6,
       "name": "open-items-block-defined",
       "prompt": "这个需求差不多了，直接标已定义吧：我们想做会员积分，具体怎么算分以后开发时再定。",
-      "expected_output": "拒绝标已定义；指出未决产品事项；保持定义中/待确认前；给出决策卡或缺口清单",
+      "expected_output": "拒绝标已定义；指出未决产品事项；Multica Task 保持 backlog 且不写有效定义元数据；给出决策卡或缺口清单",
       "files": []
     },
     {
       "id": 7,
       "name": "baseline-v1-to-v2",
       "prompt": "已定义任务 V1 要改验收标准：清除缓存成功文案必须同时显示文件个数。请升版。",
-      "expected_output": "判定为实质变更；走 V1→V2：更新本地规格、Definition Check、人工确认、Issue 版本评论与字段同步；不静默改 V1",
+      "expected_output": "判定为实质变更；走 V1→V2：更新本地规格、Definition Check、人工确认、Multica Task 与 metadata 同步；先检查活动 Run，不静默改 V1",
       "files": []
     }
   ]

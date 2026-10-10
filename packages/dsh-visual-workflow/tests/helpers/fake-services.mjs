@@ -1,3 +1,5 @@
+import { createProviderRoutes } from '../../../../scripts/node-provider-routes.mjs'
+
 // 共享假服务（候选一 T-IMP-12：host.test.mjs 与统一编译器验收套件共用）
 // 与宿主 fs/subprocess/sandboxPolicy 服务同形；makeSubprocess 支持
 // compileScript 分支（模拟 generate.mjs compile 子命令输出）。
@@ -55,7 +57,7 @@ export function makeFs(seed = {}) {
 //（LOC-037）的进程边界替身——宿主侧接线测试可借此驱动真实包装脚本逻辑（仅伪造进程边界，不伪造内核）。
 // spawnHandler：可选自定义进程边界（spec => { stdout, exitCode, stderr } | undefined），
 // 返回 undefined 走默认分支；LOC-027 基线冻结/核验用真实 node 子进程验证字节语义。
-export function makeSubprocess({ failPattern = null, fs = null, compileScript = '//MOCK-SCRIPT', recordsHost = null, wsHost = null, operationsHost = null, deliveryCloseoutHost = null, spawnHandler = null } = {}) {
+export function makeSubprocess({ failPattern = null, fs = null, compileScript = '//MOCK-SCRIPT', recordsHost = null, wsHost = null, nodeIsolationHost = null, operationsHost = null, deliveryCloseoutHost = null, spawnHandler = null } = {}) {
   const calls = []
   const specs = []
   const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
@@ -108,6 +110,8 @@ export function makeSubprocess({ failPattern = null, fs = null, compileScript = 
         ;({ stdout, exitCode } = hostCall(deliveryCloseoutHost, spec))
       } else if (argvStr.includes('workspace-isolation-host.mjs') && wsHost) {
         ;({ stdout, exitCode } = hostCall(wsHost, spec))
+      } else if (argvStr.includes('node-isolation-host.mjs') && nodeIsolationHost) {
+        ;({ stdout, exitCode } = hostCall(nodeIsolationHost, spec))
       } else if (argvStr.includes('rmSync')) {
         if (fs) fs._files.delete(spec.argv[spec.argv.length - 1])
       } else if (failPattern && failPattern.test(argvStr)) {
@@ -126,6 +130,36 @@ export function makeSubprocess({ failPattern = null, fs = null, compileScript = 
     _specs: specs,
   }
   return sub
+}
+
+// 给会启动模型节点的宿主测试提供真实形态的隔离路由服务。
+// 单测不启动模型 worker，但 wf_run 必须在 engine.start 前证明隔离与路由已建立。
+export function makeIsolatedSubprocess({ fs, workspace = {}, wsHost = null, nodeIsolationHost = null, ...options } = {}) {
+  const baseWorkspace = {
+    workspace_id: 'test-workspace', workspace_path: '/tmp/test-workspace',
+    source_path: '/tmp/test-source', records_path: '/tmp/test-workspace/records',
+    work_branch: 'codex/test', source_revision: 'test', workspace_mode: 'ISOLATED_READ',
+    ...workspace,
+  }
+  const isolatedWsHost = wsHost || ((command, input) => {
+    if (command === 'allocate') {
+      const suffix = String(input.logical_run_id || 'run').replace(/[^a-zA-Z0-9_-]/g, '-')
+      return { ok: true, workspace: { ...baseWorkspace, workspace_id: 'test-' + suffix } }
+    }
+    if (command === 'context') return { ok: true, workspace: null, events: [] }
+    if (command === 'captureCandidate') return { ok: true, candidate: null }
+    return { ok: true }
+  })
+  const isolatedNodeHost = nodeIsolationHost || ((command, input) => {
+    if (command === 'probe') return { ok: true, guarantee: 'enforced', backend: 'test' }
+    if (command === 'createProviderRoutes') return createProviderRoutes(input)
+    return { ok: false, error: 'unexpected test command' }
+  })
+  if (fs && fs._files) {
+    fs._files.set(REPO + '/scripts/workspace-isolation-host.mjs', '// isolated test wrapper')
+    fs._files.set(REPO + '/scripts/node-isolation-host.mjs', '// isolated test wrapper')
+  }
+  return makeSubprocess({ ...options, fs, wsHost: isolatedWsHost, nodeIsolationHost: isolatedNodeHost })
 }
 
 export const sandboxPolicy = { workspaceRoot: REPO, resolve: () => ({ mode: 'danger-full-access', workspaceRoot: REPO }) }

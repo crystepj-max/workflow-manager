@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
 const here = dirname(fileURLToPath(import.meta.url))
 
 import { loadHost } from './helpers/load-host.mjs'
-import { REPO, DSH_HOME, USER_DIR, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
+import { REPO, DSH_HOME, USER_DIR, makeFs, makeIsolatedSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 
 const call = async (handlers, method, args) => handlers.get(method)(args)
 
@@ -43,7 +43,7 @@ function env(seedExtra = {}) {
   }
   Object.assign(seed, seedExtra)
   const fs = makeFs(seed)
-  const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
+  const sub = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
   const { handlers, definedTools, events, ctx } = loadHost({ fs, subprocess: sub, sandboxPolicy })
   return { handlers, definedTools, events, ctx, fs, sub }
 }

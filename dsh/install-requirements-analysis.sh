@@ -1,27 +1,79 @@
 #!/usr/bin/env bash
-# 把「Requirements Analysis」安装为公共池技能（真源：本仓库 dsh/skills/requirements-analysis/）。
-# 用法：dsh/install-requirements-analysis.sh [目标目录]   默认 ~/.agents/skills/requirements-analysis
+# workflow-manager 的 requirements-analysis 真源直接分发到用户级技能目录。
+# 用法：dsh/install-requirements-analysis.sh [目标目录]
+# 默认：~/.agents/skills/requirements-analysis
 set -euo pipefail
-# 默认公共池安装交由统一治理，避免独立副本覆盖正式来源。
+
 TASK_WORKFLOW_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-if [ "$#" -eq 0 ] || [ "${1:-}" = "$HOME/.agents/skills/requirements-analysis" ]; then
-  TASK_SKILL_REPO="$(dirname "$TASK_WORKFLOW_ROOT")/my-agent-skills"
-  node "$TASK_WORKFLOW_ROOT/scripts/sync-ai-task-skill-set.mjs" "$TASK_SKILL_REPO"
-  exec python3 "$TASK_SKILL_REPO/scripts/manage-skills.py" apply
+TASK_SKILL_SOURCE="$TASK_WORKFLOW_ROOT/dsh/skills/requirements-analysis"
+TASK_SKILL_DEST="${1:-$HOME/.agents/skills/requirements-analysis}"
+TASK_SKILL_PARENT="$(dirname "$TASK_SKILL_DEST")"
+TASK_SKILL_NAME="$(basename "$TASK_SKILL_DEST")"
+TASK_SKILL_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+TASK_SKILL_BACKUP_ROOT="${TASK_SKILL_BACKUP_ROOT:-$HOME/.local/share/agent-skills/backups/requirements-analysis}"
+TASK_SKILL_BACKUP=""
+TASK_SKILL_OLD=""
+
+if [ ! -d "$TASK_SKILL_SOURCE" ]; then
+  echo "缺少技能真源：$TASK_SKILL_SOURCE" >&2
+  exit 1
 fi
 
+case "$TASK_SKILL_DEST" in
+  "$TASK_SKILL_SOURCE"|"$TASK_SKILL_SOURCE"/*)
+    echo "目标目录不能位于技能真源内：$TASK_SKILL_DEST" >&2
+    exit 1
+    ;;
+esac
 
-SRC="$(cd "$(dirname "$0")" && pwd)/skills/requirements-analysis"
-DEST="${1:-$HOME/.agents/skills/requirements-analysis}"
+mkdir -p "$TASK_SKILL_PARENT"
+TASK_SKILL_STAGE="$(mktemp -d "$TASK_SKILL_PARENT/.${TASK_SKILL_NAME}.stage.XXXXXX")"
+trap 'rm -rf "$TASK_SKILL_STAGE"' EXIT
+cp -R "$TASK_SKILL_SOURCE/." "$TASK_SKILL_STAGE/"
 
-mkdir -p "$DEST"
-cp "$SRC/SKILL.md" "$DEST/SKILL.md"
-rm -rf "$DEST/evals" "$DEST/references"
-cp -R "$SRC/evals"     "$DEST/evals"
-cp -R "$SRC/references" "$DEST/references"
+# 先把现有入口完整备份到技能发现目录之外，再切换安装目录。
+if [ -L "$TASK_SKILL_DEST" ] || [ -e "$TASK_SKILL_DEST" ]; then
+  mkdir -p "$TASK_SKILL_BACKUP_ROOT"
+  TASK_SKILL_BACKUP="$TASK_SKILL_BACKUP_ROOT/$TASK_SKILL_STAMP-$$"
+  if [ -L "$TASK_SKILL_DEST" ]; then
+    cp -P "$TASK_SKILL_DEST" "$TASK_SKILL_BACKUP"
+    if [ "$(readlink "$TASK_SKILL_DEST")" != "$(readlink "$TASK_SKILL_BACKUP")" ]; then
+      echo "现有技能入口备份校验失败：$TASK_SKILL_BACKUP" >&2
+      exit 1
+    fi
+  elif [ -d "$TASK_SKILL_DEST" ]; then
+    cp -R "$TASK_SKILL_DEST" "$TASK_SKILL_BACKUP"
+    if ! diff -qr "$TASK_SKILL_DEST" "$TASK_SKILL_BACKUP" >/dev/null; then
+      echo "现有技能目录备份校验失败：$TASK_SKILL_BACKUP" >&2
+      exit 1
+    fi
+  else
+    cp -p "$TASK_SKILL_DEST" "$TASK_SKILL_BACKUP"
+    if ! cmp -s "$TASK_SKILL_DEST" "$TASK_SKILL_BACKUP"; then
+      echo "现有技能文件备份校验失败：$TASK_SKILL_BACKUP" >&2
+      exit 1
+    fi
+  fi
 
-# 清除 DSH 原子写残留的 .tmpdir 目录（不属技能内容）
-find "$DEST" -type d -name "*.tmpdir" -exec rm -rf {} + 2>/dev/null || true
+  TASK_SKILL_OLD="$TASK_SKILL_PARENT/.${TASK_SKILL_NAME}.old.$TASK_SKILL_STAMP.$$"
+  mv "$TASK_SKILL_DEST" "$TASK_SKILL_OLD"
+fi
 
-echo "installed -> $DEST"
-find "$DEST" -type f | sort
+if ! mv "$TASK_SKILL_STAGE" "$TASK_SKILL_DEST"; then
+  if [ -n "$TASK_SKILL_OLD" ] && [ -e "$TASK_SKILL_OLD" -o -L "$TASK_SKILL_OLD" ]; then
+    mv "$TASK_SKILL_OLD" "$TASK_SKILL_DEST"
+  fi
+  echo "安装失败；旧入口已恢复。" >&2
+  exit 1
+fi
+
+if [ -n "$TASK_SKILL_OLD" ]; then
+  rm -rf "$TASK_SKILL_OLD"
+fi
+
+trap - EXIT
+echo "installed -> $TASK_SKILL_DEST"
+if [ -n "$TASK_SKILL_BACKUP" ]; then
+  echo "backup -> $TASK_SKILL_BACKUP"
+fi
+find "$TASK_SKILL_DEST" -type f | sort

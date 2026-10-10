@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 本地质量闸门（issue-33 / QUALITY_GATES Gate1-4）
-# Gate1 知识/API 来源可追溯：dsh-tools 版本与宿主 DSH v0.1.1-rc.2 对齐
+# Gate1 知识/API 来源可追溯：dsh-tools 与 SDK client 对齐宿主 DSH v0.2.0-rc.2
 # Gate2 本地化：本脚本与包内中文说明保持一致（不引入未翻译对外文案）
 # Gate3 构建：npm run build
 # Gate4 一致性 + 包测试：check-dist-fresh + node --test
@@ -17,12 +17,13 @@ echo '—— Gate1 dsh-tools 版本 ——'
 node --input-type=module -e "
 import { readFileSync } from 'node:fs'
 const pkg = JSON.parse(readFileSync('./package.json','utf8'))
-const v = pkg.dependencies['@deepseek-ai/dsh-tools']
-if (v !== '0.1.1-rc.2') {
-  console.error('❌ @deepseek-ai/dsh-tools=' + v + '，期望 0.1.1-rc.2（对齐 DSH v0.1.1-rc.2）')
+const tools = pkg.dependencies['@deepseek-ai/dsh-tools']
+const sdk = pkg.dependencies['@deepseek-ai/dsh-sdk-client']
+if (tools !== '0.2.0-rc.2' || sdk !== tools) {
+  console.error('❌ dsh-tools=' + tools + ' / dsh-sdk-client=' + sdk + '，期望两者均为 0.2.0-rc.2（对齐 DSH）')
   process.exit(1)
 }
-console.log('✅ @deepseek-ai/dsh-tools=' + v + '（对齐 DSH v0.1.1-rc.2）')
+console.log('✅ dsh-tools / dsh-sdk-client=' + tools + '（对齐 DSH v0.2.0-rc.2）')
 "
 
 echo '—— Gate4 包测试 ——'

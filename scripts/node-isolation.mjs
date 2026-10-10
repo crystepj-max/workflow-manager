@@ -4,7 +4,7 @@
 // 强制边界依赖宿主文件/进程沙箱（macOS sandbox-exec 参考配置），chmod/提示词不算证据。
 
 import { createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import {
   existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync,
   realpathSync, rmSync, symlinkSync, writeFileSync,
@@ -13,7 +13,10 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateRecord } from './cwf-validate.mjs'
 
-const SCHEMA_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'design', 'node-isolation', 'schema.json')
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url))
+const BUNDLED_SCHEMA_PATH = join(MODULE_DIR, 'node-isolation-schema.json')
+const SOURCE_SCHEMA_PATH = join(MODULE_DIR, '..', 'docs', 'design', 'node-isolation', 'schema.json')
+const SCHEMA_PATH = existsSync(BUNDLED_SCHEMA_PATH) ? BUNDLED_SCHEMA_PATH : SOURCE_SCHEMA_PATH
 
 export const ISOLATION_GUARANTEE = {
   ENFORCED: 'enforced',
@@ -163,22 +166,277 @@ function tightenCapabilities(base, declared) {
   return out
 }
 
-// macOS 参考配置：sandbox-exec 可用且能拒绝工作区外写入 → enforced；否则 unavailable。
-// FIX-235 探针口径（故障机 2026-09-20 实测修正）：
-// ① profile 用「写入范围收紧」形态：(allow default) + deny 区外 file-write*。
-//    旧参考配置用 (deny default)，而当前 macOS 进程启动需读 dyld 闭包（/usr/lib、
-//    /private/var/db/dyld 等），全被 deny → canary SIGABRT(134)，insideAllowed 恒 false
-//    → 恒判 unavailable，机制从未在真机生效。
-// ② 区外拒绝证据必须是 file-write 本身：exec 保持放行（allow default），touch 死于写入拒绝
-//    而非 exec 拒绝（旧配置只放行 /bin/echo 的 exec，量错了目标）。
-// ③ 探测目录先落盘再 realpath 嵌入 profile：seatbelt 按解析后路径匹配
-//    （/tmp → /private/tmp 等软链场景直接拼字符串会误判）。
+// FIX-235 的旧探针只限制写入，不能证明节点文件工具或 shell 的完整边界。
+// 该入口现与正式节点共用默认拒绝策略，确保机器能力判定覆盖读、写和进程启动。
 export function buildProbeProfile(insideRealPath) {
-  return [
+  const ctx = {
+    profile: 'review',
+    isolation_guarantee: ISOLATION_GUARANTEE.ENFORCED,
+    candidate_path: '',
+    evidence_path: insideRealPath,
+    scratch_path: insideRealPath,
+    test_overlay_path: '',
+    capabilities: {
+      candidate: { read: true, write: false },
+      source: { read: true, write: false },
+      evidence: { read: true, write: true },
+      test_overlay: { read: false, write: false },
+    },
+    writable_roots: [insideRealPath],
+  }
+  return buildNodeExecutionProfile(ctx, { executable_paths: [process.execPath] })
+}
+
+// 节点进程使用默认拒绝的 Seatbelt 策略；只开放节点能力对应的工作区、
+// 隔离 DSH Home、运行时文件和单个 loopback 模型代理端口。
+export function buildNodeExecutionProfile(ctx, options = {}) {
+  if (!ctx || typeof ctx !== 'object') throw new Error('buildNodeExecutionProfile 需要节点上下文')
+  if (ctx.isolation_guarantee !== ISOLATION_GUARANTEE.ENFORCED) throw new Error('节点隔离未达到 enforced，拒绝生成执行策略')
+  if (process.platform !== 'darwin') throw new Error('Seatbelt 节点执行策略仅支持 macOS')
+  if (typeof ctx.profile !== 'string' || !ctx.profile.trim()) throw new Error('节点上下文缺少 profile 角色')
+  if (!ctx.capabilities || typeof ctx.capabilities !== 'object' || Array.isArray(ctx.capabilities)) {
+    throw new Error('节点上下文缺少 capabilities 能力表')
+  }
+  for (const zone of [ZONE.CANDIDATE, ZONE.SOURCE, ZONE.EVIDENCE, ZONE.TEST_OVERLAY]) {
+    const capability = ctx.capabilities[zone]
+    if (!capability || typeof capability !== 'object'
+      || typeof capability.read !== 'boolean' || typeof capability.write !== 'boolean') {
+      throw new Error(`节点上下文缺少 capabilities.${zone}.read/write 布尔值`)
+    }
+  }
+  if (!Array.isArray(ctx.writable_roots)) throw new Error('节点上下文缺少 writable_roots 写入目录清单')
+  if (!ctx.scratch_path || typeof ctx.scratch_path !== 'string') throw new Error('节点上下文缺少 scratch_path')
+  for (const key of ['extra_read_roots', 'extra_read_files', 'extra_write_roots', 'executable_paths']) {
+    if (options[key] !== undefined && !Array.isArray(options[key])) throw new Error(`${key} 必须是数组`)
+  }
+
+  const dyldSupport = '/System/Library/Sandbox/Profiles/dyld-support.sb'
+  if (!existsSync(dyldSupport)) throw new Error('macOS dyld-support.sb 不可用')
+
+  const caps = resolveNodeCapabilities(ctx.profile, ctx.capabilities)
+  const readRoots = []
+  if (ctx.candidate_path && (caps.candidate?.read || caps.source?.read)) readRoots.push(ctx.candidate_path)
+  if (ctx.evidence_path && caps.evidence.read) readRoots.push(ctx.evidence_path)
+  if (ctx.scratch_path) readRoots.push(ctx.scratch_path)
+  if (ctx.test_overlay_path && caps.test_overlay.read) readRoots.push(ctx.test_overlay_path)
+  readRoots.push(...(options.extra_read_roots || []))
+
+  const writeRoots = [
+    ...ctx.writable_roots,
+    ...(options.extra_write_roots || []),
+  ]
+  const executables = options.executable_paths || []
+  const normalizedReadRoots = normalizeProfileDirectories(readRoots, 'read root')
+  const normalizedReadFiles = normalizeProfileFiles(options.extra_read_files || [], 'read file')
+  const normalizedWriteRoots = normalizeProfileDirectories(writeRoots, 'write root')
+  const normalizedExecutables = normalizeProfileFiles(executables, 'executable')
+  assertRootsRespectCapabilities(ctx, caps, normalizedReadRoots, normalizedWriteRoots)
+  assertFilesRespectCapabilities(ctx, caps, normalizedReadFiles)
+
+  const rules = [
     '(version 1)',
-    '(allow default)',
-    '(deny file-write* (require-not (subpath "' + insideRealPath + '")))',
-  ].join('\n')
+    '(deny default)',
+    `(import ${sbplString(dyldSupport)})`,
+    '(allow process-exec process-fork)',
+    '(allow file-read* (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/private/etc") (subpath "/dev"))',
+    ...normalizedReadRoots.map((root) => `(allow file-read* (subpath ${sbplString(root)}))`),
+    ...normalizedReadFiles.map((file) => `(allow file-read* (literal ${sbplString(file)}))`),
+    '(allow file-read-metadata)',
+    '(allow file-map-executable (subpath "/System") (subpath "/usr/lib"))',
+    ...normalizedExecutables.map((file) => `(allow file-read* file-map-executable (literal ${sbplString(file)}))`),
+    '(allow sysctl-read)',
+    '(allow signal (target self))',
+    ...normalizedWriteRoots.map((root) => `(allow file-write* (subpath ${sbplString(root)}))`),
+  ]
+
+  if (options.loopback_port !== undefined && options.loopback_port !== null) {
+    const port = Number(options.loopback_port)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('loopback_port 必须是 1–65535 的整数')
+    rules.push(`(allow network-outbound (remote ip "localhost:${port}"))`)
+  }
+
+  return rules.join('\n')
+}
+
+// DSH SDK 可把自定义 dshBin 指向 WFM 启动垫片。垫片用此规格在真实 DSH
+// 入口外包一层默认拒绝策略，并给实际 DSH 重建无用户凭据的环境。
+export function buildSandboxedDshLaunchSpec(ctx, options = {}) {
+  if (process.platform !== 'darwin') throw new Error('sandboxed DSH 启动仅支持 macOS Seatbelt')
+  if (!ctx || typeof ctx !== 'object') throw new Error('sandboxed DSH 启动需要节点上下文')
+  const dshEntry = requireText(options.dsh_entry, 'dsh_entry')
+  const runtimeRoots = options.runtime_roots
+  if (!Array.isArray(runtimeRoots) || runtimeRoots.length === 0) throw new Error('runtime_roots 必须是非空目录数组')
+  if (runtimeRoots.some((value) => typeof value !== 'string' || !value.trim())) {
+    throw new Error('runtime_roots 只能包含非空目录路径')
+  }
+  const runtimeFiles = options.runtime_files === undefined ? [] : options.runtime_files
+  if (!Array.isArray(runtimeFiles) || runtimeFiles.some((value) => typeof value !== 'string' || !value.trim())) {
+    throw new Error('runtime_files 须为绝对路径数组')
+  }
+  const dshHome = requireText(options.dsh_home, 'dsh_home')
+  const argv = options.argv === undefined ? [] : options.argv
+  if (!Array.isArray(argv) || argv.some((value) => typeof value !== 'string' || value.includes('\0'))) {
+    throw new Error('argv 必须是无 NUL 字符的字符串数组')
+  }
+
+  const runtimeRootPaths = normalizeProfileDirectories(runtimeRoots, 'DSH runtime root')
+  const runtimeFilePaths = normalizeProfileFiles(runtimeFiles, 'DSH runtime file')
+  const entryPath = normalizeProfileFiles([dshEntry], 'DSH entry')[0]
+  if (!runtimeRootPaths.some((root) => isUnder(entryPath, root))) {
+    throw new Error('dsh_entry 必须位于声明的 runtime_roots 中')
+  }
+
+  const scratchPath = normalizeProfileDirectories([ctx.scratch_path], 'node scratch root')[0]
+  if (!Array.isArray(ctx.writable_roots)) throw new Error('节点上下文缺少 writable_roots 写入目录清单')
+  const nodeWritableRoots = normalizeProfileDirectories(ctx.writable_roots, 'node writable root')
+  if (runtimeRootPaths.some((runtimeRoot) => nodeWritableRoots.some((writeRoot) => rootsOverlap(runtimeRoot, writeRoot)))) {
+    throw new Error('DSH runtime root 不得与节点 writable_roots 重叠')
+  }
+  if (runtimeFilePaths.some((runtimeFile) => nodeWritableRoots.some((writeRoot) => isUnder(runtimeFile, writeRoot)))) {
+    throw new Error('DSH runtime file 不得位于节点 writable_roots')
+  }
+  const homeInput = resolve(dshHome)
+  if (!existsSync(homeInput) || lstatSync(homeInput).isSymbolicLink() || !lstatSync(homeInput).isDirectory()) {
+    throw new Error('dsh_home 必须是已存在且非符号链接的空目录')
+  }
+  const homePath = realpathSync(homeInput)
+  if (!isUnder(homePath, scratchPath) || homePath === scratchPath) {
+    throw new Error('dsh_home 必须位于该节点 scratch_path 的子目录中')
+  }
+  if (readdirSync(homePath).length > 0) throw new Error('dsh_home 必须为空，拒绝复用可能含凭据的配置')
+
+  const nodeExecutable = normalizeProfileFiles([process.execPath], 'Node executable')[0]
+  const cwdInput = requireText(ctx.agent_cwd, 'agent_cwd')
+  const cwd = normalizeProfileDirectories([cwdInput], 'node cwd')[0]
+  const caps = resolveNodeCapabilities(ctx.profile, ctx.capabilities)
+  const readableRoots = []
+  if (ctx.candidate_path && (caps.candidate.read || caps.source.read)) readableRoots.push(ctx.candidate_path)
+  if (ctx.evidence_path && caps.evidence.read) readableRoots.push(ctx.evidence_path)
+  if (ctx.scratch_path) readableRoots.push(ctx.scratch_path)
+  if (ctx.test_overlay_path && caps.test_overlay.read) readableRoots.push(ctx.test_overlay_path)
+  const normalizedReadableRoots = normalizeProfileDirectories(readableRoots, 'node readable root')
+  if (!normalizedReadableRoots.some((root) => isUnder(cwd, root))) {
+    throw new Error('agent_cwd 不在该节点可读区域中')
+  }
+
+  const sandboxExec = '/usr/bin/sandbox-exec'
+  if (!existsSync(sandboxExec) || !lstatSync(sandboxExec).isFile()) throw new Error('系统 sandbox-exec 不可用')
+  const profile = buildNodeExecutionProfile(ctx, {
+    extra_read_roots: runtimeRootPaths,
+    extra_read_files: runtimeFilePaths,
+    executable_paths: [nodeExecutable],
+    loopback_port: options.loopback_port,
+  })
+  const localProxy = options.loopback_port === undefined || options.loopback_port === null
+    ? null
+    : `http://127.0.0.1:${Number(options.loopback_port)}`
+  const proxyEnv = localProxy ? {
+    HTTP_PROXY: localProxy,
+    HTTPS_PROXY: localProxy,
+    http_proxy: localProxy,
+    https_proxy: localProxy,
+    ALL_PROXY: undefined,
+    all_proxy: undefined,
+    NO_PROXY: 'localhost,127.0.0.1,::1',
+    no_proxy: 'localhost,127.0.0.1,::1',
+  } : {}
+
+  return {
+    command: sandboxExec,
+    args: ['-p', profile, nodeExecutable, entryPath, ...argv],
+    cwd,
+    env: {
+      PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+      HOME: homePath,
+      DSH_HOME: homePath,
+      TMPDIR: scratchPath,
+      LANG: 'C',
+      LC_ALL: 'C',
+      ...(typeof options.api_key === 'string' && options.api_key ? { DEEPSEEK_API_KEY: options.api_key } : {}),
+      ...proxyEnv,
+    },
+    profile,
+  }
+}
+
+function normalizeProfileDirectories(paths, label) {
+  if (!Array.isArray(paths)) throw new Error(`${label} 必须是路径数组`)
+  const normalized = []
+  for (const value of paths) {
+    if (typeof value !== 'string' || !value.trim()) continue
+    if (!isAbsolute(value)) throw new Error(`${label} 必须是绝对路径: ${value}`)
+    if (!existsSync(value)) throw new Error(`${label} 不存在: ${value}`)
+    const real = realpathSync(value)
+    if (!lstatSync(real).isDirectory()) throw new Error(`${label} 必须是目录: ${value}`)
+    if (real === sep) throw new Error(`${label} 不得是文件系统根目录`)
+    if (!normalized.includes(real)) normalized.push(real)
+  }
+  return normalized
+}
+
+function normalizeProfileFiles(paths, label) {
+  if (!Array.isArray(paths)) throw new Error(`${label} 必须是路径数组`)
+  const normalized = []
+  for (const value of paths) {
+    if (typeof value !== 'string' || !value.trim()) continue
+    if (!isAbsolute(value)) throw new Error(`${label} 必须是绝对路径: ${value}`)
+    if (!existsSync(value)) throw new Error(`${label} 不存在: ${value}`)
+    const real = realpathSync(value)
+    if (!lstatSync(real).isFile()) throw new Error(`${label} 必须是文件: ${value}`)
+    if (!normalized.includes(real)) normalized.push(real)
+  }
+  return normalized
+}
+
+function assertRootsRespectCapabilities(ctx, caps, readRoots, writeRoots) {
+  const zones = [
+    {
+      name: '候选/源',
+      path: ctx.candidate_path,
+      read: caps.candidate.read || caps.source.read,
+      write: caps.candidate.write || caps.source.write,
+    },
+    { name: '证据', path: ctx.evidence_path, read: caps.evidence.read, write: caps.evidence.write },
+    { name: '测试覆盖层', path: ctx.test_overlay_path, read: caps.test_overlay.read, write: caps.test_overlay.write },
+  ].filter((zone) => typeof zone.path === 'string' && zone.path.trim())
+
+  for (const zone of zones) {
+    const zoneRoot = existsSync(zone.path) ? realpathSync(zone.path) : resolve(zone.path)
+    if (!zone.read && readRoots.some((root) => rootsOverlap(root, zoneRoot))) {
+      throw new Error(`read root 绕过 ${zone.name}只读能力`)
+    }
+    if (!zone.write && writeRoots.some((root) => rootsOverlap(root, zoneRoot))) {
+      throw new Error(`writable root 绕过 ${zone.name}只读能力`)
+    }
+  }
+}
+
+function assertFilesRespectCapabilities(ctx, caps, readFiles) {
+  const zones = [
+    { name: '候选/源', path: ctx.candidate_path, read: caps.candidate.read || caps.source.read },
+    { name: '证据', path: ctx.evidence_path, read: caps.evidence.read },
+    { name: '测试覆盖层', path: ctx.test_overlay_path, read: caps.test_overlay.read },
+  ].filter((zone) => typeof zone.path === 'string' && zone.path.trim())
+
+  for (const zone of zones) {
+    const zoneRoot = existsSync(zone.path) ? realpathSync(zone.path) : resolve(zone.path)
+    if (!zone.read && readFiles.some((file) => isUnder(file, zoneRoot))) {
+      throw new Error(`read file 绕过 ${zone.name}只读能力`)
+    }
+  }
+}
+
+function rootsOverlap(left, right) {
+  return isUnder(left, right) || isUnder(right, left)
+}
+
+function sbplString(value) {
+  if (/[\0\r\n]/.test(value)) throw new Error('Seatbelt 路径不能含控制字符')
+  return '"' + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
+}
+
+function shellQuote(value) {
+  return "'" + value.replace(/'/g, "'\\''") + "'"
 }
 
 export function probeIsolationCapability(options = {}) {
@@ -201,53 +459,101 @@ export function probeIsolationCapability(options = {}) {
     return { guarantee: ISOLATION_GUARANTEE.UNAVAILABLE, platform, backend: null, evidence: { reason: 'sandbox-exec 不可用' } }
   }
   const probeDir = options.probe_root || join(process.cwd(), '.scratch', 'ni-probe-' + Date.now())
-  mkdirSync(probeDir, { recursive: true })
-  // seatbelt 按解析后路径匹配：先落盘再 realpath，软链（/tmp、cwd 软链）不下沉到 profile
-  const probeDirReal = realpathSync(probeDir)
-  const outside = join(probeDirReal, 'outside')
-  const inside = join(probeDirReal, 'inside')
-  mkdirSync(outside, { recursive: true })
-  mkdirSync(inside, { recursive: true })
-  const targetOutside = join(outside, 'canary.txt')
-  const targetInside = join(inside, 'canary.txt')
-  const profile = buildProbeProfile(inside)
-  let insideAllowed = false
-  let insideWrite = false
-  let outsideBlocked = false
   try {
-    try {
-      execFileSync('sandbox-exec', ['-p', profile, '/bin/echo', 'ok'], { encoding: 'utf-8', cwd: inside, stdio: ['ignore', 'pipe', 'pipe'] })
-      insideAllowed = true
-    } catch { /* 区内进程无法在沙箱内启动 */ }
-    try {
-      execFileSync('sandbox-exec', ['-p', profile, '/usr/bin/touch', targetInside], { encoding: 'utf-8', cwd: inside, stdio: ['ignore', 'pipe', 'pipe'] })
-      insideWrite = existsSync(targetInside)
-    } catch { /* 区内写入被拒：profile 不成立 */ }
-    try {
-      execFileSync('sandbox-exec', ['-p', profile, '/usr/bin/touch', targetOutside], { encoding: 'utf-8', cwd: inside, stdio: ['ignore', 'pipe', 'pipe'] })
-    } catch {
-      outsideBlocked = true
+    mkdirSync(probeDir, { recursive: true })
+    // 策略按真实路径匹配；先创建探针目录，再解析软链路径。
+    const probeDirReal = realpathSync(probeDir)
+    const candidate = join(probeDirReal, 'candidate')
+    const evidence = join(probeDirReal, 'evidence')
+    const outside = join(probeDirReal, 'outside')
+    mkdirSync(candidate, { recursive: true })
+    mkdirSync(evidence, { recursive: true })
+    mkdirSync(outside, { recursive: true })
+    const sourceFile = join(candidate, 'source.txt')
+    const evidenceFile = join(evidence, 'node-proof.txt')
+    const shellEvidenceFile = join(evidence, 'shell-proof.txt')
+    const outsideReadFile = join(outside, 'read-canary.txt')
+    const outsideWriteFile = join(outside, 'write-canary.txt')
+    const symlinkFile = join(evidence, 'source-link.txt')
+    writeFileSync(sourceFile, 'source-base\n')
+    writeFileSync(outsideReadFile, 'outside-base\n')
+    symlinkSync(sourceFile, symlinkFile)
+    const ctx = {
+      profile: 'review',
+      isolation_guarantee: ISOLATION_GUARANTEE.ENFORCED,
+      candidate_path: candidate,
+      evidence_path: evidence,
+      scratch_path: evidence,
+      test_overlay_path: '',
+      capabilities: {
+        candidate: { read: true, write: false },
+        source: { read: true, write: false },
+        evidence: { read: true, write: true },
+        test_overlay: { read: false, write: false },
+      },
+      writable_roots: [evidence],
     }
-    if (!outsideBlocked && existsSync(targetOutside)) outsideBlocked = false
-    else if (!existsSync(targetOutside)) outsideBlocked = true
-  } finally {
+    let insideAllowed = false
+    let insideWrite = false
+    let outsideReadBlocked = false
+    let outsideBlocked = false
+    let shellWriteEnforced = false
+    let symlinkWriteBlocked = false
+    try {
+      const profile = buildNodeExecutionProfile(ctx, { executable_paths: [process.execPath] })
+      const nodeScript = `const fs=require('node:fs'); const read=p=>{try{return fs.readFileSync(p,'utf8').trim()}catch(e){return e.code}}; const write=p=>{try{fs.writeFileSync(p,'tampered\\n');return 'written'}catch(e){return e.code}}; console.log(JSON.stringify({source:read(${JSON.stringify(sourceFile)}),outsideRead:read(${JSON.stringify(outsideReadFile)}),insideWrite:write(${JSON.stringify(evidenceFile)}),sourceWrite:write(${JSON.stringify(sourceFile)}),outsideWrite:write(${JSON.stringify(outsideWriteFile)}),symlinkWrite:write(${JSON.stringify(symlinkFile)})}))`
+      const nodeRun = spawnSync('sandbox-exec', ['-p', profile, process.execPath, '-e', nodeScript], { encoding: 'utf-8', timeout: 5000 })
+      let nodeResult = null
+      if (nodeRun.status === 0 && nodeRun.stdout) {
+        try { nodeResult = JSON.parse(nodeRun.stdout.trim()) } catch { /* 探针输出不合法，判 unavailable */ }
+      }
+      insideAllowed = !!nodeResult
+      insideWrite = !!nodeResult && nodeResult.insideWrite === 'written' && existsSync(evidenceFile)
+      outsideReadBlocked = !!nodeResult && nodeResult.outsideRead === 'EPERM'
+      outsideBlocked = !!nodeResult && nodeResult.outsideWrite === 'EPERM' && !existsSync(outsideWriteFile)
+      symlinkWriteBlocked = !!nodeResult && nodeResult.symlinkWrite === 'EPERM'
+
+      const shellScript = [
+        `printf 'tampered\\n' > ${shellQuote(sourceFile)}`,
+        `printf 'shell-proof\\n' > ${shellQuote(shellEvidenceFile)}`,
+        `printf 'tampered\\n' > ${shellQuote(outsideWriteFile)}`,
+        `printf 'tampered\\n' > ${shellQuote(symlinkFile)}`,
+      ].join('; ')
+      const shellRun = spawnSync('sandbox-exec', ['-p', profile, '/bin/sh', '-c', shellScript], { encoding: 'utf-8', timeout: 5000 })
+      const sourceUnchanged = readFileSync(sourceFile, 'utf-8') === 'source-base\n'
+      shellWriteEnforced = !shellRun.error && shellRun.signal === null && sourceUnchanged
+        && existsSync(shellEvidenceFile) && !existsSync(outsideWriteFile)
+      symlinkWriteBlocked = symlinkWriteBlocked && sourceUnchanged
+    } finally {
+      if (!options.keep_probe_root) {
+        try { rmSync(probeDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }
+    }
+    const probeEvidence = { insideAllowed, insideWrite, outsideReadBlocked, outsideBlocked, shellWriteEnforced, symlinkWriteBlocked }
+    if (Object.values(probeEvidence).every((value) => value === true)) {
+      return {
+        guarantee: ISOLATION_GUARANTEE.ENFORCED,
+        platform,
+        backend: 'sandbox-exec',
+        evidence: probeEvidence,
+      }
+    }
+    return {
+      guarantee: ISOLATION_GUARANTEE.UNAVAILABLE,
+      platform,
+      backend: 'sandbox-exec',
+      evidence: { ...probeEvidence, reason: '探针未同时满足：区内进程/合法写入成功，区外读取/写入、shell 与符号链接写入均被拒' },
+    }
+  } catch (error) {
     if (!options.keep_probe_root) {
       try { rmSync(probeDir, { recursive: true, force: true }) } catch { /* ignore */ }
     }
-  }
-  if (insideAllowed && insideWrite && outsideBlocked) {
     return {
-      guarantee: ISOLATION_GUARANTEE.ENFORCED,
+      guarantee: ISOLATION_GUARANTEE.UNAVAILABLE,
       platform,
       backend: 'sandbox-exec',
-      evidence: { insideAllowed, insideWrite, outsideBlocked },
+      evidence: { reason: `探针目录或隔离策略执行失败：${error?.code || error?.message || '未知错误'}` },
     }
-  }
-  return {
-    guarantee: ISOLATION_GUARANTEE.UNAVAILABLE,
-    platform,
-    backend: 'sandbox-exec',
-    evidence: { insideAllowed, insideWrite, outsideBlocked, reason: '探针未同时满足：区内进程可跑、区内可写、区外写入被拒' },
   }
 }
 

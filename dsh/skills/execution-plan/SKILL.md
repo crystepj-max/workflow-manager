@@ -4,7 +4,8 @@ description: "AI 任务批量调度（Execution Plan）：从候选「已定义�
 ---
 
 # Execution Plan｜批量调度（M3）
-> 本 Skill 属「AI 任务交付」集合（见 `docs/design/ai-task-define-delivery/skill-set.md`）；通用副本同步至 my-agent-skills（下游同步与宿主安装态截至 2026-10-04，main=`c9c08cb8` 仍未验证，见文末说明）。
+> **历史副本**：本文件不再是当前入口或维护源，保留供追溯且不应安装。当前项目级 Skill 位于 `dev-flow/.agents/skills/execution-plan/`。
+> 以下内容描述 2026-10-04 之前的旧分发安排，仅作历史记录。当前 Skill 的维护与使用方式见 `docs/design/ai-task-define-delivery/skill-set.md`。
 
 
 本 skill **只负责「哪些任务现在开始」**，不负责把需求谈清楚，也不负责单任务施工。

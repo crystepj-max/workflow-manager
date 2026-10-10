@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
 import { loadHost } from './helpers/load-host.mjs'
-import { REPO, DSH_HOME, makeFs, makeSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
+import { REPO, DSH_HOME, makeFs, makeIsolatedSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
 
 const require = createRequire(import.meta.url)
 
@@ -86,7 +86,7 @@ function env({ template = OPTIMIZE_LIKE, workspaceSource = null, engine = null, 
     if (cmd === 'context') return { ok: true, workspace: null, events: [] }
     return { ok: true }
   }
-  const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', wsHost, spawnHandler: ebSpawnHandler })
+  const sub = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT', wsHost, spawnHandler: ebSpawnHandler })
   const { handlers, definedTools, events, ctx } = loadHost({
     fs, subprocess: sub, sandboxPolicy,
     agents: { requireInitiator: () => ({}), currentInitiator: () => (execCwd ? { session: { header: { cwd: execCwd } } } : null) },
@@ -155,6 +155,12 @@ test('EB1 冻结成功：检查点中止 + 注入已核验引用自动恢复 + �
   await until(() => eng.starts.length >= 2, '基线恢复段启动')
   // 冻结成功后原段被中止，恢复段从检查点注入已核验引用
   const resumeReq = eng.starts[1]
+  assert.equal(eng.starts[0].subagentProvider, 'vwf-node-isolated')
+  assert.equal(resumeReq.subagentProvider, 'vwf-node-isolated', '检查点恢复仍使用隔离 Provider')
+  assert.equal(eng.starts[0].args.requireIsolatedNodes, true)
+  assert.equal(resumeReq.args.requireIsolatedNodes, true)
+  assert.notEqual(eng.starts[0].args.routes.nodes.execute, resumeReq.args.routes.nodes.execute,
+    '检查点恢复必须获得新路由，不能复用已撤销令牌')
   assert.equal(resumeReq.args.entry, 'execute')
   assert.equal(resumeArgsDigest(resumeReq), real)
   assert.equal(resumeReq.args.evaluation_baseline.version, 1)

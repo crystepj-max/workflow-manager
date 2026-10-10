@@ -13,10 +13,10 @@
 |------|------|
 | `dsh/roles/*.md` | 角色提示词（12 个正式内置角色；用户自建的自定义角色也放这里） |
 | `dsh/roles/builtin-roles.json` | 正式内置角色清单事实源（id / name / summary / definition / builtin / readonly） |
-| `dsh/skills/requirements-analysis/` | requirements-analysis 技能真源（SKILL.md + evals/ + references/，内联自洽版） |
-| `dsh/skills/execution-plan/` | execution-plan（批量调度 / 到点开跑）技能真源 |
-| `dsh/install-requirements-analysis.sh` | requirements-analysis 真源 → 公共池安装脚本 |
-| `dsh/install-execution-plan.sh` | execution-plan 真源 → 公共池安装脚本 |
+| `dsh/skills/requirements-analysis/` | workflow-manager 维护的 requirements-analysis 技能真源（SKILL.md + evals/ + references/） |
+| `dsh/skills/execution-plan/` | execution-plan 历史副本；当前维护源在 dev-flow 项目级 Skill |
+| `dsh/install-requirements-analysis.sh` | requirements-analysis 真源 → 用户级技能目录分发脚本 |
+| `dsh/install-execution-plan.sh` | 旧分发入口保护脚本；不安装 execution-plan |
 
 ## 角色库
 
@@ -43,21 +43,22 @@
 - 角色文件不进 args：各节点 agent 开工时按 `args.roleDir`（缺省 `dsh/roles`）自行读取对应
   `<role>.md` 并严格遵循；生成技能包内置角色副本，目标工作区没有 `dsh/roles/` 时也能运行。
 
-## 技能真源与安装脚本（仓库 = 真源）
+## Skill 来源与分发边界
 
-本仓库是若干公共池技能的**版本化真源**：改仓库 → 跑安装脚本 → 公共池生效（改仓库即改全局）。
+workflow-manager 是 `requirements-analysis` 的维护与分发来源，直接安装到用户级 Skill 目录。
+`execution-plan` 的唯一维护来源是 dev-flow 仓库，并作为项目级 Skill 随 dev-flow 项目加载；
+workflow-manager 中保留的同名文件只供历史追溯，不参与分发。两者都不再由 `my-agent-skills` 负责分发。
 
-| 技能 | 真源（本仓库） | 安装脚本 | 公共池目标 |
+| Skill | 维护来源 | 分发方式 | 生效位置 |
 |------|----------------|----------|------------|
-| requirements-analysis | `dsh/skills/requirements-analysis/`（SKILL.md + evals/ + references/） | `dsh/install-requirements-analysis.sh` | `~/.agents/skills/requirements-analysis/` |
-| execution-plan | `dsh/skills/execution-plan/`（SKILL.md） | `dsh/install-execution-plan.sh` | `~/.agents/skills/execution-plan/` |
+| requirements-analysis | workflow-manager：`dsh/skills/requirements-analysis/` | `dsh/install-requirements-analysis.sh` | 用户级 `~/.agents/skills/requirements-analysis/` |
+| execution-plan | dev-flow：`.agents/skills/execution-plan/` | 随 dev-flow 项目加载 | dev-flow 项目会话 |
 
-**技能变更落地 GitHub 的同步流程：**
+**requirements-analysis 的本地分发流程：**
 
-1. 改真源文件（如 `dsh/skills/requirements-analysis/SKILL.md`）；
-2. 跑安装脚本部署公共池（`./dsh/install-requirements-analysis.sh`），并 diff 校验真源与线上生效版逐字节一致；
-3. 开分支 `dev-<runId>` 提交推送 → PR → 合并 main（分支命名派生规则见
-   `docs/design/workspace-directory-convention.md` §1.3）。
+1. 只修改 workflow-manager 中的技能真源；
+2. 运行 `./dsh/install-requirements-analysis.sh`，脚本会备份已有用户级入口后安装副本；
+3. 通过文件比较核对安装副本与真源。新 DSH 会话加载用户级入口后生效。
 
 **requirements-analysis 为何是自洽（内联）版**：其编排依赖的 `triage` / `grill-with-docs` / `wayfinder` /
 `to-tickets` 是「仅限用户调用」的命令型 skill（frontmatter `disable-model-invocation: true`，刻意设计），

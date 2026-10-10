@@ -668,11 +668,22 @@ export function compileBlueprint(bp, opts = {}) {
     '  }',
     '  return v',
     '}',
-    'function nodeCallOpts(id, round) {',
+    // LOC-041: route model calls through an opaque token issued by the trusted host.
+    'function nodeProviderRoute(id, kind, itemNo) {',
+    '  const routes = A.routes && typeof A.routes === \'object\' && !Array.isArray(A.routes) ? A.routes : {}',
+    '  const table = kind === \'attribution\' ? routes.attribution : routes.nodes',
+    '  const token = table && typeof table === \'object\' && Object.prototype.hasOwnProperty.call(table, id) ? table[id] : null',
+    '  if (typeof token !== \'string\' || !token) {',
+    '    throw new Error(\'模型节点缺少宿主签发的隔离路由：\' + id)',
+    '  }',
+    '  return \'vwf-node-isolated:\' + token + (kind === \'attribution\' ? \':attribution\' : (Number.isSafeInteger(itemNo) && itemNo > 0 ? \':item:\' + itemNo : \'\'))',
+    '}',
+    'function nodeCallOpts(id, round, routeKind) {',
     '  const n = BYID[id]',
     '  const model = MODELS[id] || {}',
     '  const opts = { label: (n.label || id) + (round > 0 ? \' R\' + round : \'\') }',
-    '  if (model.provider) opts.provider = model.provider',
+    '  const isolatedRoute = nodeProviderRoute(id, routeKind || \'node\')',
+    '  opts.provider = isolatedRoute',
     '  if (model.model) opts.model = model.model',
     '  if (n.output && n.output.schema) opts.schema = n.output.schema',
     '  // #93 工作区 cwd 由引擎 run 级 startReq.cwd 承载，不再逐节点传 opts.cwd——',
@@ -1319,7 +1330,8 @@ export function compileBlueprint(bp, opts = {}) {
     '    const itemResults = source.length === 0 ? [] : await pipeline(indexed, async function (entry) {',
     '      const model = MODELS[current] || {}',
     '      const itemOpts = { label: (n.label || current) + \' #\' + (entry.index + 1) + (round > 0 ? \' R\' + round : \'\') }',
-    '      if (model.provider) itemOpts.provider = model.provider',
+      '      const isolatedItemRoute = nodeProviderRoute(current, \'node\', entry.index + 1)',
+      '      itemOpts.provider = isolatedItemRoute',
     '      if (model.model) itemOpts.model = model.model',
     '      if (n.output && n.output.schema) itemOpts.schema = n.output.schema',
     '      // 工作区 cwd 同 callNode：由引擎 run 级 startReq.cwd 承载，不再逐节点传',
@@ -1554,7 +1566,7 @@ export function compileBlueprint(bp, opts = {}) {
       '      const historyText = history.map(function (h) { return \'第 \' + h.round + \' 轮 [\' + h.stage + \'] \' + h.verdict + \'：\' + h.reason }).join(\'\\n\')',
       '      const attrKey = \'__attribution|\' + __digest({ i: issueBlock(), l: historyText.length })',
       '      autoOpen()',
-      '      const ar = await modelCall(attrKey, reschedulePrompt(historyText), { label: \'超限归因\', schema: { type: \'object\', properties: { reschedule: { oneOf: [{ type: \'object\', properties: { attribution: { type: \'string\' }, split: { type: \'array\', items: { type: \'string\' } }, human_action: { type: \'string\' } }, required: [\'attribution\', \'split\', \'human_action\'], additionalProperties: false }, { type: \'null\' }] }, reason: { type: \'string\' } }, required: [\'reason\'], additionalProperties: false } })',
+      '      const ar = await modelCall(attrKey, reschedulePrompt(historyText), Object.assign(nodeCallOpts(current, round, \'attribution\'), { label: \'超限归因\', schema: { type: \'object\', properties: { reschedule: { oneOf: [{ type: \'object\', properties: { attribution: { type: \'string\' }, split: { type: \'array\', items: { type: \'string\' } }, human_action: { type: \'string\' } }, required: [\'attribution\', \'split\', \'human_action\'], additionalProperties: false }, { type: \'null\' }] }, reason: { type: \'string\' } }, required: [\'reason\'], additionalProperties: false } }))',
       '      const re = (ar && ar.value && ar.value.reschedule) ? ar.value : null',
       '      return { status: \'FAILED_MAX_ROUNDS\', taskId: TASK, rounds: MAX_ROUNDS, results: results, history: history, reschedule: re ? re.reschedule : null, technical_budget: technicalBudgetSnapshot() }',
     ] : [
@@ -1772,6 +1784,7 @@ export function blueprintSourceRel(bpId) {
 
 export function skillWrap(bp) {
   const src = blueprintSourceRel(bp.id);
+  const hasModelNodes = (bp.nodes || []).some((node) => node && !node.mechanical);
   // 描述拼接归一（FIX-66，历史 LOC-034）：蓝图 description 多数已以句号结尾，无脑再追加「。」会产出
   // 「。。」；description 为空时也不应留下孤立的「：」分隔符。
   const desc = String(bp.description || '').trim().replace(/[。．.]+$/, '');
@@ -1786,7 +1799,9 @@ export function skillWrap(bp) {
     '## runbook',
     '1. 装配 args（taskId / runDir / entry / issueBody 或 requirement / 续跑参数），见蓝图契约 `docs/design/blueprint-schema.md`；模型绑定已在编译时固化（bindings.models），运行时不传 models。optimize 类模板按需补 `resource_kind`（git / files / document / config / other）。',
     '2. 调用 `wf_run` 工具起跑：`templateId` = `' + bp.id + '`，`taskId` = 任务标识（如 issue-12），其余字段照 args。**首选此路径**——由插件自身发起，本次运行即同一 Logical Run（分段 / 任务归属 / 完成类型齐全，看板可续跑、暂停、指导）。',
-    '   - 回退（仅当 `wf_run` 不可用、报错提示无法访问 workflowEngine 时）：改用内置 `workflow` 工具执行编译产物——`script` = `.generated/' + bp.id + '/script.mjs` 全文，`meta` = `.generated/' + bp.id + '/meta.json`；并**在会话输出中显式提示「本次运行记录将退化为单段、无完成类型，且不可从看板续跑」**，不得声称记录完整。',
+    hasModelNodes
+      ? '   - 隔离要求：模型节点必须使用 `wf_run`。宿主会为每个执行段签发隔离路由；不得改用内置 `workflow` 工具直接执行编译产物。若 `wf_run` 不可用，明确报告阻塞并等待宿主恢复，不得发起模型调用。'
+      : '   - 回退（仅当 `wf_run` 不可用、报错提示无法访问 workflowEngine 时）：可改用内置 `workflow` 工具执行编译产物——`script` = `.generated/' + bp.id + '/script.mjs` 全文，`meta` = `.generated/' + bp.id + '/meta.json`；并**在会话输出中显式提示「本次运行记录将退化为单段、无完成类型，且不可从看板续跑」**，不得声称记录完整。',
     '3. 按返回状态机驱动：',
     '   - `AWAITING_HUMAN_<节点id>`：呈报告 + 人工确认卡；通过 → 以该门禁节点为 entry 且 approved=true 续跑（只走 success 出边）；非 true（含 false）→ 仍以同一门禁节点续跑，引擎再挂起，不走 failure。',
     '   - `WAITING_HUMAN`：呈 Decision Package（why / current_state / options / subsequent_effects）；按 `decision_id` + `user_choice` 续跑。控制类 Result：`STOP` 停止本 Run、`USER_ACCEPTED` 完成且不改写原 Outcome、`ADD_BUDGET` 显式 +1 额度并沿被拦边再走（须写入 Decision/Control Record，不得隐式恢复）。`reason=MAX_ROUNDS_REACHED` 表示自动回退额度耗尽，原 Node Business Outcome 必须原样保留。业务 Result 沿该蓝图 `$human-decision` 出边继续；无对应出边则拒绝该选择并保持等待。',

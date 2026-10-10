@@ -14,9 +14,8 @@ const PROVIDER = 'deepseek-official';
 // 默认档模型（开发/执行/门禁/收口等非验证节点）
 const DEFAULT_MODEL = 'deepseek-flash';
 // 验证角色模型（承担独立验证或回归职责的节点：收敛审查 / 审核 / 测试 / 回归验证 / 评估）
-// FIX-234：deepseek-v4-flash 已从配置删除（真机 MODEL_NOT_CONFIGURED 实证），
-// 验证角色默认模型改为现存配置 deepseek-v4.1-flash（基线 V1 决策，2026-09-20）。
-const VERIFY_MODEL = 'deepseek-v4.1-flash';
+// 用户于 2026-10-08 确认六个验证角色使用 Pro，其余 13 个非验证角色使用 Flash。
+const VERIFY_MODEL = 'deepseek-v4-pro';
 
 // LOC-019 需求基线 V1 §6 逐模板映射表：四套内置模板默认绑定 DeepSeek 化
 const EXPECTED = {
@@ -74,13 +73,13 @@ test('LOC-019 内置模板不再绑定非 DeepSeek provider', () => {
   }
 });
 
-test('LOC-019 内置模板保持默认弱异源语义：同 provider 不同 model 通过并给出弱异源警告', () => {
+test('LOC-019 construction / diagnose 使用不同官方模型并保留弱异源警告', () => {
   for (const id of ['wf-construction-full-feature', 'wf-diagnose']) {
     const bp = loadTemplate(id);
     const r = validateBlueprint(bp, { requireModels: true });
     assert.equal(r.ok, true, id + ' 必须通过校验：' + JSON.stringify(r.errors));
-    assert.equal(r.warnings.length, 1, id + ' 应产生恰好 1 条弱异源警告');
-    assert.ok(r.warnings[0].includes('弱异源'), id + ' 的警告应为弱异源：' + JSON.stringify(r.warnings));
+    assert.equal(r.warnings.length, 1, id + ' 同 provider 不同模型应各有一条弱异源警告');
+    assert.match(r.warnings[0], /^弱异源：dev\/review 同 provider/);
   }
 });
 

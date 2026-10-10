@@ -222,10 +222,26 @@ function discoverDevDsh() {
 function sourceVersion() {
   const host = readFileSync(join(pluginRoot, 'src', 'host.js'))
   const client = readFileSync(join(pluginRoot, 'src', 'client.js'))
-  // 角色库深化后运行时行为还由内核与清单决定：改它们不改 host/client 时
-  // 联合版本必须变化，否则动态注入后 cordis_inspect_self 核对会漏掉内核漂移
+  // 动态插件通过 dist 加载隔离路由、worker 和节点策略；改这些运行内核时，
+  // 联合版本也必须变化，否则 cordis_inspect_self 会漏掉实际执行代码漂移。
   const roleLibrary = readFileSync(join(repoRoot, 'scripts', 'role-library.cjs'))
   const roleManifest = readFileSync(join(repoRoot, 'dsh', 'roles', 'builtin-roles.json'))
+  const runtimeFiles = [
+    join(repoRoot, 'scripts', 'node-provider-core.cjs'),
+    join(repoRoot, 'scripts', 'node-provider-routes.mjs'),
+    join(repoRoot, 'scripts', 'node-isolation-host-client.cjs'),
+    join(repoRoot, 'scripts', 'node-isolation-host.mjs'),
+    join(repoRoot, 'scripts', 'node-isolation.mjs'),
+    join(repoRoot, 'scripts', 'node-isolation-launcher.mjs'),
+    join(repoRoot, 'scripts', 'workspace-isolation.mjs'),
+    join(repoRoot, 'scripts', 'workspace-isolation-host-helpers.mjs'),
+    join(repoRoot, 'scripts', 'cwf-validate.mjs'),
+    join(repoRoot, 'docs', 'design', 'node-isolation', 'schema.json'),
+    join(pluginRoot, 'package.json'),
+    join(pluginRoot, 'src', 'node-provider-worker.mjs'),
+    join(pluginRoot, 'src', 'node-provider-loopback-proxy.mjs'),
+    join(pluginRoot, 'src', 'structured-output.mjs'),
+  ]
   const hash = createHash('sha256')
     .update(host)
     .update('\0')
@@ -234,9 +250,8 @@ function sourceVersion() {
     .update(roleLibrary)
     .update('\0')
     .update(roleManifest)
-    .digest('hex')
-    .slice(0, 12)
-  return `vwf-${hash}`
+  for (const file of runtimeFiles) hash.update('\0').update(readFileSync(file))
+  return `vwf-${hash.digest('hex').slice(0, 12)}`
 }
 
 function argValue(argv, name) {
@@ -458,7 +473,7 @@ if (command === 'status') {
   console.log(`- web Profile：${profile ? '已初始化' : '未初始化（首次 start 时由 DSH 默认模板创建）'}`)
   console.log(`- 正式 VWF 组合包：${formalBundleInstalled ? '已安装（冲突）' : '未安装'}`)
   console.log(`- 开发 DSH：${running ? `运行中（PID ${pid}，${active.urls.join(', ')}）` : '未运行'}`)
-  console.log(`- 当前联合版本：${version}（host + client + role-library + role-manifest）`)
+  console.log(`- 当前联合版本：${version}（host + client + 节点隔离运行内核 + 角色库）`)
   console.log(`- 本任务命名空间：${namespace ?? '未指定（请传 --task，或让 .agent-runs/ 下只留一个 Run）'}`)
   if (pluginName) console.log(`- 本任务插件注册名：${pluginName}`)
   console.log(`- 登记表中当前激活的任务：${ledgerNs ?? '（无）'}`)
