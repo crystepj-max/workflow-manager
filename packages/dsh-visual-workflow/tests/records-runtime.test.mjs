@@ -15,7 +15,7 @@ import path, { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadHost } from './helpers/load-host.mjs'
-import { REPO, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
+import { REPO, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeIsolatedSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 import { recordsCommit, recordsList, recordsGet } from '../../../scripts/records-host.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -77,7 +77,7 @@ function env({ value = RUN_VALUE, recordsHost = null, wsHost = null, seed = {}, 
   }
   Object.assign(base, seed)
   const fs = makeFs(base)
-  const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost, wsHost })
+  const sub = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost, wsHost })
   const engine = {
     start: (spec) => {
       if (engineCapture) engineCapture(spec)

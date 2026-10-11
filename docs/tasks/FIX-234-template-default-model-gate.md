@@ -28,15 +28,15 @@
 
 **目标：** 四套内置模板在现配置下开箱可跑（6 个验证角色节点默认绑定指向现存模型）；今后配置再漂移时，发布前机器闸门输出逐节点核对清单并拦截，不再靠真机起跑发现。
 
-**范围：** 做——四套蓝图 6 个验证角色节点 `deepseek-v4-flash` → `deepseek-v4.1-flash`（蓝图重生成，禁止手改 `.generated/`）；映射表测试同步；`release:verify` 新增「默认绑定 vs 当前可用模型」检查段（产品 DSH 可达时逐节点核对、输出明确失败清单；不可达显式跳过留痕；核对逻辑可注入 stub 单测）。不做——仓外 DSH 应用配置、#74 探针恢复语义、#233 形态误判（在途）、编辑器 UI、两层设计重议、历史模板。
+**范围：** 做——四套蓝图使用当前官方 API ID（用户确认：`deepseek-flash` 显示为 DeepSeek-V41-Flash，`deepseek-v4-pro` 显示为 DeepSeek-V4-Pro；用户于 2026-10-08 确认六个验证节点使用 `deepseek-v4-pro`，其余 13 个节点使用 `deepseek-flash`；据此重生成，禁止手改 `.generated/`）；映射表测试同步；`release:verify` 新增「默认绑定 vs 当前可用模型」检查段（产品 DSH 可达时逐节点核对、输出明确失败清单；不可达显式跳过留痕；核对逻辑可注入 stub 单测）。不做——仓外 DSH 应用配置、#74 探针恢复语义、#233 形态误判（在途）、编辑器 UI、历史记录重写。
 
 **验收标准：**
 
-- [ ] AC-01：四套蓝图 6 个验证角色节点 = `deepseek-official/deepseek-v4.1-flash`，其余 11 节点保持 `deepseek-flash`（映射表测试全绿）。
+- [ ] AC-01（2026-10-08 更新）：四套正式内置模板只绑定官方可用 ID `deepseek-flash`（DeepSeek-V41-Flash）和/或 `deepseek-v4-pro`（DeepSeek-V4-Pro）；六个验证节点绑定 `deepseek-v4-pro`、其余 13 个节点绑定 `deepseek-flash`；映射表和运行时目录审计全绿。
 - [ ] AC-02：`npm run generate` 后 `.generated` 一致（validate 通过），无手改。
 - [ ] AC-03：检查段在产品 DSH 不可达时显式跳过留痕，整体不误报失败。
 - [ ] AC-04：检查段正（全绿清单）负（失败 + 逐节点清单）路径以 stub 单测固化。
-- [ ] AC-05：弱异源语义保持（construction / diagnose 仍恰好 1 条弱异源警告）。
+- [ ] AC-05：沿用 2026-09-20 已确认的弱异源验收：construction / diagnose 的执行与审核模型不同，并各产生 1 条弱异源警告；如要改变此验收，须先确认新的模型分配或关闭异源检查。
 - [ ] AC-06：`npm run validate` 与 `npm test` 全绿。
 - [ ] AC-07：UAT-01 真机核对清单通过（含可选负路径复演）。
 
@@ -51,7 +51,9 @@
 ## 已拍板的产品口径
 
 - ✅ 闸门方案 = **A · 双层闸门**（仓库映射表测试 + `release:verify` 检查段）。B（仓库清单，第二事实源自身会漂移）与 C（仅运行时提示，不满足可核对产物）不取。确认人 crystepj-max，2026-09-20。
-- ✅ 验证角色新默认 = **`deepseek-v4.1-flash`**：保持验证/执行异模型两层设计与弱异源语义。前提「配置中确实可选」设为 UAT-01 显式核对点。确认人 crystepj-max，2026-09-20。
+- 🕘 历史决定：2026-09-20 曾选择 `deepseek-v4.1-flash`，当时按该字符串认为它在产品 DSH 中可用。
+- ✅ 官方名称映射（2026-10-08）：`deepseek-flash` 显示为 DeepSeek-V41-Flash，`deepseek-v4-pro` 显示为 DeepSeek-V4-Pro。
+- ✅ 角色分配（2026-10-08）：六个验证节点（construction 的 review/test、diagnose 的 review/regression、explore/optimize 的 evaluate）使用 `deepseek-v4-pro`；其余 13 个非验证节点使用 `deepseek-flash`。construction/diagnose 保留 `heteroCheck=weak`，执行与审核模型不同、同 provider，各产生一条弱异源警告。该决定已写入隔离候选；生成、完整校验、产品目录核对和 UAT 仍是后续验收。
 
 ## 与 #233 的边界
 
@@ -68,3 +70,4 @@
 | 2026-09-20T14:54:35Z | 待确认 | 需求分析完成：根因修正（配置漂移无闸门，非 LOC-019 漏网）+ 过期面实测（6 节点）+ 双层闸门/新默认模型决策（用户拍板）；规格 V1 + Definition Check 落盘（未决产品事项 0）；issue 正文更新，打 `sized-m` |
 | 2026-09-20T15:06:29Z | 已定义 | 用户确认基线 V1。登记册登记（`remote: GitHub #234`、`github_sync: #234`）、看板重写、issue 正文状态改「已定义」并写入定义时间、打 `ready-for-agent`。🟡 规格与任务卡落盘于工作区，入库提交待授权呈递 |
 | 2026-09-20T16:12:00Z | 已定义 | 门禁字段规范化（值均不变）：基线→纯 V1；无人值守许可→纯「允许」，原注释「仓库侧实现 + 可 stub 单测可无人值守；UAT-01 产品 DSH 实测属发布场景（随 V1 基线一并确认）」于本行留痕，范围界定不变；优先级→纯「P1」，原注释「随 V1 基线一并确认」由 definition-check.md 与本行留痕，适配门禁机械判据 （夜间批次评估修复 fix-preflight-null-baseline-r1） |
+| 2026-10-08 | 已定义 | 用户确认官方 ID 与显示名的对应关系：DeepSeek-V41-Flash=`deepseek-flash`、DeepSeek-V4-Pro=`deepseek-v4-pro`。六个验证节点使用 `deepseek-v4-pro`、其余 13 个节点使用 `deepseek-flash`；保留弱异源验收。该决定已在隔离候选落盘，生成与完整校验尚待复核。 |

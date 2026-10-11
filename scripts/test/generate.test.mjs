@@ -9,11 +9,87 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { compileBlueprint, generateAll, generateUserSkill, projectToVwf, skillWrap, writeUserSkill, collectBuiltinRoles, loadBuiltinRoleIds, loadBuiltinRoleDefs } from '../generate.mjs';
 import { generateBaseline, generateInTemp, loadBaseline, makeFixtureRolesDir } from './helpers/baseline-harness.mjs';
+import { runGeneratedScript } from './helpers/runtime-harness.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tplDir = path.join(here, '../../templates');
 const bp = loadBaseline();
 const fanoutBp = JSON.parse(readFileSync(path.join(here, 'fixtures/fanout-blueprint.json'), 'utf8'));
+
+test('R10：生成的节点与 fanout 模型调用携带宿主签发的路由令牌', async () => {
+  const singleNode = {
+    id: 'r10-route-token', displayName: 'R10 路由令牌', entry: 'work',
+    control: { maxRounds: 2 },
+    nodes: [{
+      id: 'work', profile: 'dev', label: '工作节点', goal: '完成任务',
+      output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false }, successCondition: '$.ok == true' },
+    }],
+    edges: [
+      { from: 'work', to: '$end', on: 'success' },
+      { from: 'work', to: '$end', on: 'failure' },
+    ],
+    bindings: { models: { work: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } } },
+  };
+  const single = compileBlueprint(singleNode);
+  const calls = [];
+  await runGeneratedScript(single.script, {
+    args: { taskId: 'r10-route-token', routes: { nodes: { work: 'opaque-work-token' }, attribution: {} } },
+    agent: async (_prompt, opts) => { calls.push(opts); return { ok: true }; },
+  });
+  assert.equal(calls[0].provider, 'vwf-node-isolated:opaque-work-token');
+  assert.equal(calls[0].model, 'deepseek-v4-pro', '模型名继续使用蓝图绑定');
+
+  const fan = compileBlueprint(fanoutBp);
+  const fanCalls = [];
+  await runGeneratedScript(fan.script, {
+    args: { taskId: 'r10-fanout-route', items: ['a', 'b'], routes: { nodes: { fan: 'opaque-fan-token', finish: 'opaque-finish-token' }, attribution: {} } },
+    agent: async (_prompt, opts) => { fanCalls.push(opts); return { value: 'ok' }; },
+  });
+  assert.deepEqual(fanCalls.slice(0, 2).map((opts) => opts.provider), [
+    'vwf-node-isolated:opaque-fan-token:item:1',
+    'vwf-node-isolated:opaque-fan-token:item:2',
+  ], '扇出子项按序号绑定路由');
+  assert.equal(fanCalls[0].model, 'deepseek-v4-pro');
+});
+
+test('R10：宿主要求隔离时，缺少路由令牌不能退回蓝图模型直连', async () => {
+  const blueprint = {
+    id: 'r10-required-route', displayName: 'R10 必需路由', entry: 'work',
+    control: { maxRounds: 1 },
+    nodes: [{
+      id: 'work', profile: 'dev', label: '工作节点', goal: '完成任务',
+      output: { schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false }, successCondition: '$.ok == true' },
+    }],
+    edges: [
+      { from: 'work', to: '$end', on: 'success' },
+      { from: 'work', to: '$end', on: 'failure' },
+    ],
+    bindings: { models: { work: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } } },
+  };
+  const compiled = compileBlueprint(blueprint);
+  const calls = [];
+  await assert.rejects(runGeneratedScript(compiled.script, {
+    args: { taskId: 'r10-required-route', routes: { nodes: {}, attribution: {} } },
+    agent: async (_prompt, opts) => { calls.push(opts); return { ok: true }; },
+  }), /缺少宿主签发的隔离路由/);
+  assert.deepEqual(calls, [], '路由令牌缺失时不得调用 agent');
+  assert.doesNotMatch(compiled.script, /else if \(model\.provider\) opts\.provider/,
+    '编译产物不得保留直接 Provider 回退');
+});
+
+test('R10：模型工作流的 Skill 禁止用内置 workflow 工具绕过宿主隔离', () => {
+  const skill = skillWrap(bp);
+  assert.match(skill, /不得改用内置 `workflow` 工具直接执行编译产物/);
+  assert.match(skill, /模型节点必须使用 `wf_run`/);
+
+  const mechanicalOnly = {
+    id: 'mechanical-only', displayName: '机械检查', entry: 'check',
+    nodes: [{ id: 'check', mechanical: 'construction-preflight', profile: 'evaluator' }],
+    edges: [],
+  };
+  assert.match(skillWrap(mechanicalOnly), /改用内置 `workflow` 工具执行编译产物/,
+    '纯机械工作流仍可使用无模型调用的轻量回退');
+});
 
 test('S2 生成器：内置模板产物四件套齐全', () => {
   const { files, report } = generateAll(tplDir);

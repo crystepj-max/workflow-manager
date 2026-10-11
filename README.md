@@ -113,11 +113,10 @@ dsh plugin --profile web add link:/你的绝对路径/workflow-manager/packages/
 
 ```bash
 cd workflow-manager
-./dsh/install-requirements-analysis.sh      # 需求分析
-./dsh/install-execution-plan.sh             # 执行计划（批量调度）
+./dsh/install-requirements-analysis.sh      # 需求分析：workflow-manager 直接安装到用户级技能目录
 ```
 
-装好后，在任意项目的会话里直接说「用开发工作流跑这个需求」即可触发。
+`execution-plan` 是 dev-flow 仓库的项目级 Skill，应在该项目中使用，不从 workflow-manager 安装为用户级技能。
 
 四条内置流程的技能包（可在会话里按名字直接调用流程）用仓库命令安装：
 

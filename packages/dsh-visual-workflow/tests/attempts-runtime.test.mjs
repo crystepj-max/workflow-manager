@@ -14,7 +14,7 @@ import path, { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadHost } from './helpers/load-host.mjs'
-import { REPO, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
+import { REPO, DSH_HOME, USER_DIR, SKILL_ROOT, makeFs, makeIsolatedSubprocess, sandboxPolicy } from './helpers/fake-services.mjs'
 
 const DIST = REPO + '/packages/dsh-visual-workflow/dist'
 import { recordsAttempt, recordsCommit, recordsList, recordsGet } from '../../../scripts/records-host.mjs'
@@ -79,7 +79,7 @@ function env({ value = null, recordsHost = null, seedRecordsHost = true } = {}) 
   }
   if (seedRecordsHost) seeds[REPO + '/scripts/records-host.mjs'] = recordsHostSrc
   const fs = makeFs(seeds)
-  const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost })
+  const sub = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost })
   const engine = {
     start: () => {
       const id = 'run-' + (engine.n = (engine.n || 0) + 1)

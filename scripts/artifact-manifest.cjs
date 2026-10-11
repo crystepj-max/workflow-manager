@@ -2,9 +2,16 @@
 // 消费方：宿主（host.js）经 dist loadDist 加载；测试直接 require。
 'use strict'
 
-const crypto = require('crypto')
-const fs = require('fs')
-const path = require('path')
+// 动态插件只加载声明、解析与闸门逻辑。文件和摘要能力仅在真实 Node
+// 子进程执行核验时加载，不能要求插件 vm 提供 Node fs/crypto。
+let crypto, fs, path
+function nodeDependencies() {
+  if (!fs) {
+    crypto = require('crypto')
+    fs = require('fs')
+    path = require('path')
+  }
+}
 
 const LINE_TAG = '[am-submit]'
 const MANIFEST_RECORD_PREFIX = 'artifact_manifest:'
@@ -20,6 +27,7 @@ const KIND_TO_MEDIA = {
 }
 
 function sha256Hex(buf) {
+  nodeDependencies()
   return crypto.createHash('sha256').update(buf).digest('hex')
 }
 
@@ -77,6 +85,7 @@ function parseSubmitRequest(message) {
 }
 
 function resolveAuthRoot(cwd, runDirRel) {
+  nodeDependencies()
   const base = cwd ? path.resolve(cwd, runDirRel) : path.resolve(runDirRel)
   try { return fs.realpathSync.native ? fs.realpathSync.native(base) : fs.realpathSync(base) } catch (e) { return path.resolve(base) }
 }
@@ -87,6 +96,7 @@ function isPathInside(root, target) {
 }
 
 function verifyEntry(authRoot, entry) {
+  nodeDependencies()
   const logical = String(entry.logical_name || '')
   const rel = String(entry.relative_path || logical)
   if (!logical) return failEntry('MISSING_LOGICAL_NAME', 'logical_name 必填', logical)
@@ -184,6 +194,7 @@ function copySnapshot(authRoot, snapRoot, revision, item) {
 }
 
 function processSubmit(opts) {
+  nodeDependencies()
   const { cwd, runDir, taskId, req, prevManifest } = opts
   const authRoot = resolveAuthRoot(cwd, runDir)
   const revision = Number(req.revision) || ((prevManifest && prevManifest.revision) || 0) + 1
@@ -307,6 +318,60 @@ function submitPayload(opts) {
   }
 }
 
+function submitSnippetSource() {
+  return [
+    '// artifact-manifest-submit：文件核验只在宿主子进程执行',
+    'try { const p = JSON.parse(process.argv[1]); const kernel = require(p.modulePath);',
+    'console.log(JSON.stringify(kernel.processSubmit(p.input)));',
+    '} catch (e) { console.log(JSON.stringify({ ok: false, error: String(e && e.message || e) })); }',
+  ].join('\n')
+}
+
+// 插件侧的异步核验队列不读文件。依赖由宿主注入，真实字节只交给
+// 受管 Node 子进程，完成后更新该逻辑运行的材料记录。
+function queueHostSubmit(context, message, host) {
+  const req = parseSubmitRequest(message)
+  if (!req) return
+  context.pending = (context.pending || Promise.resolve()).then(async () => {
+    let result
+    try {
+      const input = submitPayload({ cwd: context.cwd, runDir: context.runDir, taskId: context.taskId, req, prevManifest: context.byNode.get(req.node) || null })
+      const execution = await host.runNode(['-e', submitSnippetSource(), JSON.stringify({ modulePath: host.modulePath, input })], { graceMs: 30000, maxBytes: 1024 * 1024 })
+      result = execution.ok ? JSON.parse(execution.stdout) : { ok: false, error: execution.detail || '产物核验子进程失败' }
+    } catch (e) { result = { ok: false, error: String(e && e.message || e) } }
+    const manifest = result && result.ok && result.manifest || {
+      revision: req.revision, node: req.node, materials_status: 'incomplete', required_complete: false,
+      entries: req.entries.map(entry => Object.assign({}, entry, { verification_status: 'rejected', rejection_reason: String(result && result.error || '产物核验没有结果') })),
+    }
+    context.byNode.set(req.node, manifest)
+    if (host.record) {
+      host.record.artifact_manifests = host.record.artifact_manifests || {}
+      host.record.artifact_manifests[req.node] = manifest
+      host.controlEvent(host.record, 'artifact_manifest_submitted', {
+        node: req.node, revision: manifest.revision, materials_status: manifest.materials_status, required_complete: manifest.required_complete,
+      })
+      host.persist(host.record.logical_run_id)
+    }
+  }).catch(e => { host.log('产物清单提交失败：' + String(e && e.message || e)) })
+}
+
+function createHostContext(cwd, runDir, taskId, manifests) {
+  return { cwd, runDir: runDir || '.agent-runs/' + taskId, taskId, byNode: new Map(Object.entries(manifests || {})) }
+}
+
+async function hostGateOf(context, record, nodeId) {
+  if (context && context.pending) await context.pending
+  const manifest = context && context.byNode.get(String(nodeId || ''))
+    || record && record.artifact_manifests && record.artifact_manifests[String(nodeId || '')]
+  return gateBlockOf(manifest, nodeId)
+}
+
+function endHostContext(contexts, id) {
+  const context = contexts.get(id)
+  if (context && context.pending) context.pending.finally(() => contexts.delete(id)).catch(() => {})
+  else contexts.delete(id)
+}
+
 function buildSubmitRequest(nodeId, ctx) {
   const entries = (ctx.entries || []).map((e) => Object.assign({}, e))
   return {
@@ -346,6 +411,11 @@ module.exports = {
   materialsStatusOf,
   gateBlockOf,
   submitPayload,
+  submitSnippetSource,
+  queueHostSubmit,
+  createHostContext,
+  hostGateOf,
+  endHostContext,
   buildSubmitRequest,
   entriesForManifestRead,
 }

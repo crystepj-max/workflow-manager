@@ -14,17 +14,17 @@ const EXPECTED_NODES = 19
 const BINDINGS = {
   'wf-construction-full-feature': {
     preflight: { provider: 'deepseek-official', model: 'deepseek-flash' },
-    review: { provider: 'deepseek-official', model: 'deepseek-v4.1-flash' },
-    test: { provider: 'deepseek-official', model: 'deepseek-v4.1-flash' },
+    review: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    test: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
   },
   'wf-explore': {
     orchestrate: { provider: 'deepseek-official', model: 'deepseek-flash' },
-    evaluate: { provider: 'deepseek-official', model: 'deepseek-v4.1-flash' },
+    evaluate: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
   },
 }
 
-const FULL_CATALOG = { 'deepseek-official': ['deepseek-flash', 'deepseek-v4.1-flash'] }
-const STALE_CATALOG = { 'deepseek-official': ['deepseek-flash'] } // 模拟 v4.1-flash 被删除后的漂移
+const FULL_CATALOG = { 'deepseek-official': ['deepseek-flash', 'deepseek-v4-pro'] }
+const STALE_CATALOG = { 'deepseek-official': ['deepseek-flash'] } // 模拟验证模型 deepseek-v4-pro 被移除后的漂移
 
 function toSets(catalog) {
   const out = {}
@@ -50,7 +50,7 @@ test('FIX-234 审计内核：目录缺模型 → 失败并逐节点指认（AC-0
     'wf-construction-full-feature/test',
     'wf-explore/evaluate',
   ])
-  assert.ok(r.missing.every((m) => m.provider === 'deepseek-official' && m.model === 'deepseek-v4.1-flash'))
+  assert.ok(r.missing.every((m) => m.provider === 'deepseek-official' && m.model === 'deepseek-v4-pro'))
 })
 
 test('FIX-234 审计内核：未知 provider 的绑定按缺失处理（不静默放行）', async () => {

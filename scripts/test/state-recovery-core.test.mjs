@@ -62,6 +62,17 @@ test('S06：损坏/缺失检查点诚实降级', () => {
   assert.equal(extractCheckpointFromLogs([]).degraded, true)
 })
 
+test('检查点续跑字段省略未填写的可选值，保持无损 JSON 和原预算', () => {
+  const minimal = checkpointToResumeFields({})
+  assert.deepEqual(minimal, JSON.parse(JSON.stringify(minimal)))
+  assert.equal(Object.hasOwn(minimal, 'entry'), false)
+  assert.equal(Object.hasOwn(minimal, 'technical_budget'), false)
+  const resumed = checkpointToResumeFields({ entry: 'execute', technical_budget: sampleState.technicalBudget })
+  assert.deepEqual(resumed, JSON.parse(JSON.stringify(resumed)))
+  assert.equal(resumed.entry, 'execute')
+  assert.deepEqual(resumed.technical_budget, sampleState.technicalBudget)
+})
+
 test('S03：人工等待 resume 载荷字段与检查点映射一致', () => {
   const resume = buildHumanWaitResume({
     entry: 'review',

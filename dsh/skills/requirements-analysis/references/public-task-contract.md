@@ -1,296 +1,53 @@
-# AI 任务定义与批量交付 V0.1｜公共任务契约
+# Multica Task definition contract
 
-> **版本**：v0.1.0-m1（2026-09-05）  
-> **上游**：《AI 任务定义与批量交付工作流 V0.1》+《实施任务书 V0.1》  
-> **产品拍板（相对上游规格的覆盖）**：自动返工上限 **3**（非上游文中的 2）；人工验收严格三态；定义 / 单任务 / 批量构成同一 skill 集合（见 `skill-set.md`），工程真源在本仓库，通用副本同步 my-agent-skills；定时开跑（M4）只到点唤起同一执行计划，不另建调度。  
-> **本文件职责**：定义 / 单任务交付 / Execution Plan 三块能力共用的任务字段、状态与版本规则。不单独建设第四套系统。  
-> **M1 范围**：契约 + Definition Skill（`dsh/skills/requirements-analysis/`）。  
-> **M2 范围**：内置模板 `templates/wf-construction-full-feature.json` + 启动 Skill；单任务交付主链——见 `single-task-delivery-m2.md`。  
-> **M3 范围**：Execution Plan Skill——见 `execution-plan-m3.md`。  
-> **M4 范围**：到点唤起同一执行计划 + 夜间报告 + 试跑——见 `scheduled-trigger-m4.md`（不含完整验收工作台 / 每晚循环）。
+This contract defines the handoff from requirements analysis to dev-flow. Multica owns Task identity, work status, definition metadata, dependencies, and run history. A repository-local specification stores detailed requirement content; it is not a second status ledger.
 
----
+## Human decisions and completion
 
-## 1. Issue 基本信息（任务控制层）
+- A task is not ready for unattended execution until the user confirms its requirement baseline, every Definition Check item passes, and `pending_product_decisions` is `0`.
+- The unattended permission is an explicit product decision. Never infer permission from an assignee, project status, or user request to analyze requirements.
+- `backlog` and `todo` are Multica work statuses. Requirement-definition status is separate and belongs to `dev-flow.definition.v1.definition_status`.
+- When the baseline is not confirmed, keep the Task in `backlog` and do not write a valid defined carrier. After confirmation and successful metadata readback, move it to `todo` with `--no-start`.
+- A failure to create, update, read back, or set the Task status means the registration is incomplete. Do not substitute a local file, registry, or board as the authoritative state.
 
-Issue 只保存执行、调度与状态管理需要快速读取的字段。权威关系见 §4。
+## Multica Task fields
 
-| 字段 | 允许值 / 说明 | 必填 |
-|---|---|---|
-| 任务标识 | 全局唯一标识。`LOC-<序号>`（本地轨道）或 Issue 号（GitHub 轨道）；二选一必有其一 | 是 |
-| 需求来源 | `github-issue` / `本地文档` / `会话录入` | 是 |
-| 来源定位 | issue 号 / 文档路径 / 会话日期与摘要 | 是 |
-| GitHub 同步 | `not-applicable` / `pending` / `synced#N`——仅本地轨道需要 | 本地轨道必填 |
-| 任务名称 | 当前任务名称 | 是 |
-| 任务类型 | 如「完整功能开发」 | 是 |
-| 优先级 | 仅 `P0` / `P1` / `P2` | 是 |
-| 当前状态 | 见 §2 用户可见状态 | 是 |
-| 需求基线版本 | `V1` / `V2` / `V3`…（与本地规格一致） | 是（进入「已定义」后） |
-| 前置依赖 | 明确写 `无`，或写具体任务标识（Issue 号等）；同环境串行时写清所依赖成员 | 是（进入「已定义」后） |
-| 施工环境组 | 环境组 ID；无关联独立任务可写本任务标识；父子组建议写父 Issue 号 | 是（进入「已定义」后） |
-| 施工环境角色 | `独立`（本任务建分支/工作区）或 `成员`（沿用组内已有现场） | 是（进入「已定义」后） |
-| 无人值守许可 | `允许` / `不允许` | 是（进入「已定义」后） |
-| 任务规格位置 | 本地详细任务规格相对仓库根的路径 | 是（进入「已定义」后） |
-| 定义时间 | ISO 8601；同优先级排序用（越早越先） | 是（进入「已定义」后） |
+The Multica Task UUID is the only task identifier. Preserve source tracker IDs as links in the Task description; they do not replace the Multica UUID.
 
-### 1.1 施工环境组（单任务交付；批量不管）
+The Task description or attached repository specification must state:
 
-产品规则见 `task-workspace-env.md`。摘要：
+- Goal, scope, non-goals, user-visible behavior, and acceptance conditions.
+- Source links and the target code repository.
+- Priority, environment group and role, unattended decision, dependencies, and specification path.
+- Version history and the user confirmation for each accepted baseline.
 
-- **定义阶段**拆任务时，人与 Agent 共同判定关联（如父 Issue / 子 Issue），写入「施工环境组」「施工环境角色」「前置依赖」。
-- **单任务启动**时：`独立` → 新建分支 + 独立工作区；`成员` → 沿用同组现场，且前置依赖须已完成（串行）。
-- **清理**：同组全部任务验收通过（已完成）后再清理工作区。
-- **批量调度**：只排任务，不创建/不清理分支与工作区。
+Multica's native priority values are `urgent`, `high`, `medium`, `low`, and `none`. If a source specification uses the project's P0–P2 shorthand, map P0 to `high`, P1 to `medium`, and P2 to `low`. Preserve an explicitly requested `urgent`; when priority is unspecified, omit `--priority` instead of inventing one.
 
-Issue 正文建议使用模板：`dsh/skills/requirements-analysis/references/issue-basics-template.md`。
+## Versioned metadata
 
----
+Multica metadata values are strings. Encode each value as a JSON string and set it with `multica issue metadata set <uuid> --key <key> --type string --value '<json>'`.
 
-## 2. 用户可见任务状态
+### `dev-flow.definition.v1`
 
-统一枚举（机器字段建议英文常量，展示用中文）：
-
-| 展示 | 机器常量 | 含义 |
-|---|---|---|
-| 定义中 | `DEFINING` | 正在分析与决策，尚未完成 Definition Check |
-| 待确认 | `PENDING_CONFIRMATION` | Definition Check 通过，等待人确认需求基线 |
-| 已定义 | `DEFINED` | 人已确认基线；Issue + 本地规格已落档且版本一致 |
-| 本地已定义 | `LOCAL_DEFINED` | GitHub 不可用时，**本地任务卡已入库**且其余条件与「已定义」等价；具备同等开工资格，但 `GitHub 同步` 必须为 `pending`（见 §11） |
-| 交付中 | `DELIVERING` | 单任务交付已启动（开发/审查/测试等节点进行中） |
-| 等待验收 | `WAITING_ACCEPTANCE` | 自动阶段完成，等待人工 UAT |
-| 执行受阻 | `BLOCKED` | 当前无法继续（交付型或定义型） |
-| 已完成 | `COMPLETED` | 收口完成 |
-
-**禁止**把「开发 / 审查 / 测试 / 收口」提升为新的顶层任务状态；它们是「当前执行节点」展示字段。
-
-状态流转（摘要）：
-
-```text
-定义中 →（Definition Check 通过）→ 待确认 →（人工确认基线）→ 已定义
-                                                  ↘（GitHub 不可用）→ 本地已定义
-已定义 / 本地已定义 →（交付启动）→ 交付中 →（自动阶段完成）→ 等待验收
-等待验收 →（通过 / 有条件通过）→ 收口后已完成
-等待验收 →（退回）→ 交付中
-交付中 →（无法继续）→ 执行受阻
-执行受阻 →（需求须变）→ 返回定义中
+```json
+{
+  "definition_status": "defined",
+  "baseline_version": "V1",
+  "unattended": true,
+  "env_group": "<group-id>",
+  "env_role": "independent",
+  "pending_product_decisions": 0,
+  "defined_at": "<RFC3339 timestamp>",
+  "spec_ref": "docs/tasks/specs/<slug>/task-spec-V1.md"
+}
 ```
 
-**已完成**在 GitHub 轨道由 Issue 置位表达；本地轨道由任务合并进主干 + 登记册记录合并提交表达（见 §11）。
+Allowed definition statuses are `defined` and `local_defined`; new registrations use `defined` because Multica is available. `unattended` must be a boolean. `env_role` is `independent` or `member`. `defined_at` records the accepted baseline time. `spec_ref` must be a non-empty repository-relative path whose resolved file stays inside the target repository.
 
----
+### `dev-flow.dependencies.v1`
 
-## 3. Workflow Run 宏观状态（供 Execution Plan）
+The value is a JSON array of Multica Task UUIDs. Always write the key. Use `[]` when there are no dependencies; a missing key is not equivalent to an empty list. Cross-project dependencies are allowed. Each dependency is satisfied only when its Multica work status and category are both `done`.
 
-| Run 状态 | 含义 | 是否占并发名额 |
-|---|---|---:|
-| `RUNNING` | 自动施工中 | 是 |
-| `WAITING_HUMAN` | 等待人工 UAT | 否 |
-| `BLOCKED` | 当前无法继续 | 否 |
-| `COMPLETED` | 已完成收口 | 否 |
+## Handoff
 
----
-
-## 4. 需求版本契约
-
-必须始终满足：
-
-```text
-Issue 当前需求基线版本
-=
-本地任务规格版本
-=
-（若已启动）Workflow Run 绑定版本
-```
-
-任一处不一致 → **禁止静默继续施工**，标记执行受阻并写明原因。
-
-### 4.1 实质变更（必须升版）
-
-目标 / 功能范围 / 非目标 / 用户行为 / 业务规则 / 验收标准 / 风险边界 / 功能切片边界发生明显变化 → 生成新基线版本（如 V1→V2）。
-
-### 4.2 非实质修正（可不升版）
-
-错别字、表述优化、不改变含义的补充说明、增加已有结论的证据或示例。
-
-### 4.3 升版流程
-
-```text
-返回定义阶段
-→ 完成必要人工决策
-→ 更新本地任务规格（Vn → Vn+1）
-→ 人工确认新基线
-→ Issue 评论记录版本变化
-→ Issue 更新当前版本字段
-```
-
-Issue 版本变更评论最低字段见 `references/baseline-change-v1-v2.md`。
-
-已启动的 Run **不得**自动从旧版本切换到新版本。
-
----
-
-## 5. 「已定义」落档清单（M1 门禁）
-
-任务状态可标为「已定义」（本地轨道为「本地已定义」）当且仅当下列全部成立。两条轨道共用同一清单，**仅第 4 条载体不同**。
-
-1. Definition Check 全部项通过（见 `references/definition-check.md`）
-2. 未决产品事项数量 = **0**
-3. 人已明确确认：「确认需求基线 Vx，可按该版本进入交付」
-4. **GitHub 轨道**：Issue 已创建/更新，基本信息字段齐全（含施工环境组、施工环境角色）；**本地轨道**：本地任务卡已落盘 `docs/tasks/<任务标识>-<slug>.md`，字段同样齐全，且 `GitHub 同步 = pending`
-5. 本地详细任务规格已按模板落档，且版本号与 Issue 一致
-6. 优先级、前置依赖、施工环境组/角色、无人值守许可已写入 Issue
-7. 定义时间已写入
-
-成功结束时对外回报至少包含：
-
-```text
-任务已定义
-Issue：
-需求基线：
-优先级：
-前置依赖：
-施工环境组：
-施工环境角色：
-无人值守许可：
-本地任务规格：
-定义时间：
-当前状态：已定义
-```
-
----
-
-## 6. 人工验收严格三态（公共语义，供 M2 交付接线）
-
-人工验收**只允许**三种正式结果（无操作 = 继续等待验收）：
-
-| 展示 | 机器常量 | 含义 | 流转 |
-|---|---|---|---|
-| 验收通过 | `ACCEPT` | 当前基线已正确实现；无影响后续工作的新增优化 | 收口 → 已完成 |
-| 验收退回 | `REJECT` | 当前实现与已确认基线不符 | 保持基线版本；返回交付开发节点 |
-| 有条件通过 | `CONDITIONAL_PASS` | 当前基线已做对；同时产生新的完善/优化需求 | 本轮正常收口；优化意见作为**下一轮定义输入**；**不修改**当前基线 |
-
-### 6.1 与历史建设契约用词的对照（M2 迁移备忘）
-
-| 本契约（产品拍板） | 历史建设 Portable Contract 用词 | 说明 |
-|---|---|---|
-| `ACCEPT` | `accept` | 语义对齐 |
-| `REJECT` | `reject` | 语义对齐 |
-| `CONDITIONAL_PASS` | （无直接对应） | **不是**历史 `user_accepted`。历史 `user_accepted` = 知情接受**未完全满足基线**的结果；本契约禁止用该路径替代「有条件通过」。M2 改造交付时以本契约三态为准。 |
-
-### 6.2 验收项执行时机（裁决依据的范围）
-
-每条验收项（规格 §16 UAT 场景与 UAT 验收卡）必须声明**执行时机**：
-
-- **裁决前可观测** —— 人工裁决的依据；
-- **收口后观测** —— 只有在收口/合并之后才可能产生结果（例：主检出已包含本修复、本任务工作区已删除、主检出自跑全绿），集中在验收卡的「收口后复核」区，**不得**混入裁决清单，**不得**作为裁决前置。
-
-裁决依据**只取**「裁决前可观测」项。收口后项由执行体在收口合并后**立即执行并回填**（执行时间 / 命令 / 实际结果 / 结论），不得留空或静默跳过；失败如实记录——属真缺陷另立任务，属环境不成立则写明原因与后续触发条件。
-
-🔴 本节**不改变**第 6 节的三态语义，也**不新增**第四种验收结果；它回答的是「哪些项构成裁决依据、哪些项在收口后复核」。一张卡必须至少有一项「裁决前可观测」项；若全部验收项都无法在裁决前观测，属需求定义不完整，不得进入等待验收。
-
-背景（2026-09-15 实测）：LOC-023 的验收清单把「主检出自跑全绿」写作裁决前步骤，交付操作者照单执行必然失败——合并前主检出跑的仍是修复前脚本，得到的是**假红灯**。规则的目的就是让清单照着执行不再产生假红灯。
-
----
-
-## 7. 自动返工上限（产品拍板）
-
-> **产品拍板：3**  
-> 上游规格 / 实施任务书正文曾写「最多 2 轮」。本仓库以产品拍板为准，统一为 **3**，并与现有「建设 · 完整功能开发」默认额度保持一致。
-
-规则摘要（供 M2 单任务交付实现）：
-
-- 一次无人值守交付尝试中，审查或测试失败触发的自动返工循环最多 **3** 轮；
-- 一轮 = 返回开发 → 修复 → 重新审查 → 重新测试；
-- 达到上限仍不通过 → `BLOCKED`，记录失败节点、已返工次数、未解决问题、建议人工查看内容，并释放并发名额；
-- 需求需重新决策 / 外部条件缺失 / 版本冲突 / 环境或权限问题 → **不消耗**自动返工额度，直接受阻；
-- 人工验收退回后的新一轮交付，重新拥有最多 **3** 轮自动返工额度。
-
-机器字段建议：`auto_rework_limit = 3`（常量，非运行时可配置项）。
-
----
-
-## 8. 本地任务规格（详细需求事实源）
-
-模板：`dsh/skills/requirements-analysis/references/task-spec-template.md`。
-
-至少包含：需求背景、用户问题、目标、非目标、修改前、修改后、功能范围、不修改范围、业务规则、用户操作路径、异常和边界、已确认关键决策及原因、功能切片关系、前置依赖说明、验收条件、UAT 场景、风险、已知限制、版本历史。
-
-权威关系：
-
-- 任务状态 / 优先级 / 无人值守许可 / 当前需求版本 → **以 Issue 基本信息为准**
-- 详细功能要求 / 规则 / 范围 / 验收条件 → **以对应版本的本地任务规格为准**
-- Issue 评论本身不能直接改变当前需求范围（实质变更必须走 §4.3）
-
-落档位置约定：
-
-```text
-.scratch/<feature-slug>/task-spec-V<n>.md
-```
-
-Issue「任务规格位置」写上述相对路径。
-
----
-
-## 9. 定义能力入口
-
-- **唯一入口**：现有 Skill `requirements-analysis`（需求分析）  
-- **禁止**：新建平行的「Definition Skill」第二入口  
-- 定义阶段完成后状态为「已定义」；完整功能开发交付（M2）应从「已定义」开工，不再在交付主链内重做定义决策闭环（过渡说明见 `construction-bridge-m1.md`）
-
----
-
-## 10. M1 明确不做（后续里程碑承接）
-
-- ~~单任务交付完整主链改造~~ → 见 M2 / `single-task-delivery-m2.md`
-- Execution Plan / 批量 / 定时（M3/M4）——批量**不管**分支与工作区
-- ~~有前置依赖任务的同环境串行施工~~ → 见 `task-workspace-env.md`（单任务启动判定；非批量自动接续）
-- ~~把历史建设 handoff schema 的 `user_accepted` 改名为有条件通过~~ → M2 已改为 `conditional_pass` 并废弃 `user_accepted` 枚举
-
----
-
-## 11. 本地轨道（GitHub 不可用时的替代通道）
-
-> 来源：`docs/design/ai-task-define-delivery/local-track-offline-mode.md`（方案与决策记录）。
-> 目的：GitHub 不可用时保持「定义 → 交付 → 合并 → 追溯」闭环可用，且恢复后可机械回填。
-
-### 11.1 任务标识
-
-- 格式 `LOC-<三位序号>`，由本地登记册分配，**永不复用**。
-- 派生命名：任务目录 `.scratch/LOC-001-<slug>/`；工作分支 `dev-loc-001-r1`（`rN` = 该任务第 N 次交付运行）；完成标签 `task/loc-001/v1`。
-- GitHub 恢复后，issue 正文「任务标识」字段填写 `LOC-001`，形成 `LOC-001 ↔ #N` 双向映射。
-
-### 11.2 三类需求输入
-
-| 判定顺序 | 条件 | 来源 |
-|---|---|---|
-| 1 | `#123` / `123` / `owner/repo#123` / 含 `github.com/.../issues/` 的链接 | `github-issue` |
-| 2 | 真实存在且为 `.md` 的路径 | `本地文档` |
-| 3 | 其他（口述、粘贴） | `会话录入` |
-
-命中即停；判定结果向用户复述一次。issue 拉取失败时降级为本地轨道并标注「来源=github-issue（暂不可读）」。
-
-### 11.3 状态与开工资格
-
-- 「本地已定义」与「已定义」**开工资格等价**，但 `GitHub 同步` 必须为 `pending`。
-- 呈递确认时必须显式写明「本版本属本地轨道，GitHub 恢复后需补建 issue」。
-- 人工验收三态、自动返工上限 3、AI 不代签 —— 与 GitHub 轨道完全一致。
-
-### 11.4 交付与合并
-
-- **一任务一工作区**机制不变；分支基线改为**本地主干当前提交**（不再从远程拉取）。
-- 窗口期内本地主干**只能由任务合并推进**，禁止在主干上直接改动。
-- 合并采用**一任务一提交**：提交信息必带任务标识、需求基线、需求来源、任务范围、验收结果、任务卡与规格归档路径。
-- 合并后打标签 `task/loc-001/v1`，并把任务卡与对应版本规格归档至 `docs/tasks/archive/LOC-001/`（确保合并后仍可追溯）；**工作区删除、分支保留**（阶段一口径：工作区可再生，随时可用 `git worktree add` 重建；分支不可再生，是补登 PR 的唯一载体）。
-
-### 11.5 跟踪与回填
-
-- 唯一真源：`docs/tasks/registry.json`（入库）；人读视图 `docs/tasks/<标识>-<slug>.md`；总览 `docs/tasks/BOARD.md`（自动重写）。
-- 恢复后按 `GitHub 同步 = pending` 筛出待同步清单 → 批量补建 issue → 逐任务推分支开 PR → 状态收敛回标准「已定义」，本地轨道临时规则退役。
-
-### 11.6 硬规则
-
-1. 🔴 标注「本地已定义」时，Definition Check、未决产品事项 0、人工确认基线三条**缺一不可**；
-2. 🔴 未通过验收（通过 / 有条件通过）的任务禁止合并；
-3. 🔴 合并前必须先把主干最新进展并入本任务工作区并重跑测试；
-4. 🔴 任务卡与规格必须随合并提交入库，不得只留在不入库的临时目录；
-5. 🟡 本地主干是窗口期内唯一副本，必须配置本地镜像仓库作为备份。
+dev-flow reads candidates and these versioned metadata keys from Multica. A valid definition is not permission to start work by itself: the user-approved scope, Multica Task status, and the execution safety gate still apply. Planning output, simulated batches, and Run status are distinct evidence.

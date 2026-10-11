@@ -21,6 +21,7 @@ import { generateBaseline } from './helpers/baseline-harness.mjs'
 import { runGeneratedScript, makeAgentScript } from './helpers/runtime-harness.mjs'
 import { loadHost } from '../../packages/dsh-visual-workflow/tests/helpers/load-host.mjs'
 import { REPO, USER_DIR, SKILL_ROOT, makeFs, makeSubprocess, sandboxPolicy } from '../../packages/dsh-visual-workflow/tests/helpers/fake-services.mjs'
+import { createProviderRoutes } from '../node-provider-routes.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(here, '../..')
@@ -35,9 +36,34 @@ const tplScript = files.get('legacy-baseline/script.mjs')
 // （统一校验内核 T-IMP-13：假 fs 默认种入真实 validate-core.cjs 源码）
 const validatorCoreSrc = readFileSync(path.join(root, 'scripts', 'validate-core.cjs'), 'utf8')
 
-function wfRunEnv({ fsSeed = {}, compileScript = '//MOCK-SCRIPT' } = {}) {
-  const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc, ...fsSeed })
-  const sub = makeSubprocess({ fs, compileScript })
+function wfRunEnv({ fsSeed = {}, compileScript = '//MOCK-SCRIPT', failCompile = false } = {}) {
+  const workspace = {
+    workspace_id: 'test-workspace', workspace_path: '/tmp/test-workspace',
+    source_path: '/tmp/test-source', records_path: '/tmp/test-workspace/records',
+    work_branch: 'codex/test', source_revision: 'test', workspace_mode: 'ISOLATED_READ',
+  }
+  const wsHost = (command, input) => command === 'allocate'
+    ? { ok: true, workspace: { ...workspace, workspace_id: 'test-' + String(input.logical_run_id || 'run').replace(/[^a-zA-Z0-9_-]/g, '-') } }
+    : { ok: true }
+  const nodeIsolationHost = (command, input) => {
+    if (command === 'probe') return { ok: true, guarantee: 'enforced', backend: 'test' }
+    if (command === 'createProviderRoutes') return createProviderRoutes(input)
+    return { ok: false, error: 'unexpected test command' }
+  }
+  const fs = makeFs({
+    [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
+    [REPO + '/scripts/workspace-isolation-host.mjs']: '// test wrapper',
+    [REPO + '/scripts/node-isolation-host.mjs']: '// test wrapper',
+    ...fsSeed,
+  })
+  const spawnHandler = failCompile ? (spec) => {
+    const command = spec.argv.join(' ')
+    if (command.includes('generate.mjs') && command.includes(' compile ')) {
+      return { exitCode: 1, stderr: '编译器不可用（测试注入）' }
+    }
+    return undefined
+  } : null
+  const sub = makeSubprocess({ fs, compileScript, wsHost, nodeIsolationHost, spawnHandler })
   const captured = {}
   const engine = {
     start: (spec) => {
@@ -93,27 +119,20 @@ test('H2 用户模板现编译优先：过期 save 闭环产物不再直接执�
 
 test('H2b 编译通道不可用即失败关闭：不静默回落磁盘产物', async () => {
   const userScript = generateUserSkill(mini).get('script.mjs')
-  const fs = makeFs({
-    [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
-    [USER_DIR + '/hello.json']: JSON.stringify(mini, null, 2) + '\n',
-    [SKILL_ROOT + '/hello/script.mjs']: userScript,
+  const { tool } = wfRunEnv({
+    fsSeed: {
+      [USER_DIR + '/hello.json']: JSON.stringify(mini, null, 2) + '\n',
+      [SKILL_ROOT + '/hello/script.mjs']: userScript,
+    },
+    failCompile: true,
   })
-  // 有进程服务形态但不可用（缺 resolveExecutable）：编译失败必须显式报错，
-  // 不得静默回落磁盘产物（过期产物直执正是 UAT-80 实证的事故源）
-  const badSub = { spawn() { throw new Error('no subprocess in this env') } }
-  const { definedTools } = loadHost({ fs, subprocess: badSub, sandboxPolicy, workflowEngine: { start: () => ({ id: 'r1', result: Promise.resolve({ stopReason: 'completed', value: {} }) }) }, agents: { requireInitiator: () => ({}) } })
-  const tool = definedTools.find((t) => t.name === 'wf_run')
+  // 只注入编译调用失败；隔离宿主保持可用，确保本例验证的是编译失败关闭。
   const out = await tool.execute({ templateId: 'hello', taskId: 't' })
   assert.ok(String(out).includes('编译失败') || String(out).includes('无法编译'), '编译不可用显式失败：' + out)
 })
 
 test('H3 临时图 CLI 兜底：wf_run(args.dsl) → 逆投影蓝图经 --inline 交给 compile 子命令', async () => {
-  const fs = makeFs({ [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc })
-  const sub = makeSubprocess({ fs, compileScript: '//CLI-SCRIPT' })
-  const captured = {}
-  const engine = { start: (spec) => { captured.script = spec.script; return { id: 'r1', result: Promise.resolve({ stopReason: 'completed', value: {}, agentsStarted: 1 }) } } }
-  const { definedTools } = loadHost({ fs, subprocess: sub, sandboxPolicy, workflowEngine: engine, agents: { requireInitiator: () => ({}) } })
-  const tool = definedTools.find((t) => t.name === 'wf_run')
+  const { tool, sub, captured } = wfRunEnv({ compileScript: '//CLI-SCRIPT' })
   const out = await runTool(tool, { dsl: projectToVwf(mini), taskId: 't' })
   assert.equal(out.stopReason, 'completed')
   assert.equal(captured.script, '//CLI-SCRIPT', '引擎收到 CLI 编译译文')

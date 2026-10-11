@@ -1,13 +1,11 @@
 # AI 任务定义与批量交付 V0.1｜公共任务契约
 
-> **版本**：v0.1.0-m1（2026-09-05）  
-> **上游**：《AI 任务定义与批量交付工作流 V0.1》+《实施任务书 V0.1》  
-> **产品拍板（相对上游规格的覆盖）**：自动返工上限 **3**（非上游文中的 2）；人工验收严格三态；定义 / 单任务 / 批量构成同一 skill 集合（见 `skill-set.md`），工程真源在本仓库，通用副本同步 my-agent-skills；定时开跑（M4）只到点唤起同一执行计划，不另建调度。  
-> **本文件职责**：定义 / 单任务交付 / Execution Plan 三块能力共用的任务字段、状态与版本规则。不单独建设第四套系统。  
-> **M1 范围**：契约 + Definition Skill（`dsh/skills/requirements-analysis/`）。  
-> **M2 范围**：内置模板 `templates/wf-construction-full-feature.json` + 启动 Skill；单任务交付主链——见 `single-task-delivery-m2.md`。  
-> **M3 范围**：Execution Plan Skill——见 `execution-plan-m3.md`。  
-> **M4 范围**：到点唤起同一执行计划 + 夜间报告 + 试跑——见 `scheduled-trigger-m4.md`（不含完整验收工作台 / 每晚循环）。
+> **历史版本**：v0.1.0-m1（2026-09-05），记录旧版 GitHub Issue / 本地任务卡状态模型。以下旧规则保留作追溯，不再作为当前任务状态契约。
+> **当前职责**：Multica 管理 Task 身份与状态；dev-flow 读取状态并准备本地计划；workflow-manager 维护并分发 `requirements-analysis`，也维护 DSH 工作流插件。`execution-plan` 是 dev-flow 项目级 Skill。
+> **当前 M1 定义规则**：见 `dsh/skills/requirements-analysis/references/public-task-contract.md`。
+> **当前状态与分派规则**：见 dev-flow 仓库的 `docs/multica-status-dispatch-contract.md`。
+
+> **历史状态说明（2026-10-09）**：本文件以下 GitHub Issue / 本地任务卡状态规则记录的是旧版方案，保留供追溯，不再作为当前 Task 状态契约。当前分工见 `skill-set.md`。
 
 ---
 

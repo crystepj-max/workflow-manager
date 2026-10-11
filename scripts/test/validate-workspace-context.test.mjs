@@ -9,20 +9,24 @@
 // D-7/D-8 读到该分支的旧登记册快照。
 
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { after } from 'node:test'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'validate-workspace.mjs')
 
-// 夹具根必须落在「治理区」：macOS 的 os.tmpdir() 是 /var/folders/…（判治理区，用例通过），
-// 而 Linux 的 os.tmpdir() 就是 /tmp —— 正是 validate-workspace 的例外区前缀
-// （scripts/validate-workspace.mjs 的 EXEMPT_ABS_PREFIXES）。夹具一旦落进例外区，
-// 违规只计警告，本文件用例成片误判（CHORE-260 · M3）。故改用仓库内被 Git 忽略的
-// .scratch/ 作平台无关的确定根，不再依赖宿主 tmpdir。
-const FIXTURE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '.scratch', 'ws-ctx-fixtures')
+// 夹具必须落在治理区。macOS 的 os.tmpdir() 通常在 /var/folders，可直接使用；
+// Linux 的 /tmp 属于 validator 例外区，回退到用户缓存目录。不能放在仓库内：
+// 当前仓库本身可能位于 .codex/worktrees，例外规则会覆盖其所有子目录。
+const osTemp = path.resolve(os.tmpdir())
+const tempIsExempt = osTemp === '/tmp' || osTemp.startsWith('/tmp/')
+  || osTemp === '/private/tmp' || osTemp.startsWith('/private/tmp/')
+const FIXTURE_PARENT = tempIsExempt ? os.homedir() : osTemp
+const FIXTURE_ROOT = fs.mkdtempSync(path.join(FIXTURE_PARENT, 'wfm-ws-ctx-'))
+after(() => fs.rmSync(FIXTURE_ROOT, { recursive: true, force: true }))
 
 const GIT_ENV = {
   ...process.env,
@@ -46,7 +50,6 @@ function gOk(args, cwd) {
 
 /** 建一个「主检出 + 三个链接工作区」的临时仓库，返回各路径。 */
 function fixture() {
-  fs.mkdirSync(FIXTURE_ROOT, { recursive: true })
   const base = fs.mkdtempSync(path.join(FIXTURE_ROOT, 'ws-ctx-'))
   const repo = path.join(base, 'repo')
   fs.mkdirSync(repo)

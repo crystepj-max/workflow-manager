@@ -34,8 +34,10 @@ test('#79 编译脚本：model_overrides 按节点合并进 agent 调用（未�
   assert.equal(result.status, 'DONE')
   const exploreCall = agent.calls.find((c) => c.label === '探索')
   const reviewCall = agent.calls.find((c) => c.label === '审核')
-  assert.deepEqual({ provider: exploreCall.opts.provider, model: exploreCall.opts.model }, { provider: 'p2', model: 'm2' }, '被覆盖节点实际使用 Rev2 模型')
-  assert.deepEqual({ provider: reviewCall.opts.provider, model: reviewCall.opts.model }, { provider: 'p1', model: 'm1' }, '未覆盖节点沿用蓝图绑定')
+  assert.equal(exploreCall.opts.provider, 'vwf-node-isolated:test-route-explore', '覆盖后的模型仍经宿主隔离路由调用')
+  assert.equal(exploreCall.opts.model, 'm2', '被覆盖节点实际使用 Rev2 模型')
+  assert.equal(reviewCall.opts.provider, 'vwf-node-isolated:test-route-review', '未覆盖模型也不能绕过隔离路由')
+  assert.equal(reviewCall.opts.model, 'm1', '未覆盖节点沿用蓝图模型')
 })
 
 test('#79 编译脚本：$default 覆盖作用于未显式覆盖的绑定节点', async () => {
@@ -48,8 +50,10 @@ test('#79 编译脚本：$default 覆盖作用于未显式覆盖的绑定节点'
   assert.equal(result.status, 'DONE')
   const exploreCall = agent.calls.find((c) => c.label === '探索')
   const reviewCall = agent.calls.find((c) => c.label === '审核')
-  assert.deepEqual({ provider: exploreCall.opts.provider, model: exploreCall.opts.model }, { provider: 'p2', model: 'm1' }, '显式节点覆盖优先，未给出的维度沿用旧绑定')
-  assert.deepEqual({ provider: reviewCall.opts.provider, model: reviewCall.opts.model }, { provider: 'pd', model: 'md' }, '$default 作用于未显式覆盖节点')
+  assert.equal(exploreCall.opts.provider, 'vwf-node-isolated:test-route-explore')
+  assert.equal(exploreCall.opts.model, 'm1', '显式节点覆盖保留旧模型')
+  assert.equal(reviewCall.opts.provider, 'vwf-node-isolated:test-route-review')
+  assert.equal(reviewCall.opts.model, 'md', '$default 作用于未显式覆盖节点')
 })
 
 test('#79 编译脚本：无 model_overrides 时行为与既有完全一致', async () => {
@@ -58,6 +62,7 @@ test('#79 编译脚本：无 model_overrides 时行为与既有完全一致', as
   const { result } = await runGeneratedScript(script, { args: { taskId: 'issue-mo' }, agent })
   assert.equal(result.status, 'DONE')
   for (const c of agent.calls) {
-    assert.deepEqual({ provider: c.opts.provider, model: c.opts.model }, { provider: 'p1', model: 'm1' })
+    assert.match(c.opts.provider, /^vwf-node-isolated:/, '没有覆盖时也始终使用宿主隔离路由')
+    assert.equal(c.opts.model, 'm1')
   }
 })

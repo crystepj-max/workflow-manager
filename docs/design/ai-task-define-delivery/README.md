@@ -1,8 +1,10 @@
 # AI 任务定义与批量交付 — 设计文档索引
 
+> 当前 M1 使用 `dsh/skills/requirements-analysis/` 中的真源与配套参考；M3 使用 dev-flow 项目级 Skill。下表中旧版 GitHub / 本地任务卡流程文件保留作历史设计记录。
+
 | 文档 | 用途 | 里程碑 |
 |---|---|---|
-| [public-task-contract.md](./public-task-contract.md) | 三块能力共用的字段/状态/版本/验收三态/返工上限 | M1–M4 |
+| [public-task-contract.md](./public-task-contract.md) | 2026-09 版 GitHub / 本地任务状态契约，保留作历史记录；当前 Task 状态见 dev-flow 的 Multica dispatch contract | 历史 |
 | [task-spec-template.md](./task-spec-template.md) | 本地详细任务规格模板 | M1 |
 | [issue-basics-template.md](./issue-basics-template.md) | Issue 基本信息模板 | M1 |
 | [definition-check.md](./definition-check.md) | Definition Check 清单 | M1 |
@@ -15,11 +17,11 @@
 | [execution-plan-m3.md](./execution-plan-m3.md) | Execution Plan（批量调度） | M3 |
 | [scheduled-trigger-m4.md](./scheduled-trigger-m4.md) | **定时触发（到点唤起同一执行计划）** | M4 |
 | [m4-e2e-trial.md](./m4-e2e-trial.md) | M4 端到端试跑清单 | M4 |
-| [skill-set.md](./skill-set.md) | 集合落点与双仓同步（含 M4 触发） | M1–M4 |
+| [skill-set.md](./skill-set.md) | 当前 M1、M2、M3 的职责与 Skill 落点 | M1–M3 |
 
-- 定义入口 Skill：`dsh/skills/requirements-analysis/`（同步副本：[my-agent-skills](https://github.com/crystepj-max/my-agent-skills)）
+- 定义入口 Skill：`dsh/skills/requirements-analysis/`（workflow-manager 直接安装到用户级 `~/.agents/skills/requirements-analysis/`）
 - 交付入口：内置蓝图 `wf-construction-full-feature` + 其生成 Skill（从已定义开工；命令序列 `docs/runbooks/construction-dsh/runbook.md`）
-- 批量调度 Skill：`dsh/skills/execution-plan/`（定时 = 到点再调本入口，见 M4）
+- 批量调度 Skill：dev-flow 项目级 `.agents/skills/execution-plan/`
 
 机械验收：
 
@@ -29,4 +31,4 @@ node scripts/ai-task-execution-plan-m3-check.mjs
 node scripts/ai-task-scheduled-m4-check.mjs
 ```
 
-> **落点**：工程真源在本仓；通用副本同步至 my-agent-skills。M4 不新建第二套定时 Skill。
+> **当前边界**：Multica 管理 Task 身份与状态；dev-flow 读取状态并形成计划；workflow-manager 维护需求分析 Skill 与工作流插件。M4 定时触发仍未作为可用能力验收。

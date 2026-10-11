@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
 import { loadHost } from './helpers/load-host.mjs'
-import { REPO, DSH_HOME, makeFs, makeSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
+import { REPO, DSH_HOME, makeFs, makeIsolatedSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
 
 const require = createRequire(import.meta.url)
 
@@ -31,6 +31,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const LOGICAL_DIR = DSH_HOME + '/visual-workflow/logical-runs'
 const validatorCoreSrc = readFileSync(path.join(here, '..', '..', '..', 'scripts', 'validate-core.cjs'), 'utf8')
 const ebKernel = require(path.join(here, '..', '..', '..', 'scripts', 'evaluation-baseline.cjs'))
+const artifactManifestSource = readFileSync(path.join(here, '..', '..', '..', 'scripts', 'artifact-manifest.cjs'), 'utf8')
 
 // 克隆真实 wf-optimize 蓝图（结构合法性 + 声明保真），仅换 id 隔离用户模板命名空间
 const OPTIMIZE_LIKE = (() => {
@@ -64,6 +65,12 @@ const readLogical = (fs, id) => JSON.parse(fs._files.get(LOGICAL_DIR + '/' + enc
 // 真实冻结/核验子进程边界：'-e' + 内核脚本文本 + JSON 载荷 → 真实 node 执行（真实 fs/crypto）
 function ebSpawnHandler(spec) {
   const argv = spec.argv
+  if (argv[1] === '-e' && typeof argv[2] === 'string' && argv[2].includes('artifact-manifest-submit')) {
+    const payload = JSON.parse(argv[3])
+    payload.modulePath = path.join(here, '..', '..', '..', 'scripts', 'artifact-manifest.cjs')
+    const r = spawnSync(process.execPath, ['-e', argv[2], JSON.stringify(payload)], { encoding: 'utf8' })
+    return { stdout: r.stdout, stderr: r.stderr, exitCode: r.status }
+  }
   if (argv[1] === '-e' && typeof argv[2] === 'string' && argv[2].includes('p.mode==="freeze"') && typeof argv[3] === 'string' && argv[3].startsWith('{')) {
     const r = spawnSync(process.execPath, ['-e', argv[2], argv[3]], { encoding: 'utf8' })
     return { stdout: r.stdout, stderr: r.stderr, exitCode: r.status }
@@ -77,16 +84,17 @@ function env({ template = OPTIMIZE_LIKE, workspaceSource = null, engine = null, 
     [REPO + '/scripts/workspace-isolation-host.mjs']: '// workspace-isolation-host stub（测试种子）',
     [USER_DIR + '/' + template.id + '.json']: JSON.stringify(template, null, 2) + '\n',
     [SKILL_ROOT + '/' + template.id + '/script.mjs']: '//MOCK-SCRIPT',
+    [REPO + '/packages/dsh-visual-workflow/dist/artifact-manifest.cjs']: artifactManifestSource,
   }
   const fs = makeFs(seed)
   const wsHost = (cmd) => {
-    if (cmd === 'allocate') {
+    if (cmd === 'allocate' || cmd === 'get') {
       return { ok: true, workspace: { workspace_id: 'ws-eb', workspace_path: workspaceSource + '/ws', source_path: workspaceSource, records_path: workspaceSource + '/records', work_branch: 'dev-eb', source_revision: 'rev-1', workspace_mode: 'SANDBOX' } }
     }
     if (cmd === 'context') return { ok: true, workspace: null, events: [] }
     return { ok: true }
   }
-  const sub = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT', wsHost, spawnHandler: ebSpawnHandler })
+  const sub = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT', wsHost, spawnHandler: ebSpawnHandler })
   const { handlers, definedTools, events, ctx } = loadHost({
     fs, subprocess: sub, sandboxPolicy,
     agents: { requireInitiator: () => ({}), currentInitiator: () => (execCwd ? { session: { header: { cwd: execCwd } } } : null) },
@@ -155,6 +163,16 @@ test('EB1 冻结成功：检查点中止 + 注入已核验引用自动恢复 + �
   await until(() => eng.starts.length >= 2, '基线恢复段启动')
   // 冻结成功后原段被中止，恢复段从检查点注入已核验引用
   const resumeReq = eng.starts[1]
+  assert.deepEqual(resumeReq.args, JSON.parse(JSON.stringify(resumeReq.args)),
+    '恢复段传给 DSH 的参数必须为无损 JSON；可选字段缺失时不能携带 undefined')
+  assert.equal(resumeReq.args.isolation_guarantee, eng.starts[0].args.isolation_guarantee,
+    '刷新工作区未返回隔离探测字段时，保留已核验的隔离保证')
+  assert.equal(eng.starts[0].subagentProvider, 'vwf-node-isolated')
+  assert.equal(resumeReq.subagentProvider, 'vwf-node-isolated', '检查点恢复仍使用隔离 Provider')
+  assert.equal(eng.starts[0].args.requireIsolatedNodes, true)
+  assert.equal(resumeReq.args.requireIsolatedNodes, true)
+  assert.notEqual(eng.starts[0].args.routes.nodes.execute, resumeReq.args.routes.nodes.execute,
+    '检查点恢复必须获得新路由，不能复用已撤销令牌')
   assert.equal(resumeReq.args.entry, 'execute')
   assert.equal(resumeArgsDigest(resumeReq), real)
   assert.equal(resumeReq.args.evaluation_baseline.version, 1)
@@ -199,6 +217,32 @@ test('EB2 摘要与模型声称值不符：BLOCKED 不放行，不恢复', async
   assert.ok(out.value.message.includes('声称 deadbeef-not-real'))
   assert.equal(readLogical(fs, 't-eb').lifecycle.state, 'BLOCKED')
   rmSync(wsx.tmp, { recursive: true, force: true })
+})
+
+test('EB9 基线恢复段仍核验产物清单，workflow/end 不得抹掉材料缺失', async () => {
+  const wsx = workspaceFixture('# 契约\n判据：人工确认\n')
+  try {
+    const real = createHash('sha256').update(readFileSync(wsx.contractPath)).digest('hex')
+    const eng = makeEngine()
+    const { events, definedTools, fs } = env({ workspaceSource: wsx.wsSource, execCwd: wsx.execDir, engine: eng })
+    const wfRun = definedTools.find(t => t.name === 'wf_run')
+    const pending = wfRun.execute({ templateId: 'eb-spec', taskId: 't-eb', runDir: '.agent-runs/t-eb' })
+    await until(() => eng.starts.length >= 1, '首段启动')
+    await until(() => fs._files.get(LOGICAL_DIR + '/t-eb.json'), '逻辑运行登记')
+    events.get('workflow/start')({ id: 'run-1', meta: { name: 'eb' } })
+    events.get('workflow/log')({ id: 'run-1' }, freezeLine(1, real))
+    ckptLog(events, 'run-1', 'execute', { confirm: { route: 'READY', contract_digest: real } })
+    settle(eng, events, 'run-1', 'cancelled')
+    await until(() => eng.starts.length >= 2 && readLogical(fs, 't-eb').segments.length === 2, '恢复段登记')
+    events.get('workflow/log')({ id: 'run-2' }, '[am-submit]' + JSON.stringify({ revision: 1, node: 'evaluate', producer_attempt_id: 'a0k2', round_id: 0, entries: [{ logical_name: 'evaluation-report.md', relative_path: 'evaluation-report.md', required: true }] }))
+    settle(eng, events, 'run-2', 'completed', { status: 'WAITING_HUMAN', reason: 'ESCALATED_DECISION', node: 'evaluate', decision_id: 't-eb:confirm:0:1', results: { evaluate: { route: 'CONFIRM', contract_digest: real } } })
+    const out = JSON.parse(await pending)
+    assert.equal(out.value.status, 'BLOCKED')
+    assert.equal(out.value.code, 'ARTIFACT_MANIFEST_INCOMPLETE')
+    const logical = readLogical(fs, 't-eb')
+    assert.equal(logical.artifact_manifests.evaluate.required_complete, false)
+    assert.equal(logical.lifecycle.state, 'BLOCKED')
+  } finally { rmSync(wsx.tmp, { recursive: true, force: true }) }
 })
 
 test('EB3 原评价文件缺失：BLOCKED（不进入执行）', async () => {

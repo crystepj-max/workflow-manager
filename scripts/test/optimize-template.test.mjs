@@ -130,6 +130,48 @@ test('CONFIRM 升人工决策（含冻结契约摘要材料），ACCEPT 续跑�
   })
   assert.equal(resume.result.status, 'DONE')
   assert.equal(resume.result.completion && resume.result.completion.type, 'USER_ACCEPTED')
+  assert.match(resume.agentCalls[0].prompt, /【宿主已核验的人工决定】/)
+  assert.ok(resume.agentCalls[0].prompt.includes(halt.result.decision_id))
+  assert.match(resume.agentCalls[0].prompt, /"user_choice":"ACCEPT"/)
+  assert.match(resume.agentCalls[0].prompt, /"actor_source":"host_ui"/)
+})
+
+test('人工 ACCEPT 后收口误报自动完成须拒绝；重试共用原预算及决定', async () => {
+  const halt = await runEngine(optimizeBp, {
+    目标确认: { route: 'READY', summary: '契约冻结', contract_digest: 'c1' },
+    执行: { route: 'READY', summary: '交付', changed: 'a.md' },
+    评估: { route: 'CONFIRM', summary: '由用户决定', contract_digest: 'c1', gaps: '易懂性' },
+  }, { taskId: 'accept-completion-mismatch' })
+  const resumeArgs = {
+    taskId: halt.result.taskId,
+    decision_id: halt.result.decision_id,
+    user_choice: 'ACCEPT',
+    results: halt.result.results,
+    decision_ref: createDecisionRef({
+      decision_id: halt.result.decision_id,
+      logical_run_id: halt.result.taskId,
+      choice: 'ACCEPT',
+    }),
+  }
+  const wrong = { status: 'DELIVERED', completion_type: 'EVALUATION_PASSED', summary: '误报', followups: '' }
+  const rejected = await runEngine(optimizeBp, { 收口: wrong }, resumeArgs)
+  assert.notEqual(rejected.result.status, 'DONE')
+  assert.equal(rejected.result.results.closeout, undefined, '误报不能成为通过证明')
+  assert.equal(rejected.result.consumed_decision, undefined, '失败不得消费人工决定')
+  assert.equal(rejected.agentCalls.length, 3, '拒绝后不得通过技术自环重置预算')
+
+  let calls = 0
+  const corrected = await runEngine(optimizeBp, {
+    收口: () => (++calls === 1 ? wrong : {
+      status: 'DELIVERED', completion_type: 'USER_ACCEPTED', summary: '原人工决定收口', followups: '',
+    }),
+  }, resumeArgs)
+  assert.equal(corrected.result.status, 'DONE')
+  assert.equal(corrected.result.completion.type, 'USER_ACCEPTED')
+  assert.equal(corrected.result.results.evaluate.route, 'CONFIRM', '不得改写自动评估为 PASS')
+  assert.equal(corrected.result.consumed_decision.decision_id, halt.result.decision_id)
+  assert.equal(corrected.agentCalls.length, 2)
+  assert.ok(corrected.agentCalls.every((call) => call.prompt.includes(halt.result.decision_id)))
 })
 
 test('LOC-028：PASS 路径 closeout 自报 USER_ACCEPTED 无 decision_ref 不得完成', async () => {

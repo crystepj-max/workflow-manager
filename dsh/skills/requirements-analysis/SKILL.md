@@ -1,86 +1,79 @@
 ---
 name: requirements-analysis
-description: "需求分析统一入口：把 GitHub issue、本地需求文档或会话录入的原始输入加工成「已定义」任务（GitHub 不可用时为「本地已定义」，开工资格相同）——含人工确认的需求基线、任务基本信息、本地详细任务规格、Definition Check 通过且未决产品事项为 0。当用户给出需求描述、需求 issue、需求文档、或说『做个需求分析/拆需求/拆任务/出规格/评估需求体量/这个需求怎么落地/把需求变成可执行计划/定义任务/任务定义』时使用。本 skill 是 AI 任务定义与批量交付的唯一定义入口，不另建第二套 Definition 入口。"
+description: "需求分析统一入口：把 GitHub issue、Multica Task、本地需求文档或会话输入加工成经人工确认的任务定义，包含基线、规格、依赖、Definition Check 和无人值守许可。workflow-manager 维护源码并直接分发用户级入口。当用户提出拆需求、拆任务、出规格、评估体量或任务定义时使用。"
 ---
 
 # Requirements Analysis（需求分析）→ 任务定义
 
-> **工程真源仓库**：workflow-manager（本文件）。通用副本同步至 my-agent-skills。公共契约亦见 `docs/design/ai-task-define-delivery/public-task-contract.md`。
+> **工程真源仓库**：`workflow-manager/dsh/skills/requirements-analysis/`（本目录）。workflow-manager 维护并直接安装用户级入口 `~/.agents/skills/requirements-analysis/`。Multica 是任务与状态平台，不是本技能的代码源。`execution-plan` 的项目级入口由 `dev-flow/.agents/skills/execution-plan/` 独立维护。
 
-把一份原始输入（GitHub issue、本地文档，或会话中录入的自然语言）加工成**可无人值守开工的任务**——GitHub 可用时为「已定义」，不可用时为「本地已定义」（具备同等开工资格，见 §7.2）。
+把一份原始输入（GitHub issue、Multica Task、本地文档，或会话中录入的自然语言）加工成**可审阅的需求基线**，经用户确认后把定义和依赖写入 Multica Task。Multica 是任务身份与状态的唯一来源；本 skill 不创建本地登记册、看板或临时状态副本。
 
 本 skill 是**自洽的编排能力**：分诊、澄清、定体量、拆解、探路、Definition Check、基线确认与落档所需知识内联于此，**不通过 `skill` 工具调用任何子 skill**。
 
-> **公共契约**：`references/public-task-contract.md`（字段、状态、版本、验收三态、自动返工上限产品拍板为 3）。  
+> **公共契约**：`references/public-task-contract.md`（Multica Task 状态与 `dev-flow.definition.v1` / `dev-flow.dependencies.v1` 元数据）。
 > **为什么内联而不调用子 skill**：`triage` / `grill-with-docs` / `wayfinder` / `to-tickets` 是「仅限用户调用」的命令型 skill；本 skill 将等价知识内联。
 
 ## 成功标准
 
-> 一个完全不了解前序讨论的执行者，只读取 Issue 基本信息与对应版本的本地任务规格，就能理解任务并开始施工，**无需再向用户询问任何会影响产品结果的问题**。
+> 一个完全不了解前序讨论的执行者，只读取 Multica Task 的已确认定义与对应版本的本地规格，就能理解任务并开始施工，**无需再向用户询问任何会影响产品结果的问题**。
 
-结束状态必须是 **「已定义」**（不是只写完三要素草稿）。未达门禁时只能停在「定义中」或「待确认」。
+结束状态必须是：已确认基线和 Definition Check，并把定义元数据写入 Multica Task。未达门禁时 Task 留在 `backlog`，不得假装已定义。
 
 ---
 
 ## 流程
 
-### 0. 输入识别（三类来源，命中即停）
+### 0. 输入识别（四类来源，命中即停）
 
-先检测 GitHub 可用性（`gh` 已认证且可读写目标仓库）。再按下列顺序判定来源，**判定结果向用户复述一次**，不做二次追问。
+先识别输入来源；需要新建 Task 时，确认 Multica CLI 已登录并取得目标项目 ID。若目标项目不明确，先向用户询问，因为它决定任务进入哪个工作区。
 
-| 顺序 | 判定条件 | 识别为 | 接入方式 | 发布去向 |
+| 顺序 | 判定条件 | 识别为 | 接入方式 | 登记去向 |
 |---|---|---|---|---|
-| 1 | `#编号` / `编号` / `owner/repo#编号` / 含 `github.com/.../issues/` 的链接 | **GitHub issue** | 拉取全文 + 全部评论 + 标签 + 作者 | GitHub 可用 → 更新该 issue；不可用 → 降级本地轨道，需求来源记 `github-issue`（标注暂不可读，请用户粘贴正文或改走会话录入） |
-| 1b | 含其他已接入 tracker 的 issue 链接（如 `cnb.cool/<org>/<repo>/-/issues/<n>`） | **第三方 tracker issue** | 用该 tracker 的能力拉取正文 + 评论（先确认其 CLI / 连接器可用） | 按下方「第三方 tracker 轨道规则」判定 |
-| 2 | 真实存在的 `.md` 文件路径 | **本地文档** | 直接读取全文 | GitHub 可用 → 创建 issue；不可用 → 本地任务卡 |
-| 3 | 其余（口述、粘贴、自然语言） | **会话录入** | 需求源 = 输入本身，按 §2 渐进式分析 | 同上 |
+| 1 | Multica Task UUID 或链接 | **现有 Multica Task** | `multica issue get <id> --output json`；按需读取相关评论 | 更新该 Multica Task |
+| 2 | `#编号` / `owner/repo#编号` / `github.com/.../issues/...` | **GitHub issue** | `gh issue view` 读取正文和讨论；未经明确请求不回写来源 issue | 目标项目中的 Multica Task |
+| 3 | 真实存在的 `.md` 文件路径 | **本地文档** | 读取全文并核对仓库归属 | 目标项目中的 Multica Task |
+| 4 | 其余（口述、粘贴、自然语言） | **会话录入** | 输入本身作为需求源，按 §2 渐进分析 | 目标项目中的 Multica Task |
 
 - 一次输入含「文件路径 + 补充说明」→ 以文件为主，说明作为补充约束。
-- 一次输入含多个需求 → 先按 §3.1 切片，每片一个任务标识。
-- 输入是「实质变更 / 升版」请求（已有已定义/本地已定义任务）→ 走 §8 V1→V2 闭环，不要当成全新需求从零分诊（可复用已有规格）。
+- 一次输入含多个需求 → 先按 §3.1 切片，每片一个 Multica Task。
+- 一次输入含「实质变更 / 升版」请求 → 先定位现有 Multica Task，再走 §8 V1→V2 闭环，不要创建重复 Task。
 
-**发布去向只有两种**：GitHub issue，或本地任务卡（`docs/tasks/<任务标识>-<slug>.md`，模板 `references/local-task-card-template.md`）。
+**所有新任务都登记在 Multica Task。** GitHub、CNB 等外部 issue 仅作为需求来源；项目内规格文件是 Task 的 `spec_ref` 指针目标，不是第二套状态账本。
 
-#### 第三方 tracker 轨道规则
+#### 外部 tracker 来源规则
 
-需求源可以来自 GitHub 之外的 tracker（如 CNB）。此时**需求源与发布去向必须分开判定**，不得因为"有 issue"就假定 tracker 侧能承载「已定义」：
+需求源可以来自 GitHub、CNB 或其他系统。此时**需求来源与登记去向分开处理**：
 
-1. **先验证交付流程实际支持的载具**，而不是先看 tracker。判据是该仓库的开工流程（runbook / 开工脚本）认哪几种载体；**只有流程能读到的载体才算可用载具**。
-2. 若交付流程只认「GitHub issue」与「本地任务卡」，且 GitHub 不可用 → **走本地轨道**：载具 = 本地任务卡 + 登记册，`GitHub 同步` 保持 `pending`。
-3. 第三方 tracker 的 issue 在此情形下**只作需求源与讨论/结论记录**：可以读取、可以回写结论评论，但**不构成 tracker 侧的「已定义」**。
-4. 🔴 **对外只称「本地已定义」**，不得宣称 tracker 侧已「已定义」；任务卡中记明「第三方 tracker 仅为记录，交付载具为本地任务卡」，避免后续读者误判开工资格来源。
-5. 若第三方 tracker 已被交付流程正式接入（流程自己能读它）→ 该 tracker 即视为可用载具，按「GitHub 轨道」同口径处理，此时不再降级本地轨道。
+1. 读取来源只使用用户已连接且有权限的工具；没有访问权限时请用户提供正文，不编造来源内容。
+2. 结论、状态、基线与依赖写入 Multica Task；不得在来源 tracker、本地登记册或看板维护第二份状态。
+3. 若 Multica CLI 不可用，仍可完成需求分析、规格和 Definition Check 草稿，但 Task 登记停在未完成；不得降级为本地登记或声称「已定义」。
 
-> 判定结果必须向用户复述一次，并明确告知「本版本属哪条轨道、第三方 tracker 在其中扮演什么角色」。
+> 向用户复述来源类型和目标 Multica 项目。不要把 GitHub/CNB 来源 issue 描述成任务状态的权威记录。
 
-任务状态机（用户可见）：`定义中` → `待确认` → `已定义` 或 `本地已定义`（此后交付属其他能力；本 skill 以二者为成功终点）。
+Multica 工作状态与需求定义状态分开：定义和基线待确认期间 Task 保持 `backlog`；用户确认后写入 `dev-flow.definition.v1.definition_status=defined`，并把 Task 移到 `todo`。不把 Multica 的工作状态改造成自定义「定义中」状态。
 
 ### 1. 分诊（内联 triage 规则）
 
-对需求做分类 + 状态判定，并为需求源打标签。
+对需求做分类和状态判断。将分类写入需求摘要；只有目标 Multica 项目已配置对应自定义属性时才写该属性，不为贴标签而改写外部来源。
 
 **分类标签**（恰好一个）：
 - `bug` — 有东西坏了
 - `enhancement` — 新功能或改进
 
-**状态标签**（与「用户可见任务状态」配合；标签用于 tracker 检索）：
-- `needs-triage` — 维护者待评估
-- `needs-info` — 等报告者补充信息
-- `ready-for-agent` — **仅当已达「已定义」**后才打（规格完整可交施工）
-- `ready-for-human` — 需人工实现（判断/外部权限/设计决策/手动测试）
-- `wontfix` — 不处理
-
-> 定义过程中 Issue「当前状态」字段用：`定义中` / `待确认`；确认落档后改为 `已定义` 并打 `ready-for-agent`。
+**需求定义状态**与 Multica 工作状态分开。未确认前保持 `backlog`；确认并写入完整定义元数据后才转到 `todo`。不要创建或依赖 `ready-for-agent` 等 GitHub 标签。
 
 **分诊检查**：
 1. **冗余性**：按领域概念搜索仓库是否已有实现；已有 → `wontfix` 并指出位置。
 2. **历史拒绝**：读 `.out-of-scope/`（若存在），有相似需求先提示。
 
-**标签应用**（仅 GitHub 轨道）：先 `gh label list`；存在则复用，缺失才新建。**本地轨道不打标签**，分类与状态一律用本地任务卡的字段表达。
+**标签应用**：本 skill 不在 GitHub/CNB 来源上写标签。Multica 项目自定义属性只在用户已明确配置且现有写入能力可用时使用；未配置时把分类写在 Multica Task 描述中。
 
-**第三方 tracker**（需求源来自 CNB 等非 GitHub 平台时）：默认**不打标签、不改其状态字段**，只读取正文与评论、必要时回写结论。若已确认该 tracker 是交付流程正式接入的载具（见 §0「第三方 tracker 轨道规则」），才按 GitHub 轨道同口径管理标签与状态。
+**来源 tracker**（GitHub、CNB 等）：默认只读取正文和讨论，不回写标签、状态或评论。用户单独要求回写时，先完成待审草稿并确认写入目标；Multica Task 仍是定义与交付状态的权威记录。
 
-**发布规则**：发布到 issue tracker 的内容必须以 `> *This was generated by AI during triage.*` 开头。本地任务卡不需要该前缀（不对外发布），但补建 issue 时必须补上。
+**发布规则**：创建 Multica Task 时，描述应区分用户提供的原始事实与 AI 整理的分析；不得把推测写成已确认事实。对外来源 tracker 的写入需有单独请求。
+
+**优先级落档**：Multica 使用 `urgent`、`high`、`medium`、`low`、`none`。若输入使用项目 P0–P2 口径，分别映射为 `high`、`medium`、`low`；只有用户明确要求紧急级别时才使用 `urgent`，未指定时省略 `--priority`。
 
 ### 2. 渐进式需求分析与人工决策
 
@@ -148,7 +141,7 @@ description: "需求分析统一入口：把 GitHub issue、本地需求文档�
 
 Agent 必须带着分析与推荐提问，不能把分析责任转嫁给用户。
 
-**无人工受访者时**（后台自动化）：影响产品结果的未决项列入缺口，状态保持「定义中」/`needs-info`，**不得**标「已定义」，不得编造决策。
+**无人工受访者时**（后台自动化）：影响产品结果的未决项列入缺口；Multica Task 保持 `backlog`，**不得**写入有效的已定义元数据，也不得编造决策。
 
 落定的决策写入本地规格「已确认的关键决策及原因」，并同步分析文档。
 
@@ -180,14 +173,14 @@ Agent 必须带着分析与推荐提问，不能把分析责任转嫁给用户�
 前置依赖：无
 ```
 
-拆分时人与 Agent **共同判定**任务关联，并写入施工环境字段（见 `task-workspace-env.md` / 公共契约 §1.1）：
+拆分时人与 Agent **共同判定**任务关联，并写入施工环境字段（见 `references/public-task-contract.md`）：
 
 | 情形 | 施工环境组 | 施工环境角色 | 前置依赖 |
 |---|---|---|---|
-| 无关联、可并行 | 本任务自己的标识 | 独立 | 无 |
-| 父 Issue 下的能力包 | 父 Issue 号 | 父=`独立`；子=`成员` | 子写清依赖的父/兄任务 |
+| 无关联、可并行 | 本 Task UUID | `independent` | 无 |
+| 父 Task 下的能力包 | 父 Task UUID | 父=`independent`；子=`member` | 子写清依赖的父/兄 Task UUID |
 
-示例：父 Issue `#120` 建分支与独立工作区后，子 `#121` `#122` 同组串行——`#122` 的前置依赖写 `#121`（或约定顺序），全部验收通过后再清理该工作区。
+示例：父 Task 建分支与独立工作区后，子 Task 同组串行——后一个 Task 的前置依赖写入前一个 Multica UUID。
 
 批量调度**不管**分支与工作区；有依赖时的串行门禁由**单任务启动**执行。
 
@@ -199,7 +192,7 @@ Agent 必须带着分析与推荐提问，不能把分析责任转嫁给用户�
 4. 🔴 **L 型禁止直接开工**——不实施、不写实现代码
 5. 决策清后，再按 §3.1 拆可 UAT 切片并进入 Definition Check
 
-决策地图结构、工单类型、雾区原则、落地形式与既有 wayfinder 约定相同（地图 / 工单 / frontier；有 GitHub 用 issue，否则本地 markdown）。
+决策地图结构、工单类型、雾区原则和 OpenSpec 落地形式沿用既有 wayfinder 约定。外部写入到 Multica 需有用户明确请求；没有写入条件时只交付草稿，不创建本地状态账本。
 
 ### 4. 产出三要素（任何中途文档必须包含）
 
@@ -221,19 +214,19 @@ Agent 必须带着分析与推荐提问，不能把分析责任转嫁给用户�
 - ✅ 如实标注缺失 + 补齐建议（缺什么 / 由谁补 / 补在哪）
 - ❌ 不得编造补全
 - ❌ 不得在无人可问时假装已定义
-- 有人可问 → 用 §2 决策卡推进；无人可问 → `awaiting-human-input` / `needs-info`，保持「定义中」
+- 有人可问 → 用 §2 决策卡推进；无人可问 → 保持 Task 为 `backlog`，列出缺口并等待输入
 
 ### 6. Definition Check
 
 在请求人工确认基线**之前**，按 `references/definition-check.md` 逐项检查并落盘：
 
-`docs/tasks/specs/<任务标识>-<slug>/definition-check.md`（入库：它是「能否开工」的判定依据，下游必须能读到）
+`docs/tasks/specs/<slug>/definition-check.md`（入库：它是「能否开工」的判定依据，下游必须能读到）
 
 硬规则：
 
 - 未决产品事项数必须为 **0**
-- 任一项未通过 → 不得进入「待确认」
-- 全部通过 → Issue 当前状态改为「待确认」，向用户呈递基线确认请求
+- 任一项未通过 → Multica Task 保持 `backlog`
+- 全部通过 → 向用户呈递基线确认请求；确认前不写有效定义元数据
 
 确认话术：
 
@@ -241,108 +234,73 @@ Agent 必须带着分析与推荐提问，不能把分析责任转嫁给用户�
 
 **未经过人工确认，不得自动进入「已定义」。**
 
-### 7. 落档为「已定义」或「本地已定义」
+### 7. 登记 Multica Task
 
-人工确认后，必须**实际完成**下列落档（缺一不可）。两条轨道共用本清单，**仅第 2 与第 4 条载体不同**。
+只有在需求规格和 Definition Check 完成、未决产品事项为 0、用户明确确认基线后，才能把 Task 标记为已定义。Multica Task 是状态与任务身份的唯一记录。
 
-1. **本地详细任务规格**（自 `references/task-spec-template.md` 填满）  
-   路径：`docs/tasks/specs/<任务标识>-<slug>/task-spec-V<n>.md`（目录名含任务标识，便于归档与回填）  
-   **必须入库**：规格是下游施工的唯一输入，留在被 Git 忽略的目录里会导致干净检出或远端克隆后无法开工。
-2. **任务基本信息**，二选一：
-   - **GitHub 轨道**：自 `references/issue-basics-template.md` 写入/更新 Issue，当前状态 = `已定义`；
-   - **本地轨道**：自 `references/local-task-card-template.md` 写入 `docs/tasks/<任务标识>-<slug>.md`，当前状态 = `本地已定义`，`GitHub 同步 = pending`；
-   
-   字段：任务标识、需求来源、来源定位、任务名称、任务类型、优先级、当前状态、需求基线版本、前置依赖、施工环境组、施工环境角色、无人值守许可、任务规格位置、定义时间。
-3. **版本一致**：任务卡/Issue 基线版本 = 本地规格版本
-4. **标记就绪**：
-   - GitHub 轨道：`node scripts/local-task-registry.mjs mark-ready --task <任务标识>` 给该任务的 issue 打 `ready-for-agent`（幂等；无 `github#N` 锚点时会报错并给出换号指引），再按体量补 `sized-s|m|l`、去掉 `needs-info`；
-   - 本地轨道：把本地任务卡状态写为 `本地已定义` 并登记到 `docs/tasks/registry.json`（`status=本地已定义`、`github_sync=pending`）；**本地轨道不打 `ready-for-agent`**（该标签是远端可施工信号，本地准备完成不等于可施工）。换取正式号后补跑 `mark-ready`。
-   - 该标签是批量调度的施工池筛选条件（FEAT-237）：漏打 = 夜间批次不会选中该任务；
-5. **分析摘要**（可选保留）：`docs/tasks/specs/<任务标识>-<slug>/requirements-analysis.md`
-6. **登记规格位置**：`node scripts/local-task-registry.mjs set --task <任务标识> --spec-path docs/tasks/specs/<任务标识>-<slug>/task-spec-V<n>.md`
-7. **通过上下文门禁**：`npm run validate:task-context`（校验规格与任务卡均已入库、活跃任务均有远端锚点）
+1. **保存规格**：把完整规格写到目标代码仓库内的 `docs/tasks/specs/<slug>/task-spec-V<n>.md`，并用 `realpath` 确认目标仍在该仓库内。Multica 保存 `spec_ref` 相对路径；规格正文不靠本机忽略目录或临时工作区传递。
+2. **准备 Multica Task**：有现存 Task 时复用 UUID；否则，在确认目标项目后创建一个未分派的 `backlog` Task。描述包含 Goal、Scope、Acceptance、基线、需求来源链接、规格路径和 Definition Check 摘要。不要把 GitHub/CNB 来源 issue 的编号当作 Multica Task ID。
+3. **等待基线确认**：向用户呈递需求基线和 Definition Check。未获确认时不设置已定义元数据，不把状态移到 `todo`。
+4. **写入定义元数据**：基线确认后，使用 JSON 字符串写入 `dev-flow.definition.v1` 和 `dev-flow.dependencies.v1`。依赖键必须存在；没有依赖时写显式空数组 `[]`。依赖元素使用 Multica Task UUID。
+5. **核对后就绪**：重新读取 Task，确认返回 UUID、目标项目、状态及两个元数据值都与请求相符；确认无误后再将工作状态设为 `todo`。状态命令带 `--no-start`，避免定义动作启动 Agent。
+6. **唯一身份**：Multica 返回的 Task UUID 是正式标识。不在本机分配临时号，不写 `registry.json`、`BOARD.md` 或其它任务状态副本。
 
-> 施工阶段的两个远端动作由工具自动完成，定义阶段不要手工打：`施工中` 标签与 assignee 由 `cwf-run-init` 开工时写入（`node scripts/github-issues.mjs claim/release` 可单独调用）。
-
-**任务标识分配**：由 GitHub 主源发号，本机不自己算号，双机并行与多会话并行都不会撞号：
+CLI 形态：
 
 ```bash
-node scripts/local-task-registry.mjs allocate --name <任务名称> --type FEAT|FIX|CHORE [--priority P0..P2]
+multica issue create --title "<任务标题>" --project "<项目 ID>" --status backlog   [--priority <urgent|high|medium|low>] --description-file "<任务描述文件>" --output json
+
+multica issue metadata set "<task-uuid>" --key dev-flow.definition.v1   --type string --value '{"definition_status":"defined","baseline_version":"V1","unattended":true,"env_group":"<group-id>","env_role":"independent","pending_product_decisions":0,"defined_at":"<RFC3339 timestamp>","spec_ref":"docs/tasks/specs/<slug>/task-spec-V1.md"}' --output json
+
+multica issue metadata set "<task-uuid>" --key dev-flow.dependencies.v1   --type string --value '[]' --output json
+
+multica issue get "<task-uuid>" --output json
+multica issue status "<task-uuid>" todo --no-start --output json
 ```
 
-- 返回 `FEAT-<远端号>` / `FIX-<远端号>` / `CHORE-<远端号>`，同时在 GitHub 主源仓库建好对应 issue，编号即 issue 号，登记册 `remote` 记 `github#<号>`；
-- 远端不可达时降级为临时号 `TMP-<机器码>-<日期><序号>`；原换号通道 `node scripts/remote-issue-sync.mjs reissue` 已退役（reasonCode `legacy_remote_issue_sync_disabled`），不再由本机自动换取正式号，正式号以 Multica 主源为准；**禁止静默回落到 CNB 发号**（CNB 自 2026-09-19 起是灾备镜像，不再签发任务号）；
-- 历史任务（2026-09-15 及以前）沿用 `LOC-<序号>` 旧号，通过登记册 `remote` / `legacy_id` 字段与远端号双向可查；切换前由 CNB 签发的 `cnb#N` 保留为历史事实，不重编。
+命令中的 `--type string` 很重要：Multica metadata 的 value 是字符串，字符串内容再编码为 JSON。存在前置依赖时，把 `[]` 换为依赖 UUID 数组；多任务拆分按 §3.1 写清 parent、施工环境组和依赖方向。
+
+若创建、元数据写入、读取核对或状态更新任一步失败，保留实际 Task 状态和错误，不宣布「已定义」。若 Multica 不可用，只交付待审规格和 Definition Check；不创建本地登记册，也不伪造 Multica ID。
 
 成功回报格式：
 
 ```text
-任务已定义
-
-任务标识：
+需求已定义
+Multica Task UUID：
+项目：
 需求来源：
-Issue / 本地任务卡：
 需求基线：
 优先级：
 前置依赖：
-施工环境组：
-施工环境角色：
+施工环境组 / 角色：
 无人值守许可：
 本地任务规格：
 定义时间：
-当前状态：已定义 / 本地已定义
-GitHub 同步：不适用 / 待补 issue
+Multica 工作状态：
+Definition Check：通过
 ```
 
-#### 7.1 落盘位置总表
+#### 7.1 产物位置
 
 | 产物 | 位置 |
 |---|---|
-| Definition Check | `docs/tasks/specs/<任务标识>-<slug>/definition-check.md`（入库） |
-| 本地任务规格 | `docs/tasks/specs/<任务标识>-<slug>/task-spec-V<n>.md`（入库） |
-| 需求分析摘要 | `docs/tasks/specs/<任务标识>-<slug>/requirements-analysis.md`（入库） |
-| 决策票 | `docs/tasks/specs/<任务标识>-<slug>/decision-tickets/`（入库） |
-| 任务清单（多切片） | `docs/tasks/specs/<任务标识>-<slug>/issues/<NN>-<slug>.md`（入库） |
-| **本地任务卡（本地轨道）** | `docs/tasks/<任务标识>-<slug>.md`（入库） |
-| **任务登记册（本地轨道）** | `docs/tasks/registry.json`（入库，唯一真源） |
-| **看板（本地轨道）** | `docs/tasks/BOARD.md`（自动重写） |
-| 决策地图（L） | wayfinder 约定位置 |
-| OpenSpec（L） | `specs/<slug>/proposal.md` |
-
-#### 7.2 发布去向：Issue 回写 vs 本地任务卡
-
-检测 GitHub（`gh` 已认证且可读写目标仓库）：
-
-- **GitHub 轨道（可用）**：创建或更新 Issue；字段齐全；带 AI 免责声明；当前状态 = `已定义`。
-
-- **本地轨道（不可用）**：
-  1. 本地任务卡落盘 `docs/tasks/<任务标识>-<slug>.md`，字段齐全（含任务标识、需求来源、来源定位、`GitHub 同步 = pending`）；
-  2. 写入登记册 `docs/tasks/registry.json` 并重写看板 `docs/tasks/BOARD.md`；
-  3. 人工确认基线后，当前状态 = **`本地已定义`**——**具备与「已定义」同等的开工资格**（契约 §11.3）；
-  4. 🔴 呈递基线确认时必须显式写明「本版本属本地轨道，GitHub 恢复后需补建 issue」，不得默认用户已知；
-  5. 🔴 Definition Check 全通过、未决产品事项 0、人工确认基线，三条缺一不可；
-  6. 🔴 **不得**对外宣称 tracker 侧已「已定义」。对外只说「本地已定义」；`GitHub 同步` 保持 `pending`，直到 issue 真正写入成功后才改为 `synced#N`。
-
-> 与历史规则的区别：历史上 GitHub 不可用时记为「本地准备完成，待同步」且**不具备开工资格**。本地轨道下，只要任务卡已入库并登记，即为可开工的正式状态——差异仅在 `GitHub 同步` 字段，恢复后据此批量回填，不会遗漏。
-
-- **第三方 tracker 作为需求源（GitHub 不可用、且交付流程未接入该 tracker）**：
-  1. 轨道判定同上——走**本地轨道**，载具 = 本地任务卡 + 登记册；
-  2. 第三方 tracker 的 issue 仅作需求源与讨论/结论记录：任务卡「需求来源」填该 tracker、「来源定位」填 issue 链接，并**显式记明「第三方 tracker 仅为记录，交付载具为本地任务卡」**；
-  3. `GitHub 同步` 保持 `pending`（含义扩展为「尚未落到交付流程可读的 tracker 载具」）；
-  4. 🔴 呈递基线确认时必须写明「本版本属本地轨道；第三方 tracker 未接入交付流程，不构成 tracker 侧『已定义』」；
-  5. 若该 tracker 后续被交付流程接入 → 按其新载具重新落档，并把 `GitHub 同步` 改为对应的 synced 值。
-
-> 判定口径的唯一依据是**交付流程实际能读到的载具**，不是"哪里有一张 issue"。这条规则的存在理由：issue 的存在感容易让人误以为 tracker 侧已具备开工资格，从而跳过本地任务卡与登记册，导致该任务在批量调度与合并门禁中不可见。
+| Definition Check | `docs/tasks/specs/<slug>/definition-check.md` |
+| 本地任务规格 | `docs/tasks/specs/<slug>/task-spec-V<n>.md` |
+| 需求分析摘要 | `docs/tasks/specs/<slug>/requirements-analysis.md` |
+| 决策票 | `docs/tasks/specs/<slug>/decision-tickets/` |
+| 多切片清单 | `docs/tasks/specs/<slug>/issues/` |
+| 状态、定义、依赖和来源 | Multica Task description + `dev-flow.definition.v1` + `dev-flow.dependencies.v1` |
+| 决策地图 / OpenSpec | wayfinder 约定位置 / `specs/<slug>/proposal.md` |
 
 ### 8. 实质变更 V1→V2
 
-按 `references/baseline-change-v1-v2.md` 执行：回定义 → 决策 → 更新规格版本 → Definition Check → 人工确认 → Issue 版本评论 → 更新 Issue 版本字段 → 「已定义」。
+按 `references/baseline-change-v1-v2.md` 执行：回定义 → 决策 → 更新规格版本 → Definition Check → 人工确认 → 更新 Multica Task 描述与 `dev-flow.definition.v1` 基线版本。确认 Task 上没有运行中的 Run 后再改动已引用规格；不要静默改写旧基线。
 
 已启动的交付 Run 不得静默升版。
 
 ### 9. 与交付的边界（本 skill 不做）
 
-本 skill 的阶段职责是把需求定义到用户可见状态「已定义」或「本地已定义」（人工确认的需求基线 + 任务基本信息 + 本地详细任务规格 + Definition Check 通过）。
+本 skill 的阶段职责是完成需求分析、人工确认基线、通过 Definition Check，并把状态和定义写入 Multica Task。工作状态由 Multica 管理；本地规格文件只承载需求正文，不承载第二份任务状态。
 
 之后发生的事——按任务施工、审查、测试、人工验收、收口——属于**工作流侧后续能力**，不在本 skill 范围内，也不由本 skill 启动或替代。
 
@@ -350,23 +308,22 @@ GitHub 同步：不适用 / 待补 issue
 
 ## 硬规则清单
 
-1. 🔴 **未决产品事项为 0 才能「已定义」**；有未决只能停在定义中/待确认前
+1. 🔴 **未决产品事项为 0 才能写入已定义元数据**；有未决时 Task 保持 `backlog`
 2. 🔴 **Definition Check 全部通过 + 人工确认基线** 缺一不可
-3. 🔴 **任务卡/Issue 基本信息与本地规格版本必须一致**
+3. 🔴 **Multica 定义元数据中的基线版本必须与本地规格版本一致**
 4. 🔴 **L 型禁止直接开工**：只产出地图 + OpenSpec + 规格，不实施
-5. 🔴 **关键状态必须落盘**：不得只存在会话中
-6. 🔴 **三要素/决策缺失不编造**；发布到 tracker 必须带 AI 免责声明
+5. 🔴 **关键状态必须落在 Multica Task**：不得只存在会话中或本地副本
+6. 🔴 **三要素/决策缺失不编造**；未经明确请求不回写需求来源 tracker
 7. 🔴 **不新建第二套定义入口**；本 skill 即唯一定义入口
 8. 🟡 有歧义才澄清；先决策/澄清后定 size；拆分优先可独立 UAT 切片
 9. 🟡 **不通过 `skill` 工具调用子 skill**
-10. 🔴 **本地轨道**：标「本地已定义」必须同时满足——本地任务卡已入库 `docs/tasks/`、登记册已登记、Definition Check 通过、未决产品事项 0、人工确认基线；**不得**对外宣称 tracker 侧已「已定义」
-11. 🔴 **轨道判定只看交付流程能读到的载具**，不看"哪里有一张 issue"；第三方 tracker 未被流程接入时不得顶替本地任务卡与登记册
+10. 🔴 **Multica 写入或回读失败时不宣布已定义**；不得用本地登记册、看板或临时号回退
+11. 🔴 **来源 issue 与 Multica Task 分工明确**：来源可读不可写时照常分析，但定义与状态只能记在 Multica Task
 
 ## 参考文件
 
 - `references/task-spec-template.md` — 本地任务规格模板
-- `references/issue-basics-template.md` — Issue 基本信息模板（GitHub 轨道）
-- `references/local-task-card-template.md` — 本地任务卡模板（本地轨道）
+- `references/multica-task-template.md` — Multica Task 描述与元数据模板
 - `references/definition-check.md` — Definition Check 清单
 - `references/baseline-change-v1-v2.md` — 实质变更升版流程
 - `references/openspec-template.md` — L 型 OpenSpec 模板
@@ -374,11 +331,12 @@ GitHub 同步：不适用 / 待补 issue
 
 ## 安装态资料定位
 
-安装或同步后的配套脚本位于本技能 `assets/`；正文的 `scripts/<名称>` 在安装态对应 `assets/<名称>`。从技能实际位置使用绝对路径执行，不以当前业务仓库为这些工具的根目录。源码编辑仍在 workflow-manager 的 scripts/docs 中进行。
+本技能不依赖 workflow-manager 的脚本或本地登记册。Multica Task 通过用户已配置的 `multica` CLI 管理；规格文件保存在目标代码仓库中。
 
 ## 依赖
 
-- GitHub 能力：可选（不可用时本地落档；宣称「已定义」以契约 §5 清单为准并遵循 §7.2）
+- `multica` CLI：写入正式 Task 定义所必需；不可用时仅交付草稿材料，待平台恢复后再登记
+- GitHub/CNB 能力：只在读取相应来源时需要；来源 tracker 不作为状态权威
 - 无子 skill 依赖
 
 ## 与整项交付接续

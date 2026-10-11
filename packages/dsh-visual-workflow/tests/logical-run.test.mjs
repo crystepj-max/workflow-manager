@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 import { loadHost } from './helpers/load-host.mjs'
-import { REPO, DSH_HOME, makeFs, makeSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
+import { REPO, DSH_HOME, makeFs, makeIsolatedSubprocess, sandboxPolicy, USER_DIR, SKILL_ROOT } from './helpers/fake-services.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const RUNS_DIR = DSH_HOME + '/visual-workflow/runs'
@@ -43,15 +43,15 @@ const readLogical = (fs, id) => {
 }
 const logicalFiles = (fs) => [...fs._files.keys()].filter((k) => k.startsWith(LOGICAL_DIR + '/'))
 
-function env({ seed = {}, extra = {}, subprocess = null } = {}) {
+function env({ seed = {}, extra = {}, subprocess = null, fs: suppliedFs = null } = {}) {
   const base = {
     [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
     [USER_DIR + '/logical-run-spec.json']: JSON.stringify(SPEC_BLUEPRINT, null, 2) + '\n',
     [SKILL_ROOT + '/logical-run-spec/script.mjs']: '//MOCK-SCRIPT',
   }
   Object.assign(base, seed)
-  const fs = makeFs(base)
-  const sub = subprocess || makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
+  const fs = suppliedFs || makeFs(base)
+  const sub = subprocess || makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
   const { handlers, definedTools, events, ctx } = loadHost({ fs, subprocess: sub, sandboxPolicy, ...extra })
   return { handlers, definedTools, events, ctx, fs, sub }
 }
@@ -427,7 +427,7 @@ test('#79 #93 工作区上下文入档：身份/事件/锁复制进摘要；清�
     [SKILL_ROOT + '/logical-run-spec/script.mjs']: '//MOCK-SCRIPT',
     ...seed,
   })
-  const base = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
+  const base = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
   const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
   const reply = (body) => ({ pid: 1, done: Promise.resolve({ exitCode: 0, signal: null }), collected: { stdout: reader(JSON.stringify(body)), stderr: reader('') }, terminate() {}, waitForExit: async () => true })
   const origSpawn = base.spawn.bind(base)
@@ -497,7 +497,7 @@ test('#79 DSH Home 探针：子进程 DSH_* 被剥离时沿祖先进程链读回
     [CUSTOM_HOME + '/visual-workflow/templates/logical-run-spec.json']: JSON.stringify(SPEC_BLUEPRINT, null, 2) + '\n',
     [CUSTOM_HOME + '/skills/logical-run-spec/script.mjs']: '//MOCK-SCRIPT',
   })
-  const base = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
+  const base = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
   const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
   const reply = (stdout) => ({ pid: 1, done: Promise.resolve({ exitCode: 0, signal: null }), collected: { stdout: reader(stdout), stderr: reader('') }, terminate() {}, waitForExit: async () => true })
   const origSpawn = base.spawn.bind(base)
@@ -588,7 +588,7 @@ test('#79 Codex R2 ③：派生运行按自身 logical_run_id 分配 workspace',
     [SKILL_ROOT + '/logical-run-spec/script.mjs']: '//MOCK-SCRIPT',
     [REPO + '/scripts/workspace-isolation-host.mjs']: '//wrapper-stub',
   })
-  const base = makeSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
+  const base = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT' })
   const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
   const reply = (body) => ({ pid: 1, done: Promise.resolve({ exitCode: 0, signal: null }), collected: { stdout: reader(JSON.stringify(body)), stderr: reader('') }, terminate() {}, waitForExit: async () => true })
   const origSpawn = base.spawn.bind(base)
@@ -646,7 +646,7 @@ function rolesEnv(eng, compileOutput) {
     [USER_DIR + '/logical-run-spec.json']: JSON.stringify(SPEC_BLUEPRINT, null, 2) + '\n',
     [SKILL_ROOT + '/logical-run-spec/script.mjs']: '//MOCK-SCRIPT',
   })
-  const sub = makeSubprocess({
+  const sub = makeIsolatedSubprocess({
     fs,
     spawnHandler: (spec) => {
       const argv = spec.argv.join(' ')
@@ -656,7 +656,7 @@ function rolesEnv(eng, compileOutput) {
       return undefined
     },
   })
-  return env({ subprocess: sub, extra: { workflowEngine: eng, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
+  return env({ fs, subprocess: sub, extra: { workflowEngine: eng, agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })
 }
 
 test('FIX-226：Rev1 快照记角色身份/摘要/是否内联（可回答「本 Run 用的是哪一版角色」）', async () => {

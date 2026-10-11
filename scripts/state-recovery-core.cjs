@@ -99,7 +99,7 @@ function extractCheckpointFromLogs(logs) {
 function checkpointToResumeFields(ck) {
   const c = ck || {}
   return {
-    entry: c.entry || undefined,
+    ...(c.entry ? { entry: c.entry } : {}),
     results: c.results && typeof c.results === 'object' ? c.results : {},
     history: Array.isArray(c.history) ? c.history : [],
     startRound: Number(c.round) || 0,
@@ -107,7 +107,7 @@ function checkpointToResumeFields(ck) {
     budgetUsed: Number(c.budgetUsed) || 0,
     maxRounds: Number(c.maxRounds) || 0,
     decisionSeq: Number(c.decisionSeq) || 0,
-    technical_budget: c.technical_budget || undefined,
+    ...(c.technical_budget ? { technical_budget: c.technical_budget } : {}),
   }
 }
 

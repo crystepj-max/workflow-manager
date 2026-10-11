@@ -20,6 +20,8 @@ const projectionCoreSrc = readFileSync(join(repoRoot, 'scripts', 'projection-cor
 const formalArtifactsSrc = readFileSync(join(repoRoot, 'scripts', 'formal-artifacts.cjs'), 'utf8')
 const evaluationBaselineSrc = readFileSync(join(repoRoot, 'scripts', 'evaluation-baseline.cjs'), 'utf8')
 const stateRecoveryCoreSrc = readFileSync(join(repoRoot, 'scripts', 'state-recovery-core.cjs'), 'utf8')
+const nodeProviderCoreSrc = readFileSync(join(repoRoot, 'scripts', 'node-provider-core.cjs'), 'utf8')
+const nodeIsolationHostClientSrc = readFileSync(join(repoRoot, 'scripts', 'node-isolation-host-client.cjs'), 'utf8')
 
 export const ROLE_CORE_SEED = {
   [DIST + '/role-library.cjs']: roleCoreSrc,
@@ -39,6 +41,8 @@ export const DIST_KERNEL_SEED = {
   [DIST + '/formal-artifacts.cjs']: formalArtifactsSrc,
   [DIST + '/evaluation-baseline.cjs']: evaluationBaselineSrc,
   [DIST + '/state-recovery-core.cjs']: stateRecoveryCoreSrc,
+  [DIST + '/route.cjs']: nodeProviderCoreSrc,
+  [DIST + '/node-isolation-host-client.cjs']: nodeIsolationHostClientSrc,
 }
 
 const localeDir = join(here, '..', '..', 'locales')
@@ -64,7 +68,16 @@ export function loadHost(overrides = {}) {
   // 测试必须显式注入假 process：当前 DSH 会话自身可能携带真实 DSH_HOME，若让
   // host.js 读取全局 process.env 会把测试写入开发/产品真实 Home。形态与动态 loader 相同。
   const { processValue = { env: { DSH_HOME, HOME }, cwd: () => REPO }, ...serviceOverrides } = overrides
-  const svc = { fs: makeFs({}), subprocess: makeSubprocess({}), sandboxPolicy, ...serviceOverrides }
+  const providers = new Map()
+  const defaultSubagents = {
+    providers,
+    registerProvider(provider) {
+      if (providers.has(provider.name)) throw new Error('duplicate test subagent provider: ' + provider.name)
+      providers.set(provider.name, provider)
+      return () => providers.delete(provider.name)
+    },
+  }
+  const svc = { fs: makeFs({}), subprocess: makeSubprocess({}), sandboxPolicy, subagents: defaultSubagents, credentials: { resolve: async () => undefined }, ...serviceOverrides }
   if (overrides.roleCoreSeed !== false && svc.fs && svc.fs._files) {
     for (const [k, v] of Object.entries(ROLE_CORE_SEED)) if (!svc.fs._files.has(k)) svc.fs._files.set(k, v)
   }
@@ -83,7 +96,7 @@ export function loadHost(overrides = {}) {
   const fn = new Function('ctx', 'harness', '__VWF_PLUGIN_ROOT__', '__VWF_REPO_ROOT__', 'process', `${src}`)
   const plugin = fn(ctx, harness, pluginRoot, repoRootInject, processValue)
   plugin.apply(ctx)
-  return { handlers, definedTools, events, ctx }
+  return { handlers, definedTools, events, ctx, subagentProviders: svc.subagents && svc.subagents.providers }
 }
 
 // 静态 Host / Minke bundle：不注入 harness 自由变量，走 webServer 前缀路由。
@@ -95,7 +108,16 @@ export function loadStaticHost(overrides = {}) {
     register(route, label) { registered.push({ route, label }) },
   }
   const { processValue = { env: { DSH_HOME, HOME }, cwd: () => REPO }, ...serviceOverrides } = overrides
-  const svc = { fs: makeFs({}), subprocess: makeSubprocess({}), sandboxPolicy, ...serviceOverrides }
+  const providers = new Map()
+  const defaultSubagents = {
+    providers,
+    registerProvider(provider) {
+      if (providers.has(provider.name)) throw new Error('duplicate test subagent provider: ' + provider.name)
+      providers.set(provider.name, provider)
+      return () => providers.delete(provider.name)
+    },
+  }
+  const svc = { fs: makeFs({}), subprocess: makeSubprocess({}), sandboxPolicy, subagents: defaultSubagents, credentials: { resolve: async () => undefined }, ...serviceOverrides }
   if (overrides.distKernelSeed !== false) seedDistKernels(svc.fs)
   const ctx = {
     get: (name) => {

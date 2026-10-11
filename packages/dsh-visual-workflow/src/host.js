@@ -17,16 +17,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 return {
   name: 'visual-workflow-host',
+  inject: ['subagents', 'credentials'],
   apply(ctx) {
     const engine = ctx.get('workflowEngine')
     const agents = ctx.get('agents')
     const sp = ctx.get('sandboxPolicy')
     let fs = ctx.get('fs')
     let subprocess = ctx.get('subprocess')
-    // 服务可能晚于 apply 注入（静态组合包仅等待 webServer/tools/subprocess）：每次入口重取一次
+    let credentials = ctx.get('credentials')
+    // 非必需服务仍可能晚于 apply 注入：每次入口重取一次
     const refreshServices = () => {
       if (fs === undefined) fs = ctx.get('fs')
       if (subprocess === undefined) subprocess = ctx.get('subprocess')
+      if (credentials === undefined) credentials = ctx.get('credentials')
     }
     const log = (m) => console.log('[vwf] ' + m)
     const errMsg = (e) => String((e && e.message) || e)
@@ -43,6 +46,16 @@ return {
     const asNum = (v, d) => (typeof v === 'number' ? v : d)
     const asObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null)
     const asArr = (v, f) => (Array.isArray(v) ? v.filter(f || ((x) => x && typeof x === 'object')) : [])
+    const NODE_ISOLATED_PROVIDER = 'vwf-node-isolated'
+    const subagents = ctx.get('subagents')
+    if (subagents && subagents.registerProvider) {
+      subagents.registerProvider({
+        name: NODE_ISOLATED_PROVIDER,
+        capabilities: { agentOptions: true, outputSchema: true },
+        inheritsParentContext: false,
+        start(request) { return loadDist('route.cjs').then((m) => m.start(request)) },
+      })
+    }
 
     // ── 双模式注册：动态会话 = harness.handle；静态组合包 = webServer 前缀路由 ──
     // 必须用 typeof 探测未声明标识符：静态 IIFE 无 harness 全局，直接读会 ReferenceError。
@@ -797,6 +810,7 @@ return {
         snapshots: [],
         node_attempts: [],
         business_outcomes: {},
+        artifact_manifests: {},
         // #80 运行控制面：Guidance Record / 控制事件 / 基线修订均为追加式，不覆盖
         guidance: [],
         control_events: [],
@@ -1054,6 +1068,7 @@ return {
         snapshots: rec.snapshots,
         node_attempts: rec.node_attempts,
         business_outcomes: rec.business_outcomes,
+        artifact_manifests: rec.artifact_manifests || {},
         guidance: rec.guidance || [],
         control_events: rec.control_events || [],
         baseline_revisions: rec.baseline_revisions || [],
@@ -1096,6 +1111,7 @@ return {
         snapshots: asArr(data.snapshots),
         node_attempts: asArr(data.node_attempts),
         business_outcomes: asObj(data.business_outcomes) || {},
+        artifact_manifests: asObj(data.artifact_manifests) || {},
         guidance: asArr(data.guidance),
         control_events: asArr(data.control_events),
         baseline_revisions: asArr(data.baseline_revisions),
@@ -1535,37 +1551,18 @@ return {
     function observeArtifactSubmit(engineRunId, message) {
       const amc = amRuns.get(String(engineRunId || ''))
       if (!amc) return
-      const req = amc.kernel.parseSubmitRequest(message)
-      if (!req) return
-      let result
-      try {
-        const prev = amc.byNode.get(req.node) || null
-        result = amc.kernel.processSubmit({ cwd: amc.cwd, runDir: amc.runDir, taskId: amc.taskId, req, prevManifest: prev })
-      } catch (e) {
-        result = { ok: false, error: errMsg(e) }
-      }
-      if (result && result.ok && result.manifest) {
-        amc.byNode.set(req.node, result.manifest)
-        const lrId = logicalRunByEngineRun.get(String(engineRunId))
-        const lrec = lrId ? logicalRuns.get(lrId) : null
-        if (lrec) {
-          lrec.artifact_manifests = lrec.artifact_manifests || {}
-          lrec.artifact_manifests[req.node] = result.manifest
-          controlEvent(lrec, 'artifact_manifest_submitted', {
-            node: req.node,
-            revision: result.manifest.revision,
-            materials_status: result.manifest.materials_status,
-            required_complete: result.manifest.required_complete,
-          })
-          requestLogicalPersist(lrec.logical_run_id)
-        }
-      }
+      amc.kernel.queueHostSubmit(amc, message, {
+        modulePath: DIST + '/artifact-manifest.cjs', runNode,
+        record: logicalRuns.get(logicalRunByEngineRun.get(String(engineRunId))),
+        controlEvent, persist: requestLogicalPersist, log,
+      })
     }
-    function artifactGateOf(engineRunId, nodeId) {
+    async function artifactGateOf(engineRunId, nodeId) {
       const amc = amRuns.get(String(engineRunId || ''))
-      if (!amc) return null
-      const man = amc.byNode.get(String(nodeId || ''))
-      return amc.kernel.gateBlockOf(man, nodeId)
+      // workflow/end 可能先回收段上下文；材料核验结论已写入逻辑运行，
+      // 不能因事件时序而丢失一份不完整清单并放行人工门。
+      const kernel = amc && amc.kernel || await amKernel()
+      return kernel ? kernel.hostGateOf(amc, logicalRuns.get(logicalRunByEngineRun.get(String(engineRunId || ''))), nodeId) : null
     }
 
     // ── LOC-027 评价基线冻结契约（纯逻辑内核 = dist/evaluation-baseline.cjs，进程边界留在宿主）──
@@ -1619,7 +1616,7 @@ return {
     // 成功且段被中止 → 从检查点注入已核验引用自动恢复（返回恢复段结果）。非取消段
     // （无中止能力/竞速）只入档已核验引用，本段不再恢复。
     async function runBaselineGate(env) {
-      const { logicalRec, engineRunId, result, execScript, meta, scriptArgs, parent, segCtl, taskId, ws, wsIdentity, engine: gateEngine } = env
+      const { logicalRec, engineRunId, result, dsl, execScript, meta, scriptArgs, parent, segCtl, taskId, ws, wsIdentity, engine: gateEngine } = env
       const ebc = ebRuns.get(String(engineRunId || ''))
       if (!ebc || !ebc.pending.size) return null
       const versions = [...ebc.pending.keys()].sort((a, b) => a - b)
@@ -1652,7 +1649,14 @@ return {
       const resumeReq = { script: execScript, meta: meta, args: resumeArgs, parent: parent }
       if (resumeCtl) resumeReq.signal = resumeCtl.signal
       if (ws && ws.source_path) { resumeReq.cwd = runArtifactCwd(ws); resumeReq.workspaceRoot = ws.source_path }
-      const resumed = gateEngine.start(resumeReq)
+      let resumed
+      try {
+        const frozenDsl = logicalRec.snapshots && logicalRec.snapshots[0]
+          && logicalRec.snapshots[0].workflow && logicalRec.snapshots[0].workflow.dsl
+        resumed = await startIsolatedSegment(gateEngine, resumeReq, wsIdentity, frozenDsl || dsl, scriptArgs.model_overrides, ws)
+      } catch (e) {
+        return { handled: true, blocked: true, version: version, code: 'EVALUATION_BASELINE_RESUME_START_FAILED', message: '评价基线恢复段安全启动失败：' + errMsg(e) }
+      }
       const resumedId = String(resumed.id)
       const resumedRec = ensureRun(resumedId)
       resumedRec.taskId = taskId
@@ -1836,7 +1840,8 @@ return {
       // LOC-027：无待决冻结的基线上下文随段结束回收（待决条目等待闸门消费，不在此删）
       const ebcEnd = ebRuns.get(String(info.id || ''))
       if (ebcEnd && ebcEnd.pending.size === 0) ebRuns.delete(String(info.id || ''))
-      amRuns.delete(String(info.id || ''))
+      const amcEnd = amRuns.get(String(info.id || ''))
+      if (amcEnd) amcEnd.kernel.endHostContext(amRuns, String(info.id || ''))
       onRun(info.id, (rec) => {
         // wf_run 已回写的脚本权威终态（WAITING_HUMAN / DONE / …）不得被迟到的 end 盖掉
         if (!TERMINAL_STATUS_RE().test(String(rec.status || ''))) rec.status = String(result.stopReason)
@@ -2424,13 +2429,12 @@ return {
 
     // ── LOC-041 节点隔离：核心 = scripts/node-isolation.mjs，经包装脚本子进程调用 ──
     async function niHostCall(cmd, input, opts) {
-      if (!NODE_ISOLATION_HOST || (await readTextIfExists(NODE_ISOLATION_HOST)) === null) return { ok: false, notFound: true, error: 'node-isolation-host.mjs 未找到（LOC-041 集成未部署）' }
-      const r = await runNode([NODE_ISOLATION_HOST, cmd, JSON.stringify(input || {})], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 256 * 1024 })
-      if (!r.ok) return { ok: false, error: 'node isolation host 调用失败：' + r.detail }
-      try {
-        const parsed = JSON.parse(r.stdout)
-        return parsed.ok ? parsed : Object.assign({ ok: false, error: parsed.error || 'node isolation host 业务错误', detail: parsed.detail }, parsed)
-      } catch (e) { return { ok: false, error: 'node isolation host 输出不可解析：' + errMsg(e), raw: r.stdout } }
+      refreshServices()
+      const m = await loadDist('node-isolation-host-client.cjs')
+      return m.createNodeIsolationHostClient({
+        scriptPath: NODE_ISOLATION_HOST, workerPath: DIST + '/node-provider-worker.mjs',
+        readTextIfExists, runNode, subprocess, resolveNode, credentials,
+      })(cmd, input, opts)
     }
     let isolationProbePromise = null
     async function probeIsolationGuarantee() {
@@ -2444,6 +2448,30 @@ return {
         })
       }
       return isolationProbePromise
+    }
+    // 每个执行段都使用新签发的节点路由。上一段结束时 startWorkflow 会撤销其令牌；
+    // 检查点恢复和集成门禁重跑不能沿用旧 scriptArgs.routes。
+    async function startIsolatedSegment(gateEngine, request, logicalRunId, dsl, modelOverrides, ws) {
+      const routeCore = await loadDist('route.cjs')
+      const routes = await routeCore.issueRun(
+        logicalRunId,
+        dsl,
+        modelOverrides,
+        ws,
+        ws ? await probeIsolationGuarantee() : null,
+        homeDirs,
+        niHostCall,
+        routeCore.runArtifactBinding(runArtifactCwd(ws), logicalRunId, request.args),
+      )
+      request.args = Object.assign({}, request.args || {}, { routes: routes, requireIsolatedNodes: true })
+      request.subagentProvider = NODE_ISOLATED_PROVIDER
+      const run = routeCore.startWorkflow(gateEngine, request, logicalRunId)
+      const kernel = await amKernel()
+      const logical = logicalRuns.get(logicalRunId)
+      if (kernel && logical) {
+        amRuns.set(String(run.id), Object.assign({ kernel }, kernel.createHostContext(runArtifactCwd(ws), request.args.runDir, logicalRunId, logical.artifact_manifests)))
+      }
+      return run
     }
 
     // ── 工作区隔离：核心实现 = scripts/workspace-isolation.mjs，经包装脚本子进程调用 ──
@@ -2513,7 +2541,7 @@ return {
       return cap
     }
     function scriptArgsFromWorkspace(ws, cap, taskId, isolation) {
-      return {
+      return Object.fromEntries(Object.entries({
         // taskId 只在显式给出时携带：本对象参与 Object.assign，undefined 值会抹掉调用点
         // 已有的 taskId，使脚本 TASK 退化为默认 'task'、RUNDIR 默认错位到 .agent-runs/task
         ...(taskId ? { taskId } : {}),
@@ -2524,7 +2552,7 @@ return {
         // LOC-041：宿主探测的隔离保证等级（enforced | unavailable）
         isolation_guarantee: isolation && isolation.guarantee ? isolation.guarantee : undefined,
         isolation_backend: isolation && isolation.backend ? isolation.backend : undefined,
-      }
+      }).filter(([, value]) => value !== undefined))
     }
     // LOC-026：候选捕获范围缺省由包装脚本侧排除 Run 产物目录（与编译脚本 RUNDIR 同源）
     function injectWorkspaceDefaults(script, defaults) {
@@ -2955,7 +2983,7 @@ return {
             const rerunReq = { script: execScript, meta, args: rerunArgs, parent }
             if (segCtl) rerunReq.signal = segCtl.signal
             if (ws.source_path) { rerunReq.cwd = ws.source_path; rerunReq.workspaceRoot = ws.source_path }
-            const rerun = gateEngine.start(rerunReq)
+            const rerun = await startIsolatedSegment(gateEngine, rerunReq, wsIdentity, dsl, scriptArgs.model_overrides, ws)
             const rerunRunId = String(rerun.id)
             const rerunRec = ensureRun(rerunRunId)
             rerunRec.taskId = taskId
@@ -3391,9 +3419,23 @@ return {
         }
         const ws = prepared.workspace || null
         if (ws) log('workspace allocated: ' + ws.workspace_id + ' at ' + ws.workspace_path)
-        else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失），回退旧行为')
+        else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失）')
         const isolationProbe = ws ? await probeIsolationGuarantee() : null
         if (isolationProbe) log('node isolation probe: guarantee=' + isolationProbe.guarantee + (isolationProbe.backend ? (' backend=' + isolationProbe.backend) : ''))
+        const nodeProviderCore = await loadDist('route.cjs')
+        let nodeRouteTokens
+        try {
+          nodeRouteTokens = await nodeProviderCore.issueRun(
+            wsIdentity, v.sanitized, modelOverridesForExec, ws, isolationProbe, homeDirs, niHostCall,
+            nodeProviderCore.runArtifactBinding(runArtifactCwd(ws), logicalTaskId, args, logicalRec.evaluation_baseline),
+          )
+        } catch (e) {
+          if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
+          logicalSetState(logicalRec, 'FAILED', logicalReason('NODE_ISOLATION_UNAVAILABLE', errMsg(e)))
+          requestLogicalPersist(logicalRec.logical_run_id)
+          log('隔离节点路由不可用（fail closed，拒绝启动）：' + errMsg(e))
+          return '错误：无法为模型节点建立独立运行环境，工作流拒绝启动：' + errMsg(e)
+        }
 
         // LOC-028：人工决策续跑必须由宿主签发 decision_ref（含候选绑定），禁止信任模型自报
         let hostDecisionRef = null
@@ -3462,6 +3504,8 @@ return {
           // #79: 快照修订的 Provider/Model（Codex R2 ②：active 快照的合并绑定；仅续跑
           // 生效——新启透传会让脚本用覆盖模型执行而 Rev1 快照仍记蓝图绑定，归因失真）
           model_overrides: modelOverridesForExec,
+          routes: nodeRouteTokens,
+          requireIsolatedNodes: true,
           decision_ref: hostDecisionRef || undefined,
           consumed_decisions: logicalRec ? (logicalRec.consumed_decisions || {}) : undefined,
         }, ws ? scriptArgsFromWorkspace(ws, prepared.capability, undefined, isolationProbe) : {})
@@ -3476,7 +3520,7 @@ return {
         // scriptArgs 组装前注入，恢复段节点提示与摘要闸门才能拿到已核验基线）
         if (logicalRec && (isHdResume || isLegacyResume || isPauseResume || probeResume)) Object.assign(args, ebBaselineArgs(logicalRec))
         // Codex R2 ①：续跑执行 Rev 1 冻结脚本（见上方 execScript 说明）
-        const startReq = { script: execScript, meta: c.meta, args: scriptArgs, parent: parent }
+        const startReq = { script: execScript, meta: c.meta, args: scriptArgs, parent: parent, subagentProvider: NODE_ISOLATED_PROVIDER }
         // #80：段取消信号——pause/interrupt 经 vwf.run.control 中止本段（引擎在当前钩子
         // 边界抛 CANCELLED，进行中 agent 自然完成，不硬杀）。宿主不支持 AbortController
         // 时不下发 signal：pause/interrupt 会得到明确失败而不是静默无效。
@@ -3484,7 +3528,7 @@ return {
         if (segCtl) startReq.signal = segCtl.signal
         if (ws && ws.source_path) { startReq.cwd = ws.source_path; startReq.workspaceRoot = ws.source_path }
         let run
-        try { run = engineNow.start(startReq) } catch (e) {
+        try { run = nodeProviderCore.startWorkflow(engineNow, startReq, wsIdentity) } catch (e) {
           if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
           if (logicalRec) {
             logicalSetState(logicalRec, 'FAILED', logicalReason('ENGINE_START_FAILED', errMsg(e)))
@@ -3514,14 +3558,7 @@ return {
         }
         const amk = await amKernel()
         if (amk && logicalRec) {
-          const runDirRel = args.runDir || ('.agent-runs/' + logicalTaskId)
-          amRuns.set(runId, {
-            kernel: amk,
-            cwd: projectRoot() || ((ws && ws.source_path) || ''),
-            runDir: runDirRel,
-            taskId: logicalTaskId,
-            byNode: new Map(),
-          })
+          amRuns.set(runId, Object.assign({ kernel: amk }, amk.createHostContext(runArtifactCwd(ws), args.runDir, logicalTaskId, logicalRec.artifact_manifests)))
         } else if (logicalRec) {
           log('产物清单内核不可用（dist/artifact-manifest.cjs 缺失）：材料就绪闸门停用')
         }
@@ -3636,7 +3673,7 @@ return {
         let baselineGateBlocked = null
         if (logicalRec && !pauseAction) {
           for (let gateIter = 0; gateIter < EB_GATE_MAX_RESUMES; gateIter++) {
-            const g = await runBaselineGate({ logicalRec, engineRunId: currentRunId, result, execScript, meta: c.meta, scriptArgs, parent, segCtl, taskId: logicalTaskId, ws, wsIdentity, engine: engineNow })
+            const g = await runBaselineGate({ logicalRec, engineRunId: currentRunId, result, dsl: v.sanitized, execScript, meta: c.meta, scriptArgs, parent, segCtl, taskId: logicalTaskId, ws, wsIdentity, engine: engineNow })
             if (!g) break
             if (g.blocked) { baselineGateBlocked = g; break }
             if (!g.resumed) break
@@ -3773,7 +3810,7 @@ return {
           // LOC-035：材料就绪闸门——WAITING_HUMAN 前检查节点产物 manifest；必需缺失
           // 则 BLOCKED（专业结果保留在 value.results，不宣称验收材料就绪）。
           if (canon === 'WAITING_HUMAN' && value && value.node) {
-            const ag = artifactGateOf(currentRunId, value.node)
+            const ag = await artifactGateOf(currentRunId, value.node)
             if (ag) {
               logicalSetState(logicalRec, 'BLOCKED', logicalReason(ag.code, ag.message))
               controlEvent(logicalRec, ag.event, { node: value.node, code: ag.code, manifest_revision: ag.manifest_revision })

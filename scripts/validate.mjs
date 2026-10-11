@@ -106,7 +106,7 @@ try {
 // ③ 引擎层测试 + 包测试
 console.log('—— ③ 引擎层测试 ——');
 try {
-  execFileSync(process.execPath, ['--test', 'scripts/test/*.test.mjs'], { cwd: root, stdio: 'pipe', shell: true });
+  execFileSync(process.execPath, ['--test', '--test-concurrency=2', 'scripts/test/*.test.mjs'], { cwd: root, stdio: 'pipe', shell: true });
   pass('引擎层测试全绿');
 } catch (e) {
   fail(e.stdout ? summarizeTestFailure(e.stdout, '引擎层测试失败') : '引擎层测试失败：' + e.message);
