@@ -49,6 +49,20 @@ export function encodeProtocolLine(value) {
     '\\u' + character.charCodeAt(0).toString(16).padStart(4, '0')) + '\n'
 }
 
+// 真实 DSH 入口只能经 node-isolation-launcher 启动；它在加载本补丁前
+// 已把整个进程树放进节点 Seatbelt。macOS 不允许再叠加 sandbox-exec，
+// 因此工具继承外层限制。此处不关闭工具，也不改变外层文件和网络授权。
+export function buildIsolatedNodeProfilePatch(payload, modulePath) {
+  validateNodeProviderPayload(payload)
+  return [
+    '- id: sandbox-policy',
+    '  config:',
+    '    mode: danger-full-access',
+    '',
+    ...(payload.outputSchema === undefined ? [] : [buildStructuredOutputPatch(modulePath, payload.outputSchema)]),
+  ].join('\n')
+}
+
 function send(value) {
   process.stdout.write(encodeProtocolLine(value))
 }
@@ -205,14 +219,15 @@ async function execute(payload, onAccepted) {
   process.once('SIGTERM', onSignal)
   try {
     dshHome = mkdtempSync(join(payload.context.scratch_path, 'vwf-dsh-home-'))
-    if (payload.outputSchema !== undefined) {
-      patchPath = join(payload.context.scratch_path, '.vwf-node-profile-' + suffix + '.yml')
-      writeFileSync(patchPath, buildStructuredOutputPatch(outputPlugin, payload.outputSchema), { flag: 'wx', mode: 0o600 })
-    }
+    patchPath = join(payload.context.scratch_path, '.vwf-node-profile-' + suffix + '.yml')
+    writeFileSync(patchPath, buildIsolatedNodeProfilePatch(payload, outputPlugin), { flag: 'wx', mode: 0o600 })
     if (interrupted) throw new Error('node provider worker was interrupted before DSH startup')
     harness = new DeepSeekHarness(createSdkOptions(payload, { dshHome, patchPath }, proxy.port))
     const session = harness.session(payload.sessionId)
-    const result = await session.run(payload.prompt, {
+    const result = await session.run([
+      { type: 'text', text: '本节点的 DSH 进程及其全部子进程已经由外层 Seatbelt 强制隔离。DSH 内部的 danger-full-access 仅避免重复套用文件沙箱，不代表拥有主仓库、其他节点或任意网络访问权限。继续遵守节点上下文声明的可读区域和 writable_roots；工具命令直接继承这些限制，不能申请绕过。' },
+      ...payload.prompt,
+    ], {
       onNotification() {
         onAccepted()
       },

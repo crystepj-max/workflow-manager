@@ -61,6 +61,7 @@ const artifactManifestSrc = join(root, '..', '..', 'scripts', 'artifact-manifest
 const nodeProviderCoreSrc = join(root, '..', '..', 'scripts', 'node-provider-core.cjs')
 const nodeIsolationHostClientSrc = join(root, '..', '..', 'scripts', 'node-isolation-host-client.cjs')
 const nodeIsolationSrc = join(root, '..', '..', 'scripts', 'node-isolation.mjs')
+const nodeArtifactsSrc = join(root, '..', '..', 'scripts', 'node-artifacts.mjs')
 const nodeIsolationLauncherSrc = join(root, '..', '..', 'scripts', 'node-isolation-launcher.mjs')
 const cwfValidateSrc = join(root, '..', '..', 'scripts', 'cwf-validate.mjs')
 const nodeIsolationSchemaSrc = join(root, '..', '..', 'docs', 'design', 'node-isolation', 'schema.json')
@@ -86,6 +87,7 @@ const artifactManifestBody = readFileSync(artifactManifestSrc, 'utf8')
 const nodeProviderCoreBody = readFileSync(nodeProviderCoreSrc, 'utf8')
 const nodeIsolationHostClientBody = readFileSync(nodeIsolationHostClientSrc, 'utf8')
 const nodeIsolationBody = readFileSync(nodeIsolationSrc, 'utf8')
+const nodeArtifactsBody = readFileSync(nodeArtifactsSrc, 'utf8')
 const nodeIsolationLauncherBody = readFileSync(nodeIsolationLauncherSrc, 'utf8')
 const cwfValidateBody = readFileSync(cwfValidateSrc, 'utf8')
 const nodeIsolationSchemaBody = readFileSync(nodeIsolationSchemaSrc, 'utf8')
@@ -123,6 +125,7 @@ const stamp = {
   nodeProviderCore: sha256(nodeProviderCoreBody),
   nodeIsolationHostClient: sha256(nodeIsolationHostClientBody),
   nodeIsolation: sha256(nodeIsolationBody),
+  nodeArtifacts: sha256(nodeArtifactsBody),
   nodeIsolationLauncher: sha256(nodeIsolationLauncherBody),
   cwfValidate: sha256(cwfValidateBody),
   nodeIsolationSchema: sha256(nodeIsolationSchemaBody),
@@ -152,6 +155,7 @@ const requiredArtifacts = [
   join(dist, 'route.cjs'),
   join(dist, 'node-isolation-host-client.cjs'),
   join(dist, 'node-isolation.mjs'),
+  join(dist, 'node-artifacts.mjs'),
   join(dist, 'node-isolation-launcher.mjs'),
   join(dist, 'cwf-validate.mjs'),
   join(dist, 'node-isolation-schema.json'),
@@ -249,6 +253,7 @@ copyFileSync(artifactManifestSrc, join(dist, 'artifact-manifest.cjs'))
 copyFileSync(nodeProviderCoreSrc, join(dist, 'route.cjs'))
 copyFileSync(nodeIsolationHostClientSrc, join(dist, 'node-isolation-host-client.cjs'))
 copyFileSync(nodeIsolationSrc, join(dist, 'node-isolation.mjs'))
+copyFileSync(nodeArtifactsSrc, join(dist, 'node-artifacts.mjs'))
 copyFileSync(nodeIsolationLauncherSrc, join(dist, 'node-isolation-launcher.mjs'))
 copyFileSync(cwfValidateSrc, join(dist, 'cwf-validate.mjs'))
 copyFileSync(nodeIsolationSchemaSrc, join(dist, 'node-isolation-schema.json'))

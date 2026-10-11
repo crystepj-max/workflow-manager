@@ -810,6 +810,7 @@ return {
         snapshots: [],
         node_attempts: [],
         business_outcomes: {},
+        artifact_manifests: {},
         // #80 运行控制面：Guidance Record / 控制事件 / 基线修订均为追加式，不覆盖
         guidance: [],
         control_events: [],
@@ -1067,6 +1068,7 @@ return {
         snapshots: rec.snapshots,
         node_attempts: rec.node_attempts,
         business_outcomes: rec.business_outcomes,
+        artifact_manifests: rec.artifact_manifests || {},
         guidance: rec.guidance || [],
         control_events: rec.control_events || [],
         baseline_revisions: rec.baseline_revisions || [],
@@ -1109,6 +1111,7 @@ return {
         snapshots: asArr(data.snapshots),
         node_attempts: asArr(data.node_attempts),
         business_outcomes: asObj(data.business_outcomes) || {},
+        artifact_manifests: asObj(data.artifact_manifests) || {},
         guidance: asArr(data.guidance),
         control_events: asArr(data.control_events),
         baseline_revisions: asArr(data.baseline_revisions),
@@ -1548,37 +1551,18 @@ return {
     function observeArtifactSubmit(engineRunId, message) {
       const amc = amRuns.get(String(engineRunId || ''))
       if (!amc) return
-      const req = amc.kernel.parseSubmitRequest(message)
-      if (!req) return
-      let result
-      try {
-        const prev = amc.byNode.get(req.node) || null
-        result = amc.kernel.processSubmit({ cwd: amc.cwd, runDir: amc.runDir, taskId: amc.taskId, req, prevManifest: prev })
-      } catch (e) {
-        result = { ok: false, error: errMsg(e) }
-      }
-      if (result && result.ok && result.manifest) {
-        amc.byNode.set(req.node, result.manifest)
-        const lrId = logicalRunByEngineRun.get(String(engineRunId))
-        const lrec = lrId ? logicalRuns.get(lrId) : null
-        if (lrec) {
-          lrec.artifact_manifests = lrec.artifact_manifests || {}
-          lrec.artifact_manifests[req.node] = result.manifest
-          controlEvent(lrec, 'artifact_manifest_submitted', {
-            node: req.node,
-            revision: result.manifest.revision,
-            materials_status: result.manifest.materials_status,
-            required_complete: result.manifest.required_complete,
-          })
-          requestLogicalPersist(lrec.logical_run_id)
-        }
-      }
+      amc.kernel.queueHostSubmit(amc, message, {
+        modulePath: DIST + '/artifact-manifest.cjs', runNode,
+        record: logicalRuns.get(logicalRunByEngineRun.get(String(engineRunId))),
+        controlEvent, persist: requestLogicalPersist, log,
+      })
     }
-    function artifactGateOf(engineRunId, nodeId) {
+    async function artifactGateOf(engineRunId, nodeId) {
       const amc = amRuns.get(String(engineRunId || ''))
-      if (!amc) return null
-      const man = amc.byNode.get(String(nodeId || ''))
-      return amc.kernel.gateBlockOf(man, nodeId)
+      // workflow/end 可能先回收段上下文；材料核验结论已写入逻辑运行，
+      // 不能因事件时序而丢失一份不完整清单并放行人工门。
+      const kernel = amc && amc.kernel || await amKernel()
+      return kernel ? kernel.hostGateOf(amc, logicalRuns.get(logicalRunByEngineRun.get(String(engineRunId || ''))), nodeId) : null
     }
 
     // ── LOC-027 评价基线冻结契约（纯逻辑内核 = dist/evaluation-baseline.cjs，进程边界留在宿主）──
@@ -1856,7 +1840,8 @@ return {
       // LOC-027：无待决冻结的基线上下文随段结束回收（待决条目等待闸门消费，不在此删）
       const ebcEnd = ebRuns.get(String(info.id || ''))
       if (ebcEnd && ebcEnd.pending.size === 0) ebRuns.delete(String(info.id || ''))
-      amRuns.delete(String(info.id || ''))
+      const amcEnd = amRuns.get(String(info.id || ''))
+      if (amcEnd) amcEnd.kernel.endHostContext(amRuns, String(info.id || ''))
       onRun(info.id, (rec) => {
         // wf_run 已回写的脚本权威终态（WAITING_HUMAN / DONE / …）不得被迟到的 end 盖掉
         if (!TERMINAL_STATUS_RE().test(String(rec.status || ''))) rec.status = String(result.stopReason)
@@ -2476,10 +2461,17 @@ return {
         ws ? await probeIsolationGuarantee() : null,
         homeDirs,
         niHostCall,
+        routeCore.runArtifactBinding(runArtifactCwd(ws), logicalRunId, request.args),
       )
       request.args = Object.assign({}, request.args || {}, { routes: routes, requireIsolatedNodes: true })
       request.subagentProvider = NODE_ISOLATED_PROVIDER
-      return routeCore.startWorkflow(gateEngine, request, logicalRunId)
+      const run = routeCore.startWorkflow(gateEngine, request, logicalRunId)
+      const kernel = await amKernel()
+      const logical = logicalRuns.get(logicalRunId)
+      if (kernel && logical) {
+        amRuns.set(String(run.id), Object.assign({ kernel }, kernel.createHostContext(runArtifactCwd(ws), request.args.runDir, logicalRunId, logical.artifact_manifests)))
+      }
+      return run
     }
 
     // ── 工作区隔离：核心实现 = scripts/workspace-isolation.mjs，经包装脚本子进程调用 ──
@@ -3435,6 +3427,7 @@ return {
         try {
           nodeRouteTokens = await nodeProviderCore.issueRun(
             wsIdentity, v.sanitized, modelOverridesForExec, ws, isolationProbe, homeDirs, niHostCall,
+            nodeProviderCore.runArtifactBinding(runArtifactCwd(ws), logicalTaskId, args, logicalRec.evaluation_baseline),
           )
         } catch (e) {
           if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
@@ -3565,14 +3558,7 @@ return {
         }
         const amk = await amKernel()
         if (amk && logicalRec) {
-          const runDirRel = args.runDir || ('.agent-runs/' + logicalTaskId)
-          amRuns.set(runId, {
-            kernel: amk,
-            cwd: projectRoot() || ((ws && ws.source_path) || ''),
-            runDir: runDirRel,
-            taskId: logicalTaskId,
-            byNode: new Map(),
-          })
+          amRuns.set(runId, Object.assign({ kernel: amk }, amk.createHostContext(runArtifactCwd(ws), args.runDir, logicalTaskId, logicalRec.artifact_manifests)))
         } else if (logicalRec) {
           log('产物清单内核不可用（dist/artifact-manifest.cjs 缺失）：材料就绪闸门停用')
         }
@@ -3824,7 +3810,7 @@ return {
           // LOC-035：材料就绪闸门——WAITING_HUMAN 前检查节点产物 manifest；必需缺失
           // 则 BLOCKED（专业结果保留在 value.results，不宣称验收材料就绪）。
           if (canon === 'WAITING_HUMAN' && value && value.node) {
-            const ag = artifactGateOf(currentRunId, value.node)
+            const ag = await artifactGateOf(currentRunId, value.node)
             if (ag) {
               logicalSetState(logicalRec, 'BLOCKED', logicalReason(ag.code, ag.message))
               controlEvent(logicalRec, ag.event, { node: value.node, code: ag.code, manifest_revision: ag.manifest_revision })

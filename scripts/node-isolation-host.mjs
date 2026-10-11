@@ -10,6 +10,7 @@ import {
 import { getRunWorkspace } from './workspace-isolation.mjs'
 import { loadRegistryFromWorkRoot } from './workspace-isolation-host-helpers.mjs'
 import { createProviderRoutes } from './node-provider-routes.mjs'
+import { prepareNodeArtifacts, publishNodeArtifacts } from './node-artifacts.mjs'
 
 const CMD = process.argv[2]
 const INPUT = process.argv[3] ? JSON.parse(process.argv[3]) : {}
@@ -59,14 +60,21 @@ try {
       break
     }
     case 'prepareNode': {
-      const { work_root, logical_run_id, node_id, profile, node_capabilities, isolation_guarantee } = INPUT
+      const { work_root, logical_run_id, node_id, profile, node_capabilities, isolation_guarantee, artifact_binding, node } = INPUT
       if (!work_root || !logical_run_id || !node_id || !profile) err('缺少参数')
       const ws = resolveWorkspace(work_root, logical_run_id)
       const ctx = prepareNodeContext(ws, {
         node_id, profile, node_capabilities,
         isolation_guarantee: isolation_guarantee || ISOLATION_GUARANTEE.UNAVAILABLE,
       })
-      out({ ok: true, context: ctx })
+      out({ ok: true, ...(artifact_binding ? prepareNodeArtifacts(ws, ctx, artifact_binding, node) : { context: ctx }) })
+      break
+    }
+    case 'publishNodeArtifacts': {
+      const { work_root, logical_run_id, context, artifact_binding, node } = INPUT
+      if (!work_root || !logical_run_id || !context || !artifact_binding || !node) err('缺少产物交接参数')
+      const ws = resolveWorkspace(work_root, logical_run_id)
+      out({ ok: true, ...publishNodeArtifacts(ws, context, artifact_binding, node) })
       break
     }
     case 'buildProfile': {

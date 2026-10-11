@@ -28,6 +28,7 @@ export const ZONE = {
   SOURCE: 'source',
   EVIDENCE: 'evidence',
   TEST_OVERLAY: 'test_overlay',
+  ARTIFACT_INPUT: 'artifact_input',
 }
 
 // 按 profile 的最小能力矩阵（规格 §9）。蓝图 node_capabilities 可收紧，不得放宽。
@@ -217,6 +218,7 @@ export function buildNodeExecutionProfile(ctx, options = {}) {
   const readRoots = []
   if (ctx.candidate_path && (caps.candidate?.read || caps.source?.read)) readRoots.push(ctx.candidate_path)
   if (ctx.evidence_path && caps.evidence.read) readRoots.push(ctx.evidence_path)
+  if (ctx.artifact_input_path) readRoots.push(ctx.artifact_input_path)
   if (ctx.scratch_path) readRoots.push(ctx.scratch_path)
   if (ctx.test_overlay_path && caps.test_overlay.read) readRoots.push(ctx.test_overlay_path)
   readRoots.push(...(options.extra_read_roots || []))
@@ -312,6 +314,7 @@ export function buildSandboxedDshLaunchSpec(ctx, options = {}) {
   const readableRoots = []
   if (ctx.candidate_path && (caps.candidate.read || caps.source.read)) readableRoots.push(ctx.candidate_path)
   if (ctx.evidence_path && caps.evidence.read) readableRoots.push(ctx.evidence_path)
+  if (ctx.artifact_input_path) readableRoots.push(ctx.artifact_input_path)
   if (ctx.scratch_path) readableRoots.push(ctx.scratch_path)
   if (ctx.test_overlay_path && caps.test_overlay.read) readableRoots.push(ctx.test_overlay_path)
   const normalizedReadableRoots = normalizeProfileDirectories(readableRoots, 'node readable root')
@@ -397,6 +400,7 @@ function assertRootsRespectCapabilities(ctx, caps, readRoots, writeRoots) {
       write: caps.candidate.write || caps.source.write,
     },
     { name: '证据', path: ctx.evidence_path, read: caps.evidence.read, write: caps.evidence.write },
+    { name: '产物输入', path: ctx.artifact_input_path, read: true, write: false },
     { name: '测试覆盖层', path: ctx.test_overlay_path, read: caps.test_overlay.read, write: caps.test_overlay.write },
   ].filter((zone) => typeof zone.path === 'string' && zone.path.trim())
 
@@ -622,6 +626,7 @@ export function classifyPath(ctx, absPath) {
   const scratch = resolve(ctx.scratch_path)
   const overlay = ctx.test_overlay_path && ctx.test_overlay_path.trim() ? resolve(ctx.test_overlay_path) : null
   if (candidate && isUnder(p, candidate)) return ZONE.CANDIDATE
+  if (ctx.artifact_input_path && isUnder(p, resolve(ctx.artifact_input_path))) return ZONE.ARTIFACT_INPUT
   if (isUnder(p, evidence)) return ZONE.EVIDENCE
   if (overlay && isUnder(p, overlay)) return ZONE.TEST_OVERLAY
   if (isUnder(p, scratch)) return ZONE.EVIDENCE
@@ -630,7 +635,7 @@ export function classifyPath(ctx, absPath) {
 }
 
 export function assertAccess(ctx, zone, operation) {
-  const caps = ctx.capabilities[zone]
+  const caps = zone === ZONE.ARTIFACT_INPUT ? { read: true, write: false } : ctx.capabilities[zone]
   if (!caps) throw new Error(`未知区域: ${zone}`)
   const ok = operation === 'read' ? caps.read : caps.write
   if (!ok) {
@@ -694,6 +699,9 @@ function zoneRoot(ctx, zone) {
       return ctx.candidate_path
     case ZONE.EVIDENCE:
       return ctx.evidence_path
+    case ZONE.ARTIFACT_INPUT:
+      if (!ctx.artifact_input_path) throw new Error('无 artifact_input 根')
+      return ctx.artifact_input_path
     case ZONE.TEST_OVERLAY:
       if (!ctx.test_overlay_path) throw new Error('无 test_overlay 根')
       return ctx.test_overlay_path

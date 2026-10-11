@@ -114,7 +114,11 @@ function createRouteRegistry(options = {}) {
 const activeRoutes = createRouteRegistry()
 let nextRunId = 0
 
-async function issueRun(runId, dsl, modelOverrides, workspace, isolation, homeDirs, hostCall) {
+function runArtifactBinding(cwd, taskId, args, baseline) {
+  return { cwd, taskId, runDir: args && args.runDir || null, evaluationBaseline: baseline || args && args.evaluation_baseline || null }
+}
+
+async function issueRun(runId, dsl, modelOverrides, workspace, isolation, homeDirs, hostCall, artifactBinding) {
   const nodes = dsl && Array.isArray(dsl.nodes) ? dsl.nodes.filter((node) => node && !node.mechanical) : []
   if (!nodes.length) return null
   if (!workspace || !isolation || isolation.guarantee !== 'enforced') {
@@ -133,6 +137,8 @@ async function issueRun(runId, dsl, modelOverrides, workspace, isolation, homeDi
       typeof nodeTokens[node.id] !== 'string' || !nodeTokens[node.id]
       || typeof attributionTokens[node.id] !== 'string' || !attributionTokens[node.id]
     ))) throw new Error('route issue incomplete')
+    const artifactContexts = new Map()
+    const binding = artifactBinding ? cloneJson(artifactBinding, '产物交接绑定') : null
     const runtime = {
       async prepareNode(route) {
         const result = await hostCall('prepareNode', {
@@ -142,9 +148,28 @@ async function issueRun(runId, dsl, modelOverrides, workspace, isolation, homeDi
           profile: route.profile,
           node_capabilities: route.nodeCapabilities,
           isolation_guarantee: route.isolationGuarantee,
+          ...(binding ? { artifact_binding: binding, node: nodes.find(node => node.id === route.nodeId) } : {}),
         })
         if (!result || result.ok !== true || !result.context) throw new Error('节点隔离上下文准备失败')
+        if (binding) {
+          if (!result.artifacts || !result.context.artifact_output_path || !result.context.artifact_input_path) throw new Error('节点产物交接上下文准备失败')
+          artifactContexts.set(result.context.artifact_output_path, result.artifacts)
+        }
         return result.context
+      },
+      preparePrompt(context, prompt) {
+        if (!binding) return prompt
+        const artifacts = artifactContexts.get(context.artifact_output_path)
+        if (!artifacts) throw new Error('节点产物交接上下文丢失')
+        return artifactPrompt(prompt, context, artifacts)
+      },
+      async publishNodeArtifacts(context, route) {
+        if (!binding) return
+        const result = await hostCall('publishNodeArtifacts', {
+          work_root: route.workRoot, logical_run_id: route.logicalRunId, context,
+          artifact_binding: binding, node: nodes.find(node => node.id === route.nodeId),
+        })
+        if (!result || result.ok !== true) throw new Error('节点产物交接失败：' + String(result?.error || '宿主没有确认发布'))
       },
       startWorker(payload, options) { return hostCall('spawnProviderWorker', payload, options) },
     }
@@ -153,6 +178,25 @@ async function issueRun(runId, dsl, modelOverrides, workspace, isolation, homeDi
     const detail = safeDiagnostic(error && error.message ? error.message : error)
     throw new Error('隔离节点路由签发失败：' + detail)
   }
+}
+
+function artifactPrompt(prompt, context, artifacts) {
+  const converted = prompt.map(part => {
+    if (part?.type !== 'text' || typeof part.text !== 'string') return part
+    let text = part.text
+      .split('- run 产物目录：' + artifacts.runDir + '/').join('- run 产物目录：' + context.artifact_output_path + '/')
+      .split(artifacts.runDir + '/STATE.md').join(context.artifact_output_path + '/STATE.md')
+    for (const ref of artifacts.inputRefs || []) text = text.split(ref.source).join(ref.staged)
+    return { ...part, text }
+  })
+  return [...converted, { type: 'text', text: [
+    '【宿主确认的隔离文件交接，以本段路径为准】',
+    '本节点声明产物及 STATE.md 只能写入：' + context.artifact_output_path + '/',
+    '声明产物：' + JSON.stringify(artifacts.outputFiles || []),
+    '声明输入与冻结基线的只读副本：' + context.artifact_input_path + '/',
+    '业务文件仍按 candidate/source 的原有权限写入；不要把输入副本当作输出目录。',
+    '节点结束后宿主会按声明发布真实字节并核验摘要；不要自行写正式 run 目录，也不要改写只读输入。',
+  ].join('\n') }]
 }
 
 function cloneJson(value, label) {
@@ -227,6 +271,7 @@ async function start(request, dependencies = {}) {
     outputSchema: request.outputSchema === undefined ? undefined : cloneJson(request.outputSchema, '输出 schema'),
     agentOptions,
   }
+  if (typeof runtime.preparePrompt === 'function') payload.prompt = cloneJson(await runtime.preparePrompt(context, payload.prompt), '产物提示')
   const worker = await runtime.startWorker(payload, { signal: request.signal })
   if (!worker || !worker.accepted || !worker.result || typeof worker.dispose !== 'function') {
     try { await worker?.dispose?.() } catch { /* preserve startup error */ }
@@ -248,7 +293,13 @@ async function start(request, dependencies = {}) {
     await worker.dispose()
   }
   const result = workerResult
-    .then((value) => normalizeResult(value, payload.outputSchema !== undefined))
+    .then(async (value) => {
+      const normalized = normalizeResult(value, payload.outputSchema !== undefined)
+      if (normalized.stopReason === 'completed' && typeof runtime.publishNodeArtifacts === 'function') {
+        await runtime.publishNodeArtifacts(context, resolved.route)
+      }
+      return normalized
+    })
     .catch((error) => errorResult(String(error?.message || error)))
   result.catch(() => {})
   return { id: sessionId, localAgent: undefined, result, dispose }
@@ -269,4 +320,5 @@ module.exports = {
   startWorkflow: activeRoutes.startWorkflow,
   clearRun: activeRoutes.clearRun,
   resolveRoute: activeRoutes.resolve,
+  runArtifactBinding,
 }

@@ -207,6 +207,38 @@ test('node-provider core rejects mismatched node context before starting a worke
   assert.equal(started, false)
 })
 
+test('隔离 worker 完成后，必须等宿主发布声明产物才返回节点结果', async () => {
+  const registry = createRouteRegistry({ now: () => 1000 })
+  registry.registerRun('run-1', issued())
+  const events = []
+  let releasePublish
+  const publishDone = new Promise(resolve => { releasePublish = resolve })
+  const context = { node_id: 'worker', profile: 'researcher', isolation_guarantee: 'enforced' }
+  const run = await start({ prompt: [{ type: 'text', text: '原提示' }], agentOptions: { provider: 'vwf-node-isolated:' + tokenA, model: 'deepseek-v4-pro' } }, {
+    routes: registry,
+    prepareNode: async () => context,
+    preparePrompt: async (_context, prompt) => [...prompt, { type: 'text', text: '宿主产物目录' }],
+    publishNodeArtifacts: async (_context, route) => {
+      assert.equal(route.nodeId, 'worker')
+      events.push('publish-start')
+      await publishDone
+      events.push('publish-end')
+    },
+    startWorker: async payload => {
+      assert.equal(payload.prompt.at(-1).text, '宿主产物目录')
+      return { accepted: Promise.resolve(), result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => {} }
+    },
+  })
+  let finished = false
+  run.result.then(() => { finished = true })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(events, ['publish-start'])
+  assert.equal(finished, false)
+  releasePublish()
+  assert.equal((await run.result).stopReason, 'completed')
+  assert.deepEqual(events, ['publish-start', 'publish-end'])
+})
+
 test('node-provider core reaps a worker that fails before prompt acceptance', async () => {
   const registry = createRouteRegistry({ now: () => 1000 })
   registry.registerRun('run-1', issued())

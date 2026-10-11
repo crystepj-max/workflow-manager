@@ -41,6 +41,8 @@
         "isolation_guarantee": { "$ref": "#/definitions/isolationGuarantee" },
         "candidate_path": { "type": "string" },
         "evidence_path": { "type": "string" },
+        "artifact_input_path": { "type": "string" },
+        "artifact_output_path": { "type": "string" },
         "test_overlay_path": { "type": "string" },
         "scratch_path": { "type": "string" },
         "agent_cwd": { "type": "string" },

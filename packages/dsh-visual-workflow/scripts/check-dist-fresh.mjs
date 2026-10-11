@@ -12,6 +12,7 @@ const clientPath = join(root, 'src', 'client.js')
 const roleLibraryPath = join(root, '..', '..', 'scripts', 'role-library.cjs')
 const projectionCorePath = join(root, '..', '..', 'scripts', 'projection-core.cjs')
 const stateRecoveryCorePath = join(root, '..', '..', 'scripts', 'state-recovery-core.cjs')
+const nodeArtifactsPath = join(root, '..', '..', 'scripts', 'node-artifacts.mjs')
 const roleManifestPath = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
 const stampPath = join(root, 'dist', '.src-stamp.json')
 const distHost = join(root, 'dist', 'host-entry.mjs')
@@ -46,6 +47,9 @@ const host = sha256(hostPath)
 const client = sha256(clientPath)
 if (stamp.host !== host || stamp.client !== client) {
   fail('源码哈希与 stamp 不符（host ' + host.slice(0, 12) + ' / client ' + client.slice(0, 12) + '）')
+}
+if (!existsSync(join(root, 'dist', 'node-artifacts.mjs')) || stamp.nodeArtifacts !== sha256(nodeArtifactsPath)) {
+  fail('隔离节点产物交接内核缺失或未重建')
 }
 // 角色库内核与清单也纳入新鲜度闸门：改内核/manifest 未重建 dist 时正式安装会加载过期逻辑
 const roleLibrary = sha256(roleLibraryPath)

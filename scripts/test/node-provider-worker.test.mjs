@@ -12,6 +12,7 @@ const {
   encodeProtocolLine,
   sanitizeWorkerDiagnostic,
   resolveDshRuntimeRoots,
+  buildIsolatedNodeProfilePatch,
 } = await import(workerPath)
 const pluginRoot = dirname(dirname(workerPath))
 const pluginRequire = createRequire(join(pluginRoot, 'package.json'))
@@ -56,10 +57,23 @@ test('node provider worker redacts the resolved API credential from diagnostics'
   assert.equal(sanitizeWorkerDiagnostic('x'.repeat(2200), 'fixture-secret').length, 2000)
 })
 
+test('隔离节点让工具继承启动垫片的沙箱，不再请求 macOS 嵌套沙箱', () => {
+  assert.equal(typeof buildIsolatedNodeProfilePatch, 'function')
+  const patch = buildIsolatedNodeProfilePatch(payload, '/opt/vwf/dist/structured-output.mjs')
+  assert.match(patch, /- id: sandbox-policy\n  config:\n    mode: danger-full-access/)
+  assert.doesNotMatch(patch, /disabled: true/)
+  assert.doesNotMatch(patch, /vwf-structured-output/)
+  const schema = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }
+  const structured = buildIsolatedNodeProfilePatch({ ...payload, outputSchema: schema }, '/opt/vwf/dist/structured-output.mjs')
+  assert.match(structured, /id: vwf-structured-output/)
+  assert.ok(structured.includes('schema: ' + JSON.stringify(schema)))
+  assert.throws(() => buildIsolatedNodeProfilePatch({ ...payload, context: { ...payload.context, isolation_guarantee: 'unavailable' } }), /context does not match route/)
+})
+
 test('DSH runtime roots include hoisted package directories without exposing the workspace node_modules root', () => {
   const dist = join(pluginRoot, 'dist')
   const nodeModules = realpathSync(join(pluginRoot, 'node_modules'))
-  const repoNodeModules = realpathSync(join(pluginRoot, '..', '..', 'node_modules'))
+  const repoNodeModules = join(realpathSync(join(pluginRoot, '..', '..')), 'node_modules')
   const roots = resolveDshRuntimeRoots(dist)
   const isWithin = (root, target) => {
     const rel = relative(root, target)
