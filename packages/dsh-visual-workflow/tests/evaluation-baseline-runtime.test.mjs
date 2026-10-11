@@ -88,7 +88,7 @@ function env({ template = OPTIMIZE_LIKE, workspaceSource = null, engine = null, 
   }
   const fs = makeFs(seed)
   const wsHost = (cmd) => {
-    if (cmd === 'allocate') {
+    if (cmd === 'allocate' || cmd === 'get') {
       return { ok: true, workspace: { workspace_id: 'ws-eb', workspace_path: workspaceSource + '/ws', source_path: workspaceSource, records_path: workspaceSource + '/records', work_branch: 'dev-eb', source_revision: 'rev-1', workspace_mode: 'SANDBOX' } }
     }
     if (cmd === 'context') return { ok: true, workspace: null, events: [] }
@@ -163,6 +163,10 @@ test('EB1 冻结成功：检查点中止 + 注入已核验引用自动恢复 + �
   await until(() => eng.starts.length >= 2, '基线恢复段启动')
   // 冻结成功后原段被中止，恢复段从检查点注入已核验引用
   const resumeReq = eng.starts[1]
+  assert.deepEqual(resumeReq.args, JSON.parse(JSON.stringify(resumeReq.args)),
+    '恢复段传给 DSH 的参数必须为无损 JSON；可选字段缺失时不能携带 undefined')
+  assert.equal(resumeReq.args.isolation_guarantee, eng.starts[0].args.isolation_guarantee,
+    '刷新工作区未返回隔离探测字段时，保留已核验的隔离保证')
   assert.equal(eng.starts[0].subagentProvider, 'vwf-node-isolated')
   assert.equal(resumeReq.subagentProvider, 'vwf-node-isolated', '检查点恢复仍使用隔离 Provider')
   assert.equal(eng.starts[0].args.requireIsolatedNodes, true)

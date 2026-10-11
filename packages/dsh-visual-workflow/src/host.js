@@ -2541,7 +2541,7 @@ return {
       return cap
     }
     function scriptArgsFromWorkspace(ws, cap, taskId, isolation) {
-      return {
+      return Object.fromEntries(Object.entries({
         // taskId 只在显式给出时携带：本对象参与 Object.assign，undefined 值会抹掉调用点
         // 已有的 taskId，使脚本 TASK 退化为默认 'task'、RUNDIR 默认错位到 .agent-runs/task
         ...(taskId ? { taskId } : {}),
@@ -2552,7 +2552,7 @@ return {
         // LOC-041：宿主探测的隔离保证等级（enforced | unavailable）
         isolation_guarantee: isolation && isolation.guarantee ? isolation.guarantee : undefined,
         isolation_backend: isolation && isolation.backend ? isolation.backend : undefined,
-      }
+      }).filter(([, value]) => value !== undefined))
     }
     // LOC-026：候选捕获范围缺省由包装脚本侧排除 Run 产物目录（与编译脚本 RUNDIR 同源）
     function injectWorkspaceDefaults(script, defaults) {
