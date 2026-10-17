@@ -2,32 +2,85 @@
   "presets": [
     {
       "id": "optimize-evaluator",
-      "outcomePath": "$.verdict",
-      "values": ["PASS", "OPTIMIZE", "CONFIRM"],
+      "outcomePath": "$.route",
+      "values": [
+        "PASS",
+        "OPTIMIZE",
+        "CONFIRM"
+      ],
       "labelsZh": {
-        "PASS": "通过",
-        "OPTIMIZE": "需优化，回执行",
+        "PASS": "评估通过",
+        "OPTIMIZE": "需要继续优化",
         "CONFIRM": "需确认，升人工决策"
-      }
+      },
+      "applicableNodes": [
+        {
+          "templateFile": "templates/wf-optimize.json",
+          "nodeId": "evaluate"
+        }
+      ]
     },
     {
       "id": "explore-evaluator",
       "outcomePath": "$.verdict",
-      "values": ["PASS", "NEEDS_RESEARCH", "INSUFFICIENT"],
+      "values": [
+        "PASS",
+        "NEEDS_RESEARCH",
+        "INSUFFICIENT"
+      ],
       "labelsZh": {
-        "PASS": "通过",
-        "NEEDS_RESEARCH": "需补充研究",
+        "PASS": "评估通过",
+        "NEEDS_RESEARCH": "需要补充研究",
         "INSUFFICIENT": "证据不足（可为合法完成）"
-      }
+      },
+      "applicableNodes": [
+        {
+          "templateFile": "templates/wf-explore.json",
+          "nodeId": "evaluate"
+        }
+      ]
     },
     {
-      "id": "review",
-      "outcomePath": "$.verdict",
-      "values": ["APPROVE", "REQUEST_CHANGES"],
+      "id": "construction-review-route",
+      "outcomePath": "$.route",
+      "values": [
+        "APPROVE",
+        "RETURN_DEV",
+        "BLOCKED"
+      ],
       "labelsZh": {
         "APPROVE": "审核通过",
-        "REQUEST_CHANGES": "请求修改"
-      }
+        "RETURN_DEV": "退回开发修改",
+        "BLOCKED": "审核环节受阻"
+      },
+      "applicableNodes": [
+        {
+          "templateFile": "templates/wf-construction-full-feature.json",
+          "nodeId": "review"
+        }
+      ]
+    },
+    {
+      "id": "diagnose-review-route",
+      "outcomePath": "$.route",
+      "values": [
+        "APPROVE",
+        "FIX_ISSUES",
+        "ROOT_CAUSE_REFUTED",
+        "BLOCKED"
+      ],
+      "labelsZh": {
+        "APPROVE": "审核通过",
+        "FIX_ISSUES": "发现问题，需要修复",
+        "ROOT_CAUSE_REFUTED": "原根因判断被否定，需要重新诊断",
+        "BLOCKED": "审核环节受阻"
+      },
+      "applicableNodes": [
+        {
+          "templateFile": "templates/wf-diagnose.json",
+          "nodeId": "review"
+        }
+      ]
     }
   ]
 }
