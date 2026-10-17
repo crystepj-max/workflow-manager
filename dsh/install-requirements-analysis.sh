@@ -2,6 +2,7 @@
 # workflow-manager 的 requirements-analysis 真源直接分发到用户级技能目录。
 # 用法：dsh/install-requirements-analysis.sh [目标目录]
 # 默认：~/.agents/skills/requirements-analysis
+# 默认安装后会在各宿主技能目录建立同源入口：各宿主只扫自己的 skills 目录，不读公共池。
 set -euo pipefail
 
 TASK_WORKFLOW_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -76,4 +77,32 @@ echo "installed -> $TASK_SKILL_DEST"
 if [ -n "$TASK_SKILL_BACKUP" ]; then
   echo "backup -> $TASK_SKILL_BACKUP"
 fi
+
+# 宿主各扫自己的 skills 目录（Codex/Claude/WorkBuddy 等都不读 ~/.agents/skills），
+# 因此默认安装还要把入口铺到已存在的宿主目录；显式目标目录保持「只装这一处」。
+if [ "$TASK_SKILL_DEST" = "$HOME/.agents/skills/requirements-analysis" ]; then
+  for host_root in "$HOME/.codex/skills" "$HOME/.claude/skills" "$HOME/.config/claude/skills" \
+                   "$HOME/.workbuddy/skills" "$HOME/.openclaw/skills" "$HOME/.hermes/skills"; do
+    [ -d "$host_root" ] || continue
+    host_entry="$host_root/requirements-analysis"
+
+    if [ -L "$host_entry" ]; then
+      rm -f "$host_entry"
+    elif [ -e "$host_entry" ]; then
+      echo "跳过 $host_entry：已存在实体目录，未覆盖（如需接管请先人工确认并移走）" >&2
+      continue
+    fi
+
+    if ln -s "$TASK_SKILL_DEST" "$host_entry" 2>/dev/null && [ -L "$host_entry" ] && [ -f "$host_entry/SKILL.md" ]; then
+      echo "linked  -> $host_entry"
+    else
+      # 少数 Windows 环境的 ln -s 会退化为复制；清掉复制品，避免出现第二份真源。
+      if [ -e "$host_entry" ] && [ ! -L "$host_entry" ]; then
+        rm -rf "$host_entry"
+      fi
+      echo "无法建立入口：$host_entry（内容已安装到公共池，可手动链接）" >&2
+    fi
+  done
+fi
+
 find "$TASK_SKILL_DEST" -type f | sort
