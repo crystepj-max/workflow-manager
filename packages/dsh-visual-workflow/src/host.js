@@ -2388,6 +2388,18 @@ return {
       try { lib = await roleLibrary() } catch (e) { return fail('角色库内核不可用：' + errMsg(e)) }
       return handler(lib, a)
     }
+    // #75 S-2b：内置 Outcome Preset 只读下发。数据唯一来源是构建产物 dist/outcome-presets.json；
+    // 只读接口，无任何写操作；加载失败让客户端把选择器置为不可用，不影响手填路由。
+    registerRpc('vwf.outcomePresets.list', async () => {
+      try {
+        const data = await loadDist('outcome-presets.json')
+        const presets = Array.isArray(data && data.presets) ? data.presets : null
+        if (!presets) return fail('dist/outcome-presets.json 缺少 presets 数组')
+        return { ok: true, schemaVersion: 1, presets }
+      } catch (e) {
+        return fail('内置结果预设不可用：' + errMsg(e))
+      }
+    })
     registerRpc('vwf.roles', withLib(async (lib) => {
       const r = await lib.execute({ operation: 'list', facts: { includeContent: false, catalog: await collectRoleCatalog(), builtinBodies: await collectBuiltinBodies(lib) } })
       return { roles: r.roles }

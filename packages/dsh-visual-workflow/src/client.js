@@ -59,6 +59,8 @@ return {
   routingValuesOf: routingValuesOf,
   applyRoutingWrite: applyRoutingWrite,
   routingEdgeStatus: routingEdgeStatus,
+  // #75 S-2b：预设应用规划纯函数（四态判定 + 差异 + 候选），导出供单测
+  planOutcomePresetApplication: planOutcomePresetApplication,
   // 校验内核副本的最小导出（LOC-005 parity 门禁）：纯函数、零运行时行为变更，
   // 仅暴露给 tests/graph-semantics-parity 与内核权威侧同输入对拍。
   isStructuralEdge: isStructuralEdge,
@@ -1614,6 +1616,33 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     }
 
     // ── 节点配置表单（对应 WorkerNodeInspector）──────────────────────────────
+    // #75 S-2b：内置结果预设整会话只拉取一次（undefined=未加载，null=不可用，数组=就绪）。
+    // 失败只禁用选择器，不影响手填路由；不做旧数据静默降级。
+    let outcomePresetsCache
+    let outcomePresetsInflight = null
+    function ensureOutcomePresets(cb) {
+      if (outcomePresetsCache !== undefined) { cb(outcomePresetsCache); return }
+      if (!outcomePresetsInflight) {
+        outcomePresetsInflight = host.call('vwf.outcomePresets.list')
+          .then((r) => { outcomePresetsCache = (r && r.ok && Array.isArray(r.presets) && r.presets.length) ? r.presets : null })
+          .catch(() => { outcomePresetsCache = null })
+          .then(() => { outcomePresetsInflight = null; return outcomePresetsCache })
+      }
+      outcomePresetsInflight.then(cb)
+    }
+    // 冲突码 → 文案键（结构化码保持稳定，中文由 locale 提供）
+    const PRESET_CONFLICT_KEY = {
+      INVALID_PRESET: 'presetConflictInvalid',
+      DIRTY_DRAFT: 'presetConflictDirty',
+      READ_ONLY_NODE: 'presetConflictReadonly',
+      NESTED_PATH_UNSAFE: 'presetConflictNestedPath',
+      NON_ROUTING_FIELD_COLLISION: 'presetConflictFieldCollision',
+      EDGE_OUTCOME_NOT_IN_PRESET: 'presetConflictEdgeOutcome',
+      DUPLICATED_OUTCOME_EDGE: 'presetConflictDuplicatedEdge',
+      UNSUPPORTED_SCHEMA: 'presetConflictUnsupported',
+      UNSAFE_SCHEMA_CHANGE: 'presetConflictUnsafe',
+      INVALID_CANDIDATE: 'presetConflictInvalidCandidate',
+    }
     function NodeInspector(props) {
       const node = props.node
       const dsl = props.dsl
@@ -1629,9 +1658,20 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const [routingValuesDraft, setRoutingValuesDraft] = React.useState(() => routingValuesOf(node))
       const [routingValuesDirty, setRoutingValuesDirty] = React.useState(false)
       const [routingNotice, setRoutingNotice] = React.useState(null)
+      // #75 S-2b：结果预设选择器（选择只产生预览，应用始终单次提交；换节点即复位）
+      const [presetId, setPresetId] = React.useState('')
+      const [presets, setPresets] = React.useState(undefined)
+      const [presetConfirming, setPresetConfirming] = React.useState(false)
       const debounceRef = React.useRef(null)
 
       React.useEffect(() => { setIdDraft(node.id) }, [node.id])
+      React.useEffect(() => { setPresetId(''); setPresetConfirming(false) }, [node.id])
+      React.useEffect(() => {
+        if (presets !== undefined) return
+        let live = true
+        ensureOutcomePresets((ps) => { if (live) setPresets(ps) })
+        return () => { live = false }
+      }, [presets])
       React.useEffect(() => {
         setSchemaDraft(node.output && node.output.schema ? JSON.stringify(node.output.schema, null, 2) : '')
         setSchemaError(null)
@@ -1671,6 +1711,28 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const commitRoutingValues = (values) => {
         setRoutingValuesDraft(values)
         commitRouting(routingName, values)
+      }
+
+      // #75 S-2b：预设规划在渲染期按当前节点/边实时计算（纯函数，无副作用）；
+      // 确认应用时重新计算一次，前后不一致即放弃旧计划。
+      const presetById = presets && presetId ? presets.find((p) => p && p.id === presetId) : null
+      const presetEdges = (props.dsl && props.dsl.edges) || []
+      const presetOpts = { dirtyDraft: routingValuesDirty || schemaDirty, readOnly: !!props.readOnlyStructure }
+      const presetPlan = presetById ? planOutcomePresetApplication(node, presetById, presetEdges, presetOpts) : null
+      const applyPresetPlan = () => {
+        if (!presetById) return
+        const fresh = planOutcomePresetApplication(node, presetById, presetEdges, presetOpts)
+        if (!fresh.applicable || fresh.status === 'BLOCKED' || fresh.status === 'NOOP' || !fresh.candidate) { setPresetConfirming(false); return }
+        props.onUpdate(node.id, { output: fresh.candidate })
+        if (fresh.candidate.schema) setSchemaDraft(JSON.stringify(fresh.candidate.schema, null, 2))
+        setSchemaDirty(false)
+        setSchemaError(null)
+        setSchemaNotice(null)
+        setRoutingNameDraft(routingNameOf(fresh.candidate.outcomePath))
+        setRoutingValuesDraft(routingValuesOf({ id: node.id, output: fresh.candidate }))
+        setRoutingValuesDirty(false)
+        setRoutingNotice(null)
+        setPresetConfirming(false)
       }
 
       const commitSchema = (value) => {
@@ -1924,6 +1986,58 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           resultMode === 'ai' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('outputValidationDescription')) : null,
           resultMode === 'manual' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('manualCheckDescription')) : null,
           resultMode === 'routing' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 6 } }, t('resultModeRoutingDescription')) : null,
+          resultMode === 'routing' && !ro ? h('div', { className: 'vwf-field', style: { marginTop: 6 } },
+            h('div', { className: 'vwf-field-label' }, t('presetSelectorLabel')),
+            presets === null
+              ? h('div', { className: 'vwf-muted-sm' }, t('presetUnavailable'))
+              : h('select', { className: 'vwf-input', value: presetId, onChange: (ev) => { setPresetId(ev.target.value); setPresetConfirming(false) } },
+                h('option', { value: '' }, t('presetNone')),
+                (presets || []).map((p) => h('option', { key: p.id, value: p.id }, p.nameZh || p.id))),
+            presetPlan ? (() => {
+              const src = presetPlan.source && presetPlan.source.applicableNodes && presetPlan.source.applicableNodes[0]
+              const srcLabel = src ? String(src.templateFile || '').replace(/^templates\//, '') + '#' + src.nodeId : presetPlan.source.presetId
+              const diff = presetPlan.differences && presetPlan.differences[0]
+              const enumDiff = diff && diff.enumDiff
+              const conflict = presetPlan.status === 'BLOCKED' && presetPlan.conflicts[0]
+              const edgeDetail = conflict && Array.isArray(conflict.detail)
+                ? conflict.detail.map((d) => d.from + ' → ' + d.to + ' (' + d.outcome + ')').join('、')
+                : null
+              return h('div', { style: { marginTop: 4 } },
+                presetById ? h('div', { className: 'vwf-muted-sm' },
+                  t('presetSource') + ':' + srcLabel + ' · ' + (presetById.outcomePath || '')) : null,
+                presetById ? presetById.values.map((v) => h('div', { key: v, className: 'vwf-muted-sm' },
+                  v + (presetById.labelsZh && presetById.labelsZh[v] ? '　' + presetById.labelsZh[v] : ''))) : null,
+                presetPlan.status === 'NOOP' ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } }, t('presetNoop')) : null,
+                conflict ? h('div', { className: 'vwf-err-line', style: { marginTop: 4 } },
+                  t('presetBlocked') + ':' + t(PRESET_CONFLICT_KEY[conflict.code] || 'presetConflictUnsafe') + (edgeDetail ? ' ' + edgeDetail : '')) : null,
+                presetPlan.status === 'CONFIRM' && !presetConfirming && enumDiff && (enumDiff.added.length || enumDiff.removed.length)
+                  ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } },
+                    (enumDiff.removed.length ? t('presetDiffEnumRemove') + ':' + enumDiff.removed.join('、') + '　' : '')
+                    + (enumDiff.added.length ? t('presetDiffEnumAdd') + ':' + enumDiff.added.join('、') : '')) : null,
+                presetPlan.warnings.length ? h('div', { className: 'vwf-muted-sm', style: { marginTop: 4 } },
+                  t('presetMissingEdge') + ':' + presetPlan.warnings.map((w) => w.value).join('、')) : null,
+                presetPlan.status === 'DIRECT' || presetPlan.status === 'CONFIRM'
+                  ? (presetConfirming
+                    ? h('div', { style: { marginTop: 6 } },
+                      h('div', { className: 'vwf-field-label' }, t('presetConfirmTitle')),
+                      h('div', { className: 'vwf-muted-sm' }, t('presetConfirmBody', {
+                        before: (diff && diff.before) || '—', after: (diff && diff.after) || '—',
+                        added: enumDiff && enumDiff.added.length ? enumDiff.added.join('、') : '—',
+                        removed: enumDiff && enumDiff.removed.length ? enumDiff.removed.join('、') : '—',
+                      })),
+                      h('div', { className: 'vwf-muted-sm' }, t('presetEdgesUntouched')),
+                      h('div', { className: 'vwf-muted-sm' }, t('presetCompletionUntouched')),
+                      h('div', { className: 'vwf-confirm-actions', style: { marginTop: 6 } },
+                        h('button', { className: 'vwf-btn sm', onClick: () => setPresetConfirming(false) }, t('presetCancel')),
+                        h('button', { className: 'vwf-btn sm primary', onClick: applyPresetPlan }, t('presetConfirmOk'))))
+                    : h('button', { className: 'vwf-btn sm', style: { marginTop: 6 }, onClick: () => { if (presetPlan.status === 'CONFIRM') setPresetConfirming(true); else applyPresetPlan() } },
+                      presetPlan.status === 'CONFIRM' ? t('presetApplyConfirm') : t('presetApply')))
+                  : null,
+                presetId ? h('div', { style: { marginTop: 6 } },
+                  h('button', { className: 'vwf-btn sm ghost', onClick: () => { setPresetId(''); setPresetConfirming(false) } }, t('presetDismiss'))) : null,
+              )
+            })() : null,
+          ) : null,
           resultMode === 'routing' ? h('div', null,
             // F1：只填参数名（`$.` 前缀属于实现细节，对用户不可见）；粘贴 `$.route` 会自动归一
             h(Field, { label: t('routingFieldName'), required: true, help: t('routingFieldNameHelp'), errors: errorsFor('output.outcomePath') },
@@ -5654,4 +5768,100 @@ function routingEdgeStatus(dsl, nodeId) {
     if (!declared[v]) undeclared.push({ edgeIndex: i, value: v, to: e.to })
   })
   return { values: rows, undeclared }
+}
+
+/**
+ * #75 S-2b：内置 Outcome Preset 应用规划（纯函数，顶层导出供测试）。
+ * 四态判定（优先级 BLOCKED > CONFIRM > DIRECT，完全一致为 NOOP）：
+ * 候选结果一律经既有 applyRoutingWrite 生成，本函数只做判定与差异计算，
+ * 不修改 node/preset/edges，不触发提交；labelsZh 仅用于展示不参与判定。
+ * applicableNodes 只是内置来源说明，不作为自定义节点的应用白名单。
+ */
+function planOutcomePresetApplication(node, preset, edges, options) {
+  const opts = options || {}
+  const src = { presetId: (preset && preset.id) || '', applicableNodes: (preset && preset.applicableNodes) || [] }
+  const blocked = (code, detail) => ({ applicable: false, status: 'BLOCKED', conflicts: [{ code, detail: detail || null }], differences: [], warnings: [], candidate: null, source: src })
+  if (!preset || typeof preset !== 'object') return blocked('INVALID_PRESET')
+  if (typeof preset.id !== 'string' || !preset.id) return blocked('INVALID_PRESET')
+  if (typeof preset.outcomePath !== 'string' || !routingNameOf(preset.outcomePath)) return blocked('INVALID_PRESET')
+  if (!Array.isArray(preset.values) || preset.values.length === 0 || !preset.values.every((v) => typeof v === 'string' && v.trim() !== '')) return blocked('INVALID_PRESET')
+  if (new Set(preset.values).size !== preset.values.length) return blocked('INVALID_PRESET')
+  if (opts.dirtyDraft) return blocked('DIRTY_DRAFT')
+  if (opts.readOnly) return blocked('READ_ONLY_NODE')
+
+  const name = routingNameOf(preset.outcomePath)
+  const out = node && node.output
+  const curPath = out && typeof out.outcomePath === 'string' ? out.outcomePath.trim() : null
+  const curName = routingNameOf(curPath)
+  const schema = (out && out.schema) || null
+  const props = (schema && schema.properties) || {}
+  const edgeList = Array.isArray(edges) ? edges : []
+  const outcomeEdgesOf = (v) => edgeList
+    .map((e, i) => ({ e, i }))
+    .filter((x) => x.e && x.e.from === (node && node.id) && x.e.outcome !== undefined && x.e.outcome !== null && x.e.outcome !== '' && String(x.e.outcome) === v)
+
+  // 多层自定义路径（$.a.b 形态）：既有写回契约只支持单层字段，不得静默截断
+  if (curPath && !curName) return blocked('NESTED_PATH_UNSAFE', { outcomePath: curPath })
+  // 目标字段名已被非路由属性占用：不能仅凭同名获得覆盖权限
+  if (curName !== name && props[name] !== undefined) return blocked('NON_ROUTING_FIELD_COLLISION', { field: name })
+  // 既有业务边引用预设外取值：不得自动删边、改 outcome 或做近似映射
+  const foreignEdges = []
+  edgeList.forEach((e) => {
+    if (!e || e.from !== (node && node.id)) return
+    if (e.outcome === undefined || e.outcome === null || e.outcome === '') return
+    if (!preset.values.includes(String(e.outcome))) foreignEdges.push({ from: e.from, to: e.to, outcome: String(e.outcome) })
+  })
+  if (foreignEdges.length) return blocked('EDGE_OUTCOME_NOT_IN_PRESET', foreignEdges)
+  // 重复业务边：候选无法合法，要求先手动处理
+  const dupValues = []
+  preset.values.forEach((v) => { if (outcomeEdgesOf(v).length > 1) dupValues.push(v) })
+  if (dupValues.length) return blocked('DUPLICATED_OUTCOME_EDGE', dupValues)
+
+  // 目标字段既有属性约束：只允许 type+enum 形态被既有写回安全替换
+  const curValues = curName ? (enumerableValues(props[curName]) || []) : []
+  const targetProp = props[name]
+  if (targetProp && targetProp.type !== 'string') return blocked('UNSUPPORTED_SCHEMA', { field: name, type: targetProp.type || null })
+  if (targetProp && typeof targetProp === 'object') {
+    const extra = Object.keys(targetProp).filter((k) => k !== 'type' && k !== 'enum')
+    if (extra.length) return blocked('UNSAFE_SCHEMA_CHANGE', { field: name, extraKeys: extra })
+  }
+
+  const missingEdgeWarnings = () => preset.values
+    .filter((v) => outcomeEdgesOf(v).length === 0)
+    .map((v) => ({ code: 'MISSING_EDGE', value: v }))
+
+  const identical = curPath === routingPathOf(name) && curName === name
+    && curValues.length === preset.values.length
+    && preset.values.every((v) => curValues.includes(v))
+  if (identical) return { applicable: true, status: 'NOOP', conflicts: [], differences: [], warnings: missingEdgeWarnings(), candidate: null, source: src }
+
+  const candidateOutput = applyRoutingWrite(node, name, preset.values)
+  // 候选不变量：required 不得引用已删除属性；completionPath 等其他 output 字段必须原样保留
+  const candRequired = Array.isArray(candidateOutput.schema && candidateOutput.schema.required) ? candidateOutput.schema.required : []
+  const candProps = (candidateOutput.schema && candidateOutput.schema.properties) || {}
+  const orphan = candRequired.filter((k) => candProps[k] === undefined)
+  if (orphan.length) return blocked('INVALID_CANDIDATE', { orphanRequired: orphan })
+  if (JSON.stringify(candidateOutput.completionPath) !== JSON.stringify(out ? out.completionPath : undefined)) return blocked('UNSAFE_SCHEMA_CHANGE', { field: 'output.completionPath' })
+  const lostProps = Object.keys(props).filter((k) => k !== curName && candProps[k] === undefined)
+  if (lostProps.length) return blocked('UNSAFE_SCHEMA_CHANGE', { lostProperties: lostProps })
+
+  const added = preset.values.filter((v) => !curValues.includes(v))
+  const removed = curValues.filter((v) => !preset.values.includes(v))
+  const retained = preset.values.filter((v) => curValues.includes(v))
+  const differences = [
+    {
+      field: 'output.outcomePath',
+      kind: curPath === routingPathOf(name) ? (added.length || removed.length ? 'replace' : 'unchanged') : (curPath ? 'replace' : 'add'),
+      before: curPath || null,
+      after: routingPathOf(name),
+      enumDiff: { added, removed, retained },
+    },
+  ]
+  const requiredNote = schema && Array.isArray(schema.required) && !schema.required.includes(name)
+    ? [{ field: 'output.schema.required', kind: 'add', before: schema.required.slice(), after: (candidateOutput.schema.required || []).slice() }]
+    : []
+  const warnings = missingEdgeWarnings()
+
+  const status = (curPath == null || curPath === '') && curValues.length === 0 ? 'DIRECT' : 'CONFIRM'
+  return { applicable: true, status, conflicts: [], differences: differences.concat(requiredNote), warnings, candidate: candidateOutput, source: src }
 }

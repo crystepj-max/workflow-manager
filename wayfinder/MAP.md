@@ -29,6 +29,8 @@
 
 <!-- 每关闭一张票，追加一行：- [<票名>](tickets/...) — <一句话结论> -->
 
+- [DEC-75 S-2b 载荷上限裁决](tickets/DEC-75-S2B-payload-limit-296KiB.md) — 产品负责人 2026-10-17 人工裁决：插件动态载荷上限 284KiB→296KiB（S-2b 终态实测 298443B，按 FIX-65「终态实测定值」先例；不自动豁免后续任务，瘦身另立专项）。
+
 - [R-01 dev-workflow-2.0.mjs 语义盘点](tickets/R-01-mjs-semantics.md) — DSH 脚本语义全集已盘点（入口四态/脚本内分流/9 轮+超限归因/roleRef 自读角色/人工门禁在脚本外）；vwf 编译产物缺 3 个 DSH 增强：超限归因、verified_branch 可信度闸门、异源 warning。细节见 `docs/research/mjs-semantics.md`。
 - [R-02 vwf 宿主与 DSL 盘点](tickets/R-02-vwf-host-internals.md) — validateDsl 规则全集与 compileDsl 机制已确认；**compileDsl 产物即标准 workflow 脚本、可被普通 workflow 工具执行**（T-02 复用路线有据）；模板节点含规格漏列的 model/manualCheck/description；save 仅内存。细节见 `docs/research/vwf-host-internals.md`。
 - [R-03 workflow 工具脚本契约](tickets/R-03-workflow-tool-contract.md) — 脚本契约已确认：vm 执行、5 钩子、agent opts 白名单（label/phase/schema/provider/model）、schema 8 关键字子集、META_INVALID/SCRIPT_PARSE 同步抛、run.result 永不 reject、上限 1000/4096。生成脚本检查清单见 `docs/research/workflow-tool-contract.md`。
