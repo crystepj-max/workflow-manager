@@ -84,10 +84,10 @@
 
 ### 既有语义权威
 
-- [`docs/tasks/LOC-016-dashboard-logical-run-ui.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/tasks/LOC-016-dashboard-logical-run-ui.md)：Logical Run 详情、决策卡、工作空间面板、BLOCKED 恢复和筛选的既有定义。若独立 agent 实际施工该任务，应更新或引用 `LOC-016`，不要另造相互冲突的生命周期。
-- [`docs/design/workflow-manager-v0.1-final-product-spec.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/design/workflow-manager-v0.1-final-product-spec.md) §3：Lifecycle / Node Business Outcome / Completion Type 三层结果模型。
-- [`docs/design/workflow-design-principles.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/design/workflow-design-principles.md)：Logical Run、快照和追加式 Provider/Model 修订。
-- [`docs/design/workspace-isolation.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/design/workspace-isolation.md)：工作空间字段和活动锁的含义。
+- [`docs/tasks/LOC-016-dashboard-logical-run-ui.md`](../LOC-016-dashboard-logical-run-ui.md)：Logical Run 详情、决策卡、工作空间面板、BLOCKED 恢复和筛选的既有定义。若独立 agent 实际施工该任务，应更新或引用 `LOC-016`，不要另造相互冲突的生命周期。
+- [`docs/design/workflow-manager-v0.1-final-product-spec.md`](../../design/workflow-manager-v0.1-final-product-spec.md) §3：Lifecycle / Node Business Outcome / Completion Type 三层结果模型。
+- [`docs/design/workflow-design-principles.md`](../../design/workflow-design-principles.md)：Logical Run、快照和追加式 Provider/Model 修订。
+- [`docs/design/workspace-isolation.md`](../../design/workspace-isolation.md)：工作空间字段和活动锁的含义。
 
 ### 生产源码入口
 

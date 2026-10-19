@@ -303,3 +303,12 @@ dsh plugin --profile web remove dsh-visual-workflow
 - **许可证**：仓库当前**尚未声明开源许可证**（未包含 `LICENSE` 文件）。在补充许可证之前，代码版权归作者所有。
 - **问题与建议**：欢迎通过仓库的 Issue 反馈。
 - **界面设计参考**：可视化编辑器的 UI 与交互参照 Gold-Band 桌面端《工作流编辑器》实现。
+
+### VWF 原型与施工接续
+
+- [本仓库 UI Workbench](packages/dsh-visual-workflow/prototypes/ui-workbench/README.md)：Web/Desktop 交互原型的体验入口、使用顺序及验证边界。
+- [H1/H2/H3 施工接续索引](docs/tasks/handoffs/README.md)：任务分工、施工顺序、跨任务依赖及验收资料。
+
+UI Workbench 用于设计体验和方案反馈，示例编辑保存在内存中，不连接正式 DSH，也不执行真实工作流。
+
+原型预览、设计评审和开发 DSH 检查均不能替代正式产品 DSH 的真实工作流验收。正式验收要求继续以现有项目规则为准。

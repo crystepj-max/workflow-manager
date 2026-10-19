@@ -81,10 +81,10 @@
 
 ### 既有角色参考
 
-- [`specs/issue-81-built-in-roles/requirements-analysis.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/specs/issue-81-built-in-roles/requirements-analysis.md)：内置只读、自定义编辑/复制和动态角色列表语义。
-- [`packages/dsh-visual-workflow/docs/issue-58-role-library/README.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/docs/issue-58-role-library/README.md)：角色库入口、截图和已有 UI 约束。
-- [`packages/dsh-visual-workflow/prototypes/ui-workbench/DESIGN.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/prototypes/ui-workbench/DESIGN.md)：A 的颜色、字体、圆角、间距和 WCAG 目标。
-- [`packages/dsh-visual-workflow/prototypes/ui-workbench/REVIEW-2.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/prototypes/ui-workbench/REVIEW-2.md)：长职责和 390×844 的浏览器检查记录。
+- [`specs/issue-81-built-in-roles/requirements-analysis.md`](../../../specs/issue-81-built-in-roles/requirements-analysis.md)：内置只读、自定义编辑/复制和动态角色列表语义。
+- [`packages/dsh-visual-workflow/docs/issue-58-role-library/README.md`](../../../packages/dsh-visual-workflow/docs/issue-58-role-library/README.md)：角色库入口、截图和已有 UI 约束。
+- [`packages/dsh-visual-workflow/prototypes/ui-workbench/DESIGN.md`](../../../packages/dsh-visual-workflow/prototypes/ui-workbench/DESIGN.md)：A 的颜色、字体、圆角、间距和 WCAG 目标。
+- [`packages/dsh-visual-workflow/prototypes/ui-workbench/REVIEW-2.md`](../../../packages/dsh-visual-workflow/prototypes/ui-workbench/REVIEW-2.md)：长职责和 390×844 的浏览器检查记录。
 - [WCAG 2.2 文本对比度](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html)：正文对比度依据。
 - [WCAG 2.2 非文本对比度](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html)：图标、边界和控件依据。
 - [WCAG 2.2 焦点不被遮挡](https://www.w3.org/WAI/WCAG22/Understanding/focus-not-obscured-minimum.html)：窄屏和键盘焦点依据。
