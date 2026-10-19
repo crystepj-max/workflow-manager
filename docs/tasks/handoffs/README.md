@@ -37,16 +37,16 @@ npm run prototype:ui
 
 | 资料 | 用途 |
 |---|---|
-| [`packages/dsh-visual-workflow/prototypes/ui-workbench/README.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/prototypes/ui-workbench/README.md) | 原型启动方式、体验顺序、数据与生产边界 |
-| [`packages/dsh-visual-workflow/prototypes/ui-workbench/REVIEW-2.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/prototypes/ui-workbench/REVIEW-2.md) | 本轮用户问题逐项回应、真实模板连接与原型检查记录 |
-| [`packages/dsh-visual-workflow/prototypes/ui-workbench/DESIGN.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/prototypes/ui-workbench/DESIGN.md) | A 编排台的视觉、布局、文案、对比度和窄屏原则 |
-| [`packages/dsh-visual-workflow/prototypes/ui-workbench/prototype-v2.js`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/prototypes/ui-workbench/prototype-v2.js) | 可操作原型逻辑；只读参考，不直接复制为生产实现 |
-| [`packages/dsh-visual-workflow/prototypes/ui-workbench/prototype-v2.css`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/prototypes/ui-workbench/prototype-v2.css) | 原型样式、浅色/深色语义色和响应式断点 |
-| [`docs/design/workflow-manager-v0.1-final-product-spec.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/design/workflow-manager-v0.1-final-product-spec.md) | v0.1 目标规格；区分目标与当前实现 |
-| [`docs/design/workflow-design-principles.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/design/workflow-design-principles.md) | Logical Run、快照和 Provider/Model 修订的长期语义 |
-| [`docs/design/plugin-layer.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/design/plugin-layer.md) | 插件 client/host 边界和 RPC 约束 |
-| [`docs/design/workspace-isolation.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/design/workspace-isolation.md) | 工作空间、仓库、分支、锁和清理状态的业务含义 |
-| [`docs/tasks/LOC-014-builtin-model-override.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/tasks/LOC-014-builtin-model-override.md) | 内置模板逐节点 Provider/Model 覆盖、还原和自定义模板边界 |
+| [`packages/dsh-visual-workflow/prototypes/ui-workbench/README.md`](../../../packages/dsh-visual-workflow/prototypes/ui-workbench/README.md) | 原型启动方式、体验顺序、数据与生产边界 |
+| [`packages/dsh-visual-workflow/prototypes/ui-workbench/REVIEW-2.md`](../../../packages/dsh-visual-workflow/prototypes/ui-workbench/REVIEW-2.md) | 本轮用户问题逐项回应、真实模板连接与原型检查记录 |
+| [`packages/dsh-visual-workflow/prototypes/ui-workbench/DESIGN.md`](../../../packages/dsh-visual-workflow/prototypes/ui-workbench/DESIGN.md) | A 编排台的视觉、布局、文案、对比度和窄屏原则 |
+| [`packages/dsh-visual-workflow/prototypes/ui-workbench/prototype-v2.js`](../../../packages/dsh-visual-workflow/prototypes/ui-workbench/prototype-v2.js) | 可操作原型逻辑；只读参考，不直接复制为生产实现 |
+| [`packages/dsh-visual-workflow/prototypes/ui-workbench/prototype-v2.css`](../../../packages/dsh-visual-workflow/prototypes/ui-workbench/prototype-v2.css) | 原型样式、浅色/深色语义色和响应式断点 |
+| [`docs/design/workflow-manager-v0.1-final-product-spec.md`](../../design/workflow-manager-v0.1-final-product-spec.md) | v0.1 目标规格；区分目标与当前实现 |
+| [`docs/design/workflow-design-principles.md`](../../design/workflow-design-principles.md) | Logical Run、快照和 Provider/Model 修订的长期语义 |
+| [`docs/design/plugin-layer.md`](../../design/plugin-layer.md) | 插件 client/host 边界和 RPC 约束 |
+| [`docs/design/workspace-isolation.md`](../../design/workspace-isolation.md) | 工作空间、仓库、分支、锁和清理状态的业务含义 |
+| [`docs/tasks/LOC-014-builtin-model-override.md`](../LOC-014-builtin-model-override.md) | 内置模板逐节点 Provider/Model 覆盖、还原和自定义模板边界 |
 
 ### 推荐施工顺序与隔离环境
 
@@ -56,7 +56,7 @@ npm run prototype:ui
 2. **H2 运行详情**：复用 H1 的只读画布、标题栏和详情页签，接入 Logical Run 真实数据。
 3. **H3 角色、主题与窄屏**：在 H1/H2 的表面结构稳定后统一完成角色长文本、浅深色和无障碍收口。
 
-推荐每项使用一个独立 worktree（路径约定来自 [`docs/design/workspace-directory-convention-instance-workflow-manager.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/design/workspace-directory-convention-instance-workflow-manager.md)）：
+推荐每项使用一个独立 worktree（路径约定来自 [`docs/design/workspace-directory-convention-instance-workflow-manager.md`](../../design/workspace-directory-convention-instance-workflow-manager.md)）：
 
 | Handoff | 分支 | worktree |
 |---|---|---|
