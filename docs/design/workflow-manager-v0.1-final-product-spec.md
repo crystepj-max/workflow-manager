@@ -94,15 +94,15 @@ Run 创建时冻结 Workflow、Role、Provider / Model 与关键运行配置。v
 
 ### WAITING_HUMAN
 
-用于系统已经知道需要人做什么决定的场景，例如需求基线确认、最终验收、Evaluator `CONFIRM`、自动回退额度耗尽。
+用于系统已经知道需要人做什么决定的场景，例如需求基线确认、最终验收、Evaluator `CONFIRM`。
 
-达到额度后进入：
+**自动回退额度耗尽的默认处置**是进入：
 
 `WAITING_HUMAN + reason=MAX_ROUNDS_REACHED`
 
-而不是 `FAILED_MAX_ROUNDS`。
+而不是 `FAILED_MAX_ROUNDS`。蓝图可用 `control.maxRoundsExhausted` 声明本模板的替代处置：`BLOCKED`（建设模板，可恢复受阻，`reason_code=AUTO_REWORK_EXHAUSTED`）与 `INSUFFICIENT`（探索模板，宿主收口为合法完成，不弹决策卡——裁定 D-LOC-036 2026-09-16，crystepj-max 2026-09-20 复确认为 A 口径）。
 
-**关键规则：自动回退额度限制的是自动流转能力，不得改写已经形成的 Node Business Outcome。**
+**关键规则：自动回退额度限制的是自动流转能力，不得改写已经形成的 Node Business Outcome。** 无论采用上述哪种处置，原节点业务结果都必须原样保留并留下可审计痕迹。
 
 ### PAUSED / Run Guidance
 
@@ -222,8 +222,9 @@ v0.1 不做静默 Backup Provider / Failover。模型不可用时：
 - 自动流程最多为 Round 1 BROAD + Round 2 TARGETED + Round 3 TARGETED；
 - 因初次执行不计自动回退额度，最多只有 **2 次 `NEEDS_RESEARCH -> orchestrate` 自动回退**；
 - 第 3 轮后不得自动启动第 4 轮；
-- 如果第 3 轮 Evaluator 仍输出 `NEEDS_RESEARCH`，必须保留该 Outcome，并进入 `WAITING_HUMAN + reason=MAX_ROUNDS_REACHED`；**不得为了结束流程把它改写成 `PASS` 或 `INSUFFICIENT`**；
-- Human Decision 展示三轮研究历史、未解决缺口、继续研究的价值 / 成本 / 风险。用户可接受当前不确定性并受控完成、停止，或基于新目标 / 新范围派生新 Run。
+- 第 3 轮 Evaluator 仍输出 `NEEDS_RESEARCH` 时，必须原样保留该 Outcome，并由宿主把本 Run 收口为**合法完成** `completion_type = INSUFFICIENT`；**不进入 `WAITING_HUMAN`，不弹决策卡**（裁定：D-LOC-036 于 2026-09-16 确认，见 `docs/tasks/specs/LOC-036-exploration-coverage/task-spec-V1.md` §12；crystepj-max 于 2026-09-20 复确认维持该口径，即「A 方案」，被裁掉的「转人工」方案记为 B）；
+- 保留 Outcome 的含义是**不改写 Node Business Outcome**：评估原裁决仍为 `NEEDS_RESEARCH`，`INSUFFICIENT` 只作为系统完成类型有效终态，并留下可审计痕迹（`history` 中 `halted:true` + `reason:MAX_ROUNDS_REACHED`）；
+- 三轮研究历史、未解决缺口与「本轮因额度上限收尾」必须在运行详情中可读；用户如要继续研究，基于新目标 / 新范围派生新 Run，探索模板不提供额度追加选项。
 
 ## 10. Built-in / Custom 迁移
 
@@ -295,7 +296,7 @@ Draft PR #70 已关闭且未合并；`feat/multi-perspective-exploration` 仅作
 
 仅保留：**诊断模板默认自动回退额度的具体数值**。推荐 3，但实施前必须明确确认。
 
-探索轮次已经锁定：总研究轮次最多 3，首次 BROAD 计入总数，最多 2 次自动 `NEEDS_RESEARCH -> orchestrate` 回退；第 3 轮仍 NEEDS_RESEARCH 时保留 Outcome 并转人工。
+探索轮次已经锁定：总研究轮次最多 3，首次 BROAD 计入总数，最多 2 次自动 `NEEDS_RESEARCH -> orchestrate` 回退；第 3 轮仍 NEEDS_RESEARCH 时保留评估原 Outcome，并由宿主收口为合法完成 `INSUFFICIENT`（不转人工、不弹决策卡）。该处置口径由 D-LOC-036（2026-09-16 确认）确立，crystepj-max 于 2026-09-20 复确认维持 A 方案；本文此前「保留 Outcome 并转人工」的表述属未回写的旧目标口径，已按裁定更正。
 
 ## 15. 历史 Issue / 文档边界
 

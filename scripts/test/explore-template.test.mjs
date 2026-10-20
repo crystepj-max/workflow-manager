@@ -133,19 +133,100 @@ test('LOC-013 NEEDS_RESEARCH 自动回退 2 次后 PASS（初次 BROAD 不计额
   assert.ok(nrHistory.every((h) => h.countRound === true && !h.halted))
 })
 
-test('LOC-036 第 3 轮仍 NEEDS_RESEARCH：保留原裁决，DONE + INSUFFICIENT（额度耗尽收口）', async () => {
+const targetedBrief = () => {
+  const p = plan(1, 'TARGETED')
+  p.expert_briefs = [{ expert_id: 'gap-expert', focus: '缺口', brief: '补 q2', question_ids: ['q2'], research_targets: ['q2'] }]
+  return p
+}
+
+// A 口径（D-LOC-036 于 2026-09-16 确认，crystepj-max 2026-09-20 复确认维持 A）：补充额度耗尽 →
+// 宿主收口为合法完成 INSUFFICIENT，不进 WAITING_HUMAN、不弹决策卡，但保留原裁决与耗尽痕迹。
+test('LOC-036 额度耗尽走 A 口径收口：3 轮封顶、保留原裁决、DONE+INSUFFICIENT、非 WAITING_HUMAN', async () => {
+  let evals = 0
+  const roundTypes = []
   const table = {
+    探索统筹: () => {
+      const rt = roundTypes.length === 0 ? 'BROAD' : 'TARGETED'
+      roundTypes.push(rt)
+      return rt === 'BROAD' ? plan(3, 'BROAD') : targetedBrief()
+    },
+    '/^专家研究 #/': (label) => researchItem(Number(label.slice(-1))),
+    综合分析: synthesis,
+    结论评估: () => { evals += 1; return evalVerdict('NEEDS_RESEARCH', { research_targets: ['q2'] }) },
+  }
+  const { result } = await runEngine(exploreBp, table, { taskId: 'explore-halt' })
+
+  // ① 恰好 3 个研究轮次（BROAD + 2 次 TARGETED），不出现第 4 轮
+  assert.deepEqual(roundTypes, ['BROAD', 'TARGETED', 'TARGETED'])
+  assert.equal(evals, 3, '结论评估不得被叫到第 4 轮')
+  assert.equal(result.history.filter((h) => h.stage === 'orchestrate' && h.to === 'research').length, 3)
+
+  // ② 自动回退额度停在 2/2，不再增长
+  assert.equal(result.maxRounds, 2)
+  assert.equal(result.budgetUsed, 2)
+  assert.equal(result.history.filter((h) => h.countRound === true && !h.halted).length, 2)
+  assert.equal(result.history.filter((h) => h.countRound === true).length, 3, '第 3 次回退只留痕，不计数')
+
+  // ③ 原评估裁决 NEEDS_RESEARCH 完整保留，未被改写为 PASS 也未被抹掉
+  assert.equal(result.results.evaluate.verdict, 'NEEDS_RESEARCH')
+  assert.equal(result.results.evaluate.completion_type, undefined, '保留的原裁决不得被补上完成类型')
+  const wrapped = result.results.explore_budget_exhausted
+  assert.deepEqual(wrapped.evaluator_decision, result.results.evaluate)
+  assert.deepEqual(wrapped.evaluator_decision.research_targets, ['q2'])
+  assert.deepEqual(wrapped.unresolved_gaps, ['q2'])
+  assert.equal(wrapped.budget_exhausted, true)
+  assert.equal(wrapped.reason, 'budget_exhausted')
+  assert.equal(wrapped.effective_verdict, 'INSUFFICIENT')
+
+  // ④ 终态为完成 + completion_type=INSUFFICIENT，而不是 WAITING_HUMAN、不弹决策卡
+  assert.equal(result.status, 'DONE')
+  assert.equal(result.completion.type, 'INSUFFICIENT')
+  assert.equal(result.completion.node, 'evaluate')
+  assert.equal(result.completion.path, '$.explore_budget_exhausted.completion_type')
+  assert.equal(result.termination.lifecycle, 'COMPLETED')
+  assert.equal(result.termination.resumable, false)
+  for (const key of ['decision_package', 'control_event', 'resume', 'blocked_edge']) {
+    assert.ok(!(key in result), `A 口径不得产出 ${key}`)
+  }
+
+  // ⑤ history 留有可审计痕迹：halted:true + reason:MAX_ROUNDS_REACHED，且是最后一条
+  const halted = result.history.filter((h) => h.halted === true)
+  assert.equal(halted.length, 1)
+  assert.equal(halted[0].reason, 'MAX_ROUNDS_REACHED')
+  assert.equal(halted[0].stage, 'evaluate')
+  assert.equal(halted[0].outcome, 'NEEDS_RESEARCH')
+  assert.equal(result.history.at(-1).halted, true)
+})
+
+test('LOC-036 对照：额度耗尽收口 vs 评估直判 INSUFFICIENT，只有 4 处机器差异', async () => {
+  const exhausted = (await runEngine(exploreBp, {
     探索统筹: plan(3),
     '/^专家研究 #/': (label) => researchItem(Number(label.slice(-1))),
     综合分析: synthesis,
-    结论评估: () => evalVerdict('NEEDS_RESEARCH', { research_targets: ['q2'] }),
-  }
-  const done = await runEngine(exploreBp, table, { taskId: 'explore-halt' })
-  assert.equal(done.result.status, 'DONE')
-  assert.equal(done.result.completion && done.result.completion.type, 'INSUFFICIENT')
-  assert.equal(done.result.results.evaluate.verdict, 'NEEDS_RESEARCH')
-  assert.equal(done.result.results.explore_budget_exhausted.effective_verdict, 'INSUFFICIENT')
-  assert.equal(done.result.budgetUsed, 2)
+    结论评估: evalVerdict('NEEDS_RESEARCH', { research_targets: ['q2'] }),
+  })).result
+  const direct = (await runEngine(exploreBp, {
+    探索统筹: plan(3),
+    '/^专家研究 #/': (label) => researchItem(Number(label.slice(-1))),
+    综合分析: synthesis,
+    结论评估: evalVerdict('INSUFFICIENT', { completion_type: 'INSUFFICIENT' }),
+  })).result
+
+  // 两者都是合法完成，completion.type 相同
+  assert.equal(exhausted.status, 'DONE')
+  assert.equal(direct.status, 'DONE')
+  assert.equal(exhausted.completion.type, direct.completion.type)
+  // 权威终止块完全一致 → 只读 termination/completion.type 的消费方无法区分两条路径
+  assert.deepEqual(exhausted.termination, direct.termination)
+  // 区分信号只存在于这 4 处
+  assert.equal(exhausted.completion.path, '$.explore_budget_exhausted.completion_type')
+  assert.equal(direct.completion.path, '$.completion_type')
+  assert.equal(exhausted.budgetUsed, 2)
+  assert.equal(direct.budgetUsed, 0)
+  assert.ok(exhausted.results.explore_budget_exhausted)
+  assert.equal(direct.results.explore_budget_exhausted, undefined)
+  assert.ok(exhausted.history.some((h) => h.halted === true))
+  assert.ok(!direct.history.some((h) => h.halted === true))
 })
 
 test('LOC-013 INSUFFICIENT 是合法完成：DONE + completion.type=INSUFFICIENT', async () => {
