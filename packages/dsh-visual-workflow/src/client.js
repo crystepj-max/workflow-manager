@@ -4433,9 +4433,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   e.tone === 'todo' || !e.id ? null : h('span', { className: 'vwf-muted-sm' }, t('rdChainOpenResult'))
                 )
               )))),
-          ],
-          footer: [h('button', { className: 'vwf-btn', onClick: () => setChainOpen(false) }, t('close'))]
-        }) : null
+            h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
+              h('button', { className: 'vwf-btn', onClick: () => setChainOpen(false) }, t('close'))
+            )
+          )
+        ) : null
       )
 
       // 结果页签：本次执行的成果（含扇出子任务独立结果与汇总输入来源）
