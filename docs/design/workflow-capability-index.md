@@ -44,7 +44,7 @@ M2 与 Portable 七阶段关系：**唯一权威** [`m2-vs-portable-delivery.md`
 | 能力 | 状态 | 说明 | 证据 |
 |---|---|---|---|
 | 扇出 fanout | **Current** | 受限并行；4096 items / 1000 agents 上限 | [`templates/wf-explore.json`](../../templates/wf-explore.json)（research fanout）；[`scripts/generate.mjs`](../../scripts/generate.mjs) `compileBlueprint`；[`scripts/test/generate.test.mjs`](../../scripts/test/generate.test.mjs) fanout 用例；[`packages/dsh-visual-workflow/tests/`](../../packages/dsh-visual-workflow/tests/) |
-| wf_run 首选 / Logical Run | **Current** | 插件发起完整 Run；内置 workflow 回退退化 | [`packages/dsh-visual-workflow/src/host.js`](../../packages/dsh-visual-workflow/src/host.js)；[`scripts/test/runtime-logical-run.test.mjs`](../../scripts/test/runtime-logical-run.test.mjs) |
+| wf_run / Logical Run 与工作流回退 | **Current** | `wf_run` 发起正式完整 Run；内置 `workflow` 的退化回退仅适用于纯机械图，不满足模型节点隔离要求 | [`packages/dsh-visual-workflow/src/host.js`](../../packages/dsh-visual-workflow/src/host.js)；[`scripts/test/runtime-logical-run.test.mjs`](../../scripts/test/runtime-logical-run.test.mjs)；[`scripts/test/generate.test.mjs`](../../scripts/test/generate.test.mjs) R10 |
 | 统一编译器 compileBlueprint | **Current** | 双入口唯一翻译员 | [`scripts/generate.mjs`](../../scripts/generate.mjs)；[`scripts/test/runtime-host.test.mjs`](../../scripts/test/runtime-host.test.mjs) |
 | 蓝图校验 validate-core | **Current** | 结构 + 业务规则 | [`scripts/validate-core.cjs`](../../scripts/validate-core.cjs)；[`scripts/test/validate-blueprint.test.mjs`](../../scripts/test/validate-blueprint.test.mjs) |
 | 生成物一致性 validate | **Current** | 重生成 diff | [`scripts/validate.mjs`](../../scripts/validate.mjs) |

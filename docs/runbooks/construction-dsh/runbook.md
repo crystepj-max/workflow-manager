@@ -69,10 +69,14 @@ node scripts/ai-task-workspace-env.mjs resolve \
 
 ## 2. 起跑主链（引擎驱动）
 
-实施前检查通过后，用正式内置模板起跑，节点顺序、出边路由、回退额度、人工挂起均由引擎按蓝图执行：
+先按当前会话的实际工具清单分别检查 `wf_run` 与 `workflow`；不得按 Skill 文案、安装状态或历史会话推断工具能力。执行路径就绪后，才用正式内置模板起跑；节点顺序、出边路由、回退额度、人工挂起均由引擎按蓝图执行：
 
-- **首选** `wf_run`：`templateId = wf-construction-full-feature`，`taskId` 带 Run 命名空间前缀；本次运行即同一 Logical Run，可续跑、暂停、指导。
-- **回退**（仅 `wf_run` 不可用时）：用 `workflow` 工具执行 `.generated/wf-construction-full-feature/script.mjs` + `meta.json`，并**在会话输出中显式提示本次运行记录退化为单段、无完成类型、不可从看板续跑**，不得声称记录完整。
+- **正式路径** `wf_run`：`templateId = wf-construction-full-feature`，`taskId` 带 Run 命名空间前缀；本次运行即同一 Logical Run，可续跑、暂停、指导。此模板包含模型节点，`wf_run` 提供的宿主隔离路由是唯一正式执行路径。
+- `workflow` 直接执行编译产物只适用于纯机械工作流，不适用于本模板模型节点；不得为绕过隔离要求而降级调用。
+- 仅纯机械工作流且当前工具清单确认 `workflow` 可调用时，才可按既有降级契约执行 `.generated/<templateId>/script.mjs` + `meta.json`；须提示运行记录退化为单段、无完成类型、不可从看板续跑。
+- 没有可用执行路径时，在启动工作流前继续完成不依赖引擎的调查、证据收集与准备，并将其作为主任务直接交付，不能伪装成节点产物或正式 Run 结果。
+- 只有尚未调用执行工具，或工具明确确认未创建 Run 时，才可说明“工作流执行未启动”；此结论不是正式 Run 状态。确认未创建 Run 时不得创建或声称 Logical Run ID、Run 状态、节点结果、生命周期状态、UAT 签收或正式 Run 预算记录，也不得改写成 `BLOCKED` / `WAITING_HUMAN`。
+- 执行工具已调用但超时、报错或未返回创建结果/Run 状态时，说明“启动结果/Run 状态未确认”；按工具清单中的只读查询能力检查真实状态，不得重发启动、伪造状态，或推断 Run 不存在、UAT 尚未到达、没有预算记录或预算为零。
 - 状态机语义（`WAITING_HUMAN` / `AWAITING_HUMAN_<id>` / `FAILED_ITEM_CAP` / 额度耗尽 `MAX_ROUNDS_REACHED` 等）与续跑 args 以生成 skill 的 `runbook` 节与 `docs/design/blueprint-schema.md` §2.4、§6 为准。
 
 > **退役说明**：旧 Bootstrap Profile 由 controller 会话逐节点解释专业结果并手工路由（原 runbook §3/§4 与旧 §6.3/§6.4 小节）。该 shim 已随 #77（业务结果路由）、#72/#118（受控人工决策）、#73（`countRound` 额度）落地而退役，**不得再按会话手工路由替代引擎**。九项 shim 的逐项收敛记录见 `docs/design/construction-workflow-portable-contract.md` §9.6。

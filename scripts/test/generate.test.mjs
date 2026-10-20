@@ -81,13 +81,24 @@ test('R10：模型工作流的 Skill 禁止用内置 workflow 工具绕过宿主
   const skill = skillWrap(bp);
   assert.match(skill, /不得改用内置 `workflow` 工具直接执行编译产物/);
   assert.match(skill, /模型节点必须使用 `wf_run`/);
+  assert.match(skill, /0\. 启动前能力预检：只依据当前会话实际工具清单/);
+  assert.match(skill, /不得按本 skill 文案、安装状态或历史会话推断工具能力/);
+  assert.match(skill, /若本蓝图含模型节点，`wf_run` 不可用即表示正式隔离执行路径不可用/);
+  assert.match(skill, /不得归入“执行未启动”或重发启动/);
+  assert.match(skill, /启动结果\/Run 状态未确认/);
+  assert.match(skill, /不得重发启动、伪造状态/);
+  assert.match(skill, /不得推断 Run 不存在、UAT 尚未到达/);
+  assert.match(skill, /只有确认未创建 Run 时，才可说明 `UAT` 尚未到达/);
+  assert.match(skill, /不得改写成 `BLOCKED` 或 `WAITING_HUMAN`/);
 
   const mechanicalOnly = {
     id: 'mechanical-only', displayName: '机械检查', entry: 'check',
     nodes: [{ id: 'check', mechanical: 'construction-preflight', profile: 'evaluator' }],
     edges: [],
   };
-  assert.match(skillWrap(mechanicalOnly), /改用内置 `workflow` 工具执行编译产物/,
+  const mechanicalSkill = skillWrap(mechanicalOnly);
+  assert.match(mechanicalSkill, /当前工具清单确认 `workflow` 可调用时/);
+  assert.match(mechanicalSkill, /改用内置 `workflow` 工具执行编译产物/,
     '纯机械工作流仍可使用无模型调用的轻量回退');
 });
 
