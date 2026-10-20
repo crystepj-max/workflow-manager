@@ -2659,7 +2659,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const editingCustom = !!(current && current.builtin === false)
         body = h('div', null,
           editingCustom ? mutedDiv(t('roleFromSource', { src: current.id })) : null,
-          hc('div', 'vwf-field', h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-name' }, t('roleName'), hc('span', 'req', '*')), h('input', {
+          h('div', { className: 'vwf-field' },
+            h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-name' }, t('roleName'), h('span', { className: 'req' }, '*')),
+            h('input', {
               id: 'vwf-role-name',
               className: 'vwf-input', value: draftName, placeholder: t('roleNamePlaceholder'),
               onChange: (ev) => setDraftName(ev.target.value),

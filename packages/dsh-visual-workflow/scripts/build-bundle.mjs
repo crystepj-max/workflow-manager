@@ -329,10 +329,9 @@ const clientBytes = Buffer.byteLength(dynClient)
 // 上调至 232KiB，余量 5.8KiB 供同改 client 半的 FEAT-85 / FEAT-86 并入；
 // 两任务并入后按各自终态实测再评估，余量不足时先瘦身。
 // 新增载荷仍应优先瘦身，不要继续推高。
-// #75 S-2b 结果预设选择器并入后终态实测 host 118253 + client 180190 = 298443B（291.45KiB），
-// 超 284KiB 闸门 7627B；产品负责人 2026-10-17 人工裁决按「上限按终态实测定值」先例上调至
-// 296KiB（余量 ~4.5KiB 供 WFM-83 / S-4 等已确认的同文件后续任务），瘦身仍另立专项。
-const PAYLOAD_LIMIT = 296 * 1024
+// 2026-10-20 按产品负责人决定维持 284KiB；完成 S-2b 相关重复逻辑收敛后，实测总量
+// host 116184 + client 174079 = 290263B，余量 553B。后续新增仍须先瘦身并通过此闸门。
+const PAYLOAD_LIMIT = 284 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
   process.exit(1)
