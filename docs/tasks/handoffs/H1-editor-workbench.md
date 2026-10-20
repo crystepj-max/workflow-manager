@@ -102,14 +102,14 @@
 
 ### 已有设计/实现参考
 
-- [`packages/dsh-visual-workflow/docs/editor-toolbar-actions/README.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/docs/editor-toolbar-actions/README.md)：撤销/重做、工具栏按钮和测试证据。
-- [`packages/dsh-visual-workflow/docs/issue-54-editor-global-layer/README.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/docs/issue-54-editor-global-layer/README.md)：编辑器全局层和截图参考。
-- [`packages/dsh-visual-workflow/docs/issue-56-canvas-anti-overlap/README.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/docs/issue-56-canvas-anti-overlap/README.md)：画布分支、连线和节点避让参考。
-- [`packages/dsh-visual-workflow/docs/issue-57-toolbar-layout/README.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/docs/issue-57-toolbar-layout/README.md)：工具栏、窄屏和布局参考。
-- [`packages/dsh-visual-workflow/docs/issue-58-role-library/README.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/docs/issue-58-role-library/README.md)：角色库入口和节点角色选择参考。
-- [`packages/dsh-visual-workflow/docs/editor-edge-color-contrast/README.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/packages/dsh-visual-workflow/docs/editor-edge-color-contrast/README.md)：连线颜色和对比度参考。
-- [`docs/tasks/LOC-014-builtin-model-override.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/tasks/LOC-014-builtin-model-override.md)：内置逐节点默认/覆盖/还原范围；自定义模板不扩展该范围。
-- [`docs/design/workflow-manager-v0.1-final-product-spec.md`](/Users/chris/.codex/worktrees/9897/workflow-manager/docs/design/workflow-manager-v0.1-final-product-spec.md) §11：UI 边界和复杂度分层。
+- [`packages/dsh-visual-workflow/docs/editor-toolbar-actions/README.md`](../../../packages/dsh-visual-workflow/docs/editor-toolbar-actions/README.md)：撤销/重做、工具栏按钮和测试证据。
+- [`packages/dsh-visual-workflow/docs/issue-54-editor-global-layer/README.md`](../../../packages/dsh-visual-workflow/docs/issue-54-editor-global-layer/README.md)：编辑器全局层和截图参考。
+- [`packages/dsh-visual-workflow/docs/issue-56-canvas-anti-overlap/README.md`](../../../packages/dsh-visual-workflow/docs/issue-56-canvas-anti-overlap/README.md)：画布分支、连线和节点避让参考。
+- [`packages/dsh-visual-workflow/docs/issue-57-toolbar-layout/README.md`](../../../packages/dsh-visual-workflow/docs/issue-57-toolbar-layout/README.md)：工具栏、窄屏和布局参考。
+- [`packages/dsh-visual-workflow/docs/issue-58-role-library/README.md`](../../../packages/dsh-visual-workflow/docs/issue-58-role-library/README.md)：角色库入口和节点角色选择参考。
+- [`packages/dsh-visual-workflow/docs/editor-edge-color-contrast/README.md`](../../../packages/dsh-visual-workflow/docs/editor-edge-color-contrast/README.md)：连线颜色和对比度参考。
+- [`docs/tasks/LOC-014-builtin-model-override.md`](../LOC-014-builtin-model-override.md)：内置逐节点默认/覆盖/还原范围；自定义模板不扩展该范围。
+- [`docs/design/workflow-manager-v0.1-final-product-spec.md`](../../design/workflow-manager-v0.1-final-product-spec.md) §11：UI 边界和复杂度分层。
 
 ## 6. 前后依赖
 

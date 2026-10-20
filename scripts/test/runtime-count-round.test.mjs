@@ -123,7 +123,9 @@ test('#73 RECONFIRM：真正的新基线不被误判（LOC-031 AC-04 反例）',
   assert.equal(second.result.status, 'DONE')
 })
 
-test('#73 探索第 3 轮 NEEDS_RESEARCH：保留结果并转人工（自动补充研究额度=2）', async () => {
+test('#73 默认处置（未声明 maxRoundsExhausted）：保留结果并转人工，额度=2 时第 3 轮停 WAITING_HUMAN', async () => {
+  // 夹具是通用 mini 蓝图，未声明 control.maxRoundsExhausted → 走默认转人工分支。
+  // 真实 wf-explore 已改由宿主收口为合法完成 INSUFFICIENT（A 口径），见 explore-template.test.mjs。
   let evals = 0
   const { result } = await runEngine(researchBp, {
     kickoff: { go: 'START' },
