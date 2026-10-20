@@ -15,11 +15,8 @@
 ## 0. Run 引导
 
 ```bash
-# GitHub 轨道（远程可用）
-node scripts/cwf-run-init.mjs <issue编号> <run_id>
-
-# 本地轨道（GitHub 不可用）——不访问远程，以本地 main 为基线
-node scripts/cwf-run-init.mjs <任务标识> <run_id> --local-base
+# 以 Multica Task UUID 建立本地 Run/worktree
+node scripts/cwf-run-init.mjs <Multica Task UUID> <run_id>
 ```
 
 - 产出独立分支 / worktree / `.agent-runs/<run_id>/run.json`。
@@ -27,8 +24,7 @@ node scripts/cwf-run-init.mjs <任务标识> <run_id> --local-base
   worktree = `<主检出父目录>/<仓库名>-worktrees/<分支名>/`（相邻容器，**不在仓库内**）；
   运行目录 = **主检出**的 `.agent-runs/<run_id>/`（产物锚定主检出，不写进工作树——工作树才是可随时丢弃的目录）。
   任一工作树内执行 `cwf-run-init.mjs` 都得到同一套路径：锚点是主检出（`--git-common-dir`），不是当前目录。
-- `--local-base` 等价于 `--no-fetch`：`run.json` 记 `base_ref_kind = local`。同一 run_id 复用时，远程/本地基线互相切换会被拒绝，不静默复用。
-- run.json 绑定**需求基线版本**（与 Issue/任务卡当前版本一致）；之后不得静默换版。
+- run.json 绑定**需求基线版本**（与 Multica Task 的定义元数据一致）；之后不得静默换版。
 - **之后全部工作在该 worktree 内进行**；任何 git / npm 命令一律 `git -C <worktree>` 或先 `cd <worktree>`，并核对 `git rev-parse --abbrev-ref HEAD` = `run.json.work_branch`，不一致即停（不得在主检出或别的 worktree 里"顺手"执行）。**本条只约束「在哪里干活」；「产物写到哪里」由上面的锚定规则约束（写主检出）。**
 - 同时登记本任务的**插件命名空间**（= run_id）与**开发 DSH 固定端口**：写在 `run.json.env_resources` 的 `plugin_namespace` 与 `dev_dsh_port`。
 - **开发 DSH 是唯一实例，端口固定 9527**（约定 §决策六）。运行期一切 DSH 开发操作都在这一实例上，不为每个 Run 分配独占 Home：
@@ -49,21 +45,18 @@ npm run dev:plugin -- stop --task <run_id>    # 登记本任务插件「已停�
 ## 1. 实施前检查（硬门禁，先于建 Run 之后、开发之前）
 
 ```bash
-node scripts/ai-task-preflight-check.mjs <issue-basics快照.md> <task-spec路径> \
-  --run-baseline <Run绑定版本> [--env-store <环境组登记目录>]
+node scripts/construction-preflight-gate.mjs \
+  --multica-task-id <Task UUID 或标识> \
+  --multica-profile <已确认的 Multica profile> \
+  --multica-workspace-id <workspace UUID> \
+  --repo <目标仓库> --run-baseline <Run绑定版本>
 ```
 
-检查项与失败语义见 `single-task-delivery-m2.md` §2 与 `preflight-check.md`。**失败** → Issue/任务卡 执行受阻、Run `BLOCKED`、写明原因并**停止**，不进入开发。
+检查从指定 Multica profile/workspace 读取 Task 当前状态、项目、负责人、定义元数据、依赖及依赖状态；规格正文和 Definition Check 仍保存在目标仓库。Multica 当前状态只接受 `todo` / `in_progress`；依赖必须同时满足 `status=done` 与 `status_category=done`。缺少 `dev-flow.definition.v1`、`dev-flow.dependencies.v1`（无依赖须显式为 `[]`）、profile/workspace 不匹配或 CLI 不可用时均阻断，不读取本地 `registry.json`、`BOARD.md` 或旧任务卡回退。
 
-通过后解析施工环境（**批量调度不得代劳**）：
+**失败** → Run `BLOCKED`、写明原因并停止，不进入开发；Task 状态由 Multica 管理，不在本地登记册或该门禁中改写。执行历史通过 `multica issue runs <Task UUID>` 查询；`.agent-runs/` 仅保存本地工作流的详细阶段证据。
 
-```bash
-node scripts/ai-task-workspace-env.mjs resolve \
-  --store <环境组登记目录> --task <任务标识> --env <施工环境组> \
-  --role <独立|成员> --deps <无|依赖列表> [--repo <仓>] [--work-root <根>]
-```
-
-角色「独立」→ 新建分支 + 独立工作区并登记环境组；「成员」→ 沿用同组现场（前置未完成则受阻串行等待）。随后按 M2 §2 将已定义规格导入为已确认 `requirements_baseline`（注明定义外置导入，不再呈递基线确认门）、写入说明性 `design_package`（`outcome=package_ready`，仅证据链底物），**不得**再开 design 人工决策门。
+通过后按 Multica 元数据中的环境组/角色安排物理工作区；依赖是否完成仍以 Multica 状态为准，不使用本地成员状态副本。随后将已定义规格导入为已确认 `requirements_baseline`（注明定义外置导入，不再呈递基线确认门）、写入说明性 `design_package`（`outcome=package_ready`，仅证据链底物），不得再开 design 人工决策门。
 
 ---
 
@@ -103,8 +96,7 @@ node scripts/cwf-evidence-verify.mjs .agent-runs/<run_id>
 ```
 
 3. 交接包 schema 校验由 `cwf-record` / `formal-records` 写入时自动调用（内核 `scripts/cwf-validate.mjs`，无独立 CLI）。证据链校验（§8.3 ①–⑫，含 CHORE-110 的存在性分层 ⑩–⑫）**任一不满足即不得呈递或签收**。
-4. Issue / 本地任务卡 → **等待验收**；Run → `WAITING_HUMAN`；呈递 UAT 卡与验收包，**AI 不代签**。
-   本地轨道登记册已降级为只读存档（W8 P0-C）：状态变更改在 Multica 平台操作（`multica issue status <id> in_review` 等）；旧 `local-task-registry set` 写命令已 fail-closed（原因码 `legacy_registry_write_disabled`）。
+4. Multica Task 按项目流程进入 `in_review`；Run → `WAITING_HUMAN`；呈递 UAT 卡与验收包，**AI 不代签**。不得在 `registry.json`、`BOARD.md` 或本地任务卡维护一份状态。
 
 5. 无人工操作 → 保持等待；跨日从**原 Run** 恢复，禁止另起丢失上下文的新 Run。
 
@@ -133,34 +125,25 @@ node scripts/cwf-env-recycle.mjs plan .agent-runs/<run_id>   # 只读预演，�
 
 回收**以「激活登记里已有本任务的『已停用注销』记录」为门禁**，没有即拒绝（exit 1）并打印应执行的确切命令。停不掉时用 `npm run dev:plugin -- stop --task <run_id> --unresolved "<原因>"` 如实登记，此时回收照旧放行，但该原因进入报告与遗留事项，**不得谎报为已回收**。只清本任务命名空间精确匹配的项（`tasks/<run_id>/`、`workspaces/records/<run_id>/`、登记册本任务条目）；属「运行记录」范畴的文件只列出不删除。**回收失败不阻塞合并主路径**，但脚本输出必须原样进入 `closeout_summary.leftovers` / `cleanup-report.md` 后续事项。
 
-**6.2 环境组收敛**（仅同组全部完成时清理工作区）：
-
-```bash
-node scripts/ai-task-workspace-env.mjs mark-completed --store <目录> --env <组> --task <任务标识>
-node scripts/ai-task-workspace-env.mjs maybe-cleanup  --store <目录> --env <组>
-```
+**6.2 环境组收敛**：同组依赖和 Task 状态以 Multica 为准；本地只管理工作区与运行资源，不登记组内任务完成状态。
 
 **6.3 合并成果**（先跑门禁，冲突即中止且不改主干）：
 
-- **GitHub 轨道**：按仓库规则开 PR 并合并；Issue → 已完成。
-- **本地轨道**：旧本地合并入口暂停使用（W8 P0-C，WFM-157）：与 §4 一致，登记状态一律以 Multica 平台为准；`local-task-registry set` 写命令已 fail-closed（原因码 `legacy_registry_write_disabled`），旧合并路径 `local-task-merge` 门禁要求的登记册「等待验收」状态目前没有可用 CLI 写入口，尚未标记该状态的存量任务会被门禁拒绝。存量本地任务在 WFM-124 对合并流程作出后续决策前**暂停合并操作**，如有合并/收口需求经 Multica 任务升级协调者裁定；本切片未改动 `local-task-merge` 及其状态语义，`docs/design/ai-task-define-delivery/local-track-offline-mode.md` §7.1/§7.4 门禁清单仅作历史参考。
-  工作区清理口径不变（决策 0001 §6 / 约定 §1.7.1）：**删工作区、留分支**——工作区可再生、分支不可再生；删除不带 `--force`，工作区脏则拒绝并只登记遗留项；删除后追加 `git worktree prune` 兜底注销失效登记。
+- 按仓库 GitHub PR 规则交付代码；PR、提交、CI 与合并是 GitHub 交付事实，Task 状态与负责人由 Multica 管理。旧 `local-task-merge` 已退役，不得用它推进主干或改写本地登记资料。
 
 **6.4 收口后复核**：合并完成后由**执行体（AI）立即**执行验收卡「收口后复核」区各项，把执行时间 / 命令 / 实际结果 / 结论回填该区与 `closeout_summary`；**不得留空、不得静默跳过**。失败如实记录：属真缺陷 → 另立任务（不在本轮静默修）；属环境或时机不成立 → 写明原因与后续触发条件。本条是收口动作的内容，**不新增主链阶段或状态**。
 
 > 前置顺序：`closeout_summary` 需在**删除工作区之前**写入（`cwf-record` 对 `run.work_branch` 有「实际检出必须存在」的血缘守卫；工作区已删则需临时 `git worktree add` 重建检出再写）。
 
-**6.5 归档与证据保留**（`local-task-merge` 已自动完成三件套归档，以下仅用于未走合并脚本或需单独重跑）：
+**6.5 归档与证据保留**：
 
 ```bash
 node scripts/cwf-record.mjs archive .agent-runs/<run_id>
-node scripts/task-runs-cleanup.mjs            # 只读预演（默认）
-node scripts/task-runs-cleanup.mjs --apply    # 执行清理（摘要缺失的项会被拒绝）
 ```
 
-证据明细按登记册 `evidence_expires_at`（合并时间 + 7 天）保留，到期后清理（决策二）。
+`task-runs-cleanup` 依赖已弃用登记册，已停用。归档摘要只保留本地阶段证据，不复制 Multica Task 状态；在独立的证据保留规则落地前保留 `.agent-runs/` 明细，不按旧登记册到期字段自动删除。
 
-**6.6 本地轨道收尾**：把「有条件通过」的优化意见登记为新的候选任务，不改已合并基线。旧 `local-task-registry allocate/board` 写命令已 fail-closed（W8 P0-C，原因码 `legacy_registry_write_disabled`）；新候选任务一律在 Multica 平台建任务（`multica issue create`），本地登记册不再发号、不再重写看板。
+**6.6 后续任务**：把「有条件通过」的优化意见作为新 Multica Task 的输入，不改已交付基线。新任务只在 Multica 创建与管理；仓库任务卡/规格只作为版本化需求内容，不另建状态副本。
 
 ---
 

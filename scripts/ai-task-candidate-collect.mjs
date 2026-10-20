@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * M5-1 候选采集（本地事实层）：从登记册 + run 现场筛出本批可开工任务，产出 M3
- * batch.json 兼容的候选列表。只读，不建现场、不改登记册。
+ * 历史 M5-1 候选采集实现。CLI 已退役，当前 Task 候选由 Multica/dev-flow 管理。
+ * 导出的筛选函数只供迁移期历史测试，不得作为当前任务源。
  *
  * 与 M3 assessAndSort 的分工：
  *   本脚本 = 登记册状态 / 已有 run / 环境组 / 黑名单（本地事实排除）；
@@ -341,4 +341,12 @@ async function main() {
 }
 
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-if (isCli) await main()
+if (isCli) {
+  console.error(JSON.stringify({
+    ok: false,
+    code: 'legacy_registry_candidate_collection_disabled',
+    reason: '旧候选采集器依赖本地 registry.json，已退役；当前候选从 Multica Task 获取。',
+    effects: '未读取 registry.json，未写出批次文件。',
+  }, null, 2))
+  process.exitCode = 2
+}

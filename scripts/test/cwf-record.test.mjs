@@ -716,12 +716,10 @@ test('write：签收 decided 时刷新已归档摘要，让签署人进永久层
   assert.equal(refreshed.acceptance_state, 'decided')
 })
 
-test('摘要：登记册无 branch 时按任务标识反查唯一 Run（LOC-032/033 类）', () => {
+test('摘要：无需登记册即可按 Task 身份反查唯一本地 Run', () => {
   const root = mkdtempSync(join(tmpdir(), 'cwf-sum-'))
   mkdirSync(join(root, 'docs/tasks'), { recursive: true })
-  writeFileSync(join(root, 'docs/tasks/registry.json'), JSON.stringify({
-    tasks: [{ task_id: 'TIER-1', status: '已合并', branch: null }],
-  }))
+  writeFileSync(join(root, 'docs/tasks/registry.json'), '{malformed legacy snapshot\n')
   const dir = join(root, '.agent-runs', 'tier-1-r1')
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'run.json'), JSON.stringify({ run_id: 'tier-1-r1', issue_or_task_identity: '#TIER-1' }))
@@ -736,12 +734,14 @@ test('摘要：登记册无 branch 时按任务标识反查唯一 Run（LOC-032/
   assert.equal(summaryJson.run_id_source, 'discovered_from_agent_runs')
   assert.equal(summaryJson.decided_by, 'human:song')
   assert.equal(summaryJson.acceptance_state, 'decided')
+  assert.equal(Object.hasOwn(summaryJson, 'status'), false)
+  assert.equal(Object.hasOwn(summaryJson, 'branch'), false)
+  assert.equal(Object.hasOwn(summaryJson, 'merge'), false)
 })
 
 test('摘要：多个 Run 声明同一任务时报错不猜', () => {
   const root = mkdtempSync(join(tmpdir(), 'cwf-sum2-'))
   mkdirSync(join(root, 'docs/tasks'), { recursive: true })
-  writeFileSync(join(root, 'docs/tasks/registry.json'), JSON.stringify({ tasks: [{ task_id: 'TIER-2', branch: null }] }))
   for (const rid of ['tier-2-r1', 'tier-2-r2']) {
     const dir = join(root, '.agent-runs', rid)
     mkdirSync(dir, { recursive: true })
@@ -753,9 +753,6 @@ test('摘要：多个 Run 声明同一任务时报错不猜', () => {
 test('摘要：无验收包时显式标 no_record 并给成因，不再静默 null（CHORE-106 类）', () => {
   const { root, runDir } = makeRunDir()
   mkdirSync(join(root, 'docs/tasks'), { recursive: true })
-  writeFileSync(join(root, 'docs/tasks/registry.json'), JSON.stringify({
-    tasks: [{ task_id: '999', status: '等待验收', branch: 'dev-cwf-test-01' }],
-  }))
   writeFileSync(join(runDir, 'index.json'), JSON.stringify({}))
   const { summaryJson } = generateEvidenceSummary({ root, taskId: '999', runId: 'cwf-test-01', now: () => new Date('2026-09-19T02:00:00Z') })
   assert.equal(summaryJson.decided_by, null)

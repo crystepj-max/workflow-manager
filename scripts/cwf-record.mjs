@@ -221,7 +221,7 @@ function refreshArchivedSummary(runDir, run) {
   })()
   if (!main) return
   const summaryPath = join(main, 'docs/tasks/archive', taskId, 'evidence-summary.json')
-  if (!existsSync(summaryPath)) return // 尚未收口归档：合并时由 local-task-merge 生成，无需在此提前造
+  if (!existsSync(summaryPath)) return // 尚未归档时不自动创建历史任务目录；由明确的证据归档流程决定。
   try {
     generateEvidenceSummary({ root: main, taskId, runId: run.run_id })
     console.log(`已刷新归档摘要：docs/tasks/archive/${taskId}/evidence-summary.json（签收人已落值）`)

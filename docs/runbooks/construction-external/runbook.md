@@ -1,3 +1,5 @@
+> 已退役轨道：本文旧 Issue 基本信息与本地规格 preflight 命令不再用于当前任务。新任务与状态由 Multica 管理；当前施工入口请见 [`construction-dsh/runbook.md`](../construction-dsh/runbook.md)。
+
 # 建设 · 完整功能开发 · External Profile Runbook（Codex / Cursor 共用）
 
 > **M2 产品主链权威**：`docs/design/ai-task-define-delivery/single-task-delivery-m2.md`（定义外置，从已定义开工）。  
@@ -8,7 +10,7 @@
 ## 0. 实施前检查
 
 ```bash
-node scripts/ai-task-preflight-check.mjs <issue-basics.md> <task-spec.md> --run-baseline <Vn>
+node scripts/construction-preflight-gate.mjs --multica-task-id <Task UUID> --multica-profile <profile> --multica-workspace-id <workspace UUID> --run-baseline <Vn>
 ```
 
 未通过 → 执行受阻 / BLOCKED，停止。通过后导入已确认基线证据 + 说明性 design 包（非产品决策门），再进入开发。

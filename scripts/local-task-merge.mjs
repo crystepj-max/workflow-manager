@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * 本地轨道合并：把已验收的任务分支合并回本地主干，一任务一提交。
+ * 历史本地任务合并实现。Multica 是当前任务源；当前代码交付按 PR 流程完成。
+ * CLI 与导出执行 API 均 fail-closed，仅保留纯格式化/锚点辅助函数供历史材料核对。
  *
  * 门禁（任一不满足即中止，不改动仓库）：
  *   1. 人工验收结果为 accept / conditional_pass（reject 禁止合并）
@@ -45,6 +46,12 @@ export { parseRemoteAnchors }
 export const MERGEABLE_DECISIONS = new Set(['accept', 'conditional_pass'])
 export const PRE_MERGE_STATUS = STATUS_WAITING_ACCEPTANCE
 export const MERGED_STATUS = STATUS_MERGED
+
+function legacyMergeDisabledError() {
+  const error = new Error('本地任务登记合并流程已退役；任务与验收状态以 Multica 为准，代码交付通过 PR 完成。')
+  error.code = 'legacy_local_task_merge_disabled'
+  return error
+}
 
 function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
@@ -141,6 +148,7 @@ export function buildCommitMessage({
  * @returns {{ ok: boolean, failures: string[], plan?: object }}
  */
 export function checkMerge({ repo, taskId, branch, main = 'main', decision, worktree, runDir }) {
+  throw legacyMergeDisabledError()
   const failures = []
 
   if (!MERGEABLE_DECISIONS.has(decision)) {
@@ -254,6 +262,7 @@ export function runMerge({
   keepWorktree = false,
   dryRun = false,
 }) {
+  throw legacyMergeDisabledError()
   const check = checkMerge({ repo, taskId, branch, main, decision, worktree, runDir: undefined })
   if (!check.ok) return { ok: false, merged: false, failures: check.failures }
   const { plan } = check
@@ -515,5 +524,11 @@ function main(argv) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2))
+  console.error(JSON.stringify({
+    ok: false,
+    code: 'legacy_local_task_merge_disabled',
+    reason: '本地任务合并链路已退役；任务状态由 Multica 管理，代码交付按 GitHub PR 流程执行。',
+    effects: '未读取或写入本地任务登记册、未合并 Git 分支、未清理工作区。',
+  }, null, 2))
+  process.exitCode = 2
 }

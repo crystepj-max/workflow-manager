@@ -3,45 +3,11 @@
  * LOC-038：建设模板 preflight 机械节点适配器。
  * 三入口（Bootstrap CLI / wf_run mechanical 钩子 / 测试 harness）共用 runPreflight。
  */
-import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { runPreflight } from './ai-task-preflight-check.mjs'
-import { field, TASK_FIELDS } from './task-card-parse.mjs'
+import { runMulticaTaskPreflight } from './multica-task-preflight.mjs'
 
 const MECHANICAL_ID = 'construction-preflight'
-
-/**
- * @param {string} taskId
- * @param {string} repo
- */
-export function resolveTaskCardPath(taskId, repo = process.cwd()) {
-  const raw = String(taskId || '').trim()
-  const m = /^(?:loc-)?(\d{3})$/i.exec(raw.replace(/-r\d+$/i, ''))
-    || /^(LOC-\d{3,})/i.exec(raw)
-    || /^(FEAT|FIX|CHORE)-(\d+)$/i.exec(raw)
-  const id = m ? (m[1] && /^\d{3}$/.test(m[1]) ? `LOC-${m[1]}` : (m[0] || raw).toUpperCase()) : raw.toUpperCase()
-  const tasksDir = path.join(repo, 'docs', 'tasks')
-  if (!fs.existsSync(tasksDir)) return null
-  const exact = path.join(tasksDir, `${id}.md`)
-  if (fs.existsSync(exact)) return exact
-  const hit = fs.readdirSync(tasksDir).find((f) => f.toUpperCase().startsWith(id + '-') && f.endsWith('.md'))
-  return hit ? path.join(tasksDir, hit) : null
-}
-
-export function resolveSpecPath(issuePath, repo = process.cwd()) {
-  if (!issuePath || !fs.existsSync(issuePath)) return null
-  const issue = fs.readFileSync(issuePath, 'utf8')
-  const specLoc = field(issue, TASK_FIELDS.SPEC_LOC)
-  if (!specLoc) return null
-  const rel = specLoc.replace(/^`|`$/g, '').trim()
-  const candidates = [
-    path.isAbsolute(rel) ? rel : path.join(repo, rel),
-    path.resolve(path.dirname(issuePath), rel),
-  ]
-  for (const p of candidates) if (fs.existsSync(p)) return p
-  return candidates[0]
-}
 
 /**
  * 将 runPreflight 结果映射为建设 preflight 节点 schema。
@@ -50,68 +16,51 @@ export function resolveSpecPath(issuePath, repo = process.cwd()) {
 export function mapPreflightNodeOutput(pr) {
   if (pr.ok) {
     const baseline = pr.fields?.baseline || 'V1'
+    const assignee = pr.fields?.assignee_id
+      ? `${pr.fields.assignee_type || 'assignee'}:${pr.fields.assignee_id}`
+      : '未分派'
     return {
       route: 'PASS',
-      summary: `机械实施前检查通过（基线 ${baseline}）`,
+      summary: `Multica Task ${pr.fields.identifier} 状态=${pr.fields.status}，项目=${pr.fields.project_id}，负责人=${assignee}；基线 ${baseline}，依赖已核验。`,
       blockers: '',
       baseline_version: baseline,
-      reasons: pr.reasons || [],
-      mechanical: true,
     }
   }
   const blockers = (pr.failures || []).join('；')
   return {
     route: 'BLOCKED',
-    summary: '机械实施前检查未通过',
+    summary: 'Multica Task 权威来源检查未通过；未回退读取本地登记册。',
     blockers,
     baseline_version: '',
-    reasons: pr.reasons || [],
-    mechanical: true,
   }
 }
 
 /**
  * @param {object} ctx
- * @param {string} [ctx.issuePath]
- * @param {string} [ctx.specPath]
- * @param {string} [ctx.taskId]
+ * @param {string} [ctx.multicaTaskId]
+ * @param {string} [ctx.multicaProfile]
+ * @param {string} [ctx.multicaWorkspaceId]
  * @param {string} [ctx.repo]
  * @param {string} [ctx.runBaseline]
- * @param {string} [ctx.envStore]
- * @param {string} [ctx.headRef]
  */
 export async function runConstructionPreflightGate(ctx = {}) {
   const repo = path.resolve(ctx.repo || process.cwd())
-  const issuePath = ctx.issuePath
-    ? path.resolve(ctx.issuePath)
-    : resolveTaskCardPath(ctx.taskId, repo)
-  const specPath = ctx.specPath
-    ? path.resolve(ctx.specPath)
-    : resolveSpecPath(issuePath, repo)
-
-  if (!issuePath || !fs.existsSync(issuePath)) {
+  const multicaTaskId = ctx.multicaTaskId
+  if (!multicaTaskId) {
     return mapPreflightNodeOutput({
       ok: false,
-      failures: [`任务卡不可读：${issuePath || '（未解析）'}`],
-      reasons: [{ code: 'PREFLIGHT_CONTEXT_MISSING', field: 'issuePath', source: 'entry', message: '正式入口缺任务卡路径且无法从 taskId 解析' }],
-      fields: null,
-    })
-  }
-  if (!specPath || !fs.existsSync(specPath)) {
-    return mapPreflightNodeOutput({
-      ok: false,
-      failures: [`任务规格不可读：${specPath || '（未解析）'}`],
-      reasons: [{ code: 'PREFLIGHT_CONTEXT_MISSING', field: 'specPath', source: 'entry', message: '正式入口缺规格路径且无法从任务卡解析' }],
+      failures: ['缺少 multicaTaskId；建设流程必须绑定 Multica Task，不能以本地 taskId 或任务卡代替。'],
+      reasons: [{ code: 'MULTICA_TASK_ID_REQUIRED', field: 'multicaTaskId', source: 'entry', message: '正式入口缺少 Multica Task ID' }],
       fields: null,
     })
   }
 
-  const pr = await runPreflight(issuePath, specPath, {
+  const pr = await runMulticaTaskPreflight(multicaTaskId, {
     runBaseline: ctx.runBaseline ?? null,
-    envStore: ctx.envStore ?? null,
     repo,
-    headRef: ctx.headRef ?? 'HEAD',
-    registryPath: ctx.registryPath ?? null,
+    profile: ctx.multicaProfile,
+    workspaceId: ctx.multicaWorkspaceId,
+    execFileSync: ctx.execFileSync,
   })
   return mapPreflightNodeOutput(pr)
 }
@@ -120,14 +69,12 @@ export async function runConstructionPreflightGate(ctx = {}) {
 export async function mechanicalConstructionPreflight(_id, ctx = {}) {
   const args = ctx.args || {}
   return runConstructionPreflightGate({
-    issuePath: args.issuePath,
-    specPath: args.specPath,
-    taskId: args.taskId || ctx.taskId,
+    multicaTaskId: args.multicaTaskId || args.multica_task_id || ctx.multicaTaskId,
+    multicaProfile: args.multicaProfile || args.multica_profile || ctx.multicaProfile,
+    multicaWorkspaceId: args.multicaWorkspaceId || args.multica_workspace_id || ctx.multicaWorkspaceId,
     repo: args.repo_path || args.repo || ctx.repo,
     runBaseline: args.run_baseline || args.runBaseline,
-    envStore: args.env_store || args.envStore,
-    headRef: args.head_ref || args.headRef,
-    registryPath: args.registry_path || args.registryPath,
+    execFileSync: ctx.execFileSync,
   })
 }
 
@@ -146,23 +93,21 @@ export function buildMechanicalPreamble(repoRoot) {
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (isCli) {
   const argv = process.argv.slice(2)
-  let issue = null
-  let spec = null
-  let taskId = null
+  let multicaTaskId = null
+  let multicaProfile = null
+  let multicaWorkspaceId = null
   let repo = process.cwd()
-  const ti = argv.indexOf('--task-id')
-  if (ti >= 0) taskId = argv[ti + 1]
+  const taskIndex = argv.indexOf('--multica-task-id')
+  if (taskIndex >= 0) multicaTaskId = argv[taskIndex + 1]
+  const profileIndex = argv.indexOf('--multica-profile')
+  if (profileIndex >= 0) multicaProfile = argv[profileIndex + 1]
+  const workspaceIndex = argv.indexOf('--multica-workspace-id')
+  if (workspaceIndex >= 0) multicaWorkspaceId = argv[workspaceIndex + 1]
   const ri = argv.indexOf('--repo')
   if (ri >= 0) repo = argv[ri + 1]
-  if (!taskId && argv[0] && !argv[0].startsWith('--')) {
-    issue = argv[0]
-    spec = argv[1]
-  }
   const rbIdx = argv.indexOf('--run-baseline')
   const runBaseline = rbIdx >= 0 ? argv[rbIdx + 1] : null
-  const esIdx = argv.indexOf('--env-store')
-  const envStore = esIdx >= 0 ? argv[esIdx + 1] : null
-  const out = await runConstructionPreflightGate({ issuePath: issue, specPath: spec, taskId, repo, runBaseline, envStore })
+  const out = await runConstructionPreflightGate({ multicaTaskId, multicaProfile, multicaWorkspaceId, repo, runBaseline })
   console.log(JSON.stringify(out, null, 2))
   process.exit(out.route === 'PASS' ? 0 : 1)
 }
