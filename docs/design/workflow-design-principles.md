@@ -124,7 +124,9 @@ Human Acceptance 是正式业务阶段（人最终签字），不是框架默认
 - 节点内部 REVISE 不计；
 - `WAITING_HUMAN` / `PAUSED` / `BLOCKED` 不计；
 - 技术失败重试不得因为使用了回退路径就自动消耗业务额度；
-- 额度耗尽进入 `WAITING_HUMAN` 且 reason 为 `MAX_ROUNDS_REACHED`，**不是** `FAILED_MAX_ROUNDS`。系统必须展示完整上下文、历史尝试、剩余问题、风险、成本 / 收益和可选方向。
+- 额度耗尽的**默认**处置是进入 `WAITING_HUMAN` 且 reason 为 `MAX_ROUNDS_REACHED`，**不是** `FAILED_MAX_ROUNDS`。系统必须展示完整上下文、历史尝试、剩余问题、风险、成本 / 收益和可选方向；
+- 蓝图可按模板声明额度耗尽的替代处置（`control.maxRoundsExhausted`：`BLOCKED` 表示可恢复受阻并释放并发名额，`INSUFFICIENT` 表示由宿主收口为合法完成而不弹决策卡）。替代处置只改变"谁来决定停止"，不改变下面的不变量；
+- 无论采用哪种处置，**触发耗尽的节点业务结果必须原样保留**，且必须留下可审计的耗尽痕迹。为结束流程改写业务结果（例如把 `NEEDS_RESEARCH` 写成 `PASS`）始终禁止。
 
 边级是否计数由 [#73](https://github.com/crystepj-max/workflow-manager/issues/73) 承接。
 
@@ -222,7 +224,7 @@ Invocation 与 Runtime 分离：当前 Skill / Chat 仍是正式运行入口；�
 
 - 可恢复的外部 / 技术条件问题进入 `BLOCKED`（例如 Provider 额度、模型不可用、鉴权失效、测试环境不可用）；
 - 不可安全恢复的运行完整性错误才进入 `FAILED`（例如状态损坏、必要 checkpoint 无法恢复）；
-- 达到自动回退额度进入 `WAITING_HUMAN`（`MAX_ROUNDS_REACHED`），不是 `FAILED`；
+- 达到自动回退额度**默认**进入 `WAITING_HUMAN`（`MAX_ROUNDS_REACHED`），不是 `FAILED`；蓝图声明替代处置时按声明记（`BLOCKED` 可恢复受阻 / 合法完成 `INSUFFICIENT`），三者都不把额度耗尽伪装成运行失败；
 - `OBSERVING` 不是 Lifecycle 值。
 
 ### 3.3 Node Business Outcome

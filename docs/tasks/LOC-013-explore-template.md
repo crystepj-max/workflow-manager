@@ -26,6 +26,8 @@
 
 按规格 §9.4 新增 `templates/explore.json` 并补齐 fanout worker scratch 接线：探索统筹 → 专家研究 Fan-out（3–5）→ 综合分析 → 结论评估。总研究轮次最多 3 轮（含首次 BROAD），最多 2 次自动 `NEEDS_RESEARCH → 统筹` 回退（初次执行不计额度）；第 3 轮仍 `NEEDS_RESEARCH` 时保留该 Outcome 并进入 `WAITING_HUMAN + MAX_ROUNDS_REACHED`，不得为结束流程改写成 `PASS / INSUFFICIENT`；`INSUFFICIENT` 是合法完成类型。
 
+> ⚠️ **本卡的目标口径已被取代（不改动上方原文，保留定义时点事实）**：「第 3 轮仍 NEEDS_RESEARCH → `WAITING_HUMAN` + 决策卡」这一段（含「验收标准」第 1 条与第 5 条的「额度耗尽转人工」）已被 LOC-036 取代为 **A 口径**：保留评估原 `NEEDS_RESEARCH` 裁决、由宿主收口为合法完成 `completion_type=INSUFFICIENT`，**不进 `WAITING_HUMAN`、不弹决策卡**，`history` 仍留 `halted:true + reason:MAX_ROUNDS_REACHED` 痕迹。裁定来源：D-LOC-036（用户 2026-09-16 确认，`docs/tasks/specs/LOC-036-exploration-coverage/task-spec-V1.md` §12）+ crystepj-max 2026-09-20 复确认维持 A。代码事实：`scripts/generate.mjs` 的探索专属分支先于通用 `haltWaitingHuman(..., 'MAX_ROUNDS_REACHED')`；离线证据：`scripts/test/explore-template.test.mjs`「LOC-036 额度耗尽走 A 口径收口」。
+
 ### 涉及范围
 
 - 做：新蓝图（评估节点 `PASS / NEEDS_RESEARCH / INSUFFICIENT`；`NEEDS_RESEARCH → 统筹` 回退边额度语义按规格）；`scripts/generate.mjs` fanout 节点接入 `assembleWorkerContext`（共享冻结 source + 每专家独立 scratch，经 `vwf.workspace.writeWorker/readWorker` 读写，第一轮专家互不可见）；后续研究只做 TARGETED，新证据仅触发依赖它的 Synthesis / Evaluation 重算（消费 LOC-008 `dependsOnStaleInputs`）；行为与隔离测试。
