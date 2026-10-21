@@ -13,7 +13,6 @@
     "release:verify": "node scripts/release-verify.mjs",
     "validate": "node scripts/validate.mjs && node scripts/validate-workspace.mjs",
     "validate:workspace": "node scripts/validate-workspace.mjs",
-    "sync:remote-issues": "node scripts/remote-issue-sync.mjs",
     "prototype:ui": "node packages/dsh-visual-workflow/prototypes/ui-workbench/serve.mjs",
     "test": "node --test --test-concurrency=2 \"scripts/test/*.test.mjs\"",
     "test:conformance": "node --test scripts/test/workflow-conformance.test.mjs",

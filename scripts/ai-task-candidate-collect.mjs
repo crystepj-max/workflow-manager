@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 历史 M5-1 候选采集实现。CLI 已退役，当前 Task 候选由 Multica/dev-flow 管理。
- * 导出的筛选函数只供迁移期历史测试，不得作为当前任务源。
+ * 含 IO 的导出须显式 legacyHistoryAudit: true，只供历史取证；纯筛选函数不读取任务源。
  *
  * 与 M3 assessAndSort 的分工：
  *   本脚本 = 登记册状态 / 已有 run / 环境组 / 黑名单（本地事实排除）；
@@ -19,6 +19,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   loadRegistry,
+  assertLegacyHistoryAudit,
   STATUS_LOCAL_DEFINED,
   STATUS_MERGED,
 } from './local-task-registry.mjs'
@@ -79,8 +80,10 @@ function taskIdsOfRecord(record) {
   return ids
 }
 
-export function collectLocalCandidates({ repo, blacklist = [] }) {
-  const registry = loadRegistry(repo)
+export function collectLocalCandidates({ repo, blacklist = [], legacyHistoryAudit = false } = {}) {
+  const history = { legacyHistoryAudit }
+  assertLegacyHistoryAudit(history, 'collectLocalCandidates')
+  const registry = loadRegistry(repo, history)
   const tasks = Array.isArray(registry.tasks) ? registry.tasks : Object.values(registry.tasks || {})
   const byId = new Map(tasks.map((t) => [t.task_id, t]))
   const openRuns = scanOpenRuns(repo)
@@ -154,6 +157,7 @@ export function collectLocalCandidates({ repo, blacklist = [] }) {
   }
 
   return {
+    source_kind: 'legacy-history-audit',
     candidates,
     excluded,
     sourceNote: {

@@ -108,11 +108,11 @@ export function repoSlug(repo) {
 }
 
 /**
- * 任务标识 → 远端锚点（唯一依据是登记册 `remote` 字段，不猜 issue 标题）。
+ * 历史任务标识 → 旧远端锚点；须显式 { legacyHistoryAudit: true }，不用于当前 Task。
  * @returns {{ record: object|null, issue: number|null, anchors: {system:string,issue:number}[] }}
  */
-export function remoteAnchorOfTask(repo, taskId) {
-  const record = loadRegistry(repo).tasks.find((t) => t.task_id === taskId || t.legacy_id === taskId) || null
+export function remoteAnchorOfTask(repo, taskId, opts = {}) {
+  const record = loadRegistry(repo, opts).tasks.find((t) => t.task_id === taskId || t.legacy_id === taskId) || null
   if (!record) return { record: null, issue: null, anchors: [] }
   const issue = githubAnchorOf(record.remote)
   return { record, issue, anchors: issue ? [{ system: 'github', issue }] : [] }
@@ -253,28 +253,19 @@ function holderOf(issue, fallback = '未知施工人') {
 /**
  * 开工认领：**写入口已停用**。在任何 GitHub / registry / BOARD 或其他外部写之前 fail-closed，
  * 不打 `施工中` 标签、不指派 assignee、不留认领评论，也不调用 `gh`。
- * 仍保留只读的 `no-task` / `no-anchor` 前置判定（仅读登记册，不碰 gh），便于调用方区分「任务不存在」
- * 与「写入口停用」。施工互斥由 Multica 人工单写者把关。
+ * 不读取旧登记册作当前任务前置判定；施工互斥以 Multica 为准。
  *
  * @returns {{ ok: boolean, code: string, reason: string, issue?: number }}
  */
 export function claimIssue({ repo, taskId, runId = null, branch = null, actor = null, dryRun = false }) {
-  const { record, issue: number } = remoteAnchorOfTask(repo, taskId)
-  if (!record) return { ok: false, code: 'no-task', reason: `登记册无此任务：${taskId}` }
-  if (!number) {
-    return { ok: false, code: 'no-anchor', reason: `任务 ${taskId} 无 github#N 锚点（remote=${record.remote ?? 'null'}），无法远端认领` }
-  }
   return legacyIssueWriteDisabled('claimIssue')
 }
 
 /**
  * 施工结束释放：**写入口已停用**。不摘 `施工中` 标签、不摘 assignee、不留结束评论，也不调用 `gh`。
- * 保留只读的 `no-task` / `no-anchor` 前置判定。
+ * 不读取旧登记册作当前任务前置判定。
  */
 export function releaseIssue({ repo, taskId, runId = null, reason = '', outcome = '', actor = null, dryRun = false }) {
-  const { record, issue: number } = remoteAnchorOfTask(repo, taskId)
-  if (!record) return { ok: false, code: 'no-task', reason: `登记册无此任务：${taskId}` }
-  if (!number) return { ok: false, code: 'no-anchor', reason: `任务 ${taskId} 无 github#N 锚点，无远端标签可释放` }
   return legacyIssueWriteDisabled('releaseIssue')
 }
 
@@ -306,18 +297,8 @@ export function fetchTaskSource({ repo, readyLabel = READY_LABEL, wipLabel = WIP
 }
 
 /** 给任务打「可施工」标签：**写入口已停用**。在任何外部写之前 fail-closed，不打标签、不调用 `gh`。
- *  保留只读的 `no-task` / `no-anchor` 前置判定（仅读登记册），其中 `no-anchor` 的换号指引文案保持不变。 */
+ *  不读取旧登记册作当前任务前置判定。 */
 export function markReady({ repo, taskId, readyLabel = READY_LABEL, dryRun = false }) {
-  const { record, issue: number } = remoteAnchorOfTask(repo, taskId)
-  if (!record) return { ok: false, code: 'no-task', reason: `登记册无此任务：${taskId}` }
-  if (!number) {
-    return {
-      ok: false,
-      code: 'no-anchor',
-      remote: record.remote ?? null,
-      reason: `任务 ${taskId} 无 github#N 锚点（remote=${record.remote ?? 'null'}）：先换取正式号，再打「可施工」标签`,
-    }
-  }
   return legacyIssueWriteDisabled('markReady')
 }
 

@@ -39,3 +39,7 @@
 ## 变更边界与未完成验证
 
 WFM-342 的修改保留在隔离分支 `codex/wfm342-task-source`，不提交、不推送、不改远端状态。Multica profile/workspace 指向已核实的 `multica.ai` workspace；真实服务端行为之外的 Task 元数据样本、跨用户权限和平台历史交叉映射不在本地静态检查范围。
+
+## WFM-466 后续补齐
+
+模块导出的默认读取与程序化写入口，以及 npm 同步入口，见 [旧任务源导出边界](./legacy-task-helper-retirement.md)。历史标记只授予只读回放，不能解锁旧登记册写入或远端发号；PR #367 的原审查结论与历史资料保持原记录。

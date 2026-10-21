@@ -1,3 +1,4 @@
+// 旧任务卡 fixture 的显式历史回放；当前入口由 legacy-task-source-exports / multica-task-preflight 覆盖。
 // LOC-038：三入口一致、逐种拒绝、模型不能覆盖、服务与资格分离
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -121,19 +122,19 @@ test('UAT-01：建设 gate 与 mechanical 钩子从同一 Multica Task 读取当
 test('UAT-02：逐种拒绝——版本冲突/缺许可/未勾选 Definition Check 均 BLOCKED', async () => {
   const dir = tmpdir()
   const badVersion = writeTask(dir, { ...LEGAL_LOCAL, 需求基线版本: 'V2' })
-  const r1 = await runPreflight(badVersion.basicsPath, badVersion.specPath, { runBaseline: 'V1', repo: dir })
+  const r1 = await runPreflight(badVersion.basicsPath, badVersion.specPath, { legacyHistoryAudit: true, runBaseline: 'V1', repo: dir })
   assert.equal(r1.ok, false)
   assert.ok(r1.reasons.some((x) => x.code === 'PREFLIGHT_VERSION_MISMATCH'))
 
   const dir2 = tmpdir()
   const badPerm = writeTask(dir2, { ...LEGAL_LOCAL, 无人值守许可: '不允许' })
-  const r2 = await runPreflight(badPerm.basicsPath, badPerm.specPath, { repo: dir2 })
+  const r2 = await runPreflight(badPerm.basicsPath, badPerm.specPath, { legacyHistoryAudit: true, repo: dir2 })
   assert.equal(r2.ok, false)
 
   const dir3 = tmpdir()
   const { basicsPath, specPath } = writeTask(dir3, LEGAL_LOCAL)
   fs.writeFileSync(path.join(dir3, 'definition-check.md'), '- [ ] 未勾选\n')
-  const r3 = await runPreflight(basicsPath, specPath, { repo: dir3 })
+  const r3 = await runPreflight(basicsPath, specPath, { legacyHistoryAudit: true, repo: dir3 })
   assert.equal(r3.ok, false)
   assert.ok(r3.reasons.some((x) => x.code === 'PREFLIGHT_DEF_CHECK_INCOMPLETE'))
 })
