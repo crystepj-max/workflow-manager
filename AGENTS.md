@@ -13,6 +13,7 @@
 
 - `docs/design/workflow-design-principles.md` 是跨版本长期工作流设计原则的方法论权威。
 - `docs/design/workflow-manager-v0.1-final-product-spec.md` 是当前 v0.1 的 Target（目标规格）权威；目标规格不等于 main 已经实现。
+- `docs/design/workflow-ui-interaction-architecture.md` 是 v0.1 插件侧 UI 与信息架构的产品权威（P1–P10、运行入口事实、信息架构定稿、缺口台账 R-1…R-14 及 §4.6/§4.7 呈现义务）；其 §8 记录 #75 保留 open 推进的产品裁定；#75 仍是未完成的伞票，不因本文入库视为功能完成。DT-01/02/03 仍待裁。
 - Current（当前实现）以实际 `main` 为准；`CONTEXT.md` 描述当前实现术语与兼容语义，`templates/` 只定义当前已实现的具体 Workflow。
 - `roadmap.md` 负责版本顺序、实施依赖和阶段主线，不替代产品规格，也不证明某项能力已经进入 main。
 - GitHub Issue / PR 负责具体施工范围、迁移、验收和状态记录，不得反向覆盖长期原则、版本目标规格或已进入 main 的事实。
