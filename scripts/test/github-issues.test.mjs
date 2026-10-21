@@ -363,14 +363,14 @@ test('gh 不可达时：读动作抛错、写入口 fail-closed（拒绝而非�
   }
 })
 
-// ───────────── CLI：非零退出、不调用 gh、registry/BOARD 前后哈希不变 ─────────────
+// ───────────── CLI：旧 GitHub Task source 全部退役 ─────────────
 
 for (const [cmd, extra] of [
   ['mark-ready', ['--task', 'FIX-224']],
   ['claim', ['--task', 'FIX-224', '--run-id', 'fix-224-r1']],
   ['release', ['--task', 'FIX-224', '--run-id', 'fix-224-r1', '--reason', '收口']],
 ]) {
-  test(`CLI ${cmd}：fail-closed → 非零退出、稳定原因码、0 次 gh、registry/BOARD 哈希不变`, () => {
+  test(`CLI ${cmd}：旧 Task source 退役 → 非零退出、0 次 gh、registry/BOARD 哈希不变`, () => {
     const repo = tmpRepo()
     writeRegistry(repo, [rec('FIX-224', 'github#224')])
     const board = path.join(repo, 'docs/tasks/BOARD.md')
@@ -379,10 +379,11 @@ for (const [cmd, extra] of [
     const ghBin = fakeGhBin()
 
     const r = runCli([cmd, ...extra, '--repo', repo], repo, ghBin)
-    assert.notEqual(r.status, 0, 'CLI 须非零退出')
-    const out = JSON.parse(r.stdout)
-    assert.equal(out.ok, false)
-    assert.equal(out.code, DISABLED)
+    assert.equal(r.status, 2, 'CLI 须以退役原因退出')
+    const out = JSON.parse(r.stderr)
+    assert.equal(out.code, 'legacy_github_task_source_disabled')
+    assert.ok(out.effects.includes('未读取 registry.json'))
+    assert.match(out.effects, /未查询或写入 GitHub Issue/)
 
     assert.equal(ghBin.callCount(), 0, `CLI ${cmd} 不得调用 gh`)
     const after = { reg: sha256(path.join(repo, 'docs/tasks/registry.json')), board: sha256(board) }
@@ -391,16 +392,16 @@ for (const [cmd, extra] of [
   })
 }
 
-test('CLI list-ready / show：只读命令仍可运行（不因写入口停用而被误关）', () => {
+test('CLI list-ready / show：也停止读取旧任务源', () => {
   const repo = tmpRepo()
   writeRegistry(repo, [rec('FIX-224', 'github#224')])
   const ghBin = fakeGhBin()
-  // fake gh 对 issue list/view 返回空数组/无数据即可；这里只验证 CLI 未因停用写入口而拒绝只读子命令。
-  fs.writeFileSync(path.join(ghBin.bin, 'gh'), '#!/bin/sh\nif [ "$1" = "issue" ] && [ "$2" = "list" ]; then echo "[]"; exit 0; fi\nif [ "$1" = "issue" ] && [ "$2" = "view" ]; then echo "[]"; exit 0; fi\nexit 0\n')
-  fs.chmodSync(path.join(ghBin.bin, 'gh'), 0o755)
-  const listed = runCli(['list-ready', '--repo', repo], repo, ghBin)
-  assert.equal(listed.status, 0, `list-ready 应成功：${listed.stderr}`)
-  const shown = runCli(['show', '--task', 'FIX-224', '--repo', repo], repo, ghBin)
-  assert.equal(shown.status, 0, `show 应成功：${shown.stderr}`)
-  assert.equal(JSON.parse(shown.stdout).issue, 224)
+  for (const args of [['list-ready', '--repo', repo], ['show', '--task', 'FIX-224', '--repo', repo]]) {
+    const result = runCli(args, repo, ghBin)
+    assert.equal(result.status, 2, `${args[0]} 应以退役原因退出`)
+    const out = JSON.parse(result.stderr)
+    assert.equal(out.code, 'legacy_github_task_source_disabled')
+    assert.ok(out.effects.includes('未读取 registry.json'))
+  }
+  assert.equal(ghBin.callCount(), 0)
 })

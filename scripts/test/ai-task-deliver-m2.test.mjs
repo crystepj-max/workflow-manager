@@ -15,6 +15,9 @@ test('M2 机械验收脚本通过', () => {
     cwd: root,
   })
   assert.equal(r.status, 0, r.stdout + r.stderr)
+  const out = JSON.parse(r.stdout)
+  assert.equal(out.taskSource, 'multica')
+  assert.equal(out.legacyLocalPreflight, 'disabled')
   assert.match(r.stdout, /"auto_rework_limit": 3/)
   assert.match(r.stdout, /conditional_pass/)
 })
@@ -27,7 +30,7 @@ test('UAT 卡模板缺「执行时机」字段时，机械检查必须失败并�
   // 对比 `import.meta.url` 判定是否 CLI——路径不一致时它会静默什么都不做（退出码 0）。
   const tmp = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'chore36-m2-check-'))
   try {
-    for (const dir of ['docs', 'dsh', 'scripts']) {
+    for (const dir of ['docs', 'dsh', 'scripts', 'templates']) {
       fs.cpSync(path.join(root, dir), path.join(tmp, dir), { recursive: true })
     }
     // 先证明临时根本身能通过（排除「临时根缺别的文件」造成的假失败）

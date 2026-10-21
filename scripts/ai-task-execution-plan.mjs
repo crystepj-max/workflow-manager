@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * M3 Execution Plan 内核：资格筛选 → 快照 → 排序 → 并发启动/补位 → 批次汇总。
+ * 历史 M3 Execution Plan 内核：本地登记册批次计划 CLI 已退役。
+ * 下列状态机导出仅供迁移期历史测试与追溯，不是当前任务计划入口；当前计划由 Multica/dev-flow 管理。
  *
  * 用法：
  *   node scripts/ai-task-execution-plan.mjs <batch.json> [--simulate events.json]
@@ -276,4 +277,12 @@ async function main() {
 }
 
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-if (isCli) await main()
+if (isCli) {
+  console.error(JSON.stringify({
+    ok: false,
+    code: 'legacy_registry_execution_plan_disabled',
+    reason: '旧 M3 执行计划依赖本地 registry.json 与任务卡快照，已退役；当前计划由 dev-flow 从 Multica 读取。',
+    effects: '未读取 registry.json，未启动任务或写入批次报告。',
+  }, null, 2))
+  process.exitCode = 2
+}

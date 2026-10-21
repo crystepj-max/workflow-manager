@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /**
- * M2 实施前检查：校验「已定义」任务是否具备无人值守开工条件。
- * 本地轨道（GitHub 不可用）：状态「本地已定义」与「已定义」开工资格等价，
- * 但必须带 `GitHub 同步` 字段（pending / synced#N / not-applicable）。
+ * 历史任务卡 preflight 实现。CLI 已退役；当前 M2 入口是
+ * construction-preflight-gate.mjs，从 Multica 读取 Task 与依赖。
+ * 下方导出仅供迁移前逻辑与旧基准测试追溯，不得作为当前 Task source。
  *
  * 双形态（LOC-003）：
- *   - CLI：node scripts/ai-task-preflight-check.mjs <task-basics.md> <task-spec.md>
- *       [--run-baseline Vn] [--env-store <dir>] [--repo <path>]——exit 0 = 通过；exit 1 = 受阻；exit 2 = 用法错误
+ *   - CLI：已停用，返回 legacy_task_preflight_disabled；不会读取任务卡或 registry.json。
  *   - module：import { runPreflight } —— 返回结构化结果，不退出进程、不做 IO 副作用以外的输出
  *
  * LOC-038：增加 reasons[{code,field,source,message}]；严格 Definition Check；跨组依赖登记册+祖先校验。
@@ -18,35 +17,15 @@ import { fileURLToPath } from 'node:url'
 import { field, parseSpecVersion, TASK_FIELDS } from './task-card-parse.mjs'
 import { STATUS_LOCAL_DEFINED, STATUS_MERGED, loadRegistry } from './local-task-registry.mjs'
 import { parseDeps, normalizeRole } from './ai-task-workspace-env.mjs'
+import { specOpenItemsZero, strictDefinitionCheck } from './task-definition-checks.mjs'
+
+export { specOpenItemsZero, strictDefinitionCheck }
 
 export const DEFINED_STATUSES = new Set(['已定义', STATUS_LOCAL_DEFINED])
 export const GITHUB_SYNC_VALUES = /^(not-applicable|pending|synced\s*#?\d+)$/i
 const DEP_SATISFIED_STATUSES = new Set([STATUS_MERGED])
 
 /** @param {string} text */
-export function strictDefinitionCheck(text) {
-  if (!text || !text.trim()) return { ok: false, reason: 'Definition Check 文件缺失或为空' }
-  const body = text.split(/^##\s*结论/m)[0]
-  const unchecked = [...body.matchAll(/^\s*-\s*\[\s\]/gm)]
-  if (unchecked.length) return { ok: false, reason: `Definition Check 存在 ${unchecked.length} 项未勾选` }
-  const openMatch = text.match(/未决产品事项[^\n|]*[|｜][^\n|]*[|｜]\s*(\d+)/)
-  if (openMatch && Number(openMatch[1]) !== 0) {
-    return { ok: false, reason: `Definition Check 未决产品事项=${openMatch[1]}（须为 0）` }
-  }
-  if (/未决产品事项[^\n]*[：:]\s*[1-9]/.test(text)) {
-    return { ok: false, reason: 'Definition Check 声明存在未决产品事项' }
-  }
-  return { ok: true }
-}
-
-/** @param {string} spec */
-export function specOpenItemsZero(spec) {
-  return /未决产品事项[^\n]*[：:]\s*(\*\*)?0\b/.test(spec)
-    || /未决[^。\n]*为\s*\*\*0\*\*/.test(spec)
-    || /未决事项\s*=\s*0/.test(spec)
-    || /\|[^\n]*未决[^\n]*\|\s*0\s*\|/.test(spec)
-}
-
 /**
  * @param {string[]} depIds
  * @param {string} repo
@@ -280,4 +259,12 @@ async function main() {
 }
 
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-if (isCli) await main()
+if (isCli) {
+  console.error(JSON.stringify({
+    ok: false,
+    code: 'legacy_task_preflight_disabled',
+    reason: '旧任务卡 preflight 可能读取本地 registry.json；当前建设门禁使用 construction-preflight-gate.mjs 从 Multica 读取 Task 与依赖。',
+    effects: '未读取任务卡或 registry.json，未进入施工。',
+  }, null, 2))
+  process.exitCode = 2
+}

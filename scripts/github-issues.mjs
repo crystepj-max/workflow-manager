@@ -1,28 +1,26 @@
 #!/usr/bin/env node
 /**
- * GitHub issue 通道：**任务管理写入口已停用，仅保留只读与纯函数**。
+ * 历史 GitHub Task source / claim 实现。当前 CLI 的所有命令均已退役。
  *
  * 治理口径（W8 迁移，WFM-166）：Multica Task 是任务身份 / 状态 / 负责人 / 关系 / 施工互斥的
  * 唯一真源；GitHub 只留 PR / commit / review / CI 等代码交付事实，不再当第二套任务账本。
- * 因此旧「批量任务源筛选 + 施工认领互斥」的**写**路径整体 fail-closed，读路径与纯函数保留。
+ * 因此 GitHub Issue 标签、assignee 与评论不再作为任务状态或施工互斥来源。
+ * 下列兼容 API 只供旧材料/迁移测试核对，不得作为当前任务源或开工入口。
  *
- * 已停用（fail-closed，稳定原因码 `legacy_github_issue_write_disabled`，CLI 非零退出）：
+ * 写 API 已停用（稳定原因码 `legacy_github_issue_write_disabled`）：
  *   - API：markReady、claimIssue、releaseIssue
  *   - CLI：mark-ready、claim、release
  *   以上在**任何 GitHub / registry / BOARD 或其他外部写之前**即拒绝，绝不先调 `gh` 探测或打标。
  *   施工互斥改由 Multica 人工单写者把关；本模块不提供原子互斥或跨机器安全保证。
  *
- * 仍保留（只读 / 纯函数，供任务源快照与既有调用方使用）：
+ * 仅为兼容与历史测试保留的 API：
  *   - API：listReadyIssues、viewIssue、listLabels、fetchTaskSource、repoSlug、currentActor、
  *          workerIdentity、claimKeysInWindow、remoteAnchorOfTask、issueUrl、setGhRunner 等
- *   - CLI：list-ready、show
- *   只读动作仍按原口径可注入 `gh` 执行器（`setGhRunner`，离线单测不触网）；读失败仍如实抛错，
- *   由调用方决定阻断或降级（CHORE-111 口径），不得静默降级。
+ *   - CLI：没有可用命令；list-ready / show 也以 legacy_github_task_source_disabled 拒绝。
+ *   历史读取函数可注入 `gh` 执行器供离线测试，当前流程不得调用它们。
  *
  * CLI:
- *   node scripts/github-issues.mjs list-ready [--repo <path>]
- *   node scripts/github-issues.mjs show --task FIX-224 [--repo <path>]
- *   # 旧写命令（mark-ready / claim / release）保留为拒绝壳：稳定返回停用原因码并以非零退出。
+ *   node scripts/github-issues.mjs <command> # 已退役；不会读取 registry.json 或访问 GitHub。
  */
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
@@ -379,5 +377,11 @@ function main(argv) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2))
+  console.error(JSON.stringify({
+    ok: false,
+    code: 'legacy_github_task_source_disabled',
+    reason: '旧 GitHub Task source/claim 通道已退役；任务状态与执行归属以 Multica 为准。',
+    effects: '未读取 registry.json，未查询或写入 GitHub Issue/标签。',
+  }, null, 2))
+  process.exitCode = 2
 }

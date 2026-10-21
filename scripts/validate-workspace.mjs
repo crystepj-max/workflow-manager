@@ -11,7 +11,7 @@
 //
 // 两个角色必须分开（LOC-023 修正；此前二者共用同一个 root，导致在链接工作树内运行
 // 时把主检出误判为治理区工作区，并读到该分支的旧登记册快照）：
-//   · 锚点 anchor —— **数据来源**：登记册、归档目录、过程产物根只有一份，永远在主检出，
+//   · 锚点 anchor —— **数据来源**：归档目录与过程产物根只有一份，永远在主检出，
 //     由 `git rev-parse --git-common-dir` 的父目录解析（约定 §1.6；唯一入口 workspace-paths.mainCheckout）。
 //   · 上下文 repo —— **调用现场**：由 `--repo` 指定（默认脚本上两级）。仅决定「从哪个检出观察」。
 // 被校验集合 = `git worktree list` 去掉锚点本身，其余全部纳入——**含调用方自身所在的工作树**，
@@ -30,8 +30,6 @@ import { mainCheckout } from './workspace-paths.mjs';
 const PROCESS_ARTIFACT_DIRS = ['.agent-runs', '.task-runs']; // 过程产物根（现行 + 目标）
 const LEGACY_RUN_ROOTS = ['.agent-runs'];                    // 待迁移的现行根
 const ARCHIVE_ROOT = 'docs/tasks/archive';
-const REGISTRY = 'docs/tasks/registry.json';
-const TERMINAL_STATUSES = ['已合并', '已取消'];
 
 // —— 命名派生规则与纯逻辑取自 core（无副作用、可单测）——
 import conventionCore from './workspace-convention-core.cjs';
@@ -77,7 +75,7 @@ try {
   anchor = repo;
 }
 
-// 数据读写的唯一根 = 锚点（不是上下文）
+// 本地归档与过程证据的唯一路径根 = 锚点（不是上下文）
 const root = anchor;
 
 let failures = 0;
@@ -255,155 +253,65 @@ if (!asJson) {
   record('D-6', '过程产物未入库', leaked.length === 0, leaked.length ? leaked : ['无漏网文件']);
 }
 
-// —— D-7 终态任务已清理 ——
-let registry = null;
-try {
-  registry = JSON.parse(fs.readFileSync(path.join(root, REGISTRY), 'utf8'));
-} catch (e) {
-  note('D-7 ~ D-10', '任务登记册不可读，跳过（' + REGISTRY + '）', [String(e.message)]);
-}
-if (registry) {
-  const tasks = registry.tasks || [];
-  const terminal = tasks.filter((t) => TERMINAL_STATUSES.includes(t.status));
-  const bad = [];
-  for (const t of terminal) {
-    const hits = [];
-    // ① 登记册记录的 worktree 字段不得仍存在于磁盘
-    if (t.worktree) {
-      for (const c of [path.join(root, t.worktree), path.join(root, '.scratch/worktrees', t.worktree)]) {
-        if (fs.existsSync(c)) hits.push(c);
-      }
-    }
-    // ② 该任务的分支不得仍挂在工作区上
-    if (t.branch) {
-      for (const w of linked) if (w.branch === t.branch) hits.push(w.path);
-    }
-    const unique = [...new Set(hits)];
-    if (unique.length) bad.push(`${t.task_id}（${t.status}）仍有未收口工作区：${unique.join('、')}`);
-  }
-  record('D-7', `终态任务（已合并/已取消，${terminal.length} 个）工作区已清理`, bad.length === 0, bad.length ? bad : ['无终态残留']);
-}
+// —— D-7 任务状态与终态工作区 ——
+// 当前任务状态由 Multica 管理；工作区结构在 D-1 至 D-6 校验，不从历史账本推断任务归属。
+note('D-7', '任务终态与工作区收口（由 Multica 管理）', [
+  '未读取 docs/tasks/registry.json 或 BOARD.md；当前 Task 状态、负责人及收口状态以 Multica 为准。',
+]);
 
-// —— D-8 归档完整性 ——
-// 语义分层（FIX-72）：
-//   · 本地收口任务：全套三件套（任务卡 + 规格终版 + 证据摘要）——原有要求不变；
-//   · 远程收口任务（经 CNB 合并请求合入，本地无完整收口流程）：轻量归档——
-//     任务卡存根（.md）+ evidence-summary.json，摘要必须携带凭据字段（R-3）：
-//     `archive_form: "lightweight-remote"`、`merge.commit`（与登记册逐字一致）、
-//     `remote_ref`（CNB 指针）。缺任一凭据即失败——轻量 ≠ 无凭据。
-if (registry) {
-  const merged = (registry.tasks || []).filter((t) => t.status === '已合并');
-  const missing = [];
-  for (const t of merged) {
-    const archiveDir = path.join(root, ARCHIVE_ROOT, t.task_id);
-    if (!fs.existsSync(archiveDir)) {
-      missing.push(`${t.task_id} 无归档目录（${ARCHIVE_ROOT}/${t.task_id}/）`);
-      continue;
-    }
-    const files = fs.readdirSync(archiveDir);
-    const hasCard = files.some((f) => f.startsWith(t.task_id) && f.endsWith('.md'));
-    const hasSpec = files.some((f) => /^task-spec-V\d+\.md$/.test(f));
-    const hasSummary = files.includes('evidence-summary.json');
-    let summary = null;
-    if (hasSummary) {
-      try { summary = JSON.parse(fs.readFileSync(path.join(archiveDir, 'evidence-summary.json'), 'utf8')); } catch { /* 坏摘要按无凭据处理 */ }
-    }
-    const remoteCloseout = summary && summary.archive_form === 'lightweight-remote';
-    if (remoteCloseout) {
-      if (!hasCard) missing.push(`${t.task_id} 轻量归档缺任务卡存根（${ARCHIVE_ROOT}/${t.task_id}/）`);
-      const regCommit = t.merge && t.merge.commit;
-      if (!regCommit || !summary.merge || summary.merge.commit !== regCommit) {
-        missing.push(`${t.task_id} 轻量归档 merge.commit 与登记册不一致或缺失（R-5：禁止编造）`);
-      }
-      if (!summary.remote_ref) missing.push(`${t.task_id} 轻量归档缺 remote_ref（远程收口指针）`);
-    } else {
-      if (!hasCard) missing.push(`${t.task_id} 缺任务卡（${ARCHIVE_ROOT}/${t.task_id}/）`);
-      if (!hasSpec) missing.push(`${t.task_id} 缺规格终版（${ARCHIVE_ROOT}/${t.task_id}/）`);
-      if (!hasSummary) missing.push(`${t.task_id} 缺证据摘要（${ARCHIVE_ROOT}/${t.task_id}/evidence-summary.json）`);
-    }
-  }
-  if (missing.length) record('D-8', `已合并任务（${merged.length} 个）归档完整性`, false, missing);
-  else record('D-8', `已合并任务（${merged.length} 个）归档完整性`, true, ['全部齐备（本地收口=三件套；远程收口=轻量归档含凭据）']);
-  // 决策五范围收窄（FIX-72）：docs/tasks/specs/ 已复位为「定义入库家」（2026-09-16 起），
-  // 不再作为废弃目录告警；警告改为检测 archive/ 内混入的非任务目录（同名漂移）。
+// —— D-8 历史归档结构 ——
+// 只检查仓库里已存在的历史归档目录，不用旧 Task 状态推断哪些任务“应该”有归档。
+{
   const archiveRoot = path.join(root, ARCHIVE_ROOT);
-  if (fs.existsSync(archiveRoot)) {
-    const drift = fs
-      .readdirSync(archiveRoot, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && !isTaskId(e.name))
-      .map((e) => e.name);
-    if (drift.length) {
-      warn('D-8', `${ARCHIVE_ROOT}/ 内出现非任务标识目录（同名漂移）`, drift);
+  if (!fs.existsSync(archiveRoot)) {
+    note('D-8', '历史归档结构（未发现归档目录）', [`${ARCHIVE_ROOT}/ 不存在`]);
+  } else {
+    const taskDirs = fs.readdirSync(archiveRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && isTaskId(entry.name));
+    const missing = [];
+    for (const entry of taskDirs) {
+      const taskId = entry.name;
+      const archiveDir = path.join(archiveRoot, taskId);
+      const files = fs.readdirSync(archiveDir);
+      const hasCard = files.some((file) => file.startsWith(taskId) && file.endsWith('.md'));
+      const hasSpec = files.some((file) => /^task-spec-V\d+\.md$/.test(file));
+      const summaryPath = path.join(archiveDir, 'evidence-summary.json');
+      let summary = null;
+      if (fs.existsSync(summaryPath)) {
+        try { summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8')); } catch { /* malformed summary */ }
+      }
+      if (summary?.archive_form === 'lightweight-remote') {
+        if (!hasCard) missing.push(`${taskId} 轻量历史归档缺任务卡存根`);
+        if (typeof summary.merge?.commit !== 'string' || !summary.merge.commit.trim()) {
+          missing.push(`${taskId} 轻量历史归档缺 merge.commit`);
+        }
+        if (typeof summary.remote_ref !== 'string' || !summary.remote_ref.trim()) {
+          missing.push(`${taskId} 轻量历史归档缺 remote_ref`);
+        }
+      } else {
+        if (!hasCard) missing.push(`${taskId} 历史归档缺任务卡`);
+        if (!hasSpec) missing.push(`${taskId} 历史归档缺规格终版`);
+        if (!summary) missing.push(`${taskId} 历史归档缺有效证据摘要`);
+      }
     }
+    record('D-8', `历史归档结构（扫描 ${taskDirs.length} 个已存在目录）`, missing.length === 0,
+      missing.length ? missing : ['已存在目录结构完整；不据此推断 Multica Task 状态']);
+    const drift = fs.readdirSync(archiveRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !isTaskId(entry.name))
+      .map((entry) => entry.name);
+    if (drift.length) warn('D-8', `${ARCHIVE_ROOT}/ 内出现非任务标识目录（同名漂移）`, drift);
   }
 }
 
-// —— D-9 证据保留期（历史证据债报告；2026-09-29 职责切分）——
-// 切分（W0 决策）：旧 Task 登记册是冻结的历史账本，其「合并后七天」证据清理时钟
-// 不再使产品校验 / release 自动变红。本检查只读登记册字段（未扫描磁盘，CI runner 上
-// `.agent-runs/` 被 Git 忽略、明细不可见），超期红灯在产品校验链内无法靠真实清理消除，
-// 只能靠伪填 evidence_cleared_at（禁止）。历史债仍必须可见：超期未清项逐条列为警告
-// （不计失败），标注判定性质、可执行核查入口（scripts/task-runs-cleanup.mjs，默认只读
-// 预演）与处置责任；--apply 属独立执行关口，不在产品校验链内。D-8/D-10 等语义不变。
-if (registry) {
-  const withField = (registry.tasks || []).filter((t) => t.evidence_expires_at);
-  if (withField.length === 0) {
-    note('D-9', '无超期证据残留（登记册尚无 evidence_expires_at 字段，机制未启用）', ['落地步骤见模板 Part 2 的 P1']);
-  } else {
-    const now = Date.now();
-    const expired = withField
-      .filter((t) => !t.evidence_cleared_at && Date.parse(t.evidence_expires_at) < now)
-      .map((t) => `${t.task_id} 到期于 ${t.evidence_expires_at}，超期未登记清理`);
-    if (expired.length === 0) {
-      record('D-9', `无超期证据残留（已启用 ${withField.length} 条）`, true, ['无超期项']);
-    } else {
-      warn('D-9', `历史证据债：超期未清 ${expired.length} 条（不阻断产品校验）`, [
-        ...expired,
-        `判定来源：登记册 evidence_expires_at / evidence_cleared_at 字段（未扫描磁盘；共启用 ${withField.length} 条）`,
-        '核查入口：node scripts/task-runs-cleanup.mjs（默认只读预演；--apply 为独立执行关口）',
-        '处置：历史账本证据债由任务治理负责人跟进，不在产品校验链内自动执行',
-      ]);
-    }
-  }
-}
+// —— D-9 本地 Run 明细保留 ——
+note('D-9', '本地 Run 明细保留策略（未启用自动清理）', [
+  '不读取旧账本到期字段；task-runs-cleanup 已退役，.agent-runs 明细由独立保留策略另行管理。',
+]);
 
-// —— D-10 收口口径一致（登记册 branch_retained vs 实际分支）——
-if (registry) {
-  const withField = (registry.tasks || []).filter((t) => typeof t.branch_retained === 'boolean');
-  if (withField.length === 0) {
-    note('D-10', '收口口径一致（登记册尚无 branch_retained 字段，机制未启用）', ['落地步骤见模板 Part 2 的 P1']);
-  } else {
-    const bad = [];
-    for (const t of withField) {
-      if (!t.branch) continue;
-      // CHORE-286 决策 B：以**远端共享真值**为准（此前核验 `refs/heads/<branch>` 本地引用）。
-      // 本地引用使本检查在 CI 上不可能通过：runner 只检出单个 ref，故任何标「保留分支」的
-      // 任务都必然被判违规，与登记册数据是否干净无关。远端引用由 `.github/workflows/validate.yml`
-      // 的显式 fetch 保证可得；本地执行前请先 `git fetch`。
-      const exists = git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${t.branch}`]) !== null;
-      if (t.branch_retained && !exists) bad.push(`${t.task_id} 标记保留分支但远端不存在：${t.branch}`);
-      if (!t.branch_retained && exists) bad.push(`${t.task_id} 标记不保留分支但远端仍存在：${t.branch}`);
-    }
-    record('D-10', `收口口径一致（已启用 ${withField.length} 条）`, bad.length === 0, bad.length ? bad : ['全部一致']);
-  }
-  // V2 / R-8：凡 D-10 **无法核验**的终态任务都必须显式列出，不得以「全部一致」掩盖。
-  // 「无法核验」的完整定义 = 不满足 D-10 的核验前提（`branch_retained` 为布尔值 **且** 有分支记录），
-  // 因此两种形态都要报：
-  //   · 无分支记录（例：LOC-001 先于 Run 证据链机制落地，从未有分支）；
-  //   · 有分支记录但 `branch_retained` 非布尔值（例：早期合并路径未写该字段的任务）。
-  // 只按「无分支记录」判定会漏掉后者——那正是本任务要消灭的「静默跳过」同类缺口。
-  // 一律**不计失败**：没有可核验的口径就没有可判定的违例。按 R-9 只陈述事实，不伪造字段值。
-  const unverifiable = (registry.tasks || []).filter(
-    (t) => TERMINAL_STATUSES.includes(t.status) && !(typeof t.branch_retained === 'boolean' && t.branch),
-  );
-  if (unverifiable.length) {
-    note('D-10', `无法核验的终态任务（${unverifiable.length} 个：无分支记录，或 branch_retained 非布尔值）`,
-      unverifiable.map((t) => {
-        const why = !t.branch ? 'branch 为空——历史上未登记分支' : `branch_retained=${JSON.stringify(t.branch_retained)}——非布尔值，无保留口径可核`;
-        return `${t.task_id}（${t.status}）${why}，按 R-9 不伪造`;
-      }));
-  }
-}
+// —— D-10 分支保留 ——
+note('D-10', 'Git 分支保留策略（不从旧任务字段推断）', [
+  '分支生命周期按 Git / PR 交付和远端状态管理；不读取 registry.json 的 branch_retained 字段。',
+]);
 
 // —— 汇总 ——
 if (asJson) {

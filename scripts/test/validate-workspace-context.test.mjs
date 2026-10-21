@@ -74,8 +74,7 @@ function fixture() {
     gOk(['worktree', 'add', wt, branch], repo)
   }
 
-  // A 分支上提交一份与锚点不同的登记册（含 2 个终态任务）：
-  // 若校验器仍读「上下文」的登记册，D-7/D-8 的计数会与主检出侧不一致。
+  // A 分支上提交一份与锚点不同的历史登记快照。校验器不得把它当当前 Task 状态来源。
   fs.writeFileSync(
     path.join(wtA, 'docs', 'tasks', 'registry.json'),
     JSON.stringify({
@@ -140,14 +139,15 @@ test('V-3：主检出不得被当成治理区工作区（D-2/D-3/D-4）', () => 
   assert.ok(details(fromWorktree, 'D-2').includes(wtB), '治理区违规仍应报出')
 })
 
-test('V-3：锚点数据来源——工作树内也读主检出的登记册', () => {
+test('V-3：D-7 明确不再从登记册推断任务终态', () => {
   const { repo, wtA } = fixture()
   const fromMain = run(repo)
   const fromWorktree = run(wtA)
-  // 两份运行都必须报「终态任务 0 个」（锚点登记册为空），
-  // 而不是 A 分支上那份含 2 个终态任务的快照
+  // A 分支的历史快照与主检出不同；两侧均不得用它决定当前任务状态。
   for (const out of [fromMain, fromWorktree]) {
-    assert.match(findRec(out, 'D-7').title, /终态任务（已合并\/已取消，0 个）/, findRec(out, 'D-7').title)
+    const d7 = out.results.find((r) => r.id === 'D-7')
+    assert.equal(d7?.skipped, true)
+    assert.match(d7.details.join(' '), /未读取 docs\/tasks\/registry\.json/)
   }
 })
 
@@ -184,39 +184,23 @@ test('D-6：并集口径——锚点与上下文任一漏网都报出', () => {
   assert.equal(findRec(run(repo), 'D-6').ok, true)
 })
 
-test('V-8 / R-8：D-10 无法核验的终态任务一律显式标注，且不计失败', () => {
+test('V-8：D-10 不读取旧登记册中的分支保留字段', () => {
   const { repo } = fixture()
-  // 锚点登记册加入三个已合并任务，覆盖 D-10 无法核验的两种形态与一个可核验对照：
-  //   LOC-901 —— 从未登记分支（无分支记录 → 无法核验）
-  //   LOC-902 —— 有分支记录但 branch_retained 非布尔值（→ 同样无法核验；只判「无分支」会漏掉这一形态）
-  //   LOC-903 —— 有分支记录 + 布尔字段（可核验，把 D-10 判定机制激活并作为对照）
   const regPath = path.join(repo, 'docs', 'tasks', 'registry.json')
   const reg = JSON.parse(fs.readFileSync(regPath, 'utf-8'))
-  reg.tasks.push({ task_id: 'LOC-901', status: '已合并', branch: null, branch_retained: null })
-  reg.tasks.push({ task_id: 'LOC-902', status: '已合并', branch: 'dev-loc-902-r1', branch_retained: null })
-  reg.tasks.push({ task_id: 'LOC-903', status: '已合并', branch: 'dev-loc-903-r1', branch_retained: false })
+  reg.tasks.push({ task_id: 'LOC-903', status: '已合并', branch: 'dev-loc-903-r1', branch_retained: true })
   fs.writeFileSync(regPath, JSON.stringify(reg, null, 2) + '\n')
-  // 补上归档三件套，避免 D-8 干扰本用例判读
-  for (const id of ['LOC-901', 'LOC-902', 'LOC-903']) {
-    const arch = path.join(repo, 'docs', 'tasks', 'archive', id)
-    fs.mkdirSync(arch, { recursive: true })
-    fs.writeFileSync(path.join(arch, `${id}-demo.md`), '# 任务卡\n')
-    fs.writeFileSync(path.join(arch, 'task-spec-V1.md'), '**版本**：V1\n')
-    fs.writeFileSync(path.join(arch, 'evidence-summary.json'), '{}\n')
-  }
+  const arch = path.join(repo, 'docs', 'tasks', 'archive', 'LOC-903')
+  fs.mkdirSync(arch, { recursive: true })
+  fs.writeFileSync(path.join(arch, 'LOC-903-demo.md'), '# 历史材料\n')
+  fs.writeFileSync(path.join(arch, 'task-spec-V1.md'), '**版本**：V1\n')
+  fs.writeFileSync(path.join(arch, 'evidence-summary.json'), '{}\n')
   gOk(['add', '-A'], repo)
-  gOk(['-c', 'user.email=t@e', '-c', 'user.name=t', 'commit', '-m', 'chore: unverifiable terminal tasks'], repo)
+  gOk(['-c', 'user.email=t@e', '-c', 'user.name=t', 'commit', '-m', 'chore: legacy branch retention field'], repo)
 
   const out = run(repo)
-  const noteRec = out.results.find((r) => r.id === 'D-10' && r.ok === null && (r.details || []).join(' ').includes('LOC-901'))
-  assert.ok(noteRec, 'D-10 应给出「无法核验」的显式说明行，而不是静默跳过')
-  const text = (noteRec.details || []).join(' ')
-  assert.ok(text.includes('未登记分支'), `应说明无分支记录的原因：${text}`)
-  assert.ok(text.includes('LOC-902'), `有分支但字段非布尔值也必须列出：${text}`)
-  assert.ok(text.includes('非布尔值'), `应说明字段非布尔值的原因：${text}`)
-  assert.ok(!text.includes('LOC-903'), `可核验的任务不应出现在说明行：${text}`)
-  assert.equal(findRec(out, 'D-10', 'fail').ok, true, '无法核验项不得计为失败')
-  // 新增说明行不得改变失败计数：本 fixture 刻意构造的治理区违规只有 D-2 一项
+  const d10 = out.results.find((r) => r.id === 'D-10')
+  assert.equal(d10?.skipped, true)
+  assert.match(d10.details.join(' '), /不读取 registry\.json 的 branch_retained/)
   assert.equal(out.failures, 1, JSON.stringify(out.results.filter((r) => r.ok === false)))
-  assert.ok(!out.results.some((r) => r.id === 'D-10' && r.ok === false), 'D-10 不得因无法核验项转为失败')
 })

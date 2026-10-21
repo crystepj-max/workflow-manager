@@ -1,53 +1,8 @@
 #!/usr/bin/env node
 /**
- * M5 调度器入口：默认 fail-closed；仅显式 --preview 时运行只读候选/计划诊断。
- * 在 Multica 原子 Claim 与停旧后安全接管未获实证前，不得自动认领、补 ready 标签、
- * 派发实施 Run 或回写旧 registry/BOARD。
- *
- * 定位：只调度诊断，不施工、不谈需求、不代签验收。筛选/排序/补位算法仍复用 M3
- * Execution Plan 内核（assessAndSort + createBatchState/fillCapacity/applyRelease），
- * 本脚本不另写规则；预览不会启动真实会话。
- *
- * 用法：
- *   node scripts/ai-task-dispatcher.mjs <schedule.json> [--now] [--wait-ms N] [--preview] [--dry-run] [--simulate events.json]
- *
- * --preview：显式只读预览（强制 dry-run 语义）；不认领、不补标、不拉起实施 Run。
- * --now / --dry-run / --simulate  alone 不会绕过默认 fail-closed。
- *
- * schedule.json:
- * {
- *   "project": "~/workspace/workflow-manager",   // 主检出（跨项目批次换这里）
- *   "batchName": "night-2026-09-17",
- *   "maxConcurrency": 2,
- *   "startAt": "2026-09-16T23:00:00+08:00",      // 可省略=立即
- *   "endAt": "2026-09-17T06:30:00+08:00",        // 可省略=不限；到点不再开新任务，在跑的收尾
- *   "blacklist": [],
- *   "permission": "full-access",                  // full-access | auto-edit（选 machine 模板键）
- *   "watchdogMinutes": 120,                       // 单会话墙钟上限，超时终止并记受阻
- *   "postValidateCommand": "npm run validate",    // 收工校验命令，可省略
- *   "machineConfig": ".scratch/night-batches/machine.json"  // 相对 project；不入库
- * }
- *
- * machine.json（每台机器自配，按本机 CLI 语法调整；不入库）：
- * {
- *   "agent": { "templates": {
- *       "full-access": { "command": "zcode",  "args": ["exec", …, "{promptFile}"] },
- *       "auto-edit":   { "command": "claude", "args": ["-p", …, "{promptFile}"] } } },
- *   "sceneInit": { "command": "node", "args": ["<project>/scripts/cwf-run-init.mjs", "{taskId}", "{runId}", "--local-base"] },
- *   "remoteIssueCommand": "gh issue list …",       // 可省略；仅报告性核验，失败不影响批次
- *   "taskSource": {                                // 可省略；省略即不启用 GitHub 任务源（保持旧行为）
- *     "readyLabel": "ready-for-agent",             // 远端「可施工」标签
- *     "wipLabel": "施工中",                        // 认领标签（他人已认领 → 本批不重开）
- *     "labelSync": true,                           // 门禁已过但远端缺标签时自动补打
- *     "onUnavailable": "block",                    // 远端不可信：block（默认，不开工）/ local-only（降级仅本地）
- *     "requireAnchor": false                       // true = 无 github#N 锚点的任务也排除（默认放行并标注）
- *   }
- * }
- * 占位符（args 通用）：{taskId} {runId} {runDir} {worktree} {promptFile} {project}
- *
- * 会话结束契约：会话退出前写 <runDir>/release-event.json
- *   {"to":"WAITING_HUMAN|BLOCKED|COMPLETED","blockedNode":…,"reason":…,"reworkCount":…,"nextStep":…}
- * 未写而退出 / 看门狗超时 → 记「执行受阻」，名额照常释放补位。
+ * 历史 M5 本地登记册调度器实现。当前 CLI（包括 --preview）已完全退役，
+ * 任务状态和计划由 Multica/dev-flow 管理。此文件其余代码仅保留供迁移追溯，
+ * 不得作为当前开工、任务读取或报告生成入口。
  */
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -1080,4 +1035,12 @@ async function main() {
 }
 
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-if (isCli) await main()
+if (isCli) {
+  console.error(JSON.stringify({
+    ok: false,
+    code: 'legacy_registry_dispatcher_disabled',
+    reason: '旧 M5 dispatcher 依赖本地 registry.json 与 GitHub Task 标签，已退役；当前执行由 Multica 管理。',
+    effects: '未读取 registry.json，未创建批次文件，未查询或写入 GitHub Task 标签，未启动 Run。',
+  }, null, 2))
+  process.exitCode = 2
+}

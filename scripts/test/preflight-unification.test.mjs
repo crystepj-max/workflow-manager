@@ -5,13 +5,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { execFileSync } from 'node:child_process'
 import { runPreflight, strictDefinitionCheck } from '../ai-task-preflight-check.mjs'
 import {
   runConstructionPreflightGate,
   mapPreflightNodeOutput,
-  resolveTaskCardPath,
-  resolveSpecPath,
   mechanicalConstructionPreflight,
 } from '../construction-preflight-gate.mjs'
 import { compileBlueprint } from '../generate.mjs'
@@ -19,7 +16,6 @@ import { runGeneratedScript, makeAgentScript } from './helpers/runtime-harness.m
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const constructionBp = JSON.parse(fs.readFileSync(path.join(root, 'templates/wf-construction-full-feature.json'), 'utf8'))
-const preflightCli = path.join(root, 'scripts/ai-task-preflight-check.mjs')
 const gateCli = path.join(root, 'scripts/construction-preflight-gate.mjs')
 
 function tmpdir() {
@@ -79,19 +75,47 @@ test('strictDefinitionCheck：未勾选项必须失败', () => {
   assert.equal(good.ok, true)
 })
 
-test('UAT-01：三入口（CLI / gate / mechanical 钩子）同一合法输入结论一致', async () => {
+test('UAT-01：建设 gate 与 mechanical 钩子从同一 Multica Task 读取当前状态', async () => {
   const dir = tmpdir()
-  const { basicsPath, specPath } = writeTask(dir, LEGAL_LOCAL)
-  const cli = execFileSync(process.execPath, [preflightCli, basicsPath, specPath, '--run-baseline', 'V1', '--repo', dir], { encoding: 'utf8' })
-  const cliJson = JSON.parse(cli.slice(cli.indexOf('{')))
-  assert.equal(cliJson.ok, true)
+  const specPath = path.join(dir, 'task-spec-V1.md')
+  fs.writeFileSync(specPath, SPEC_V1)
+  fs.writeFileSync(path.join(dir, 'definition-check.md'), DEF_CHECK)
+  const tasks = {
+    'multica-task': {
+      id: 'multica-task', identifier: 'WFM-900', workspace_id: 'workspace-1',
+      project_id: 'project-1', assignee_id: 'agent-1', assignee_type: 'agent',
+      status: 'in_progress', status_category: 'in_progress', metadata: {
+        'dev-flow.definition.v1': JSON.stringify({ definition_status: 'defined', baseline_version: 'V1', unattended: true, env_group: 'g1', env_role: 'independent', pending_product_decisions: 0, spec_ref: 'task-spec-V1.md' }),
+        'dev-flow.dependencies.v1': '[]',
+      },
+    },
+  }
+  const execFileSync = (_command, args) => {
+    const index = args.indexOf('issue')
+    assert.equal(args[index + 1], 'get')
+    return JSON.stringify(tasks[args[index + 2]])
+  }
+  const context = {
+    multicaTaskId: 'multica-task', multicaProfile: 'desktop-api.multica.ai',
+    multicaWorkspaceId: 'workspace-1', runBaseline: 'V1', repo: dir, execFileSync,
+  }
 
-  const gate = await runConstructionPreflightGate({ issuePath: basicsPath, specPath, runBaseline: 'V1', repo: dir })
+  const gate = await runConstructionPreflightGate(context)
   assert.equal(gate.route, 'PASS')
 
-  const mech = await mechanicalConstructionPreflight('construction-preflight', { args: { issuePath: basicsPath, specPath, runBaseline: 'V1' }, repo: dir })
+  const mech = await mechanicalConstructionPreflight('construction-preflight', {
+    args: {
+      multicaTaskId: context.multicaTaskId,
+      multicaProfile: context.multicaProfile,
+      multicaWorkspaceId: context.multicaWorkspaceId,
+      runBaseline: context.runBaseline,
+    },
+    repo: dir,
+    execFileSync,
+  })
   assert.equal(mech.route, 'PASS')
-  assert.deepEqual(gate.reasons.map((r) => r.code).sort(), mech.reasons.map((r) => r.code).sort())
+  assert.equal(gate.summary, mech.summary)
+  assert.match(gate.summary, /WFM-900.*in_progress.*project-1.*agent-1/)
 })
 
 test('UAT-02：逐种拒绝——版本冲突/缺许可/未勾选 Definition Check 均 BLOCKED', async () => {
@@ -116,7 +140,7 @@ test('UAT-02：逐种拒绝——版本冲突/缺许可/未勾选 Definition Che
 
 test('UAT-03：建设模板 preflight 机械节点不调用 agent；预填 BLOCKED 不被 agent PASS 覆盖', async () => {
   const { script } = compileBlueprint(constructionBp)
-  const blocked = mapPreflightNodeOutput({ ok: false, failures: ['测试阻断'], reasons: [{ code: 'TEST', field: null, source: 'test', message: '测试阻断' }], fields: null })
+  const blocked = { ...mapPreflightNodeOutput({ ok: false, failures: ['测试阻断'], reasons: [{ code: 'TEST', field: null, source: 'test', message: '测试阻断' }], fields: null }), mechanical: true }
   const agent = makeAgentScript({
     '/实施前检查/': { route: 'PASS', summary: '模型企图放行', blockers: '', baseline_version: 'V1' },
   })
@@ -127,6 +151,12 @@ test('UAT-03：建设模板 preflight 机械节点不调用 agent；预填 BLOCK
   assert.equal(run.agentCalls.length, 0, 'preflight 不得调用 agent')
   assert.equal(run.result.status, 'BLOCKED')
   assert.equal(run.result.results.preflight.route, 'BLOCKED')
+})
+
+test('UAT-04：缺少 Multica Task ID 时机械门禁阻断，不解析本地 taskId', async () => {
+  const out = await runConstructionPreflightGate({ taskId: 'local-run-id', repo: tmpdir() })
+  assert.equal(out.route, 'BLOCKED')
+  assert.match(out.blockers, /multicaTaskId/)
 })
 
 test('UAT-03：机械 PASS 合法任务 preflight 零 agent 调用并进入 dev', async () => {
@@ -150,14 +180,7 @@ test('UAT-03：机械 PASS 合法任务 preflight 零 agent 调用并进入 dev'
   assert.equal(run.result.status, 'WAITING_HUMAN')
 })
 
-test('resolveTaskCardPath：仓库内 LOC-038 卡可解析', () => {
-  const p = resolveTaskCardPath('LOC-038', root)
-  assert.ok(p && fs.existsSync(p))
-  const spec = resolveSpecPath(p, root)
-  assert.ok(spec && fs.existsSync(spec))
-})
-
-test('mapPreflightNodeOutput：保留 reasons 结构', () => {
+test('mapPreflightNodeOutput：Multica 失败映射为建设节点阻断 schema', () => {
   const out = mapPreflightNodeOutput({
     ok: false,
     failures: ['x'],
@@ -165,5 +188,6 @@ test('mapPreflightNodeOutput：保留 reasons 结构', () => {
     fields: null,
   })
   assert.equal(out.route, 'BLOCKED')
-  assert.equal(out.reasons[0].code, 'C')
+  assert.equal(out.blockers, 'x')
+  assert.equal(out.baseline_version, '')
 })
