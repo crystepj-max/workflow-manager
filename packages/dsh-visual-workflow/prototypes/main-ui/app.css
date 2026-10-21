@@ -1,0 +1,34 @@
+/* 仅宿主外壳；插件的 .vwf-* DOM 和样式由 client.prototype.js 原样提供。 */
+* { box-sizing:border-box; }
+html,body { margin:0; min-width:320px; height:100%; }
+body { font-family:var(--dsw-font-family); font-size:14px; color:var(--dsw-alias-label-primary); background:var(--dsw-alias-bg-base); }
+button,input,select,textarea { font-family:inherit; }
+body[data-prototype-frame] { overflow:hidden; }
+.host-backdrop { position:fixed; inset:0; display:grid; grid-template-columns:66px 1fr; background:var(--dsw-alias-bg-base); }
+.host-rail { border-right:1px solid var(--dsw-alias-border-l2); display:flex; flex-direction:column; align-items:center; gap:22px; padding:22px 12px; color:var(--dsw-alias-label-secondary); }
+.host-rail span { width:30px; height:30px; display:grid; place-items:center; border-radius:10px; background:var(--dsw-alias-bg-layer-1); }
+.host-home { display:grid; place-items:center; opacity:.2; user-select:none; }
+.host-home div { text-align:center; transform:translateY(-25px); }
+.host-home h1 { font-size:28px; font-weight:500; }
+.host-home p { font-size:14px; }
+.host-mask { position:fixed; inset:0; background:var(--dsw-alias-bg-mask-1); backdrop-filter:blur(2px); }
+.host-settings { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); display:flex; width:800px; height:min(800px,calc(100vh - 48px)); max-width:calc(100vw - 48px); border-radius:28px; overflow:hidden; background:var(--dsw-alias-bg-layer-2); box-shadow:0 24px 80px rgba(0,0,0,.18); }
+.host-settings-nav { flex:none; display:flex; flex-direction:column; width:188px; gap:18px; padding:22px 12px 0; }
+.host-settings-title { padding:0 12px; font-size:16px; font-weight:500; line-height:24px; }
+.host-nav-list { display:flex; flex-direction:column; gap:4px; }
+.host-nav-item { display:flex; align-items:center; gap:9px; height:40px; padding:9px 16px 9px 12px; border-radius:12px; font-size:14px; line-height:22px; }
+.host-nav-item.active { background:var(--dsw-specific-sidebar-nav-item-active); }
+.host-nav-item svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.5; }
+.host-settings-content { display:flex; flex:1; min-width:0; flex-direction:column; }
+.host-settings-header { flex:none; height:54px; padding:20px 14px 8px 10px; display:flex; justify-content:flex-end; }
+.host-settings-close { display:grid; place-items:center; width:28px; height:28px; border:none; border-radius:8px; background:transparent; color:inherit; font-size:21px; cursor:pointer; }
+.host-options { flex:1; min-height:0; padding:0 24px 24px; overflow-y:auto; }
+.host-show-settings { position:fixed; top:25px; right:25px; padding:8px 15px; border:1px solid var(--dsw-alias-border-l3); border-radius:8px; background:var(--dsw-alias-bg-layer-2); color:inherit; cursor:pointer; }
+.host-boot-error { padding:24px; color:#b3261e; white-space:pre-wrap; }
+@media(max-width:600px) {
+  .host-settings { width:calc(100vw - 24px); max-width:none; height:calc(100dvh - 24px); border-radius:18px; }
+  .host-settings-nav { display:none; }
+  .host-settings-header { height:42px; padding-top:10px; }
+  .host-options { padding:0 12px 12px; }
+}
+.host-settings[hidden],.host-mask[hidden] { display:none; }

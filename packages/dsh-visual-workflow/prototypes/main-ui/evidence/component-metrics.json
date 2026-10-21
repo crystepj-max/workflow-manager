@@ -1,0 +1,144 @@
+{
+  "viewport": {
+    "width": 1920,
+    "height": 783
+  },
+  "matched": true,
+  "scope": "Geometry and base styles; D1 selected-surface correction is documented separately.",
+  "preview": [
+    {
+      "background": "rgb(255, 255, 255)",
+      "color": "rgb(15, 17, 21)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "14px",
+      "height": 735,
+      "padding": "0px",
+      "radius": "28px",
+      "selector": ".host-settings",
+      "width": 800
+    },
+    {
+      "background": "rgb(255, 255, 255)",
+      "color": "rgb(29, 43, 67)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "13px",
+      "height": 719,
+      "padding": "0px",
+      "radius": "18px",
+      "selector": ".vwf-editor-dialog",
+      "width": 1440
+    },
+    {
+      "background": "rgba(0, 0, 0, 0)",
+      "color": "rgb(29, 43, 67)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "13px",
+      "height": 378.71875,
+      "padding": "0px",
+      "radius": "0px",
+      "selector": ".vwf-nav-col",
+      "width": 224
+    },
+    {
+      "background": "rgb(255, 255, 255)",
+      "color": "rgb(29, 43, 67)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "13px",
+      "height": 416.59375,
+      "padding": "0px",
+      "radius": "0px",
+      "selector": ".vwf-canvas-wrap",
+      "width": 788
+    },
+    {
+      "background": "rgb(255, 255, 255)",
+      "color": "rgb(29, 43, 67)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "13px",
+      "height": 643.1875,
+      "padding": "12px",
+      "radius": "12px",
+      "selector": ".vwf-inspector",
+      "width": 368
+    },
+    {
+      "background": "rgba(0, 0, 0, 0)",
+      "color": "rgb(29, 43, 67)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "12px",
+      "height": 24.796875,
+      "padding": "3px 10px",
+      "radius": "99px",
+      "selector": "dialog[open] .vwf-editor-head .vwf-btn",
+      "width": 46
+    }
+  ],
+  "reference": [
+    {
+      "background": "rgb(255, 255, 255)",
+      "color": "rgb(15, 17, 21)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "14px",
+      "height": 735,
+      "padding": "0px",
+      "radius": "28px",
+      "selector": ".host-settings",
+      "width": 800
+    },
+    {
+      "background": "rgb(255, 255, 255)",
+      "color": "rgb(29, 43, 67)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "13px",
+      "height": 719,
+      "padding": "0px",
+      "radius": "18px",
+      "selector": ".vwf-editor-dialog",
+      "width": 1440
+    },
+    {
+      "background": "rgba(0, 0, 0, 0)",
+      "color": "rgb(29, 43, 67)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "13px",
+      "height": 378.71875,
+      "padding": "0px",
+      "radius": "0px",
+      "selector": ".vwf-nav-col",
+      "width": 224
+    },
+    {
+      "background": "rgb(255, 255, 255)",
+      "color": "rgb(29, 43, 67)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "13px",
+      "height": 416.59375,
+      "padding": "0px",
+      "radius": "0px",
+      "selector": ".vwf-canvas-wrap",
+      "width": 788
+    },
+    {
+      "background": "rgb(255, 255, 255)",
+      "color": "rgb(29, 43, 67)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "13px",
+      "height": 643.1875,
+      "padding": "12px",
+      "radius": "12px",
+      "selector": ".vwf-inspector",
+      "width": 368
+    },
+    {
+      "background": "rgba(0, 0, 0, 0)",
+      "color": "rgb(29, 43, 67)",
+      "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif, -apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontSize": "12px",
+      "height": 24.796875,
+      "padding": "3px 10px",
+      "radius": "99px",
+      "selector": "dialog[open] .vwf-editor-head .vwf-btn",
+      "width": 46
+    }
+  ]
+}

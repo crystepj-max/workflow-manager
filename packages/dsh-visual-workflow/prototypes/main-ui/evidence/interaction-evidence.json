@@ -1,0 +1,28 @@
+{
+  "roleScroll": {
+    "before": {
+      "height": 228,
+      "rootOverflow": false,
+      "scrollHeight": 858,
+      "scrollTop": 0
+    },
+    "after": {
+      "height": 228,
+      "rootOverflow": false,
+      "scrollHeight": 858,
+      "scrollTop": 460
+    }
+  },
+  "checked": [
+    "model override saved and reopened",
+    "personal step rename undo redo save reopen",
+    "run review attempt 1 versus 2",
+    "full execution history",
+    "fanout 2 completed and 1 running",
+    "pause USER_PAUSE and guidance seq 1",
+    "empty library search",
+    "390x844 flow and configuration switching",
+    "old v2 comparison route"
+  ],
+  "productionRuntimeAcceptance": false
+}

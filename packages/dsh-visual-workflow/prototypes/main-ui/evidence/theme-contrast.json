@@ -1,0 +1,30 @@
+[
+  {
+    "theme": "light",
+    "system": "dark",
+    "preview": {
+      "background": "rgb(232, 236, 255)",
+      "text": "rgb(15, 17, 21)",
+      "contrast": 16.08
+    },
+    "reference": {
+      "background": "rgb(41, 55, 89)",
+      "text": "rgb(15, 17, 21)",
+      "contrast": 1.61
+    }
+  },
+  {
+    "theme": "dark",
+    "system": "light",
+    "preview": {
+      "background": "rgb(41, 55, 89)",
+      "text": "rgb(249, 250, 251)",
+      "contrast": 11.26
+    },
+    "reference": {
+      "background": "rgb(232, 236, 255)",
+      "text": "rgb(249, 250, 251)",
+      "contrast": 1.12
+    }
+  }
+]

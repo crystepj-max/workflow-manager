@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>工作流 · 主界面原型</title>
+  <link rel="stylesheet" href="/shell.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="preview-chrome">
+    <div class="preview-mark"><i></i><strong>工作流原型</strong><small>演示数据</small></div>
+    <nav class="preview-modes" aria-label="版本对照">
+      <button data-source="preview">当前原型</button>
+      <button data-source="current">正式源码对照</button>
+      <button data-source="previous">旧版原型</button>
+    </nav>
+    <span id="sync" class="preview-meta">正在核对来源</span>
+    <span class="preview-spacer"></span>
+    <span id="size"></span>
+    <button id="viewport">390 px</button>
+    <button id="theme">深色</button>
+    <button id="reset">重置演示</button>
+  </header>
+  <main class="preview-canvas"><iframe id="preview" title="工作流插件预览"></iframe></main>
+</body>
+</html>

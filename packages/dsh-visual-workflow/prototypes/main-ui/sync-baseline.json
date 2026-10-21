@@ -1,0 +1,14 @@
+{
+  "productionBaseline": "origin/main@0a99c05f08e7822f2df8cea4c80615b4ea84f32a",
+  "checkedAt": "2026-10-21",
+  "hashes": {
+    "client": "e15b1972be3146c6c99c4439f984fdf5cf8f9e4a956c53c32c5b0dbf83f08e98",
+    "host": "fd5c33fb9a539b089dac01f7852f5efec74c024179bcaf72e43ca5e6114ddff3",
+    "templates": "f73191286c5ee2b92c787b8fa328a95f8d8c5af484d33bb2aeafcccb157667e3",
+    "builtinRoles": "54395731727f1ce31347733afd5ea61a68738fd82abc836bc05bf6fb5c76ddad",
+    "roleBodies": "3bc1d5529037d386cd71a0b6fec768710234e408b45a97f7cdafdeafef7f8b99",
+    "locale": "75ba0d8e6de70400ecf75cb6b3010ca2841a0c58352ed3406aa31e483b571c1f",
+    "presets": "7b06683b6a3eee1c0c45f0b6d37f4854d9a4b8864a6658d20d7183dcb1ea15f2"
+  },
+  "hostReference": "deepseek-harness@687f282e8625c6b8d11ff58211a90524be2e4317"
+}
