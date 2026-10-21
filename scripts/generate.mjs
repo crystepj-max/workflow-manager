@@ -1804,12 +1804,17 @@ export function skillWrap(bp) {
     '# ' + bp.displayName + '（生成 skill）',
     '本 skill 由生成器从蓝图 `' + src + '` 编译产出（NFR-1：生成物不可手改，改蓝图重生成）。',
     '## runbook',
-    '1. 装配 args（taskId / runDir / entry / issueBody 或 requirement / 续跑参数），见蓝图契约 `docs/design/blueprint-schema.md`；模型绑定已在编译时固化（bindings.models），运行时不传 models。optimize 类模板按需补 `resource_kind`（git / files / document / config / other）。',
-    '2. 调用 `wf_run` 工具起跑：`templateId` = `' + bp.id + '`，`taskId` = 任务标识（如 issue-12），其余字段照 args。**首选此路径**——由插件自身发起，本次运行即同一 Logical Run（分段 / 任务归属 / 完成类型齐全，看板可续跑、暂停、指导）。',
+    '0. 启动前能力预检：只依据当前会话实际工具清单分别确认 `wf_run`、`workflow` 是否可调用；不得按本 skill 文案、安装状态或历史会话推断工具能力。',
     hasModelNodes
-      ? '   - 隔离要求：模型节点必须使用 `wf_run`。宿主会为每个执行段签发隔离路由；不得改用内置 `workflow` 工具直接执行编译产物。若 `wf_run` 不可用，明确报告阻塞并等待宿主恢复，不得发起模型调用。'
-      : '   - 回退（仅当 `wf_run` 不可用、报错提示无法访问 workflowEngine 时）：可改用内置 `workflow` 工具执行编译产物——`script` = `.generated/' + bp.id + '/script.mjs` 全文，`meta` = `.generated/' + bp.id + '/meta.json`；并**在会话输出中显式提示「本次运行记录将退化为单段、无完成类型，且不可从看板续跑」**，不得声称记录完整。',
-    '3. 按返回状态机驱动：',
+      ? '   - 模型工作流正式执行要求 `wf_run` 提供宿主签发的隔离路由。只有启动前预检确认当前工具清单缺少 `wf_run` 且尚未调用任何执行工具，才可判定正式路径不可用并停在启动前准备；若调用 `wf_run` 后超时、报错或未返回创建结果/Run 状态，按文末“启动结果/Run 状态未确认”边界处理。即使 `workflow` 可见，也不得将其作为模型节点的隔离执行替代。'
+      : '   - `wf_run` 可用时按正式 Logical Run 契约执行；仅纯机械工作流可在启动前检查确认当前工具清单中没有 `wf_run`、尚未调用任何执行工具且 `workflow` 可调用时使用下述降级契约。',
+    '   - 只有启动前预检确认没有适用执行路径、且尚未调用任何执行工具时，才停止在工作流启动之前；继续完成不依赖工作流引擎的调查、证据收集与准备，任务授权允许时可直接交付主任务中独立可完成的内容。把这些内容明确标为主任务直接交付，不伪装成节点产物或正式 Run 结果。',
+    '1. 仅在有效工具路径就绪后装配 args（taskId / runDir / entry / issueBody 或 requirement / 续跑参数），见蓝图契约 `docs/design/blueprint-schema.md`；模型绑定已在编译时固化（bindings.models），运行时不传 models。optimize 类模板按需补 `resource_kind`（git / files / document / config / other）。',
+    '2. 只有当前工具清单确认 `wf_run` 可调用时，才通过它起跑：`templateId` = `' + bp.id + '`，`taskId` = 任务标识（如 issue-12），其余字段照 args；由插件自身发起后，本次运行才是同一 Logical Run（分段 / 任务归属 / 完成类型齐全，看板可续跑、暂停、指导）。',
+    hasModelNodes
+      ? '   - 隔离要求：模型节点必须使用 `wf_run`。宿主会为每个执行段签发隔离路由；不得改用内置 `workflow` 工具直接执行编译产物。只有启动前预检确认当前清单缺少 `wf_run` 且尚未调用执行工具时，才按上述启动前准备分支继续；`wf_run` 已调用后若结果未知，只查询只读状态并按文末边界处理，不得转入启动前准备或改用内置 `workflow`。'
+      : '   - 回退（仅纯机械工作流，且当前工具清单确认 `workflow` 可调用时）：只有启动前检查确认当前清单中没有 `wf_run`、且尚未调用任何执行工具，才可改用内置 `workflow` 工具执行编译产物——`script` = `.generated/' + bp.id + '/script.mjs` 全文，`meta` = `.generated/' + bp.id + '/meta.json`；并**在会话输出中显式提示「本次运行记录将退化为单段、无完成类型，且不可从看板续跑」**，不得声称记录完整。执行工具已调用后遇到错误、超时或结果未知时，只查询只读状态；不得改用内置 `workflow`。',
+    '3. 仅当有效引擎返回实际 Run 状态时按状态机驱动；若执行工具已经调用，但创建结果或 Run 状态未确认，按文末“启动结果未确认”边界处理，不得归入“执行未启动”或重发启动；任何情况下都不得自行造状态：',
     '   - `AWAITING_HUMAN_<节点id>`：呈报告 + 人工确认卡；通过 → 以该门禁节点为 entry 且 approved=true 续跑（只走 success 出边）；非 true（含 false）→ 仍以同一门禁节点续跑，引擎再挂起，不走 failure。',
     '   - `WAITING_HUMAN`：呈 Decision Package（why / current_state / options / subsequent_effects）；按 `decision_id` + `user_choice` 续跑。控制类 Result：`STOP` 停止本 Run、`USER_ACCEPTED` 完成且不改写原 Outcome、`ADD_BUDGET` 显式 +1 额度并沿被拦边再走（须写入 Decision/Control Record，不得隐式恢复）。`reason=MAX_ROUNDS_REACHED` 表示自动回退额度耗尽，原 Node Business Outcome 必须原样保留。业务 Result 沿该蓝图 `$human-decision` 出边继续；无对应出边则拒绝该选择并保持等待。',
     '   - LOC-031 技术预算受阻（同样 `WAITING_HUMAN`，但 reason 不同）：`TECHNICAL_BUDGET_EXHAUSTED`（同节点同输入的技术重试耗尽 max_attempts，含格式修复与技术自环）、`NON_RETRYABLE_ERROR`（权限拒绝/必需输入缺失等不可重试错误，1 次即停）、`ATTEMPT_TIMEOUT`（单次调用截止，已尽力取消；第三方是否真正终止未验证）、`RUN_TIME_BUDGET_EXHAUSTED`（Run 自动时间超 4 小时上限，人工等待不计时）、`NO_PROGRESS_BLOCKED`（相同目标重新确认连续 2 次同签名无新成果）。结果携带 `technical_budget`（冻结策略 + 实际消耗 + 取消能力限制）与 `failure`（结构化失败分类）；恢复须携带 `resume` 全量（含 `technical_budget`），已耗预算不会自动清零。技术额度扩容唯一路径：wf_run 续跑时附 `technical_budget_grant = { add_attempts 和/或 add_auto_time_ms, reason }`（增量与原因必填，写入历史）；NO_PROGRESS 受阻的出路是提供真正的新目标/新基线（guidance / baseline），不是加额度。',
@@ -1827,6 +1832,14 @@ export function skillWrap(bp) {
     '## 生成信息',
     '- 蓝图：`' + src + '`',
     '- 节点：' + bp.nodes.length + ' · 边：' + bp.edges.length + ' · 最大轮次：' + ((bp.control && bp.control.maxRounds) || 9),
+    '',
+    '## 引擎缺失时的交付边界',
+    '- 若本蓝图含模型节点，正式隔离执行路径仅在启动前工具预检确认 `wf_run` 可用时成立；若启动前确认当前清单中没有 `wf_run` 且尚未调用任何执行工具，则不启动模型工作流，也不得用内置 `workflow` 替代。若调用 `wf_run` 后结果未确认，按下一条只读查询，不转入启动前准备。纯机械蓝图仅可在启动前确认当前清单中没有 `wf_run`、尚未调用任何执行工具且 `workflow` 可调用时，按上文降级契约使用内置 `workflow`；执行工具调用后不切换引擎。',
+    '- 只有尚未调用执行工具，或工具明确确认未创建 Run 时，才可说明“本工作流执行未启动”，并列出仍需引擎的工作。此结论是主任务事实说明，不是正式 Run 状态；确认未创建 Run 时，不得创建或声称 Logical Run ID、Run 状态、节点结果、lifecycle state，也不得改写成 `BLOCKED` 或 `WAITING_HUMAN`。',
+    '- 执行工具已调用，但超时、报错或未返回创建结果/Run 状态时，说明“启动结果/Run 状态未确认”；保留已知 Run ID 或其他标识。若工具清单提供只读状态查询，则查询实际状态；不得重发启动、伪造状态，也不得推断 Run 不存在、UAT 尚未到达、没有正式预算记录或预算为零。',
+    '- 只有确认未创建 Run 时，才可说明 `UAT` 尚未到达、没有人工签收或没有建立正式 Run 预算记录；不得声称 UAT 通过、预算为零/已记账或额度已耗尽。状态未确认时，对这些事项也应标为未确认，不得推断。',
+    '- 交付引擎无关准备的实际材料与证据，并把控制权交回主任务；不得将本分支标记为 `DONE`，不得声称 `EVALUATION_PASSED`、`USER_ACCEPTED`、`INSUFFICIENT` 或其他完成类型。',
+    '- 不得在本地执行编译脚本或模拟角色、隔离路由、fanout、回合、Run 状态、UAT、预算或正式产物。'
   ].join('\n');
 }
 
