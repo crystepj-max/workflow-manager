@@ -66,8 +66,8 @@ node scripts/construction-preflight-gate.mjs \
 
 - **正式路径** `wf_run`：`templateId = wf-construction-full-feature`，`taskId` 带 Run 命名空间前缀；本次运行即同一 Logical Run，可续跑、暂停、指导。此模板包含模型节点，`wf_run` 提供的宿主隔离路由是唯一正式执行路径。
 - `workflow` 直接执行编译产物只适用于纯机械工作流，不适用于本模板模型节点；不得为绕过隔离要求而降级调用。
-- 仅纯机械工作流且当前工具清单确认 `workflow` 可调用时，才可按既有降级契约执行 `.generated/<templateId>/script.mjs` + `meta.json`；须提示运行记录退化为单段、无完成类型、不可从看板续跑。
-- 没有可用执行路径时，在启动工作流前继续完成不依赖引擎的调查、证据收集与准备，并将其作为主任务直接交付，不能伪装成节点产物或正式 Run 结果。
+- 仅纯机械工作流且启动前检查确认当前工具清单中没有 `wf_run`、尚未调用任何执行工具且 `workflow` 可调用时，才可按既有降级契约执行 `.generated/<templateId>/script.mjs` + `meta.json`；须提示运行记录退化为单段、无完成类型、不可从看板续跑。
+- 只有启动前预检确认没有适用执行路径、且尚未调用任何执行工具时，才在启动工作流前继续完成不依赖引擎的调查、证据收集与准备，并将其作为主任务直接交付，不能伪装成节点产物或正式 Run 结果。
 - 只有尚未调用执行工具，或工具明确确认未创建 Run 时，才可说明“工作流执行未启动”；此结论不是正式 Run 状态。确认未创建 Run 时不得创建或声称 Logical Run ID、Run 状态、节点结果、生命周期状态、UAT 签收或正式 Run 预算记录，也不得改写成 `BLOCKED` / `WAITING_HUMAN`。
 - 执行工具已调用但超时、报错或未返回创建结果/Run 状态时，说明“启动结果/Run 状态未确认”；按工具清单中的只读查询能力检查真实状态，不得重发启动、伪造状态，或推断 Run 不存在、UAT 尚未到达、没有预算记录或预算为零。
 - 状态机语义（`WAITING_HUMAN` / `AWAITING_HUMAN_<id>` / `FAILED_ITEM_CAP` / 额度耗尽 `MAX_ROUNDS_REACHED` 等）与续跑 args 以生成 skill 的 `runbook` 节与 `docs/design/blueprint-schema.md` §2.4、§6 为准。

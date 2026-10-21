@@ -31,7 +31,7 @@
 
 1. 任务经「需求分析」落到 **已定义**（本地任务规格 Vn + Definition Check 通过）。
 2. 执行 `node scripts/construction-preflight-gate.mjs --multica-task-id <Task UUID> --multica-profile <profile> --multica-workspace-id <workspace UUID> --run-baseline Vn`；通过后在本任务隔离 worktree 施工。
-3. 在 DSH 或等效会话只用 **`wf_run`** 执行模板 **`wf-construction-full-feature`**；该模板含模型节点，宿主隔离路由是正式执行所需能力，内置 `workflow` 不能作为替代。若当前会话没有可用的 `wf_run`，不启动或模拟正式 Run；先交付可独立完成的引擎无关准备并将控制权交回主任务。Run 引导、证据呈递与收口命令序列按 `docs/runbooks/construction-dsh/runbook.md`。
+3. 在 DSH 或等效会话只用 **`wf_run`** 执行模板 **`wf-construction-full-feature`**；该模板含模型节点，宿主隔离路由是正式执行所需能力，内置 `workflow` 不能作为替代。只有启动前预检确认当前清单中没有可用的 `wf_run` 且尚未调用任何执行工具时，才不启动正式 Run、交付可独立完成的引擎无关准备并将控制权交回主任务。若已调用 `wf_run` 但结果或状态未确认，按 runbook 的未确认边界只读查询，不得按未启动继续或重发。Run 引导、证据呈递与收口命令序列按 `docs/runbooks/construction-dsh/runbook.md`。
 4. 到达 **WAITING_HUMAN** 后停止，等人工 UAT 三态；**不得**跳过 UAT 直接 closeout。
 
 ## 4. 旧 Run：如何恢复

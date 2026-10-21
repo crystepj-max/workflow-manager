@@ -83,7 +83,12 @@ test('R10：模型工作流的 Skill 禁止用内置 workflow 工具绕过宿主
   assert.match(skill, /模型节点必须使用 `wf_run`/);
   assert.match(skill, /0\. 启动前能力预检：只依据当前会话实际工具清单/);
   assert.match(skill, /不得按本 skill 文案、安装状态或历史会话推断工具能力/);
-  assert.match(skill, /若本蓝图含模型节点，`wf_run` 不可用即表示正式隔离执行路径不可用/);
+  assert.match(skill, /启动前预检确认当前工具清单缺少 `wf_run` 且尚未调用任何执行工具，才可判定正式路径不可用并停在启动前准备/);
+  assert.match(skill, /若调用 `wf_run` 后超时、报错或未返回创建结果\/Run 状态，按文末“启动结果\/Run 状态未确认”边界处理/);
+  assert.doesNotMatch(skill, /若 `wf_run` 不可用，按上述启动前准备分支继续/,
+    '模型引擎调用后的未知状态不能转入启动前准备分支');
+  assert.match(skill, /不得转入启动前准备或改用内置 `workflow`/,
+    '模型引擎调用后的未知状态只能进入只读未确认处理');
   assert.match(skill, /不得归入“执行未启动”或重发启动/);
   assert.match(skill, /启动结果\/Run 状态未确认/);
   assert.match(skill, /不得重发启动、伪造状态/);
@@ -106,6 +111,12 @@ test('R10：模型工作流的 Skill 禁止用内置 workflow 工具绕过宿主
     'workflowEngine 报错不能作为切换到 workflow 的依据');
   assert.match(mechanicalSkill, /改用内置 `workflow` 工具执行编译产物/,
     '纯机械工作流仍可使用无模型调用的轻量回退');
+
+  const constructionRunbook = readFileSync(path.join(here, '../../docs/runbooks/construction-dsh/runbook.md'), 'utf8');
+  assert.match(constructionRunbook, /仅纯机械工作流且启动前检查确认当前工具清单中没有 `wf_run`、尚未调用任何执行工具且 `workflow` 可调用时/,
+    'runbook 的纯机械回退条件必须与生成 Skill 一致');
+  assert.match(constructionRunbook, /执行工具已调用但超时、报错或未返回创建结果\/Run 状态时.*不得重发启动/s,
+    'runbook 对执行调用后的未知状态必须明确禁止重启');
 });
 
 test('S2 生成器：内置模板产物四件套齐全', () => {
