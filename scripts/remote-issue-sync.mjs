@@ -1,20 +1,15 @@
 #!/usr/bin/env node
 /**
- * 任务登记册 ↔ 远端 issue 同步（只读 plan；写入口已退役）
+ * 历史登记册 ↔ GitHub Issue 同步实现。当前 CLI（包括 plan）全部退役。
  *
- * 用途：
- *   plan：只读列出「活跃、但还没有远端号（或仍是临时号）」的任务，不建号、不回写。
+ * Multica 是当前 Task 身份、状态与编号的唯一真源；不要从本模块把旧 registry 作为当前任务源。
  *
  * 退役说明（WFM-158）：
- *   apply / reissue 属旧双账本写路径，会在 GitHub/CNB 建 issue 并回写 registry/BOARD。
- *   Multica 已成为内部 Task 身份、状态与编号的唯一真源，该写路径整体退役，不迁移、不重建。
- *   调用 apply / reissue 会在任何远端发号与账本回写之前被拒绝：非零退出 + 稳定
- *   reasonCode `legacy_remote_issue_sync_disabled`。回退方式仅为撤销对应 PR，不恢复旧写路径。
+ *   plan / apply / reissue 均在读取旧登记册或调用远端之前拒绝，稳定原因码为
+ *   `legacy_github_task_sync_disabled`。历史纯函数仍供旧记录核对使用。
  *
  * CLI:
- *   node scripts/remote-issue-sync.mjs plan [--repo <path>] [--only LOC-016,LOC-018]
- *   node scripts/remote-issue-sync.mjs apply   # 已退役：拒绝并给出 legacy_remote_issue_sync_disabled
- *   node scripts/remote-issue-sync.mjs reissue # 已退役：同上
+ *   node scripts/remote-issue-sync.mjs <command> # 已退役；不会读取登记册或访问远端
  */
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -86,5 +81,11 @@ function main(argv) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2))
+  console.error(JSON.stringify({
+    ok: false,
+    code: 'legacy_github_task_sync_disabled',
+    reason: '旧 GitHub Task 登记同步通道已退役；GitHub 只记录代码交付事实，任务由 Multica 管理。',
+    effects: '未读取 registry.json，未查询或写入 GitHub Issue。',
+  }, null, 2))
+  process.exitCode = 2
 }

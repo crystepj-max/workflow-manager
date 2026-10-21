@@ -1,166 +1,33 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
-import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
+import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-const script = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ai-task-preflight-check.mjs')
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+const script = path.join(root, 'scripts/ai-task-preflight-check.mjs')
 
-function tmpdir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-'))
-}
+test('旧任务卡 preflight CLI 已停用并明确转向 Multica 门禁', (t) => {
+  const repo = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'preflight-retired-'))
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }))
+  fs.mkdirSync(path.join(repo, 'docs/tasks'), { recursive: true })
+  fs.writeFileSync(path.join(repo, 'docs/tasks/registry.json'), '{"version":1,"tasks":[]}\n')
+  fs.writeFileSync(path.join(repo, 'docs/tasks/BOARD.md'), '# historical board\n')
 
-const SPEC = `# 任务规格 V1
+  const result = spawnSync(process.execPath, [
+    script,
+    path.join(repo, 'task-basics.md'),
+    path.join(repo, 'task-spec-V1.md'),
+    '--repo', repo,
+  ], { encoding: 'utf8', cwd: repo })
 
-**版本**：V1
-
-未决产品事项：0
-
-已确认的关键决策：无
-`
-
-const DEF_CHECK = `# Definition Check
-
-| 未决产品事项 | 0 |
-
-- [x] 全部通过
-`
-
-function writeBasics(dir, fields) {
-  const rows = Object.entries(fields)
-    .map(([k, v]) => `| ${k} | ${v} |`)
-    .join('\n')
-  const basics = `# 任务基本信息
-
-| 字段 | 值 |
-|---|---|
-${rows}
-`
-  const basicsPath = path.join(dir, 'task-basics.md')
-  const specPath = path.join(dir, 'task-spec-V1.md')
-  fs.writeFileSync(basicsPath, basics)
-  fs.writeFileSync(specPath, SPEC)
-  fs.writeFileSync(path.join(dir, 'definition-check.md'), DEF_CHECK)
-  return { basicsPath, specPath }
-}
-
-const BASE = {
-  任务名称: '示例任务',
-  任务类型: '完整功能开发',
-  优先级: 'P1',
-  当前状态: '已定义',
-  需求基线版本: 'V1',
-  前置依赖: '无',
-  施工环境组: 'LOC-001',
-  施工环境角色: '独立',
-  无人值守许可: '允许',
-  任务规格位置: '.scratch/LOC-001-demo/task-spec-V1.md',
-  定义时间: '2026-09-08T23:00:00+08:00',
-}
-
-function run(basicsPath, specPath, extra = []) {
-  const repo = path.dirname(basicsPath)
-  try {
-    const out = execFileSync(process.execPath, [script, basicsPath, specPath, '--repo', repo, ...extra], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    return { code: 0, out }
-  } catch (e) {
-    return { code: e.status, out: String(e.stdout || ''), err: String(e.stderr || '') }
-  }
-}
-
-test('GitHub 轨道：「已定义」照旧通过', () => {
-  const dir = tmpdir()
-  const { basicsPath, specPath } = writeBasics(dir, BASE)
-  const r = run(basicsPath, specPath)
-  assert.equal(r.code, 0, r.err)
-  const j = JSON.parse(r.out.slice(r.out.indexOf('{')))
-  assert.equal(j.track, 'github')
-  assert.equal(j.status, '已定义')
-})
-
-test('本地轨道：「本地已定义」+ 任务标识 + pending 视为可开工', () => {
-  const dir = tmpdir()
-  const { basicsPath, specPath } = writeBasics(dir, {
-    ...BASE,
-    当前状态: '本地已定义',
-    任务标识: 'LOC-001',
-    需求来源: '会话录入',
-    来源定位: '2026-09-08 会话',
-    'GitHub 同步': 'pending',
-  })
-  const r = run(basicsPath, specPath)
-  assert.equal(r.code, 0, r.err)
-  const j = JSON.parse(r.out.slice(r.out.indexOf('{')))
-  assert.equal(j.track, 'local')
-  assert.equal(j.task_id, 'LOC-001')
-  assert.equal(j.github_sync, 'pending')
-})
-
-test('本地轨道：缺任务标识则受阻', () => {
-  const dir = tmpdir()
-  const { basicsPath, specPath } = writeBasics(dir, {
-    ...BASE,
-    当前状态: '本地已定义',
-    'GitHub 同步': 'pending',
-  })
-  const r = run(basicsPath, specPath)
-  assert.equal(r.code, 1)
-  assert.match(r.err, /任务标识/)
-})
-
-test('本地轨道：缺 GitHub 同步字段则受阻', () => {
-  const dir = tmpdir()
-  const { basicsPath, specPath } = writeBasics(dir, {
-    ...BASE,
-    当前状态: '本地已定义',
-    任务标识: 'LOC-001',
-  })
-  const r = run(basicsPath, specPath)
-  assert.equal(r.code, 1)
-  assert.match(r.err, /GitHub 同步/)
-})
-
-test('本地轨道：GitHub 同步取值非法则受阻', () => {
-  const dir = tmpdir()
-  const { basicsPath, specPath } = writeBasics(dir, {
-    ...BASE,
-    当前状态: '本地已定义',
-    任务标识: 'LOC-001',
-    'GitHub 同步': '待同步',
-  })
-  const r = run(basicsPath, specPath)
-  assert.equal(r.code, 1)
-  assert.match(r.err, /GitHub 同步取值非法/)
-})
-
-test('历史状态「本地准备完成，待同步」不具备开工资格', () => {
-  const dir = tmpdir()
-  const { basicsPath, specPath } = writeBasics(dir, {
-    ...BASE,
-    当前状态: '本地准备完成，待同步',
-    任务标识: 'LOC-001',
-    'GitHub 同步': 'pending',
-  })
-  const r = run(basicsPath, specPath)
-  assert.equal(r.code, 1)
-  assert.match(r.err, /已定义/)
-})
-
-test('本地轨道：版本不一致仍受阻（契约不放松）', () => {
-  const dir = tmpdir()
-  const { basicsPath, specPath } = writeBasics(dir, {
-    ...BASE,
-    当前状态: '本地已定义',
-    需求基线版本: 'V2',
-    任务标识: 'LOC-001',
-    'GitHub 同步': 'pending',
-  })
-  const r = run(basicsPath, specPath, ['--run-baseline', 'V1'])
-  assert.equal(r.code, 1)
-  assert.match(r.err, /版本/)
+  assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`)
+  const out = JSON.parse(result.stderr)
+  assert.equal(out.code, 'legacy_task_preflight_disabled')
+  assert.match(out.reason, /construction-preflight-gate\.mjs/)
+  assert.match(out.effects, /未读取任务卡或 registry\.json/)
+  assert.equal(fs.readFileSync(path.join(repo, 'docs/tasks/registry.json'), 'utf8'), '{"version":1,"tasks":[]}\n')
+  assert.equal(fs.readFileSync(path.join(repo, 'docs/tasks/BOARD.md'), 'utf8'), '# historical board\n')
 })

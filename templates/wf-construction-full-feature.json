@@ -35,7 +35,7 @@
       "profile": "evaluator",
       "mechanical": "construction-preflight",
       "label": "实施前检查",
-      "goal": "机械门禁（LOC-038）：调用 runPreflight 唯一实现，不消耗模型资格判断。逐项核对：Issue 当前状态=已定义/本地已定义；无人值守许可=允许；本地任务规格可读且版本=Issue 需求基线版本；Run 绑定基线版本与 Issue 一致（若已绑定）；前置依赖已完成（登记册+祖先校验）或同组环境串行满足；Definition Check 全部勾选且未决=0。全部通过则 route=PASS，并将已定义规格导入为已确认需求基线证据、写入定义外置说明性施工包（不是新的产品方案决策门），Issue 状态→交付中。任一项失败则 route=BLOCKED，写明原因，禁止进入开发（模型 PASS 无效）。将检查结果写入 preflight-report.md；最终回复只输出本节点 schema 对应 JSON。",
+      "goal": "机械门禁：必须以 args.multicaTaskId 读取 Multica 当前 Task；profile/workspace 由 args.multicaProfile / args.multicaWorkspaceId 或 MULTICA_PROFILE / MULTICA_WORKSPACE_ID 明确选择。逐项核对 Multica 当前状态、项目与负责人；dev-flow.definition.v1 的 definition_status=defined、无人值守许可、需求基线版本、仓库内 spec_ref、环境组/角色与 Definition Check；dev-flow.dependencies.v1 必须存在（无依赖显式 []），并逐个从 Multica 读取依赖，只有 status=done 且 status_category=done 才满足。Run 绑定基线若已提供必须一致。全部通过则 route=PASS，并将已定义规格导入为已确认需求基线证据、写入定义外置说明性施工包（不是新的产品方案决策门）；不改写 Multica Task 状态。任一项失败、profile/workspace 不明或 Multica 不可用时 route=BLOCKED；严禁读取 docs/tasks/registry.json、BOARD.md 或本地任务卡回退。将检查结果写入 preflight-report.md；最终回复只输出本节点 schema 对应 JSON。",
       "output": {
         "outcomePath": "$.route",
         "schema": {

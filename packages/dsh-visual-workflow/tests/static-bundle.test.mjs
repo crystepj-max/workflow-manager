@@ -162,6 +162,8 @@ test('开发粘贴用 dynamic 闭包合计 ≤ 284KB（一次 cordis_define 载�
   // FEAT-84 编排台工作流模板编辑器并入后终态实测 host 109822 + client 121816 = 231638B
   // （226.21KiB），按同一口径上调至 284KiB（84/85/86/100/101/102 并入 + CNB 同步后终态实测 287372B，余量 3.4KiB；FIX-65 先例：上限按终态实测定值，新增载荷优先瘦身；瘦身专项另行立卡），
   // 与 build-bundle.mjs 保持一致；新增载荷仍应先瘦身。
+  // #75 S-2b 收敛后总量 host 116184 + client 174079 = 290263B，按产品负责人 2026-10-20 决定
+  // 维持 284KiB（290816B）上限，余量 553B；与 build-bundle.mjs 一致。
   const limit = 284 * 1024
   assert.ok(host.byteLength + client.byteLength <= limit, `host ${host.byteLength} + client ${client.byteLength} > ${limit}`)
   const hostText = host.toString('utf8')

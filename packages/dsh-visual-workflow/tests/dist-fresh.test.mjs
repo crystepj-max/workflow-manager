@@ -15,6 +15,9 @@ const ROLE_LIBRARY = join(pkgRoot, '..', '..', 'scripts', 'role-library.cjs')
 const PROJECTION_CORE = join(pkgRoot, '..', '..', 'scripts', 'projection-core.cjs')
 const STATE_RECOVERY_CORE = join(pkgRoot, '..', '..', 'scripts', 'state-recovery-core.cjs')
 const ROLE_MANIFEST = join(pkgRoot, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
+// #75 S-2b：内置 Outcome Preset 源数据与 dist 产物一致性
+const OUTCOME_PRESETS_SRC = join(pkgRoot, '..', '..', 'docs', 'design', 'outcome-presets.json')
+const OUTCOME_PRESETS_DIST = join(pkgRoot, 'dist', 'outcome-presets.json')
 const STAMP = join(pkgRoot, 'dist', '.src-stamp.json')
 const DIST_HOST = join(pkgRoot, 'dist', 'host-entry.mjs')
 const PKG = join(pkgRoot, 'package.json')
@@ -35,6 +38,19 @@ test('T2：dist/.src-stamp.json 与 src/host.js + src/client.js + 共享内核/�
   assert.equal(stamp.projectionCore, sha256(PROJECTION_CORE), 'scripts/projection-core.cjs 已变更但 dist 未重建')
   assert.equal(stamp.stateRecoveryCore, sha256(STATE_RECOVERY_CORE), 'scripts/state-recovery-core.cjs 已变更但 dist 未重建')
   assert.equal(stamp.roleManifest, sha256(ROLE_MANIFEST), 'dsh/roles/builtin-roles.json 已变更但 dist 未重建')
+})
+
+test('T2：outcome-presets 源数据纳入 stamp，且 dist 产物与源文件逐字节一致', () => {
+  assert.ok(existsSync(STAMP), '缺少 dist/.src-stamp.json：请运行 npm run build')
+  const stamp = JSON.parse(readFileSync(STAMP, 'utf8'))
+  assert.ok(stamp.outcomePresets, 'stamp 缺少 outcomePresets 摘要：请运行 npm run build')
+  assert.equal(stamp.outcomePresets, sha256(OUTCOME_PRESETS_SRC), 'docs/design/outcome-presets.json 已变更但 dist 未重建')
+  assert.ok(existsSync(OUTCOME_PRESETS_DIST), '缺少 dist/outcome-presets.json：请运行 npm run build')
+  assert.equal(
+    readFileSync(OUTCOME_PRESETS_DIST, 'utf8'),
+    readFileSync(OUTCOME_PRESETS_SRC, 'utf8'),
+    'dist/outcome-presets.json 与源文件内容不一致',
+  )
 })
 
 test('T2：重建后的 dist 含双模式守卫，不再无条件调用 harness.handle', () => {

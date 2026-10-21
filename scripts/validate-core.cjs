@@ -1171,6 +1171,10 @@ module.exports = {
   isRollbackEdge,
   projectToVwf,
   projectToBlueprint,
+  // #75 S-2a：outcomePath 路径与枚举口径唯一来源，供 Preset 一致性回归复用（行为不变，仅导出）。
+  parseJsonPath,
+  schemaLeafAt,
+  enumerableValues,
   // LOC-021 异源档位三态：供宿主/客户端复用同一归一口径，勿复制映射逻辑。
   effectiveHeteroMode,
   extractFileTokens,

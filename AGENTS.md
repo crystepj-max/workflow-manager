@@ -81,13 +81,13 @@ npm test
 
 提交信息使用项目历史中已有的简洁前缀：`feat:`、`fix:`、`docs:`；必要时添加范围，例如 `feat(workflow): ...`。每次提交只处理一个清晰主题。合并请求应说明对用户或工作流程的影响，列出已运行的校验命令，说明蓝图或生成结果是否受到影响，并关联对应任务或问题。修改可视化编辑器时，应附上截图或录屏。
 
-## 任务归属记录（agent 身份）
+## 任务与执行归属（Multica）
 
-仓库要求「**谁提交的就记谁**」：任务登记册的 `origin_agent` 与施工认领身份必须反映**真实执行会话的 agent**，而不是人工手填的名字。身份解析统一走 `agentName()`（`scripts/local-task-registry.mjs`），取值顺序为：① `AI_AGENT_NAME` 显式覆盖 → ② `CLIENT_INFO_IDE_TYPE` 宿主自报 → ③ 任何 `*_AGENT_NAME` 变量 → ④ 仓库根 `.agent-identity`（本机标记，已被 Git 忽略）→ ⑤ 取不到则返回 null。
+Multica 是当前任务身份、状态、负责人、项目、依赖和 Agent 执行历史的唯一来源。使用 Multica Task UUID 或其唯一标识作为任务身份；通过 `multica issue get` 读取当前快照，通过 `multica issue runs` / `multica issue timeline` 查询执行与状态历史。GitHub 只记录代码交付事实。
 
-- **不允许静默留空**：`allocate` 在取不到身份时必须在 stderr 显式告警。若你在输出里看到该告警，应让当前会话自报身份（设置任一 `*_AGENT_NAME` 环境变量）或写入 `.agent-identity` 后重跑，不要直接接受一条无归属的记录。
-- **不允许手写身份**：不得用 `set` / `update` 把 `origin_agent` 改成无法由环境事实佐证的名字——那等于伪造留痕。
-- 同一台机器上所有 agent 的 `machineCode()` 相同，**机器码无法区分 agent**，因此 `origin_agent` 是单机多会话并行时唯一的区分依据，必须被正确填充。
+- 不在 `docs/tasks/registry.json`、`docs/tasks/BOARD.md`、本地任务卡或 `.agent-identity` 中新建或更新任务状态、负责人或执行归属；这些文件只保留迁移前历史。
+- 运行建设工作流前显式选择 `MULTICA_PROFILE` 与 `MULTICA_WORKSPACE_ID`，核对返回 Task 的 `workspace_id` 和 `project_id`。profile/workspace 不明或 CLI 不可用时阻断，不回退读取本地登记册。
+- Git 提交作者与提交者应反映真实 Git 执行环境；不要为匹配 Multica assignee 而伪造 Git 身份。Multica Agent/Run 归属由平台执行记录保留。
 
 ## 仓库级 PR 审查规则（Multica「PR 审查」Agent）
 
