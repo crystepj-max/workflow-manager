@@ -116,7 +116,8 @@ gh issue view <N> --json title,body,comments
 若当前工具清单提供只读状态查询能力，则查询真实状态；不得重发启动、换引擎或伪造状态，
 也不得推断 Run 不存在、UAT 尚未到达、没有正式预算记录或预算为零。
 只有尚未调用执行工具，或工具明确确认未创建 Run 时，才可说明“本工作流执行未启动”；
-此说明不是正式 Run 状态，不得改写为 `BLOCKED` 或 `WAITING_HUMAN`。
+此说明不是正式 Run 状态。确认未创建 Run 时，不得创建或声称 Logical Run ID、Run 状态、
+节点结果、生命周期状态、UAT 签收或正式 Run 预算记录，也不得改写为 `BLOCKED` 或 `WAITING_HUMAN`。
 
 以上边界与[生成 Skill 的启动规则](../scripts/generate.mjs)及
 [DSH runbook](../docs/runbooks/construction-dsh/runbook.md)一致。
