@@ -2082,18 +2082,48 @@ return {
       if (!id || !recordId) return fail('缺少 logical_run_id / record_id')
       return recordsHostCall('get', { logical_run_id: id, record_id: recordId })
     })
-    // LOC-043：质量成本 metrics（消费 attempt 记录 + 质量证据；可重建 JSON + 人读摘要）
-    async function qualityCostCall(cmd, input, opts) {
-      if (!QUALITY_COST_HOST || (await readTextIfExists(QUALITY_COST_HOST)) === null) {
-        return { ok: false, notFound: true, error: 'run-quality-cost.mjs 未找到（LOC-043 运行时集成未部署）' }
+    // ── 包装脚本宿主调用：LOC-008/017/032/037/041/043 六批各自书写了同一模式 ──
+    // （判缺件 → 注入目录 → 子进程 JSON 信封 → 业务错误映射），差异只在脚本路径、
+    // 文案、注入的目录键、超时/输出上限与业务错误映射策略，全部由参数承载。
+    // 子进程调用形态、返回对象字段与错误文案逐字保持。
+    const BIZ = {
+      plain: (p, l) => ({ ok: false, error: p.error || l + ' 业务错误' }),
+      // 业务错误对象整包透传（保留 code/conflicts 等结构化字段，LOC-017 闸门按 code 路由）
+      pass: (p, l) => Object.assign({ ok: false, error: p.error || l + ' 业务错误', detail: p.detail }, p),
+      operations: (p, l) => ({
+        ok: false, code: p.code, blocked: p.blocked === true,
+        status: p.status, operation_id: p.operation_id,
+        error: p.error || p.message || l + ' 业务错误',
+      }),
+      delivery: (p, l) => ({
+        ok: false, code: p.code, status: p.status, delivery_status: p.delivery_status,
+        error: p.error || p.message || l + ' 业务错误',
+      }),
+    }
+    const makeHostCall = (o) => async (cmd, input, opts) => {
+      const label = o.label
+      if (!o.host || (await readTextIfExists(o.host)) === null) {
+        return { ok: false, notFound: true, error: o.missing }
       }
-      const r = await runNode([QUALITY_COST_HOST, cmd, JSON.stringify(input || {})], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 1024 * 1024 })
-      if (!r.ok) return { ok: false, error: 'quality cost 调用失败：' + r.detail }
+      let payload = input || {}
+      if (o.dir) {
+        const d = await homeDirs()
+        if (!d) return o.noHomeNotFound ? { ok: false, notFound: true, error: o.noHome } : { ok: false, error: o.noHome }
+        payload = { ...payload, [o.dir]: payload[o.dir] || d[o.dirField] }
+      }
+      const r = await runNode([o.host, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || o.graceMs, maxBytes: o.maxBytes })
+      if (!r.ok) return { ok: false, error: label + ' 调用失败：' + r.detail }
       try {
         const parsed = JSON.parse(r.stdout)
-        return parsed.ok ? parsed : { ok: false, error: parsed.error || 'quality cost 业务错误' }
-      } catch (e) { return { ok: false, error: 'quality cost 输出不可解析：' + errMsg(e), raw: r.stdout } }
+        return parsed.ok ? parsed : BIZ[o.biz](parsed, label)
+      } catch (e) { return { ok: false, error: label + ' 输出不可解析：' + errMsg(e), raw: r.stdout } }
     }
+    // LOC-043：质量成本 metrics（消费 attempt 记录 + 质量证据；可重建 JSON + 人读摘要）
+    const qualityCostCall = makeHostCall({
+      host: QUALITY_COST_HOST, label: 'quality cost', biz: 'plain',
+      missing: 'run-quality-cost.mjs 未找到（LOC-043 运行时集成未部署）',
+      graceMs: 30000, maxBytes: 1024 * 1024,
+    })
     async function buildMetricsForRun(id, priceTable) {
       let rec = logicalRuns.get(id)
       if (!rec) {
@@ -2140,19 +2170,18 @@ return {
     // LOC-032：受管理外部操作入口（execute-or-reconcile）。已确认成功只确认不重复执行；
     // 结果不确定先核查，无法核查时 NEEDS_RECONCILIATION 受阻（unknown 禁止再次执行）。
     // 必填字段缺失在宿主侧拒绝；授权/能力/冲突等业务码由内核返回（operationsHostCall 透传）。
-    const opCall = (cmd, a, fields) => {
+    // 受管理外部操作与收口交付：必填校验（逐字段非空）后转各自的包装脚本宿主调用
+    const requiredCall = (hostCall, cmd, a, fields) => {
       for (const k of fields) if (!String(((a || {})[k]) || '').trim()) return fail('缺少 ' + k)
-      return operationsHostCall(cmd, a)
+      return hostCall(cmd, a)
     }
+    const opCall = (cmd, a, fields) => requiredCall(operationsHostCall, cmd, a, fields)
     registerRpc('vwf.operations.execute', (a) => opCall('execute', a, ['run_id', 'logical_action', 'target', 'authorization_scope', 'authorization_ref']))
     registerRpc('vwf.operations.reconcile', (a) => opCall('reconcile', a, ['run_id', 'logical_action']))
     registerRpc('vwf.operations.get', (a) => opCall('get', a, ['run_id', 'logical_action']))
     registerRpc('vwf.operations.list', (a) => opCall('list', a, ['run_id']))
     // LOC-037：收口交付动作（事实整理 / 动作计划 / 完整收口）。必填 run_id；closeout 另需 operations_dir。
-    const deliveryCall = (cmd, a, fields) => {
-      for (const k of fields) if (!String(((a || {})[k]) || '').trim()) return fail('缺少 ' + k)
-      return deliveryCloseoutHostCall(cmd, a)
-    }
+    const deliveryCall = (cmd, a, fields) => requiredCall(deliveryCloseoutHostCall, cmd, a, fields)
     registerRpc('vwf.delivery.gatherFacts', (a) => deliveryCall('gather-facts', a, ['run_id']))
     registerRpc('vwf.delivery.planActions', (a) => deliveryCall('plan-actions', a, ['run_id']))
     registerRpc('vwf.delivery.closeout', (a) => deliveryCall('closeout', a, ['run_id']))
@@ -2388,6 +2417,18 @@ return {
       try { lib = await roleLibrary() } catch (e) { return fail('角色库内核不可用：' + errMsg(e)) }
       return handler(lib, a)
     }
+    // #75 S-2b：内置 Outcome Preset 只读下发。数据唯一来源是构建产物 dist/outcome-presets.json；
+    // 只读接口，无任何写操作；加载失败让客户端把选择器置为不可用，不影响手填路由。
+    registerRpc('vwf.outcomePresets.list', async () => {
+      try {
+        const data = await loadDist('outcome-presets.json')
+        const presets = Array.isArray(data && data.presets) ? data.presets : null
+        if (!presets) return fail('dist/outcome-presets.json 缺少 presets 数组')
+        return { ok: true, schemaVersion: 1, presets }
+      } catch (e) {
+        return fail('内置结果预设不可用：' + errMsg(e))
+      }
+    })
     registerRpc('vwf.roles', withLib(async (lib) => {
       const r = await lib.execute({ operation: 'list', facts: { includeContent: false, catalog: await collectRoleCatalog(), builtinBodies: await collectBuiltinBodies(lib) } })
       return { roles: r.roles }
@@ -2475,19 +2516,12 @@ return {
     }
 
     // ── 工作区隔离：核心实现 = scripts/workspace-isolation.mjs，经包装脚本子进程调用 ──
-    async function wsHostCall(cmd, input, opts) {
-      if (!WS_HOST || (await readTextIfExists(WS_HOST)) === null) return { ok: false, notFound: true, error: 'workspace-isolation-host.mjs 未找到（宿主未部署 #93 集成）' }
-      const d = await homeDirs()
-      if (!d) return { ok: false, notFound: true, error: '无法解析 workspace 根目录' }
-      const payload = { ...input, work_root: input.work_root || d.workspaces }
-      const r = await runNode([WS_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 256 * 1024 })
-      if (!r.ok) return { ok: false, error: 'workspace host 调用失败：' + r.detail }
-      try {
-        const parsed = JSON.parse(r.stdout)
-        // 业务错误对象整包透传（保留 code/conflicts 等结构化字段，LOC-017 闸门按 code 路由）
-        return parsed.ok ? parsed : Object.assign({ ok: false, error: parsed.error || 'workspace host 业务错误', detail: parsed.detail }, parsed)
-      } catch (e) { return { ok: false, error: 'workspace host 输出不可解析：' + errMsg(e), raw: r.stdout } }
-    }
+    const wsHostCall = makeHostCall({
+      host: WS_HOST, label: 'workspace host', biz: 'pass',
+      missing: 'workspace-isolation-host.mjs 未找到（宿主未部署 #93 集成）',
+      dir: 'work_root', dirField: 'workspaces', noHome: '无法解析 workspace 根目录', noHomeNotFound: true,
+      graceMs: 30000, maxBytes: 256 * 1024,
+    })
     // 模板 → 隔离策略类型（LOC-009）：以 Core TEMPLATE_REGISTRY 为权威，不再按
     // 模板 id 名字猜测。解析顺序：① templateId 精确等于注册表键；
     // ② 模板声明的 workspace.template_id（蓝图 meta 字段，投影双向同步）；
@@ -2645,53 +2679,27 @@ return {
     // 只在真实 Node 子进程中加载；本侧只做事实采集与效果执行。每次调用独立进程、
     // 权威状态在磁盘（<DSH Home>/visual-workflow/records/<logical_run_id>.json），
     // 重启后按 logical_run_id 查询天然生效。
-    async function recordsHostCall(cmd, input, opts) {
-      if (!RECORDS_HOST || (await readTextIfExists(RECORDS_HOST)) === null) return { ok: false, notFound: true, error: 'records-host.mjs 未找到（LOC-008 运行时集成未部署）' }
-      const d = await homeDirs()
-      if (!d) return { ok: false, error: '无法解析 DSH Home：records 目录不可用' }
-      const payload = { ...input, records_dir: input.records_dir || d.recordsDir }
-      const r = await runNode([RECORDS_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 30000, maxBytes: 1024 * 1024 })
-      if (!r.ok) return { ok: false, error: 'records host 调用失败：' + r.detail }
-      try {
-        const parsed = JSON.parse(r.stdout)
-        return parsed.ok ? parsed : { ok: false, error: parsed.error || 'records host 业务错误' }
-      } catch (e) { return { ok: false, error: 'records host 输出不可解析：' + errMsg(e), raw: r.stdout } }
-    }
+    const recordsHostCall = makeHostCall({
+      host: RECORDS_HOST, label: 'records host', biz: 'plain',
+      missing: 'records-host.mjs 未找到（LOC-008 运行时集成未部署）',
+      dir: 'records_dir', dirField: 'recordsDir', noHome: '无法解析 DSH Home：records 目录不可用',
+      graceMs: 30000, maxBytes: 1024 * 1024,
+    })
     // LOC-032：操作账本进程边界（与 recordsHostCall 同模式）。外部交付动作可能慢，
     // graceMs 放宽到 120s；业务受阻（NEEDS_RECONCILIATION 等）透传 code。
-    async function operationsHostCall(cmd, input, opts) {
-      if (!OPERATIONS_HOST || (await readTextIfExists(OPERATIONS_HOST)) === null) return { ok: false, notFound: true, error: 'operations-host.mjs 未找到（LOC-032 运行时集成未部署）' }
-      const d = await homeDirs()
-      if (!d) return { ok: false, error: '无法解析 DSH Home：operations 目录不可用' }
-      const payload = { ...input, operations_dir: input.operations_dir || d.operationsDir }
-      const r = await runNode([OPERATIONS_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 120000, maxBytes: 1024 * 1024 })
-      if (!r.ok) return { ok: false, error: 'operations host 调用失败：' + r.detail }
-      try {
-        const parsed = JSON.parse(r.stdout)
-        return parsed.ok ? parsed : {
-          ok: false, code: parsed.code, blocked: parsed.blocked === true,
-          status: parsed.status, operation_id: parsed.operation_id,
-          error: parsed.error || parsed.message || 'operations host 业务错误',
-        }
-      } catch (e) { return { ok: false, error: 'operations host 输出不可解析：' + errMsg(e), raw: r.stdout } }
-    }
+    const operationsHostCall = makeHostCall({
+      host: OPERATIONS_HOST, label: 'operations host', biz: 'operations',
+      missing: 'operations-host.mjs 未找到（LOC-032 运行时集成未部署）',
+      dir: 'operations_dir', dirField: 'operationsDir', noHome: '无法解析 DSH Home：operations 目录不可用',
+      graceMs: 120000, maxBytes: 1024 * 1024,
+    })
     // LOC-037：收口交付动作进程边界（与 operationsHostCall 同模式）
-    async function deliveryCloseoutHostCall(cmd, input, opts) {
-      if (!DELIVERY_CLOSEOUT_HOST || (await readTextIfExists(DELIVERY_CLOSEOUT_HOST)) === null) return { ok: false, notFound: true, error: 'delivery-closeout-host.mjs 未找到（LOC-037 运行时集成未部署）' }
-      const d = await homeDirs()
-      if (!d) return { ok: false, error: '无法解析 DSH Home：operations 目录不可用' }
-      const payload = { ...input, operations_dir: input.operations_dir || d.operationsDir }
-      const r = await runNode([DELIVERY_CLOSEOUT_HOST, cmd, JSON.stringify(payload)], { graceMs: (opts && opts.graceMs) || 120000, maxBytes: 1024 * 1024 })
-      if (!r.ok) return { ok: false, error: 'delivery closeout host 调用失败：' + r.detail }
-      try {
-        const parsed = JSON.parse(r.stdout)
-        return parsed.ok ? parsed : {
-          ok: false, code: parsed.code, status: parsed.status,
-          delivery_status: parsed.delivery_status,
-          error: parsed.error || parsed.message || 'delivery closeout host 业务错误',
-        }
-      } catch (e) { return { ok: false, error: 'delivery closeout host 输出不可解析：' + errMsg(e), raw: r.stdout } }
-    }
+    const deliveryCloseoutHostCall = makeHostCall({
+      host: DELIVERY_CLOSEOUT_HOST, label: 'delivery closeout host', biz: 'delivery',
+      missing: 'delivery-closeout-host.mjs 未找到（LOC-037 运行时集成未部署）',
+      dir: 'operations_dir', dirField: 'operationsDir', noHome: '无法解析 DSH Home：operations 目录不可用',
+      graceMs: 120000, maxBytes: 1024 * 1024,
+    })
     // 节点收尾产物 → commit 条目（单一提交通道的宿主侧采集）：
     //  - 每个本段新完成节点 → node:<logical_run_id>:<nodeId> 的追加 Revision；
     //  - verifyBranch 节点（审核/测试）强制加发 proof：<logical_run_id>:<nodeId> 的
@@ -3110,36 +3118,51 @@ return {
       log('agents 未挂载：wf_run 工具不注册；编译产物经 vwf.script RPC 提供给 workflow 工具执行')
       return
     }
-    const textTool = (t) => dtools.define({ ...t, output: { schema: { type: 'string' }, render: (a, value) => [{ type: 'text', text: value }] } })
+    // 工具入参 schema 的常用形状（六处工具定义各自书写同一形状）：string / required string /
+    // 自由 object 三类，逐处书写与用 helper 生成的属性对象逐字相同。
+    // 工具 execute 的公共薄包装：取 RPC 路由 → 不可用按 bad 形状报错 → 执行并归一为字符串。
+    // notFound 是「路由缺失」时直接返回的错误信封（两种工具的字段形状不同，由调用点给出）。
+    const runToolRpc = async (method, rawArgs, bad, notFound) => {
+      const fn = rpcRoutes.get(method)
+      if (typeof fn !== 'function') return JSON.stringify(notFound || bad('未知方法：' + method))
+      try {
+        const res = await fn(rawArgs || {})
+        return typeof res === 'string' ? res : JSON.stringify(res)
+      } catch (e) { return JSON.stringify(bad(errMsg(e))) }
+    }
+    const S = (d) => (d ? { type: 'string', description: d } : { type: 'string' })
+    const SR = (d) => ({ type: 'string', required: true, description: d })
+    const O = (d) => (d ? { type: 'object', additionalProperties: true, description: d } : { type: 'object', additionalProperties: true })
+    const textTool = (t) => dtools.define({ ...t, output: { schema: S(), render: (a, value) => [{ type: 'text', text: value }] } })
     dtools.register(textTool({
       name: 'wf_run',
       description: '运行一个可视化工作流（DSL 图）：校验并编译为 workflow 脚本后交给引擎执行。args.templateId 用内置/用户模板，或 args.dsl 传自定义图。返回运行状态；Human Decision 以 WAITING_HUMAN 暂停，用 decision_id + user_choice 续跑；残留人工门禁以 AWAITING_HUMAN_<node> 暂停，用 entry + approved 续跑。',
       parameters: {
-        templateId: { type: 'string', description: '内置/用户工作流 id，如 wf-diagnose' },
-        dsl: { type: 'object', additionalProperties: true, description: '自定义工作流 DSL（nodes/edges/control）' },
-        taskId: { type: 'string', required: true, description: '任务标识，如 issue-12' },
-        runDir: { type: 'string', description: 'run 产物目录，缺省 .agent-runs/<taskId>' },
-        baseBranch: { type: 'string', description: 'base 分支，缺省 main' },
-        resource_kind: { type: 'string', description: 'LOC-009：输入资源类型（git | files | document | config | other）。optimize 类工作流必传（git/files→ISOLATED_WRITE git 工作区；document/config/other→SANDBOX），由模板声明或运行参数正式传入' },
-        roleDir: { type: 'string', description: '角色目录，缺省 dsh/roles' },
-        issueRef: { type: 'string', description: 'issue 引用，如 #12' },
-        issueTitle: { type: 'string', description: 'issue 标题' },
-        issueBody: { type: 'string', description: 'issue 正文' },
-        issueComments: { type: 'string', description: 'issue 评论' },
-        requirement: { type: 'string', description: '原始需求文本（无 issue 时）' },
-        entry: { type: 'string', description: '续跑入口节点 id' },
+        templateId: S('内置/用户工作流 id，如 dev-workflow-2-0'),
+        dsl: O('自定义工作流 DSL（nodes/edges/control）'),
+        taskId: SR('任务标识，如 issue-12'),
+        runDir: S('run 产物目录，缺省 .agent-runs/<taskId>'),
+        baseBranch: S('base 分支，缺省 main'),
+        resource_kind: S('LOC-009：输入资源类型（git | files | document | config | other）。optimize 类工作流必传（git/files→ISOLATED_WRITE git 工作区；document/config/other→SANDBOX），由模板声明或运行参数正式传入'),
+        roleDir: S('角色目录，缺省 dsh/roles'),
+        issueRef: S('issue 引用，如 #12'),
+        issueTitle: S('issue 标题'),
+        issueBody: S('issue 正文'),
+        issueComments: S('issue 评论'),
+        requirement: S('原始需求文本（无 issue 时）'),
+        entry: S('续跑入口节点 id'),
         approved: { type: 'boolean', description: '残留人工门禁续跑裁决（true 通过）；Human Decision 禁止此字段' },
-        feedback: { type: 'string', description: '人工打回意见（续跑）' },
+        feedback: S('人工打回意见（续跑）'),
         startRound: { type: 'number', description: '续跑起始轮次' },
         history: { type: 'array', description: '前次打回历史（续跑）' },
-        decision_id: { type: 'string', description: 'Human Decision 续跑：稳定 decision_id' },
-        user_choice: { type: 'string', description: 'Human Decision 续跑：Decision Result（如 STOP / USER_ACCEPTED / ADD_BUDGET）' },
-        blocked_edge: { type: 'object', additionalProperties: true, description: 'ADD_BUDGET 时被额度拦住的自动边 { from, to, on }' },
-        results: { type: 'object', additionalProperties: true, description: '续跑时带回的节点结果快照' },
-        model_overrides: { type: 'object', additionalProperties: true, description: '#79 续跑时可更换 Provider/Model：{ 节点id | "$default": { provider, model } }；产生追加式快照修订（旧修订保留可查），仅续跑生效' },
-        technical_budget: { type: 'object', additionalProperties: true },
-        technical_budget_grant: { type: 'object', additionalProperties: true, description: '提额' },
-        retry_policy_overrides: { type: 'object', additionalProperties: true, description: '时间上限可调' },
+        decision_id: S('Human Decision 续跑：稳定 decision_id'),
+        user_choice: S('Human Decision 续跑：Decision Result（如 STOP / USER_ACCEPTED / ADD_BUDGET）'),
+        blocked_edge: O('ADD_BUDGET 时被额度拦住的自动边 { from, to, on }'),
+        results: O('续跑时带回的节点结果快照'),
+        model_overrides: O('#79 续跑时可更换 Provider/Model：{ 节点id | "$default": { provider, model } }；产生追加式快照修订（旧修订保留可查），仅续跑生效'),
+        technical_budget: O(),
+        technical_budget_grant: O('提额'),
+        retry_policy_overrides: O('时间上限可调'),
         resume_paused: { type: 'boolean', description: '#80 暂停恢复：对 PAUSED 的逻辑运行按检查点现场续跑同一 Logical Run；恢复后的节点读取暂停期间提交的全部 Guidance 与最新基线修订（wf_control 提交）' },
       },
       async execute(rawArgs) {
@@ -3881,45 +3904,42 @@ return {
       name: 'vwf_workspace',
       description: '按已分配的 Logical Run 访问隔离 workspace。必须携带本 Run 的 workspace_capability。op=' + Object.keys(WS_OPS).join('|'),
       parameters: {
-        op: { type: 'string', required: true, description: Object.keys(WS_OPS).join(' | ') },
-        logical_run_id: { type: 'string', required: true, description: 'Logical Run / taskId' },
-        capability: { type: 'string', required: true, description: 'wf_run 或获取脚本注入的 workspace_capability' },
-        rel: { type: 'string', description: '相对 source/worker 的路径' },
-        content: { type: 'string', description: '写入内容' },
-        worker_id: { type: 'string' },
-        resource_key: { type: 'string' },
-        owner: { type: 'string' },
-        lock_id: { type: 'string' },
-        node: { type: 'string' },
+        op: SR(Object.keys(WS_OPS).join(' | ')),
+        logical_run_id: SR('Logical Run / taskId'),
+        capability: SR('wf_run 或获取脚本注入的 workspace_capability'),
+        rel: S('相对 source/worker 的路径'),
+        content: S('写入内容'),
+        worker_id: S(),
+        resource_key: S(),
+        owner: S(),
+        lock_id: S(),
+        node: S(),
         attempt: { type: 'number' },
-        lifecycle: { type: 'string' },
+        lifecycle: S(),
       },
       async execute(rawArgs) {
-        const fn = rpcRoutes.get('vwf.workspace.' + String((rawArgs && rawArgs.op) || ''))
-        if (typeof fn !== 'function') return JSON.stringify({ ok: false, error: '未知 workspace op：' + (rawArgs && rawArgs.op) })
-        try { const res = await fn(rawArgs); return typeof res === 'string' ? res : JSON.stringify(res) } catch (e) { return JSON.stringify({ ok: false, error: errMsg(e) }) }
+        return runToolRpc('vwf.workspace.' + String((rawArgs && rawArgs.op) || ''), rawArgs, (msg) => ({ ok: false, error: msg }), { ok: false, error: '未知 workspace op：' + (rawArgs && rawArgs.op) })
       },
     }))
     dtools.register(textTool({
       name: 'wf_control',
       description: '对 Logical Run 下发运行控制（#80）：action=pause 安全暂停（等待最近完成节点的检查点后生效，最坏等待一个节点完成；检查点后已启动的下一节点将被中止并在恢复后整体重跑）；action=interrupt 立即中断当前 Node Attempt（记 INTERRUPTED，不产生正式成功结果；等待中的暂停请求会升级为中断）；action=guidance 暂停期间提交用户指导（mode=coach 普通指导，不改基线；mode=baseline 实质基线变更，必须提供 new_baseline 要点，恢复后回基线负责节点整体重跑）。恢复同一逻辑运行：wf_run + resume_paused=true。',
       parameters: {
-        action: { type: 'string', required: true, description: 'pause | interrupt | guidance' },
-        logical_run_id: { type: 'string', required: true, description: 'Logical Run id（看板「同一次运行」卡片或 wf_run 返回中的 logical_run_id）' },
-        text: { type: 'string', description: 'guidance：指导内容（可多轮提交）' },
-        mode: { type: 'string', description: 'guidance：coach（默认，仅指导）| baseline（实质基线变更）' },
-        new_baseline: { type: 'string', description: 'guidance mode=baseline 必填：新基线要点（目标/范围/硬性要求的变化说明）' },
+        action: SR('pause | interrupt | guidance'),
+        logical_run_id: SR('Logical Run id（看板「同一次运行」卡片或 wf_run 返回中的 logical_run_id）'),
+        text: S('guidance：指导内容（可多轮提交）'),
+        mode: S('guidance：coach（默认，仅指导）| baseline（实质基线变更）'),
+        new_baseline: S('guidance mode=baseline 必填：新基线要点（目标/范围/硬性要求的变化说明）'),
       },
       async execute(rawArgs) {
-        const fn = rpcRoutes.get('vwf.run.control')
-        if (typeof fn !== 'function') return JSON.stringify({ ok: false, errors: [{ at: '$', message: '控制面不可用' }] })
-        try { const res = await fn(rawArgs || {}); return typeof res === 'string' ? res : JSON.stringify(res) } catch (e) { return JSON.stringify({ ok: false, errors: [{ at: '$', message: errMsg(e) }] }) }
+        const bad = (msg) => ({ ok: false, errors: [{ at: '$', message: msg }] })
+        return runToolRpc('vwf.run.control', rawArgs, bad, bad('控制面不可用'))
       },
     }))
     dtools.register(textTool({
       name: 'vwf_debug',
       description: 'vwf 插件诊断：op=paths 返回路径解析结果与服务可用性。',
-      parameters: { op: { type: 'string', required: true, description: 'paths' } },
+      parameters: { op: SR('paths') },
       async execute(args) {
         if (args.op !== 'paths') return '用法：vwf_debug { op: "paths" }'
         refreshServices()

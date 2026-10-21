@@ -105,6 +105,9 @@ function makeRuntime(opts) {
         return { providers: [{ id: 'deepseek-official', models: ['deepseek-v4-pro', 'deepseek-v4-flash'] }] }
       case 'vwf.roles':
         return { roles: ROLES }
+      case 'vwf.outcomePresets.list':
+        // #75 S-2b：与真实构建产物同源（docs/design/outcome-presets.json）
+        return { ok: true, schemaVersion: 1, presets: JSON.parse(readFileSync(join(here, '../../../docs/design/outcome-presets.json'), 'utf8')).presets }
       case 'vwf.validate':
         // options.validateErrors 用于构造校验失败：错误按节点回填 fieldErrors（与真实内核同口径）
         if (options.validateErrors) {
@@ -1141,4 +1144,280 @@ test('V-6 画布与 JSON 共用同一条历史：跨两种编辑方式连续撤�
     await flush()
   })
   assert.equal(redoBtn.disabled, true, '撤销后新修改清空重做分支')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #75 S-2b 结果预设选择器：选择→预览→应用（单次提交）→重开一致；CONFIRM 确认流
+// ═══════════════════════════════════════════════════════════════════════════
+async function openRoutingInspector(container) {
+  await act(async () => {
+    container.querySelector('g[data-node-id="node-2"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    await flush()
+  })
+  const inspector = () => container.querySelector('.vwf-inspector')
+  await openTab(container, 'outcome')
+  await act(async () => {
+    const modeSelect = Array.from(inspector().querySelectorAll('select'))
+      .find((s) => Array.from(s.options).some((o) => o.textContent === '业务结果路由'))
+    assert.ok(modeSelect, '结果模式下拉存在')
+    const modeSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set
+    modeSetter.call(modeSelect, 'routing')
+    modeSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush(); await flush()
+  })
+  return inspector
+}
+
+function presetSelectOf(container) {
+  const inspector = container.querySelector('.vwf-inspector')
+  return Array.from(inspector.querySelectorAll('select'))
+    .find((s) => Array.from(s.options).some((o) => o.textContent === '优化评价'))
+}
+
+async function choosePreset(container, value) {
+  await act(async () => {
+    const sel = presetSelectOf(container)
+    assert.ok(sel, '预设选择器存在')
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set
+    setter.call(sel, value)
+    sel.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush(); await flush()
+  })
+}
+
+test('S-2b 结果预设：DIRECT 选择→应用为单次提交，保存→重开与预设一致', async () => {
+  const { container, state } = await mountPage({})
+  await openEditor(container)
+  await openRoutingInspector(container)
+
+  const sel = presetSelectOf(container)
+  assert.ok(sel, '预设选择器随 routing 档出现')
+  const optionTexts = Array.from(sel.options).map((o) => o.textContent)
+  for (const name of ['优化评价', '探索评价', '建设审核路由', '诊断审核路由']) {
+    assert.ok(optionTexts.includes(name), '预设选项齐全：' + name)
+  }
+
+  await choosePreset(container, 'optimize-evaluator')
+  const inspectorText = container.querySelector('.vwf-inspector').textContent
+  assert.ok(inspectorText.includes('评估通过'), '预览带中文解释：评估通过')
+  assert.ok(inspectorText.includes('需确认，升人工决策'), '预览带中文解释：需确认，升人工决策')
+
+  await act(async () => {
+    const applyBtn = byText(container, '应用预设')
+    assert.ok(applyBtn, 'DIRECT 出现应用按钮')
+    applyBtn.click()
+    await flush(); await flush()
+  })
+
+  // 应用后：字段名 route、三行取值写入检查器，且出现与预设一致的 NOOP 提示
+  const afterText = container.querySelector('.vwf-inspector').textContent
+  assert.ok(afterText.includes('当前结果配置已与该预设一致'), '应用后回显 NOOP 提示')
+
+  // 保存：node-2 携带预设配置，一次应用只产生一次提交
+  const savedBefore = state.saved.length
+  await act(async () => {
+    byText(container, '保存工作流').click()
+    await flush(); await flush(); await flush()
+  })
+  assert.equal(state.saved.length, savedBefore + 1, '一次保存')
+  const savedNode = state.saved[state.saved.length - 1].nodes.find((n) => n.id === 'node-2')
+  assert.equal(savedNode.output.outcomePath, '$.route')
+  assert.deepEqual(savedNode.output.schema.properties.route.enum, ['PASS', 'OPTIMIZE', 'CONFIRM'])
+
+  // 重开：以保存后的 DSL 重新装配工作区，选中预设应显示一致（真实 DSL 回显，不依赖内存态）
+  const reopen = await mountPage({ dsl: state.saved[state.saved.length - 1] })
+  await openEditor(reopen.container)
+  await openRoutingInspector(reopen.container)
+  await choosePreset(reopen.container, 'optimize-evaluator')
+  assert.ok(
+    reopen.container.querySelector('.vwf-inspector').textContent.includes('当前结果配置已与该预设一致'),
+    '重开后从真实 DSL 判定一致（NOOP）',
+  )
+})
+
+test('S-2b 结果预设：手填后选择走 CONFIRM 确认流，确认后单次提交恢复预设取值', async () => {
+  const { container } = await mountPage({})
+  await openEditor(container)
+  await openRoutingInspector(container)
+
+  // 手填：字段名 route + 取值 PASS（走既有手填路径）
+  await act(async () => {
+    const nameInput = Array.from(container.querySelectorAll('.vwf-inspector input.vwf-input'))
+      .find((i) => i.placeholder === 'route')
+    assert.ok(nameInput, '结果字段输入框存在')
+    const inputSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    inputSetter.call(nameInput, 'route')
+    nameInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    nameInput.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush()
+  })
+
+  await choosePreset(container, 'optimize-evaluator')
+  await act(async () => {
+    const previewBtn = byText(container, '预览并应用预设')
+    assert.ok(previewBtn, '同名字段枚举差异走 CONFIRM，先预览')
+    previewBtn.click()
+    await flush(); await flush()
+  })
+  const confirmText = container.querySelector('.vwf-inspector').textContent
+  assert.ok(confirmText.includes('确认应用预设'), '出现确认块')
+  assert.ok(confirmText.includes('已有业务连线不会被修改'), '确认块说明边不改动')
+
+  await act(async () => {
+    // 注意：确认块标题与按钮同名，必须精确定位按钮本身
+    const okBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '确认应用预设')
+    assert.ok(okBtn, '确认按钮可用')
+    okBtn.click()
+    await flush(); await flush()
+  })
+  assert.ok(
+    container.querySelector('.vwf-inspector').textContent.includes('当前结果配置已与该预设一致'),
+    '确认后与预设一致',
+  )
+})
+
+test('S-2b T-ACCEPT-01：手填→选择→应用→手动改回→保存→重开，恢复自定义配置无预设残留', async () => {
+  const { container, state } = await mountPage({})
+  await openEditor(container)
+  await openRoutingInspector(container)
+
+  // 手填：字段 route + 取值 PASS
+  await act(async () => {
+    const nameInput = Array.from(container.querySelectorAll('.vwf-inspector input.vwf-input')).find((i) => i.placeholder === 'route')
+    assert.ok(nameInput, '结果字段输入框存在')
+    const inputSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    inputSetter.call(nameInput, 'route')
+    nameInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    nameInput.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush()
+  })
+  await act(async () => {
+    const addBtn = byText(container, '加取值')
+    assert.ok(addBtn, '存在添加取值按钮')
+    addBtn.click()
+    await flush()
+    const rowInput = container.querySelector('.vwf-inspector .vwf-routing-row input')
+    assert.ok(rowInput, '取值行出现')
+    const s = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    s.call(rowInput, 'PASS')
+    rowInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    // React onBlur 经 focusout 委派，JSDOM 需派发 focusout 才触发提交
+    rowInput.dispatchEvent(new dom.window.Event('focusout', { bubbles: true }))
+    await flush()
+  })
+
+  // 选择预设 → CONFIRM → 确认应用
+  await choosePreset(container, 'optimize-evaluator')
+  await act(async () => {
+    const previewBtn = byText(container, '预览并应用预设')
+    assert.ok(previewBtn, '手填配置走 CONFIRM 预览')
+    previewBtn.click()
+    await flush()
+  })
+  await act(async () => {
+    const okBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '确认应用预设')
+    assert.ok(okBtn, '确认按钮可用')
+    okBtn.click()
+    await flush(); await flush()
+  })
+
+  // 手动改回：删除 OPTIMIZE / CONFIRM 两行，仅保留 PASS（无业务边，删除不被阻止）
+  await act(async () => {
+    for (let i = 0; i < 2; i++) {
+      const rows = container.querySelectorAll('.vwf-inspector .vwf-routing-row')
+      assert.ok(rows.length >= 1, '仍有取值行')
+      const removeBtn = Array.from(rows[rows.length - 1].querySelectorAll('button')).find((b) => b.textContent === '−')
+      assert.ok(removeBtn, '行内存在移除按钮')
+      removeBtn.click()
+      await flush()
+    }
+    await flush()
+  })
+
+  // 保存：最终 DSL 是用户改回后的配置
+  const savedBefore = state.saved.length
+  await act(async () => {
+    byText(container, '保存工作流').click()
+    await flush(); await flush(); await flush()
+  })
+  assert.equal(state.saved.length, savedBefore + 1, '一次保存')
+  const savedNode = state.saved[state.saved.length - 1].nodes.find((n) => n.id === 'node-2')
+  assert.equal(savedNode.output.outcomePath, '$.route', '自定义字段保留')
+  assert.deepEqual(savedNode.output.schema.properties.route.enum, ['PASS'], '恢复为手填枚举')
+
+  // 重开：不残留「已与预设一致」的错误匹配状态，且选择预设重新给出 CONFIRM 差异
+  const reopen = await mountPage({ dsl: state.saved[state.saved.length - 1] })
+  await openEditor(reopen.container)
+  await openRoutingInspector(reopen.container)
+  assert.ok(
+    !reopen.container.querySelector('.vwf-inspector').textContent.includes('当前结果配置已与该预设一致'),
+    '重开后不残留错误的预设一致状态',
+  )
+  await choosePreset(reopen.container, 'optimize-evaluator')
+  assert.ok(
+    byText(reopen.container, '预览并应用预设'),
+    '重开后选择预设仍给出 CONFIRM 差异（OPTIMIZE/CONFIRM 待新增）',
+  )
+})
+
+test('S-2b BLOCKED 无绕过：草稿未提交时不出现任何应用入口，恢复后自动解除', async () => {
+  console.error('CKPT-1')
+  const { container } = await mountPage({})
+  console.error('CKPT-2')
+  await openEditor(container)
+  console.error('CKPT-3')
+  await openRoutingInspector(container)
+  console.error('CKPT-4')
+
+  // 先应用预设（DIRECT），随后编辑取值行进入脏草稿态
+  console.error('CKPT-5')
+  await choosePreset(container, 'optimize-evaluator')
+  console.error('CKPT-6')
+  await act(async () => {
+    const applyBtn = byText(container, '应用预设')
+    assert.ok(applyBtn, 'DIRECT 应用按钮存在')
+    applyBtn.click()
+    await flush(); await flush()
+  })
+  console.error('CKPT-7')
+  await act(async () => {
+    console.error('CKPT-8')
+    const rowInput = container.querySelector('.vwf-inspector .vwf-routing-row input')
+    assert.ok(rowInput, '取值行输入框存在')
+    const s = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    // 输入与现值不同的内容才会产生真实 onChange（React 值追踪对同值去重），进入脏草稿态
+    s.call(rowInput, 'PASSX')
+    console.error('CKPT-9')
+    rowInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    console.error('CKPT-10')
+    await flush()
+    console.error('CKPT-11')
+  })
+  console.error('CKPT-12')
+  await choosePreset(container, 'explore-evaluator')
+  console.error('CKPT-13')
+  const wd = setTimeout(() => { console.error('WATCHDOG-FIRED (event loop alive)') }, 5000)
+
+  // 脏草稿态：显示阻塞原因，且不存在任何应用/确认按钮（确认不能绕过 BLOCKED）
+  // 有界扫描：只看按钮文本，BLOCKED 态不允许出现任何应用入口（确认不能绕过阻塞）
+  const buttonLabel = (text) => Array.from(container.querySelectorAll('button')).some((b) => b.textContent === text)
+  assert.ok(!buttonLabel('应用预设'), '无直接应用按钮')
+  assert.ok(!buttonLabel('预览并应用预设'), '无预览应用按钮')
+  assert.ok(!buttonLabel('确认应用预设'), '无确认应用按钮')
+  const blockedText = container.querySelector('.vwf-inspector').textContent
+  assert.ok(blockedText.includes('请先完成或取消当前结果字段/取值编辑'), '显示脏草稿阻塞原因')
+  assert.ok(blockedText.includes('无法应用该预设'), '显示不可应用')
+
+  // blur 提交草稿后，脏草稿阻塞解除；跨字段预设（route→verdict 改名遗留 required 孤儿）
+  // 仍是真实 BLOCKED（INVALID_CANDIDATE），继续无任何应用入口——确认不能绕过阻塞
+  await act(async () => {
+    const rowInput = container.querySelector('.vwf-inspector .vwf-routing-row input')
+    rowInput.dispatchEvent(new dom.window.Event('focusout', { bubbles: true }))
+    await flush(); await flush()
+  })
+  const afterCommitText = container.querySelector('.vwf-inspector').textContent
+  assert.ok(!afterCommitText.includes('请先完成或取消当前结果字段/取值编辑'), '脏草稿阻塞解除')
+  assert.ok(afterCommitText.includes('候选结果未通过完整性检查'), '真实结构阻塞（改名孤儿 required）保持 BLOCKED')
+  assert.ok(!Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '预览并应用预设'), '真实阻塞下仍无预览应用入口')
+  assert.ok(!Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '确认应用预设'), '真实阻塞下仍无确认应用入口')
 })

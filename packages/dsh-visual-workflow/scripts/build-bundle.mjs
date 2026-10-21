@@ -69,6 +69,8 @@ const structuredOutputSrc = join(root, 'src', 'structured-output.mjs')
 const nodeProviderWorkerSrc = join(root, 'src', 'node-provider-worker.mjs')
 const nodeProviderProxySrc = join(root, 'src', 'node-provider-loopback-proxy.mjs')
 const roleManifestSrc = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
+// #75 S-2b：内置 Outcome Preset 数据随 dist 分发（宿主只读下发，客户端不内嵌副本）
+const outcomePresetsSrc = join(root, '..', '..', 'docs', 'design', 'outcome-presets.json')
 const localesSrc = join(root, 'locales')
 const rolesSrc = join(root, '..', '..', 'dsh', 'roles')
 
@@ -91,6 +93,7 @@ const nodeArtifactsBody = readFileSync(nodeArtifactsSrc, 'utf8')
 const nodeIsolationLauncherBody = readFileSync(nodeIsolationLauncherSrc, 'utf8')
 const cwfValidateBody = readFileSync(cwfValidateSrc, 'utf8')
 const nodeIsolationSchemaBody = readFileSync(nodeIsolationSchemaSrc, 'utf8')
+const outcomePresetsBody = readFileSync(outcomePresetsSrc, 'utf8')
 const structuredOutputBody = readFileSync(structuredOutputSrc, 'utf8')
 const nodeProviderWorkerBody = readFileSync(nodeProviderWorkerSrc, 'utf8')
 const nodeProviderProxyBody = readFileSync(nodeProviderProxySrc, 'utf8')
@@ -130,6 +133,7 @@ const stamp = {
   cwfValidate: sha256(cwfValidateBody),
   nodeIsolationSchema: sha256(nodeIsolationSchemaBody),
   structuredOutput: sha256(structuredOutputBody),
+  outcomePresets: sha256(outcomePresetsBody),
   nodeProviderWorker: sha256(nodeProviderWorkerBody),
   nodeProviderProxy: sha256(nodeProviderProxyBody),
   locales: dirStamp(localesSrc, '.json'),
@@ -159,6 +163,7 @@ const requiredArtifacts = [
   join(dist, 'node-isolation-launcher.mjs'),
   join(dist, 'cwf-validate.mjs'),
   join(dist, 'node-isolation-schema.json'),
+  join(dist, 'outcome-presets.json'),
   join(dist, 'structured-output.mjs'),
   join(dist, 'node-provider-worker.mjs'),
   join(dist, 'node-provider-loopback-proxy.mjs'),
@@ -257,6 +262,7 @@ copyFileSync(nodeArtifactsSrc, join(dist, 'node-artifacts.mjs'))
 copyFileSync(nodeIsolationLauncherSrc, join(dist, 'node-isolation-launcher.mjs'))
 copyFileSync(cwfValidateSrc, join(dist, 'cwf-validate.mjs'))
 copyFileSync(nodeIsolationSchemaSrc, join(dist, 'node-isolation-schema.json'))
+copyFileSync(outcomePresetsSrc, join(dist, 'outcome-presets.json'))
 copyFileSync(structuredOutputSrc, join(dist, 'structured-output.mjs'))
 copyFileSync(nodeProviderWorkerSrc, join(dist, 'node-provider-worker.mjs'))
 copyFileSync(nodeProviderProxySrc, join(dist, 'node-provider-loopback-proxy.mjs'))
@@ -323,6 +329,8 @@ const clientBytes = Buffer.byteLength(dynClient)
 // 上调至 232KiB，余量 5.8KiB 供同改 client 半的 FEAT-85 / FEAT-86 并入；
 // 两任务并入后按各自终态实测再评估，余量不足时先瘦身。
 // 新增载荷仍应优先瘦身，不要继续推高。
+// 2026-10-20 按产品负责人决定维持 284KiB；完成 S-2b 相关重复逻辑收敛后，实测总量
+// host 116184 + client 174079 = 290263B，余量 553B。后续新增仍须先瘦身并通过此闸门。
 const PAYLOAD_LIMIT = 284 * 1024
 if (hostBytes + clientBytes > PAYLOAD_LIMIT) {
   console.error(`dynamic 载荷超限：host ${hostBytes} + client ${clientBytes} = ${hostBytes + clientBytes}/${PAYLOAD_LIMIT}`)
