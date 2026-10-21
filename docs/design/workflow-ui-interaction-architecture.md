@@ -85,7 +85,7 @@
 
 - Built-in 只展示正式四套：建设 / 优化 / 诊断 / 探索（P1）。
 - 内置项入口固定为两个：「查看流程」（只读结构）与「模型设置」（Provider / Model 持久覆盖，P2）。
-- 历史 `default-workflow` / `dev-workflow-2-0` 归入 Custom 并可编辑，迁移映射由宿主 `isLegacyCustomId` 承担（`src/host.js:299-332`）。
+- 2026-09 快照曾建议把历史 `default-workflow` / `dev-workflow-2-0` 归入 Custom 并允许编辑；该建议以旧主线状态为前提。PR #361 已将旧资产从内置模板清单移除，不得据此恢复旧模板或把它们重新暴露为可编辑 Custom；当前实现以 `main` 为准。
 - 结构修改一律走"基于此模板创建自定义工作流"（P3）。
 
 ### 4.2 编辑器：渐进式配置
@@ -95,13 +95,13 @@
 | 段 | 承载 | v0.1 状态 |
 |---|---|---|
 | 基础 | 节点名 / 角色 / Provider / Model / 目标、输入输出、正式产物声明 | 已实现 |
-| 结果与去向 | Business Outcome Routing：字段路径 + 值 → 去向；`countRound` / 自动回退额度 | 已实现，但**只认单层字段名**（`routingNameOf` `client.js:5551-5555` 对多段路径返回 `''`），而校验内核允许多层（`scripts/validate-core.cjs:123`）→ **FEAT-114** |
-| **完成映射（Completion Mapping）** | 终态节点结构化结果字段 → Run Completion Summary | **缺失**——契约与运行时全通，仅无编辑入口 → **FEAT-114** |
+| 结果与去向 | Business Outcome Routing：字段路径 + 值 → 去向；`countRound` / 自动回退额度 | 2026-09 快照记录为只认单层字段名（`routingNameOf` `client.js:5551-5555` 对多段路径返回 `''`），而校验内核允许多层（`scripts/validate-core.cjs:123`）；历史需求 FEAT-114 已迁移到 WFM-83，当前实现与状态须按 `main` 和 Multica Task 核验 |
+| **完成映射（Completion Mapping）** | 终态节点结构化结果字段 → Run Completion Summary | 2026-09 快照记录为缺少编辑入口；历史需求 FEAT-114 已迁移到 WFM-83，不能把快照当作当前实现状态证明 |
 | 高级 | Human Decision、Fan-out、Formal Record 声明、其他 Blueprint 高级项 | 已实现 |
 
-Completion Mapping 必须作为一等能力补入，不得只靠 JSON 页签手改 DSL；按 CHORE-113 侧裁定，它**不算 v0.1 发布门槛**（内置模板已满足规格 §13），排发布后第一批。
+2026-09 方案曾要求 Completion Mapping 作为一等编辑能力，并引用 CHORE-113 的排期判断；这只是历史建议。FEAT-115 的四段面板重排已取消，Completion Mapping 与多层结果路径由 WFM-83 承接。当前发布门槛和实施/验收状态须查 #75 当前执行口径及 WFM-83 的实际证据，不沿用旧排期判断。
 
-2026-09 快照曾记录 `docs/design/outcome-presets.json` 与实际模板不一致并将选择器列为待决事项。当前 DT-02=B 已在 #75 确认：按节点语义纠偏数据并在“结果与去向”提供内置 Preset 选择器；保留自定义字段与手填，应用前校验 schema 并明确冲突，不新增用户自建 Preset。当前交付/验收状态以 #75 与关联 Multica Task/PR 的实际证据为准。
+2026-09 快照曾记录 `docs/design/outcome-presets.json` 与实际模板不一致并将选择器列为待决事项。当前 DT-02=B 已在 #75 确认数据纠偏 + 内置 Preset 选择器的需求范围：优化评价节点使用 `$.route`，探索评价节点继续使用 `$.verdict`；通用 `review` 必须区分专业审核意见与流程路由的字段和值域。选择器应用前需校验 schema 并明确冲突，保留自定义字段与手填，不新增用户自建 Preset。该裁定不证明数据已修正、选择器已实现或功能已验收；这些状态以关联交付证据为准。
 
 ### 4.3 Run 详情：三类视角的落点
 
@@ -177,8 +177,8 @@ P8 + §6 要求列表行至少承载 8 项。现状与缺口见 §5 R-8；宿主
 |---|---|---|---|
 | R-1 | 插件无运行入口 | 历史判断：曾将运行入口列为产品待裁；当前 DT-01=A，Skill / Chat 是新 Run 唯一正式入口，S-1 取消；既有 Run 控制/续跑仍走同一 Runtime | 当前归属见 #75 与关联任务 |
 | R-2 | Outcome Preset 无选择器 | 历史核对曾发现 Preset 数据与模板语义不一致；当前 DT-02=B 已确认数据纠偏及选择器范围。不得把本行当成当前数据或实现状态证明 | 当前交付/验收以 #75 与关联任务证据为准 |
-| R-3 | Completion Mapping 无 UI | 成立：`src/client.js` 内 `completionPath` 命中 0；`src/host.js:974` 与四套模板均已声明 | **FEAT-114**（非 #75 切片） |
-| R-10 | 编辑器只认单层结果字段路径 | 成立：`routingNameOf`（`client.js:5551-5555`）对多段路径返回空，而校验内核 `validate-core.cjs:123` 允许多层——**面板能力小于契约能力** | **FEAT-114** |
+| R-3 | Completion Mapping 无 UI | 2026-09 快照结论：`src/client.js` 内 `completionPath` 命中 0；`src/host.js:974` 与四套模板均已声明。此处不是当前实现/验收证明 | 历史 FEAT-114 已迁移至 **WFM-83**（不属于 #75 新增切片） |
+| R-10 | 编辑器只认单层结果字段路径 | 2026-09 快照结论：`routingNameOf`（`client.js:5551-5555`）对多段路径返回空，而校验内核 `validate-core.cjs:123` 允许多层；此处不是当前实现状态证明 | 历史 FEAT-114 已迁移至 **WFM-83** |
 | R-11 | 配置面板三段 → 四段重排 | 历史目标曾提出插入"完成映射"档；当前 FEAT-115 已取消，不能作为现行需求 | Completion Mapping 归 WFM-83 |
 | R-4 | 无 Timeline 视图 | 成立，但已在 LOC-016 片1 基线内。⚠️ CHORE-113 判为"已实现（形态与原文不同：三页签 + 完整经过链路弹窗）"——**分歧项**：现有弹窗按节点序不按时间序，不满足 P9/§7 的合并时间线定义 | LOC-016 / 待裁定（见 §8） |
 | R-5 | 决策卡 / BLOCKED 无提交续跑 | 成立，已立 FEAT-208（待派工）；FEAT-85 交付的呈现层不动 | FEAT-208 |
@@ -196,15 +196,17 @@ P8 + §6 要求列表行至少承载 8 项。现状与缺口见 §5 R-8；宿主
 
 ## 6. 承载物地图（避免把原型当实现、把已验收当未做）
 
+本表是 2026-09 的资料映射快照。当前 #75 仍为 Open 的 UI 剩余事项父票与决策/归属索引，四项 DT 已裁定；正式设计归档由 WFM-82 承接，Completion Mapping / 多层字段路径由 WFM-83 承接。DT-02=B 确认 Preset 数据纠偏和选择器范围，但不代表已实现或验收。以下历史来源不替代当前 Task、代码或验收证据。
+
 | 承载物 | 角色 | 纪律 |
 |---|---|---|
-| GitHub #75 正文 + P1–P10 评论 | 需求与产品规则一手来源 | 规则已搬入本文 §2；Issue 正文不再作为唯一副本 |
-| `packages/dsh-visual-workflow/prototypes/ui-workbench/`（`DESIGN.md`、`REVIEW-2.md`，`npm run prototype:ui`） | **视觉与交互权威** | 仍是纸面原型：个人模板/角色/运行记录皆示例，编辑只存内存，**不得作为生产实现直接合入，也不是发布证据** |
-| `docs/tasks/handoffs/H1|H2|H3.md` | 一手需求输入（2026-09-17 Codex 产出） | 分别是 FEAT-84 / 85 / 86 的需求来源，不是裁定记录 |
-| `docs/design/workflow-manager-v0.1-final-product-spec.md` §11 | 目标规格，UI 推给 #75 | 语义权威；UI 细节以本文为准 |
+| GitHub #75 正文 + P1–P10 评论 | 历史需求与产品规则来源 | 原始记录继续保留；现行 DT-00～DT-03 与归属以 #75 顶部执行口径和正式裁定评论为准。#75 仍 Open，不表示功能已完成 |
+| `packages/dsh-visual-workflow/prototypes/ui-workbench/`（`DESIGN.md`、`REVIEW-2.md`，`npm run prototype:ui`） | 2026-09 纸面原型与交互探索 | 仍是纸面原型：个人模板/角色/运行记录皆示例，编辑只存内存，**不得作为生产实现直接合入，也不是发布证据**；本行不改变原型源码或当前产品权威 |
+| `docs/tasks/handoffs/H1-editor-workbench.md`、`H2-run-detail.md`、`H3-role-theme-responsive.md` | 一手需求输入（2026-09-17 Codex 产出） | 分别是 FEAT-84 / 85 / 86 的历史需求来源，不是当前裁定或交付证明 |
+| `docs/design/workflow-manager-v0.1-final-product-spec.md` §11 | v0.1 目标规格 | 记录 Target 目标；本文仅供历史设计追溯，现行 UI 决策以 #75 当前口径为准，正式归档/引用对齐由 WFM-82 承接 |
 | `docs/design/blueprint-schema.md` | 字段级契约 | 本文不改字段 |
-| `docs/design/outcome-presets.json` | 候选值推荐 | 校验不强制；内容待纠偏（R-2） |
-| `docs/tasks/CHORE-113-issue-75-reconcile-closeout.md`（+ `FEAT-114` / `FEAT-115`） | **并行会话的对账与拆票方案**，与本文同源（都读 #75） | 其结论是"#75 降为需求源并关票"，与本文接到的"保留推进"指令互斥 → 见 §8 冲突项，须产品经理裁定 |
+| `docs/design/outcome-presets.json` | Preset 推荐数据 | DT-02=B 已确认逐节点纠偏与选择器范围；优化评价使用 `$.route`，探索评价保持 `$.verdict`。实现与验收仍须由对应交付证据证明 |
+| `docs/tasks/CHORE-113-issue-75-reconcile-closeout.md`（+ 历史 FEAT-114 / FEAT-115） | 并行会话的历史对账与拆票方案 | CHORE-113→WFM-82、FEAT-114→WFM-83；FEAT-115 已取消。其“关闭 #75”建议已被 DT-00=C 取代：#75 保持 Open 并收窄为父票/索引，不再作为待裁冲突 |
 
 🟢 已经落地、**不得重复设计**的：模板库分区、Built-in 只读 + 逐节点 Provider/Model Override、渐进式三段配置面板、Preflight（静态校验 + 探针）、快照只读历史表、Run 看板与三分组详情、PAUSED + Guidance、BLOCKED 恢复卡与决策卡的**呈现**、终态呈现。对应 FEAT-84/85/86/100/101/102/103、FIX-105/107/108（CNB 期已合并）。
 
