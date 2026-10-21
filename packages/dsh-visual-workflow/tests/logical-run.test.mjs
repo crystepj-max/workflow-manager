@@ -389,6 +389,14 @@ test('#79 重启回载：逻辑运行摘要全量回载，list join 与续跑索
   const got = await call(envB.handlers, 'vwf.logicalRuns.get', { logical_run_id: 'issue-hy' })
   assert.equal(got.found, true)
   assert.equal(got.record.segments.length, 2)
+  // #75 S-4：runs.list 行携带只读看板投影（真实宿主状态 → 投影字段）
+  assert.ok(row2.dashboard, '活跃段行携带 dashboard 投影')
+  assert.equal(row2.dashboard.lifecycle, 'COMPLETED')
+  assert.equal(row2.dashboard.snapshot_revision, 1, '唯一 active 快照 → Rev 1')
+  assert.equal(row2.dashboard.last_outcome.node, 'explore')
+  assert.equal(row2.dashboard.last_outcome.outcome, 'PASS')
+  assert.ok(row1.dashboard, '非活跃段行同样携带同一逻辑运行的投影')
+  assert.equal(row1.dashboard.lifecycle, 'COMPLETED')
   // 损坏摘要容错：跳过并留痕，不阻断其余回载
   envB.fs._files.set(LOGICAL_DIR + '/' + encodeURIComponent('broken') + '.json', '{oops')
   const envC = env({ seed: Object.fromEntries(envB.fs._files), extra: { workflowEngine: makeEngine('c-'), agents: { requireInitiator: () => ({}), currentInitiator: () => null } } })

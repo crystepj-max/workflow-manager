@@ -2034,11 +2034,28 @@ return {
     })
     const listRunSummaries = async () => {
       await runsHydration
+      // #75 S-4：同一逻辑运行的看板投影逐请求缓存，避免每个段重复遍历事件数组；
+      // 投影逻辑在 dist/dashboard-projection.cjs 内核（载荷外），加载失败时行不带
+      // dashboard 字段（客户端按缺失态呈现，不影响其余列表能力）
+      let projKernel = null
+      try { projKernel = await loadDist('dashboard-projection.cjs') } catch (e) { projKernel = null }
+      const projOf = projKernel && typeof projKernel.dashboardProjectionOf === 'function'
+        ? projKernel.dashboardProjectionOf
+        : () => null
+      const dashCache = new Map()
+      const dashOf = (lrId) => {
+        if (!dashCache.has(lrId)) dashCache.set(lrId, projOf(logicalRuns.get(lrId) || null, (rid) => runs.get(String(rid))))
+        return dashCache.get(lrId)
+      }
       const out = Array.from(runs.values()).map((rec) => {
         const row = summary(rec)
         // #79：逻辑运行 join（第 N 段呈现数据源；旧记录无逻辑运行归属时不加字段）
         const lj = logicalJoinForRun(rec.id)
-        if (lj) Object.assign(row, lj)
+        if (lj) {
+          Object.assign(row, lj)
+          // #75 S-4：只读看板投影（lifecycle 已在 join；此处补预算/快照/最近结果/最近事件）
+          row.dashboard = dashOf(lj.logical_run_id)
+        }
         return row
       }).sort((a, b) => ((b.startedAt || 0) - (a.startedAt || 0)) || byId(b.id, a.id))
       return { runs: out }

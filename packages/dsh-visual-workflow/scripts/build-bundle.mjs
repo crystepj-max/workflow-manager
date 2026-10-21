@@ -43,6 +43,7 @@ function minifyDynamicClosure(src) {
 }
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
+const repoRoot = dirname(dirname(root))
 const dist = join(root, 'dist')
 const selfPath = fileURLToPath(import.meta.url)
 const force = process.argv.includes('--force')
@@ -71,6 +72,8 @@ const nodeProviderProxySrc = join(root, 'src', 'node-provider-loopback-proxy.mjs
 const roleManifestSrc = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
 // #75 S-2b：内置 Outcome Preset 数据随 dist 分发（宿主只读下发，客户端不内嵌副本）
 const outcomePresetsSrc = join(root, '..', '..', 'docs', 'design', 'outcome-presets.json')
+// #75 S-4：运行看板只读投影内核（dist 侧分发，不占动态载荷预算）
+const dashboardProjectionSrc = join(root, '..', '..', 'scripts', 'dashboard-projection.cjs')
 const localesSrc = join(root, 'locales')
 const rolesSrc = join(root, '..', '..', 'dsh', 'roles')
 
@@ -94,6 +97,7 @@ const nodeIsolationLauncherBody = readFileSync(nodeIsolationLauncherSrc, 'utf8')
 const cwfValidateBody = readFileSync(cwfValidateSrc, 'utf8')
 const nodeIsolationSchemaBody = readFileSync(nodeIsolationSchemaSrc, 'utf8')
 const outcomePresetsBody = readFileSync(outcomePresetsSrc, 'utf8')
+const dashboardProjectionBody = readFileSync(dashboardProjectionSrc, 'utf8')
 const structuredOutputBody = readFileSync(structuredOutputSrc, 'utf8')
 const nodeProviderWorkerBody = readFileSync(nodeProviderWorkerSrc, 'utf8')
 const nodeProviderProxyBody = readFileSync(nodeProviderProxySrc, 'utf8')
@@ -134,6 +138,7 @@ const stamp = {
   nodeIsolationSchema: sha256(nodeIsolationSchemaBody),
   structuredOutput: sha256(structuredOutputBody),
   outcomePresets: sha256(outcomePresetsBody),
+  dashboardProjection: sha256(dashboardProjectionBody),
   nodeProviderWorker: sha256(nodeProviderWorkerBody),
   nodeProviderProxy: sha256(nodeProviderProxyBody),
   locales: dirStamp(localesSrc, '.json'),
@@ -164,6 +169,7 @@ const requiredArtifacts = [
   join(dist, 'cwf-validate.mjs'),
   join(dist, 'node-isolation-schema.json'),
   join(dist, 'outcome-presets.json'),
+  join(dist, 'dashboard-projection.cjs'),
   join(dist, 'structured-output.mjs'),
   join(dist, 'node-provider-worker.mjs'),
   join(dist, 'node-provider-loopback-proxy.mjs'),
@@ -263,6 +269,8 @@ copyFileSync(nodeIsolationLauncherSrc, join(dist, 'node-isolation-launcher.mjs')
 copyFileSync(cwfValidateSrc, join(dist, 'cwf-validate.mjs'))
 copyFileSync(nodeIsolationSchemaSrc, join(dist, 'node-isolation-schema.json'))
 copyFileSync(outcomePresetsSrc, join(dist, 'outcome-presets.json'))
+// #75 S-4：看板只读投影内核随 dist 分发（loadDist 加载，同目录无额外引用）
+copyFileSync(dashboardProjectionSrc, join(dist, 'dashboard-projection.cjs'))
 copyFileSync(structuredOutputSrc, join(dist, 'structured-output.mjs'))
 copyFileSync(nodeProviderWorkerSrc, join(dist, 'node-provider-worker.mjs'))
 copyFileSync(nodeProviderProxySrc, join(dist, 'node-provider-loopback-proxy.mjs'))
@@ -283,10 +291,11 @@ mkdirSync(join(dist, 'dynamic'), { recursive: true })
 // __VWF_PLUGIN_ROOT__/__VWF_REPO_ROOT__，也不提供 Buffer（dist/validate-core.cjs 的
 // 输入尺寸检查会调用 Buffer.byteLength）——静态 bundle 靠构建期常量与 Node 全局，
 // 动态闭包体必须自带。常量指向宿主构建时的真实路径（开发 DSH 单机部署场景成立），
+// 两个根共享的仓库路径只注入一次，再派生插件路径，避免重复占用动态载荷预算。
 // Buffer 用沙箱已有的 TextEncoder 实现最小垫片（host.js 只用 byteLength 等静态方法）。
 const DYN_HOST_PRELUDE = [
-  `const __VWF_PLUGIN_ROOT__ = ${JSON.stringify(root)};`,
-  `const __VWF_REPO_ROOT__ = ${JSON.stringify(dirname(dirname(root)))};`,
+  `const __VWF_REPO_ROOT__ = ${JSON.stringify(repoRoot)};`,
+  `const __VWF_PLUGIN_ROOT__ = __VWF_REPO_ROOT__ + ${JSON.stringify(root.slice(repoRoot.length))};`,
   'if (typeof globalThis.Buffer === "undefined") { const enc = new TextEncoder(); globalThis.Buffer = { from(s, e) { if (e === "base64" && typeof atob === "function") { const bin = atob(s); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; } return enc.encode(String(s)); }, byteLength(s) { return enc.encode(String(s)).length; }, isBuffer() { return false; }, alloc(n) { return new Uint8Array(n); }, concat(list) { const out = []; for (const a of list) out.push(...a); return new Uint8Array(out); } }; }',
   // cordis 动态沙箱同样没有 structuredClone（续跑路径 host.js 会对快照 provider_model
   // 做深拷贝）；被拷贝对象均为 JSON 安全结构，用 JSON 往返兜底即可。产品 Node 运行时
