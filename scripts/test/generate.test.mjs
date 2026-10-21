@@ -98,6 +98,12 @@ test('R10：模型工作流的 Skill 禁止用内置 workflow 工具绕过宿主
   };
   const mechanicalSkill = skillWrap(mechanicalOnly);
   assert.match(mechanicalSkill, /当前工具清单确认 `workflow` 可调用时/);
+  assert.match(mechanicalSkill, /启动前检查确认当前工具清单中没有 `wf_run`、尚未调用任何执行工具/,
+    '纯机械回退必须发生在能力预检阶段，且此前没有执行工具调用');
+  assert.match(mechanicalSkill, /执行工具已调用后遇到错误、超时或结果未知时，只查询只读状态；不得改用内置 `workflow`/,
+    '执行结果不明时只能查询状态，不得切换引擎重试');
+  assert.doesNotMatch(mechanicalSkill, /或错误提示无法访问 workflowEngine/,
+    'workflowEngine 报错不能作为切换到 workflow 的依据');
   assert.match(mechanicalSkill, /改用内置 `workflow` 工具执行编译产物/,
     '纯机械工作流仍可使用无模型调用的轻量回退');
 });
