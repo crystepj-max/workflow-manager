@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // 生成「证据摘要」（归档三件套之第三件）。
 //
-// 约定出处：docs/design/workspace-directory-convention.md §1.7.3 —— 阶段一必须
-// 入库的「必要文档」第 3 项。证据明细（.agent-runs/<run-id>/）按 7 天保留期清理，
-// 摘要永久保留，用于日后回答「这个任务当时做了什么、裁决是什么、谁签的」。
+// 约定出处：docs/design/workspace-directory-convention.md §1.7.3 —— 本地阶段证据摘要。
+// 摘要记录本地 Run 与验收证据，不复制 Multica Task 状态；证据明细目前由独立保留策略管理。
 //
 // 用法：
 //   node scripts/workspace-evidence-summary.mjs <TASK_ID> [--run-id <run_id>] [--repo <path>] [--json]
@@ -14,7 +13,7 @@
 //   import { generateEvidenceSummary } from './workspace-evidence-summary.mjs'
 //   generateEvidenceSummary({ root, taskId, runId })
 //
-// 该文件是删除证据明细的前置条件：摘要不存在时，清理动作必须拒绝执行。
+// 当前不提供登记册驱动的自动删除入口；生成摘要本身不会删除证据明细。
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -75,8 +74,7 @@ function normIdent(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
-// 登记册 branch 为空时（远程收口/未回写分支的任务常如此）按任务标识在 .agent-runs/ 里
-// 反查 Run：以 run.json.issue_or_task_identity 为准，唯一命中才采用，多命中一律报错不猜。
+// 按本地 Run 的 issue_or_task_identity 反查 Run；唯一命中才采用，多命中一律报错不猜。
 function discoverRunId(root, taskId) {
   const runsRootDir = join(root, '.agent-runs')
   if (!existsSync(runsRootDir)) return { runId: null, candidates: [] }
@@ -95,10 +93,7 @@ function discoverRunId(root, taskId) {
  */
 export function generateEvidenceSummary({ root, taskId, runId, noRunEvidence = false, now = () => new Date() }) {
   const archivedRoot = '.agent-runs'
-  const registry = readJson(join(root, 'docs/tasks/registry.json'))
-  const task = registry?.tasks?.find((t) => t.task_id === taskId) || null
-
-  let effectiveRunId = runId || (task?.branch ? task.branch.replace(/^dev-/, '') : null)
+  let effectiveRunId = runId || null
   let runDiscovered = false
   if (!effectiveRunId && !noRunEvidence) {
     const found = discoverRunId(root, taskId)
@@ -111,7 +106,7 @@ export function generateEvidenceSummary({ root, taskId, runId, noRunEvidence = f
     }
   }
   if (!effectiveRunId && !noRunEvidence) {
-    throw new Error(`无法确定 ${taskId} 的 RUN_ID：登记册 branch 为空、未提供 runId，且 .agent-runs 内无匹配本任务的 Run。若该任务确无 Run 证据链，显式传 noRunEvidence: true`)
+    throw new Error(`无法确定 ${taskId} 的 RUN_ID：未提供 runId，且 .agent-runs 内无匹配本任务的 Run。若该任务确无 Run 证据链，显式传 noRunEvidence: true`)
   }
 
   const runDir = effectiveRunId ? join(root, archivedRoot, effectiveRunId) : null
@@ -157,23 +152,11 @@ export function generateEvidenceSummary({ root, taskId, runId, noRunEvidence = f
     task_id: taskId,
     ...(effectiveRunId ? { run_id: effectiveRunId } : {}),
     ...(runDiscovered ? { run_id_source: 'discovered_from_agent_runs' } : {}),
-    ...(task?.name ? { task_name: task.name } : {}),
-    ...(task?.branch ? { branch: task.branch } : {}),
-    status: task?.status ?? null,
     decision: acceptance?.summary?.decision ?? null,
     decided_by: acceptance?.summary?.decided_by ?? null,
     decided_at: acceptance?.summary?.decided_at ?? null,
     acceptance_state: acceptanceState,
     ...(acceptanceNote ? { acceptance_note: acceptanceNote } : {}),
-    ...(task?.merge
-      ? {
-          merge: {
-            commit: task.merge.commit ?? null,
-            merged_at: task.merge.merged_at ?? null,
-            issue: task.merge.issue ?? null,
-          },
-        }
-      : {}),
     stages,
     ...(hasEvidence
       ? {
@@ -186,7 +169,7 @@ export function generateEvidenceSummary({ root, taskId, runId, noRunEvidence = f
       : {
           evidence: null,
           no_run_evidence: true,
-          note: '该任务先于 Run 证据链机制落地（无分支与 .agent-runs 记录），本摘要依据登记册与归档规格生成。',
+          note: '未提供或发现本地 Run 阶段证据；本摘要只记录当前可见的本地验收证据，不推断 Multica Task 状态。',
         }),
     generated_at: now().toISOString(),
   }

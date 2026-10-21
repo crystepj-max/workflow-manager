@@ -1,5 +1,5 @@
 {
-  "_说明": "机器本地配置示例（复制到 <项目>/.scratch/night-batches/machine.json 后按本机实际调整；此文件不入库）。args 占位符：{taskId} {runId} {runDir} {worktree} {promptFile} {project}。zcode 模板已在本机实测通过（2026-09-17）：① -p 不能漏——漏了它 zcode 会把整段提示词当「未知命令」直接退出；② 需要 ~/.zcode/cli/config.json 模型配置（可从桌面 App ~/.zcode/v2/config.json 镜像 provider 并加 model 键）；③ zcode 0.16.5 的 --max-turns 参数实际不可用，时长上限交给调度器看门狗。",
+  "_说明": "历史示例（WFM-342）：本地登记册 M5 派发已退役，不要复制为当前任务入口。其余配置仅用于追溯 2026-09-17 的机器配置实验。args 占位符：{taskId} {runId} {runDir} {worktree} {promptFile} {project}。",
   "agent": {
     "templates": {
       "full-access": {

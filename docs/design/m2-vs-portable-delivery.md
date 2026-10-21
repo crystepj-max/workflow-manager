@@ -1,3 +1,5 @@
+> 历史流程说明：本文的旧任务卡 / registry 开工示例已退役。当前身份与状态以 Multica 为准，施工门禁见 `single-task-delivery-m2.md` 与 `construction-preflight-gate.mjs`。
+
 # M2 单任务交付与 Portable 旧七阶段关系（权威说明）
 
 > **用途**：接手者只需读本文，即可区分「当前 M2 主链」与「Portable 契约七阶段证据底物」。其他指南（`docs/runbooks/construction-dsh/`、`docs/runbooks/construction-external/`、生成 Skill、`CONTEXT.md`）**引用本文**，不得再写第二套互相矛盾的主链叙事。
@@ -28,8 +30,8 @@
 ## 3. 新建 M2 任务：从哪里开始
 
 1. 任务经「需求分析」落到 **已定义**（本地任务规格 Vn + Definition Check 通过）。
-2. 执行 `node scripts/ai-task-preflight-check.mjs <任务卡> <规格> --run-baseline Vn`；通过后在本任务隔离 worktree 施工。
-3. 在 DSH 或等效会话用 **`wf_run`** 执行模板 **`wf-construction-full-feature`**；该模板含模型节点，宿主隔离路由是正式执行所需能力，内置 `workflow` 不能作为替代。若当前会话没有可用的 `wf_run`，不启动或模拟正式 Run；先交付可独立完成的引擎无关准备并将控制权交回主任务。Run 引导、证据呈递与收口命令序列按 `docs/runbooks/construction-dsh/runbook.md`。
+2. 执行 `node scripts/construction-preflight-gate.mjs --multica-task-id <Task UUID> --multica-profile <profile> --multica-workspace-id <workspace UUID> --run-baseline Vn`；通过后在本任务隔离 worktree 施工。
+3. 在 DSH 或等效会话只用 **`wf_run`** 执行模板 **`wf-construction-full-feature`**；该模板含模型节点，宿主隔离路由是正式执行所需能力，内置 `workflow` 不能作为替代。若当前会话没有可用的 `wf_run`，不启动或模拟正式 Run；先交付可独立完成的引擎无关准备并将控制权交回主任务。Run 引导、证据呈递与收口命令序列按 `docs/runbooks/construction-dsh/runbook.md`。
 4. 到达 **WAITING_HUMAN** 后停止，等人工 UAT 三态；**不得**跳过 UAT 直接 closeout。
 
 ## 4. 旧 Run：如何恢复

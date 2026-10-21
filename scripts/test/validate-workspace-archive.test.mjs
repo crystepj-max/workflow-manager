@@ -1,8 +1,7 @@
 // FIX-72 回归：D-8 归档语义分层
 //
-// 覆盖验收 V-3（轻量归档账实一致）、V-5（本地收口语义不放松）、V-6（轻量归档缺凭据即失败）。
-// 远程收口任务 = 登记册含 merge + 轻量归档（archive_form=lightweight-remote + merge.commit
-// 与登记册逐字一致 + remote_ref）；本地收口任务仍要求全套三件套。
+// 覆盖验收：已存在的归档目录按其自身材料校验，不读取旧登记册的任务状态或合并值。
+// 轻量归档须有 merge.commit 与 remote_ref；完整归档须有任务卡、规格和证据摘要。
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -97,16 +96,16 @@ test('V-3 正例：远程收口（轻量归档含凭据）与本地收口（全�
   assert.equal(rec(out, 'D-8').ok, true, JSON.stringify(rec(out, 'D-8').details))
 })
 
-test('V-6 负例：轻量归档 merge.commit 与登记册不一致即失败', () => {
+test('V-6 负例：轻量归档缺 merge.commit 即失败', () => {
   const { repo, summaryPath } = fixture()
   const s = JSON.parse(fs.readFileSync(summaryPath, 'utf8'))
-  s.merge.commit = 'c'.repeat(40)
+  delete s.merge.commit
   fs.writeFileSync(summaryPath, JSON.stringify(s, null, 2) + '\n')
   gOk(['add', '-A'], repo)
   gOk(['-c', 'user.email=t@e', '-c', 'user.name=t', 'commit', '-m', 'tamper'], repo)
   const out = runValidator(repo)
   assert.equal(rec(out, 'D-8').ok, false)
-  assert.ok(rec(out, 'D-8').details.join(' ').includes('merge.commit 与登记册不一致'))
+  assert.ok(rec(out, 'D-8').details.join(' ').includes('缺 merge.commit'))
 })
 
 test('V-6 负例：轻量归档缺 remote_ref 即失败', () => {
@@ -129,7 +128,7 @@ test('V-5 负例：本地收口任务缺全套三件套不因轻量形态而豁�
   gOk(['-c', 'user.email=t@e', '-c', 'user.name=t', 'commit', '-m', 'tamper'], repo)
   const out = runValidator(repo)
   assert.equal(rec(out, 'D-8').ok, false)
-  assert.ok(rec(out, 'D-8').details.join(' ').includes('LOC-901 缺规格终版'))
+  assert.ok(rec(out, 'D-8').details.join(' ').includes('LOC-901 历史归档缺规格终版'))
 })
 
 test('决策五收窄：specs/ 存在不再触发 D-8 警告', () => {

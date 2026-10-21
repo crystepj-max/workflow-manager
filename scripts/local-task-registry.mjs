@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * 本地任务登记册（本地轨道唯一真源）
+ * 迁移前本地任务登记册（只读历史资料）
  *
- * GitHub 不可用时替代 issue tracker：分配任务标识、记录来源与范围、
- * 跟踪状态、重写看板、列出待同步 GitHub 的任务。
+ * 当前 Task 身份与状态由 Multica 管理。CLI 写命令和旧 GitHub Task 通道已退役；
+ * 此模块的历史读取/变换导出不得被当前任务流程调用。
  *
  * CLI（只读）:
  *   node scripts/local-task-registry.mjs list [--github-sync pending] [--repo <path>]
@@ -11,8 +11,7 @@
  *
  * 已退役写命令（fail-closed，稳定原因码 legacy_registry_write_disabled，W8 P0-C）：
  *   allocate / set / mark-ready / board —— 任务身份/状态/Run 以 Multica 平台为唯一真源，
- *   本 CLI 不再提供任何写入口（不写文件、不调 GitHub）。导出函数及其程序化调用者
- *   不在此列，其写路径的处置另列后续切片。
+ *   本 CLI 不提供写入口；旧程序化写入入口也已在 registry-reconcile / 旧合并流程中封闭。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -315,7 +314,7 @@ export function renderBoard(records) {
     const key = groups.has(r.status) ? r.status : '其他'
     groups.get(key).push(r)
   }
-  const lines = ['# 本地任务看板', '', '> 自动生成，请勿手工编辑。来源：`docs/tasks/registry.json`', '']
+  const lines = ['# 本地任务看板（历史快照）', '', '> 仅用于追溯迁移前资料；内容不代表 Multica 当前 Task 状态。来源：旧 `docs/tasks/registry.json`。', '']
   const pendingRemote = records.filter(
     (r) => r.status !== '已合并' && r.status !== '已取消' && (r.remote === 'pending' || r.remote == null || r.remote === 'none'),
   )
@@ -468,11 +467,10 @@ export function writeBoard(repo) {
   return boardPath
 }
 
-// —— 旧写入口退役（W8 P0-C）——
+// —— 旧登记册 CLI 入口退役（WFM-342）——
 // Multica 平台是任务身份/状态/Run 的唯一真源；本模块 CLI 不再提供写入口。
 // 四个 CLI 写命令在任何本地文件写入或 GitHub 调用之前统一拒绝：非零退出 + 稳定原因码。
-// 仅作用于 CLI 层：导出函数（allocate/update/writeBoard 等）与其程序化调用者
-// （registry-reconcile、local-task-merge、task-runs-cleanup 等）行为不变，写路径处置另列切片。
+// 历史导出函数只供迁移前实现与单测追溯；当前任务流程不得调用其读写能力。
 const LEGACY_WRITE_REASON = 'legacy_registry_write_disabled'
 const RETIRED_WRITE_COMMANDS = new Set(['allocate', 'set', 'mark-ready', 'board'])
 
@@ -500,6 +498,9 @@ function rejectRetiredWrite(cmd) {
 async function main(argv) {
   const cmd = argv[0]
   if (RETIRED_WRITE_COMMANDS.has(cmd)) rejectRetiredWrite(cmd)
+  if (cmd === 'list' || cmd === 'show') {
+    console.error('历史查阅：以下内容来自迁移前 registry.json，不代表 Multica 当前 Task 状态、负责人或开工资格。')
+  }
   const get = (f) => {
     const i = argv.indexOf(f)
     return i >= 0 ? argv[i + 1] : undefined

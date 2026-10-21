@@ -1,30 +1,23 @@
-# 实施前检查清单（M2）
+# 实施前检查（Multica Task）
 
-> 交付从「已定义」开工前的硬门禁。权威流程见 `single-task-delivery-m2.md`。  
-> 机械检查：`node scripts/ai-task-preflight-check.mjs <issue-basics.md> <task-spec.md> [--run-baseline Vn] [--env-store <dir>]`
+> 当前施工硬门禁使用 `scripts/construction-preflight-gate.mjs`。本地 registry、BOARD 与旧任务卡不再是任务状态来源。
 
-## 检查表
-
-- [ ] 当前状态 = **已定义**
-- [ ] 无人值守许可 = **允许**
-- [ ] 需求基线版本已填写（如 V1）
-- [ ] 任务规格位置指向可读的本地规格文件
-- [ ] 本地规格版本号与 Issue「需求基线版本」一致
-- [ ] （若已启动 Run）Run 绑定版本与 Issue 一致
-- [ ] 前置依赖已填写（`无` 或具体任务标识）
-- [ ] 施工环境组已填写
-- [ ] 施工环境角色 = **独立** 或 **成员**
-- [ ] 若角色=成员：环境组已建立，且前置依赖任务均已完成（串行）
-- [ ] 规格中未决产品事项 = **0** / Definition Check 已通过声明存在
-- [ ] 优先级 ∈ {P0, P1, P2}
-- [ ] 定义时间已填写
-
-## 失败动作
-
-```text
-任务状态 → 执行受阻
-Run → BLOCKED
-记录明确原因
-释放并发名额
-停止施工（禁止跳过门禁）
+```bash
+node scripts/construction-preflight-gate.mjs \
+  --multica-task-id <Task UUID 或标识> \
+  --multica-profile <已确认的 Multica profile> \
+  --multica-workspace-id <workspace UUID> \
+  --repo <目标仓库> --run-baseline <Run 绑定版本>
 ```
+
+门禁从所选 Multica workspace 读取 Task 状态、项目、负责人、定义元数据和依赖，再从目标仓库读取 `spec_ref` 与 Definition Check。profile 与 workspace 必须明确并与返回的 `workspace_id` 一致。
+
+## 检查内容
+
+- Task 属于预期 Multica project，状态为 `todo` 或 `in_progress`；
+- `dev-flow.definition.v1` 存在且 `definition_status=defined`，无人值守许可为 `true`；
+- 需求基线版本、仓库内 `spec_ref`、环境组与角色有效，Definition Check 已通过且未决事项为 0；
+- `dev-flow.dependencies.v1` 存在；无依赖须显式写 `[]`，有依赖时逐个读取 Multica Task，且 `status=done` 与 `status_category=done` 同时成立；
+- 若 Run 已绑定需求基线版本，必须与 Task 元数据一致。
+
+Multica CLI 不可用、profile/workspace 未指定或数据缺失时均阻断，不从 `registry.json`、`BOARD.md` 或旧任务卡回退。门禁只报告结果，不改写 Multica Task 状态。

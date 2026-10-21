@@ -1,9 +1,9 @@
 # M2｜单任务交付（定义外置）
 
-> **里程碑**：M2  
-> **产品拍板**：改造「建设 · 完整功能开发」——定义外置，交付从「已定义」开工；自动返工上限 **3**；验收严格三态。  
-> **调用入口**：正式内置蓝图 `wf-construction-full-feature` 及其生成 Skill（`npm run install:builtin-skills` 安装）；DSH 轨道命令序列见 `docs/runbooks/construction-dsh/runbook.md`。不新建第二套交付入口。  
-> **公共契约**：`public-task-contract.md`  
+> **里程碑**：M2
+> **产品拍板**：改造「建设 · 完整功能开发」——定义外置，交付从「已定义」开工；自动返工上限 **3**；验收严格三态。
+> **调用入口**：正式内置蓝图 `wf-construction-full-feature` 及其生成 Skill（`npm run install:builtin-skills` 安装）；DSH 轨道命令序列见 `docs/runbooks/construction-dsh/runbook.md`。不新建第二套交付入口。
+> **公共契约**：`public-task-contract.md`
 > **证据底物**：可继续使用建设交接包 schema（`handoff.schema.json`）；产品可见主链以本文为准。
 
 ---
@@ -34,29 +34,20 @@ WAITING_HUMAN（等待验收）
 
 ## 2. 实施前检查（硬门禁）
 
-全部通过才可进入开发；任一失败 → 任务「执行受阻」+ Run `BLOCKED`，写明原因，释放并发名额。
+全部通过才可进入开发；任一失败 → Run `BLOCKED`，写明原因并停止。Multica Task 状态仍由 Multica 管理，不由门禁或本地登记册改写。
 
 | # | 检查项 | 失败语义 |
 |---|---|---|
-| 1 | Issue「当前状态」= 已定义 | 未定义，不得开工 |
-| 2 | 无人值守许可 = 允许 | 不允许无人施工 |
-| 3 | 本地任务规格可读，且版本 = Issue 需求基线版本 | 版本不一致 / 规格缺失 |
-| 4 | Run 绑定的需求基线版本 = Issue 当前版本 | Run 不得静默换版 |
-| 5 | 施工环境组 / 角色已填写；角色合法 | 缺环境信息不得开工 |
-| 6 | 若角色=成员：环境组须已建立；前置依赖任务须均已完成（串行） | 父现场未就绪 / 须等待同组前置 |
-| 7 | 若角色=独立且前置依赖≠无：须在规格/关联说明中自洽（通常独立任务依赖写「无」） | 关联口径矛盾 |
-| 8 | 未决产品事项 = 0（规格/落档声明） | 仍有产品决策未完成 |
+| 1 | Multica Task 属于预期 project，当前状态为 `todo` 或 `in_progress` | Task 不匹配或状态不可开工 |
+| 2 | Task 的 `dev-flow.definition.v1` 已定义且允许无人值守 | 定义或授权缺失 |
+| 3 | 需求基线版本与仓库内 `spec_ref` 一致且可读 | 版本不一致或规格缺失 |
+| 4 | Run 绑定版本（若已提供）与 Task 定义一致 | Run 不得静默换版 |
+| 5 | 环境组 / 角色合法，Definition Check 通过，未决事项为 0 | 定义材料或环境信息不完整 |
+| 6 | `dev-flow.dependencies.v1` 存在；所有依赖在 Multica 同时满足 `status=done` 和 `status_category=done` | 依赖未确认完成 |
 
-机械脚本：`scripts/ai-task-preflight-check.mjs`（环境判定可联调 `scripts/ai-task-workspace-env.mjs`）。
+机械入口：`scripts/construction-preflight-gate.mjs`。必须显式指定 Multica profile/workspace；缺少 Task 元数据、依赖数据或服务不可用时 fail-closed，不回退到本地 `registry.json`、`BOARD.md` 或任务卡。
 
-通过后：
-
-1. **解析施工环境**：独立 → 新建分支 + 工作区并登记环境组；成员 → 沿用同组现场（见 `task-workspace-env.md`）
-2. 将「已定义」规格**导入**为已确认需求基线证据（不重新呈递基线人工确认门）；
-3. 写入「定义外置」说明性施工包（证据链需要；**不是**新的产品方案决策门）；
-4. Issue 状态 → 交付中；Run → `RUNNING`。
-
----
+通过后将已定义规格导入为已确认需求基线证据，并写入说明性施工包；两者均不构成新的产品决策门。建设状态、负责人、依赖和执行历史通过 Multica 管理；`.agent-runs/` 只保存本地阶段证据。
 
 ## 3. 开发 / 审查 / 测试
 
@@ -91,9 +82,9 @@ WAITING_HUMAN（等待验收）
 
 自动阶段完成后：
 
-- Issue 状态 → 等待验收  
-- Run → `WAITING_HUMAN`  
-- 释放 Execution Plan 并发名额（M3 消费；本里程碑只保证语义就绪）  
+- Multica Task 按项目流程进入 `in_review`
+- Run → `WAITING_HUMAN`
+- 释放 Execution Plan 并发名额（M3 消费；本里程碑只保证语义就绪）
 - **AI 不代签**；无操作则继续等待
 
 ---
@@ -116,9 +107,9 @@ WAITING_HUMAN（等待验收）
 
 ## 7. 收口
 
-- `accept` / `conditional_pass` → 写 closeout、归档证据、按仓库规则开/合 PR、更新 Issue → 已完成  
-- `conditional_pass` 的优化意见必须保留在收口遗留事项中，供下次「做需求分析」摄入  
-- `reject` 不得收口  
+- `accept` / `conditional_pass` → 写 closeout、归档本地证据、按仓库规则开/合 PR，并按 Multica 项目流程更新 Task 状态
+- `conditional_pass` 的优化意见必须保留在收口遗留事项中，供下次「做需求分析」摄入
+- `reject` 不得收口
 - 收口后：对该任务 `mark-completed`；若同施工环境组**全部成员已完成** → `maybe-cleanup` 清理工作区（未齐则保留）
 - **收口后复核（「收口后观测」项的执行）**：收口合并完成后，由**执行体（AI）立即执行**卡上「收口后复核」区的各项，并把执行时间、命令、实际结果与结论**回填**到该区与收口摘要；**不得留空、不得静默跳过**。
   - 复核失败 → 如实记录：属真缺陷 → **另立任务**（不在本轮静默修）；属环境/时机不成立 → 写明原因与后续触发条件，列入已知限制；

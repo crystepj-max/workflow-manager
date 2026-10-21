@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * 登记册账实对账（CHORE-73 第一层）：以主干 git 历史为事实源，校准登记册。
+ * 迁移前登记册差异取证工具（历史只读）。Multica 是当前 Task 状态唯一来源。
+ *
+ * 仅允许显式传入 --legacy-history-audit 用于历史材料核对；当前流程不得调用。
  *
  * 背景（2026-09-16 三次同型事故）：登记册是共享账本，「任务已合并」的事实却发生在
  * git 历史里——两个真相来源靠会话自觉同步，出现分叉互相覆盖、收口脚本读旧写回、
@@ -12,10 +14,10 @@
  * 扫描这两类痕迹即可确定性推导「已合并」事实，把登记册中状态落后于事实的条目回写。
  *
  * CLI:
- *   node scripts/registry-reconcile.mjs plan  [--repo <path>] [--base <ref>]   # 只报告差异
+ *   node scripts/registry-reconcile.mjs plan --legacy-history-audit [--repo <path>] [--base <ref>] # 历史取证
  *   node scripts/registry-reconcile.mjs apply                                  # 已退役（W8 P0-C3）：
  *       在任何文件/GitHub 写入前以退出码 2 拒绝，原因码 legacy_registry_write_disabled。
- *       程序化回写仍走导出函数 apply（scheduled-trigger 等显式导入），其退役归后续 W8 切片。
+ *       当前流程不得导入或调用旧登记册的回写函数。
  *
  * 只回写一类差异：git 有合并事实、登记册 status 不是「已合并」。
  * 反向差异（登记册说已合并、git 无痕迹）只报告不动——可能发生在镜像/沙箱缺历史时，
@@ -30,7 +32,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-import { loadRegistry, saveRegistry, writeBoard } from './local-task-registry.mjs'
+import { loadRegistry } from './local-task-registry.mjs'
 import { githubAnchorOf } from './remote-anchors.mjs'
 
 const MERGED_STATUS = '已合并'
@@ -228,25 +230,11 @@ export function reconcilePlan(repo, baseRef = 'main', opts = {}) {
   return { toMerge, suspicious, ok, total: registry.tasks.length, unclaimedSkipped: skipped }
 }
 
-function applyReconcile(repo, baseRef) {
-  const registry = loadRegistry(repo)
-  const facts = collectMergeFacts(repo, baseRef)
-  const changed = []
-  for (const t of registry.tasks) {
-    if (t.status === MERGED_STATUS || ['已取消'].includes(t.status)) continue
-    const fact = facts.get(t.task_id)
-    if (!fact) continue
-    t.status = MERGED_STATUS
-    t.merge = { ...(t.merge || {}), commit: fact.commit, merged_at: fact.mergedAt }
-    t.updated_at = new Date().toISOString()
-    changed.push(`${t.task_id} → 已合并（${fact.commit.slice(0, 7)} @ ${fact.mergedAt.slice(0, 10)}，via ${fact.via}）`)
-  }
-  saveRegistry(repo, registry)
-  writeBoard(repo)
-  return changed
+export function apply() {
+  const error = new Error('旧登记册状态回写已退役：Multica 是当前 Task 状态唯一来源。')
+  error.code = LEGACY_WRITE_REASON_CODE
+  throw error
 }
-
-export { applyReconcile as apply }
 
 function main() {
   const cmd = process.argv[2]
@@ -254,20 +242,29 @@ function main() {
   const repo = path.resolve(get('--repo') || process.cwd())
   const baseRef = get('--base') || 'main'
   if (cmd === 'plan') {
+    if (!process.argv.includes('--legacy-history-audit')) {
+      console.error(JSON.stringify({
+        ok: false,
+        code: 'legacy_registry_audit_requires_explicit_flag',
+        reason: 'plan 只可用于显式发起的迁移历史取证，不属于当前任务流程。',
+        remediation: '需要核对旧登记材料时添加 --legacy-history-audit；当前 Task 状态请查询 Multica。',
+      }, null, 2))
+      process.exit(2)
+    }
     const r = reconcilePlan(repo, baseRef)
-    console.log(JSON.stringify({ total: r.total, ok: r.ok, toMerge: r.toMerge, suspicious: r.suspicious, unclaimedSkipped: r.unclaimedSkipped }, null, 2))
+    console.log(JSON.stringify({ source_kind: 'legacy-history-audit', total: r.total, ok: r.ok, toMerge: r.toMerge, suspicious: r.suspicious, unclaimedSkipped: r.unclaimedSkipped }, null, 2))
     return
   }
   if (cmd === 'apply') {
     // W8 P0-C3（WFM-162）：直接 CLI apply 会把任务状态回写旧 registry/BOARD 双账本，已 fail-closed。
-    // 必须在任何文件或 GitHub/CNB 写入前拒绝；程序化回写仍走导出函数 apply，签名与行为不变。
+    // 旧登记册状态回写已完全退役；CLI 与导出 API 都在任何旧账本写入前拒绝。
     console.error(
       `apply 已退役（旧 registry/BOARD 写入口已封闭）：reasonCode=${LEGACY_WRITE_REASON_CODE}。` +
-        'plan 仍可只读对账；程序化回写走导出函数 apply（后续 W8 切片另行退役）。',
+        'plan 只可在显式 --legacy-history-audit 下用于历史取证。',
     )
     process.exit(2)
   }
-  console.error(`用法: registry-reconcile plan [--repo <path>] [--base <ref>]   # apply 已退役（${LEGACY_WRITE_REASON_CODE}）`)
+  console.error(`用法: registry-reconcile plan --legacy-history-audit [--repo <path>] [--base <ref>]   # apply 已退役（${LEGACY_WRITE_REASON_CODE}）`)
   process.exit(2)
 }
 
