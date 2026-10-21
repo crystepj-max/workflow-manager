@@ -1,12 +1,14 @@
-# 工作流插件 UI / 交互架构定稿（v0.1）
+# 工作流插件 UI / 交互架构（2026-09 历史设计快照，v0.1）
 
-> 定位：Workflow Manager **插件侧 UI 与信息架构的产品权威**。回答"用户如何发现、理解、配置、调用、干预运行、处理人工决策与阻塞、查看完整 Run 与最终成果"。此前这些规则只存在于 GitHub [#75](https://github.com/crystepj-max/workflow-manager/issues/75) 的正文与评论里，仓库内无可引用副本——本文消除该权威真空。
+> ⚠️ **当前状态（2026-10-17）**：本文保留 2026-09 的方案与缺口盘点，仅供历史追溯，不是当前产品决策权威或当前施工清单。#75 的当前口径为 DT-00=C、DT-01=A、DT-02=B、DT-03=A：[DT-00](https://github.com/crystepj-max/workflow-manager/issues/75#issuecomment-6231570747)、[DT-01](https://github.com/crystepj-max/workflow-manager/issues/75#issuecomment-6231651893)、[DT-02](https://github.com/crystepj-max/workflow-manager/issues/75#issuecomment-6231717311)、[DT-03](https://github.com/crystepj-max/workflow-manager/issues/75#issuecomment-6231738435)。#75 仍保持 Open；WFM-82 承接正式归档和引用对齐。本文中“待裁”“开放”或“唯一权威”等表述只记录当时状态，不代表当前状态。
+
+> 历史定位：本文记录 Workflow Manager 插件侧 UI 与信息架构的设计方案，回答"用户如何发现、理解、配置、调用、干预运行、处理人工决策与阻塞、查看完整 Run 与最终成果"。当前产品决策以 GitHub [#75](https://github.com/crystepj-max/workflow-manager/issues/75) 的当前执行口径和后续有证据的评论为准。
 >
-> 需求源：[#75](https://github.com/crystepj-max/workflow-manager/issues/75)（`design: 工作流插件整体 UI/交互架构重构`），产品规则来自该 Issue 的「第五轮审查结论：P1–P10 全部确认」评论（2026-09-19 核对：GitHub 侧仅此 1 条评论，第 1–4 轮审查发生在 CNB 期，未随迁移带回，见 §7）。
+> 历史需求源：[#75](https://github.com/crystepj-max/workflow-manager/issues/75)（`design: 工作流插件整体 UI/交互架构重构`）及其「第五轮审查结论：P1–P10 全部确认」评论；2026-09-19 核对时 GitHub 侧仅有该评论，第 1–4 轮审查发生在 CNB 期，未随迁移带回，见 §7。后续产品裁定见本文开头链接。
 >
-> 与相邻权威的关系：本文只管 **UI 承载什么、如何分层呈现、用户可以做什么**。字段级契约见 [`blueprint-schema.md`](blueprint-schema.md)；产品语义与七层结果模型见 [`workflow-manager-v0.1-final-product-spec.md`](workflow-manager-v0.1-final-product-spec.md) §2–§6；为什么这样设计见 [`workflow-design-principles.md`](workflow-design-principles.md)。该规格 §11 把 UI 整体推给 #75，本文即其承接者。
+> 本文记录的设计边界：当时将 UI 承载、呈现分层和用户操作与字段级契约、产品语义及长期设计原则分开讨论。关联资料仍见 [`blueprint-schema.md`](blueprint-schema.md)、[`workflow-manager-v0.1-final-product-spec.md`](workflow-manager-v0.1-final-product-spec.md) 与 [`workflow-design-principles.md`](workflow-design-principles.md)；本文不取代这些资料或当前 #75 口径。
 >
-> Current vs Target：本文的 **P1–P10 是 Target 产品规则**；§5「承载现状」逐条标注 main 已实现到什么程度。二者不一致属正常迁移状态，不得静默混用。
+> Current vs Target（2026-09-19 快照）：本文的 **P1–P10 是当时记录的 Target 产品规则**；§5「承载现状」记录当时对 main 实现情况的观察。它不是当前实现或验收状态的证明。
 
 ## 1. 适用范围
 
@@ -73,7 +75,7 @@
 
 **不可协商的约束**：无论插件将来是否增加"运行 / 使用此工作流"入口，都必须进入同一个 Logical Run Runtime，**禁止出现 Chat Runtime 与 Plugin Runtime 两套运行状态或两份运行历史**。
 
-是否新增插件内运行入口，是本文唯一悬而未决的产品选择 → 决策票 `docs/tasks/specs/FEAT-75-ui-interaction-architecture/decision-tickets/DT-01-plugin-run-entry.md`。
+截至本文 2026-09 快照，是否新增插件内运行入口尚待产品裁定，对应历史决策票 `docs/tasks/specs/FEAT-75-ui-interaction-architecture/decision-tickets/DT-01-plugin-run-entry.md`。当前已由 #75 于 2026-10-17 确认 DT-01=A：新 Logical Run 只通过 Skill / Chat 发起，插件不新增起跑按钮，S-1 取消；同一 Run 内的控制与续跑仍保留。
 
 ---
 
@@ -88,7 +90,7 @@
 
 ### 4.2 编辑器：渐进式配置
 
-现状是**配置栏三段 tab**（`InspectorTabs`，`src/client.js:2106-2112`；其注释 `:361` 自述"配置栏三段 tab（V-11）"）：基础 / 结果与去向 / 高级设置+JSON，档位带校验错误时标 ⚠ 并自动切过去。目标形态是**四段**（插入"完成映射"一档），已由 **FEAT-115** 认领（需先出真机原型）。
+2026-09 快照记录的现状是**配置栏三段 tab**（`InspectorTabs`，`src/client.js:2106-2112`；其注释 `:361` 自述"配置栏三段 tab（V-11）"）：基础 / 结果与去向 / 高级设置+JSON。快照曾提出插入"完成映射"形成四段；当前该能力由 WFM-83 承接，历史 FEAT-115 已取消，不能把四段重排当作当前施工项。
 
 | 段 | 承载 | v0.1 状态 |
 |---|---|---|
@@ -99,7 +101,7 @@
 
 Completion Mapping 必须作为一等能力补入，不得只靠 JSON 页签手改 DSL；按 CHORE-113 侧裁定，它**不算 v0.1 发布门槛**（内置模板已满足规格 §13），排发布后第一批。
 
-`docs/design/outcome-presets.json` 定位为**候选值推荐**，不是校验规则；当前内容与实际模板不一致（见 §5 R-2），在纠偏前不得直接接入选配器。注意 FEAT-114 已明确"不新增完成映射 Preset 库"、并把 Preset 理解为"按 schema 声明给出候选值"（其 `task-spec-V1.md:38`）——**该文件本身的选择器至今无人认领**，仍是开放项（DT-02）。
+2026-09 快照曾记录 `docs/design/outcome-presets.json` 与实际模板不一致并将选择器列为待决事项。当前 DT-02=B 已在 #75 确认：按节点语义纠偏数据并在“结果与去向”提供内置 Preset 选择器；保留自定义字段与手填，应用前校验 schema 并明确冲突，不新增用户自建 Preset。当前交付/验收状态以 #75 与关联 Multica Task/PR 的实际证据为准。
 
 ### 4.3 Run 详情：三类视角的落点
 
@@ -167,23 +169,23 @@ P8 + §6 要求列表行至少承载 8 项。现状与缺口见 §5 R-8；宿主
 
 ---
 
-## 5. 缺口台账（2026-09-19 实测复核；R-13/R-14 为 2026-09-20 产品补入的两条输入）
+## 5. 历史缺口台账（2026-09-19 实测复核；R-13/R-14 为 2026-09-20 产品补入的两条输入）
 
-🔴 并行会话已产出另一份 #75 对账表（`docs/tasks/specs/CHORE-113-issue-75-reconcile-closeout/requirements-analysis.md` §2）。两份对 14 项的归属判定大体一致，但在 **"#75 该不该关票"** 上互斥（见 §8），且本表多出 R-2 的 preset 数据错误与 R-10/R-11/R-12 三条。裁定前不得宣称其中任何一份为唯一权威对账。
+本表仅保留 2026-09 的缺口和归属判断，不是当前施工清单。彼时并行会话还产出另一份 #75 对账表（`docs/tasks/specs/CHORE-113-issue-75-reconcile-closeout/requirements-analysis.md` §2），双方对 #75 去留判断互斥；该冲突及本表缺口现状均以本文开头所列 2026-10-17 #75 口径取代。
 
 | 编号 | 缺口 | 复核结论 | 归属 |
 |---|---|---|---|
-| R-1 | 插件无运行入口 | **修正**：运行能力已在 `wf_run`（宿主工具），缺的是 UI 入口 + 产品裁定；#83 的 Invocation Adapter 层未实现；LOC-015 已裁"发起权归插件、回灌方案不采纳" | 待 DT-01 |
-| R-2 | Outcome Preset 无选择器 | 成立，且 `outcome-presets.json` 三条 preset 的 `outcomePath` 全为 `$.verdict`，而正式模板实际用 `$.route`（14 处）/ `$.status`（3 处）/ `$.verdict`（仅 `templates/wf-explore.json:336` 1 处，共 18 个 `outcomePath` 声明）——**照文件做选择器会给用户错默认值**。FEAT-114 已声明不做 Preset 库（其 `task-spec-V1.md:38`），此面**至今无人认领** | 先纠偏（小票），再 DT-02 |
+| R-1 | 插件无运行入口 | 历史判断：曾将运行入口列为产品待裁；当前 DT-01=A，Skill / Chat 是新 Run 唯一正式入口，S-1 取消；既有 Run 控制/续跑仍走同一 Runtime | 当前归属见 #75 与关联任务 |
+| R-2 | Outcome Preset 无选择器 | 历史核对曾发现 Preset 数据与模板语义不一致；当前 DT-02=B 已确认数据纠偏及选择器范围。不得把本行当成当前数据或实现状态证明 | 当前交付/验收以 #75 与关联任务证据为准 |
 | R-3 | Completion Mapping 无 UI | 成立：`src/client.js` 内 `completionPath` 命中 0；`src/host.js:974` 与四套模板均已声明 | **FEAT-114**（非 #75 切片） |
 | R-10 | 编辑器只认单层结果字段路径 | 成立：`routingNameOf`（`client.js:5551-5555`）对多段路径返回空，而校验内核 `validate-core.cjs:123` 允许多层——**面板能力小于契约能力** | **FEAT-114** |
-| R-11 | 配置面板三段 → 四段重排 | 目标形态（插入"完成映射"档）未落地 | **FEAT-115**（需先出真机原型） |
+| R-11 | 配置面板三段 → 四段重排 | 历史目标曾提出插入"完成映射"档；当前 FEAT-115 已取消，不能作为现行需求 | Completion Mapping 归 WFM-83 |
 | R-4 | 无 Timeline 视图 | 成立，但已在 LOC-016 片1 基线内。⚠️ CHORE-113 判为"已实现（形态与原文不同：三页签 + 完整经过链路弹窗）"——**分歧项**：现有弹窗按节点序不按时间序，不满足 P9/§7 的合并时间线定义 | LOC-016 / 待裁定（见 §8） |
 | R-5 | 决策卡 / BLOCKED 无提交续跑 | 成立，已立 FEAT-208（待派工）；FEAT-85 交付的呈现层不动 | FEAT-208 |
-| R-6 | OBSERVING 未呈现 | 成立，根因更深：全仓无 `COMPLETED_OBSERVING` 生产者，看板 Completion 筛选按实际 producer 动态生成 → 该值永不出现。⚠️ CHORE-113 已记"产品裁定：v0.1 不做、列为非目标"（2026-09-19）——与本轮把它列为待裁事项相冲突 | 待确认该裁定是否为准（DT-03） |
+| R-6 | OBSERVING 未呈现 | 历史记录曾将其列为冲突待确认；当前 DT-03=A：本版不实现 OBSERVING，S-5 取消。长期设计原则与本版范围边界按 #75 当前口径区分 | 当前归属见 #75 / WFM-82 |
 | R-7 | #54–#57 裁定未入库 | 成立：四票 GitHub `closed=COMPLETED`（2026-08-26T04:46Z），0 评论，`docs/design/` 无裁定记录。CHORE-113 判"无需再判"；本文 §7 采更严格口径（保留裁定依据，供回归时反查） | 本文 §7 记录 |
 | R-8 | 看板字段缺口 | 成立：§6 八项约 3.5 项有；缺 current node、last Node Outcome、回退额度 `used/limit`、当前快照修订、最近事件 | #75 切片 S-4（CHORE-113 判其归 LOC-016） |
-| R-9 | 权威真空 | 成立：P1–P10 仅在 Issue 评论；规格 §11（`:240`）把 UI 整体推给 #75，`roadmap.md:176` 仍列 Timeline 未做 | 本文即修复 |
+| R-9 | 权威真空 | 历史发现：当时拟将设计归档至本文；当前 #75 的决策/归属索引为现行口径，正式归档与引用对齐由 WFM-82 承接 | 本文仅作历史资料 |
 | R-12 | #75 §1 探索硬用例已被取代 | 成立：LOC-036（用户 2026-09-16 确认）把探索额度耗尽改为 `INSUFFICIENT` 直接结束、不再转人工；#75 从未记录该取代。**2026-09-20 已裁定为方案 A** | 本文 §2 已标注；是否回写 Issue 归冲突裁定 |
 | R-13 | 额度收尾在结局权威里被误显示 | **已钉死（离线注入 + 本轮逐行复核）**：不是"看不出"，而是把已收口的 Run 显示成**「退回修改」**（`client.js:3441` → `zh.json:338`），且完成类型两种 `INSUFFICIENT` 渲染同一句（`zh.json:285`）。区分信号宿主侧已具备（`generate.mjs:1537-1538` 的 `completion.path` + DONE 体的 `budgetUsed`/`maxRounds`/`results`/`history`），**UI 四条全未用** → 纯界面缺陷，无需改宿主 | 本文 §4.6（7 条逐面验收）→ 切片 S-6；真机复验待重装 |
 | R-14 | 降级取证在界面上不可见 | 成立：`canIssueIndependentProof`（`scripts/node-isolation.mjs:235-239`）在 `guarantee !== enforced` 时拒签，2026-09-20 产品模式实测 `unavailable`（GitHub #235 OPEN），成果只在产物文字上标"非独立取证"，Run Detail 无档位区分 | 本文 §4.7 → 切片 S-7（呈现需求；根因修复归 #235） |
@@ -223,17 +225,17 @@ P8 + §6 要求列表行至少承载 8 项。现状与缺口见 §5 R-8；宿主
 
 ---
 
-## 8. 会话间冲突的裁定结果（已决）
+## 8. 历史会话间冲突裁定（2026-09-21；已被 2026-10-17 #75 口径取代）
 
 曾有两份同日、同源（GitHub #75）的对账得出互斥结论。**产品经理已于 2026-09-21 裁定：以 `FEAT-75` 这侧为准**（原话「以你这边为准，单独分支单独 worktree 来推进」）。据此固定三件事：
 
 | 事项 | 裁定后的口径 |
 |---|---|
-| #75 存续 | **保留 open 推进**，作为 v0.1 UI/交互架构的伞票与剩余项承接者；`CHORE-113` 的"降为需求源并关票"结论**不予采纳** |
-| 权威载体 | **本文**是 UI/交互架构与 #75 缺口对账的唯一落点；`docs/design/issue-75-ui-reconciliation.md`（CHORE-113 计划创建、至今未落盘）不再另建第二份对账权威 |
-| 派工面 | #75 派工面 = S-2（preset）、S-4（看板字段）、S-6（额度收尾呈现）、S-7（降级取证可见）+ 挂起的 S-1/S-5；`FEAT-114`（完成映射与多层路径）与 `FEAT-115`（面板四段重排）作为已拆出的施工卡保留 |
+| #75 存续 | 2026-09 当时决定保留 open；2026-10 的 DT-00=C 将其收窄为 UI 剩余事项父票与决策/归属索引，仍保持 Open |
+| 权威载体 | 当时计划由本文记录 UI/交互架构与缺口对账；当前决策/归属以 #75 的 2026-10-17 执行口径和后续评论为准，WFM-82 承接正式归档与引用对齐 |
+| 派工面 | 2026-09 当时的清单含 S-2 / S-4 / S-6 / S-7，并将 S-1 / S-5 挂起；当前 DT-01=A 与 DT-03=A 已取消 S-1 / S-5，FEAT-115 已取消，Completion Mapping 与多层路径归 WFM-83 |
 
-**未被本裁定覆盖、仍开放的三件**（各自归属清楚，不因此重开冲突）：
+**截至 2026-09-21 尚未解决的三项历史记录**（当前归属以 #75 的 2026-10-17 执行口径和关联任务为准）：
 
 1. Timeline 归属分歧仍然存在：CHORE-113 判"已实现（形态不同）"，本文 §5 R-4 判"合并时间线未交付"，代码依据是 `chainEntries`（`src/client.js:3977-4055`）按模板节点顺序而非时间序。本文按 R-4 口径执行，实施落点仍是 LOC-016 片1。
 2. `CHORE-113` 记为"产品（本会话）"的其余两条裁定（**Completion Mapping 不算发布门槛**、**先补能力再重排面板**）未经本轮确认，作为待确认项保留——它们只影响排期顺序与发布门槛，不改变 #75 存续。
