@@ -18,6 +18,9 @@ const ROLE_MANIFEST = join(pkgRoot, '..', '..', 'dsh', 'roles', 'builtin-roles.j
 // #75 S-2b：内置 Outcome Preset 源数据与 dist 产物一致性
 const OUTCOME_PRESETS_SRC = join(pkgRoot, '..', '..', 'docs', 'design', 'outcome-presets.json')
 const OUTCOME_PRESETS_DIST = join(pkgRoot, 'dist', 'outcome-presets.json')
+// #75 S-4：看板只读投影内核
+const DASH_PROJECTION_SRC = join(pkgRoot, '..', '..', 'scripts', 'dashboard-projection.cjs')
+const DASH_PROJECTION_DIST = join(pkgRoot, 'dist', 'dashboard-projection.cjs')
 const STAMP = join(pkgRoot, 'dist', '.src-stamp.json')
 const DIST_HOST = join(pkgRoot, 'dist', 'host-entry.mjs')
 const PKG = join(pkgRoot, 'package.json')
@@ -50,6 +53,19 @@ test('T2：outcome-presets 源数据纳入 stamp，且 dist 产物与源文件�
     readFileSync(OUTCOME_PRESETS_DIST, 'utf8'),
     readFileSync(OUTCOME_PRESETS_SRC, 'utf8'),
     'dist/outcome-presets.json 与源文件内容不一致',
+  )
+})
+
+test('T2：dashboard-projection 内核纳入 stamp，且 dist 产物与源文件逐字节一致', () => {
+  assert.ok(existsSync(STAMP), '缺少 dist/.src-stamp.json：请运行 npm run build')
+  const stamp = JSON.parse(readFileSync(STAMP, 'utf8'))
+  assert.ok(stamp.dashboardProjection, 'stamp 缺少 dashboardProjection 摘要：请运行 npm run build')
+  assert.equal(stamp.dashboardProjection, sha256(DASH_PROJECTION_SRC), 'scripts/dashboard-projection.cjs 已变更但 dist 未重建')
+  assert.ok(existsSync(DASH_PROJECTION_DIST), '缺少 dist/dashboard-projection.cjs：请运行 npm run build')
+  assert.equal(
+    readFileSync(DASH_PROJECTION_DIST, 'utf8'),
+    readFileSync(DASH_PROJECTION_SRC, 'utf8'),
+    'dist/dashboard-projection.cjs 与源文件内容不一致',
   )
 })
 

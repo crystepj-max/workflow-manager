@@ -172,8 +172,10 @@ test('开发粘贴用 dynamic 闭包合计 ≤ 284KB（一次 cordis_define 载�
   assert.match(hostText, /\nreturn\{name:"visual-workflow-host"/, 'host 必须以注入头 + return {...} 闭包体收尾')
   assert.match(clientText, /^return\{/, 'client 必须是 return {...} 闭包体')
   // 动态沙箱缺省注入：插件根常量（loadDist 内核来源）与 Buffer 垫片（validate-core 尺寸检查依赖）
-  assert.match(hostText, /const __VWF_PLUGIN_ROOT__ = "/, 'host 必须自注入 __VWF_PLUGIN_ROOT__（动态沙箱不提供）')
   assert.match(hostText, /const __VWF_REPO_ROOT__ = "/, 'host 必须自注入 __VWF_REPO_ROOT__（generate/workspace-host 路径来源）')
+  const pluginRootDeclaration = hostText.match(/const __VWF_PLUGIN_ROOT__ = __VWF_REPO_ROOT__ \+ ("(?:\\.|[^"])*");/)
+  assert.ok(pluginRootDeclaration, 'host 必须从仓库根派生 __VWF_PLUGIN_ROOT__，避免重复嵌入绝对路径')
+  assert.ok(JSON.parse(pluginRootDeclaration[1]).replace(/\\/g, '/').endsWith('/packages/dsh-visual-workflow'), '派生插件根仍指向插件包目录')
   assert.match(hostText, /globalThis\.Buffer/, 'host 必须注入 globalThis.Buffer 垫片（validate-core 尺寸检查依赖）')
 })
 

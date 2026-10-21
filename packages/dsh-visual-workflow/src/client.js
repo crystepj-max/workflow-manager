@@ -3719,6 +3719,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           completionType: lr && lr.completion && lr.completion.type ? String(lr.completion.type) : '',
           outcomes: lr ? outcomeValuesOf(lr) : [],
           lifecycle: lr && lr.lifecycle ? String(lr.lifecycle.state || '') : '',
+          // #75 S-4：宿主只读看板投影（无逻辑运行归属的旧记录为 null，不伪造）
+          dashboard: head.dashboard || null,
           bucket: runBucketOf(head.status),
         }
       }, [lrMap, lrErr])
@@ -3915,6 +3917,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         ),
         byWs.get(key).slice().sort((a, b) => runOrderOf(a.bucket) - runOrderOf(b.bucket)).map((m) => {
           const gi = m.task.logicalRunId ? (gateIdx || new Map()).get(m.task.logicalRunId) : undefined
+          // #75 S-4：宿主只读投影的行内呈现（无逻辑运行归属的旧记录不新增行，不伪造）
+          const dash = m.dashboard
+          const dashInfo = dash && dash.summary_fields.map(([k, v]) => t(k) + (v === '' ? '' : '：' + (v === null ? t('dashNotRecorded') : (v && v.key ? t(v.key) + (v.hint ? ' · ' + t(v.hint) : '') + (v.at ? ' · ' + fmtAt(v.at) : '') : v)))).join(' · ')
           return h('button', {
             key: m.task.key,
             className: 'vwf-run-row',
@@ -3926,10 +3931,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h('div', { className: 'vwf-row', style: { gap: 6 } },
                 // 人工门禁位次（一次裁决一张）：并入列表后不丢这条信息
                 gi === undefined ? null : h('span', { className: 'vwf-badge accent' }, gi === 0 ? t('dashDeciding') : t('dashQueued', { n: gi + 1 })),
-                statusBadge(m.head.status)
+                statusBadge(m.head.status),
+                // S-4：Lifecycle 以独立标签展示，不翻译为引擎技术状态
               )
             ),
           h('p', { className: 'vwf-run-row-note' }, m.lr && m.lr.title ? String(m.lr.title) : (m.head.name || m.head.workflowId || '—')),
+          dashInfo ? h('small', { className: 'vwf-muted-sm' }, dashInfo) : null,
           h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
             h('small', null, (m.head.name || m.head.workflowId || '—') + ' · ' + (m.rework === null ? t('dashRuntimeLabel') : (m.rework > 0 ? t('dashReworkCount', { n: m.rework }) : t('dashFirstRun')))),
             h('small', null, m.task.segmentCount > 1 ? t('dashSegment', { n: (m.head.segment || m.task.segmentCount), total: m.task.segmentCount }) + ' · ' : '')

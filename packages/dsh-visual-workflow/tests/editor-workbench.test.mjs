@@ -12,11 +12,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { JSDOM } from 'jsdom'
 
 const here = dirname(fileURLToPath(import.meta.url))
+const require = createRequire(import.meta.url)
+const { dashboardProjectionOf } = require(join(here, '..', '..', '..', 'scripts', 'dashboard-projection.cjs'))
 // 真实内置模板：扇出（并行研究组）+ 汇总 + 三类连接齐备（V-4 要求的第三类模板）
 const EXPLORE_DSL = JSON.parse(readFileSync(join(here, '..', '..', '..', 'templates', 'wf-explore.json'), 'utf8'))
 const src = readFileSync(join(here, '..', 'src', 'client.js'), 'utf8')
@@ -105,6 +108,12 @@ function makeRuntime(opts) {
         return { providers: [{ id: 'deepseek-official', models: ['deepseek-v4-pro', 'deepseek-v4-flash'] }] }
       case 'vwf.roles':
         return { roles: ROLES }
+      case 'vwf.runs.list':
+        // #75 S-4：看板行挂载级样本（options.s4Runs 注入，行为真实 RPC 同形状）
+        return { runs: (options.s4Runs || []).map((r) => ({ ...r })) }
+      case 'vwf.logicalRuns.get':
+        if (options.s4Lr && options.s4Lr[args.logical_run_id]) return { found: true, record: JSON.parse(JSON.stringify(options.s4Lr[args.logical_run_id])) }
+        return { found: false, record: null }
       case 'vwf.outcomePresets.list':
         // #75 S-2b：与真实构建产物同源（docs/design/outcome-presets.json）
         return { ok: true, schemaVersion: 1, presets: JSON.parse(readFileSync(join(here, '../../../docs/design/outcome-presets.json'), 'utf8')).presets }
@@ -1420,4 +1429,134 @@ test('S-2b BLOCKED 无绕过：草稿未提交时不出现任何应用入口，�
   assert.ok(afterCommitText.includes('候选结果未通过完整性检查'), '真实结构阻塞（改名孤儿 required）保持 BLOCKED')
   assert.ok(!Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '预览并应用预设'), '真实阻塞下仍无预览应用入口')
   assert.ok(!Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '确认应用预设'), '真实阻塞下仍无确认应用入口')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #75 S-4 看板行挂载级回归：五种运行状态样本 + 旧记录/状态不一致负向
+// ═══════════════════════════════════════════════════════════════════════════
+function s4Row(over) {
+  const row = Object.assign({
+    id: 'run-1', name: 'wf-x', status: 'running', phase: '', taskId: 'TASK-1', workflowId: 'wf-x',
+    startedAt: 1000, decision_id: '', reason: '', node: '',
+    logical_run_id: 'LR-1', segment: 1, segment_count: 1, logical_state: 'RUNNING', pause_pending: false,
+    dashboard: null,
+  }, over)
+  if (row.dashboard) {
+    const d = row.dashboard
+    const lr = {
+      lifecycle: d.lifecycle ? { state: d.lifecycle } : null,
+      segments: [{ index: row.segment, run_id: row.id, active: row.status !== 'DONE' }],
+      snapshots: Number.isFinite(d.snapshot_revision) ? [{ revision: d.snapshot_revision, active: true }] : [],
+      business_outcomes: d.last_outcome ? { [d.last_outcome.node]: d.last_outcome } : {},
+      control_events: d.last_event && d.last_event.source === 'control' ? [{ type: d.last_event.type, at: d.last_event.at }] : [],
+    }
+    const run = { node: row.node, status: row.status, budgetUsed: d.budget_used, maxRounds: d.budget_limit }
+    row.dashboard = dashboardProjectionOf(lr, () => run)
+  }
+  return row
+}
+function s4Dash(over) {
+  return Object.assign({ lifecycle: null, budget_used: null, budget_limit: null, snapshot_revision: null, last_outcome: null, last_event: null }, over)
+}
+async function openRunsBoard(container) {
+  await act(async () => {
+    const tabBtn = container.querySelector('[data-vwf-nav="dashboard"]')
+    assert.ok(tabBtn, '运行页签存在')
+    tabBtn.click()
+    await flush(); await flush(); await flush()
+  })
+  return container
+}
+function s4RowByText(container, taskId) {
+  return Array.from(container.querySelectorAll('.vwf-run-row')).find((r) => r.textContent.includes(taskId)) || null
+}
+
+test('S-4 看板行（挂载级）：RUNNING / WAITING_HUMAN / BLOCKED 三态的八项呈现', async () => {
+  const { container } = await mountPage({
+    s4Runs: [
+      s4Row({ id: 'r-a', taskId: 'TASK-A', logical_run_id: 'LR-A', logical_state: 'RUNNING', node: 'evaluate',
+        dashboard: s4Dash({ lifecycle: 'RUNNING', budget_used: 1, budget_limit: 3, snapshot_revision: 1,
+          last_outcome: { node: 'evaluate', outcome: 'OPTIMIZE', at: 1000 }, last_event: { source: 'control', type: 'guidance', at: 2000 } }) }),
+      s4Row({ id: 'r-b', taskId: 'TASK-B', status: 'WAITING_HUMAN', decision_id: 'd1', logical_run_id: 'LR-B', logical_state: 'WAITING_HUMAN', node: 'evaluate',
+        dashboard: s4Dash({ lifecycle: 'WAITING_HUMAN', last_outcome: { node: 'evaluate', outcome: 'CONFIRM', at: 1000 } }) }),
+      s4Row({ id: 'r-c', taskId: 'TASK-C', status: 'BLOCKED', logical_run_id: 'LR-C', logical_state: 'BLOCKED', node: 'review',
+        dashboard: s4Dash({ lifecycle: 'BLOCKED', snapshot_revision: 2 }) }),
+    ],
+  })
+  await openRunsBoard(container)
+
+  const rowA = s4RowByText(container, 'TASK-A')
+  assert.ok(rowA, 'RUNNING 行存在')
+  assert.ok(rowA.textContent.includes('运行中'), 'Lifecycle 徽标：运行中')
+  assert.ok(!rowA.textContent.includes('需要人工决策'), 'RUNNING 不误报待人工操作')
+  assert.ok(rowA.textContent.includes('当前节点：evaluate'), '当前节点')
+  assert.ok(rowA.textContent.includes('最近结果：evaluate · OPTIMIZE'), '最近结果 node·outcome')
+  assert.ok(rowA.textContent.includes('回退额度：1 / 3'), '预算 used/limit')
+  assert.ok(rowA.textContent.includes('快照：Rev 1'), '快照修订')
+  assert.ok(rowA.textContent.includes('最近事件：用户指导 · '), '最近事件类别+时间')
+
+  const rowB = s4RowByText(container, 'TASK-B')
+  assert.ok(rowB, 'WAITING_HUMAN 行存在')
+  assert.ok(rowB.textContent.includes('等待人工决策') && rowB.textContent.includes('需要人工决策'), 'Lifecycle 与操作提示分开')
+  assert.ok(rowB.textContent.includes('最近结果：evaluate · CONFIRM'), '原 Node Outcome 保留，不被转成 Lifecycle')
+  assert.ok(rowB.textContent.includes('回退额度：未记录'), '预算缺失显示未记录，不补零')
+
+  const rowC = s4RowByText(container, 'TASK-C')
+  assert.ok(rowC, 'BLOCKED 行存在')
+  assert.ok(rowC.textContent.includes('运行受阻') && rowC.textContent.includes('需要处理阻塞'), '阻塞提示')
+  assert.ok(rowC.textContent.includes('快照：Rev 2'), '快照 Rev 2')
+  assert.ok(rowC.textContent.includes('最近结果：未记录'), '无业务结果不猜测')
+})
+
+test('S-4 看板行（挂载级）：跨段恢复单行不累加预算；COMPLETED 终态不冒称执行中', async () => {
+  const { container } = await mountPage({
+    s4Runs: [
+      s4Row({ id: 'r-1', taskId: 'TASK-CS', logical_run_id: 'LR-CS', segment: 1, segment_count: 2, logical_state: 'RUNNING', startedAt: 1000,
+        dashboard: s4Dash({ lifecycle: 'RUNNING', budget_used: 2, budget_limit: 3, snapshot_revision: 2 }) }),
+      s4Row({ id: 'r-2', taskId: 'TASK-CS', logical_run_id: 'LR-CS', segment: 2, segment_count: 2, logical_state: 'RUNNING', startedAt: 2000, node: 'evaluate',
+        dashboard: s4Dash({ lifecycle: 'RUNNING', budget_used: 2, budget_limit: 3, snapshot_revision: 2 }) }),
+      s4Row({ id: 'r-d', taskId: 'TASK-D', status: 'DONE', logical_run_id: 'LR-D', logical_state: 'COMPLETED', node: 'review',
+        dashboard: s4Dash({ lifecycle: 'COMPLETED', last_outcome: { node: 'review', outcome: 'APPROVE', at: 1000 } }) }),
+    ],
+    s4Lr: { 'LR-D': { logical_run_id: 'LR-D', lifecycle: { state: 'COMPLETED' }, completion: { type: 'EVALUATION_PASSED' } } },
+  })
+  await openRunsBoard(container)
+
+  const csRows = Array.from(container.querySelectorAll('.vwf-run-row')).filter((r) => r.textContent.includes('TASK-CS'))
+  assert.equal(csRows.length, 1, '跨段恢复聚合为一个 Logical Run 行')
+  assert.ok(csRows[0].textContent.includes('回退额度：2 / 3'), '预算取最新有效值，不跨段累加')
+  assert.ok(!csRows[0].textContent.includes('4 / 3'), '不出现两段求和')
+  assert.ok(csRows[0].textContent.includes('快照：Rev 2'), '最新有效修订')
+
+  const rowD = s4RowByText(container, 'TASK-D')
+  assert.ok(rowD, 'COMPLETED 行存在')
+  assert.ok(rowD.textContent.includes('已完成'), 'Lifecycle 独立展示')
+  assert.ok(rowD.textContent.includes('—（运行已结束）'), '终态不冒称某节点仍在执行')
+  assert.ok(rowD.textContent.includes('最近结果：review · APPROVE'), '最近结果独立，不等价完成')
+  // displayWord 将 EVALUATION_PASSED 显示为「汇总完成」：完成类型独立于最近结果与 Lifecycle
+  assert.ok(rowD.textContent.includes('汇总完成'), 'Completion Type 单独展示')
+})
+
+test('S-4 看板行（挂载级）负向：旧记录不伪造；DONE 与 RUNNING 并存显示状态待同步', async () => {
+  const { container } = await mountPage({
+    s4Runs: [
+      // 旧记录：无 logical_run_id、无 dashboard
+      s4Row({ id: 'r-old', taskId: 'TASK-OLD', logical_run_id: undefined, logical_state: undefined }),
+      // 状态不一致：技术 DONE 但 Lifecycle 仍是 RUNNING
+      s4Row({ id: 'r-x', taskId: 'TASK-X', status: 'DONE', logical_run_id: 'LR-X', logical_state: 'RUNNING', node: 'evaluate',
+        dashboard: s4Dash({ lifecycle: 'RUNNING', budget_used: 1, budget_limit: 3 }) }),
+    ],
+  })
+  await openRunsBoard(container)
+
+  const oldRow = s4RowByText(container, 'TASK-OLD')
+  assert.ok(oldRow, '旧记录行仍存在')
+  assert.ok(!oldRow.textContent.includes('回退额度'), '旧记录不虚构预算')
+  assert.ok(!oldRow.textContent.includes('最近事件'), '旧记录不虚构事件')
+
+  const rowX = s4RowByText(container, 'TASK-X')
+  assert.ok(rowX, '不一致行存在')
+  assert.ok(rowX.textContent.includes('状态待同步'), '显示状态待同步提示')
+  assert.ok(rowX.textContent.includes('运行中'), 'Lifecycle 原样保留（不把 DONE 翻译成 COMPLETED）')
+  assert.ok(rowX.textContent.includes('DONE'), '技术状态原样保留')
 })

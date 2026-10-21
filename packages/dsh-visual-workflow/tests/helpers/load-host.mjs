@@ -43,6 +43,7 @@ export const DIST_KERNEL_SEED = {
   [DIST + '/state-recovery-core.cjs']: stateRecoveryCoreSrc,
   [DIST + '/route.cjs']: nodeProviderCoreSrc,
   [DIST + '/node-isolation-host-client.cjs']: nodeIsolationHostClientSrc,
+  [DIST + '/dashboard-projection.cjs']: readFileSync(join(repoRoot, 'scripts', 'dashboard-projection.cjs'), 'utf8'),
 }
 
 const localeDir = join(here, '..', '..', 'locales')
