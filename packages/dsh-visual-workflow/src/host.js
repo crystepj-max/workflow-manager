@@ -3123,6 +3123,20 @@ return {
     const SR = (d) => ({ type: 'string', required: true, description: d })
     const O = (d) => (d ? { type: 'object', additionalProperties: true, description: d } : { type: 'object', additionalProperties: true })
     const textTool = (t) => dtools.define({ ...t, output: { schema: S(), render: (a, value) => [{ type: 'text', text: value }] } })
+    // FIX-225：在首次 await 前抢位；交给 live 后释放，所有返回/异常由 finally 兜底。
+    // release 幂等，旧调用结算时不能误删后一次新启动的占位。续跑只查占位，不抢位。
+    function guardTaskStarts(execute) {
+      const starting = new Map()
+      return async (rawArgs) => {
+        const args = rawArgs || {}
+        const taskId = String(args.taskId || '')
+        if (starting.has(taskId)) return '错误：任务 ' + taskId + ' 已占用（工作流 ' + starting.get(taskId) + ' 正在启动中）；同 taskId 串行互斥。请等待前任结束后重试；并行任务请换 taskId。'
+        let claimed = !(args.decision_id || args.entry || args.resume_paused === true)
+        if (claimed) starting.set(taskId, String(args.templateId || (args.dsl && args.dsl.id) || '自定义工作流'))
+        const release = () => { if (claimed) { claimed = false; starting.delete(taskId) } }
+        try { return await execute(rawArgs, release) } finally { release() }
+      }
+    }
     dtools.register(textTool({
       name: 'wf_run',
       description: '运行一个可视化工作流（DSL 图）：校验并编译为 workflow 脚本后交给引擎执行。args.templateId 用内置/用户模板，或 args.dsl 传自定义图。返回运行状态；Human Decision 以 WAITING_HUMAN 暂停，用 decision_id + user_choice 续跑；残留人工门禁以 AWAITING_HUMAN_<node> 暂停，用 entry + approved 续跑。',
@@ -3154,7 +3168,7 @@ return {
         retry_policy_overrides: O('时间上限可调'),
         resume_paused: { type: 'boolean', description: '#80 暂停恢复：对 PAUSED 的逻辑运行按检查点现场续跑同一 Logical Run；恢复后的节点读取暂停期间提交的全部 Guidance 与最新基线修订（wf_control 提交）' },
       },
-      async execute(rawArgs) {
+      execute: guardTaskStarts(async (rawArgs, releaseStart) => {
         refreshServices()
         await srcCore()
         // 工具平台会 deepFreeze 入参：续跑回填写到浅拷贝上
@@ -3228,6 +3242,17 @@ return {
           for (const k of Object.keys(cfg)) { if (cfg[k] === undefined || cfg[k] === null || cfg[k] === '') delete cfg[k] }
           return cfg
         }
+        const createTaskRun = (id, derivedFrom) => createLogicalRun({
+          logical_run_id: id,
+          taskId: logicalTaskId,
+          templateId: String(args.templateId || v.sanitized.id || ''),
+          dsl: v.sanitized,
+          script: c.script,
+          roleDir: args.roleDir || c.roleDir || '',
+          roles: c.roles,
+          config: logicalRunConfig(),
+          derivedFrom,
+        })
         let logicalRec = null
         let logicalTrigger = 'start'
         // FIX-226：本次是否新建了逻辑运行（新建才写 Rev1 角色条目并留降级控制事件；
@@ -3237,7 +3262,7 @@ return {
         // → 重新 Probe → Resume；不是新启，也不是崩溃残留派生。
         let probeResume = false
         // #80：暂停恢复是独立续跑形态——按检查点现场回填 entry/results，不得当成新启动
-        if (isHdResume || isLegacyResume || isPauseResume) {
+        if (isResumeLike) {
           const latest = latestLogicalRunForTask(logicalTaskId)
           if (latest && latest.terminal) {
             return '错误：任务 ' + logicalTaskId + ' 的逻辑运行 ' + latest.logical_run_id + ' 已终态（' + latest.lifecycle.state + '），同一运行不能继续。请直接重新发起（将派生新运行并保留来源关系）。'
@@ -3277,16 +3302,7 @@ return {
             logicalRec = latest
           } else {
             // 旧形态挂起记录（升级前）升级后续跑：由本段起新建逻辑运行承接，不回写旧记录（R14）
-            logicalRec = createLogicalRun({
-              logical_run_id: logicalTaskId,
-              taskId: logicalTaskId,
-              templateId: String(args.templateId || v.sanitized.id || ''),
-              dsl: v.sanitized,
-              script: c.script,
-              roleDir: args.roleDir || c.roleDir || '',
-              roles: c.roles,
-              config: logicalRunConfig(),
-            })
+            logicalRec = createTaskRun(logicalTaskId)
             createdRoles = c.roles
           }
         } else {
@@ -3309,20 +3325,11 @@ return {
               await refreshWorkspaceContext(latest, latest.logical_run_id)
               requestLogicalPersist(latest.logical_run_id)
             }
-            logicalRec = createLogicalRun({
-              logical_run_id: latest ? nextLogicalRunId(logicalTaskId) : logicalTaskId,
-              taskId: logicalTaskId,
-              templateId: String(args.templateId || v.sanitized.id || ''),
-              dsl: v.sanitized,
-              script: c.script,
-              roleDir: args.roleDir || c.roleDir || '',
-              roles: c.roles,
-              config: logicalRunConfig(),
-              derivedFrom: latest ? latest.logical_run_id : null,
-            })
+            logicalRec = createTaskRun(latest ? nextLogicalRunId(logicalTaskId) : logicalTaskId, latest ? latest.logical_run_id : null)
             createdRoles = c.roles
           }
         }
+        const wsIdentity = logicalRec.logical_run_id
         // FIX-226（§6.3/§9.4）：新建逻辑运行时如存在未内联的角色（角色文件读不到或编译产物
         // 超尺寸闸门被拒绝内联），留一条控制事件——降级必须可见，不得静默假装已冻结。
         // 只在新建时留痕，续跑沿用 Rev1 快照已有条目，不重复记事件。
@@ -3337,9 +3344,9 @@ return {
         }
         // #79 快照修订（R3/R4）：续跑携带 model_overrides → 追加 Rev N（仅
         // Provider/Model），旧修订保留，新修订只影响后续执行；#74 BLOCKED 恢复同理。
-        if ((isHdResume || isLegacyResume || isPauseResume || probeResume) && args.model_overrides && typeof args.model_overrides === 'object' && !Array.isArray(args.model_overrides) && Object.keys(args.model_overrides).length) {
+        if ((isResumeLike || probeResume) && args.model_overrides && typeof args.model_overrides === 'object' && !Array.isArray(args.model_overrides) && Object.keys(args.model_overrides).length) {
           const rev = appendSnapshotRevision(logicalRec, args.model_overrides)
-          if (rev) requestLogicalPersist(logicalRec.logical_run_id)
+          if (rev) requestLogicalPersist(wsIdentity)
         }
         // Codex R2 ①：续跑必须执行 Rev 1 冻结脚本（R3：运行中仅 Provider/Model 可改，
         // 工作流定义冻结）——等待期间模板被修改时，重新编译会让"新脚本 + script_ref:1
@@ -3347,12 +3354,12 @@ return {
         // #74 BLOCKED 恢复同为既有运行的继续，遵守同一冻结纪律。
         const snap1 = (logicalRec.snapshots || []).find((s) => s.revision === 1) || null
         const frozenScript = snap1 && typeof snap1.script === 'string' && snap1.script ? snap1.script : null
-        const execScript = (isHdResume || isLegacyResume || isPauseResume || probeResume) && frozenScript ? frozenScript : c.script
+        const execScript = (isResumeLike || probeResume) && frozenScript ? frozenScript : c.script
         // Codex R2 ②：续跑传入 active 快照的合并绑定（而非本次 delta）——Rev3 只改 B
         // 时，A 必须仍用 Rev2 的覆盖值执行；合并语义与编译脚本一致（显式覆盖优先，
         // $default 兜底未显式覆盖节点）。
         const activeSnap = activeSnapshot(logicalRec)
-        const modelOverridesForExec = (isHdResume || isLegacyResume || isPauseResume || probeResume) ? deepCloneData(activeSnap ? activeSnap.provider_model : null) : undefined
+        const modelOverridesForExec = (isResumeLike || probeResume) ? deepCloneData(activeSnap ? activeSnap.provider_model : null) : undefined
 
         // #74 Preflight Probe：业务节点执行前对本次将使用的 active 快照去重探测。
         // 探针明确失败 → BLOCKED（可恢复，不改写 Workflow Outcome）；探针降级
@@ -3372,11 +3379,11 @@ return {
               if (blocking.length) {
                 const summaryText = probeFailureSummary(blocking)
                 logicalSetState(logicalRec, 'BLOCKED', logicalReason('PROBE_FAILED', summaryText))
-                requestLogicalPersist(logicalRec.logical_run_id)
+                requestLogicalPersist(wsIdentity)
                 return JSON.stringify({
                   blocked: true,
                   stage: 'preflight_probe',
-                  logical_run_id: logicalRec.logical_run_id,
+                  logical_run_id: wsIdentity,
                   snapshot_revision: activeSnap ? activeSnap.revision : null,
                   failures: blocking,
                   hint: '模型探针未通过：请修改当前 Run 的 Provider/Model 后，用 wf_run（同 taskId + model_overrides）恢复同一逻辑运行；完成后将产生新的 Snapshot Revision 并重新探针。若本运行此前因人工决策处于 WAITING_HUMAN，请在原续跑参数（decision_id/user_choice）基础上追加 model_overrides 恢复。',
@@ -3405,14 +3412,14 @@ return {
           })
           if (!gateRun.ok) {
             logicalSetState(logicalRec, 'BLOCKED', logicalReason('PREFLIGHT_GATE_FAILED', gateRun.detail || '机械资格检查执行失败'))
-            requestLogicalPersist(logicalRec.logical_run_id)
-            return JSON.stringify({ blocked: true, stage: 'preflight_qualification', logical_run_id: logicalRec.logical_run_id, detail: gateRun.detail }, null, 2)
+            requestLogicalPersist(wsIdentity)
+            return JSON.stringify({ blocked: true, stage: 'preflight_qualification', logical_run_id: wsIdentity, detail: gateRun.detail }, null, 2)
           }
           const gate = gateRun.gate
           if (gate.route === 'BLOCKED') {
             logicalSetState(logicalRec, 'BLOCKED', logicalReason('PREFLIGHT_BLOCKED', String(gate.blockers || gate.summary || '资格检查未通过')))
-            requestLogicalPersist(logicalRec.logical_run_id)
-            return JSON.stringify({ blocked: true, stage: 'preflight_qualification', logical_run_id: logicalRec.logical_run_id, route: gate.route, blockers: gate.blockers, reasons: gate.reasons }, null, 2)
+            requestLogicalPersist(wsIdentity)
+            return JSON.stringify({ blocked: true, stage: 'preflight_qualification', logical_run_id: wsIdentity, route: gate.route, blockers: gate.blockers, reasons: gate.reasons }, null, 2)
           }
           args.results = Object.assign({}, args.results || {}, { preflight: gate })
         }
@@ -3420,12 +3427,11 @@ return {
         // Codex R2 ③：派生运行按自身 logical_run_id 分配 workspace——沿用原 taskId 会让
         // #93 注册表把前任（仍注册）的 workspace 复用给派生运行，或在清理后把溯源记到
         // 旧身份下。markWorkspaceLifecycle/refreshWorkspaceContext 同步用该 ID。
-        const wsIdentity = logicalRec.logical_run_id
         const prepared = await prepareRunWorkspace({ taskId: wsIdentity, templateId: args.templateId || v.sanitized.id, baseBranch: args.baseBranch || 'main', declaredWorkspace: v.sanitized.workspace, resourceKind: args.resource_kind })
         if (!prepared.ok) {
           // Codex R2 ⑥：分配失败不得留下 READY 悬挂记录（否则下次重试被误判为崩溃残留）
           logicalSetState(logicalRec, 'FAILED', logicalReason('WORKSPACE_ALLOCATE_FAILED', String(prepared.error || '')))
-          requestLogicalPersist(logicalRec.logical_run_id)
+          requestLogicalPersist(wsIdentity)
           log('workspace allocate 失败（fail closed，拒绝启动）：' + prepared.error)
           return '错误：Run Workspace 分配失败，隔离保证无法建立，工作流拒绝启动：' + prepared.error + '（请检查仓库根可访问性、DSH Home/workspaces 目录权限与 workspace-isolation-host.mjs 是否存在）'
         }
@@ -3445,7 +3451,7 @@ return {
         } catch (e) {
           if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
           logicalSetState(logicalRec, 'FAILED', logicalReason('NODE_ISOLATION_UNAVAILABLE', errMsg(e)))
-          requestLogicalPersist(logicalRec.logical_run_id)
+          requestLogicalPersist(wsIdentity)
           log('隔离节点路由不可用（fail closed，拒绝启动）：' + errMsg(e))
           return '错误：无法为模型节点建立独立运行环境，工作流拒绝启动：' + errMsg(e)
         }
@@ -3456,20 +3462,20 @@ return {
           let candidateRef = null
           if (ws && ws.source_path) {
             try {
-              const cap = await wsHostCall('captureCandidate', { logical_run_id: logicalRec.logical_run_id, capability: capabilityFor(logicalRec.logical_run_id) })
+              const cap = await wsHostCall('captureCandidate', { logical_run_id: wsIdentity, capability: capabilityFor(wsIdentity) })
               candidateRef = cap && cap.candidate ? cap.candidate : null
             } catch (e) { log('captureCandidate（人工决定）失败：' + errMsg(e)) }
           }
           hostDecisionRef = {
             decision_id: String(args.decision_id),
-            logical_run_id: logicalRec.logical_run_id,
+            logical_run_id: wsIdentity,
             checkpoint_id: String(args.decision_id),
             candidate_ref: candidateRef,
             choice: String(args.user_choice),
             actor_source: 'host_ui',
             decided_at: new Date().toISOString(),
           }
-          if (hostDecisionRef.logical_run_id !== logicalRec.logical_run_id) {
+          if (hostDecisionRef.logical_run_id !== wsIdentity) {
             return '错误：人工决定归属 Run 不匹配，拒绝续跑。'
           }
           const dig = candidateRef && candidateRef.version && candidateRef.version.content_sha256
@@ -3531,7 +3537,7 @@ return {
         if (ws) await markWorkspaceLifecycle(wsIdentity, 'RUNNING')
         // LOC-027：续跑（人工决策/旧门禁/暂停恢复/模型恢复）携带活动评价基线引用（在
         // scriptArgs 组装前注入，恢复段节点提示与摘要闸门才能拿到已核验基线）
-        if (logicalRec && (isHdResume || isLegacyResume || isPauseResume || probeResume)) Object.assign(args, ebBaselineArgs(logicalRec))
+        if (logicalRec && (isResumeLike || probeResume)) Object.assign(args, ebBaselineArgs(logicalRec))
         // Codex R2 ①：续跑执行 Rev 1 冻结脚本（见上方 execScript 说明）
         const startReq = { script: execScript, meta: c.meta, args: scriptArgs, parent: parent, subagentProvider: NODE_ISOLATED_PROVIDER }
         // #80：段取消信号——pause/interrupt 经 vwf.run.control 中止本段（引擎在当前钩子
@@ -3545,7 +3551,7 @@ return {
           if (ws) await markWorkspaceLifecycle(wsIdentity, 'FAILED')
           if (logicalRec) {
             logicalSetState(logicalRec, 'FAILED', logicalReason('ENGINE_START_FAILED', errMsg(e)))
-            requestLogicalPersist(logicalRec.logical_run_id)
+            requestLogicalPersist(wsIdentity)
           }
           return '错误：工作流引擎启动失败，workspace 已标 FAILED：' + errMsg(e)
         }
@@ -3559,8 +3565,9 @@ return {
         rec.taskId = taskId
         rec.workflowId = String(args.templateId || v.sanitized.id || '')
         live.add(runId)
+        releaseStart()
         persist(runId)
-        if (isHdResume || isLegacyResume || isPauseResume) supersedeParked(taskId, runId)
+        if (isResumeLike) supersedeParked(taskId, runId)
         // LOC-027：评价基线上下文登记（声明 evaluationBaseline 的模板才启用观察与冻结闸门）
         const ebDecl = v.sanitized && v.sanitized.evaluationBaseline && typeof v.sanitized.evaluationBaseline === 'object'
           ? v.sanitized.evaluationBaseline
@@ -3580,7 +3587,7 @@ return {
         if (logicalRec) {
           appendLogicalSegment(logicalRec, runId, logicalTrigger, isHdResume ? String(args.decision_id || '') : '')
           logicalSetState(logicalRec, 'RUNNING', null)
-          requestLogicalPersist(logicalRec.logical_run_id)
+          requestLogicalPersist(wsIdentity)
         }
         let result
         try { result = await run.result } catch (e) {
@@ -3590,7 +3597,7 @@ return {
             logicalRec.pause_state = null
             endLogicalSegment(logicalRec, runId, 'ENGINE_ERROR')
             logicalSetState(logicalRec, 'FAILED', logicalReason('ENGINE_ERROR', errMsg(e)))
-            requestLogicalPersist(logicalRec.logical_run_id)
+            requestLogicalPersist(wsIdentity)
           }
           return '错误：工作流运行失败，workspace 已标 FAILED：' + errMsg(e)
         }
@@ -3670,10 +3677,10 @@ return {
             ebcPause.pending.clear()
           }
           await refreshWorkspaceContext(logicalRec, wsIdentity)
-          requestLogicalPersist(logicalRec.logical_run_id)
+          requestLogicalPersist(wsIdentity)
           onRun(runId, (r) => { r.status = 'PAUSED'; r.reason = pauseAction === 'interrupt' ? 'USER_INTERRUPT' : 'USER_PAUSE' })
           if (ws) await markWorkspaceLifecycle(wsIdentity, 'PAUSED')
-          return JSON.stringify({ runId: runId, stopReason: 'paused', paused: true, action: pauseAction, logical_run_id: logicalRec.logical_run_id, checkpoint_entry: ck.entry || null, checkpoint_degraded: ck.degraded === true, engine_stop_reason: 'cancelled', value: result.value, agentsStarted: result.agentsStarted })
+          return JSON.stringify({ runId: runId, stopReason: 'paused', paused: true, action: pauseAction, logical_run_id: wsIdentity, checkpoint_entry: ck.entry || null, checkpoint_degraded: ck.degraded === true, engine_stop_reason: 'cancelled', value: result.value, agentsStarted: result.agentsStarted })
         }
         if (logicalRec && logicalRec.pause_state) {
           // 取消请求下发后段仍正常收束（abort 与完成竞速）：请求失效，按正常终态走
@@ -3703,7 +3710,7 @@ return {
           controlEvent(logicalRec, 'evaluation_baseline_gate', { decision: 'blocked', code: baselineGateBlocked.code, message: baselineGateBlocked.message, version: baselineGateBlocked.version === undefined ? null : baselineGateBlocked.version })
           endLogicalSegment(logicalRec, currentRunId, result && result.stopReason === 'cancelled' ? 'CANCELLED_BASELINE_FREEZE' : (canon || String((result && result.stopReason) || '')))
           await refreshWorkspaceContext(logicalRec, wsIdentity)
-          requestLogicalPersist(logicalRec.logical_run_id)
+          requestLogicalPersist(wsIdentity)
           onRun(currentRunId, (r) => { r.status = 'BLOCKED'; r.reason = baselineGateBlocked.code })
           if (ws) await markWorkspaceLifecycle(wsIdentity, 'BLOCKED')
           return JSON.stringify({
@@ -3804,7 +3811,7 @@ return {
               controlEvent(logicalRec, 'evaluation_baseline_conflict', { version: conflictVersion, code: conflictCode, expected: conflict.expected, observed: conflict.observed })
               logicalSetState(logicalRec, 'BLOCKED', logicalReason('EVALUATION_BASELINE_CONFLICT', conflict.message))
               await refreshWorkspaceContext(logicalRec, wsIdentity)
-              requestLogicalPersist(logicalRec.logical_run_id)
+              requestLogicalPersist(wsIdentity)
               onRun(currentRunId, (r) => { r.status = 'BLOCKED'; r.reason = 'EVALUATION_BASELINE_CONFLICT'; r.decision_id = ''; r.decision_package = null })
               if (ws) await markWorkspaceLifecycle(wsIdentity, 'BLOCKED')
               return JSON.stringify({
@@ -3830,7 +3837,7 @@ return {
               logicalSetState(logicalRec, 'BLOCKED', logicalReason(ag.code, ag.message))
               controlEvent(logicalRec, ag.event, { node: value.node, code: ag.code, manifest_revision: ag.manifest_revision })
               await refreshWorkspaceContext(logicalRec, wsIdentity)
-              requestLogicalPersist(logicalRec.logical_run_id)
+              requestLogicalPersist(wsIdentity)
               onRun(currentRunId, (r) => { r.status = 'BLOCKED'; r.reason = ag.code })
               if (ws) await markWorkspaceLifecycle(wsIdentity, 'BLOCKED')
               return JSON.stringify({
@@ -3873,7 +3880,7 @@ return {
             // 闸门窗口内发生过锁获取/释放与同步：收尾再刷一次工作区上下文留痕（B12）
             await refreshWorkspaceContext(logicalRec, wsIdentity)
           }
-          requestLogicalPersist(logicalRec.logical_run_id)
+          requestLogicalPersist(wsIdentity)
         }
         if (ws) {
           const blockedGate = !!(gateOutcome && gateOutcome.blocked)
@@ -3890,7 +3897,7 @@ return {
           : (gateOutcome && gateOutcome.finalValue !== undefined ? gateOutcome.finalValue : result.value)
         const outAgents = (result.agentsStarted || 0) + (gateOutcome && gateOutcome.trace ? gateOutcome.trace.reruns.reduce((n, r) => n + (r.agents_started || 0), 0) : 0)
         return JSON.stringify({ runId: outRunId, stopReason: outStop, value: outValue, agentsStarted: outAgents, integration_gate: gateOutcome ? gateOutcome.trace : undefined })
-      },
+      }),
     }))
     dtools.register(textTool({
       name: 'vwf_workspace',

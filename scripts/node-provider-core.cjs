@@ -14,8 +14,7 @@ function createRouteRegistry(options = {}) {
     const at = now()
     for (const [runId, run] of runs) {
       if (run.expiresAt > at) continue
-      for (const token of run.tokens) routes.delete(token)
-      runs.delete(runId)
+      clearRun(runId)
     }
   }
 
@@ -60,10 +59,10 @@ function createRouteRegistry(options = {}) {
 
   function clearRun(runId) {
     const run = runs.get(runId)
+    runtimes.delete(runId)
     if (!run) return false
     for (const token of run.tokens) routes.delete(token)
     runs.delete(runId)
-    runtimes.delete(runId)
     return true
   }
 
