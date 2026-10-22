@@ -12,8 +12,7 @@ function tmpRepo() {
 /**
  * 函数级固定身份环境：暂时摘除运行环境的自报身份变量（AI_AGENT_NAME /
  * CLIENT_INFO_IDE_TYPE / 任何 *_AGENT_NAME），避免测试机自身痕迹混进断言。
- * （旧版两个用例经 CLI allocate 子进程覆盖；CLI 写命令自 W8 P0-C fail-closed
- * 后改走函数级，告警与「不伪造归属」语义不变。）
+ * newRecord 只变换历史记录；allocate 的 CLI 与导出均已退役。
  */
 function withoutAgentEnv(run) {
   const removed = []
@@ -28,10 +27,6 @@ function withoutAgentEnv(run) {
   } finally {
     for (const [k, v] of removed) process.env[k] = v
   }
-}
-
-function readRegistry(repo) {
-  return JSON.parse(fs.readFileSync(path.join(repo, 'docs', 'tasks', 'registry.json'), 'utf-8'))
 }
 
 test('agentName：AI_AGENT_NAME 显式覆盖优先级最高', () => {
@@ -72,38 +67,25 @@ test('newRecord：origin_agent 由 agentName 填充，与机器码并列留痕',
   assert.equal(record.origin_machine, machineCode())
 })
 
-// 归属静默留空是历史缺陷（88 条记录里 87 条为空）。取不到身份必须出声，
-// 而不是安静写一条无归属的记录。
-test('allocate：取不到 agent 身份时在 stderr 告警，且不伪造身份', () => {
+test('newRecord：取不到身份时不伪造；allocate 不再允许写无归属记录', () => {
   const repo = tmpRepo()
-  const errors = []
-  const prevErr = console.error
-  console.error = (msg) => errors.push(String(msg))
-  try {
-    const rec = withoutAgentEnv(() => allocate(repo, { name: '无身份样例', type: 'FIX', offline: true }))
-    assert.equal(rec.origin_agent, null, '取不到身份时不得编造归属')
-    assert.match(errors.join('\n'), /未识别到 agent 身份/)
-    assert.equal(readRegistry(repo).tasks.at(-1).origin_agent, null)
-  } finally {
-    console.error = prevErr
-  }
+  const record = withoutAgentEnv(() => newRecord({ taskId: 'FIX-999', name: '无身份样例', repo }))
+  assert.equal(record.origin_agent, null)
+  assert.throws(() => allocate(repo, { name: '无身份样例', offline: true }), (error) => error.code === 'legacy_registry_write_disabled')
+  assert.equal(fs.existsSync(path.join(repo, 'docs/tasks')), false)
 })
 
-test('allocate：会话自报身份时静默记录，且登记册带 agent 名', () => {
+test('newRecord：会话自报身份仍被读取；allocate 不再落盘任何身份', () => {
   const repo = tmpRepo()
   const had = 'AI_AGENT_NAME' in process.env
   const prev = process.env.AI_AGENT_NAME
-  const errors = []
-  const prevErr = console.error
-  console.error = (msg) => errors.push(String(msg))
   process.env.AI_AGENT_NAME = 'ZCODE'
   try {
-    const rec = allocate(repo, { name: '有身份样例', type: 'FIX', offline: true })
-    assert.equal(rec.origin_agent, 'ZCODE')
-    assert.doesNotMatch(errors.join('\n'), /未识别到 agent 身份/)
-    assert.equal(readRegistry(repo).tasks.at(-1).origin_agent, 'ZCODE')
+    const record = newRecord({ taskId: 'FIX-999', name: '有身份样例', repo })
+    assert.equal(record.origin_agent, 'ZCODE')
+    assert.throws(() => allocate(repo, { name: '有身份样例', offline: true }), (error) => error.code === 'legacy_registry_write_disabled')
+    assert.equal(fs.existsSync(path.join(repo, 'docs/tasks')), false)
   } finally {
-    console.error = prevErr
     if (had) process.env.AI_AGENT_NAME = prev
     else delete process.env.AI_AGENT_NAME
   }

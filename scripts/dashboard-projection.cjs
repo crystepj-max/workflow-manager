@@ -20,8 +20,11 @@ const eventMeta = {
   pause_requested: 'dashEventPause', paused: 'dashEventPause',
   interrupt_requested: 'dashEventInterrupt', interrupted: 'dashEventInterrupt',
   guidance: 'dashEventGuidance', human_decision_recorded: 'dashEventHumanDecision',
+  // 只归类明确的冻结请求、冻结成功与基线修订；失败、恢复和未知类型保留原标识。
+  evaluation_baseline_freeze_requested: 'dashEventBaseline',
+  evaluation_baseline_frozen: 'dashEventBaseline', baseline_change: 'dashEventBaseline',
 }
-const eventKey = (type) => eventMeta[type] || (/^evaluation_baseline/.test(type) || type === 'baseline_change' ? 'dashEventBaseline' : type)
+const eventKey = (type) => Object.hasOwn(eventMeta, type) ? eventMeta[type] : type
 
 function dashboardProjectionOf(lr, getRun) {
   const missing = { lifecycle: null, lifecycle_key: null, lifecycle_hint_key: null, lifecycle_terminal: false, budget_used: null, budget_limit: null, snapshot_revision: null, last_outcome: null, last_event: null, summary_fields: [] }
