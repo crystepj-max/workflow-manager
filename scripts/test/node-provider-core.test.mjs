@@ -64,10 +64,41 @@ test('node-provider core expires and clears routes at the run lease boundary', (
   assert.throws(() => registry.resolve('vwf-node-isolated:' + tokenA, 'deepseek-v4-pro'), /route rejected/)
 })
 
-test('node-provider core explicitly clears run routes', () => {
+test('node-provider core releases expired runtime references and safely repeats prune and clear', () => {
+  let now = 1000
+  const registry = createRouteRegistry({ now: () => now })
+  const runtime = { prepareNode() {}, startWorker() {} }
+  registry.registerRun('run-1', issued(2000), runtime)
+  const { route } = registry.resolve('vwf-node-isolated:' + tokenA, 'deepseek-v4-pro')
+  assert.equal(registry.runtimeFor(route), runtime)
+
+  now = 1999
+  registry.pruneExpired()
+  assert.equal(registry.runtimeFor(route), runtime, '租约到期前保留 runtime')
+
+  now = 2000
+  registry.pruneExpired()
+  assert.equal(registry.runtimeFor(route), undefined, '到期清理后不能再取得 runtime')
+  assert.equal(registry.clearRun('run-1'), false, 'prune 已清理 run 记录')
+  assert.equal(registry.clearRun('run-1'), false, '重复 clear 安全')
+  registry.pruneExpired()
+  assert.equal(registry.runtimeFor(route), undefined)
+  for (const suffix of ['', ':item:1', ':attribution']) {
+    assert.throws(() => registry.resolve('vwf-node-isolated:' + tokenA + suffix, 'deepseek-v4-pro'), /route rejected/)
+  }
+
+  now = 1000
+  assert.throws(() => registry.resolve('vwf-node-isolated:' + tokenA, 'deepseek-v4-pro'), /route rejected/, '时钟回退也不能恢复已删除的路由')
+})
+
+test('node-provider core explicitly clears run routes and runtime references', () => {
   const registry = createRouteRegistry({ now: () => 1000 })
-  registry.registerRun('run-1', issued())
+  const runtime = { prepareNode() {}, startWorker() {} }
+  registry.registerRun('run-1', issued(), runtime)
+  const { route } = registry.resolve('vwf-node-isolated:' + tokenA, 'deepseek-v4-pro')
+  assert.equal(registry.runtimeFor(route), runtime)
   assert.equal(registry.clearRun('run-1'), true)
+  assert.equal(registry.runtimeFor(route), undefined)
   assert.equal(registry.clearRun('run-1'), false)
   assert.throws(() => registry.resolve('vwf-node-isolated:' + tokenA, 'deepseek-v4-pro'), /route rejected/)
 })
