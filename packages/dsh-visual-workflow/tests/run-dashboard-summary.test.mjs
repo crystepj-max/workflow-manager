@@ -165,7 +165,6 @@ test('事件类型映射：已知生产者归类，未知类型保留原始标�
     ['paused', 'dashEventPause'], ['pause_requested', 'dashEventPause'],
     ['interrupt_requested', 'dashEventInterrupt'], ['interrupted', 'dashEventInterrupt'],
     ['guidance', 'dashEventGuidance'], ['human_decision_recorded', 'dashEventHumanDecision'],
-    ['evaluation_baseline_frozen', 'dashEventBaseline'], ['baseline_change', 'dashEventBaseline'],
     ['something_new', 'something_new'],
   ]) {
     const lr = lrBase()
@@ -175,6 +174,46 @@ test('事件类型映射：已知生产者归类，未知类型保留原始标�
   const lr = lrBase()
   lr.business_outcomes = { review: { outcome: 'PASS', at: 3000 } }
   assert.deepEqual(field(dashboardProjectionOf(lr, () => ({})), 'dashLastEvent'), { key: 'dashEventNodeOutcome', at: 3000 })
+})
+
+// WFM-463：白名单对应宿主真实生产者；恢复事件的 terminal 不保证成功，
+// 冻结失败 / 摘要不符 / 核验冲突 / 闸门阻断均不得被归成成功冻结文案。
+for (const [type, data, key] of [
+  ['evaluation_baseline_freeze_requested', { version: 1, claimed_digest: 'claimed' }, 'dashEventBaseline'],
+  ['evaluation_baseline_frozen', { version: 1, digest: 'verified', artifact_path: 'v1/contract.md' }, 'dashEventBaseline'],
+  ['baseline_change', { revision: 2, guidance_seq: 1 }, 'dashEventBaseline'],
+  ['baseline_rebase', { revision: 2, entry: 'confirm' }, 'baseline_rebase'],
+  ['evaluation_baseline_resumed', { version: 1, terminal: 'FAILED' }, 'evaluation_baseline_resumed'],
+  ['evaluation_baseline_freeze_failed', { version: 1, code: 'FILE_MISSING' }, 'evaluation_baseline_freeze_failed'],
+  ['evaluation_baseline_digest_mismatch', { version: 1, code: 'FROZEN', claimed: 'claimed', actual: 'verified' }, 'evaluation_baseline_digest_mismatch'],
+  ['evaluation_baseline_conflict', { version: 1, code: 'SOURCE_REWRITTEN' }, 'evaluation_baseline_conflict'],
+  ['evaluation_baseline_gate', { decision: 'blocked', code: 'EVALUATION_BASELINE_RESUME_LOST', version: 1 }, 'evaluation_baseline_gate'],
+]) {
+  test(`WFM-463 实际评价基线事件投影：${type}（与 Lifecycle / Completion 独立）`, () => {
+    for (const state of ['RUNNING', 'BLOCKED', 'FAILED', 'COMPLETED']) {
+      const lr = lrBase()
+      lr.lifecycle.state = state
+      lr.completion = { type: 'EVALUATION_PASSED' }
+      lr.control_events = [{ type, at: 2000, ...data }]
+      const plan = dashboardProjectionOf(lr, () => ({}))
+      assert.deepEqual(plan.last_event, { source: 'control', type, at: 2000 })
+      assert.deepEqual(field(plan, 'dashLastEvent'), { key, at: 2000 })
+      assert.equal(plan.lifecycle, state)
+    }
+  })
+}
+
+test('WFM-463 未识别评价基线事件和原型名称保留原类型，不按前缀推断成功', () => {
+  for (const type of [
+    'evaluation_baseline', 'evaluation_baseline_unknown', 'evaluation_baseline_frozen_extra',
+    'evaluation_baseline_freeze_requested_v2', 'baseline_change_failed',
+    'constructor', 'toString', '__proto__',
+  ]) {
+    const lr = lrBase()
+    lr.control_events = [{ type, at: 2000 }]
+    const plan = dashboardProjectionOf(lr, () => ({}))
+    assert.deepEqual(field(plan, 'dashLastEvent'), { key: type, at: 2000 })
+  }
 })
 
 test('摘要预算格式：缺失 ≠ 0，单边缺失保留另一边', () => {
