@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
@@ -74,7 +74,8 @@ test('隔离节点让工具继承启动垫片的沙箱，不再请求 macOS 嵌�
 
 test('DSH runtime roots include hoisted package directories without exposing the workspace node_modules root', () => {
   const dist = join(pluginRoot, 'dist')
-  const nodeModules = realpathSync(join(pluginRoot, 'node_modules'))
+  const localNodeModules = join(pluginRoot, 'node_modules')
+  const nodeModules = existsSync(localNodeModules) ? realpathSync(localNodeModules) : null
   const repoNodeModules = join(realpathSync(join(pluginRoot, '..', '..')), 'node_modules')
   const roots = resolveDshRuntimeRoots(dist)
   const isWithin = (root, target) => {
@@ -82,7 +83,7 @@ test('DSH runtime roots include hoisted package directories without exposing the
     return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep))
   }
 
-  assert.ok(roots.includes(nodeModules))
+  if (nodeModules) assert.ok(roots.includes(nodeModules))
   assert.ok(roots.includes(realpathSync(dist)))
   assert.equal(roots.includes(repoNodeModules), false)
 
@@ -113,7 +114,7 @@ test('DSH runtime roots include hoisted package directories without exposing the
   }
 })
 
-test('DSH runtime roots follow only installed declared peers and their runtime closure, with missing optional peers and cycles', async () => {
+async function assertRuntimePackageRoots(localModulesPresent) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'vwf-peer-roots-')))
   try {
     const fixturePlugin = join(root, 'packages', 'plugin')
@@ -121,7 +122,7 @@ test('DSH runtime roots follow only installed declared peers and their runtime c
     const localNodeModules = join(fixturePlugin, 'node_modules')
     const hoistedNodeModules = join(root, 'node_modules')
     mkdirSync(dist, { recursive: true })
-    mkdirSync(localNodeModules, { recursive: true })
+    if (localModulesPresent) mkdirSync(localNodeModules, { recursive: true })
     copyFileSync(workerPath, join(dist, 'node-provider-worker.mjs'))
     // 这里只调用目录收集器；SDK 与执行辅助入口均不启动。
     writeFileSync(join(dist, 'node-provider-loopback-proxy.mjs'), 'export const createDeepSeekApiLoopbackProxy = () => {}\n')
@@ -133,7 +134,7 @@ test('DSH runtime roots follow only installed declared peers and their runtime c
       writeFileSync(join(packageRoot, 'index.js'), entry)
       return packageRoot
     }
-    install(localNodeModules, '@deepseek-ai/dsh-sdk-client', { type: 'module', main: 'index.js' }, 'export class DeepSeekHarness {}\n')
+    install(hoistedNodeModules, '@deepseek-ai/dsh-sdk-client', { type: 'module', main: 'index.js' }, 'export class DeepSeekHarness {}\n')
     const dsh = install(hoistedNodeModules, '@deepseek-ai/dsh', { dependencies: { '@fixture/boot': '*' } })
     const tools = install(hoistedNodeModules, '@deepseek-ai/dsh-tools', {})
     const boot = install(hoistedNodeModules, '@fixture/boot', {
@@ -165,8 +166,28 @@ test('DSH runtime roots follow only installed declared peers and their runtime c
     assert.equal(roots.includes(devOnly), false, 'devDependencies 不属于运行时闭包')
     assert.equal(roots.some((path) => path.endsWith('/@fixture/missing-peer')), false, '未安装的可选 peer 不得生成授权')
     assert.equal(roots.length, new Set(roots).size, '循环和重复依赖只收集一次')
-    assert.deepEqual(roots, [localNodeModules, dist, dsh, tools, boot, peer, transitive, optional, nestedPeer].sort())
+    assert.deepEqual(roots, [...(localModulesPresent ? [localNodeModules] : []), dist, dsh, tools, boot, peer, transitive, optional, nestedPeer].sort())
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+}
+
+for (const localModulesPresent of [true, false]) {
+  test(`DSH runtime roots follow installed declared peers with ${localModulesPresent ? 'local' : 'fully hoisted'} dependencies`, () =>
+    assertRuntimePackageRoots(localModulesPresent))
+}
+
+test('SDK agent-loop and mounted tools use the same scheduler contract', async () => {
+  const dshRequire = createRequire(pluginRequire.resolve('@deepseek-ai/dsh/package.json'))
+  const baseRequire = createRequire(dshRequire.resolve('@deepseek-ai/dsh-base/package.json'))
+  const loopRequire = createRequire(baseRequire.resolve('@deepseek-ai/dsh-agent-loop'))
+  const entries = [dshRequire, loopRequire, pluginRequire].map((from) =>
+    realpathSync(from.resolve('@deepseek-ai/dsh-tools')))
+  const guidance = 'SDK 安装、agent-loop 与结构化插件必须共享同一 tools 调度器；在仓库根执行 npm dedupe --ignore-scripts 后重跑本检查。解析路径：' + entries.join(', ')
+  assert.equal(new Set(entries).size, 1, guidance)
+  const modules = await Promise.all(entries.map((entry) => import(pathToFileURL(entry).href)))
+  assert.equal(typeof modules[0].TOOL_RUNTIME_SCHEDULER, 'symbol', guidance)
+  for (const tools of modules) {
+    assert.equal(tools.TOOL_RUNTIME_SCHEDULER, modules[0].TOOL_RUNTIME_SCHEDULER, guidance)
   }
 })

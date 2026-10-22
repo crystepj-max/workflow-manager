@@ -111,8 +111,10 @@ function findInstalledPackageManifest(packageName, fromManifestPath) {
 // but it should not gain access to the entire repository dependency tree.
 export function resolveDshRuntimeRoots(dist) {
   const distRoot = realpathSync(dist)
-  const nodeModules = realpathSync(join(dirname(distRoot), 'node_modules'))
-  const roots = new Set([nodeModules, distRoot])
+  const localNodeModules = join(dirname(distRoot), 'node_modules')
+  const nodeModules = existsSync(localNodeModules) ? realpathSync(localNodeModules) : null
+  const roots = new Set([distRoot])
+  if (nodeModules) roots.add(nodeModules)
   const queue = [
     require.resolve('@deepseek-ai/dsh/package.json'),
     require.resolve('@deepseek-ai/dsh-tools/package.json'),
@@ -126,7 +128,7 @@ export function resolveDshRuntimeRoots(dist) {
 
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
     const packageRoot = dirname(manifestPath)
-    if (!isPathWithin(nodeModules, packageRoot)) roots.add(packageRoot)
+    if (!nodeModules || !isPathWithin(nodeModules, packageRoot)) roots.add(packageRoot)
 
     for (const dependencyName of [
       ...Object.keys(manifest.dependencies || {}),
