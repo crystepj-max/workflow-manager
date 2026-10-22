@@ -78,6 +78,21 @@ npm run install:builtin-skills:pool   # 追加公共池（默认 ~/.agents/skill
 - 幂等，可重复执行；改模板或换机后重跑即可；
 - 用户模板走编辑器「保存闭环」，自动产出同形态技能包到 `~/.dsh/skills/<id>/`。
 
+安装后可执行只读核对，不会修改安装目录：
+
+```bash
+npm run audit:builtin-skills             # $DSH_HOME/skills，缺省 ~/.dsh/skills
+npm run audit:builtin-skills -- --pool    # 同时核对公共技能池；自定义池用 --pool=<目录>
+# 指定其他产品 Home：npm run audit:builtin-skills -- /path/to/dsh-home --format json
+```
+
+比较清单复用安装链路：`SKILL.md`、`script.mjs`、`meta.json` 和蓝图实际引用的 `roles/`
+文件；`.generated/` 中仅供编辑器使用的 `vwf-dsl.json` 不属于安装包。漏件、内容变化或内置
+目录内的多余文件均报 `FAIL`，列出模板、文件、安装时间和首处内容差异；用户技能目录不参与。
+安装位置不可达或文件无法读取时明确报 `SKIP`，不视为通过。`release:verify` 默认核对产品
+DSH 技能目录；分发到公共池的发布还须补跑 `--pool`。干净环境的显式跳过不代替产品机核对，
+安装态一致也不代替真实工作流行为验收或模型绑定核验。
+
 ## 运行内置模板（主会话）
 
 ### 1. 装配输入
