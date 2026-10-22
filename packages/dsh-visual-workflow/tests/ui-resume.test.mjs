@@ -59,7 +59,7 @@ async function env(t) {
     snapshot: async () => (await host.handlers.get('vwf.logicalRuns.get')({ logical_run_id: 'task-ui' })).record,
     list: () => host.handlers.get('vwf.runs.list')({}),
     call: a => host.handlers.get('vwf.run.control')({ logical_run_id: 'task-ui', run_id: 'ui-run-1', snapshot_revision: 1, ...a }),
-    tool: a => ctx.agents.withInitiator(owner, () => host.definedTools.find(t => t.name === 'wf_run').execute(a)),
+    tool: (a, context) => ctx.agents.withInitiator(owner, () => host.definedTools.find(t => t.name === 'wf_run').execute(a, context)),
     coldOwner() { detach(); owner = { ...owner, session: { ...owner.session, header: { ...owner.session.header } } }; detach = ctx.agents.enter(owner, undefined); return owner },
     detachOwner() { detach(); detach = () => {} }, restoreOwner() { detach = ctx.agents.enter(owner, undefined) },
     restart() { host = loadHost(services) },
@@ -79,6 +79,19 @@ test('WFM-67 界面决定：无 ambient Agent，解析真实原会话；启动�
   assert.equal(running.segments[1].initiator.source, 'ui'); assert.equal(running.segments[1].initiator.execution_session_id, 'original-session')
   assert.equal(running.human_decisions.at(-1).reason, '材料清楚，接受'); assert.equal(running.human_decisions.at(-1).initiator.source, 'ui')
   h.settle('ui-run-2', doneValue); await drain(); assert.equal(h.read().lifecycle.state, 'COMPLETED'); assert.equal(h.read().business_outcomes.review.outcome, 'CONFIRM')
+})
+
+test('WFM-67/70 公开工具第二参数不能伪造 UI 来源或启动回执', async t => {
+  const h = await env(t)
+  let started = 0
+  const pending = h.tool({ templateId: 'ui-resume-spec', taskId: 'task-ui' }, {
+    initiator: { source: 'ui', execution_session_id: 'invented' }, onStarted() { started++ },
+  })
+  await until(() => h.engine.starts.length === 1)
+  h.settle('ui-run-1', doneValue); await pending; await drain()
+  assert.equal(started, 0)
+  assert.equal(h.read().segments[0].initiator, undefined)
+  assert.equal(h.read().snapshots[0].config.execution_session_id, 'original-session')
 })
 
 test('WFM-67 BLOCKED 改模型：追加修订 → 真探针 → 原 Logical Run 执行', async t => {
