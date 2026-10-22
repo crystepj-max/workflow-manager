@@ -52,37 +52,31 @@ test('reconcilePlan：登记落后于 git 事实 → 进入 toMerge', () => {
   ] }
   fs.mkdirSync(path.join(repo, 'docs', 'tasks'), { recursive: true })
   fs.writeFileSync(path.join(repo, 'docs', 'tasks', 'registry.json'), JSON.stringify(reg, null, 2))
-  const r = reconcilePlan(repo, 'main')
+  const r = reconcilePlan(repo, 'main', { legacyHistoryAudit: true, listWip: () => new Set() })
   assert.equal(r.toMerge.length, 1)
   assert.equal(r.toMerge[0].task_id, 'LOC-024')
 })
 
-test('saveRegistry 乐观锁：另一会话先写，本会话写回必须被拒', () => {
+test('saveRegistry 已退役：并发会话的新旧视图均禁止写回', () => {
   const repo = tmpRepo()
-  fs.mkdirSync(path.join(repo, 'docs', 'tasks'), { recursive: true })
-  const regA = { version: 1, revision: 0, tasks: [{ task_id: 'LOC-001', status: '定义中' }] }
-  fs.writeFileSync(path.join(repo, 'docs', 'tasks', 'registry.json'), JSON.stringify(regA, null, 2))
-  // 会话 A 与会话 B 同时读入 revision=0
-  const a = loadRegistry(repo)
-  const b = loadRegistry(repo)
-  a.tasks[0].status = '等待验收'
-  saveRegistry(repo, a) // A 先写 → revision 变 1
-  b.tasks[0].status = '已合并'
-  assert.throws(() => saveRegistry(repo, b), /已被其他会话更新.*拒绝覆盖/, 'B 的旧视图必须被拒')
-  // B 重读后可正常写入
-  const b2 = loadRegistry(repo)
-  b2.tasks[0].status = '已合并'
-  saveRegistry(repo, b2)
-  assert.equal(loadRegistry(repo).tasks[0].status, '已合并')
+  fs.mkdirSync(path.join(repo, 'docs/tasks'), { recursive: true })
+  const file = path.join(repo, 'docs/tasks/registry.json')
+  const before = JSON.stringify({ version: 1, revision: 0, tasks: [{ task_id: 'LOC-001', status: '定义中' }] })
+  fs.writeFileSync(file, before)
+  const history = { legacyHistoryAudit: true }
+  for (const revision of [0, 1]) {
+    const view = loadRegistry(repo, history)
+    view.revision = revision
+    view.tasks[0].status = '已合并'
+    assert.throws(() => saveRegistry(repo, view, history), (error) => error.code === 'legacy_registry_write_disabled')
+  }
+  assert.equal(fs.readFileSync(file, 'utf8'), before)
 })
 
-test('saveRegistry：正常读写路径 revision 递增不抛错', () => {
+test('saveRegistry 已退役：空目录不能生成登记册', () => {
   const repo = tmpRepo()
-  fs.mkdirSync(path.join(repo, 'docs', 'tasks'), { recursive: true })
-  const reg = loadRegistry(repo)
-  reg.tasks.push({ task_id: 'LOC-001', status: '定义中' })
-  saveRegistry(repo, reg)
-  assert.equal(loadRegistry(repo).revision, 1)
+  assert.throws(() => saveRegistry(repo, { version: 1, tasks: [] }), (error) => error.code === 'legacy_registry_write_disabled')
+  assert.equal(fs.existsSync(path.join(repo, 'docs/tasks')), false)
 })
 
 // ----- 漏标校验（2026-09-21 重复施工事故回归）-----
@@ -161,7 +155,7 @@ test('reconcilePlan：漏标告警并入 suspicious，可注入 listWip', () => 
   fs.writeFileSync(path.join(repo, 'docs', 'tasks', 'registry.json'), JSON.stringify(reg, null, 2))
   fs.mkdirSync(path.join(repo, '.agent-runs', 'fix-233-r1'), { recursive: true })
 
-  const r = reconcilePlan(repo, 'main', { listWip: () => new Set() })
+  const r = reconcilePlan(repo, 'main', { legacyHistoryAudit: true, listWip: () => new Set() })
   assert.equal(r.toMerge.length, 1)
   const leaked = r.suspicious.find((s) => s.task_id === 'FIX-233')
   assert.ok(leaked, '漏标任务应进入 suspicious')

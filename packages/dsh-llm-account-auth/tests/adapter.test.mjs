@@ -1,6 +1,8 @@
 // 离线冒烟：用桩 fetch 验证 StreamChunk 协议与鉴权头，不依赖真实凭据与网络。
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Context } from '@deepseek-ai/cordis';
+import { LlmRuntime } from '@deepseek-ai/dsh-llm';
 import { rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -436,5 +438,52 @@ test('凭据库条目声明 forceMode 时不走前缀启发式（Claude OAuth �
     assert.equal(credential.mode, 'account', 'forceMode 优先于 apiKeyPrefix 启发式');
   } finally {
     await rm(file, { force: true });
+  }
+});
+
+
+test('账户适配器通过真实 llm 公共 API 准备并返回两条路由的工具调用', async () => {
+  const ctx = new Context();
+  new LlmRuntime(ctx);
+  try {
+    apply(ctx, {
+      env: {},
+      resolveCredential: async (profile) => ({
+        mode: profile.id === 'openai' ? 'account' : 'api-key',
+        token: 'fixture-token', accountId: 'fixture-account', source: 'test',
+      }),
+      fetch: async (url) => sseResponse(url.includes('/responses') ? [
+        { data: { type: 'response.output_item.added', item: { id: 'fc_1', type: 'function_call', call_id: 'call_1', name: 'structured_output', arguments: '' } } },
+        { data: { type: 'response.function_call_arguments.delta', item_id: 'fc_1', delta: '{"answer":42}' } },
+        { data: { type: 'response.output_item.done', item: { id: 'fc_1', type: 'function_call', call_id: 'call_1', name: 'structured_output', arguments: '{"answer":42}' } } },
+        { data: { type: 'response.completed', response: { status: 'completed', usage: { input_tokens: 5, output_tokens: 3 } } } },
+      ] : [
+        { data: { type: 'message_start', message: { usage: { input_tokens: 5, output_tokens: 0 } } } },
+        { data: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'call_1', name: 'structured_output', input: {} } } },
+        { data: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"answer":42}' } } },
+        { data: { type: 'content_block_stop', index: 0 } },
+        { data: { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 3 } } },
+        { data: { type: 'message_stop' } },
+      ]),
+    });
+    const llm = ctx.get('llm');
+    assert.deepEqual(llm.listProviders().map((provider) => provider.id).sort(), ['anthropic', 'openai']);
+    for (const provider of ['openai', 'anthropic']) {
+      assert.ok((await llm.listModels(provider)).length);
+      const model = 'fixture-model';
+      assert.equal((await llm.resolveModelInfo(provider, model)).id, model);
+      const call = await llm.prepareCall({ provider, model });
+      const chunks = await collect(call.stream({
+        ...call.config,
+        messages: BASE.messages,
+        tools: [{ name: 'structured_output', description: 'fixture', parameters: { type: 'object' } }],
+      }));
+      assert.equal(chunks.at(-1).type, 'finish');
+      assert.equal(chunks.at(-1).reason.kind, 'tool-calls');
+      const block = chunks.find((chunk) => chunk.type === 'block-end').block;
+      assert.deepEqual(block, { type: 'tool-call', id: 'call_1', name: 'structured_output', arguments: '{"answer":42}' });
+    }
+  } finally {
+    await ctx.fiber.dispose();
   }
 });
