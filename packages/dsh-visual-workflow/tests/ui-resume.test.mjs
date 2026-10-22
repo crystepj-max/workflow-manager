@@ -23,7 +23,7 @@ const doneValue = { status: 'DONE', results: { review: { verdict: 'CONFIRM' }, c
 const drain = async () => { for (let i = 0; i < 4; i++) await new Promise(r => setImmediate(r)) }
 async function until(fn) { for (let i = 0; i < 800; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 5)) } throw Error('未收到启动回执') }
 
-async function env(t) {
+async function env(t, { seed = {} } = {}) {
   const ctx = new Context()
   const fiber = await ctx.plugin(AgentRegistry)
   let owner = { id: 'original-session', ctx, session: { id: 'original-session', header: { cwd: REPO } } }
@@ -31,7 +31,7 @@ async function env(t) {
   const pending = new Map()
   let startError = null
   const engine = { starts: [], start(req) { if (startError) { const error = startError; startError = null; throw error }; this.starts.push(req); const id = 'ui-run-' + this.starts.length; const result = new Promise(resolve => pending.set(id, resolve)); return { id, result } } }
-  const fs = makeFs({ [USER_DIR + '/ui-resume-spec.json']: JSON.stringify(BLUEPRINT), [SKILL_ROOT + '/ui-resume-spec/script.mjs']: '//FROZEN-UI-SCRIPT' })
+  const fs = makeFs({ [USER_DIR + '/ui-resume-spec.json']: JSON.stringify(BLUEPRINT), [SKILL_ROOT + '/ui-resume-spec/script.mjs']: '//FROZEN-UI-SCRIPT', ...seed })
   const streamModels = []
   let failModel = ''
   const llm = { listProviders: () => [{ id: 'p' }], listModels: () => [{ id: 'm1' }, { id: 'm2' }], stream(opts) { streamModels.push(opts.model); return (async function* () { if (opts.model === failModel) yield { type: 'finish', reason: { kind: 'error', failure: { code: 'MODEL_NOT_FOUND', message: 'model unavailable' } } }; else { yield { type: 'text-delta', index: 0, text: 'ok' }; yield { type: 'finish', reason: { kind: 'stop' } } } })() } }
@@ -77,6 +77,7 @@ test('WFM-67 界面决定：无 ambient Agent，解析真实原会话；启动�
   assert.ok(req.args.routes); assert.equal(req.args.results.review.verdict, 'CONFIRM')
   await drain(); const running = h.read(); assert.equal(running.logical_run_id, before.logical_run_id); assert.equal(running.segments.length, 2)
   assert.equal(running.segments[1].initiator.source, 'ui'); assert.equal(running.segments[1].initiator.execution_session_id, 'original-session')
+  assert.deepEqual((await h.snapshot()).segments[1].initiator, running.segments[1].initiator, 'WFM-81 RPC 投影须保留 WFM-67 UI 来源')
   assert.equal(running.human_decisions.at(-1).reason, '材料清楚，接受'); assert.equal(running.human_decisions.at(-1).initiator.source, 'ui')
   h.settle('ui-run-2', doneValue); await drain(); assert.equal(h.read().lifecycle.state, 'COMPLETED'); assert.equal(h.read().business_outcomes.review.outcome, 'CONFIRM')
 })
@@ -253,4 +254,19 @@ test('WFM-67 未起段模型受阻投影与 WFM-81 unavailable 投影互斥，�
   assert.equal(rows.length, 1)
   assert.equal(rows[0].id, 'logical:model-only'); assert.equal(rows[0].segment_count, 0); assert.equal(rows[0].execution_not_started, true)
   assert.equal(base.segments.length, 0)
+})
+
+test('WFM-67/81 同时展示模型受阻与隔离不可用的未起段运行，各一行且无伪造段', async t => {
+  const isolation = { logical_run_id: 'other-isolation', task_id: 'other', title: '隔离不可用', isolation_guarantee: 'unavailable', lifecycle: { state: 'BLOCKED', reason: { code: 'PROBE_FAILED' } }, segments: [], snapshots: [], node_attempts: [] }
+  const raw = JSON.stringify(isolation)
+  const path = DSH_HOME + '/visual-workflow/logical-runs/other-isolation.json'
+  const h = await env(t, { seed: { [path]: raw } }); h.setFail('m1')
+  await h.tool({ templateId: 'ui-resume-spec', taskId: 'task-ui' }); await drain()
+  const rows = (await h.list()).runs
+  assert.deepEqual(rows.map(r => r.id).sort(), ['logical:other-isolation', 'logical:task-ui'])
+  assert.equal(rows.find(r => r.id === 'logical:other-isolation').isolation_guarantee, 'unavailable')
+  for (const row of rows) { assert.equal(row.segment, null); assert.equal(row.segment_count, 0); assert.equal(row.execution_not_started, true) }
+  assert.equal(h.engine.starts.length, 0)
+  assert.deepEqual(h.read().segments, [])
+  assert.equal(h.fs._files.get(path), raw, '只读投影不得改写旧记录')
 })

@@ -637,5 +637,12 @@
   "presetConflict_UNSUPPORTED_SCHEMA": "目标字段类型或结构与结果路由不兼容。",
   "presetConflict_UNSAFE_SCHEMA_CHANGE": "应用该预设可能丢失既有输出结构，已阻止。",
   "presetConflict_INVALID_CANDIDATE": "候选结果未通过完整性检查（如 required 孤儿引用），已阻止。",
-  "output.schema 必填（对象）": "请在高级设置中声明这一步的结构化结果。"
+  "output.schema 必填（对象）": "请在高级设置中声明这一步的结构化结果。",
+  "isolationenforced": "强制隔离",
+  "isolationunavailable": "隔离不可用 · 非独立取证",
+  "isolationunknown": "隔离等级未知",
+  "isolationNotStarted": "执行未启动",
+  "isolationProbe": "隔离探针证据",
+  "isolationProofEligible": "具备独立 Proof 资格",
+  "isolationProofIneligible": "不具备独立 Proof 资格"
 }

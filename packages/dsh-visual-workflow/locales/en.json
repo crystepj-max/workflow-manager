@@ -637,5 +637,12 @@
   "presetConflict_UNSUPPORTED_SCHEMA": "The target field type or structure is incompatible with outcome routing.",
   "presetConflict_UNSAFE_SCHEMA_CHANGE": "Applying this preset could lose existing output structure; blocked.",
   "presetConflict_INVALID_CANDIDATE": "The candidate failed integrity checks (e.g. orphan required); blocked.",
-  "output.schema 必填（对象）": "Declare this step’s structured result in Advanced settings."
+  "output.schema 必填（对象）": "Declare this step’s structured result in Advanced settings.",
+  "isolationenforced": "Isolation enforced",
+  "isolationunavailable": "Isolation unavailable · Non-independent evidence",
+  "isolationunknown": "Isolation unknown",
+  "isolationNotStarted": "Execution not started",
+  "isolationProbe": "Isolation probe evidence",
+  "isolationProofEligible": "Eligible for independent Proof",
+  "isolationProofIneligible": "Ineligible for independent Proof"
 }

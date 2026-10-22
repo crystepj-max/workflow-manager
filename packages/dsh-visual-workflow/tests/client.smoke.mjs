@@ -3363,6 +3363,67 @@ test('FEAT-100 V-6：内置记录只提供 查看流程 / 模型设置（无删�
   state.wfList = null
 })
 
+for (const [level, label] of [['enforced', '强制隔离'], ['unavailable', '非独立取证'], ['unknown', '隔离等级未知']]) {
+  test('WFM-81 看板与记录详情显示隔离等级：' + level, async () => {
+    const id = 'wfm81-' + level
+    const fields = level === 'unknown' ? {} : {
+      isolation_guarantee: level,
+      isolation_probe: { backend: 'fixture-sandbox', evidence: { outsideBlocked: level === 'enforced', reason: 'fixture evidence' } },
+      independent_proof_eligible: level === 'enforced',
+      independent_proof_block_reason: level === 'unavailable' ? 'fixture: unavailable' : null,
+    }
+    const lr = JSON.parse(JSON.stringify(runState.logical['lr-a']))
+    Object.assign(lr, fields, { logical_run_id: id, task_id: id, title: id })
+    const row = { id, taskId: id, workflowId: 'wf-runs', status: 'FAILED', startedAt: Date.now(), logical_run_id: id, ...fields }
+    if (level === 'unavailable') {
+      row.execution_not_started = true
+      lr.segments = []
+      lr.node_attempts = []
+    }
+    runState.runs.push(row)
+    runState.logical[id] = lr
+    const attempt = logicalAttempt(id, 'dev', 1, { attempt_id: 'a1k1', outcome: 'READY', result: { summary: 'isolation fixture' } })
+    Object.assign(attempt.body.value, fields)
+    runState.records[id] = { ok: true, found: true, records: level === 'unavailable' ? [] : [attempt] }
+    const fresh = document.createElement('div')
+    document.body.appendChild(fresh)
+    const freshRoot = createRoot(fresh)
+    try {
+      await mountPage(freshRoot, fresh)
+      await clickEl(fresh.querySelector('[data-vwf-nav="dashboard"]'), 8)
+      const listed = Array.from(fresh.querySelectorAll('.vwf-run-row')).find((r) => r.textContent.includes(id))
+      assert.ok(listed, '隔离夹具出现在看板')
+      const badge = listed.querySelector('[data-vwf-isolation="' + level + '"]')
+      assert.ok(badge, '看板必须有明确隔离等级')
+      assert.ok(badge.textContent.includes(label))
+      if (level === 'unavailable') {
+        assert.ok(listed.textContent.includes('执行未启动'))
+        assert.equal(badge.getAttribute('role'), 'alert', '非独立取证具有显著且可访问的提示')
+      }
+      await clickEl(listed, 8)
+      const detail = fresh.querySelector('dialog[open]')
+      assert.ok(detail.querySelector('[data-vwf-isolation="' + level + '"]'), '记录详情必须显示同一等级')
+      assert.ok(detail.textContent.includes(label))
+      if (level === 'unavailable') assert.ok(detail.textContent.includes('尚未开始'), '未启动运行不伪造执行成果')
+      else {
+        const nodeBadges = detail.querySelectorAll('[data-vwf-isolation="' + level + '"]')
+        assert.ok(nodeBadges.length >= 2, '所选节点执行也显示自己的等级')
+        if (level === 'enforced') {
+          for (const key of Object.keys(fields)) delete attempt.body.value[key]
+          await clickEl(Array.from(detail.querySelectorAll('button')).find((b) => b.textContent.includes('刷新')), 8)
+          assert.ok(detail.querySelector('[data-vwf-isolation="unknown"]'), '旧节点缺字段显示未知，不使用运行等级回填')
+          assert.ok(detail.querySelector('[data-vwf-isolation="enforced"]'), '运行自己的等级仍被保留')
+        }
+      }
+    } finally {
+      await act(async () => { freshRoot.unmount(); fresh.remove() })
+      runState.runs.splice(runState.runs.indexOf(row), 1)
+      delete runState.logical[id]
+      delete runState.records[id]
+    }
+  })
+}
+
 test('清理：卸载冒烟测试根节点', async () => {
   await act(async () => {
     root.unmount()
