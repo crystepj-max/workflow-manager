@@ -440,6 +440,9 @@ function normalizeProvenance(p) {
   if (p.dependency_source) out.dependency_source = requireText(p.dependency_source, 'provenance.dependency_source')
   if (p.dependency_coverage) out.dependency_coverage = requireText(p.dependency_coverage, 'provenance.dependency_coverage')
   if (p.resolved_inputs_snapshot !== undefined) out.resolved_inputs_snapshot = structuredClone(p.resolved_inputs_snapshot)
+  for (const key of ['isolation_guarantee', 'isolation_probe', 'independent_proof_eligible', 'independent_proof_block_reason']) {
+    if (p[key] !== undefined) out[key] = structuredClone(p[key])
+  }
   if (p.related_decision) out.related_decision = normalizeRef(p.related_decision, 'related_decision')
   if (p.related_guidance) out.related_guidance = normalizeRef(p.related_guidance, 'related_guidance')
   if (p.portable) {

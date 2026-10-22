@@ -29,7 +29,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { STATUS_WAITING_ACCEPTANCE, STATUS_EXECUTION_BLOCKED, loadRegistry } from './local-task-registry.mjs'
+import { STATUS_WAITING_ACCEPTANCE, STATUS_EXECUTION_BLOCKED, loadRegistry, assertLegacyHistoryAudit } from './local-task-registry.mjs'
 import { collectMergeFacts } from './registry-reconcile.mjs'
 import { runPreflight } from './ai-task-preflight-check.mjs'
 
@@ -94,12 +94,12 @@ export function autoPhaseDone(state) {
   return state.running.size === 0 && state.queue.length === 0
 }
 
-// ---------- 资格筛选（导出供 M5 调度器复用，勿另写一份筛选规则） ----------
+// ---------- 历史资格筛选（显式只读回放；不是当前调度入口） ----------
 
 // batch.json 的候选相对路径基于 batch 文件所在目录解析。
-// repoRoot 仅用于依赖合并事实核查；缺省为脚本所在仓库（M3 CLI 行为不变），
-// M5 调度器唤起其他项目批次时显式传目标项目主检出。
-export async function assessAndSort(candidates, batchPath, repoRoot = path.resolve(__dirname, '..')) {
+// repoRoot 为历史 fixture / 合并事实所属仓库；第四参数须显式选择历史模式。
+export async function assessAndSort(candidates, batchPath, repoRoot = path.resolve(__dirname, '..'), opts = {}) {
+  assertLegacyHistoryAudit(opts, 'assessAndSort')
   const PRI = { P0: 0, P1: 1, P2: 2 }
   const baseDir = path.dirname(batchPath)
 
@@ -107,7 +107,7 @@ export async function assessAndSort(candidates, batchPath, repoRoot = path.resol
     const issuePath = path.resolve(baseDir, candidate.issueBasics)
     const specPath = path.resolve(baseDir, candidate.taskSpec)
     // LOC-003：进程内调用结构化校验，不再 spawn 子进程、不再自行重读 issue 文件
-    const pr = await runPreflight(issuePath, specPath, { runBaseline: 'V1' })
+    const pr = await runPreflight(issuePath, specPath, { ...opts, runBaseline: 'V1' })
     const f = pr.fields || {}
     const dep = f.dependencies ?? null
     const excluded = {
@@ -122,7 +122,7 @@ export async function assessAndSort(candidates, batchPath, repoRoot = path.resol
       const depIds = dep.split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
       let unmet = depIds
       try {
-        const reg = loadRegistry(repoRoot)
+        const reg = loadRegistry(repoRoot, opts)
         const facts = collectMergeFacts(repoRoot, 'main')
         unmet = depIds.filter((d) => {
           const dt = reg.tasks.find((x) => x.task_id === d)

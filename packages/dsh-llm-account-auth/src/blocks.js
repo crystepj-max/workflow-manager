@@ -2,7 +2,10 @@
 // StreamChunk 约定：block-start 开块 → 若干 *-delta（同 index 关联）→ block-end 携带完整块；
 // usage 先于 finish，且 finish 之后不再有任何块。
 
-import { CallId } from '@deepseek-ai/dsh-llm';
+import * as llmTypes from '@deepseek-ai/dsh-llm';
+
+// 0.2 使用 ToolCallId，保留 0.1 宿主公开的 CallId 入口。
+const CallId = typeof llmTypes.ToolCallId === 'function' ? llmTypes.ToolCallId : llmTypes.CallId;
 
 export function createStreamBuilder() {
   const byKey = new Map(); // 逻辑键（如 'text' / 'tool:0'）→ 块 index

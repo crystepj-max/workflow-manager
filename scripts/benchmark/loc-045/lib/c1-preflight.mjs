@@ -2,13 +2,13 @@ import { runPreflight } from '../../../ai-task-preflight-check.mjs'
 import { join } from 'node:path'
 
 /**
- * C1：将建设模板 preflight 模型调用替换为确定性资格检查。
+ * 历史 LOC-045 基准 C1：只读旧 fixture，不用于当前 Task 开工。
  * 返回机械检查结果，不计为模型调用。
  */
 export async function runMechanicalPreflight(repoRoot = process.cwd()) {
   const issue = join(repoRoot, 'docs/tasks/LOC-045-workflow-complexity-benchmark.md')
   const spec = join(repoRoot, 'docs/tasks/specs/LOC-045-workflow-complexity-benchmark/task-spec-V1.md')
-  const result = await runPreflight(issue, spec, { runBaseline: 'V1' })
+  const result = await runPreflight(issue, spec, { runBaseline: 'V1', legacyHistoryAudit: true })
   return {
     route: result.ok ? 'PASS' : 'BLOCKED',
     mechanical: true,

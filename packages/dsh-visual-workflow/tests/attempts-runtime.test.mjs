@@ -364,6 +364,10 @@ test('FIX-224 旧脚本中断后续跑：中断也标扫描来源，段内编号
   ])
   assert.equal(before.node_attempts.find((a) => a.node === 'dev').status, 'completed')
   assert.equal(before.node_attempts.find((a) => a.node === 'review').status, 'interrupted', '真实 interrupt 的补录仍明确标中断')
+  for (const attempt of before.node_attempts) {
+    assert.equal(attempt.isolation_guarantee, 'enforced', 'WFM-69 扫描和中断补录均保留 WFM-81 隔离事实')
+    assert.equal(attempt.independent_proof_eligible, before.node_isolation[attempt.node].independent_proof_eligible)
+  }
   assert.ok(!before.business_outcomes.review, '中断仍不生成成功业务结果')
   const p2 = wfRun.execute({ templateId: 'attempt-spec', taskId: 'legacy-resume', resume_paused: true })
   await until(() => engine.pending.length === 2, '旧脚本恢复段')

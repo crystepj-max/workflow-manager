@@ -19,7 +19,7 @@ packages/dsh-visual-workflow/
 │   └── dist-fresh.test.mjs     # dist 新鲜度 + dsh-tools 声明可移植/同源校验
 ├── verify.sh              # 本地质量闸门（build + 新鲜度 + 版本 + 包测试）
 ├── docs/EDITOR-MIGRATION.md
-└── package.json           # @deepseek-ai/dsh-tools 对齐宿主发行版（本机同源由开发机软链保证）
+└── package.json           # SDK 与 dsh-tools 声明精确发行版本，安装后检查运行时实例一致性
 ```
 
 ## 开发模式：动态插件快速迭代
@@ -128,14 +128,31 @@ npm test                              # host + client 冒烟 + 静态 bundle + d
 bash verify.sh                        # Gate1–4：版本对齐 + 构建 + 新鲜度 + 包测试
 ```
 
-## 版本策略（dsh-tools ↔ 宿主）
+## 版本策略（SDK 与 tools 运行时）
 
-- 插件 `@deepseek-ai/dsh-tools` **声明发行版本号**（当前 `0.1.1-rc.2`），仓库内**不写本机路径**：受管 `file:` 绝对路径只在一台机器上成立，换机 / CI 上会安装成悬空链接、包测试必红（2026-09-20 事故）。
-- **本机同源由开发环境保证，不进仓库文件**：需要与宿主同源的开发机上，把 `node_modules/@deepseek-ai/dsh-tools` 软链（或 `npm link`）到宿主工作区副本 `deepseek-harness/packages/core/tools`。
-- 为什么必须同源：宿主 DSH v0.1.6 起工具调度器以 `Symbol.for('@deepseek-ai/dsh-tools.scheduler')` **全局注册**，而 npm 已发布副本（含 `0.1.6-alpha.2`）仍是实例级 `Symbol(...)`。link 挂载的插件按真实路径解析依赖，旧副本与宿主符号不同源 → `registry[TOOL_RUNTIME_SCHEDULER]` 取不到 → 工具执行崩（`Cannot read properties of undefined (reading 'prepare')`，2026-09-19 wf-explore DeepSeek 测试事故）。profile 回退解析只覆盖安装在 profile 内的插件，帮不到 link 挂载的本插件。
-- 用途仅限静态 bundle 的 `defineTool` 兜底（动态模式走 `harness.defineTool`）。宿主换版本后需回归确认 `defineTool` 工厂签名兼容。`tests/dist-fresh.test.mjs` T4 校验「声明不得含本机路径 + 与发行版对齐」，并在本机已软链到宿主副本时进一步校验调度器符号为全局注册。
-- 待办：宿主发布含全局符号注册的 dsh-tools 版本后，本行同批升到该版本，即可去掉开发机软链步骤。
-- 改 `src/` 后若未 `npm run build`，`npm run check:dist` / `verify.sh` / 包测试会失败，避免再出现 issue-33 的过期 `dist/host-entry.mjs`。
+- 当前 SDK、`dsh` 与 `dsh-tools` 使用同一发行版 `0.2.0-rc.2`。私有仓库根显式固定 `dsh-llm@0.2.0-rc.2`，用于规范当前工作区的 SDK 依赖图；没有升级外部 SDK。
+- `dsh-llm-account-auth` 独立包继续声明 `^0.1.1-rc.2 || 0.2.0-rc.2`，分别使用公开的 `CallId` / `ToolCallId` 入口，保留旧宿主兼容。私有工作区的当前运行时固定不改变它独立安装到旧宿主的支持范围。
+- 当前 tools 的调度器 Symbol 属于模块实例。SDK 安装、`agent-loop` 与结构化插件必须解析到同一 tools realpath 并共享该 Symbol；只核对版本号不足以判断安装有效。
+
+在仓库根使用 Node.js 24 安装并检查实际解析身份：
+
+```bash
+npm install
+node --test --test-name-pattern="SDK agent-loop" scripts/test/node-provider-worker.test.mjs
+```
+
+旧安装中，精确依赖固定和普通 `npm install` 仍可能保留合法但分裂的旧 peer 图；`npm install --prefer-dedupe` 也不保证迁移。检查报告多个 tools 路径或调度器身份不一致时，在本仓库执行一次正规去重，再回读实际身份：
+
+```bash
+npm dedupe --ignore-scripts
+node --test --test-name-pattern="SDK agent-loop" scripts/test/node-provider-worker.test.mjs
+npm run build --workspace dsh-visual-workflow
+npm run check:dist --workspace dsh-visual-workflow
+```
+
+去重是本仓库旧安装的受控迁移步骤；未添加自动 `postinstall`。检查通过只证明本次安装图一致。正式产品仍需按上文重建、真实安装路径加载、完整重启和工作流验收。运行时根目录收集同时支持完全提升安装：没有子包本地 `node_modules` 时只收集实际存在的精确包目录。
+
+改 `src/` 后仍须重新构建；`check:dist` / 包测试会拒绝过期产物。
 
 ## 与 pkg-19 的主要差异
 
