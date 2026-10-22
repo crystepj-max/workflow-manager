@@ -62,6 +62,14 @@ const stages = [
     cwd: repoRoot,
   },
   {
+    // WFM-77：只读比较真实 DSH_HOME/skills 与当前生成器安装清单。
+    // 干净环境目录不可达时段内显式 SKIP，不把未核对伪装为安装态通过。
+    name: '内置技能安装态核对（WFM-77）',
+    command: process.execPath,
+    args: ['scripts/installed-skill-audit.mjs'],
+    cwd: repoRoot,
+  },
+  {
     name: '运行项目测试',
     command: npm,
     args: ['test'],
@@ -100,4 +108,5 @@ for (const [index, stage] of stages.entries()) {
 console.log(`
 ✅ 机器验证通过。
 下一步：关闭开发 DSH，完整重启产品 DSH，并从真实安装路径完成人工 E2E。
+环境核对若显示 SKIP，须在真实目标补跑；跳过不代表对应证据通过。
 动态开发插件的运行结果不是发布证据；本命令不会自动宣布 Release Ready。`)
