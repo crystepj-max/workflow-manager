@@ -1063,6 +1063,7 @@ return {
         segments: rec.segments.map((s) => {
           const out = { index: s.index, run_id: s.run_id, trigger: s.trigger, started_at: s.started_at, ended_at: s.ended_at, status: s.status, active: s.active === true }
           if (s.decision_id) out.decision_id = s.decision_id
+          if (s.initiator) out.initiator = s.initiator
           return out
         }),
         snapshots: rec.snapshots,
@@ -2034,6 +2035,7 @@ return {
     })
     const listRunSummaries = async () => {
       await runsHydration
+      await logicalRunsHydration
       // #75 S-4：同一逻辑运行的看板投影逐请求缓存，避免每个段重复遍历事件数组；
       // 投影逻辑在 dist/dashboard-projection.cjs 内核（载荷外），加载失败时行不带
       // dashboard 字段（客户端按缺失态呈现，不影响其余列表能力）
@@ -2058,6 +2060,7 @@ return {
         }
         return row
       }).sort((a, b) => ((b.startedAt || 0) - (a.startedAt || 0)) || byId(b.id, a.id))
+      out.push(...(await uiResume()).unstartedRuns(logicalRuns.values()))
       return { runs: out }
     }
     registerRpc('vwf.runs.list', listRunSummaries)
@@ -2240,6 +2243,9 @@ return {
       persist(rec.id)
       return { ok: true, formalRecords: rec.formalRecords, produced: artifacts.length, taskId: rec.taskId, store_committed: storeCommitted }
     })
+    let executeWorkflowRun
+    let uiResumeCore = null
+    const uiResume = async () => uiResumeCore || (uiResumeCore = await loadDist('ui-resume.cjs'))
     // #80 运行控制面：pause / interrupt（RUNNING 专属）与 guidance（PAUSED 专属）。
     // 状态语义不混用：WAITING_HUMAN 归 Human Decision 流程、BLOCKED 归外部条件恢复。
     registerRpc('vwf.run.control', async (a) => {
@@ -2249,6 +2255,7 @@ return {
       const lrId = String((a && a.logical_run_id) || '')
       const rec = logicalRuns.get(lrId)
       if (!rec) return fail('逻辑运行不存在：' + lrId, '$.logical_run_id')
+      if (action === 'decision' || action === 'recover') return (await uiResume()).submit(a, { rec, latest: latestLogicalRunForTask(rec.task_id), parked: runs.get((rec.segments[rec.segments.length - 1] || {}).run_id), agents, execute: executeWorkflowRun, event: (type, extra) => { controlEvent(rec, type, extra); requestLogicalPersist(lrId) } })
       if (rec.terminal) return fail('逻辑运行已终态（' + rec.lifecycle.state + '），控制面不可用：' + lrId)
       if (action === 'pause' || action === 'interrupt') {
         if (rec.lifecycle.state !== 'RUNNING') return fail('仅 RUNNING 的逻辑运行可' + (action === 'interrupt' ? '中断' : '暂停') + '；当前为 ' + rec.lifecycle.state + '（WAITING_HUMAN / BLOCKED / PAUSED 三态语义不混用）')
@@ -3151,6 +3158,8 @@ return {
     const SR = (d) => ({ type: 'string', required: true, description: d })
     const O = (d) => (d ? { type: 'object', additionalProperties: true, description: d } : { type: 'object', additionalProperties: true })
     const textTool = (t) => dtools.define({ ...t, output: { schema: S(), render: (a, value) => [{ type: 'text', text: value }] } })
+    // 仅控制面持有双参数执行链；公开工具包装只接收 rawArgs，不能伪造 UI 来源。
+    const bindWorkflowRun = (run) => { executeWorkflowRun = async (args, ui) => (await uiResume()).execute(run, args, ui); return (args) => executeWorkflowRun(args) }
     dtools.register(textTool({
       name: 'wf_run',
       description: '运行一个可视化工作流（DSL 图）：校验并编译为 workflow 脚本后交给引擎执行。args.templateId 用内置/用户模板，或 args.dsl 传自定义图。返回运行状态；Human Decision 以 WAITING_HUMAN 暂停，用 decision_id + user_choice 续跑；残留人工门禁以 AWAITING_HUMAN_<node> 暂停，用 entry + approved 续跑。',
@@ -3182,7 +3191,7 @@ return {
         retry_policy_overrides: O('时间上限可调'),
         resume_paused: { type: 'boolean', description: '#80 暂停恢复：对 PAUSED 的逻辑运行按检查点现场续跑同一 Logical Run；恢复后的节点读取暂停期间提交的全部 Guidance 与最新基线修订（wf_control 提交）' },
       },
-      async execute(rawArgs) {
+      execute: bindWorkflowRun(async (rawArgs, ui) => {
         refreshServices()
         await srcCore()
         // 工具平台会 deepFreeze 入参：续跑回填写到浅拷贝上
@@ -3251,11 +3260,7 @@ return {
         // LOC-027：基线恢复段以检查点现场为段首基线（beforeResultKeys 随恢复段更新，
         // 保证逐节点入档只记恢复段新完成的节点）
         let beforeResultKeys = new Set(Object.keys((args.results && typeof args.results === 'object' && !Array.isArray(args.results)) ? args.results : {}))
-        const logicalRunConfig = () => {
-          const cfg = { runDir: args.runDir, baseBranch: args.baseBranch, roleDir: args.roleDir || c.roleDir, issueRef: args.issueRef, issueTitle: args.issueTitle }
-          for (const k of Object.keys(cfg)) { if (cfg[k] === undefined || cfg[k] === null || cfg[k] === '') delete cfg[k] }
-          return cfg
-        }
+        const logicalRunConfig = () => uiResumeCore.config(args, parent, c.roleDir)
         let logicalRec = null
         let logicalTrigger = 'start'
         // FIX-226：本次是否新建了逻辑运行（新建才写 Rev1 角色条目并留降级控制事件；
@@ -3523,12 +3528,13 @@ return {
               })
             }
           }
+          if (ui) Object.assign(hostDecisionRef, { initiator: ui.initiator, reason: args.feedback || '' })
           logicalRec.human_decisions = (logicalRec.human_decisions || []).concat([hostDecisionRef])
           controlEvent(logicalRec, 'human_decision_recorded', { decision_id: hostDecisionRef.decision_id, choice: hostDecisionRef.choice, candidate_digest: dig })
         }
 
         const scriptArgs = Object.assign({
-          taskId: args.taskId, runDir: args.runDir, roleDir: args.roleDir || c.roleDir, baseBranch: args.baseBranch,
+          taskId: args.taskId, logical_run_id: logicalRec.logical_run_id, runDir: args.runDir, roleDir: args.roleDir || c.roleDir, baseBranch: args.baseBranch,
           issueRef: args.issueRef, issueTitle: args.issueTitle, issueBody: args.issueBody, issueComments: args.issueComments,
           issuePath: args.issuePath, specPath: args.specPath, repo_path: CODE_ROOT || projectRoot(),
           run_baseline: args.run_baseline || args.runBaseline, env_store: args.env_store || args.envStore,
@@ -3604,10 +3610,12 @@ return {
         }
         // #79：本段执行挂到逻辑运行（READY/WAITING_HUMAN → RUNNING，清 reason）
         if (logicalRec) {
-          appendLogicalSegment(logicalRec, runId, logicalTrigger, isHdResume ? String(args.decision_id || '') : '')
+          const segment = appendLogicalSegment(logicalRec, runId, logicalTrigger, isHdResume ? String(args.decision_id || '') : '')
+          if (ui) segment.initiator = ui.initiator
           logicalSetState(logicalRec, 'RUNNING', null)
           requestLogicalPersist(logicalRec.logical_run_id)
         }
+        if (ui) ui.onStarted(runId)
         let result
         try { result = await run.result } catch (e) {
           segmentCtrls.delete(runId)
@@ -3915,7 +3923,7 @@ return {
           : (gateOutcome && gateOutcome.finalValue !== undefined ? gateOutcome.finalValue : result.value)
         const outAgents = (result.agentsStarted || 0) + (gateOutcome && gateOutcome.trace ? gateOutcome.trace.reruns.reduce((n, r) => n + (r.agents_started || 0), 0) : 0)
         return JSON.stringify({ runId: outRunId, stopReason: outStop, value: outValue, agentsStarted: outAgents, integration_gate: gateOutcome ? gateOutcome.trace : undefined })
-      },
+      }),
     }))
     dtools.register(textTool({
       name: 'vwf_workspace',

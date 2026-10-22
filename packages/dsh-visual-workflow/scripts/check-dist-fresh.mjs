@@ -11,6 +11,7 @@ const hostPath = join(root, 'src', 'host.js')
 const clientPath = join(root, 'src', 'client.js')
 const roleLibraryPath = join(root, '..', '..', 'scripts', 'role-library.cjs')
 const projectionCorePath = join(root, '..', '..', 'scripts', 'projection-core.cjs')
+const uiResumePath = join(root, '..', '..', 'scripts', 'ui-resume.cjs')
 const stateRecoveryCorePath = join(root, '..', '..', 'scripts', 'state-recovery-core.cjs')
 const nodeArtifactsPath = join(root, '..', '..', 'scripts', 'node-artifacts.mjs')
 const roleManifestPath = join(root, '..', '..', 'dsh', 'roles', 'builtin-roles.json')
@@ -59,6 +60,8 @@ const roleManifest = sha256(roleManifestPath)
 if (stamp.projectionCore !== projectionCore || stamp.stateRecoveryCore !== stateRecoveryCore || stamp.roleLibrary !== roleLibrary || stamp.roleManifest !== roleManifest) {
   fail('共享内核/清单哈希与 stamp 不符（projectionCore ' + projectionCore.slice(0, 12) + ' / stateRecoveryCore ' + stateRecoveryCore.slice(0, 12) + ' / roleLibrary ' + roleLibrary.slice(0, 12) + ' / roleManifest ' + roleManifest.slice(0, 12) + '）')
 }
+
+if (stamp.uiResume !== sha256(uiResumePath) || !existsSync(join(root, 'dist', 'ui-resume.cjs')) || sha256(join(root, 'dist', 'ui-resume.cjs')) !== sha256(uiResumePath)) fail('界面续跑内核缺失或未重建')
 
 const body = readFileSync(distHost, 'utf8')
 if (!body.includes("typeof harness !== 'undefined'") || !body.includes('webServer')) {

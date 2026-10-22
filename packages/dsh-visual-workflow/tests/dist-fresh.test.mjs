@@ -126,3 +126,12 @@ test('T4：dsh-tools 依赖声明可移植，且与宿主同源（调度器符�
     '宿主 dsh-tools 必须用 Symbol.for 注册调度器符号，否则与插件携带的副本不同源',
   )
 })
+
+
+test('WFM-67 界面续跑内核随 dist 分发，输入与产物均受新鲜度约束', () => {
+  const source = join(REPO_ROOT, 'scripts', 'ui-resume.cjs')
+  const copied = join(pkgRoot, 'dist', 'ui-resume.cjs')
+  const stamp = JSON.parse(readFileSync(STAMP, 'utf8'))
+  assert.equal(stamp.uiResume, sha256(source))
+  assert.equal(sha256(copied), sha256(source))
+})

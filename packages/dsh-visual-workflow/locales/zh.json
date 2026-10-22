@@ -619,5 +619,8 @@
   "dashEventGuidance": "用户指导",
   "dashEventHumanDecision": "人工决策",
   "dashEventBaseline": "评价基线",
-  "dashEventNodeOutcome": "节点结果记录"
+  "dashEventNodeOutcome": "节点结果记录",
+  "ui_resume_requested": "已提交界面续跑请求",
+  "ui_resume_failed": "界面续跑提交失败",
+  "rdResumeLegacy": "旧运行缺少可核验的逻辑归属，请在原会话中恢复。"
 }

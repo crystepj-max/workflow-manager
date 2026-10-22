@@ -560,7 +560,8 @@ function makeRuntime() {
         return runState.records[String((args && args.logical_run_id) || '')] || { ok: true, found: true, logical_run_id: String((args && args.logical_run_id) || ''), records: [], attempts: [] }
       }
       case 'vwf.run.control':
-        runState.controlCalls.push({ action: String((args && args.action) || ''), logical_run_id: String((args && args.logical_run_id) || ''), text: args && args.text })
+        runState.controlCalls.push({ ...args })
+        if (runState.controlHandler) return runState.controlHandler(args)
         if (runState.controlFail) return { ok: false, error: '仅 PAUSED 的逻辑运行可提交 Guidance；当前为 RUNNING' }
         return { ok: true, action: String((args && args.action) || ''), logical_run_id: String((args && args.logical_run_id) || '') }
       case 'vwf.state': {
@@ -2589,7 +2590,7 @@ test('FEAT-85 详情：扇出子任务独立结果与汇总输入来源，未完
   assert.ok(synthPanel.includes('来自 explore'), '输入来源列出生产者：' + synthPanel.slice(0, 300))
 })
 
-test('FEAT-85 详情：WAITING_HUMAN 决策卡（选项/理由/影响/锁定 + DT-01 受阻字段映射）', async () => {
+test('FEAT-85 详情：WAITING_HUMAN 决策卡（选项/理由/影响/锁定；WFM-67 接通原 Run）', async () => {
   await openRunsTab()
   await openTask('T-A1')
   const card = Array.from(container.querySelectorAll('.vwf-card')).find((c) => (c.textContent || '').includes('需要你的决定'))
@@ -2607,16 +2608,34 @@ test('FEAT-85 详情：WAITING_HUMAN 决策卡（选项/理由/影响/锁定 + D
   assert.ok(card.querySelector('textarea'), '决策卡含理由输入')
   assert.ok(text.includes('提交前影响说明'), '决策卡含提交前影响说明')
   const submit = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('提交决定'))
-  assert.ok(submit && submit.disabled, 'DT-01 未裁定：提交按钮锁定，不伪造成功')
-  assert.ok(text.includes('DT-01-ui-resume-attribution') && text.includes('不会发起续跑'), '决策卡写明提交路径受阻及其原因')
-  assert.ok(text.includes('字段映射'), '决策卡附字段映射（交给会话执行）')
-  assert.ok(text.includes('T-A1:review:1:1'), '字段映射含真实 decision_id')
+  assert.ok(submit && submit.disabled, '未选择选项前不提交')
+  assert.ok(!text.includes('DT-01-ui-resume-attribution'), '已裁定的归属不再显示旧阻塞')
   // 点选选项后映射更新
   const addBudget = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === 'ADD_BUDGET')
   await clickEl(addBudget)
   assert.ok(card.textContent.includes('增加 1 轮自动返工额度后继续'), '点选选项后影响说明可读')
+  assert.equal(submit.disabled, false, '选择后允许提交')
   assert.ok(container.textContent.includes('提交中，按钮已锁定') || container.textContent.includes('按钮锁定'), '给出提交后锁定与续跑中状态说明')
   assert.ok(!container.textContent.includes('wf_run {'), '决策卡不拼接让用户复制的命令')
+})
+
+test('WFM-67 界面决策提交：选择后可用，真实错误可见且可重试', async () => {
+  await openRunsTab()
+  await openTask('T-A1')
+  const card = Array.from(container.querySelectorAll('.vwf-card')).find(c => c.textContent.includes('需要你的决定'))
+  const stop = Array.from(card.querySelectorAll('button')).find(b => b.textContent.trim() === 'STOP')
+  await clickEl(stop)
+  const submit = Array.from(card.querySelectorAll('button')).find(b => b.textContent.includes('提交决定'))
+  assert.equal(submit.disabled, false, '点选选项后可提交原 Run')
+  runState.controlFail = true
+  const before = runState.controlCalls.length
+  await clickEl(submit)
+  assert.equal(runState.controlCalls.length, before + 1)
+  assert.equal(runState.controlCalls.at(-1).action, 'decision')
+  assert.ok(container.textContent.includes('仅 PAUSED'), '宿主真实拒绝应可读')
+  assert.equal(submit.disabled, false, '失败解除提交锁，可由用户重试')
+  runState.controlFail = false
+  runState.controlCalls.length = 0
 })
 
 test('FEAT-85 详情：BLOCKED 恢复卡（原因 / 服务商·模型前后值 / 新版本与旧版本保留）', async () => {
@@ -2630,15 +2649,141 @@ test('FEAT-85 详情：BLOCKED 恢复卡（原因 / 服务商·模型前后值 /
   assert.ok(text.includes('deepseek-official / deepseek-v4-pro'), '恢复卡显示当前服务商 / 模型')
   assert.ok(card.querySelectorAll('select').length >= 2, '恢复卡提供服务商 / 模型修改入口')
   assert.ok(text.includes('恢复后会生成新的版本存档，历史版本仍可查'), '恢复卡说明新版本与旧版本保留')
-  assert.ok(text.includes('model_overrides'), '恢复卡附 model_overrides 字段映射')
   const submit = Array.from(card.querySelectorAll('button')).find((b) => (b.textContent || '').includes('恢复并继续'))
-  assert.ok(submit && submit.disabled, 'DT-01 未裁定：恢复提交按钮锁定')
+  assert.ok(submit && submit.disabled, '未变更模型前保持不可提交')
+  assert.ok(!text.includes('DT-01-ui-resume-attribution'), '恢复卡不显示旧归属阻塞')
   // 版本表同时保留旧版本（按卡片标题定位，避免与恢复卡里的同词说明混淆）
   const snaps = Array.from(container.querySelectorAll('.vwf-card')).find((c) => {
     const title = c.querySelector('.vwf-card-title')
     return title && (title.textContent || '').trim() === '历史版本'
   })
   assert.ok(snaps && snaps.textContent.includes('第 1 版'), '历史版本表可查')
+})
+
+test('WFM-67 恢复卡：模型草稿随请求提交，宿主 errors 信封如实显示且可重试', async () => {
+  await openRunsTab()
+  await openTask('T-C2')
+  const card = Array.from(container.querySelectorAll('.vwf-card')).find(c => c.textContent.includes('阻塞原因'))
+  const submit = Array.from(card.querySelectorAll('button')).find(b => b.textContent.includes('恢复并继续'))
+  const model = card.querySelectorAll('select')[1]
+  await selectValue(model, 'deepseek-v4-flash')
+  assert.equal(submit.disabled, false)
+  runState.controlHandler = () => ({ ok: false, errors: [{ at: '$', message: '原执行会话当前未加载或已退出' }] })
+  try {
+    await clickEl(submit)
+    const request = runState.controlCalls.at(-1)
+    assert.equal(request.action, 'recover'); assert.equal(request.logical_run_id, 'lr-c')
+    assert.equal(request.run_id, 'run-c2'); assert.equal(request.snapshot_revision, 1)
+    assert.deepEqual(request.model_overrides.dev, { model: 'deepseek-v4-flash' })
+    assert.ok(!request.initiator && !request.execution_session_id, '客户端不能指定执行身份')
+    assert.ok(container.textContent.includes('原执行会话当前未加载或已退出'))
+    assert.equal(submit.disabled, false)
+  } finally { runState.controlHandler = null; runState.controlCalls.length = 0 }
+})
+
+test('WFM-67 决策重复点击锁定：失败前不伪造续跑回执，用户重试后只按宿主启动回执显示', async () => {
+  await openRunsTab(); await openTask('T-A1')
+  const card = Array.from(container.querySelectorAll('.vwf-card')).find(c => c.textContent.includes('需要你的决定'))
+  await clickEl(Array.from(card.querySelectorAll('button')).find(b => b.textContent.trim() === 'STOP'))
+  const reason = card.querySelector('textarea')
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set.call(reason, '停止这次运行')
+    reason.dispatchEvent(new dom.window.Event('input', { bubbles: true })); await flush()
+  })
+  const submit = Array.from(card.querySelectorAll('button')).find(b => b.textContent.includes('提交决定'))
+  let finish
+  runState.controlHandler = () => new Promise(resolve => { finish = resolve })
+  try {
+    await act(async () => { submit.click(); submit.click(); await flush() })
+    assert.equal(runState.controlCalls.length, 1); assert.equal(submit.disabled, true)
+    const request = runState.controlCalls[0]
+    assert.equal(request.action, 'decision'); assert.equal(request.decision_id, 'T-A1:review:1:1'); assert.equal(request.user_choice, 'STOP')
+    assert.equal(request.reason, '停止这次运行')
+    assert.ok(card.textContent.includes('提交中，按钮已锁定')); assert.ok(!card.textContent.includes('已提交，续跑中'))
+    await act(async () => { finish({ ok: false, error: '提交连接中断' }); await flush(); await flush() })
+    assert.equal(submit.disabled, false); assert.equal(reason.value, '停止这次运行')
+    runState.controlHandler = () => ({ ok: true, state: 'RUNNING', run_id: 'run-a3' })
+    await clickEl(submit)
+    assert.equal(runState.controlCalls.length, 2); assert.equal(submit.disabled, true)
+    assert.ok(card.textContent.includes('已提交，续跑中'))
+  } finally { runState.controlHandler = null; runState.controlCalls.length = 0 }
+})
+
+test('WFM-67 已启动的新段实时进入详情三页签、attempt 与完整经过，原任务只一行', async () => {
+  const before = { runs: runState.runs, logical: runState.logical['lr-a'], records: runState.records['lr-a'] }
+  await openRunsTab(); await openTask('T-A1')
+  const card = Array.from(container.querySelectorAll('.vwf-card')).find(c => c.textContent.includes('需要你的决定'))
+  await clickEl(Array.from(card.querySelectorAll('button')).find(b => b.textContent.trim() === 'ADD_BUDGET'))
+  runState.controlHandler = () => {
+    const record = JSON.parse(JSON.stringify(before.logical))
+    record.lifecycle = { state: 'COMPLETED', reason: null }; record.terminal = true
+    record.segments.forEach(s => { s.active = false })
+    record.segments.push({ index: 3, run_id: 'run-a3', trigger: 'human_decision', decision_id: 'T-A1:review:1:1', status: 'DONE', active: false, started_at: 5000 })
+    record.control_events.push({ type: 'ui_resume_requested', at: 4999 }, { type: 'constructor', at: 5000 })
+    record.node_attempts.push({ node: 'review', segment: 3, snapshot_revision: 2, provider: 'p1', model: 'm2', outcome: 'APPROVE', completed_at: 5100 })
+    runState.logical['lr-a'] = record
+    runState.runs = [...before.runs.map(r => r.id === 'run-a2' ? { ...r, supersededBy: 'run-a3' } : r), { id: 'run-a3', taskId: 'T-A1', workflowId: 'wf-runs', status: 'DONE', phase: '检查', startedAt: 5000, logical_run_id: 'lr-a', logical_state: 'COMPLETED', segment: 3, segment_count: 3 }]
+    runState.records['lr-a'] = { ...before.records, records: [...before.records.records, logicalAttempt('lr-a', 'review', 3, { attempt_id: 'a3k1', outcome: 'APPROVE', result: { verdict: 'APPROVE', summary: '第三段已核验的新成果' } })] }
+    runState.states['run-a3'] = { status: 'DONE', phase: '检查', logs: ['第三段执行完成'], agents: [] }
+    return { ok: true, state: 'RUNNING', run_id: 'run-a3' }
+  }
+  try {
+    await clickEl(Array.from(card.querySelectorAll('button')).find(b => b.textContent.includes('提交决定')), 10)
+    assert.equal(container.querySelectorAll('.vwf-rd-body .vwf-tab').length, 3)
+    await clickEl(nodeDirRows().find(r => r.textContent.includes('检查')))
+    assert.equal(attemptSelect().options.length, 3, '不离开详情即可读取第三次执行')
+    assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第三段已核验的新成果'))
+    const verdict = container.querySelector('.vwf-rd-body [data-vwf-verdict]').textContent
+    assert.ok(verdict.includes('已通过'))
+    for (const label of ['检查', '活动']) {
+      const tab = detailTabs().find(t => t.textContent.includes(label))
+      await clickEl(tab)
+      assert.equal(tab.getAttribute('aria-selected'), 'true')
+      assert.ok(container.querySelector('.vwf-rd-body [data-vwf-verdict]').textContent.includes('已通过'))
+      if (label === '活动') {
+        assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('已提交界面续跑请求'))
+        assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('constructor'), '未知历史事件仍保留原始标识，不作为翻译对象的继承属性读取')
+      }
+    }
+    await clickEl(Array.from(container.querySelectorAll('.vwf-rd-strip button')).find(b => b.textContent.includes('查看完整经过')))
+    const entry = container.querySelector('.vwf-chain [data-vwf-chain-node="review"][data-vwf-chain-attempt="3"]')
+    assert.ok(entry && entry.textContent.includes('已通过'), '完整经过展示同一新段、同一结论')
+    await clickEl(entry)
+    assert.ok(container.querySelector('.vwf-tab-panel').textContent.includes('第三段已核验的新成果'))
+    await backToList()
+    assert.equal(runRows().filter(r => r.textContent.includes('T-A1')).length, 1)
+  } finally {
+    runState.runs = before.runs; runState.logical['lr-a'] = before.logical; runState.records['lr-a'] = before.records
+    delete runState.states['run-a3']; runState.controlHandler = null; runState.controlCalls.length = 0
+    await openRunsTab()
+    await clickEl(Array.from(container.querySelectorAll('button')).find(b => b.textContent.trim() === '刷新列表'))
+  }
+})
+
+test('WFM-67 无 Logical Run 归属的历史等待卡：明确限制且不发送无归属请求', async () => {
+  const before = { runs: runState.runs, state: runState.states['run-c1'] }
+  runState.runs = before.runs.map(r => r.id === 'run-c1' ? { ...r, status: 'WAITING_HUMAN', startedAt: 99000 } : r)
+  runState.states['run-c1'] = { ...runState.states['run-a2'], decision_id: 'legacy-d1' }
+  try {
+    await openRunsTab()
+    await clickEl(Array.from(container.querySelectorAll('button')).find(b => b.textContent.trim() === '刷新列表'))
+    await openTask('T-C1')
+    const card = Array.from(container.querySelectorAll('.vwf-card')).find(c => c.textContent.includes('需要你的决定'))
+    assert.ok(card)
+    await clickEl(Array.from(card.querySelectorAll('button')).find(b => b.textContent.trim() === 'STOP'))
+    const submit = Array.from(card.querySelectorAll('button')).find(b => b.textContent.includes('提交决定'))
+    assert.equal(submit.disabled, true, '历史卡没有逻辑归属，不能开启无效提交')
+    assert.ok(card.textContent.includes('旧运行缺少可核验的逻辑归属'), '用户能看懂不可提交的原因与原会话恢复路径')
+    const count = runState.controlCalls.length
+    await clickEl(submit)
+    assert.equal(runState.controlCalls.length, count, '不发空 logical_run_id 请求')
+  } finally {
+    runState.runs = before.runs
+    if (before.state) runState.states['run-c1'] = before.state
+    else delete runState.states['run-c1']
+    await openRunsTab()
+    await clickEl(Array.from(container.querySelectorAll('button')).find(b => b.textContent.trim() === '刷新列表'))
+  }
 })
 
 test('FEAT-85 详情：工作空间字段齐全、读取失败显示未知与重试；节点成果不可用不冒充内容', async () => {

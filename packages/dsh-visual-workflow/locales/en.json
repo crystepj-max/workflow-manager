@@ -619,5 +619,8 @@
   "dashEventGuidance": "User guidance",
   "dashEventHumanDecision": "Human decision",
   "dashEventBaseline": "Evaluation baseline",
-  "dashEventNodeOutcome": "Node outcome record"
+  "dashEventNodeOutcome": "Node outcome record",
+  "ui_resume_requested": "UI resume requested",
+  "ui_resume_failed": "UI resume submission failed",
+  "rdResumeLegacy": "This legacy record has no verified Logical Run owner. Resume it in the original session."
 }
