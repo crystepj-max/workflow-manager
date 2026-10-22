@@ -83,4 +83,70 @@ function dashboardProjectionOf(lr, getRun) {
   return out
 }
 
-module.exports = { dashboardProjectionOf }
+function logicalRunPayload(rec) {
+  return {
+    logical_run_id: rec.logical_run_id,
+    isolation_guarantee: ['enforced', 'unavailable'].includes(rec.isolation_guarantee) ? rec.isolation_guarantee : 'unknown',
+    isolation_probe: rec.isolation_probe || null,
+    node_isolation: rec.node_isolation || {},
+    isolation_history: rec.isolation_history || [],
+    schema: 1,
+    task_id: rec.task_id,
+    template_id: rec.template_id,
+    title: rec.title,
+    derived_from: rec.derived_from,
+    created_at: rec.created_at,
+    updated_at: rec.updated_at,
+    lifecycle: { state: rec.lifecycle.state, reason: rec.lifecycle.reason },
+    terminal: rec.terminal === true,
+    completion: rec.completion || null,
+    segments: rec.segments.map((s) => {
+      const out = { index: s.index, run_id: s.run_id, trigger: s.trigger, started_at: s.started_at, ended_at: s.ended_at, status: s.status, active: s.active === true }
+      if (s.decision_id) out.decision_id = s.decision_id
+      return out
+    }),
+    snapshots: rec.snapshots,
+    node_attempts: rec.node_attempts,
+    business_outcomes: rec.business_outcomes,
+    artifact_manifests: rec.artifact_manifests || {},
+    guidance: rec.guidance || [],
+    control_events: rec.control_events || [],
+    baseline_revisions: rec.baseline_revisions || [],
+    baseline_applied_upto: rec.baseline_applied_upto || 0,
+    last_engine_error: rec.last_engine_error || null,
+    pause_state: rec.pause_state || null,
+    pause_resume: rec.pause_resume || null,
+    // LOC-027：活动评价基线引用与历史版本（不可变副本审计链）
+    evaluation_baseline: rec.evaluation_baseline || null,
+    evaluation_baselines: rec.evaluation_baselines || [],
+    formal_records: rec.formal_records || null,
+    workspace: rec.workspace || null,
+    human_decisions: rec.human_decisions || [],
+    consumed_decisions: rec.consumed_decisions || {},
+    human_waits: rec.human_waits || [],
+  }
+}
+
+// 隔离路由建立前已失败的 Logical Run 仍可被用户查到；无引擎段、无节点执行。
+function unstartedIsolationRuns(records) {
+  return Array.from(records).filter((r) => !r.segments.length && r.isolation_guarantee === 'unavailable').map((r) => ({
+    id: 'logical:' + r.logical_run_id, logical_run_id: r.logical_run_id,
+    taskId: r.task_id, workflowId: r.template_id, name: r.title,
+    status: r.lifecycle.state, logical_state: r.lifecycle.state,
+    startedAt: r.created_at, segment: null, segment_count: 0, execution_not_started: true,
+    isolation_guarantee: r.isolation_guarantee, isolation_probe: r.isolation_probe,
+  }))
+}
+
+function runFromDisk(data, rec) {
+  for (const k of Object.keys(rec)) if (data[k] !== undefined && data[k] !== null) rec[k] = data[k]
+  rec.meta = { name: String((data.meta && data.meta.name) || ''), description: String((data.meta && data.meta.description) || '') }
+  rec.status = typeof data.status === 'string' && data.status ? data.status : 'unknown'
+  rec.logs = Array.isArray(rec.logs) ? rec.logs.map(String).slice(-50) : []
+  rec.agents = Array.isArray(rec.agents) ? rec.agents.filter((a) => a && typeof a === 'object') : []
+  rec.formalRecords = Array.isArray(rec.formalRecords) ? rec.formalRecords : []
+  if (!['enforced', 'unavailable'].includes(rec.isolation_guarantee)) rec.isolation_guarantee = 'unknown'
+  return rec
+}
+
+module.exports = { dashboardProjectionOf, logicalRunPayload, unstartedIsolationRuns, runFromDisk }

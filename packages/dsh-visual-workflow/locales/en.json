@@ -619,5 +619,12 @@
   "dashEventGuidance": "User guidance",
   "dashEventHumanDecision": "Human decision",
   "dashEventBaseline": "Evaluation baseline",
-  "dashEventNodeOutcome": "Node outcome record"
+  "dashEventNodeOutcome": "Node outcome record",
+  "isolationenforced": "Isolation enforced",
+  "isolationunavailable": "Isolation unavailable · Non-independent evidence",
+  "isolationunknown": "Isolation unknown",
+  "isolationNotStarted": "Execution not started",
+  "isolationProbe": "Isolation probe evidence",
+  "isolationProofEligible": "Eligible for independent Proof",
+  "isolationProofIneligible": "Ineligible for independent Proof"
 }

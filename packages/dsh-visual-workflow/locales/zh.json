@@ -619,5 +619,12 @@
   "dashEventGuidance": "用户指导",
   "dashEventHumanDecision": "人工决策",
   "dashEventBaseline": "评价基线",
-  "dashEventNodeOutcome": "节点结果记录"
+  "dashEventNodeOutcome": "节点结果记录",
+  "isolationenforced": "强制隔离",
+  "isolationunavailable": "隔离不可用 · 非独立取证",
+  "isolationunknown": "隔离等级未知",
+  "isolationNotStarted": "执行未启动",
+  "isolationProbe": "隔离探针证据",
+  "isolationProofEligible": "具备独立 Proof 资格",
+  "isolationProofIneligible": "不具备独立 Proof 资格"
 }
