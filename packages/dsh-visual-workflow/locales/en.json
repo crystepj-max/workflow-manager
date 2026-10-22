@@ -644,5 +644,9 @@
   "isolationNotStarted": "Execution not started",
   "isolationProbe": "Isolation probe evidence",
   "isolationProofEligible": "Eligible for independent Proof",
-  "isolationProofIneligible": "Ineligible for independent Proof"
+  "isolationProofIneligible": "Ineligible for independent Proof",
+  "rdSegmentScan": "Segment-end scan (not every call)",
+  "rdScanEntry": "Scan entry #{n}",
+  "rdScanRecords": "Scan entries (not every call)",
+  "rdScanSegments": "Segments {segments}: segment-end scan (not every call). Numbers show scan order; actual call counts cannot be recovered."
 }

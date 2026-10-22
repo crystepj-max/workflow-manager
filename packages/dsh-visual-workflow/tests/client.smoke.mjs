@@ -3424,6 +3424,54 @@ for (const [level, label] of [['enforced', '强制隔离'], ['unavailable', '非
   })
 }
 
+test('FIX-224 扫描摘要以段末扫描记录呈现，序号与逐次记录可辨，Store 逐次段优先', async () => {
+  const original = runState.logical['lr-a']
+  const records = runState.records['lr-a']
+  const scan = (node, segment, seq, outcome) => ({ node, segment, attempt_id: 'a' + segment + 's' + seq,
+    evidence_source: 'segment_scan', status: 'completed', snapshot_revision: segment, provider: 'p1', model: 'm1', outcome, completed_at: 3200 + seq })
+  runState.logical['lr-a'] = { ...original, node_attempts: [scan('dev', 1, 1, 'READY'), scan('review', 1, 2, 'RETURN_DEV')],
+    segments: [original.segments[0]] }
+  runState.records['lr-a'] = { ok: true, found: true, records: [], attempts: [] }
+  const persisted = JSON.stringify(runState.logical['lr-a'])
+  try {
+    await clickEl(container.querySelector('[data-vwf-nav="templates"]'))
+    await openRunsTab()
+    const row = runRowWith('T-A1')
+    assert.match(row.textContent, /段末扫描记录（不保证逐次）/, '列表不能把扫描条数说成返工次数或首次处理')
+    await openTask('T-A1')
+    await clickEl(nodeDirRows().find((r) => r.textContent.includes('实现')))
+    const detail = container.querySelector('.vwf-rd-body')
+    assert.match(detail.textContent, /段末扫描记录（不保证逐次）/)
+    assert.match(attemptSelect().options[0].textContent, /扫描记录 #1/)
+    assert.doesNotMatch(attemptSelect().options[0].textContent, /第 1 次/, '扫描序号不是实际调用次数')
+    await clickEl(Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === '查看完整经过'))
+    const chain = container.querySelector('.vwf-chain-dialog')
+    assert.match(chain.querySelector('.vwf-dialog-desc').textContent, /段末扫描记录（不保证逐次）/, '整段说明醒目可见')
+    const entries = [...chain.querySelectorAll('[data-vwf-chain-node]')].filter((e) => e.getAttribute('data-vwf-chain-attempt') !== '0')
+    assert.equal(entries.length, 2, '扫描条数不补造')
+    for (const e of entries) assert.match(e.textContent, /段末扫描记录（不保证逐次）/, '每条可辨识来源')
+    assert.match(entries[1].textContent, /扫描记录 #2/, '段内编号跨节点连续')
+    await clickEl(entries[1])
+    assert.match(container.querySelector('.vwf-rd-body').textContent, /扫描记录 #2/, '链路条目可定位到扫描结果')
+    assert.equal(JSON.stringify(runState.logical['lr-a']), persisted, '展示只读，不改历史落盘记录')
+    await backToList()
+
+    // 同一段异常同时出现扫描摘要与逐次 Store 记录时，Store 是权威；整个扫描段不参与展示。
+    runState.records['lr-a'] = records
+    await clickEl(container.querySelector('[data-vwf-nav="templates"]'))
+    await openRunsTab()
+    await openTask('T-A1')
+    await clickEl(nodeDirRows().find((r) => r.textContent.includes('实现')))
+    assert.doesNotMatch(attemptSelect().textContent, /扫描记录/)
+    assert.match(attemptSelect().textContent, /第 1 次/)
+    assert.equal(attemptSelect().options.length, 2, '同段扫描不覆盖逐次记录或凭空加一条')
+    await backToList()
+  } finally {
+    runState.logical['lr-a'] = original
+    runState.records['lr-a'] = records
+  }
+})
+
 test('清理：卸载冒烟测试根节点', async () => {
   await act(async () => {
     root.unmount()

@@ -644,5 +644,9 @@
   "isolationNotStarted": "执行未启动",
   "isolationProbe": "隔离探针证据",
   "isolationProofEligible": "具备独立 Proof 资格",
-  "isolationProofIneligible": "不具备独立 Proof 资格"
+  "isolationProofIneligible": "不具备独立 Proof 资格",
+  "rdSegmentScan": "段末扫描记录（不保证逐次）",
+  "rdScanEntry": "扫描记录 #{n}",
+  "rdScanRecords": "扫描记录（不保证逐次）",
+  "rdScanSegments": "第 {segments} 段：段末扫描记录（不保证逐次）。序号仅表示扫描顺序，无法还原真实调用次数。"
 }
