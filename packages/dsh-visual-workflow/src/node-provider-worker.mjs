@@ -131,6 +131,7 @@ export function resolveDshRuntimeRoots(dist) {
     for (const dependencyName of [
       ...Object.keys(manifest.dependencies || {}),
       ...Object.keys(manifest.optionalDependencies || {}),
+      ...Object.keys(manifest.peerDependencies || {}),
     ]) {
       const dependencyManifest = findInstalledPackageManifest(dependencyName, manifestPath)
       if (dependencyManifest) queue.push(dependencyManifest)
