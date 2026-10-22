@@ -1,3 +1,4 @@
+// 旧任务卡 fixture 的显式历史回放；当前入口由 legacy-task-source-exports / multica-task-preflight 覆盖。
 // LOC-003：runPreflight 结构化接口直测（不经子进程、不退出）
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -51,7 +52,7 @@ const BASE = {
 test('runPreflight：合法任务返回结构化结果且含进程内消费字段', async () => {
   const dir = tmpdir()
   const { basicsPath, specPath } = writeBasics(dir, BASE)
-  const r = await runPreflight(basicsPath, specPath, { runBaseline: 'V1', repo: dir })
+  const r = await runPreflight(basicsPath, specPath, { legacyHistoryAudit: true, runBaseline: 'V1', repo: dir })
   assert.equal(r.ok, true)
   assert.deepEqual(r.failures, [])
   assert.equal(r.fields.status, '已定义')
@@ -64,7 +65,7 @@ test('runPreflight：合法任务返回结构化结果且含进程内消费字�
 test('runPreflight：受阻任务返回 ok:false + failures，不抛出不退出', async () => {
   const dir = tmpdir()
   const { basicsPath, specPath } = writeBasics(dir, { ...BASE, 无人值守许可: '不允许' })
-  const r = await runPreflight(basicsPath, specPath, { repo: dir })
+  const r = await runPreflight(basicsPath, specPath, { legacyHistoryAudit: true, repo: dir })
   assert.equal(r.ok, false)
   assert.equal(r.fields, null)
   assert.ok(r.failures.some((f) => f.includes('无人值守许可')))
@@ -72,7 +73,7 @@ test('runPreflight：受阻任务返回 ok:false + failures，不抛出不退出
 
 test('runPreflight：文件缺失返回失败而非抛出', async () => {
   const dir = tmpdir()
-  const r = await runPreflight(path.join(dir, 'nope.md'), path.join(dir, 'nope-spec.md'))
+  const r = await runPreflight(path.join(dir, 'nope.md'), path.join(dir, 'nope-spec.md'), { legacyHistoryAudit: true })
   assert.equal(r.ok, false)
   assert.ok(r.failures.some((f) => f.includes('文件不存在')))
 })
@@ -80,7 +81,7 @@ test('runPreflight：文件缺失返回失败而非抛出', async () => {
 test('runPreflight：Run 绑定版本不一致进入 failures', async () => {
   const dir = tmpdir()
   const { basicsPath, specPath } = writeBasics(dir, BASE)
-  const r = await runPreflight(basicsPath, specPath, { runBaseline: 'V2', repo: dir })
+  const r = await runPreflight(basicsPath, specPath, { legacyHistoryAudit: true, runBaseline: 'V2', repo: dir })
   assert.equal(r.ok, false)
   assert.ok(r.failures.some((f) => f.includes('Run 绑定版本不一致')))
 })
@@ -91,7 +92,7 @@ test('runPreflight：需求基线缺失时记失败而非崩溃（2026-09-20 夜
   delete fields['需求基线版本']
   const { basicsPath, specPath } = writeBasics(dir, fields)
   // 规格含版本号而卡缺基线：修复前对 null baseline 调 toUpperCase 会抛 TypeError
-  const r = await runPreflight(basicsPath, specPath, { runBaseline: 'V1', repo: dir })
+  const r = await runPreflight(basicsPath, specPath, { legacyHistoryAudit: true, runBaseline: 'V1', repo: dir })
   assert.equal(r.ok, false)
   assert.ok(r.failures.some((f) => f.includes('需求基线版本缺失或非法')))
 })
