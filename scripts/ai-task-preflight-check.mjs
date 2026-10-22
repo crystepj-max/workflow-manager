@@ -2,11 +2,11 @@
 /**
  * 历史任务卡 preflight 实现。CLI 已退役；当前 M2 入口是
  * construction-preflight-gate.mjs，从 Multica 读取 Task 与依赖。
- * 下方导出仅供迁移前逻辑与旧基准测试追溯，不得作为当前 Task source。
+ * 含 IO 的导出默认拒绝；显式 legacyHistoryAudit: true 仅供历史取证与旧基准测试。
  *
  * 双形态（LOC-003）：
  *   - CLI：已停用，返回 legacy_task_preflight_disabled；不会读取任务卡或 registry.json。
- *   - module：import { runPreflight } —— 返回结构化结果，不退出进程、不做 IO 副作用以外的输出
+ *   - module：历史模式返回结构化结果；缺少历史标记时在任何 IO 前抛出稳定退役错误
  *
  * LOC-038：增加 reasons[{code,field,source,message}]；严格 Definition Check；跨组依赖登记册+祖先校验。
  */
@@ -15,7 +15,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { field, parseSpecVersion, TASK_FIELDS } from './task-card-parse.mjs'
-import { STATUS_LOCAL_DEFINED, STATUS_MERGED, loadRegistry } from './local-task-registry.mjs'
+import { STATUS_LOCAL_DEFINED, STATUS_MERGED, loadRegistry, assertLegacyHistoryAudit } from './local-task-registry.mjs'
 import { parseDeps, normalizeRole } from './ai-task-workspace-env.mjs'
 import { specOpenItemsZero, strictDefinitionCheck } from './task-definition-checks.mjs'
 
@@ -32,9 +32,10 @@ const DEP_SATISFIED_STATUSES = new Set([STATUS_MERGED])
  * @param {string} headRef
  * @param {(msg: string, code: string, field?: string) => void} failReason
  */
-export function checkCrossGroupDeps(depIds, repo, headRef, failReason) {
+export function checkCrossGroupDeps(depIds, repo, headRef, failReason, opts = {}) {
+  assertLegacyHistoryAudit(opts, 'checkCrossGroupDeps')
   if (!depIds.length) return
-  const registry = loadRegistry(repo)
+  const registry = loadRegistry(repo, opts)
   for (const dep of depIds) {
     const rec = registry.tasks.find((t) => String(t.task_id).toUpperCase() === String(dep).toUpperCase())
     if (!rec) {
@@ -59,11 +60,12 @@ export function checkCrossGroupDeps(depIds, repo, headRef, failReason) {
 }
 
 /**
- * 资格校验唯一实现（LOC-003/LOC-038）。读入任务基本信息与本地任务规格，返回结构化结果；
- * 不打印、不退出。CLI 薄壳只负责参数解析与输出/退出码映射。
+ * 旧 LOC-003/LOC-038 资格检查的只读历史回放，当前 Task 门禁位于 multica-task-preflight.mjs。
+ * 显式历史模式不打印、不退出；默认调用在任何 IO 前拒绝。
  * @returns {Promise<{ok: boolean, failures: string[], reasons: object[], fields: object|null}>}
  */
 export async function runPreflight(issuePath, specPath, opts = {}) {
+  assertLegacyHistoryAudit(opts, 'runPreflight')
   const failures = []
   const reasons = []
   const failReason = (msg, code, fieldName = null, source = 'preflight') => {
@@ -133,7 +135,7 @@ export async function runPreflight(issuePath, specPath, opts = {}) {
   }
 
   const depList = parseDeps(deps)
-  if (depList.length) checkCrossGroupDeps(depList, repo, headRef, failReason)
+  if (depList.length) checkCrossGroupDeps(depList, repo, headRef, failReason, opts)
 
   let roleNorm = null
   try {

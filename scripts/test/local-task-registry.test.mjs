@@ -83,46 +83,46 @@ test('renderBoard：按状态分组，未知状态归入其他', () => {
   assert.match(renderBoard([]), /暂无任务/)
 })
 
-test('登记册读写往返：分配两个任务并落盘', () => {
+const disabled = (error) => error.code === 'legacy_registry_write_disabled'
+const history = { legacyHistoryAudit: true }
+
+function writeHistoricalFixture(repo, tasks = []) {
+  fs.mkdirSync(path.join(repo, 'docs/tasks'), { recursive: true })
+  fs.writeFileSync(path.join(repo, 'docs/tasks/registry.json'), JSON.stringify({ version: 1, revision: 2, tasks }) + '\n')
+  fs.writeFileSync(path.join(repo, 'docs/tasks/BOARD.md'), '# 历史存档，不应重写\n')
+}
+
+test('登记册写 API 已退役，当前 Task 读取也必须拒绝', () => {
   const repo = tmpRepo()
-  const a = allocate(repo, { name: '任务甲', source: '会话录入' })
-  const b = allocate(repo, { name: '任务乙', source: '本地文档', sourceRef: 'docs/req/b.md' })
-  assert.equal(a.task_id, 'LOC-001')
-  assert.equal(b.task_id, 'LOC-002')
-
-  const reg = loadRegistry(repo)
-  assert.equal(reg.tasks.length, 2)
-
-  const updated = update(repo, 'LOC-001', { status: '本地已定义', branch: 'dev-loc-001-r1' })
-  assert.equal(updated.status, '本地已定义')
-  assert.equal(loadRegistry(repo).tasks[0].branch, 'dev-loc-001-r1')
-
-  assert.throws(() => update(repo, 'LOC-999', { status: '已合并' }), /任务不存在/)
+  writeHistoricalFixture(repo, [newRecord({ taskId: 'LOC-001', name: '历史任务' })])
+  const before = fs.readFileSync(path.join(repo, 'docs/tasks/registry.json'), 'utf8')
+  assert.throws(() => allocate(repo, { name: '任务甲' }), disabled)
+  assert.throws(() => update(repo, 'LOC-001', { status: '本地已定义' }), disabled)
+  assert.throws(() => update(repo, 'LOC-999', { status: '已合并' }), disabled)
+  assert.throws(() => loadRegistry(repo), (error) => error.code === 'legacy_registry_read_disabled')
+  assert.equal(fs.readFileSync(path.join(repo, 'docs/tasks/registry.json'), 'utf8'), before)
 })
 
-test('登记册落盘路径固定为 docs/tasks/registry.json 且可入库', () => {
+test('历史查询路径固定为 docs/tasks/registry.json，仅读取原有快照', () => {
   const repo = tmpRepo()
-  allocate(repo, { name: '任务甲' })
-  const p = path.join(repo, 'docs', 'tasks', 'registry.json')
-  assert.ok(fs.existsSync(p))
-  // 能被 JSON 解析（不是带注释的文本）
-  assert.equal(JSON.parse(fs.readFileSync(p, 'utf-8')).tasks[0].task_id, 'LOC-001')
+  writeHistoricalFixture(repo, [newRecord({ taskId: 'LOC-001', name: '任务甲' })])
+  assert.equal(loadRegistry(repo, history).tasks[0].task_id, 'LOC-001')
+  assert.deepEqual(loadRegistry(tmpRepo(), history).tasks, [])
 })
 
-test('writeBoard：生成看板文件', () => {
+test('writeBoard 已退役，已有历史看板逐字节不变', () => {
   const repo = tmpRepo()
-  allocate(repo, { name: '任务甲' })
-  allocate(repo, { name: '任务乙' })
-  const p = writeBoard(repo)
-  assert.equal(p, path.join(repo, 'docs', 'tasks', 'BOARD.md'))
-  assert.match(fs.readFileSync(p, 'utf-8'), /LOC-002/)
+  writeHistoricalFixture(repo)
+  const p = path.join(repo, 'docs/tasks/BOARD.md')
+  const before = fs.readFileSync(p, 'utf8')
+  assert.throws(() => writeBoard(repo, history), disabled)
+  assert.equal(fs.readFileSync(p, 'utf8'), before)
 })
 
-test('saveRegistry：空目录自动创建 docs/tasks', () => {
+test('saveRegistry 已退役，不创建 docs/tasks 或其他文件', () => {
   const repo = tmpRepo()
-  const p = saveRegistry(repo, { version: 1, tasks: [] })
-  assert.ok(fs.existsSync(p))
-  assert.deepEqual(loadRegistry(repo).tasks, [])
+  assert.throws(() => saveRegistry(repo, { version: 1, tasks: [] }, history), disabled)
+  assert.deepEqual(fs.readdirSync(repo), [])
 })
 
 // ── CHORE-111：发号源从 CNB 迁到 GitHub ─────────────────────────────────────
@@ -154,71 +154,48 @@ test('resolveGitHubRemote：主源按 URL 识别，优先 origin，CNB 不参与
   assert.equal(resolveGitHubRemote(cnbOnly), null, '只有灾备镜像时不发号，也不回落 CNB')
 })
 
-test('GitHub 发号成功：task_id=<TYPE>-<GitHub issue 号>、remote=github#<号>', () => {
-  const repo = gitRepoWith({ origin: 'https://github.com/crystepj-max/workflow-manager.git' })
+test('GitHub 发号导出已退役：有主源远端也零 gh 调用、零本地写入', () => {
+  const repo = gitRepoWith({ origin: 'https://github.com/o/r.git' })
   const calls = []
-  setGhRunner((args) => {
-    calls.push(args)
-    return 'https://github.com/crystepj-max/workflow-manager/issues/216\n'
-  })
+  setGhRunner((args) => { calls.push(args); return 'https://github.com/o/r/issues/216\n' })
   try {
-    const rec = allocate(repo, { name: '发号探针', type: 'CHORE', source: '会话录入' })
-    assert.equal(rec.task_id, 'CHORE-216')
-    assert.equal(rec.remote, 'github#216')
-    assert.equal(calls.length, 1)
-    const args = calls[0]
-    assert.deepEqual(args.slice(0, 2), ['issue', 'create'])
-    assert.ok(args.includes('--repo') && args.includes('crystepj-max/workflow-manager'))
-    assert.ok(args.includes('--title') && args.includes('发号探针'), 'issue 标题与任务名一致')
-    assert.ok(!args.some((a) => String(a).includes('cnb')), '不得再调用 CNB 通道')
+    assert.throws(() => remoteAllocate({ repo, name: '发号探针' }), disabled)
+    assert.throws(() => allocate(repo, { name: '发号探针', type: 'CHORE' }), disabled)
+    assert.deepEqual(calls, [])
+    assert.equal(fs.existsSync(path.join(repo, 'docs/tasks')), false)
   } finally {
     setGhRunner(null)
   }
 })
 
-test('gh 不可达时降级 TMP 并告警；全程不产出 cnb# 形式的号（验收 2）', () => {
+test('gh 不可达也禁止 TMP 降级或创建第二套任务状态', () => {
   const repo = gitRepoWith({ origin: 'https://github.com/o/r.git', cnb: 'https://cnb.cool/o/r.git' })
-  setGhRunner(() => { throw new Error('gh: To use GitHub in the CLI, run `gh auth login`') })
-  const prevErr = console.error
-  const warnings = []
-  console.error = (msg) => { warnings.push(String(msg)) }
+  let calls = 0
+  setGhRunner(() => { calls++; throw new Error('gh: not logged in') })
   try {
-    const rec = allocate(repo, { name: '降级探针', type: 'FIX' })
-    assert.match(rec.task_id, /^TMP-[a-z0-9]+-\d{6}[a-z]?$/i, '降级为临时号')
-    assert.equal(rec.remote, 'pending')
-    // 断言「恰好一条降级告警」：同一路径还可能出现正交的「未识别到 agent 身份」告警
-    // （宿主无指纹时由 FIX-245 引入），故按降级告警本身计数，不再对告警总数设死值（CHORE-260 · M5）。
-    const degradeWarnings = warnings.filter((w) => /已降级为临时号/.test(w))
-    assert.equal(degradeWarnings.length, 1)
+    assert.throws(() => allocate(repo, { name: '降级探针', type: 'FIX' }), disabled)
+    assert.equal(calls, 0)
+    assert.equal(fs.existsSync(path.join(repo, 'docs/tasks')), false)
   } finally {
-    console.error = prevErr
     setGhRunner(null)
   }
-  const raw = fs.readFileSync(path.join(repo, 'docs', 'tasks', 'registry.json'), 'utf-8')
-  assert.ok(!/cnb#\d/.test(raw), '登记册不得出现 cnb# 形式的号')
 })
 
-test('发号不触碰历史任务的 task_id 与 remote（验收 3）', () => {
+test('退役发号不会触碰历史任务的 task_id、remote 或新增条目', () => {
   const repo = gitRepoWith({ origin: 'https://github.com/o/r.git' })
   const historical = [
     newRecord({ name: '历史甲', taskId: 'CHORE-110', type: 'CHORE', remote: 'cnb#110 + github#110', slug: 'a' }),
     newRecord({ name: '历史乙', taskId: 'FEAT-208', type: 'FEAT', remote: 'GitHub #208', slug: 'b' }),
   ]
-  saveRegistry(repo, { version: 1, tasks: historical })
-  const before = JSON.parse(JSON.stringify(loadRegistry(repo).tasks))
-  setGhRunner(() => 'https://github.com/o/r/issues/301\n')
-  try {
-    allocate(repo, { name: '新任务', type: 'CHORE' })
-  } finally {
-    setGhRunner(null)
-  }
-  const after = loadRegistry(repo).tasks
-  assert.deepEqual(after.slice(0, 2), before, '既有条目逐字段不变')
-  assert.equal(after.length, 3)
-  assert.equal(after[2].remote, 'github#301')
+  writeHistoricalFixture(repo, historical)
+  const file = path.join(repo, 'docs/tasks/registry.json')
+  const before = fs.readFileSync(file, 'utf8')
+  assert.throws(() => allocate(repo, { name: '新任务', type: 'CHORE', legacyHistoryAudit: true }), disabled)
+  assert.equal(fs.readFileSync(file, 'utf8'), before)
+  assert.deepEqual(loadRegistry(repo, history).tasks, historical)
 })
 
-test('remoteAllocate：无 GitHub 远端时明确拒绝，不静默回落 CNB', () => {
+test('remoteAllocate：没有 GitHub 远端也明确退役，禁止本地号或 CNB 发号', () => {
   const repo = gitRepoWith({ cnb: 'https://cnb.cool/o/r.git' })
-  assert.throws(() => remoteAllocate({ type: 'CHORE', name: 'x', repo }), /GitHub 主源远端/)
+  assert.throws(() => remoteAllocate({ type: 'CHORE', name: 'x', repo }), disabled)
 })

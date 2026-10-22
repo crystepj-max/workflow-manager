@@ -119,6 +119,57 @@ test('R10：模型工作流的 Skill 禁止用内置 workflow 工具绕过宿主
     'runbook 对执行调用后的未知状态必须明确禁止重启');
 });
 
+test('R10：README 启动说明保持模型隔离、机械降级与未知状态边界', async (t) => {
+  const readme = readFileSync(path.join(here, '../../dsh/README.md'), 'utf8');
+  const startup = readme.split('### 2. ')[1]?.split('### 3. ')[0] || '';
+  const paragraphs = startup.split(/\n\s*\n/).map((text) => text.replace(/\s+/g, ' '));
+
+  await t.test('四个正式模板均按模型工作流执行，不得降级到 workflow', () => {
+    for (const id of ['wf-construction-full-feature', 'wf-diagnose', 'wf-explore', 'wf-optimize']) {
+      const template = JSON.parse(readFileSync(path.join(tplDir, id + '.json'), 'utf8'));
+      assert.ok(template.nodes.some((node) => !node.mechanical), id + ' 含模型节点，不能按纯机械模板降级');
+      assert.match(skillWrap(template), /模型节点必须使用 `wf_run`/);
+      assert.ok(readme.includes('`' + id + '`'), 'README 应列出正式模板 ' + id);
+    }
+    const isolation = paragraphs.find((text) => text.startsWith('建设、诊断、探索、优化')) || '';
+    assert.match(isolation, /四个正式内置模板均含模型节点.*正式执行必须通过 `wf_run`/);
+    assert.match(isolation, /每个执行段签发隔离路由.*不得改用内置 `workflow` 工具直接执行编译产物/);
+  });
+
+  await t.test('纯机械降级同时受启动前、工具缺失、零执行调用及可用替代工具约束', () => {
+    const fallback = paragraphs.find((text) => text.startsWith('仅纯机械工作流')) || '';
+    assert.match(fallback, /不含模型节点/);
+    assert.match(fallback, /启动前检查确认当前工具清单中没有 `wf_run`、尚未调用任何执行工具且 `workflow` 可调用时，才可使用内置 `workflow`/);
+    assert.match(fallback, /单段、无完成类型.*不可从看板续跑/);
+  });
+
+  await t.test('调用后结果未知只读查询，不得重发启动或换引擎', () => {
+    const unknown = paragraphs.find((text) => text.startsWith('**执行工具调用后的边界：**')) || '';
+    assert.match(unknown, /执行工具已调用但超时、报错或未返回创建结果\/Run 状态/);
+    assert.match(unknown, /启动结果\/Run 状态未确认.*保留已知 Run ID/);
+    assert.match(unknown, /只读状态查询能力，则查询真实状态/);
+    assert.match(unknown, /不得重发启动、换引擎或伪造状态/);
+    assert.match(unknown, /不得推断 Run 不存在/);
+    assert.match(readme, /仅当有效引擎返回实际 Run 状态时，才按下表驱动/);
+  });
+
+  await t.test('明确未创建 Run 时，不得编造任何正式运行记录', () => {
+    const notCreated = paragraphs.find((text) => text.includes('确认未创建 Run 时，不得创建或声称')) || '';
+    assert.match(notCreated, /确认未创建 Run 时，不得创建或声称 Logical Run ID、Run 状态、\s*节点结果、生命周期状态、UAT 签收或正式 Run 预算记录/);
+    assert.match(notCreated, /不得改写为 `BLOCKED` 或 `WAITING_HUMAN`/);
+  });
+
+  await t.test('三处曾出现的工具缺失或报错即换引擎指引不得重新出现', () => {
+    const text = readme.replace(/\s+/g, ' ');
+    assert.equal(/回退（仅当 `wf_run` 不可用、报错无法访问 workflowEngine）/.test(text), false,
+      'README 不得恢复工具不可用或报错就回退的指引');
+    assert.equal(/`wf_run` 不可用时才回退内置 `workflow`/.test(text), false,
+      'README 不得省略纯机械与启动前条件');
+    assert.equal(/才回退到内置 `workflow` 工具执行编译产物/.test(text), false,
+      'README 不得恢复 workflowEngine 解析失败就换引擎的指引');
+  });
+});
+
 test('S2 生成器：内置模板产物四件套齐全', () => {
   const { files, report } = generateAll(tplDir);
   const ids = report.map((r) => r.id).sort();
