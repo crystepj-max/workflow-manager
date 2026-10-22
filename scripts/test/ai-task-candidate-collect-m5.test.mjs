@@ -1,3 +1,4 @@
+// 历史采集算法只读回放，不作为当前自动调度入口。
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -45,7 +46,7 @@ test('采集：状态闸门（仅本地已定义/已定义入围）', () => {
     rec('MERGED-001', '已合并'),
     rec('WAIT-001', '等待验收'),
   ])
-  const r = collectLocalCandidates({ repo })
+  const r = collectLocalCandidates({ legacyHistoryAudit: true, repo })
   assert.deepEqual(r.candidates.map((c) => c.id).sort(), ['DEF-001', 'PASS-001'])
   const reasons = Object.fromEntries(r.excluded.map((e) => [e.id, e.reason]))
   assert.match(reasons['DEFINING-001'], /状态=定义中/)
@@ -63,7 +64,7 @@ test('采集：已有未收口 run 排除（run.json 为权威事实）', () => 
   const runDir = path.join(repo, '.agent-runs/run-001-r1')
   fs.mkdirSync(runDir, { recursive: true })
   fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({ run_id: 'run-001-r1', issue_or_task_identity: '#RUN-001', stage: 'human_acceptance' }))
-  const r = collectLocalCandidates({ repo })
+  const r = collectLocalCandidates({ legacyHistoryAudit: true, repo })
   assert.deepEqual(r.candidates.map((c) => c.id), ['CLEAN-001'])
   assert.match(r.excluded[0].reason, /已有未收口 run（run-001-r1 stage=human_acceptance/)
 })
@@ -75,7 +76,7 @@ test('采集：已收口 run 不再排除（stage=closed 视为收口）', () =>
   fs.mkdirSync(runDir, { recursive: true })
   fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({ run_id: 'done-001-r1', issue_or_task_identity: '#DONE-001', stage: 'closed' }))
   assert.equal(scanOpenRuns(repo).filter((r) => r.open).length, 0)
-  const r = collectLocalCandidates({ repo })
+  const r = collectLocalCandidates({ legacyHistoryAudit: true, repo })
   assert.deepEqual(r.candidates.map((c) => c.id), ['DONE-001'])
 })
 
@@ -92,7 +93,7 @@ test('采集：依赖未满足与环境组先导排除，黑名单生效', () =>
     rec('ENV-I-002', '定义中', { env_group: 'G-2', env_role: '独立' }),
     rec('BLACK-001', '本地已定义'),
   ])
-  const r = collectLocalCandidates({ repo, blacklist: ['BLACK-001'] })
+  const r = collectLocalCandidates({ legacyHistoryAudit: true, repo, blacklist: ['BLACK-001'] })
   assert.deepEqual(r.candidates.map((c) => c.id).sort(), ['DEP-OK-001', 'ENV-M-001'])
   const reasons = Object.fromEntries(r.excluded.map((e) => [e.id, e.reason]))
   assert.match(reasons['DEP-BAD-001'], /依赖未满足（DEFINING-001/)
@@ -105,7 +106,7 @@ test('采集：候选携带 issue/spec 路径与优先级（供 M3 机械门禁�
   writeRegistry(repo, [
     rec('PASS-001', '本地已定义', { priority: 'P1', spec_path: 'docs/tasks/specs/pass-001/task-spec-V1.md' }),
   ])
-  const r = collectLocalCandidates({ repo })
+  const r = collectLocalCandidates({ legacyHistoryAudit: true, repo })
   const c = r.candidates[0]
   assert.equal(c.issueBasics, path.join('docs/tasks', 'PASS-001-pass-001.md'))
   assert.equal(c.taskSpec, 'docs/tasks/specs/pass-001/task-spec-V1.md')
@@ -137,7 +138,7 @@ test('FIX-76 验收#1：依赖已 git 合并但登记册滞后 → 依赖方进�
     rec('FEAT-900', '本地已定义', { deps: [] }), // 登记册滞后：未记合并
     rec('TASK-001', '本地已定义', { deps: ['FEAT-900'] }),
   ])
-  const r = collectLocalCandidates({ repo })
+  const r = collectLocalCandidates({ legacyHistoryAudit: true, repo })
   assert.ok(r.candidates.some((c) => c.id === 'TASK-001'), '依赖方应进入候选（不被依赖排除）')
   assert.ok(!r.excluded.some((e) => e.id === 'TASK-001'), '依赖方不应出现在排除列表')
 })
@@ -149,7 +150,7 @@ test('FIX-76 验收#2：依赖无合并痕迹且非已合并 → 排除并标注
     rec('FEAT-901', '本地已定义', { deps: [] }),
     rec('TASK-002', '本地已定义', { deps: ['FEAT-901'] }),
   ])
-  const r = collectLocalCandidates({ repo })
+  const r = collectLocalCandidates({ legacyHistoryAudit: true, repo })
   assert.ok(!r.candidates.some((c) => c.id === 'TASK-002'), '依赖方应被排除')
   const ex = r.excluded.find((e) => e.id === 'TASK-002')
   assert.ok(ex, '依赖方应出现在排除列表')
@@ -163,6 +164,6 @@ test('FIX-76 回归：依赖登记册已合并（无 git 事实）→ 仍进候�
     rec('FEAT-902', '已合并', { deps: [] }),
     rec('TASK-003', '本地已定义', { deps: ['FEAT-902'] }),
   ])
-  const r = collectLocalCandidates({ repo })
+  const r = collectLocalCandidates({ legacyHistoryAudit: true, repo })
   assert.ok(r.candidates.some((c) => c.id === 'TASK-003'), '依赖方应进入候选')
 })

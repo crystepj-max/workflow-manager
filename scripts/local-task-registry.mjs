@@ -3,7 +3,7 @@
  * 迁移前本地任务登记册（只读历史资料）
  *
  * 当前 Task 身份与状态由 Multica 管理。CLI 写命令和旧 GitHub Task 通道已退役；
- * 此模块的历史读取/变换导出不得被当前任务流程调用。
+ * 历史读取须显式传入 { legacyHistoryAudit: true }；程序化写导出同样已退役。
  *
  * CLI（只读）:
  *   node scripts/local-task-registry.mjs list [--github-sync pending] [--repo <path>]
@@ -11,7 +11,7 @@
  *
  * 已退役写命令（fail-closed，稳定原因码 legacy_registry_write_disabled，W8 P0-C）：
  *   allocate / set / mark-ready / board —— 任务身份/状态/Run 以 Multica 平台为唯一真源，
- *   本 CLI 不提供写入口；旧程序化写入入口也已在 registry-reconcile / 旧合并流程中封闭。
+ *   CLI 与模块导出均在读写或远端发号前拒绝，历史只读标记不能解锁写入。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -71,7 +71,6 @@ export function slugify(name, fallback = 'task') {
 // 任务编号由 GitHub 建 issue 时服务端分配，本机不再自己算号，从根上消除双机/多会话撞号。
 // 主源仓库 slug 按「URL 主机是 github.com」从 git remote 里识别，不写死远端名：
 // 本仓库的主源远端叫 origin，另有 cnb（灾备镜像）与 mirror（本地镜像）两个非主源远端。
-const GITHUB_TYPE_LABEL = { FEAT: 'enhancement', FIX: 'bug', CHORE: 'chore' }
 
 export function remoteUrls(repo) {
   try {
@@ -168,25 +167,8 @@ export function setGhRunner(fn) {
  * @returns {number} issue 编号
  * @throws 无 GitHub 远端、`gh` 未登录或建 issue 失败时抛错，由调用方降级为临时号
  */
-export function remoteAllocate({
-  type = 'FEAT',
-  name,
-  body = '',
-  priority = null,
-  repo = process.cwd(),
-} = {}) {
-  const target = resolveGitHubRemote(repo)
-  if (!target) throw new Error('未找到 GitHub 主源远端，无法向远端申请编号（禁止回落 CNB 发号）')
-  const args = ['issue', 'create', '--repo', target.slug, '--title', String(name ?? '')]
-  const label = GITHUB_TYPE_LABEL[String(type).toUpperCase()]
-  if (label) args.push('--label', label)
-  if (body) args.push('--body', body)
-  // GitHub 无优先级参数：priority 只记在登记册，不映射到远端
-  const out = String(ghRunner(args) ?? '').trim()
-  const last = out.split('\n').filter(Boolean).pop() || ''
-  const m = /\/issues\/(\d+)\/?$/.exec(last)
-  if (!m) throw new Error('远端未返回 issue 编号')
-  return Number(m[1])
+export function remoteAllocate() {
+  throw legacyRegistryWriteDisabledError('remoteAllocate')
 }
 
 /**
@@ -349,129 +331,57 @@ function registryPath(repo) {
   return path.join(repo, 'docs', 'tasks', 'registry.json')
 }
 
-// CLI 值转换：字符串 'none' / 'null' 表示显式置 null（区别于「未提供参数」）
-function nullable(v) {
-  if (v === undefined) return undefined
-  return v === 'none' || v === 'null' ? null : v
+export const LEGACY_REGISTRY_READ_DISABLED = 'legacy_registry_read_disabled'
+export const LEGACY_REGISTRY_WRITE_DISABLED = 'legacy_registry_write_disabled'
+
+/** 历史取证是显式只读行为；未选择时须在任何 IO 前拒绝当前任务源调用。 */
+export function assertLegacyHistoryAudit(opts = {}, entry = 'loadRegistry') {
+  if (opts?.legacyHistoryAudit === true) return
+  const error = new Error(
+    `${entry} 不能把旧登记册作为当前 Task 源；当前任务请查询 Multica。` +
+      '仅历史只读取证可显式传入 { legacyHistoryAudit: true }。',
+  )
+  error.code = LEGACY_REGISTRY_READ_DISABLED
+  throw error
 }
 
-function toBool(v) {
-  if (v === undefined) return undefined
-  return v === 'true' || v === '1' || v === 'yes'
+function legacyRegistryWriteDisabledError(entry) {
+  const error = new Error(`${entry} 已退役：任务编号与状态由 Multica 管理，禁止写入历史登记册或远端发号。`)
+  error.code = LEGACY_REGISTRY_WRITE_DISABLED
+  return error
 }
 
-export function loadRegistry(repo) {
+/** 只读历史快照，不提供当前任务状态；返回值修改不会落盘。 */
+export function loadRegistry(repo, opts = {}) {
+  assertLegacyHistoryAudit(opts, 'loadRegistry')
   const p = registryPath(repo)
   if (!fs.existsSync(p)) return { version: 1, revision: 0, tasks: [] }
   const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'))
   return { version: 1, revision: 0, tasks: [], ...parsed }
 }
 
-export function saveRegistry(repo, registry) {
-  const p = registryPath(repo)
-  // 乐观锁（CHORE-73 第二层）：写回前校验「本会话读入之后，磁盘没有被其他会话改过」。
-  // 防住「长会话拿旧账本写回、覆盖别人新收口」的事故（2026-09-16 FIX-72 收口刷掉 FIX-65 收口状态）。
-  // 光比时间戳防不住——覆盖者会刷新时间戳；必须比版本号。
-  const disk = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf-8')) : null
-  const diskRevision = disk?.revision ?? 0
-  const mineRevision = registry.revision ?? 0
-  if (diskRevision !== mineRevision) {
-    throw new Error(
-      `登记册已被其他会话更新（磁盘 revision=${diskRevision}，本会话读入 revision=${mineRevision}），` +
-        '拒绝覆盖。请先 git pull 同步，再运行 node scripts/registry-reconcile.mjs apply 对账，然后重读本册操作。',
-    )
-  }
-  registry.revision = mineRevision + 1
-  fs.mkdirSync(path.dirname(p), { recursive: true })
-  fs.writeFileSync(p, JSON.stringify(registry, null, 2) + '\n')
-  return p
+// 保留导出名供旧依赖得到明确的退役原因；任何参数均不能开启写路径。
+export function saveRegistry() {
+  throw legacyRegistryWriteDisabledError('saveRegistry')
 }
 
-// 建 issue 时的正文：任务卡还没写出来，先把登记册里的已知信息落远端，联网可查。
-function issueBody({ name, source, sourceRef, baseline }) {
-  return [
-    `任务名称: ${name}`,
-    `需求来源: ${source ?? '会话录入'}`,
-    `来源定位: ${sourceRef || '（待补）'}`,
-    `需求基线: ${baseline ?? 'V1'}`,
-    '',
-    '_本 issue 由任务登记册在建任务时自动创建，任务卡全文随后补入。_',
-  ].join('\n')
+export function allocate() {
+  throw legacyRegistryWriteDisabledError('allocate')
 }
 
-/**
- * 分配任务编号：默认向 GitHub 主源申请（服务端发号，双机/多会话不会撞号）；
- * 远端不可达或显式 --offline 时降级为临时号，remote 记为 pending，联网后须换取正式号。
- * 禁止回落 CNB 发号：CNB 已是灾备镜像，不再签发任务号。
- */
-export function allocate(repo, { name, slug, source, sourceRef, baseline, type = 'FEAT', priority = null, offline = false }) {
-  const t = String(type).toUpperCase()
-  if (!TASK_TYPES.includes(t)) throw new Error(`任务类型必须是 ${TASK_TYPES.join(' / ')} 之一`)
-  const registry = loadRegistry(repo)
-  let taskId
-  let remote
-  const remoteSlug = offline ? null : resolveRemoteSlug(repo)
-  if (offline) {
-    taskId = tmpId(registry.tasks)
-    remote = 'pending'
-  } else if (!remoteSlug) {
-    // 未配置 GitHub 主源远端（如临时目录、测试仓）：沿用旧的本地序号，并明确标注无远端锚点。
-    taskId = formatId(nextSeq(registry.tasks))
-    remote = 'none'
-    console.error(`[warn] 未配置 GitHub 主源远端，已用本地序号 ${taskId}；该号无远端锚点，双机并行可能撞号`)
-  } else {
-    try {
-      const number = remoteAllocate({
-        type: t,
-        name,
-        body: issueBody({ name, source, sourceRef, baseline }),
-        priority,
-        repo,
-      })
-      taskId = `${t}-${number}`
-      remote = `github#${number}`
-    } catch (err) {
-      taskId = tmpId(registry.tasks)
-      remote = 'pending'
-      console.error(`[warn] 远端发号失败（${err.message}），已降级为临时号 ${taskId}，联网后请换取正式号`)
-    }
-  }
-  const record = newRecord({ name, source, sourceRef, baseline, taskId, type: t, remote, slug, repo })
-  if (priority) record.priority = priority
-  if (!record.origin_agent) {
-    console.error(
-      '[warn] 未识别到 agent 身份，本条归属只能记到机器码 ' +
-        `${record.origin_machine}。请让会话自报身份（任一 *_AGENT_NAME 环境变量），` +
-        `或在仓库根写入 ${AGENT_IDENTITY_FILE} 后重跑——静默留空会让并行会话无法区分。`,
-    )
-  }
-  registry.tasks.push(record)
-  saveRegistry(repo, registry)
-  return record
+export function update() {
+  throw legacyRegistryWriteDisabledError('update')
 }
 
-export function update(repo, taskId, patch) {
-  const registry = loadRegistry(repo)
-  const idx = registry.tasks.findIndex((r) => r.task_id === taskId)
-  if (idx < 0) throw new Error(`任务不存在：${taskId}`)
-  registry.tasks[idx] = applyUpdate(registry.tasks[idx], patch)
-  saveRegistry(repo, registry)
-  return registry.tasks[idx]
-}
-
-export function writeBoard(repo) {
-  const registry = loadRegistry(repo)
-  const boardPath = path.join(repo, 'docs', 'tasks', 'BOARD.md')
-  fs.mkdirSync(path.dirname(boardPath), { recursive: true })
-  fs.writeFileSync(boardPath, renderBoard(registry.tasks))
-  return boardPath
+export function writeBoard() {
+  throw legacyRegistryWriteDisabledError('writeBoard')
 }
 
 // —— 旧登记册 CLI 入口退役（WFM-342）——
 // Multica 平台是任务身份/状态/Run 的唯一真源；本模块 CLI 不再提供写入口。
 // 四个 CLI 写命令在任何本地文件写入或 GitHub 调用之前统一拒绝：非零退出 + 稳定原因码。
-// 历史导出函数只供迁移前实现与单测追溯；当前任务流程不得调用其读写能力。
-const LEGACY_WRITE_REASON = 'legacy_registry_write_disabled'
+// 模块写导出同样拒绝；CLI list/show 显式走只读历史路径。
+const LEGACY_WRITE_REASON = LEGACY_REGISTRY_WRITE_DISABLED
 const RETIRED_WRITE_COMMANDS = new Set(['allocate', 'set', 'mark-ready', 'board'])
 
 function rejectRetiredWrite(cmd) {
@@ -509,97 +419,15 @@ async function main(argv) {
   // 函数作用域：mark-ready / set / show 都按 --task 取任务标识
   const taskId = get('--task')
 
-  if (cmd === 'allocate') {
-    const name = get('--name')
-    if (!name) {
-      console.error(
-        '用法: allocate --name <任务名称> [--type FEAT|FIX|CHORE] [--priority P0..P2] [--offline]\n' +
-          '        [--slug <x>] [--source <来源>] [--source-ref <x>] [--repo <path>]',
-      )
-      process.exit(2)
-    }
-    const rec = allocate(repo, {
-      name,
-      slug: get('--slug'),
-      type: get('--type') || 'FEAT',
-      priority: get('--priority') || null,
-      offline: argv.includes('--offline'),
-      source: get('--source') || '会话录入',
-      sourceRef: get('--source-ref') || '',
-      baseline: get('--baseline') || 'V1',
-    })
-    writeBoard(repo)
-    console.log(JSON.stringify(rec, null, 2))
-    return
-  }
-
-  if (cmd === 'set') {
-    if (!taskId) {
-      console.error(
-        '用法: set --task LOC-001 [--status <状态>] [--baseline V1] [--branch <b>] [--merge-commit <sha>] [--github-sync <x>]\n' +
-          '        [--worktree <路径|none>] [--evidence-expires-at <iso|none>] [--evidence-cleared-at <iso|none>]\n' +
-          '        [--branch-retained <true|false>] [--retention-days <n>]',
-      )
-      process.exit(2)
-    }
-    const deps = get('--deps')
-    const retention = get('--retention-days')
-    const rec = update(repo, taskId, {
-      status: get('--status'),
-      type: get('--type'),
-      remote: get('--remote'),
-      baseline: get('--baseline'),
-      branch: get('--branch'),
-      worktree: nullable(get('--worktree')),
-      spec_path: nullable(get('--spec-path')),
-      github_sync: get('--github-sync'),
-      merge_commit: get('--merge-commit'),
-      evidence_expires_at: nullable(get('--evidence-expires-at')),
-      evidence_cleared_at: nullable(get('--evidence-cleared-at')),
-      branch_retained: toBool(get('--branch-retained')),
-      retention_days: retention ? Number(retention) : undefined,
-      deps: deps ? deps.split(/[,，]/).map((s) => s.trim()).filter(Boolean) : undefined,
-    })
-    writeBoard(repo)
-    console.log(JSON.stringify(rec, null, 2))
-    return
-  }
-
-  if (cmd === 'mark-ready') {
-    // 「满足开工条件」的远端信号（FEAT-237）：把 ready-for-agent 打到该任务的 GitHub issue 上。
-    // 定义落档（status=本地已定义/已定义）之后跑一次；幂等，可反复执行。
-    if (!taskId) {
-      console.error('用法: mark-ready --task <任务标识> [--repo <path>] [--dry-run]\n' +
-        '        在任务的 GitHub issue 上打「可施工」标签（ready-for-agent）；无 github#N 锚点时报错并给出换号指引。')
-      process.exit(2)
-    }
-    const { markReady } = await import('./github-issues.mjs')
-    let r
-    try {
-      r = markReady({ repo, taskId, dryRun: argv.includes('--dry-run') })
-    } catch (e) {
-      r = { ok: false, code: 'remote-failed', reason: String((e && e.message) || e).slice(0, 300) }
-    }
-    console.log(JSON.stringify(r, null, 2))
-    if (!r.ok) console.error(`[error] 未打上「可施工」标签（${r.code}）：${r.reason}`)
-    process.exit(r.ok ? 0 : 1)
-  }
-
-  if (cmd === 'board') {
-    const p = writeBoard(repo)
-    console.log(JSON.stringify({ board: p }, null, 2))
-    return
-  }
-
   if (cmd === 'list') {
     const sync = get('--github-sync')
-    const tasks = loadRegistry(repo).tasks.filter((t) => !sync || t.github_sync === sync)
+    const tasks = loadRegistry(repo, { legacyHistoryAudit: true }).tasks.filter((t) => !sync || t.github_sync === sync)
     console.log(JSON.stringify({ count: tasks.length, tasks }, null, 2))
     return
   }
 
   if (cmd === 'show') {
-    const rec = loadRegistry(repo).tasks.find((r) => r.task_id === taskId)
+    const rec = loadRegistry(repo, { legacyHistoryAudit: true }).tasks.find((r) => r.task_id === taskId)
     if (!rec) {
       console.error(`任务不存在：${taskId}`)
       process.exit(1)

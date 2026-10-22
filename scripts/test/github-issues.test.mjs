@@ -194,35 +194,35 @@ test('认领人解析：只认最后一次释放之后的认领标记（纯函�
   assert.deepEqual(claimKeysInWindow(comments.slice(0, 2)), [])
 })
 
-// ───────────── 只读前置判定：no-task / no-anchor 仍以 registry 读返回，不调用 gh ─────────────
+// ───────────── 旧写入口在任何 registry 前置读取前一律退役 ─────────────
 
-test('markReady：无 github 锚点 → 仍返回 no-anchor 与换号指引（registry 读，不碰 gh）', () => {
+test('markReady：旧无锚点记录也明确退役，不再提供换号指引', () => {
   const repo = tmpRepo()
   writeRegistry(repo, [rec('CHORE-110', 'cnb#110')])
   const fake = fakeGh()
   const r = withGh(fake, () => markReady({ repo, taskId: 'CHORE-110' }))
   assert.equal(r.ok, false)
-  assert.equal(r.code, 'no-anchor')
-  assert.match(r.reason, /先换取正式号/)
-  assert.equal(fake.calls.length, 0, 'no-anchor 判定不得调用 gh')
+  assert.equal(r.code, DISABLED)
+  assert.match(r.reason, /Multica/)
+  assert.equal(fake.calls.length, 0, '退役入口不得调用 gh')
 })
 
-test('markReady：登记册无此任务 → no-task（registry 读，不碰 gh）', () => {
+test('markReady：无历史任务也明确退役，不从旧源判断任务存在性', () => {
   const repo = tmpRepo()
   writeRegistry(repo, [])
   const fake = fakeGh()
   const r = withGh(fake, () => markReady({ repo, taskId: 'FIX-999' }))
-  assert.equal(r.code, 'no-task')
+  assert.equal(r.code, DISABLED)
   assert.equal(fake.calls.length, 0)
 })
 
-test('claimIssue：无锚点任务 → no-anchor 显著告警（registry 读，不碰 gh）', () => {
+test('claimIssue：无锚点任务也明确退役，不读取旧源', () => {
   const repo = tmpRepo()
   writeRegistry(repo, [rec('LOC-020', 'none')])
   const fake = fakeGh()
   const r = withGh(fake, () => claimIssue({ repo, taskId: 'LOC-020', runId: 'loc-020-r1' }))
-  assert.equal(r.code, 'no-anchor')
-  assert.match(r.reason, /无 github#N 锚点/)
+  assert.equal(r.code, DISABLED)
+  assert.match(r.reason, /Multica/)
   assert.equal(fake.calls.length, 0)
 })
 
@@ -329,12 +329,12 @@ test('releaseIssue：fail-closed → 0 次 gh，不摘标签、不摘 assignee�
   assert.equal(it.comments.length, 1, '不得留结束评论')
 })
 
-test('releaseIssue：无锚点任务 → no-anchor（registry 读，不碰 gh）', () => {
+test('releaseIssue：无锚点任务也明确退役，不读取旧源', () => {
   const repo = tmpRepo()
   writeRegistry(repo, [rec('LOC-020', 'none')])
   const fake = fakeGh()
   const r = withGh(fake, () => releaseIssue({ repo, taskId: 'LOC-020', runId: 'loc-020-r1' }))
-  assert.equal(r.code, 'no-anchor')
+  assert.equal(r.code, DISABLED)
   assert.equal(fake.calls.length, 0)
 })
 

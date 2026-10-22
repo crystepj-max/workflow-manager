@@ -32,7 +32,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-import { loadRegistry } from './local-task-registry.mjs'
+import { loadRegistry, assertLegacyHistoryAudit } from './local-task-registry.mjs'
 import { githubAnchorOf } from './remote-anchors.mjs'
 
 const MERGED_STATUS = '已合并'
@@ -210,7 +210,8 @@ export function realListWipIssueNumbers(repo) {
  *   suspicious —— 登记册记了已合并、git 无对应事实；以及本地施工痕迹但远端未认领（只报告，不自动改）
  */
 export function reconcilePlan(repo, baseRef = 'main', opts = {}) {
-  const registry = loadRegistry(repo)
+  assertLegacyHistoryAudit(opts, 'reconcilePlan')
+  const registry = loadRegistry(repo, opts)
   const facts = collectMergeFacts(repo, baseRef)
   const toMerge = []
   const suspicious = []
@@ -251,7 +252,7 @@ function main() {
       }, null, 2))
       process.exit(2)
     }
-    const r = reconcilePlan(repo, baseRef)
+    const r = reconcilePlan(repo, baseRef, { legacyHistoryAudit: true })
     console.log(JSON.stringify({ source_kind: 'legacy-history-audit', total: r.total, ok: r.ok, toMerge: r.toMerge, suspicious: r.suspicious, unclaimedSkipped: r.unclaimedSkipped }, null, 2))
     return
   }
