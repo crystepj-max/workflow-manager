@@ -89,18 +89,42 @@ gh issue view <N> --json title,body,comments
 # 方式 B：直接给需求文本（走 args.requirement）
 ```
 
-### 2. 调用 wf_run 起跑（首选）
+### 2. 启动前预检与 wf_run 起跑
+
+建设、诊断、探索、优化四个正式内置模板均含模型节点，正式执行必须通过 `wf_run`，
+由宿主为每个执行段签发隔离路由；不得改用内置 `workflow` 工具直接执行编译产物。
+
+启动前只依据当前会话实际工具清单，分别确认 `wf_run`、`workflow` 是否可调用；
+不得从技能文案、安装状态或历史会话推断工具可用。
+若当前工具清单没有 `wf_run` 且尚未调用任何执行工具，则不启动模型工作流，继续完成
+不依赖引擎的调查、证据收集和准备；任务授权允许时可交付独立可完成的内容，
+明确标为主任务直接交付，不伪装成节点产物或正式 Run 结果。
+
+确认 `wf_run` 可调用后，通过它起跑：
 
 - `templateId`：模板 id（如 `wf-construction-full-feature`）——插件自行编译并交给引擎，
   **不需要传脚本全文**；
 - `args`：见「wf_run 参数表」。**不传 `models`**（模型绑定编译时固化于蓝图 `bindings.models`）。
 
-回退（仅当 `wf_run` 不可用、报错无法访问 workflowEngine）：才改用内置 `workflow` 工具——
+仅纯机械工作流（不含模型节点），在启动前检查确认当前工具清单中没有 `wf_run`、尚未调用任何执行工具且 `workflow` 可调用时，才可使用内置 `workflow` 降级执行：
 `script` = `.generated/<id>/script.mjs` 全文（生成物，勿手改；改蓝图后 `npm run generate` 重建）、
 `meta` = `.generated/<id>/meta.json`（name/phases 已由生成器按蓝图组装，直接引用）；
-并须如实提示用户本次运行记录将退化（单段、无完成类型、不可从看板续跑）。
+并须在会话输出中显式提示「本次运行记录将退化为单段、无完成类型，且不可从看板续跑」。
+
+**执行工具调用后的边界：**执行工具已调用但超时、报错或未返回创建结果/Run 状态时，
+说明“启动结果/Run 状态未确认”，保留已知 Run ID 或其他标识。
+若当前工具清单提供只读状态查询能力，则查询真实状态；不得重发启动、换引擎或伪造状态，
+也不得推断 Run 不存在、UAT 尚未到达、没有正式预算记录或预算为零。
+只有尚未调用执行工具，或工具明确确认未创建 Run 时，才可说明“本工作流执行未启动”；
+此说明不是正式 Run 状态。确认未创建 Run 时，不得创建或声称 Logical Run ID、Run 状态、
+节点结果、生命周期状态、UAT 签收或正式 Run 预算记录，也不得改写为 `BLOCKED` 或 `WAITING_HUMAN`。
+
+以上边界与[生成 Skill 的启动规则](../scripts/generate.mjs)及
+[DSH runbook](../docs/runbooks/construction-dsh/runbook.md)一致。
 
 ### 3. 按返回状态驱动
+
+仅当有效引擎返回实际 Run 状态时，才按下表驱动；启动结果/Run 状态未确认时遵守上述只读查询边界。
 
 > 状态机以生成器产出的脚本（`.generated/<id>/script.mjs`）为准；行为由运行时排练厅套件
 > （`scripts/test/runtime.test.mjs` / `runtime-host.test.mjs`）持续验证。
@@ -145,8 +169,9 @@ schema 必填 `verified_branch`（实际验证分支）与 `verified_head`（实
 ## 可视化插件（vwf）使用说明
 
 「可视化工作流」（Visual Workflow，下文 vwf）把同一套模板状态机做成图形化入口：
-Skill / Chat 入口首选 `wf_run` 工具直接起跑——由插件自身发起，不需要传递脚本；
-`wf_run` 不可用时才回退内置 `workflow` 工具执行编译产物，并如实提示运行记录将退化。
+Skill / Chat 入口通过 `wf_run` 直接起跑，由插件自身发起并提供模型隔离路由，不需要传递脚本。
+四个正式内置模板均遵守上述模型隔离与启动结果未确认边界；纯机械模板的 `workflow` 降级
+仅适用于上述启动前条件全部满足时，执行工具调用后不切换引擎。
 实现说明见 `docs/design/plugin-layer.md`。
 
 ### 插件形态：组合包与动态开发包
@@ -174,9 +199,9 @@ Skill / Chat 入口首选 `wf_run` 工具直接起跑——由插件自身发起
 「DSL 图编译 + 执行」——**这是 Skill / Chat 入口的正式起跑通道**（LOC-015）：由插件自身发起，
 本次运行即同一条 Logical Run（执行分段 / 任务归属 / 完成类型齐全，看板可续跑、暂停、指导）。
 
-`workflowEngine` 推迟到 execute 阶段解析；若解析失败（工具明确报错，无法访问 workflowEngine），
-才回退到内置 `workflow` 工具执行编译产物——该路径下脚本返回值只回到会话，插件只能旁观事件流，
-运行记录会退化为单段且无完成类型，**回退时必须如实提示用户记录将退化**。
+`workflowEngine` 推迟到 execute 阶段解析。`wf_run` 已调用后，即使工具报错无法访问
+`workflowEngine`，也不得据此切换引擎；创建结果或 Run 状态未确认时，只查询只读状态，
+不得重发启动。纯机械模板的降级条件与记录退化说明见上述启动前预检，模型模板不得降级执行。
 首次运行从模板蓝图入口节点起（缺省取蓝图 `entry`，如 `wf-construction-full-feature` 的 `preflight`），
 跑到人工门禁即返回，裁决后再以对应参数续跑。
 
@@ -235,4 +260,5 @@ vwf 插件与模板技能包（内置模板经 `npm run install:builtin-skills` 
 vwf 插件走图形触发（模板 → DSL 校验 → 磁盘产物或 CLI 编译，交给同一引擎执行）。
 二者共享同一角色库（`dsh/roles/*.md`）、同一返回状态机与由蓝图推导的模型分配。
 差别只在入口与取脚本的管道：技能包读安装时的技能目录，vwf 内置模板读 `.generated/`、
-用户模板读 save 闭环产物、临时图走 CLI 编译。两类入口都首选 `wf_run` 起跑。
+用户模板读 save 闭环产物、临时图走 CLI 编译。两类入口均遵守上述启动前预检、模型隔离与
+启动结果未确认时的只读查询边界。
