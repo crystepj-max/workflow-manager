@@ -106,6 +106,192 @@ async function until(fn, label, ms = 4000) {
   }
 }
 
+function holdProcess(sub, matches) {
+  let release
+  let count = 0
+  const gate = new Promise((resolve) => { release = resolve })
+  const spawn = sub.spawn.bind(sub)
+  sub.spawn = (spec) => {
+    const handle = spawn(spec)
+    if (matches(spec)) {
+      count++
+      const done = handle.done
+      handle.done = gate.then(() => done)
+    }
+    return handle
+  }
+  return { release, get count() { return count } }
+}
+
+async function immediateReceipt(promise) {
+  let timer
+  try { return await Promise.race([promise, new Promise((resolve) => { timer = setTimeout(() => resolve(null), 300) })]) }
+  finally { clearTimeout(timer) }
+}
+
+const isCompile = (spec) => spec.argv.includes('compile') && spec.argv.some((a) => a.endsWith('/generate.mjs'))
+
+test('FIX-225 同 tick 新启动：只有一次进入引擎，健康启动不被判作崩溃残留', async () => {
+  const eng = makeEngine()
+  const { events, definedTools, fs } = engineEnv(eng)
+  const wfRun = definedTools.find((t) => t.name === 'wf_run')
+  const states = []
+  const writeText = fs.writeText
+  fs.writeText = async (target, content) => {
+    if (target.displayPath.startsWith(LOGICAL_DIR + '/')) states.push(JSON.parse(content).lifecycle)
+    return writeText(target, content)
+  }
+  let secondSettled = false
+  const first = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'same-tick' })
+  const second = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'same-tick' })
+    .then((value) => { secondSettled = true; return value })
+  await until(() => secondSettled || eng.starts.length === 2, '后到请求被拒绝或重现双启动')
+  await until(() => eng.starts.length >= 1, '唯一启动')
+  const startCount = eng.starts.length
+  for (let n = 1; n <= startCount; n++) settleRun(eng, events, 'run-' + n, 'DONE')
+  const [, receipt] = await Promise.all([first, second])
+  await drain()
+
+  assert.equal(startCount, 1, '同 tick 的两次调用只能实际启动一次引擎')
+  assert.match(receipt, /已占用/)
+  assert.match(receipt, /same-tick.*正在启动中/)
+  assert.match(receipt, /等待.*结束.*taskId/)
+  assert.equal(logicalFiles(fs).length, 1, '不得错误派生 #2')
+  assert.equal(states.some((state) => state.reason && state.reason.code === 'RUNTIME_RESTARTED'), false,
+    '健康启动期间不得写入崩溃残留失败状态')
+})
+
+test('FIX-225 编译尚未结束时立即拒绝同任务新启动及恢复，回执说明占用方和出路', async (t) => {
+  const eng = makeEngine()
+  const { events, definedTools, sub } = engineEnv(eng)
+  const wfRun = definedTools.find((tool) => tool.name === 'wf_run')
+  const compile = holdProcess(sub, isCompile)
+  const first = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'starting-task' })
+  await until(() => compile.count === 1, '第一次启动停在编译阶段')
+  const pending = [
+    {},
+    { decision_id: 'd1', user_choice: 'USER_ACCEPTED' },
+    { entry: 'explore', approved: true },
+    { resume_paused: true },
+  ].map((resume) => wfRun.execute({ templateId: 'logical-run-spec', taskId: 'starting-task', ...resume }))
+  const receipts = await Promise.all(pending.map(immediateReceipt))
+  const startsWhileBlocked = eng.starts.length
+  const compileCount = compile.count
+  compile.release()
+  // 即使回归导致额外调用放行，也收束实际启动，保证测试给出断言失败而不悬挂。
+  await until(() => eng.starts.length === 1 + receipts.filter((value) => value === null).length, '释放编译')
+  for (let n = 1; n <= eng.starts.length; n++) settleRun(eng, events, 'run-' + n, 'DONE')
+  await Promise.all([first, ...pending])
+
+  assert.equal(startsWhileBlocked, 0)
+  assert.equal(compileCount, 1, '后到调用不得进入编译或等待前任释放')
+  for (const receipt of receipts) {
+    assert.equal(typeof receipt, 'string', '前任编译挂起时仍应立即返回回执')
+    assert.match(receipt, /starting-task.*已占用.*logical-run-spec.*正在启动中/)
+    assert.match(receipt, /等待前任结束.*换 taskId/)
+  }
+  t.diagnostic(receipts[0])
+})
+
+for (const scenario of [
+  { name: '缺少工作流', args: {}, error: /必须提供/ },
+  { name: '未知模板', args: { templateId: 'missing-template' }, error: /未知工作流/ },
+  { name: 'DSL 校验失败', args: { dsl: { ...SPEC_BLUEPRINT, nodes: [] } }, error: /DSL 校验失败/ },
+  {
+    name: '编译失败', args: { templateId: 'logical-run-spec' }, error: /编译失败.*test compile failed/,
+    inject({ sub }) {
+      const spawn = sub.spawn.bind(sub)
+      let fail = true
+      sub.spawn = (spec) => {
+        const handle = spawn(spec)
+        if (isCompile(spec) && fail) {
+          fail = false
+          handle.done = Promise.resolve({ exitCode: 1 })
+          handle.collected.stderr = { readFrom: () => ({ text: 'test compile failed' }) }
+        }
+        return handle
+      }
+    },
+  },
+  {
+    name: '启动前抛出异常', args: { templateId: 'logical-run-spec' }, error: /test initiator error/, throws: true,
+    inject({ ctx }) {
+      let fail = true
+      ctx.get('agents').requireInitiator = () => { if (fail) { fail = false; throw new Error('test initiator error') }; return {} }
+    },
+  },
+  {
+    name: '引擎 start 抛出异常', args: { templateId: 'logical-run-spec' }, error: /引擎启动失败.*test start error/,
+    inject(host, eng) {
+      const start = eng.start.bind(eng)
+      let fail = true
+      eng.start = (request) => { if (fail) { fail = false; throw new Error('test start error') }; return start(request) }
+    },
+  },
+]) {
+  test('FIX-225 ' + scenario.name + ' 后释放占位，同任务可立即重试', async () => {
+    const eng = makeEngine()
+    const host = engineEnv(eng)
+    const wfRun = host.definedTools.find((tool) => tool.name === 'wf_run')
+    if (scenario.inject) scenario.inject(host, eng)
+    const failed = wfRun.execute({ taskId: 'retry-task', ...scenario.args })
+    if (scenario.throws) await assert.rejects(failed, scenario.error)
+    else assert.match(await failed, scenario.error)
+    assert.equal(eng.starts.length, 0, '失败的启动不能进入执行')
+
+    const retried = wfRun.execute({ taskId: 'retry-task', templateId: 'logical-run-spec' })
+    await until(() => eng.starts.length === 1, '同任务重试进入引擎')
+    settleRun(eng, host.events, 'run-1', 'DONE')
+    assert.equal(JSON.parse(await retried).value.status, 'DONE')
+  })
+}
+
+test('FIX-225 不同 taskId 同 tick 启动保持并发，不等待另一任务编译', async () => {
+  const eng = makeEngine()
+  const { events, definedTools, sub } = engineEnv(eng)
+  const wfRun = definedTools.find((tool) => tool.name === 'wf_run')
+  const compile = holdProcess(sub, isCompile)
+  const promises = ['concurrent-a', 'concurrent-b'].map((taskId) => wfRun.execute({ templateId: 'logical-run-spec', taskId }))
+  await until(() => compile.count === 2, '不同任务同时进入编译')
+  compile.release()
+  await until(() => eng.starts.length === 2, '两个任务均进入引擎')
+  settleRun(eng, events, 'run-1', 'DONE')
+  settleRun(eng, events, 'run-2', 'DONE')
+  const results = await Promise.all(promises)
+  assert.equal(results.every((value) => JSON.parse(value).value.status === 'DONE'), true)
+})
+
+test('FIX-225 登记后移交占位；前任迟到的 finally 不能删除后任正在编译的占位', async () => {
+  const eng = makeEngine()
+  const { events, definedTools, sub, fs } = engineEnv(eng)
+  const wfRun = definedTools.find((tool) => tool.name === 'wf_run')
+  const finalContext = holdProcess(sub, (spec) => spec.argv.includes('context') && spec.argv.some((a) => a.endsWith('/workspace-isolation-host.mjs')))
+  const first = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'handoff-task' })
+  await until(() => eng.starts.length === 1, '第一轮进入引擎')
+  const executing = await wfRun.execute({ templateId: 'logical-run-spec', taskId: 'handoff-task' })
+  assert.match(executing, /进行中的运行 run-1/)
+  assert.doesNotMatch(executing, /正在启动中/, '登记后应显示引擎运行占用')
+  settleRun(eng, events, 'run-1', 'DONE')
+  await until(() => finalContext.count === 1, '前任结束但回执仍在落档')
+
+  const compile = holdProcess(sub, isCompile)
+  const second = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'handoff-task' })
+  await until(() => compile.count === 1, '后任在前任回执结算前已抢位')
+  finalContext.release()
+  await first
+  const third = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'handoff-task' })
+  const receipt = await immediateReceipt(third)
+  compile.release()
+  await until(() => eng.starts.length === (receipt === null ? 3 : 2), '释放后任编译')
+  for (let n = 2; n <= eng.starts.length; n++) settleRun(eng, events, 'run-' + n, 'DONE')
+  await Promise.all([second, third])
+  await drain()
+
+  assert.match(receipt, /已占用.*正在启动中/)
+  assert.equal(eng.starts.length, 2)
+  assert.equal(logicalFiles(fs).length, 2, '终态后派生 #2，第三次启动不得闯入')
+})
+
 test('#79 创建逻辑运行：稳定 logical_run_id + 快照 Rev1 冻结 + 第 1 段', async () => {
   const eng = makeEngine()
   const { events, definedTools, fs } = engineEnv(eng)
