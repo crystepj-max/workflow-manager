@@ -619,5 +619,9 @@
   "dashEventGuidance": "User guidance",
   "dashEventHumanDecision": "Human decision",
   "dashEventBaseline": "Evaluation baseline",
-  "dashEventNodeOutcome": "Node outcome record"
+  "dashEventNodeOutcome": "Node outcome record",
+  "rdSegmentScan": "Segment-end scan (not every call)",
+  "rdScanEntry": "Scan entry #{n}",
+  "rdScanRecords": "Scan entries (not every call)",
+  "rdScanSegments": "Segments {segments}: segment-end scan (not every call). Numbers show scan order; actual call counts cannot be recovered."
 }
