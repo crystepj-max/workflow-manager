@@ -1,5 +1,7 @@
 # 工作流插件 UI / 交互架构（2026-09 历史设计快照，v0.1）
 
+> **正式归档入口（2026-10-22）**：当前已确认的四项 DT、P1–P10 和十四项唯一归属见 [`workflow-ui-v0.1-decisions.md`](workflow-ui-v0.1-decisions.md)。下文整体保留历史资料定位；WFM-468 的历史措辞校正另行处理，不因本文留有旧表述而恢复取消的切片或关闭 #75。
+
 > ⚠️ **当前状态（2026-10-17）**：本文保留 2026-09 的方案与缺口盘点，仅供历史追溯，不是当前产品决策权威或当前施工清单。#75 的当前口径为 DT-00=C、DT-01=A、DT-02=B、DT-03=A：[DT-00](https://github.com/crystepj-max/workflow-manager/issues/75#issuecomment-6231570747)、[DT-01](https://github.com/crystepj-max/workflow-manager/issues/75#issuecomment-6231651893)、[DT-02](https://github.com/crystepj-max/workflow-manager/issues/75#issuecomment-6231717311)、[DT-03](https://github.com/crystepj-max/workflow-manager/issues/75#issuecomment-6231738435)。#75 仍保持 Open；WFM-82 承接正式归档和引用对齐。本文中“待裁”“开放”或“唯一权威”等表述只记录当时状态，不代表当前状态。
 
 > 历史定位：本文记录 Workflow Manager 插件侧 UI 与信息架构的设计方案，回答"用户如何发现、理解、配置、调用、干预运行、处理人工决策与阻塞、查看完整 Run 与最终成果"。当前产品决策以 GitHub [#75](https://github.com/crystepj-max/workflow-manager/issues/75) 的当前执行口径和后续有证据的评论为准。

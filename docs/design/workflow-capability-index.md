@@ -67,8 +67,14 @@ M2 与 Portable 七阶段关系：**唯一权威** [`m2-vs-portable-delivery.md`
 |---|---|---|
 | WR-009 状态恢复核心 | LOC-044 task-spec | Target / 未合入 |
 | WR-016 协议版本 | LOC-039 task-spec | Target / 未合入 |
-| 逻辑 Run UI 续跑交互 | LOC-016 V2 片2 | Target / 待 DT-01 |
+| 逻辑 Run UI 续跑交互 | WFM-67（Task UUID `01a0e5e2-f331-77a3-bb8a-78d45a858d8a`；原 FEAT-208，LOC-016 仅历史基线） | 本次 UI 核对基线中待交付；同 Run 提交/恢复未闭环，不能因 #75 的 DT-01=A 取消新 Run 起跑按钮而取消它 |
 | 全库 Run Lifecycle #79 | roadmap | Target |
+
+---
+
+## UI 产品裁定与实现核对（2026-10-22）
+
+以上能力表保留各自原有核对范围；本次 UI 专项基线为 main `63bef81ef0a6b67dbf3ed0efba2a48e04c639298`，不据此宣称全表重新验收。四项已确认 DT、P1–P10、十四项唯一归属、S-2/S-4 已合入与产品验收边界统一见 [`workflow-ui-v0.1-decisions.md`](workflow-ui-v0.1-decisions.md)，本索引不重复维护第二张 UI 对账表。OBSERVING 为本版非目标、未交付，不作 Current 能力。
 
 ---
 
