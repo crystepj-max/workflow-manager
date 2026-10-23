@@ -65,6 +65,7 @@ module.exports = {
         provider: String((pm && pm.provider) || 'default'),
         model: String((pm && pm.model) || 'default'),
         workspace: wsMap.get(key) || null,
+        isolation: lrec.node_isolation && lrec.node_isolation[String(ev.n)] || null,
         resolved_inputs: ev.ri || null,
         explicit_refs: explicitRefs,
         ev,

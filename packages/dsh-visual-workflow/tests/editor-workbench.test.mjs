@@ -20,6 +20,7 @@ import { JSDOM } from 'jsdom'
 const here = dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
 const { dashboardProjectionOf } = require(join(here, '..', '..', '..', 'scripts', 'dashboard-projection.cjs'))
+const validationCore = require(join(here, '../../../scripts/validate-core.cjs'))
 // 真实内置模板：扇出（并行研究组）+ 汇总 + 三类连接齐备（V-4 要求的第三类模板）
 const EXPLORE_DSL = JSON.parse(readFileSync(join(here, '..', '..', '..', 'templates', 'wf-explore.json'), 'utf8'))
 const src = readFileSync(join(here, '..', 'src', 'client.js'), 'utf8')
@@ -118,6 +119,12 @@ function makeRuntime(opts) {
         // #75 S-2b：与真实构建产物同源（docs/design/outcome-presets.json）
         return { ok: true, schemaVersion: 1, presets: JSON.parse(readFileSync(join(here, '../../../docs/design/outcome-presets.json'), 'utf8')).presets }
       case 'vwf.validate':
+        if (options.kernelValidate) {
+          const result = validationCore.validateBlueprint(validationCore.projectToBlueprint(args.dsl))
+          const fieldErrors = {}
+          for (const e of result.errors) if (e.fieldKey) (fieldErrors[e.fieldKey] ||= []).push(e.message)
+          return { ...result, fieldErrors, sanitized: args.dsl }
+        }
         // options.validateErrors 用于构造校验失败：错误按节点回填 fieldErrors（与真实内核同口径）
         if (options.validateErrors) {
           return { ok: false, errors: options.validateErrors, fieldErrors: options.fieldErrors || {}, sanitized: args.dsl }
@@ -149,7 +156,7 @@ function makeRuntime(opts) {
     inject: (name, fn) => { const r = fn(); if (r && r.__register) return },
     register: (o, Component) => { slotsFake.component = Component; return { __register: true } },
   }
-  const ctxFake = { get: (n) => (n === 'slots' ? slotsFake : undefined), timeout: makeTimeout, interval: () => () => {} }
+  const ctxFake = { get: (n) => (n === 'slots' ? slotsFake : undefined), timeout: (fn, delay) => options.kernelValidate && delay === 350 ? (fn(), () => {}) : makeTimeout(fn, delay), interval: () => () => {} }
   const closure = new Function(
     'React', 'console', 'styles', 'host', 'harness', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
     'fetch', 'require', 'process', 'Buffer', src,
@@ -1259,6 +1266,8 @@ test('S-2b 结果预设：手填后选择走 CONFIRM 确认流，确认后单次
     nameInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     nameInput.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
     await flush()
+    nameInput.dispatchEvent(new dom.window.Event('focusout', { bubbles: true }))
+    await flush()
   })
 
   await choosePreset(container, 'optimize-evaluator')
@@ -1298,6 +1307,8 @@ test('S-2b T-ACCEPT-01：手填→选择→应用→手动改回→保存→重�
     inputSetter.call(nameInput, 'route')
     nameInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     nameInput.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush()
+    nameInput.dispatchEvent(new dom.window.Event('focusout', { bubbles: true }))
     await flush()
   })
   await act(async () => {
@@ -1417,8 +1428,7 @@ test('S-2b BLOCKED 无绕过：草稿未提交时不出现任何应用入口，�
   assert.ok(blockedText.includes('请先完成或取消当前结果字段/取值编辑'), '显示脏草稿阻塞原因')
   assert.ok(blockedText.includes('无法应用该预设'), '显示不可应用')
 
-  // blur 提交草稿后，脏草稿阻塞解除；跨字段预设（route→verdict 改名遗留 required 孤儿）
-  // 仍是真实 BLOCKED（INVALID_CANDIDATE），继续无任何应用入口——确认不能绕过阻塞
+  // blur 提交草稿后，脏草稿阻塞解除；改名会同步维护 required，可预览待确认的合法候选。
   await act(async () => {
     const rowInput = container.querySelector('.vwf-inspector .vwf-routing-row input')
     rowInput.dispatchEvent(new dom.window.Event('focusout', { bubbles: true }))
@@ -1426,9 +1436,10 @@ test('S-2b BLOCKED 无绕过：草稿未提交时不出现任何应用入口，�
   })
   const afterCommitText = container.querySelector('.vwf-inspector').textContent
   assert.ok(!afterCommitText.includes('请先完成或取消当前结果字段/取值编辑'), '脏草稿阻塞解除')
-  assert.ok(afterCommitText.includes('候选结果未通过完整性检查'), '真实结构阻塞（改名孤儿 required）保持 BLOCKED')
-  assert.ok(!Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '预览并应用预设'), '真实阻塞下仍无预览应用入口')
-  assert.ok(!Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '确认应用预设'), '真实阻塞下仍无确认应用入口')
+  assert.ok(!afterCommitText.includes('候选结果未通过完整性检查'), '改名同步清理 required，无孤儿引用')
+  assert.ok(buttonLabel('预览并应用预设'), '可预览合法候选')
+  assert.ok(!buttonLabel('确认应用预设'), '仍须先预览再确认')
+  clearTimeout(wd)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1559,4 +1570,236 @@ test('S-4 看板行（挂载级）负向：旧记录不伪造；DONE 与 RUNNING
   assert.ok(rowX.textContent.includes('状态待同步'), '显示状态待同步提示')
   assert.ok(rowX.textContent.includes('运行中'), 'Lifecycle 原样保留（不把 DONE 翻译成 COMPLETED）')
   assert.ok(rowX.textContent.includes('DONE'), '技术状态原样保留')
+})
+
+
+// WFM-83：沿用真实客户端装配，只有校验 RPC 接同源内核，测试中推进 350ms 防抖。
+function nestedCompletionDsl() {
+  return { id: 'wf1', name: '完成映射', entry: 'closeout', control: { maxRounds: 3 }, nodes: [{
+    id: 'closeout', label: '收口', profile: 'dev', goal: '输出收口结果', output: {
+      outcomePath: '$.result.decision', schema: { type: 'object', required: ['result'], properties: {
+        result: { type: 'object', required: ['decision', 'reason'], properties: {
+          decision: { type: 'string', enum: ['DONE'] }, reason: { type: 'string', enum: ['CUSTOM_DONE'] },
+        } },
+      } },
+    },
+  }], edges: [{ from: 'closeout', to: '$end', outcome: 'DONE' }] }
+}
+async function mappingPage(dsl = nestedCompletionDsl(), builtin = false) {
+  const page = await mountPage({ kernelValidate: true, list: [{ id: dsl.id, name: dsl.name, builtin, dsl }] })
+  await openEditor(page.container)
+  await openTab(page.container, 'outcome')
+  return page
+}
+async function fillMappingInput(input, value, blur = true) {
+  assert.ok(input, '映射输入框存在')
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input, value)
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await flush()
+  })
+  if (blur) await act(async () => { input.dispatchEvent(new dom.window.Event('focusout', { bubbles: true })); await flush(); await flush() })
+}
+const mappingOf = (container, field) => container.querySelector('[data-vwf-mapping="' + field + '"]')
+async function saveMapping(container) {
+  await act(async () => { byText(container, '保存工作流').click(); await flush(); await flush(); await flush() })
+}
+
+test('WFM-83 UI 声明多层完成字段，候选来自本节点，保存后重开保真', async () => {
+  const { container, state } = await mappingPage()
+  const section = mappingOf(container, 'completionPath')
+  assert.ok(section, '结果与去向中提供完成映射')
+  assert.ok(section.textContent.includes('未声明完成映射'))
+  await fillMappingInput(section.querySelector('input[aria-label="完成类型字段"]'), 'result.reason')
+  assert.equal(mappingOf(container, 'completionPath').querySelector('.vwf-row input').value, 'CUSTOM_DONE', '当前 schema 候选值可见')
+  assert.ok(!mappingOf(container, 'completionPath').textContent.includes('COMPLETED_OBSERVING'))
+  await saveMapping(container)
+  assert.equal(state.saved.length, 1)
+  assert.equal(state.saved[0].nodes[0].output.completionPath, '$.result.reason')
+  const reopened = await mappingPage(state.saved[0])
+  assert.equal(mappingOf(reopened.container, 'completionPath').querySelector('input').value, 'result.reason')
+})
+
+test('WFM-83 UI 多层结果和完成字段改取值均不降层，共用字段标注且即时同步', async () => {
+  const dsl = nestedCompletionDsl()
+  dsl.nodes[0].output.completionPath = '$.result.reason'
+  const { container, state } = await mappingPage(dsl)
+  for (const [field, value] of [['outcomePath', 'DONE'], ['completionPath', 'MY_DONE']]) {
+    const section = mappingOf(container, field)
+    assert.ok(section, field + ' 配置区存在')
+    const rows = section.querySelectorAll('.vwf-row input')
+    await fillMappingInput(rows[0], value)
+  }
+  await saveMapping(container)
+  const out = state.saved[0].nodes[0].output
+  assert.equal(out.outcomePath, '$.result.decision')
+  assert.equal(out.completionPath, '$.result.reason')
+  assert.deepEqual(out.schema.properties.result.properties.reason.enum, ['MY_DONE'])
+  const reopened = await mappingPage(state.saved[0])
+  await fillMappingInput(mappingOf(reopened.container, 'completionPath').querySelector('input'), 'result.decision')
+  assert.ok(mappingOf(reopened.container, 'completionPath').textContent.includes('共用同一字段'))
+  assert.equal(mappingOf(reopened.container, 'completionPath').querySelector('.vwf-row input').value, 'DONE', '显示所选共用字段的实际值')
+})
+
+
+test('WFM-83 UI 六条完成规则直接展示既有校验结果，非法态不能保存', async () => {
+  const cases = [
+    [d => { d.nodes[0].output.completionPath = '$.result[0]' }, '完成类型字段路径有误'],
+    [d => { delete d.nodes[0].output.schema }, '请先在高级设置中声明这一步的结构化结果'],
+    [d => { d.nodes[0].output.completionPath = '$.missing' }, '完成类型字段尚未在这一步的结构化结果中声明'],
+    [d => { d.nodes[0].output.schema.properties.result.properties.reason = { type: 'number' } }, '完成原因必须是文本'],
+    [d => { d.edges = [] }, '只有能直接走向结束的步骤可以声明完成映射'],
+  ]
+  for (const [mutate, message] of cases) {
+    const dsl = nestedCompletionDsl()
+    dsl.nodes[0].output.completionPath = '$.result.reason'
+    mutate(dsl)
+    const { container, state } = await mappingPage(dsl)
+    assert.ok(mappingOf(container, 'completionPath').textContent.includes(message), message + ' 在保存前可见')
+    await saveMapping(container)
+    assert.equal(state.saved.length, 0, '现有校验拒绝非法蓝图')
+  }
+  const fanout = nestedCompletionDsl()
+  Object.assign(fanout.nodes[0], { kind: 'fanout', items: ['A', 'B'] })
+  fanout.nodes[0].output.completionPath = '$.result.reason'
+  const { container, state } = await mappingPage(fanout)
+  assert.equal(Boolean(mappingOf(container, 'outcomePath')), false, '并行组无结果映射编辑入口')
+  assert.equal(Boolean(mappingOf(container, 'completionPath')), false, '并行组无完成映射编辑入口')
+  assert.ok(container.querySelector('.vwf-inspector').textContent.includes('并行组由系统汇总'))
+  await saveMapping(container)
+  assert.equal(state.saved.length, 0)
+})
+
+test('WFM-83 UI 内置只读、无枚举文本完成字段与取值来源不被预设替换', async () => {
+  const dsl = nestedCompletionDsl()
+  dsl.nodes[0].output.completionPath = '$.result.reason'
+  const builtin = await mappingPage(dsl, true)
+  for (const field of ['outcomePath', 'completionPath']) {
+    const section = mappingOf(builtin.container, field)
+    assert.ok(section.textContent.includes(field === 'outcomePath' ? 'result.decision' : 'result.reason'))
+    assert.equal(section.querySelectorAll('input,button,select,textarea').length, 0, '内置映射只读展示')
+  }
+  delete dsl.nodes[0].output.schema.properties.result.properties.reason.enum
+  const { container, state } = await mappingPage(dsl)
+  assert.ok(mappingOf(container, 'completionPath').textContent.includes('该字段未声明候选值'))
+  await saveMapping(container)
+  assert.equal(state.saved.length, 1, '内核允许没有 enum 的 string 完成字段')
+})
+
+test('WFM-83 UI 输入路径经过现有父字段时，只在离开输入框后一次应用完整路径', async () => {
+  const dsl = nestedCompletionDsl()
+  dsl.nodes[0].output.completionPath = '$.result.reason'
+  const { container, state } = await mappingPage(dsl)
+  await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), 'result', false)
+  assert.equal(mappingOf(container, 'completionPath').querySelector('.vwf-row input')?.value, 'CUSTOM_DONE', '输入中的父路径不应覆盖已声明叶子')
+  await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), 'result.final_reason')
+  await saveMapping(container)
+  assert.equal(state.saved.length, 1)
+  const out = state.saved[0].nodes[0].output
+  assert.equal(out.completionPath, '$.result.final_reason')
+  assert.deepEqual(out.schema.properties.result.properties.final_reason.enum, ['CUSTOM_DONE'])
+  assert.equal(out.schema.properties.result.properties.reason, undefined)
+  assert.deepEqual(out.schema.properties.result.required, ['decision', 'final_reason'])
+})
+
+test('WFM-83 A1 UI 离开父路径或穿过文本的路径时即时拒绝，两种映射与原 schema 保真', async () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    for (const invalid of ['result', 'result.decision.note']) {
+      const dsl = nestedCompletionDsl()
+      const out = dsl.nodes[0].output
+      out.completionPath = '$.result.reason'
+      Object.assign(out.schema.properties.result.properties.reason, { description: '完成原因', minLength: 1 })
+      const before = JSON.parse(JSON.stringify(out))
+      const { container, state } = await mappingPage(dsl)
+      await fillMappingInput(mappingOf(container, field).querySelector('input'), invalid)
+      assert.ok(mappingOf(container, field).textContent.includes('本次无效修改未应用'), invalid + ' 离开输入框后显示无效修改')
+      assert.equal(mappingOf(container, field).querySelector('.vwf-row input')?.value, field === 'outcomePath' ? 'DONE' : 'CUSTOM_DONE', '旧候选值仍可见')
+      await saveMapping(container)
+      assert.equal(state.saved.length, 1, '保存沿用未损坏的原稿')
+      assert.deepEqual(state.saved[0].nodes[0].output, before)
+      const reopened = await mappingPage(state.saved[0])
+      await fillMappingInput(mappingOf(reopened.container, field).querySelector('input'), invalid)
+      await fillMappingInput(mappingOf(reopened.container, field).querySelector('input'), before[field].slice(2))
+      assert.ok(!mappingOf(reopened.container, field).textContent.includes('本次无效修改未应用'), '重新选择原叶子后清除提示')
+      await saveMapping(reopened.container)
+      assert.deepEqual(reopened.state.saved[0].nodes[0].output, before, '原路径往返完整保真')
+    }
+  }
+})
+
+test('WFM-83 A1 UI 拒绝对象数组终点；已声明对象映射也不能用加取值绕过校验', async () => {
+  for (const target of [{ type: 'object', properties: { evidence: { type: 'string' } } }, { type: 'array', items: { type: 'string' } }]) {
+    const dsl = nestedCompletionDsl()
+    const out = dsl.nodes[0].output
+    out.completionPath = '$.result.reason'
+    out.schema.properties.container = target
+    const before = JSON.parse(JSON.stringify(out))
+    const { container, state } = await mappingPage(dsl)
+    await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), 'container')
+    assert.ok(mappingOf(container, 'completionPath').textContent.includes('本次无效修改未应用'))
+    await saveMapping(container)
+    assert.deepEqual(state.saved[0].nodes[0].output, before)
+  }
+  const invalid = nestedCompletionDsl()
+  invalid.nodes[0].output.completionPath = '$.result'
+  const { container, state } = await mappingPage(invalid)
+  await act(async () => { byText(mappingOf(container, 'completionPath'), '加取值').click(); await flush() })
+  await fillMappingInput(mappingOf(container, 'completionPath').querySelector('.vwf-row input'), 'CUSTOM_DONE')
+  assert.ok(mappingOf(container, 'completionPath').textContent.includes('本次无效修改未应用'), '给对象加取值被即时拒绝')
+  await saveMapping(container)
+  assert.equal(state.saved.length, 0, '对象映射仍被同源校验拒绝保存')
+})
+
+test('WFM-83 A2 UI 迁出带元数据的最后一个字段后，保存重开无必填空分组', async () => {
+  for (const keepSibling of [false, true]) {
+    const dsl = nestedCompletionDsl()
+    const out = dsl.nodes[0].output
+    out.completionPath = '$.final.details.reason'
+    out.schema.required.push('final')
+    out.schema.properties.final = { type: 'object', description: '收口分组', additionalProperties: false, required: ['details'], properties: {
+      details: { type: 'object', description: '详细原因', additionalProperties: false, required: ['reason'], properties: {
+        reason: { type: 'string', enum: ['CUSTOM_DONE'], description: '完成原因', minLength: 1 },
+      } },
+    } }
+    if (keepSibling) {
+      out.schema.properties.final.properties.evidence = { type: 'string' }
+      out.schema.properties.final.required.push('evidence')
+    }
+    const { container, state } = await mappingPage(dsl)
+    await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), 'completion_type')
+    await saveMapping(container)
+    assert.equal(state.saved.length, 1)
+    const saved = state.saved[0].nodes[0].output
+    assert.deepEqual(saved.schema.properties.completion_type, out.schema.properties.final.properties.details.properties.reason)
+    if (keepSibling) {
+      assert.deepEqual(saved.schema.properties.final, { type: 'object', description: '收口分组', additionalProperties: false, required: ['evidence'], properties: { evidence: { type: 'string' } } })
+      assert.ok(saved.schema.required.includes('final'))
+    } else {
+      assert.equal(saved.schema.properties.final, undefined)
+      assert.ok(!saved.schema.required.includes('final'))
+    }
+    const reopened = await mappingPage(state.saved[0])
+    assert.equal(mappingOf(reopened.container, 'completionPath').querySelector('input').value, 'completion_type')
+    await saveMapping(reopened.container)
+    assert.deepEqual(reopened.state.saved[0].nodes[0].output, saved)
+  }
+})
+
+test('WFM-83 UI 仅声明完成映射不启用业务结果路由，切换结果模式仍保留完成字段', async () => {
+  const dsl = nestedCompletionDsl()
+  const out = dsl.nodes[0].output
+  delete out.outcomePath
+  out.completionPath = '$.result.reason'
+  dsl.edges = [{ from: 'closeout', to: '$end', on: 'success' }]
+  const { container, state } = await mappingPage(dsl)
+  assert.equal(Boolean(mappingOf(container, 'outcomePath')), false, '未声明 outcomePath 不显示结果路由编辑器')
+  const modes = Array.from(container.querySelectorAll('.vwf-inspector select')).find(s => Array.from(s.options).some(o => o.value === 'routing'))
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set.call(modes, 'none')
+    modes.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await flush(); await flush()
+  })
+  assert.ok(mappingOf(container, 'completionPath'), '不启用业务路由仍可配置完成映射')
+  await saveMapping(container)
+  assert.equal(state.saved[0].nodes[0].output.completionPath, '$.result.reason')
 })

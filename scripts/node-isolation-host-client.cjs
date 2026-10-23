@@ -3,6 +3,53 @@
 const MAX_WORKER_LINE = 1024 * 1024
 const MAX_WORKER_OUTPUT = 4 * 1024 * 1024
 
+// WFM-81：仅观测与复制既有判定；缺历史字段必须保持 unknown / null。
+function isolationFieldsOf(value) {
+  const v = value || {}
+  const level = v.isolation_guarantee
+  return {
+    isolation_guarantee: level === 'enforced' || level === 'unavailable' ? level : 'unknown',
+    isolation_probe: v.isolation_probe && typeof v.isolation_probe === 'object' ? JSON.parse(JSON.stringify(v.isolation_probe)) : null,
+    independent_proof_eligible: typeof v.independent_proof_eligible === 'boolean' ? v.independent_proof_eligible : null,
+    independent_proof_block_reason: typeof v.independent_proof_block_reason === 'string' ? v.independent_proof_block_reason : null,
+  }
+}
+
+async function recordIsolation(rec, probe, dsl, hostCall) {
+  if (!rec) return
+  const fields = isolationFieldsOf({
+    isolation_guarantee: probe && probe.guarantee,
+    isolation_probe: probe ? { backend: probe.backend || null, evidence: probe.evidence || {}, recorded_at: Date.now() } : null,
+  })
+  const nodes = {}
+  for (const node of (dsl && dsl.nodes) || []) {
+    if (!node || node.mechanical) continue
+    let gate = null
+    if (fields.isolation_guarantee !== 'unknown') {
+      try {
+        const r = await hostCall('canIssueProof', {
+          isolation_guarantee: fields.isolation_guarantee, profile: String(node.profile || ''),
+          node_capabilities: node.node_capabilities || undefined,
+        })
+        if (r && r.ok && r.decision && typeof r.decision.ok === 'boolean') gate = r.decision
+      } catch { /* 资格查询不可用只影响观测，不代替原签发闸门 */ }
+    }
+    nodes[node.id] = {
+      ...fields,
+      independent_proof_eligible: gate ? gate.ok : null,
+      independent_proof_block_reason: gate ? (gate.ok ? null : String(gate.reason || '')) : 'independent_proof_eligibility_unknown',
+    }
+  }
+  const metadata = { isolation_guarantee: fields.isolation_guarantee, isolation_probe: fields.isolation_probe }
+  Object.assign(rec, metadata)
+  rec.node_isolation = nodes
+  // 含失败的启动尝试；这份历史不表示创建过引擎段或执行过节点。
+  rec.isolation_history = (rec.isolation_history || []).concat([{
+    isolation_guarantee: fields.isolation_guarantee, isolation_probe: fields.isolation_probe, node_isolation: nodes,
+  }])
+  return metadata
+}
+
 function createNodeIsolationHostClient(dependencies = {}) {
   return async function nodeIsolationHostCall(command, input = {}, options = {}) {
     if (command === 'spawnProviderWorker') return startProviderWorker(input, options, dependencies)
@@ -172,4 +219,4 @@ function createWorkerHandle(handle) {
   return { accepted, result, dispose }
 }
 
-module.exports = { createNodeIsolationHostClient }
+module.exports = { createNodeIsolationHostClient, isolationFieldsOf, recordIsolation }
