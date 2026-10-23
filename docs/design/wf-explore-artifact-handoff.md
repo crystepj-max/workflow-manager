@@ -31,6 +31,14 @@
 
 每次 provider 调用的实际 evidence 和 scratch 均按 item / invocation 分开。模型只访问自己的输出、scratch 和宿主为它复制的只读输入；消费者不获得 canonical、其他节点 evidence 或 workers 父目录的读取权限。宿主不扫描 evidence、不复制 scratch。符号链接检查与 exact 路径白名单沿用 `node-artifacts.mjs`。
 
+### 宿主短事务与异常恢复
+
+同一 Run 的 `.handoff/transaction.lock` 统一串行化 prepare/begin、消费输入版本核对和拷贝、publish 的 current/必要依赖核对→canonical 提交→ready 指针、fail。模型执行不持锁。锁采用完整 owner JSON 的原子 hardlink 发布，owner 含 PID 和随机 token；释放必须同时匹配自身 PID/token。不同节点也使用同一 Run 锁，避免上游在消费发布中途变化。它不开放新的模型目录权限。
+
+竞争等待使用单调时间，最多 2 秒；超时以 `EXPLORE_HANDOFF_BUSY` 报错，包含 owner PID 与确切锁路径。同进程重入直接报错。活 owner、死亡 owner、无法解析或非普通 owner 文件均不按时长自动抢占/删除；崩溃残锁会使后续调用有界失败。恢复时必须确认这个 Run 的 owner 已退出、核对原 token 与现场，再显式清理该确切锁并启动新 attempt，禁止删除其他 owner 的锁。正常完成和已捕获异常在短事务结束时释放自身锁。
+
+该锁保证受信宿主并发操作的线性化，不承诺断电或 `SIGKILL` 时多个文件同时落盘。崩溃可能留下已写 canonical 字节、不可变副本或临时 JSON，但未完成的 slot 不会被补成 ready；消费者仍必须核对当前成功版本与控制器真实结果，不能拿这些半成品补交。恢复后以新 attempt 重新发布，保留原失败证据。
+
 这些 slot / sidecar 是传输依据，不能替代 Formal Records、业务覆盖检查、正式安装证据或真实产品验收。
 
 ## 验证边界

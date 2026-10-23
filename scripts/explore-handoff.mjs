@@ -166,7 +166,7 @@ export function prepareExploreHandoff(binding, node, io) {
   return { node: resolved, files, json, record, expertId, write, readCurrent: () => read(node.id, x.round, x.item_no), versionRoot: versionPath(record) }
 }
 
-export function finishExploreHandoff(handoff, structured, readyFiles, io) {
+export function finishExploreHandoff(handoff, structured, readyFiles, io, commitFiles) {
   const current = handoff.readCurrent()
   if (current.invocation_id !== handoff.record.invocation_id || current.status !== 'running') throw new Error('探索产物不是当前 attempt，拒绝发布')
   if (!schema.instanceValid(handoff.node.output.schema, structured, 'versioned')) throw new Error('探索结果未通过生产 schema，拒绝发布')
@@ -179,7 +179,9 @@ export function finishExploreHandoff(handoff, structured, readyFiles, io) {
     writeFileSync(io.checked(relative, true), file.bytes, { flag: 'wx', mode: 0o400 })
     files[file.path] = { sha256: hash(file.bytes), bytes: file.bytes.length }
   }
-  return () => handoff.write({ ...current, status: 'ready', value: structured, value_sha256: hash(encoded(structured)), files })
+  // 调用者持有整个 Run 的短事务锁，校验、canonical 提交和 ready 指针不可被 begin/fail 插入。
+  commitFiles()
+  handoff.write({ ...current, status: 'ready', value: structured, value_sha256: hash(encoded(structured)), files })
 }
 
 // publish/fail 是另一个宿主进程；只恢复 prepare 已登记的 exact attempt，绝不重新 begin。
