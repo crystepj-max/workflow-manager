@@ -55,6 +55,148 @@ test('WFM-83 显式改路径清理旧叶子和 required，保留兄弟字段并�
   assert.equal(flat.completionPath, '$.completion_type')
 })
 
+test('WFM-83 A1 两种映射拒绝移到旧路径父级，重输原路径仍完整保真', () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    const n = seed(), before = clone(n)
+    for (const values of [undefined, ['DONE']]) {
+      const rejected = ui.applyRoutingWrite(n, 'result', values, field)
+      assert.deepEqual(rejected, before.output, field + ' 父路径修改不应用')
+      const restored = ui.applyRoutingWrite({ output: rejected }, ui.routingNameOf(n.output[field]), undefined, field)
+      assert.deepEqual(restored, before.output, '重新选择原叶子保留注释、约束、候选值和兄弟字段')
+    }
+    assert.deepEqual(n, before, '拒绝修改不改变入参')
+  }
+})
+
+test('WFM-83 A1 对象数组终点及穿过标量的路径不能破坏 schema', () => {
+  const targets = [
+    ['container', { type: 'object', properties: { evidence: { type: 'string' } } }],
+    ['container', { properties: { evidence: { type: 'string' } } }],
+    ['container', { type: 'array', items: { type: 'string' } }],
+    ['container', { items: { type: 'string' } }],
+    ['container', { type: 'object' }],
+    ['container', { type: 'array' }],
+    ['result.decision.note', null],
+    ['container.note', { type: 'number' }],
+    ['container.note', { type: 'boolean' }],
+    ['container.note', { enum: ['A', 'B'] }],
+  ]
+  for (const field of ['outcomePath', 'completionPath']) {
+    for (const [path, target] of targets) {
+      const n = seed()
+      if (target) n.output.schema.properties.container = target
+      const before = clone(n)
+      for (const values of [undefined, ['DONE']]) {
+        assert.deepEqual(ui.applyRoutingWrite(n, path, values, field), before.output, field + ' 拒绝 ' + path + ' ' + JSON.stringify(target))
+      }
+      assert.deepEqual(n, before)
+    }
+  }
+})
+
+test('WFM-83 A1 给已映射的对象数组或非枚举数值加取值不能将其收成 string', () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    for (const target of [{ type: 'object', properties: {} }, { type: 'array', items: { type: 'string' } }, { type: 'number' }]) {
+      const n = seed()
+      n.output[field] = '$.container'
+      n.output.schema.properties.container = target
+      const before = clone(n)
+      assert.deepEqual(ui.applyRoutingWrite(n, 'container', ['DONE'], field), before.output)
+      assert.deepEqual(n, before)
+    }
+  }
+})
+
+test('WFM-83 A1 完成路径不能穿过现有业务文本字段，旧完成叶子不丢失', () => {
+  const n = seed(), before = clone(n)
+  const out = ui.applyRoutingWrite(n, 'result.decision.note', undefined, 'completionPath')
+  assert.deepEqual(out, before.output)
+  assert.deepEqual(n, before)
+})
+
+test('WFM-83 A2 带元数据的空容器递归清理及 required 同步，业务兄弟与元数据保留', () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    for (const metadata of [{ additionalProperties: false }, { description: '结果分组' }, { additionalProperties: false, description: '结果分组' }]) {
+      for (const keepSibling of [false, true]) {
+        const n = seed()
+        n.output[field] = '$.final.details.reason'
+        n.output.schema.required.push('final')
+        n.output.schema.properties.final = { type: 'object', ...metadata, required: ['details'], properties: {
+          details: { type: 'object', ...metadata, required: ['reason'], properties: {
+            reason: { type: 'string', enum: ['DONE'], description: '原因', minLength: 1 },
+          } },
+        } }
+        if (keepSibling) {
+          n.output.schema.properties.final.properties.evidence = { type: 'string', description: '必须输出的证据' }
+          n.output.schema.properties.final.required.push('evidence')
+        }
+        const before = clone(n)
+        const moved = ui.applyRoutingWrite(n, 'completion_type', undefined, field)
+        assert.deepEqual(moved.schema.properties.completion_type, before.output.schema.properties.final.properties.details.properties.reason)
+        assert.deepEqual(moved.schema.properties.result, before.output.schema.properties.result, '未迁移的业务分组完整保留')
+        if (keepSibling) {
+          assert.deepEqual(moved.schema.properties.final, { type: 'object', ...metadata, required: ['evidence'], properties: { evidence: before.output.schema.properties.final.properties.evidence } })
+          assert.ok(moved.schema.required.includes('final'), '还有业务字段的父级仍必填')
+        } else {
+          assert.equal(moved.schema.properties.final, undefined, '全部空父级递归删除')
+          assert.ok(!moved.schema.required.includes('final'), '空父级的 required 同步删除')
+        }
+        assert.ok(moved.schema.required.includes('result'))
+        assert.ok(moved.schema.required.includes('summary'))
+        assert.deepEqual(n, before)
+      }
+    }
+  }
+})
+
+test('WFM-83 A2 数组 items 还有业务兄弟时保留，迁出最后叶子后才清理数组及 required', () => {
+  for (const keepSibling of [false, true]) {
+    const n = seed()
+    n.output.completionPath = '$.final.reason'
+    n.output.schema.required.push('final')
+    n.output.schema.properties.final = { type: 'array', minItems: 1, description: '收口结果', items: {
+      type: 'object', additionalProperties: false, required: ['reason'], properties: {
+        reason: { type: 'string', const: 'DELIVERED' },
+      },
+    } }
+    if (keepSibling) {
+      n.output.schema.properties.final.items.properties.evidence = { type: 'string' }
+      n.output.schema.properties.final.items.required.push('evidence')
+    }
+    const before = clone(n)
+    const moved = ui.applyRoutingWrite(n, 'completion_type', undefined, 'completionPath')
+    if (keepSibling) {
+      assert.deepEqual(moved.schema.properties.final, { type: 'array', minItems: 1, description: '收口结果', items: {
+        type: 'object', additionalProperties: false, required: ['evidence'], properties: { evidence: { type: 'string' } },
+      } })
+      assert.ok(moved.schema.required.includes('final'))
+    } else {
+      assert.equal(moved.schema.properties.final, undefined)
+      assert.ok(!moved.schema.required.includes('final'))
+    }
+    assert.deepEqual(moved.schema.properties.result, before.output.schema.properties.result)
+    assert.deepEqual(n, before)
+  }
+})
+
+test('WFM-83 A2 多份 schema 的容器不能因第一份变空而丢掉其它业务字段', () => {
+  const n = seed()
+  n.output.completionPath = '$.final.reason'
+  n.output.schema.required.push('final')
+  n.output.schema.properties.final = [
+    { type: 'object', description: '映射所在 schema', required: ['reason'], properties: { reason: { type: 'string', const: 'DELIVERED' } } },
+    { type: 'object', required: ['evidence'], properties: { evidence: { type: 'string' } } },
+  ]
+  const before = clone(n)
+  const moved = ui.applyRoutingWrite(n, 'completion_type', undefined, 'completionPath')
+  assert.deepEqual(moved.schema.properties.final, [
+    { type: 'object', description: '映射所在 schema', required: [], properties: {} },
+    before.output.schema.properties.final[1],
+  ])
+  assert.ok(moved.schema.required.includes('final'))
+  assert.deepEqual(n, before)
+})
+
 test('WFM-83 共用字段改映射不删除另一映射仍使用的属性', () => {
   const n = seed()
   n.output.completionPath = n.output.outcomePath

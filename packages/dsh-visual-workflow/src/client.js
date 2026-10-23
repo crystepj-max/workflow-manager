@@ -1699,13 +1699,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const candidates = routingCandidates(out.schema, completion)
       const write = (path, nextValues) => {
         const output = applyRoutingWrite(node, path, nextValues, field)
+        if (output === out) { setNotice(t('routingNameInvalid')); return }
         props.onUpdate(node.id, { output })
         setValues(routingValuesOf({ output }, field))
         setDirty(false)
         props.onDirty(false)
+        setPathDraft(path)
+        setNotice(null)
       }
       const listId = 'vwf-mapping-' + field
-      const shared = name && out.completionPath && out.outcomePath && routingNameOf(out.completionPath) === routingNameOf(out.outcomePath)
+      const shared = name && routingNameOf(out.completionPath) === routingNameOf(out.outcomePath)
       return h('div', { 'data-vwf-mapping': field },
         h(Field, { label, required: !completion, help: t(completion ? 'completionHelp' : 'routingFieldNameHelp'), errors },
           ro ? h('div', { className: 'vwf-mono' }, pathDraft || t('completionUndeclared')) : h('input', {
@@ -1714,7 +1717,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             onChange: (ev) => { setPathDraft(ev.target.value); props.onDirty(true) },
             onBlur: () => {
               const normalized = normalizeRoutingName(pathDraft)
-              if (normalized || !pathDraft.trim()) { write(normalized); setPathDraft(normalized); setNotice(null) }
+              if (normalized || !pathDraft.trim()) write(normalized)
               else setNotice(t('routingNameInvalid'))
             },
           })
@@ -5606,8 +5609,7 @@ function connectionClassOf(edge, orderOf) {
 // ── 字段映射：schema 是取值真源；界面隐藏 $. 前缀，保留全部路径段 ──
 function routingNameOf(path) {
   if (typeof path !== 'string') return ''
-  const m = /^\$\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)$/.exec(path.trim())
-  return m ? m[1] : ''
+  return /^\$\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)$/.exec(path.trim())?.[1] || ''
 }
 function normalizeRoutingName(input) {
   return routingNameOf('$.' + String(input == null ? '' : input).trim().replace(/^\$\./, ''))
@@ -5625,21 +5627,32 @@ function enumerableValues(prop) {
   return prop.type === 'boolean' ? ['true', 'false'] : null
 }
 
-function mappingLeaf(schema, name) {
+function mappingContainer(schema) {
+  if (Array.isArray(schema)) return mappingContainer(schema[0])
+  return schema?.type === 'array' ? mappingContainer(schema.items) : schema
+}
+
+function mappingEmpty(schema) {
+  if (Array.isArray(schema)) return schema.every(mappingEmpty)
+  return schema?.type === 'array' ? mappingEmpty(schema.items) : schema?.properties && !Object.keys(schema.properties).length
+}
+
+function mappingLeaf(schema, name, writing) {
   if (!name) return null
-  return name.split('.').reduce((cursor, key) => {
-    if (Array.isArray(cursor)) cursor = cursor[0]
-    if (cursor && cursor.type === 'array') cursor = cursor.items
-    return cursor?.properties?.[key]
-  }, schema) || null
+  let cursor = schema
+  for (const key of name.split('.')) {
+    const container = mappingContainer(cursor)
+    // 写入前检查所有已有父级，不能在 string 等标量里生成 properties。
+    if (writing && cursor && (!container || (container.type && container.type !== 'object') || enumerableValues(container) || container.oneOf)) return false
+    cursor = container?.properties?.[key]
+  }
+  return cursor || null
 }
 
 function routingCandidates(schema, completion) {
   const found = []
   function visit(s, prefix) {
-    if (!s || typeof s !== 'object') return
-    if (s.type === 'array') s = s.items || {}
-    Object.entries(s.properties || {}).forEach(([key, prop]) => {
+    Object.entries(mappingContainer(s)?.properties || {}).forEach(([key, prop]) => {
       const name = prefix + key
       if (completion ? prop && (prop.type === 'string' || typeof prop.const === 'string') : enumerableValues(prop)) found.push(name)
       visit(prop, name + '.')
@@ -5654,22 +5667,20 @@ function routingValuesOf(node, field) {
   return enumerableValues(mappingLeaf(out.schema, routingNameOf(out[field || 'outcomePath']))) || []
 }
 
-// 只沿修改路径复制；删叶子时同步 required，空的普通容器可递归清除。
+// 只沿修改路径复制；删叶子时同步 required，空容器连同注解递归清除。
 function writeMappingLeaf(schema, parts, leaf) {
   if (Array.isArray(schema)) return [writeMappingLeaf(schema[0], parts, leaf), ...schema.slice(1)]
   const next = { ...(schema || { type: 'object' }) }
   if (next.type === 'array' && next.items) return { ...next, items: writeMappingLeaf(next.items, parts, leaf) }
   const [key, ...tail] = parts
-  let props = { ...(next.properties || {}) }
+  const props = next.properties = { ...next.properties }
   let child = tail.length ? writeMappingLeaf(props[key], tail, leaf) : leaf
-  if (tail.length && leaf === undefined && !Object.keys(child.properties || {}).length && Object.keys(child).every(k => ['type', 'properties', 'required'].includes(k))) child = undefined
+  if (tail.length && leaf === undefined && mappingEmpty(child)) child = undefined
   if (child === undefined) delete props[key]
-  else props = { ...props, [key]: child }
-  next.properties = props
-  if (Array.isArray(next.required) || leaf !== undefined) {
-    next.required = (Array.isArray(next.required) ? next.required : []).filter(k => child !== undefined || k !== key)
-    if (child !== undefined && leaf !== undefined && !next.required.includes(key)) next.required.push(key)
-  }
+  else props[key] = child
+  const required = Array.isArray(next.required) ? next.required : []
+  if (leaf !== undefined) next.required = required.includes(key) ? required : required.concat(key)
+  else if (child === undefined && Array.isArray(next.required)) next.required = required.filter(k => k !== key)
   return next
 }
 
@@ -5679,19 +5690,22 @@ function applyRoutingWrite(node, name, values, field) {
   const out = node?.output || {}
   const prev = routingNameOf(out[field])
   const other = routingNameOf(out[field === 'outcomePath' ? 'completionPath' : 'outcomePath'])
-  let leaf = mappingLeaf(out.schema, name) || mappingLeaf(out.schema, prev)
+  const target = mappingLeaf(out.schema, name, true)
+  let leaf = target || mappingLeaf(out.schema, prev)
+  // 无效修改整体拒绝：不先删旧叶子，也不把容器或其它标量收成 string。
+  if (name && (target === false || prev.startsWith(name + '.') || (leaf && (Array.isArray(leaf) || leaf.type === 'object' || leaf.type === 'array' || leaf.properties || leaf.items || (values !== undefined && leaf.type !== 'string' && !enumerableValues(leaf)))))) return out
   let schema = out.schema
   // 另一映射仍引用旧字段（或其父/子路径）时必须保留，不能删除共用结果。
   if (prev && prev !== name && !(other && (other === prev || other.startsWith(prev + '.') || prev.startsWith(other + '.')))) schema = writeMappingLeaf(schema, prev.split('.'), undefined)
   if (name && values !== undefined) {
     const clean = values.map(v => String(v == null ? '' : v).trim()).filter(Boolean)
-    leaf = { ...(leaf || {}), type: 'string' }
+    leaf = { ...leaf, type: 'string' }
     delete leaf.const
     delete leaf.oneOf
     delete leaf.enum
     if (clean.length) leaf.enum = clean
   }
-  if (name && leaf && (values !== undefined || !mappingLeaf(schema, name))) schema = writeMappingLeaf(schema, name.split('.'), leaf)
+  if (name && leaf && (values !== undefined || !target)) schema = writeMappingLeaf(schema, name.split('.'), leaf)
   const next = { ...out }
   if (schema !== undefined) next.schema = schema
   if (field === 'completionPath' && !name) delete next[field]
@@ -5704,20 +5718,20 @@ function applyRoutingWrite(node, name, values, field) {
  * 并回出「用了未声明取值」的边。state ∈ ok | missing | duplicated。
  */
 function routingEdgeStatus(dsl, nodeId) {
-  const nodes = (dsl && dsl.nodes) || []
-  const edges = (dsl && dsl.edges) || []
-  const values = routingValuesOf(nodes.find((n) => n && n.id === nodeId))
+  const nodes = dsl?.nodes || []
+  const edges = dsl?.edges || []
+  const values = routingValuesOf(nodes.find((n) => n?.id === nodeId))
   const rows = values.map((v) => {
     const hits = []
     edges.forEach((e, i) => {
-      if (e && e.from === nodeId && e.outcome !== undefined && e.outcome !== null && String(e.outcome) === v) hits.push(i)
+      if (e && e.from === nodeId && e.outcome != null && String(e.outcome) === v) hits.push(i)
     })
     return { value: v, edgeIndexes: hits, state: hits.length === 0 ? 'missing' : (hits.length > 1 ? 'duplicated' : 'ok') }
   })
   const undeclared = []
   edges.forEach((e, i) => {
     if (!e || e.from !== nodeId) return
-    if (e.outcome === undefined || e.outcome === null || e.outcome === '') return
+    if (e.outcome == null || e.outcome === '') return
     const v = String(e.outcome)
     if (!values.includes(v)) undeclared.push({ edgeIndex: i, value: v, to: e.to })
   })
@@ -5733,25 +5747,24 @@ function routingEdgeStatus(dsl, nodeId) {
  */
 function planOutcomePresetApplication(node, preset, edges, options) {
   const opts = options || {}
-  const src = { presetId: (preset && preset.id) || '', applicableNodes: (preset && preset.applicableNodes) || [] }
+  const src = { presetId: preset?.id || '', applicableNodes: preset?.applicableNodes || [] }
   const result = (status, extra) => ({ applicable: status !== 'BLOCKED', status, conflicts: [], differences: [], warnings: [], candidate: null, source: src, ...extra })
   const blocked = (code, detail) => result('BLOCKED', { conflicts: [{ code, detail: detail || null }] })
-  if (!preset || typeof preset !== 'object') return blocked('INVALID_PRESET')
-  if (typeof preset.id !== 'string' || !preset.id) return blocked('INVALID_PRESET')
-  if (typeof preset.outcomePath !== 'string' || !routingNameOf(preset.outcomePath)) return blocked('INVALID_PRESET')
-  if (!Array.isArray(preset.values) || preset.values.length === 0 || !preset.values.every((v) => typeof v === 'string' && v.trim() !== '')) return blocked('INVALID_PRESET')
-  if (new Set(preset.values).size !== preset.values.length) return blocked('INVALID_PRESET')
+  if (!preset || typeof preset !== 'object' || typeof preset.id !== 'string' || !preset.id
+    || !routingNameOf(preset.outcomePath) || !Array.isArray(preset.values) || !preset.values.length
+    || !preset.values.every((v) => typeof v === 'string' && v.trim() !== '')
+    || new Set(preset.values).size !== preset.values.length) return blocked('INVALID_PRESET')
   if (opts.dirtyDraft) return blocked('DIRTY_DRAFT')
   if (opts.readOnly) return blocked('READ_ONLY_NODE')
 
   const name = routingNameOf(preset.outcomePath)
-  const out = node && node.output
-  const curPath = out && typeof out.outcomePath === 'string' ? out.outcomePath.trim() : null
+  const out = node?.output
+  const curPath = typeof out?.outcomePath === 'string' ? out.outcomePath.trim() : null
   const curName = routingNameOf(curPath)
   const schema = out?.schema || null
   const props = schema?.properties || {}
-  const edgeList = (Array.isArray(edges) ? edges : []).filter(e => e && e.from === (node && node.id) && e.outcome != null && e.outcome !== '')
-  const outcomeEdgesOf = v => edgeList.filter(e => String(e.outcome) === v)
+  const edgeList = (Array.isArray(edges) ? edges : []).filter(e => e && e.from === node?.id && e.outcome != null && e.outcome !== '')
+  const outcomeEdgeCount = v => edgeList.filter(e => String(e.outcome) === v).length
 
   // 预设只替换单层字段；多层自定义配置沿用原有保护，交由字段编辑器显式修改。
   if (curPath && (!curName || curName.includes('.'))) return blocked('NESTED_PATH_UNSAFE', { outcomePath: curPath })
@@ -5764,31 +5777,31 @@ function planOutcomePresetApplication(node, preset, edges, options) {
   })
   if (foreignEdges.length) return blocked('EDGE_OUTCOME_NOT_IN_PRESET', foreignEdges)
   // 重复业务边：候选无法合法，要求先手动处理
-  const dupValues = preset.values.filter(v => outcomeEdgesOf(v).length > 1)
+  const dupValues = preset.values.filter(v => outcomeEdgeCount(v) > 1)
   if (dupValues.length) return blocked('DUPLICATED_OUTCOME_EDGE', dupValues)
 
   // 目标字段既有属性约束：只允许 type+enum 形态被既有写回安全替换
   const curValues = curName ? (enumerableValues(props[curName]) || []) : []
   const targetProp = props[name]
-  if (targetProp && targetProp.type !== 'string') return blocked('UNSUPPORTED_SCHEMA', { field: name, type: targetProp.type || null })
-  if (targetProp && typeof targetProp === 'object') {
+  if (targetProp) {
+    if (targetProp.type !== 'string') return blocked('UNSUPPORTED_SCHEMA', { field: name, type: targetProp.type || null })
     const extra = Object.keys(targetProp).filter((k) => k !== 'type' && k !== 'enum')
     if (extra.length) return blocked('UNSAFE_SCHEMA_CHANGE', { field: name, extraKeys: extra })
   }
 
   const missingEdgeWarnings = () => preset.values
-    .filter((v) => outcomeEdgesOf(v).length === 0)
+    .filter((v) => outcomeEdgeCount(v) === 0)
     .map((v) => ({ code: 'MISSING_EDGE', value: v }))
 
-  const identical = curPath === routingPathOf(name) && curName === name
+  const identical = curPath === routingPathOf(name)
     && curValues.length === preset.values.length
     && preset.values.every((v) => curValues.includes(v))
   if (identical) return result('NOOP', { warnings: missingEdgeWarnings() })
 
   const candidateOutput = applyRoutingWrite(node, name, preset.values)
   // 候选不变量：required 不得引用已删除属性；completionPath 等其他 output 字段必须原样保留
-  const candRequired = Array.isArray(candidateOutput.schema && candidateOutput.schema.required) ? candidateOutput.schema.required : []
-  const candProps = (candidateOutput.schema && candidateOutput.schema.properties) || {}
+  const candRequired = Array.isArray(candidateOutput.schema?.required) ? candidateOutput.schema.required : []
+  const candProps = candidateOutput.schema?.properties || {}
   const orphan = candRequired.filter((k) => candProps[k] === undefined)
   if (orphan.length) return blocked('INVALID_CANDIDATE', { orphanRequired: orphan })
   if (candidateOutput.completionPath !== out?.completionPath) return blocked('UNSAFE_SCHEMA_CHANGE', { field: 'output.completionPath' })
@@ -5807,11 +5820,11 @@ function planOutcomePresetApplication(node, preset, edges, options) {
       enumDiff: { added, removed, retained },
     },
   ]
-  const requiredNote = schema && Array.isArray(schema.required) && !schema.required.includes(name)
+  const requiredNote = Array.isArray(schema?.required) && !schema.required.includes(name)
     ? [{ field: 'output.schema.required', kind: 'add', before: schema.required.slice(), after: (candidateOutput.schema.required || []).slice() }]
     : []
   const warnings = missingEdgeWarnings()
 
-  const status = (curPath == null || curPath === '') && curValues.length === 0 ? 'DIRECT' : 'CONFIRM'
+  const status = !curPath && !curValues.length ? 'DIRECT' : 'CONFIRM'
   return result(status, { differences: differences.concat(requiredNote), warnings, candidate: candidateOutput })
 }
