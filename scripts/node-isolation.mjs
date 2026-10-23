@@ -575,8 +575,15 @@ export function prepareNodeContext(workspace, spec) {
   const caps = resolveNodeCapabilities(profile, spec.node_capabilities)
   const wsPath = requireText(workspace.workspace_path, 'workspace_path')
   const sourcePath = workspace.source_path || null
-  const evidencePath = join(wsPath, 'evidence', nodeId)
-  const scratchPath = join(wsPath, 'workers', nodeId)
+  let invocation = []
+  if (spec.execution) {
+    const x = spec.execution
+    if (!/^[a-z0-9-]+$/.test(x.invocation_id || '') || !['node', 'item', 'attribution'].includes(x.kind)
+      || (x.kind === 'item' && (!Number.isSafeInteger(x.item_no) || x.item_no < 1))) throw new Error('节点调用隔离身份无效')
+    invocation = [x.kind === 'item' ? 'item-' + x.item_no : x.kind, x.invocation_id]
+  }
+  const evidencePath = join(wsPath, 'evidence', nodeId, ...invocation)
+  const scratchPath = join(wsPath, 'workers', nodeId, ...invocation)
   const testOverlayPath = caps.test_overlay.read || caps.test_overlay.write ? join(wsPath, 'test-overlay') : null
   mkdirSync(evidencePath, { recursive: true })
   mkdirSync(scratchPath, { recursive: true })

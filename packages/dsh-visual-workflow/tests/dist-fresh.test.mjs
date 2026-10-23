@@ -69,6 +69,23 @@ test('T2：dashboard-projection 内核纳入 stamp，且 dist 产物与源文件
   )
 })
 
+test('WFM-524：探索交接内核与固定 builtin 语义随正式包分发且逐字节一致', async () => {
+  const stamp = JSON.parse(readFileSync(STAMP, 'utf8'))
+  for (const [key, source, target] of [
+    ['exploreHandoff', join(REPO_ROOT, 'scripts/explore-handoff.mjs'), 'explore-handoff.mjs'],
+    ['exploreHandoffTemplate', join(REPO_ROOT, 'templates/wf-explore.json'), 'explore-handoff-template.json'],
+  ]) {
+    const file = join(pkgRoot, 'dist', target)
+    assert.equal(stamp[key], sha256(source))
+    assert.equal(sha256(file), sha256(source))
+  }
+  const kernel = await import(pathToFileURL(join(pkgRoot, 'dist/explore-handoff.mjs')).href)
+  const frozen = JSON.parse(readFileSync(join(pkgRoot, 'dist/explore-handoff-template.json')))
+  assert.equal(kernel.exploreHandoffContract(frozen).version, 'wf-explore/1')
+  frozen.nodes.find(node => node.id === 'synthesize').goal = '自定义读取'
+  assert.throws(() => kernel.exploreHandoffContract(frozen), /内置.*语义/)
+})
+
 test('T2：重建后的 dist 含双模式守卫，不再无条件调用 harness.handle', () => {
   assert.ok(existsSync(DIST_HOST), '缺少 dist/host-entry.mjs')
   const body = readFileSync(DIST_HOST, 'utf8')

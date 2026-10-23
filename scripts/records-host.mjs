@@ -34,6 +34,7 @@ import { createHash, randomUUID } from 'node:crypto'
 
 const require = createRequire(import.meta.url)
 const formalArtifacts = require('./formal-artifacts.cjs')
+const { isolationFieldsOf } = require('./node-isolation-host-client.cjs')
 
 import {
   KIND,
@@ -242,6 +243,7 @@ function attemptBody(attemptId, ev, segment, ctx) {
     snapshot_revision: String(ctx.snapshot_revision || 'unspecified'),
     provider: String(ctx.provider || 'default'),
     model: String(ctx.model || 'default'),
+    ...(ctx.isolation ? isolationFieldsOf(ctx.isolation) : {}),
   }
   if (ev.i !== undefined) v.item_index = ev.i
   if (ev.m !== undefined) v.item = ev.m
@@ -273,6 +275,7 @@ function attemptEntryOf(value, recordRef) {
     snapshot_revision: value.snapshot_revision,
     provider: value.provider,
     model: value.model,
+    ...isolationFieldsOf(value),
     outcome: value.outcome === undefined ? null : value.outcome,
     outcome_path: value.outcome_path || null,
     retry_kind: value.retry_kind || 'unknown',
@@ -327,7 +330,7 @@ export function recordsAttempt(input) {
     if (['s', 'e', 'l'].indexOf(ev.a) < 0) throw new Error('非法 ev.a: ' + String(ev.a) + '（允许 s / e / l）')
     const node = requireText(ev.n, 'ev.n')
     const aid = requireText(attempt_id, 'attempt_id')
-    const ctx = { snapshot_revision, provider, model }
+    const ctx = { snapshot_revision, provider, model, isolation: input.isolation }
     const bodyValue = attemptBody(aid, ev, segment, ctx)
     const key = ev.a + ':' + aid
     const hash = attemptHash(bodyValue)
@@ -357,6 +360,7 @@ export function recordsAttempt(input) {
       snapshot_revision: String(snapshot_revision || 'unspecified'),
       provider: String(provider || 'default'),
       model: String(model || 'default'),
+      ...(input.isolation ? isolationFieldsOf(input.isolation) : {}),
       produced_by: 'vwf:runtime:attempt',
       node_business_outcome: ev.o === undefined ? null : ev.o,
     }
@@ -411,6 +415,7 @@ export function recordsAttempt(input) {
               verified_branch: ev.w.b === undefined ? null : ev.w.b,
               verified_head: ev.w.h === undefined ? null : ev.w.h,
               workspace: workspace || null,
+              ...(input.isolation ? isolationFieldsOf(input.isolation) : {}),
             },
           },
           dependencies: pd.dependencies,
@@ -472,6 +477,7 @@ export function recordsList(input) {
       entries.push({
         node: v.node, segment: v.segment, snapshot_revision: v.snapshot_revision,
         provider: v.provider, model: v.model,
+        ...isolationFieldsOf(v),
         outcome: v.outcome === undefined ? null : v.outcome, completed_at: item.completed_at,
         attempt_id: v.attempt_id, kind: v.kind, status: v.status,
         record: { record_id: ref.record_id, record_revision: ref.record_revision },
