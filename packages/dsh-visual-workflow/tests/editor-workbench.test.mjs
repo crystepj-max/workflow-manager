@@ -1785,6 +1785,40 @@ test('WFM-83 A2 UI 迁出带元数据的最后一个字段后，保存重开无�
   }
 })
 
+for (const field of ['outcomePath', 'completionPath']) {
+  for (const nested of [false, true]) {
+    test(`WFM-83 R2 UI ${field} ${nested ? '深层迁到同组' : '组内唯一字段改名'}保存重开保留容器约束`, async () => {
+      const dsl = nestedCompletionDsl()
+      const out = dsl.nodes[0].output
+      const leaf = { type: 'string', enum: ['DONE'], description: '结果说明', minLength: 1 }
+      const metadata = { type: 'object', description: '收口分组', additionalProperties: false }
+      out[field] = nested ? '$.final.details.reason' : '$.final.reason'
+      out.schema.required.push('final')
+      out.schema.properties.final = { ...metadata, required: [nested ? 'details' : 'reason'], properties: nested
+        ? { details: { type: 'object', description: '旧子分组', additionalProperties: false, required: ['reason'], properties: { reason: leaf } } }
+        : { reason: leaf } }
+      const validation = validationCore.validateBlueprint(validationCore.projectToBlueprint(dsl))
+      assert.equal(validation.ok, true, '保存重开使用内核支持的 schema：' + JSON.stringify(validation.errors))
+      const before = JSON.parse(JSON.stringify(out))
+      const { container, state } = await mappingPage(dsl)
+      await fillMappingInput(mappingOf(container, field).querySelector('input'), 'final.note')
+      assert.equal(mappingOf(container, field).querySelector('.vwf-row input').value, 'DONE')
+      assert.ok(!mappingOf(container, field).textContent.includes('本次无效修改未应用'), '合法迁移已应用')
+      await saveMapping(container)
+      assert.equal(state.saved.length, 1)
+      const saved = state.saved[0].nodes[0].output
+      assert.equal(saved[field], '$.final.note')
+      assert.deepEqual(saved.schema.properties.final, { ...metadata, required: ['note'], properties: { note: leaf } })
+      assert.deepEqual(saved.schema.required, before.schema.required)
+      assert.deepEqual(saved.schema.properties.result, before.schema.properties.result)
+      const reopened = await mappingPage(state.saved[0])
+      assert.equal(mappingOf(reopened.container, field).querySelector('input').value, 'final.note')
+      await saveMapping(reopened.container)
+      assert.deepEqual(reopened.state.saved[0].nodes[0].output, saved)
+    })
+  }
+}
+
 test('WFM-83 UI 仅声明完成映射不启用业务结果路由，切换结果模式仍保留完成字段', async () => {
   const dsl = nestedCompletionDsl()
   const out = dsl.nodes[0].output
