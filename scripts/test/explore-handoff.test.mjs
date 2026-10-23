@@ -15,6 +15,9 @@ import { runGeneratedScript } from './helpers/runtime-harness.mjs'
 const require = createRequire(import.meta.url)
 const provider = require('../node-provider-core.cjs')
 const blueprint = JSON.parse(readFileSync(new URL('../../templates/wf-explore.json', import.meta.url)))
+const seatbeltTestOptions = {
+  skip: process.platform !== 'darwin' ? '真实 Seatbelt 仅支持 macOS；本平台未验证隔离保证' : false,
+}
 const plan = {
   route: 'PLAN_READY', round_type: 'BROAD', research_question: '实际文件能否交接？',
   questions: [{ id: 'q-core', required: true }],
@@ -122,7 +125,7 @@ const outputText = (input, name, text) => writeFileSync(join(input.context.artif
 test('WFM-524 编译调用链交接完整计划/专家/失败索引/综合/评价，三阶段后保留预算收口', async t => {
   let phase = -1
   const seen = []
-  const f = await fixture(t, input => {
+  const f = await fixture(t, async input => {
     const id = input.route.nodeId
     if (id === 'orchestrate') {
       phase++
@@ -168,17 +171,19 @@ test('WFM-524 编译调用链交接完整计划/专家/失败索引/综合/评�
     seen.push({ id, phase, aggregate })
     if (id === 'synthesize') {
       if (phase === 0) {
-        const path = join(input.context.artifact_input_path, 'research-aggregate.json')
-        const profile = buildNodeExecutionProfile(input.context)
-        const readable = spawnSync('/usr/bin/sandbox-exec', ['-p', profile, '/bin/cat', path], { encoding: 'utf8', cwd: input.context.agent_cwd })
-        assert.equal(readable.status, 0, readable.stderr)
-        assert.deepEqual(JSON.parse(readable.stdout), aggregate)
-        for (const target of [path, join(f.project, f.binding.runDir, 'research-plan.md')]) {
-          const result = spawnSync('/usr/bin/sandbox-exec', ['-p', profile, '/bin/sh', '-c', 'printf tamper > "$1"', 'write-check', target], { encoding: 'utf8', cwd: input.context.agent_cwd })
-          assert.notEqual(result.status, 0)
-          assert.match(result.stderr, /Operation not permitted/)
-        }
-        assert.deepEqual(inputJson(input, 'research-aggregate.json'), aggregate)
+        await t.test('真实 Seatbelt 允许读取聚合副本，拒绝写入输入与 canonical', seatbeltTestOptions, () => {
+          const path = join(input.context.artifact_input_path, 'research-aggregate.json')
+          const profile = buildNodeExecutionProfile(input.context)
+          const readable = spawnSync('/usr/bin/sandbox-exec', ['-p', profile, '/bin/cat', path], { encoding: 'utf8', cwd: input.context.agent_cwd })
+          assert.equal(readable.status, 0, readable.stderr)
+          assert.deepEqual(JSON.parse(readable.stdout), aggregate)
+          for (const target of [path, join(f.project, f.binding.runDir, 'research-plan.md')]) {
+            const result = spawnSync('/usr/bin/sandbox-exec', ['-p', profile, '/bin/sh', '-c', 'printf tamper > "$1"', 'write-check', target], { encoding: 'utf8', cwd: input.context.agent_cwd })
+            assert.notEqual(result.status, 0)
+            assert.match(result.stderr, /Operation not permitted/)
+          }
+          assert.deepEqual(inputJson(input, 'research-aggregate.json'), aggregate)
+        })
       }
       outputText(input, 'synthesis.md', '综合阶段 ' + phase)
       return synthesis(aggregate.failures)
@@ -226,7 +231,7 @@ test('WFM-524 错 expert_id、缺文件、symlink 和失败 attempt 不得借用
   }
 })
 
-test('WFM-524 并行 item 与重试的真实 Seatbelt 边界：只读自身副本，拒绝兄弟/前 attempt/输入写入/canonical', async t => {
+test('WFM-524 并行 item 与重试的真实 Seatbelt 边界：只读自身副本，拒绝兄弟/前 attempt/输入写入/canonical', seatbeltTestOptions, async t => {
   const f = await fixture(t, input => {
     if (input.route.nodeId === 'orchestrate') { outputText(input, 'research-plan.md', '# 当前计划'); return plan }
     const id = plan.expert_briefs[input.itemNo - 1].expert_id
