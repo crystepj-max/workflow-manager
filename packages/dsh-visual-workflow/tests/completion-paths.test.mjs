@@ -55,6 +55,72 @@ test('WFM-83 显式改路径清理旧叶子和 required，保留兄弟字段并�
   assert.equal(flat.completionPath, '$.completion_type')
 })
 
+const mappingGroup = (label, properties) => ({
+  type: 'object', description: label, additionalProperties: false, minProperties: 1,
+  required: Object.keys(properties), properties,
+})
+for (const field of ['outcomePath', 'completionPath']) {
+  for (const values of [undefined, ['CUSTOM']]) {
+    for (const [previous, name, preserved] of [
+      ['final.reason', 'final.note', ['final']],
+      ['final.details.reason', 'final.note', ['final']],
+      ['final.details.branch.reason', 'final.details.note', ['final', 'final.details']],
+      ['final.left.reason', 'final.right.note', ['final']],
+    ]) {
+      test(`WFM-83 R2 ${field} ${previous} → ${name}，${values ? '改候选' : '仅改名'}保留全部公共祖先约束`, () => {
+        const n = seed()
+        const source = { type: 'string', enum: ['DONE'], description: '字段说明', minLength: 1 }
+        n.output[field] = '$.' + previous
+        const parts = previous.split('.')
+        let branch = source
+        for (let i = parts.length - 1; i > 0; i--) branch = mappingGroup(parts.slice(0, i).join('.'), { [parts[i]]: branch })
+        n.output.schema.properties.final = branch
+        n.output.schema.required.push('final')
+        const before = clone(n)
+        const moved = ui.applyRoutingWrite(n, name, values, field)
+        assert.equal(moved[field], '$.' + name)
+        assert.deepEqual(core.schemaLeafAt(moved.schema, name.split('.')), { ...source, enum: values || source.enum })
+        assert.equal(core.schemaLeafAt(moved.schema, previous.split('.')), null, '旧叶子已迁走')
+        for (const path of preserved) {
+          const { properties, required, ...metadata } = core.schemaLeafAt(before.output.schema, path.split('.'))
+          const { properties: actualProperties, required: actualRequired, ...actualMetadata } = core.schemaLeafAt(moved.schema, path.split('.'))
+          assert.deepEqual(actualMetadata, metadata, path + ' 的说明与封闭对象等约束完整保留')
+          assert.deepEqual(actualRequired, Object.keys(actualProperties), path + ' 只要求迁移后的实际子字段')
+        }
+        const shared = preserved.at(-1)
+        const abandoned = previous.split('.').slice(0, -1).join('.')
+        if (abandoned !== shared) assert.equal(core.schemaLeafAt(moved.schema, abandoned.split('.')), null, '真正离开的空分组被清理')
+        assert.deepEqual(moved.schema.required, before.output.schema.required, '公共根分组仍必填且不换序')
+        assert.deepEqual(moved.schema.properties.result, before.output.schema.properties.result, '其它业务分组不变')
+        assert.deepEqual(moved.files, before.output.files)
+        assert.deepEqual(n, before, '迁移不改写原入参')
+      })
+    }
+  }
+}
+
+test('WFM-83 R2 已有目标叶子与同路径写入各自保留元数据；无效修改返回原 output', () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    const n = seed()
+    n.output[field] = '$.final.reason'
+    n.output.schema.properties.final = mappingGroup('收口分组', {
+      reason: { type: 'string', enum: ['DONE'], description: '旧字段', minLength: 1 },
+      note: { type: 'string', enum: ['TARGET'], description: '目标字段', minLength: 2 },
+    })
+    n.output.schema.required.push('final')
+    const before = clone(n)
+    const moved = ui.applyRoutingWrite(n, 'final.note', undefined, field)
+    assert.deepEqual(moved.schema.properties.final, { ...before.output.schema.properties.final, required: ['note'], properties: { note: before.output.schema.properties.final.properties.note } })
+    const same = ui.applyRoutingWrite(n, 'final.reason', undefined, field)
+    assert.deepEqual(same, before.output, '同路径不删叶子或元数据')
+    for (const invalid of ['final', 'final.reason.child', 'result']) {
+      assert.equal(ui.applyRoutingWrite(n, invalid, undefined, field), n.output, invalid + ' 原对象退回')
+      assert.equal(ui.applyRoutingWrite(n, invalid, ['CUSTOM'], field), n.output, invalid + ' 原对象退回')
+    }
+    assert.deepEqual(n, before)
+  }
+})
+
 test('WFM-83 A1 两种映射拒绝移到旧路径父级，重输原路径仍完整保真', () => {
   for (const field of ['outcomePath', 'completionPath']) {
     const n = seed(), before = clone(n)
