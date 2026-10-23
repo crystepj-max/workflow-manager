@@ -22,6 +22,7 @@
   },
   "protocol": {
     "version": "1.0",
+    "artifact_handoff": "wf-explore/1",
     "required_capabilities": [
       "additionalProperties",
       "enum",
@@ -36,6 +37,9 @@
       "id": "orchestrate",
       "profile": "orchestrator",
       "label": "探索统筹",
+      "inputs": [
+        { "name": "previous_evaluation", "from": "$.results.evaluate", "required": true, "default": null, "artifact": "evaluation.md" }
+      ],
       "goal": "你是本轮探索的统筹。读取【任务输入】中的研究问题；若 run 产物目录已存在 `evaluation.md`（上一轮评估结论），必须先读取并只针对其中的 research_targets 与未解决缺口组织本轮补充研究。\n要求：\n1. 产出 questions[{id,required}] 必需问题清单（ID 唯一、至少一项 required=true）；\n2. 产出 3-5 名专家的独立研究任务书（expert_briefs）：视角互不重叠，每份含 expert_id（kebab-case）、focus、brief、question_ids（关联至少一个 question_id）；首轮 round_type=BROAD；后续 TARGETED 轮每项还须非空 research_targets 映射当前 open_gaps 的 question_id；\n3. 禁止 focus+brief 完全相同的两份任务（去首尾空白、折叠连续空白后比对）；\n4. 把研究方案写入 run 产物目录的 `research-plan.md`；\n5. 最终回复只输出本节点 schema 的 JSON（route=PLAN_READY）。",
       "output": {
         "outcomePath": "$.route",
@@ -209,6 +213,10 @@
       "id": "synthesize",
       "profile": "synthesizer",
       "label": "综合分析",
+      "inputs": [
+        { "name": "research_plan", "from": "$.results.orchestrate", "required": true, "artifact": "research-plan.md" },
+        { "name": "research_results", "from": "$.results.research", "required": true }
+      ],
       "goal": "读取 run 产物目录下的 `research-plan.md` 与全部专家研究报告（文件名形如 research-<expert_id>.md），并接收专家 fanout 聚合结果（含成功项与失败项索引），做综合分析：\n1. 构建共识（consensus）、分歧（disagreements）与证据地图（evidence_map）；\n2. 不做多数投票：分歧必须如实保留；\n3. 输出 coverage[{question_id,status,evidence_refs,reason}]，必需问题只有带可读证据的回答或有证据支撑的未知/不可得结论才算已处理；\n4. 汇总仍未解决的缺口（open_gaps）与来源重合（source_overlaps）；\n5. 写入 run 产物目录的 `synthesis.md`；\n6. 最终回复只输出本节点 schema 的 JSON（route=SYNTHESIS_READY）。",
       "output": {
         "outcomePath": "$.route",
@@ -331,6 +339,11 @@
       "id": "evaluate",
       "profile": "evaluator",
       "label": "结论评估",
+      "inputs": [
+        { "name": "research_plan", "from": "$.results.orchestrate", "required": true, "artifact": "research-plan.md" },
+        { "name": "research_results", "from": "$.results.research", "required": true },
+        { "name": "synthesis", "from": "$.results.synthesize", "required": true, "artifact": "synthesis.md" }
+      ],
       "goal": "对照研究问题、`synthesis.md` 与 coverage 表做结论评估：\n1. verdict 三选一：PASS / NEEDS_RESEARCH / INSUFFICIENT；\n2. verdict=PASS 时 completion_type=EVALUATION_PASSED，且所有必需问题须在 coverage 中有证据或证据支撑的未知/不可得；verdict=INSUFFICIENT 时 completion_type=INSUFFICIENT；NEEDS_RESEARCH 时必须给出非空 research_targets 且不得填 completion_type；\n3. 始终填写 why / summary_for_human / current_state；\n4. 把评估结论写入 run 产物目录的 `evaluation.md`；\n5. 最终回复只输出本节点 schema 的 JSON。",
       "output": {
         "outcomePath": "$.verdict",

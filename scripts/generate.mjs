@@ -314,6 +314,7 @@ export function compileBlueprint(bp, opts = {}) {
     // LOC-041：宿主探测的节点隔离保证（enforced | unavailable）
     'const ISOLATION_GUARANTEE = A.isolation_guarantee || \'unavailable\'',
     'const NODES = ' + JSON.stringify(bp.nodes),
+    ...(bp.protocol?.artifact_handoff === 'wf-explore/1' ? ['const EXPLORE_HANDOFF = true'] : []),
     'const EDGES = ' + JSON.stringify(bp.edges),
     // #79：续跑快照修订仅允许更换 Provider/Model——宿主经 args.model_overrides 注入
     // （节点id → {provider,model}，$default 只作用于未显式覆盖的绑定节点），合并进
@@ -498,7 +499,7 @@ export function compileBlueprint(bp, opts = {}) {
     '}',
     'function inputItem(b, producer, value, source, versionRef) {',
     '  const item = { binding: b.name, selector: b.from, producer: producer, source: source, version_ref: versionRef }',
-    '  if (b.artifact) item.artifact_ref = RUNDIR + \'/\' + b.artifact',
+    '  if (b.artifact && source === \'producer_result\') item.artifact_ref = RUNDIR + \'/\' + b.artifact',
     '  if (value !== undefined) item.value = value',
     '  return item',
     '}',
@@ -671,20 +672,20 @@ export function compileBlueprint(bp, opts = {}) {
     '  return v',
     '}',
     // LOC-041: route model calls through an opaque token issued by the trusted host.
-    'function nodeProviderRoute(id, kind, itemNo) {',
+    'function nodeProviderRoute(id, kind, itemNo, dispatchRound, dispatchCall) {',
     '  const routes = A.routes && typeof A.routes === \'object\' && !Array.isArray(A.routes) ? A.routes : {}',
     '  const table = kind === \'attribution\' ? routes.attribution : routes.nodes',
     '  const token = table && typeof table === \'object\' && Object.prototype.hasOwnProperty.call(table, id) ? table[id] : null',
     '  if (typeof token !== \'string\' || !token) {',
     '    throw new Error(\'模型节点缺少宿主签发的隔离路由：\' + id)',
     '  }',
-    '  return \'vwf-node-isolated:\' + token + (kind === \'attribution\' ? \':attribution\' : (Number.isSafeInteger(itemNo) && itemNo > 0 ? \':item:\' + itemNo : \'\'))',
+    '  return \'vwf-node-isolated:\' + token + (kind === \'attribution\' ? \':attribution\' : (Number.isSafeInteger(itemNo) && itemNo > 0 ? \':item:\' + itemNo : \'\')) + (typeof EXPLORE_HANDOFF !== \'undefined\' && kind !== \'attribution\' && Number.isSafeInteger(dispatchRound) && Number.isSafeInteger(dispatchCall) ? \':round:\' + dispatchRound + \':call:\' + dispatchCall : \'\')',
     '}',
     'function nodeCallOpts(id, round, routeKind) {',
     '  const n = BYID[id]',
     '  const model = MODELS[id] || {}',
     '  const opts = { label: (n.label || id) + (round > 0 ? \' R\' + round : \'\') }',
-    '  const isolatedRoute = nodeProviderRoute(id, routeKind || \'node\')',
+    '  const isolatedRoute = nodeProviderRoute(id, routeKind || \'node\', null, typeof EXPLORE_HANDOFF !== \'undefined\' ? budgetUsed : round, AWK)',
     '  opts.provider = isolatedRoute',
     '  if (model.model) opts.model = model.model',
     '  if (n.output && n.output.schema) opts.schema = n.output.schema',
@@ -698,7 +699,13 @@ export function compileBlueprint(bp, opts = {}) {
     // LOC-024：声明输入按块注入提示（缺必需引用的拦截在调用前的解析门，此处只做注入）
     '  const irPrompt = resolveNodeInputs(id)',
     '  const inputExtra = inputsBlock(irPrompt.items)',
-    '  return roleRef(n.profile) + runtimeCtx(id, fb + inputExtra + (n.verifyBranch ? verifyBranchStep(id) : \'\')' + (hasCloseoutNode ? ' + managedOpsStep(id) + deliveryActionsStep(id)' : '') + ')',
+    '  return handoffPrompt(id, roleRef(n.profile) + runtimeCtx(id, fb + inputExtra + (n.verifyBranch ? verifyBranchStep(id) : \'\')' + (hasCloseoutNode ? ' + managedOpsStep(id) + deliveryActionsStep(id)' : '') + '))',
+    '}',
+    'function handoffPrompt(id, text, call, itemNo) {',
+    '  if (typeof EXPLORE_HANDOFF === \'undefined\') return text',
+    '  const names = { orchestrate: budgetUsed > 0 ? [\'evaluate\'] : [], research: [], synthesize: [\'orchestrate\', \'research\'], evaluate: [\'orchestrate\', \'research\', \'synthesize\'] }[id] || []',
+    '  const inputs = {}; for (const name of names) if (results[name] !== undefined) inputs[name] = results[name]',
+    '  return text + \'\\n[wf-explore-handoff]\' + JSON.stringify({ version: \'wf-explore/1\', node_id: id, phase_id: budgetUsed, call_id: call || AWK, item_no: itemNo || null, inputs: inputs }) + \'\\n[/wf-explore-handoff]\'',
     '}',
     // LOC-031 格式修复反馈（单源常量）：节点内格式修复与技术自环共用同一激活预算（AC-01）。
     'const FORMAT_RETRY_FB = \'【格式要求】上一轮未返回可解析的结构化结果（运行环境只认 structured_output 等结构化通道的提交，或纯文本最终回复必须是严格符合本节点 output.schema 的裸 JSON——不认 markdown 围栏/前后缀/报告全文）。请重试：报告与产物写文件，最终回复按本节点 schema 用可解析 JSON 收尾。\'',
@@ -1353,8 +1360,9 @@ export function compileBlueprint(bp, opts = {}) {
     // LOC-013 R2 修复：worker 提示不下发 Run 级 capability——fanout worker 无需调用
     // workspace RPC（文件直写专属 scratch / run 目录）；无凭据则任何 RPC 调用被宿主拒绝，
     // 从 RPC 面杜绝「持 Run 令牌冒用可预测 worker_id 读兄弟 scratch」（规格 E2 严格口径）。
-    '      const prompt = roleRef(n.profile) + runtimeCtx(current, itemExtra, renderedGoal, { hideCapability: true })',
     '      const __ik = ++AWK',
+    '      const prompt = handoffPrompt(current, roleRef(n.profile) + runtimeCtx(current, itemExtra, renderedGoal, { hideCapability: true }), __ik, entry.index + 1)',
+    '      itemOpts.provider = nodeProviderRoute(current, \'node\', entry.index + 1, typeof EXPLORE_HANDOFF !== \'undefined\' ? budgetUsed : round, __ik)',
     '      attLog({ a: \'s\', k: __ik, n: current, r: round, t: \'item\', i: entry.index, m: itemText(entry.item).slice(0, 512) })',
     '      const fanKey = current + \'|\' + inputDigest(current, feedback + itemText(entry.item)) + \'#\' + (visitSeq++)',
     '      const itemKey = fanKey + \'-i\' + (entry.index + 1)',

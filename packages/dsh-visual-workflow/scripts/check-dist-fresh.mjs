@@ -52,6 +52,13 @@ if (stamp.host !== host || stamp.client !== client) {
 if (!existsSync(join(root, 'dist', 'node-artifacts.mjs')) || stamp.nodeArtifacts !== sha256(nodeArtifactsPath)) {
   fail('隔离节点产物交接内核缺失或未重建')
 }
+for (const [key, source, target] of [
+  ['exploreHandoff', join(root, '..', '..', 'scripts', 'explore-handoff.mjs'), 'explore-handoff.mjs'],
+  ['exploreHandoffTemplate', join(root, '..', '..', 'templates', 'wf-explore.json'), 'explore-handoff-template.json'],
+]) {
+  const bundled = join(root, 'dist', target)
+  if (!existsSync(bundled) || stamp[key] !== sha256(source) || sha256(bundled) !== sha256(source)) fail('探索交接版本/语义映射缺失或未重建：' + target)
+}
 // 角色库内核与清单也纳入新鲜度闸门：改内核/manifest 未重建 dist 时正式安装会加载过期逻辑
 const roleLibrary = sha256(roleLibraryPath)
 const projectionCore = sha256(projectionCorePath)
