@@ -5677,8 +5677,6 @@ function applyRoutingWrite(node, name, values, field) {
   // 无效修改整体拒绝：不先删旧叶子，也不把容器或其它标量收成 string。
   if (name && (target === false || prev.startsWith(name + '.') || (leaf && (Array.isArray(leaf) || leaf.type === 'object' || leaf.type === 'array' || leaf.properties || leaf.items || (values !== undefined && leaf.type !== 'string' && !enumerableValues(leaf)))))) return out
   let schema = out.schema
-  // 另一映射仍引用旧字段（或其父/子路径）时必须保留，不能删除共用结果。
-  if (prev && prev !== name && !(other && (other === prev || other.startsWith(prev + '.') || prev.startsWith(other + '.')))) schema = writeMappingLeaf(schema, prev.split('.'), undefined)
   if (name && values !== undefined) {
     const clean = values.map(v => String(v == null ? '' : v).trim()).filter(Boolean)
     leaf = { ...leaf, type: 'string' }
@@ -5688,6 +5686,8 @@ function applyRoutingWrite(node, name, values, field) {
     if (clean.length) leaf.enum = clean
   }
   if (name && leaf && (values !== undefined || !target)) schema = writeMappingLeaf(schema, name.split('.'), leaf)
+  // 先写新叶以保留公共祖先的约束；另一映射仍引用旧字段时保留共用结果。
+  if (prev && prev !== name && !(other && (other === prev || other.startsWith(prev + '.') || prev.startsWith(other + '.')))) schema = writeMappingLeaf(schema, prev.split('.'), undefined)
   const next = { ...out }
   if (schema !== undefined) next.schema = schema
   if (field === 'completionPath' && !name) delete next[field]
