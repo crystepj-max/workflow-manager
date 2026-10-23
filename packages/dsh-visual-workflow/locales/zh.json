@@ -120,7 +120,7 @@
   "routingNotEnumerable": "该字段在 JSON 输出约束中不可穷举（需 enum / const / oneOf 常量 / boolean），无法作为业务结果路由。",
   "routingBooleanUnsupported": "boolean 型路由字段暂不提供取值列表，请在 JSON 输出约束中直接编辑。",
   "routingNeedFieldName": "先填写业务结果字段名，随后可增删取值。",
-  "routingNameInvalid": "字段路径只能使用字母、数字、下划线；用点连接多层字段（如 result.decision）。本次无效修改未应用。",
+  "routingNameInvalid": "路径须指向取值字段，不能指向对象、数组或穿过已有取值字段；仅用字母、数字、下划线和点。本次无效修改未应用。",
   "routingRemoveBlocked": "该取值仍有对应边，请先处理那条边再删除。",
   "outputSchema": "JSON 输出约束",
   "outputSchemaPlaceholder": "标准 JSON Schema，例如 {\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"boolean\"}},\"required\":[\"result\"]}",

@@ -1702,6 +1702,89 @@ test('WFM-83 UI 输入路径经过现有父字段时，只在离开输入框后�
   assert.deepEqual(out.schema.properties.result.required, ['decision', 'final_reason'])
 })
 
+test('WFM-83 A1 UI 离开父路径或穿过文本的路径时即时拒绝，两种映射与原 schema 保真', async () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    for (const invalid of ['result', 'result.decision.note']) {
+      const dsl = nestedCompletionDsl()
+      const out = dsl.nodes[0].output
+      out.completionPath = '$.result.reason'
+      Object.assign(out.schema.properties.result.properties.reason, { description: '完成原因', minLength: 1 })
+      const before = JSON.parse(JSON.stringify(out))
+      const { container, state } = await mappingPage(dsl)
+      await fillMappingInput(mappingOf(container, field).querySelector('input'), invalid)
+      assert.ok(mappingOf(container, field).textContent.includes('本次无效修改未应用'), invalid + ' 离开输入框后显示无效修改')
+      assert.equal(mappingOf(container, field).querySelector('.vwf-row input')?.value, field === 'outcomePath' ? 'DONE' : 'CUSTOM_DONE', '旧候选值仍可见')
+      await saveMapping(container)
+      assert.equal(state.saved.length, 1, '保存沿用未损坏的原稿')
+      assert.deepEqual(state.saved[0].nodes[0].output, before)
+      const reopened = await mappingPage(state.saved[0])
+      await fillMappingInput(mappingOf(reopened.container, field).querySelector('input'), invalid)
+      await fillMappingInput(mappingOf(reopened.container, field).querySelector('input'), before[field].slice(2))
+      assert.ok(!mappingOf(reopened.container, field).textContent.includes('本次无效修改未应用'), '重新选择原叶子后清除提示')
+      await saveMapping(reopened.container)
+      assert.deepEqual(reopened.state.saved[0].nodes[0].output, before, '原路径往返完整保真')
+    }
+  }
+})
+
+test('WFM-83 A1 UI 拒绝对象数组终点；已声明对象映射也不能用加取值绕过校验', async () => {
+  for (const target of [{ type: 'object', properties: { evidence: { type: 'string' } } }, { type: 'array', items: { type: 'string' } }]) {
+    const dsl = nestedCompletionDsl()
+    const out = dsl.nodes[0].output
+    out.completionPath = '$.result.reason'
+    out.schema.properties.container = target
+    const before = JSON.parse(JSON.stringify(out))
+    const { container, state } = await mappingPage(dsl)
+    await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), 'container')
+    assert.ok(mappingOf(container, 'completionPath').textContent.includes('本次无效修改未应用'))
+    await saveMapping(container)
+    assert.deepEqual(state.saved[0].nodes[0].output, before)
+  }
+  const invalid = nestedCompletionDsl()
+  invalid.nodes[0].output.completionPath = '$.result'
+  const { container, state } = await mappingPage(invalid)
+  await act(async () => { byText(mappingOf(container, 'completionPath'), '加取值').click(); await flush() })
+  await fillMappingInput(mappingOf(container, 'completionPath').querySelector('.vwf-row input'), 'CUSTOM_DONE')
+  assert.ok(mappingOf(container, 'completionPath').textContent.includes('本次无效修改未应用'), '给对象加取值被即时拒绝')
+  await saveMapping(container)
+  assert.equal(state.saved.length, 0, '对象映射仍被同源校验拒绝保存')
+})
+
+test('WFM-83 A2 UI 迁出带元数据的最后一个字段后，保存重开无必填空分组', async () => {
+  for (const keepSibling of [false, true]) {
+    const dsl = nestedCompletionDsl()
+    const out = dsl.nodes[0].output
+    out.completionPath = '$.final.details.reason'
+    out.schema.required.push('final')
+    out.schema.properties.final = { type: 'object', description: '收口分组', additionalProperties: false, required: ['details'], properties: {
+      details: { type: 'object', description: '详细原因', additionalProperties: false, required: ['reason'], properties: {
+        reason: { type: 'string', enum: ['CUSTOM_DONE'], description: '完成原因', minLength: 1 },
+      } },
+    } }
+    if (keepSibling) {
+      out.schema.properties.final.properties.evidence = { type: 'string' }
+      out.schema.properties.final.required.push('evidence')
+    }
+    const { container, state } = await mappingPage(dsl)
+    await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), 'completion_type')
+    await saveMapping(container)
+    assert.equal(state.saved.length, 1)
+    const saved = state.saved[0].nodes[0].output
+    assert.deepEqual(saved.schema.properties.completion_type, out.schema.properties.final.properties.details.properties.reason)
+    if (keepSibling) {
+      assert.deepEqual(saved.schema.properties.final, { type: 'object', description: '收口分组', additionalProperties: false, required: ['evidence'], properties: { evidence: { type: 'string' } } })
+      assert.ok(saved.schema.required.includes('final'))
+    } else {
+      assert.equal(saved.schema.properties.final, undefined)
+      assert.ok(!saved.schema.required.includes('final'))
+    }
+    const reopened = await mappingPage(state.saved[0])
+    assert.equal(mappingOf(reopened.container, 'completionPath').querySelector('input').value, 'completion_type')
+    await saveMapping(reopened.container)
+    assert.deepEqual(reopened.state.saved[0].nodes[0].output, saved)
+  }
+})
+
 test('WFM-83 UI 仅声明完成映射不启用业务结果路由，切换结果模式仍保留完成字段', async () => {
   const dsl = nestedCompletionDsl()
   const out = dsl.nodes[0].output
