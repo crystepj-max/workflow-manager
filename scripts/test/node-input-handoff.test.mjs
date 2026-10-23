@@ -44,8 +44,9 @@ const CAND = 'handoff-candidate'
 
 // ---------- 声明校验（编译期门） ----------
 
-test('LOC-024 三个模板 inputs 声明通过校验，wf-explore 维持旧输入模式', () => {
-  for (const bp of [optimizeBp, diagnoseBp, constructionBp]) {
+test('LOC-024 四个模板固定 inputs 声明通过校验，探索专家仅接收受限 item 指派', () => {
+  const explore = load('wf-explore')
+  for (const bp of [optimizeBp, diagnoseBp, constructionBp, explore]) {
     const v = validateBlueprint(bp)
     assert.equal(v.ok, true, bp.id + ': ' + JSON.stringify(v.errors))
   }
@@ -53,8 +54,11 @@ test('LOC-024 三个模板 inputs 声明通过校验，wf-explore 维持旧输�
   assert.deepEqual(declaredIds(optimizeBp).sort(), ['closeout', 'execute'])
   assert.deepEqual(declaredIds(diagnoseBp).sort(), ['diagnose', 'fix', 'regression', 'review'])
   assert.deepEqual(declaredIds(constructionBp).sort(), ['closeout', 'dev', 'review', 'test', 'uat'])
-  const explore = load('wf-explore')
-  assert.ok(explore.nodes.every((n) => n.inputs === undefined), 'wf-explore 未声明输入 = 旧输入模式')
+  assert.deepEqual(declaredIds(explore).sort(), ['evaluate', 'orchestrate', 'synthesize'])
+  assert.equal(explore.nodes.find(n => n.id === 'research').inputs, undefined, '专家不接收包含兄弟材料的公共输入')
+  assert.equal(explore.protocol.artifact_handoff, 'wf-explore/1')
+  const previous = explore.nodes.find(n => n.id === 'orchestrate').inputs[0]
+  assert.deepEqual(previous, { name: 'previous_evaluation', from: '$.results.evaluate', required: true, default: null, artifact: 'evaluation.md' })
   // 签发 Proof 的节点（verifyBranch）必须自己声明 inputs：否则其依赖只能靠宿主段末回填，
   // Proof 的覆盖判定就不再出自节点契约（LOC-026 / FIX-228）。
   for (const bp of [optimizeBp, diagnoseBp, constructionBp, explore]) {
@@ -63,7 +67,7 @@ test('LOC-024 三个模板 inputs 声明通过校验，wf-explore 维持旧输�
       assert.ok(Array.isArray(n.inputs) && n.inputs.length, bp.id + '.' + n.id + ' 签发 Proof 却未声明 inputs')
     }
   }
-  for (const bp of [optimizeBp, diagnoseBp, constructionBp]) {
+  for (const bp of [optimizeBp, diagnoseBp, constructionBp, explore]) {
     for (const n of bp.nodes) {
       if (!Array.isArray(n.inputs)) continue
       for (const b of n.inputs) {

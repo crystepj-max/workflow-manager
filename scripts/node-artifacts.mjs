@@ -3,6 +3,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { prepareExploreHandoff, restoreExploreHandoff, finishExploreHandoff, failExploreHandoff } from './explore-handoff.mjs'
 
 function inside(root, path) {
   const rel = relative(root, path)
@@ -48,6 +49,17 @@ function outputDeclarations(node) {
   }))
 }
 
+function handoffIo(canonical) {
+  return {
+    checked: (rel, create = false) => checkedPath(canonical, rel, create),
+    read(rel) {
+      const path = checkedPath(canonical, rel)
+      if (!lstatSync(path).isFile()) throw new Error('探索输入产物不是普通文件：' + rel)
+      return readFileSync(path)
+    },
+  }
+}
+
 function boundContext(workspace, context, node) {
   if (!workspace?.workspace_path || !context || context.node_id !== node?.id || context.isolation_guarantee !== 'enforced') {
     throw new Error('产物交接上下文与隔离节点不匹配')
@@ -61,7 +73,8 @@ function boundContext(workspace, context, node) {
 export function prepareNodeArtifacts(workspace, context, binding, node) {
   const { root, evidence } = boundContext(workspace, context, node)
   const canonical = canonicalRoot(binding)
-  const outputs = outputDeclarations(node)
+  const handoff = prepareExploreHandoff(binding, node, handoffIo(canonical))
+  const outputs = outputDeclarations(handoff?.node || node)
   const attempt = 'artifacts-' + randomUUID()
   const output = checkedPath(evidence, attempt, true)
   const input = checkedPath(root, 'inputs/' + artifactPath(node.id) + '/' + attempt, true)
@@ -76,7 +89,7 @@ export function prepareNodeArtifacts(workspace, context, binding, node) {
     }
     inputRefs.push({ source, staged: join(input, rel) })
   }
-  for (const declared of node.inputs || []) {
+  for (const declared of handoff ? [] : node.inputs || []) {
     if (!declared.artifact) continue
     const rel = artifactPath(declared.artifact)
     const path = checkedPath(canonical, rel)
@@ -88,6 +101,15 @@ export function prepareNodeArtifacts(workspace, context, binding, node) {
     const bytes = readFileSync(path)
     stage(rel, bytes, path)
     inputRefs.push({ source: (binding.runDir || '.agent-runs/' + binding.taskId) + '/' + rel, staged: join(input, rel) })
+  }
+  if (handoff) {
+    for (const file of handoff.files) {
+      const bytes = handoffIo(canonical).read(file.relative_path)
+      if (createHash('sha256').update(bytes).digest('hex') !== file.sha256) throw new Error('探索输入产物摘要不一致：' + file.path)
+      stage(file.path, bytes, join(canonical, file.path))
+      inputRefs.push({ source: (binding.runDir || '.agent-runs/' + binding.taskId) + '/' + file.path, staged: join(input, file.path) })
+    }
+    for (const file of handoff.json) stage(file.path, Buffer.from(JSON.stringify(file.value)), join(canonical, file.path))
   }
   const frozen = binding.evaluationBaseline
   if (frozen) {
@@ -103,16 +125,19 @@ export function prepareNodeArtifacts(workspace, context, binding, node) {
   }
   return {
     context: { ...context, artifact_input_path: input, artifact_output_path: output },
-    artifacts: { runDir: binding.runDir || '.agent-runs/' + binding.taskId, canonicalRoot: canonical, outputFiles: outputs.map(file => file.path), inputRefs },
+    artifacts: { runDir: binding.runDir || '.agent-runs/' + binding.taskId, canonicalRoot: canonical, outputFiles: outputs.map(file => file.path), inputRefs,
+      ...(handoff ? { transportInputs: [...handoff.files, ...handoff.json].map(file => join(input, file.path)), handoffVersion: binding.explore_handoff.contract } : {}),
+    },
   }
 }
 
-export function publishNodeArtifacts(workspace, context, binding, node) {
+export function publishNodeArtifacts(workspace, context, binding, node, structured) {
   const { root, evidence } = boundContext(workspace, context, node)
   const output = resolve(context.artifact_output_path || '')
   if (!inside(evidence, output) || output === evidence || !inside(root, output)) throw new Error('节点产物输出目录越界')
   const canonical = canonicalRoot(binding)
-  const declarations = outputDeclarations(node)
+  const handoff = restoreExploreHandoff(binding, node, handoffIo(canonical))
+  const declarations = outputDeclarations(handoff?.node || node)
   if (!declarations.some(file => file.path === 'STATE.md')) declarations.push({ path: 'STATE.md', required: false })
   const ready = []
   for (const file of declarations) {
@@ -125,10 +150,17 @@ export function publishNodeArtifacts(workspace, context, binding, node) {
     const destination = checkedPath(canonical, file.path)
     ready.push({ path: file.path, destination, bytes: readFileSync(source) })
   }
+  const finish = handoff ? finishExploreHandoff(handoff, structured, ready, handoffIo(canonical)) : null
   // 先验证全部路径及必需文件，再发布；不会把半份无效提交当作成功。
   for (const file of ready) {
     checkedPath(canonical, file.path, true)
     writeFileSync(file.destination, file.bytes)
   }
+  if (finish) finish()
   return { files: ready.map(file => file.path) }
+}
+
+export function failNodeArtifacts(workspace, context, binding, node, error) {
+  boundContext(workspace, context, node)
+  if (binding.explore_handoff) failExploreHandoff(binding, node, handoffIo(canonicalRoot(binding)), error)
 }
