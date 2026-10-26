@@ -2495,7 +2495,7 @@ return {
       request.args = Object.assign({}, request.args || {}, { routes: routes, requireIsolatedNodes: true })
       request.subagentProvider = NODE_ISOLATED_PROVIDER
       const run = routeCore.startWorkflow(gateEngine, request, logicalRunId)
-      Object.assign(ensureRun(run.id), isolationMeta)
+      Object.assign(ensureRun(run.id), isolationMeta())
       const kernel = await amKernel()
       if (kernel && logical) {
         amRuns.set(String(run.id), Object.assign({ kernel }, kernel.createHostContext(runArtifactCwd(ws), request.args.runDir, logicalRunId, logical.artifact_manifests)))
@@ -3561,7 +3561,7 @@ return {
         // 逐次 Proof 需要段 workspace 绑定（LOC-029）：与 workspace 生命周期同段登记
         attk().then((t) => t.setWs(runId, ws)).catch(() => {})
         const rec = ensureRun(runId)
-        Object.assign(rec, isolationMeta)
+        Object.assign(rec, isolationMeta())
         rec.taskId = taskId
         rec.workflowId = String(args.templateId || v.sanitized.id || '')
         live.add(runId)

@@ -14,6 +14,10 @@
 
 `recorded_at` 是把宿主 Probe 结果记录到本次准备的时间。宿主原有 Probe 缓存仍然适用；该时间不宣称重新执行了一次操作系统探针。
 
+隔离准备总是追加 `isolation_history`。已有真实执行段时，逻辑运行的当前等级、探针和 `node_isolation` 只在新的 `engine.start` 成功返回句柄后替换；路由签发或引擎启动失败仅留下准备历史，保留上一执行段的当前事实和全部旧 attempt。首次尚无执行段时仍保存准备事实，方便查看拒绝启动的原因。
+
+节点详情优先显示所选 attempt 自己的观测；尚无 attempt 时读取该节点已保存的 `node_isolation`，再回退至运行级事实。旧 attempt 或节点记录里的 `unknown` 不会被当前运行等级覆盖，运行级等级也不会推算节点的独立 Proof 资格。
+
 `unavailable` 仍在隔离节点路由签发处阻断。此时逻辑运行保存失败和探针事实，`segments` 与 `node_attempts` 为空，`runs/` 不创建假引擎记录。`vwf.runs.list` 通过只读逻辑运行投影给出 `execution_not_started: true`，供看板和详情呈现“执行未启动”“隔离不可用 · 非独立取证”。该行的 `id` 为 `logical:<logical_run_id>`，`vwf.state` 不会把它当成真实引擎段。
 
 旧记录缺字段时显示“隔离等级未知”，资格为未知。读取和重启回载不会批量改写旧文件，也不会用本机当前的 `enforced` 为历史记录背书。
