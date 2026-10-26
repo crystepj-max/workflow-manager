@@ -16,7 +16,7 @@ function isolationFieldsOf(value) {
 }
 
 async function recordIsolation(rec, probe, dsl, hostCall) {
-  if (!rec) return
+  if (!rec) return () => undefined
   const fields = isolationFieldsOf({
     isolation_guarantee: probe && probe.guarantee,
     isolation_probe: probe ? { backend: probe.backend || null, evidence: probe.evidence || {}, recorded_at: Date.now() } : null,
@@ -41,13 +41,20 @@ async function recordIsolation(rec, probe, dsl, hostCall) {
     }
   }
   const metadata = { isolation_guarantee: fields.isolation_guarantee, isolation_probe: fields.isolation_probe }
-  Object.assign(rec, metadata)
-  rec.node_isolation = nodes
+  // 准备与执行分开：失败的再次准备不能替换上一真实执行段的 current。
+  // 调用者只在 engine.start 成功返回句柄后调用此提交函数；引擎记录只取段级字段。
+  const commit = () => {
+    Object.assign(rec, metadata)
+    rec.node_isolation = nodes
+    return metadata
+  }
+  // 首次未执行的准备仍需可见，但不代表存在引擎段或执行成果。
+  if (!(rec.segments || []).length && !(rec.node_attempts || []).length) commit()
   // 含失败的启动尝试；这份历史不表示创建过引擎段或执行过节点。
   rec.isolation_history = (rec.isolation_history || []).concat([{
     isolation_guarantee: fields.isolation_guarantee, isolation_probe: fields.isolation_probe, node_isolation: nodes,
   }])
-  return metadata
+  return commit
 }
 
 function createNodeIsolationHostClient(dependencies = {}) {
