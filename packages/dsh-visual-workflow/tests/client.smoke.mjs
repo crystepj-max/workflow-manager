@@ -3379,6 +3379,9 @@ for (const [level, label] of [['enforced', '强制隔离'], ['unavailable', '非
       row.execution_not_started = true
       lr.segments = []
       lr.node_attempts = []
+      lr.node_isolation = { dev: { ...fields } }
+      delete lr.independent_proof_eligible
+      delete lr.independent_proof_block_reason
     }
     runState.runs.push(row)
     runState.logical[id] = lr
@@ -3404,7 +3407,19 @@ for (const [level, label] of [['enforced', '强制隔离'], ['unavailable', '非
       const detail = fresh.querySelector('dialog[open]')
       assert.ok(detail.querySelector('[data-vwf-isolation="' + level + '"]'), '记录详情必须显示同一等级')
       assert.ok(detail.textContent.includes(label))
-      if (level === 'unavailable') assert.ok(detail.textContent.includes('尚未开始'), '未启动运行不伪造执行成果')
+      if (level === 'unavailable') {
+        assert.ok(detail.textContent.includes('尚未开始'), '未启动运行不伪造执行成果')
+        assert.equal(detail.querySelectorAll('[data-vwf-isolation="unknown"]').length, 0, '已保存 unavailable 节点不能改口为 unknown')
+        assert.ok(detail.querySelectorAll('[data-vwf-isolation="unavailable"]').length >= 2, '未执行节点读取自身已保存的隔离事实')
+        assert.ok(detail.textContent.includes('不具备独立 Proof 资格'), '未执行节点仍显示已保存的不具备资格')
+        delete lr.node_isolation.dev
+        await clickEl(Array.from(detail.querySelectorAll('button')).find((b) => b.textContent.includes('刷新')), 8)
+        assert.ok(detail.querySelectorAll('[data-vwf-isolation="unavailable"]').length >= 2, '没有节点事实时可使用本运行已保存的等级')
+        assert.ok(!detail.textContent.includes('不具备独立 Proof 资格'), '运行级等级不能伪造缺失的节点资格')
+        lr.node_isolation.dev = { isolation_guarantee: 'unknown', independent_proof_eligible: null }
+        await clickEl(Array.from(detail.querySelectorAll('button')).find((b) => b.textContent.includes('刷新')), 8)
+        assert.ok(detail.querySelector('[data-vwf-isolation="unknown"]'), '已保存的节点 unknown 不得用运行等级覆盖')
+      }
       else {
         const nodeBadges = detail.querySelectorAll('[data-vwf-isolation="' + level + '"]')
         assert.ok(nodeBadges.length >= 2, '所选节点执行也显示自己的等级')

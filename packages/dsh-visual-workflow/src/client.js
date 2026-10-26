@@ -4003,6 +4003,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const pickedIdx = selected && attemptSel[selected.id] ? Math.min(attemptSel[selected.id], latestIdx) : latestIdx
       const picked = pickedIdx > 0 ? selectedAttempts[pickedIdx - 1] : null
       const pickedValue = picked ? picked.value : null
+      const pickedIsolation = pickedValue || (lr && lr.node_isolation && lr.node_isolation[effectiveSel]) || lr
       // attempt 结局词表（蓝图派生）与「人工门禁已裁决到的段号」：三处视图共用同一份判据输入。
       // 门禁是否已裁决只认**这次执行之后**的裁决（人工退回后再次停在门禁时，新门禁还没有裁决，
       // 不能因为「这个运行曾经裁决过」就写成已裁决）。
@@ -4327,8 +4328,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 mutedSpan((lr && lr.title ? String(lr.title) : (head.taskId || head.id)))
               ),
               h('div', { className: 'vwf-card-title', style: { marginTop: 6 } }, selected.label || selected.id),
-              isolationBadge(pickedValue),
-              pickedValue && typeof pickedValue.independent_proof_eligible === 'boolean' ? mutedDiv(t(pickedValue.independent_proof_eligible ? 'isolationProofEligible' : 'isolationProofIneligible') + (pickedValue.independent_proof_block_reason ? '：' + pickedValue.independent_proof_block_reason : '')) : null,
+              isolationBadge(pickedIsolation),
+              pickedIsolation && typeof pickedIsolation.independent_proof_eligible === 'boolean' ? mutedDiv(t(pickedIsolation.independent_proof_eligible ? 'isolationProofEligible' : 'isolationProofIneligible') + (pickedIsolation.independent_proof_block_reason ? '：' + pickedIsolation.independent_proof_block_reason : '')) : null,
               selectedAttempts.length ? h('label', { className: 'vwf-row', style: { gap: 8, marginTop: 6 } },
                 mutedSpan(t(isSegmentScan(pickedValue) ? 'rdScanRecords' : 'rdAttemptPicker')),
                 h('select', {
