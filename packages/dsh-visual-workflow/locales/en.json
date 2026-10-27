@@ -120,7 +120,7 @@
   "routingNotEnumerable": "This field is not exhaustible in the JSON output constraint (needs enum / const / oneOf constants / boolean) and cannot serve as a business result route.",
   "routingBooleanUnsupported": "Boolean routing fields have no value list for now; edit them directly in the JSON output constraint.",
   "routingNeedFieldName": "Enter the business result field name first, then you can add or remove values.",
-  "routingNameInvalid": "Choose a value field, not an object, array or a path through an existing value field. Use letters, digits, underscores and dots. This invalid edit has not been applied.",
+  "routingNameInvalid": "Choose a value field, not an object, array, a path through an existing value field, or an undeclared reserved field name. Use letters, digits, underscores and dots. If other result constraints still reference the old field, check them in advanced settings first. This invalid edit has not been applied.",
   "routingRemoveBlocked": "This value still has a corresponding edge; handle that edge before removing it.",
   "outputSchema": "JSON output constraint",
   "outputSchemaPlaceholder": "Standard JSON Schema, e.g. {\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"boolean\"}},\"required\":[\"result\"]}",
