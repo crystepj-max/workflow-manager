@@ -143,7 +143,7 @@ export function resolveDshRuntimeRoots(dist) {
   return [...roots].sort()
 }
 
-function createSdkOptions(payload, files, loopbackPort) {
+export function createSdkOptions(payload, files, loopbackPort) {
   const dist = dirname(fileURLToPath(import.meta.url))
   const runtimeRoots = resolveDshRuntimeRoots(dist)
   const launchSpec = {
@@ -157,6 +157,8 @@ function createSdkOptions(payload, files, loopbackPort) {
   const sdkOptions = {
     dshBin: join(dist, 'node-isolation-launcher.mjs'),
     profile: 'sdk',
+    // 隔离 DSH 使用有限握手窗口；技术尝试数与外层预算仍由引擎管理。
+    initializeTimeoutMs: 60000,
     patches: files.patchPath ? [files.patchPath] : [],
     dshHome: files.dshHome,
     processCwd: payload.context.agent_cwd,
