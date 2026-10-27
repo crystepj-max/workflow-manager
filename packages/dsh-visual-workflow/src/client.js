@@ -5619,13 +5619,9 @@ function mappingContainer(schema) {
 }
 
 function mappingEmpty(schema) {
-  if (Array.isArray(schema)) return schema.every(mappingEmpty)
-  const array = schema?.type === 'array'
-  if (array ? !mappingEmpty(schema.items) : !schema?.properties || Object.keys(schema.properties).length ||
-    (schema.required && (!Array.isArray(schema.required) || schema.required.length)) || (schema.type && schema.type !== 'object')) return false
-  return Object.keys(schema).every(k => /^(type|title|description|\$comment|examples|default|\$schema)$/.test(k) ||
-    (array ? k === 'items' || (k === 'minItems' && schema.items?.additionalProperties === false) :
-      k === 'properties' || k === 'required' || (k === 'additionalProperties' && schema[k] === false) || (k === 'minProperties' && schema.additionalProperties === false)))
+  return schema?.type === 'object' && schema.additionalProperties === false && schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties) &&
+    !Object.keys(schema.properties).length && (schema.required === undefined || (Array.isArray(schema.required) && !schema.required.length)) &&
+    Object.keys(schema).every(k => /^(type|title|description|\$comment|examples|default|\$schema|properties|required|additionalProperties)$/.test(k))
 }
 
 function mappingOwn(obj, key) { return Object.prototype.hasOwnProperty.call(obj || {}, key) }
