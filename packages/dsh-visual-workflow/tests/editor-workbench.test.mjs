@@ -1819,6 +1819,56 @@ for (const field of ['outcomePath', 'completionPath']) {
   }
 }
 
+for (const field of ['outcomePath', 'completionPath']) {
+  for (const action of ['clear', 'move']) {
+    test(`WFM-83 UI protocol 1.0 数组 minItems ${field} ${action} 保存投影重开`, async () => {
+      const dsl = nestedCompletionDsl()
+      dsl.protocol = { version: '1.0', required_capabilities: ['type', 'properties', 'required', 'additionalProperties', 'enum', 'items', 'minItems'] }
+      const out = dsl.nodes[0].output
+      out.schema.additionalProperties = false
+      out.schema.properties.keepArray = { type: 'array', minItems: 1, items: { type: 'string' } }
+      out[field] = '$.final.reason'
+      out.schema.required.push('final')
+      const group = { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, properties: { reason: { type: 'string', enum: ['DONE'] } }, required: ['reason'] } }
+      out.schema.properties.final = group
+      const before = JSON.parse(JSON.stringify(dsl))
+      const validation = validationCore.validateBlueprint(validationCore.projectToBlueprint(dsl))
+      assert.equal(validation.ok, true, JSON.stringify(validation.errors))
+      const { container, state } = await mappingPage(dsl)
+      await fillMappingInput(mappingOf(container, field).querySelector('input'), action === 'move' ? 'moved' : '')
+      if (field === 'outcomePath' && action === 'clear') {
+        const dialog = await openConnections(container)
+        await act(async () => { dialog.querySelector('.vwf-wb-conn-row').click(); await flush() })
+        const select = Array.from(container.querySelectorAll('.vwf-inspector select')).find(s => Array.from(s.options).some(o => o.value === 'outcome'))
+        assert.ok(select, '边类型选择器存在')
+        await act(async () => {
+          Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set.call(select, 'success')
+          select.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+          await flush()
+        })
+      }
+      await saveMapping(container)
+      assert.equal(state.saved.length, 1, container.textContent.slice(-2000))
+      const bp = validationCore.projectToBlueprint(state.saved[0])
+      const vAfter = validationCore.validateBlueprint(bp)
+      assert.equal(vAfter.ok, true, JSON.stringify(vAfter.errors))
+      const projected = validationCore.projectToVwf(bp)
+      const saved = projected.nodes[0].output
+      assert.equal(saved[field] || '', action === 'move' ? '$.moved' : '')
+      assert.deepEqual(saved.schema.properties.final, { ...group, items: { ...group.items, properties: {}, required: [] } })
+      assert.ok(saved.schema.required.includes('final'))
+      const result = { result: { decision: 'DONE', reason: 'CUSTOM_DONE' }, ...(action === 'move' ? { moved: 'DONE' } : {}) }
+      assert.equal(validationCore.instanceValid(saved.schema, { ...result, final: [{}] }), true)
+      assert.equal(validationCore.instanceValid(saved.schema, { ...result, final: [] }), false)
+      assert.equal(validationCore.instanceValid(saved.schema, result), false)
+      const reopened = await mappingPage(projected)
+      await saveMapping(reopened.container)
+      assert.deepEqual(reopened.state.saved[0].nodes[0].output, saved)
+      assert.deepEqual(dsl, before)
+    })
+  }
+}
+
 test('WFM-83 UI 仅声明完成映射不启用业务结果路由，切换结果模式仍保留完成字段', async () => {
   const dsl = nestedCompletionDsl()
   const out = dsl.nodes[0].output
@@ -1837,3 +1887,140 @@ test('WFM-83 UI 仅声明完成映射不启用业务结果路由，切换结果�
   await saveMapping(container)
   assert.equal(state.saved[0].nodes[0].output.completionPath, '$.result.reason')
 })
+
+for (const kind of ['additionalProperties', 'additionalPropertiesTrue', 'allOf', 'allOfUnrelatedEnum']) {
+  test(`WFM-83 UI 清空完成映射后保存、投影重开保留 ${kind} 业务约束`, async () => {
+    const dsl = nestedCompletionDsl()
+    const out = dsl.nodes[0].output
+    out.completionPath = '$.final.details.reason'
+    out.schema.required.push('final')
+    const details = { type: 'object', required: ['reason'], properties: { reason: { type: 'string', enum: ['DONE'] } } }
+    const final = { type: 'object', required: ['details'], properties: { details } }
+    if (kind === 'additionalProperties') details.additionalProperties = { type: 'string' }
+    else if (kind === 'additionalPropertiesTrue') details.additionalProperties = true
+    else {
+      const constrained = kind === 'allOfUnrelatedEnum' ? details : final
+      constrained.allOf = [{ properties: { audit: { type: 'string', ...(kind === 'allOfUnrelatedEnum' ? { enum: ['reason'] } : {}) } }, required: ['audit'] }]
+      // 即使旧版错误删掉 final，协议中的 allOf 能力仍被另一个字段使用。
+      out.schema.properties.result.allOf = [{ type: 'object' }]
+      dsl.protocol = { version: '1.0', required_capabilities: ['type', 'properties', 'required', 'enum', 'allOf'] }
+    }
+    out.schema.properties.final = final
+    const before = JSON.parse(JSON.stringify(dsl))
+    const validate = d => validationCore.validateBlueprint(validationCore.projectToBlueprint(d))
+    assert.equal(validate(dsl).ok, true, JSON.stringify(validate(dsl).errors))
+    const { container, state } = await mappingPage(dsl)
+    assert.equal(mappingOf(container, 'completionPath').querySelector('input').value, 'final.details.reason')
+    await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), '')
+    await saveMapping(container)
+    assert.equal(state.saved.length, 1, '真实编辑器调用保存，且蓝图校验通过')
+    const savedBlueprint = validationCore.projectToBlueprint(state.saved[0])
+    const after = validationCore.validateBlueprint(savedBlueprint)
+    assert.equal(after.ok, true, JSON.stringify(after.errors))
+    const projected = validationCore.projectToVwf(savedBlueprint)
+    const saved = projected.nodes[0].output
+    const expectedFinal = { ...final, properties: { details: { ...details, properties: {}, required: [] } } }
+    assert.equal(saved.completionPath, undefined)
+    assert.deepEqual(saved.schema.properties.final, expectedFinal)
+    assert.deepEqual(saved.schema.required, ['result', 'final'])
+    assert.deepEqual(saved.schema.properties.result, before.nodes[0].output.schema.properties.result)
+    const finalValue = kind === 'additionalProperties' ? { details: { other: 'ok' } } : kind === 'additionalPropertiesTrue' ? { details: { other: 42 } } : kind === 'allOfUnrelatedEnum' ? { details: { audit: 'reason' } } : { details: {}, audit: 'ok' }
+    const badFinal = kind === 'additionalProperties' ? { details: { other: 42 } } : kind === 'additionalPropertiesTrue' ? { details: 'not an object' } : kind === 'allOfUnrelatedEnum' ? { details: { audit: 42 } } : { details: {}, audit: 42 }
+    const result = { decision: 'DONE', reason: 'CUSTOM_DONE' }
+    assert.equal(validationCore.instanceValid(saved.schema, { result, final: finalValue }), true)
+    assert.equal(validationCore.instanceValid(saved.schema, { result, final: badFinal }), false)
+    const reopened = await mappingPage(projected)
+    assert.equal(mappingOf(reopened.container, 'completionPath').querySelector('input').value, '')
+    await saveMapping(reopened.container)
+    assert.deepEqual(reopened.state.saved[0].nodes[0].output, saved, '重开再次保存不丢字段')
+    assert.deepEqual(dsl, before, '编辑不更改输入')
+  })
+}
+
+test('WFM-83 UI 清空被组合约束引用的字段时提示未应用，原结果可恢复并保存', async () => {
+  const dsl = nestedCompletionDsl()
+  const out = dsl.nodes[0].output
+  out.completionPath = '$.final.reason'
+  out.schema.required.push('final')
+  out.schema.properties.final = { type: 'object', additionalProperties: false, required: ['reason'], properties: {
+    reason: { type: 'string', enum: ['DONE'] },
+  }, allOf: [{ required: ['reason'] }] }
+  dsl.protocol = { version: '1.0', required_capabilities: ['type', 'properties', 'required', 'enum', 'additionalProperties', 'allOf'] }
+  const before = JSON.parse(JSON.stringify(out))
+  const validation = validationCore.validateBlueprint(validationCore.projectToBlueprint(dsl))
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors))
+  const { container, state } = await mappingPage(dsl)
+  await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), '')
+  assert.ok(mappingOf(container, 'completionPath').textContent.includes('本次无效修改未应用'))
+  assert.ok(mappingOf(container, 'completionPath').textContent.includes('旧字段仍被其他结果约束引用'))
+  await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), 'final.reason')
+  await saveMapping(container)
+  assert.equal(state.saved.length, 1)
+  assert.deepEqual(state.saved[0].nodes[0].output, before)
+})
+
+test('WFM-83 UI 拒绝未声明的原型路径并提示，原字段可恢复并保存', async () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    const dsl = nestedCompletionDsl()
+    dsl.nodes[0].output.completionPath = '$.result.reason'
+    const before = JSON.parse(JSON.stringify(dsl.nodes[0].output))
+    const { container, state } = await mappingPage(dsl)
+    await fillMappingInput(mappingOf(container, field).querySelector('input'), '__proto__.polluted')
+    assert.ok(mappingOf(container, field).textContent.includes('未声明的保留字段名'))
+    assert.ok(mappingOf(container, field).textContent.includes('本次无效修改未应用'))
+    await fillMappingInput(mappingOf(container, field).querySelector('input'), before[field].slice(2))
+    await saveMapping(container)
+    assert.equal(state.saved.length, 1)
+    assert.deepEqual(state.saved[0].nodes[0].output, before)
+  }
+})
+
+for (const field of ['outcomePath', 'completionPath']) {
+  for (const explicit of [false, true]) {
+    for (const action of ['clear', 'move']) {
+      test(`WFM-83 UI 开放组 ${explicit ? '显式' : '默认'} ${field} ${action} 保存投影重开`, async () => {
+        const dsl = nestedCompletionDsl()
+        const out = dsl.nodes[0].output
+        out[field] = '$.final.reason'
+        out.schema.required.push('final')
+        const group = { type: 'object', description: '开放业务组', properties: { reason: { type: 'string', enum: ['DONE'] } }, required: ['reason'] }
+        if (explicit) group.additionalProperties = true
+        out.schema.properties.final = group
+        const before = JSON.parse(JSON.stringify(dsl))
+        const validation = validationCore.validateBlueprint(validationCore.projectToBlueprint(dsl))
+        assert.equal(validation.ok, true, JSON.stringify(validation.errors))
+        const { container, state } = await mappingPage(dsl)
+        await fillMappingInput(mappingOf(container, field).querySelector('input'), action === 'move' ? 'moved' : '')
+        if (field === 'outcomePath' && action === 'clear') {
+          // 清除业务结果路由后，使用真实边编辑器把原业务出边改为普通成功边。
+          const dialog = await openConnections(container)
+          await act(async () => { dialog.querySelector('.vwf-wb-conn-row').click(); await flush() })
+          const select = Array.from(container.querySelectorAll('.vwf-inspector select')).find(s => Array.from(s.options).some(o => o.value === 'outcome'))
+          assert.ok(select, '边类型选择器存在')
+          await act(async () => {
+            Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set.call(select, 'success')
+            select.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+            await flush()
+          })
+        }
+        await saveMapping(container)
+        assert.equal(state.saved.length, 1, '真实编辑器保存通过同源校验')
+        const bp = validationCore.projectToBlueprint(state.saved[0])
+        const vAfter = validationCore.validateBlueprint(bp)
+        assert.equal(vAfter.ok, true, JSON.stringify(vAfter.errors))
+        const projected = validationCore.projectToVwf(bp)
+        const saved = projected.nodes[0].output
+        assert.equal(saved[field] || '', action === 'move' ? '$.moved' : '')
+        assert.deepEqual(saved.schema.properties.final, { ...group, properties: {}, required: [] })
+        assert.ok(saved.schema.required.includes('final'))
+        const result = { result: { decision: 'DONE', reason: 'CUSTOM_DONE' }, ...(action === 'move' ? { moved: 'DONE' } : {}) }
+        assert.equal(validationCore.instanceValid(saved.schema, { ...result, final: { other: 42 } }), true)
+        assert.equal(validationCore.instanceValid(saved.schema, result), false)
+        const reopened = await mappingPage(projected)
+        await saveMapping(reopened.container)
+        assert.deepEqual(reopened.state.saved[0].nodes[0].output, saved)
+        assert.deepEqual(dsl, before)
+      })
+    }
+  }
+}
