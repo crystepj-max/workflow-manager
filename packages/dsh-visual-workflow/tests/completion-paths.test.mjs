@@ -438,15 +438,17 @@ test('WFM-83 编辑已有错误 required 不抛异常，沿用旧编辑器的数
 })
 
 for (const field of ['outcomePath', 'completionPath']) {
-  for (const kind of ['additionalProperties', 'allOf']) {
+  for (const kind of ['additionalProperties', 'additionalPropertiesTrue', 'allOf', 'allOfUnrelatedEnum', 'allOfUnrelatedConst']) {
     test(`WFM-83 清空 ${field} 保留 ${kind} 业务约束和完整蓝图往返`, () => {
       const bp = JSON.parse(readFileSync(new URL('../../../scripts/test/fixtures/hello-blueprint.json', import.meta.url), 'utf8'))
       const n = bp.nodes.find(node => node.id === 'finish')
       const group = { type: 'object', description: '业务结果', required: ['reason'], properties: { reason: { type: 'string', enum: ['DONE'] } } }
       if (kind === 'additionalProperties') group.additionalProperties = { type: 'string' }
+      else if (kind === 'additionalPropertiesTrue') group.additionalProperties = true
       else {
-        group.allOf = [{ properties: { audit: { type: 'string' } }, required: ['audit'] }]
+        group.allOf = [{ properties: { audit: { type: 'string', ...(kind === 'allOfUnrelatedEnum' ? { enum: ['reason'] } : kind === 'allOfUnrelatedConst' ? { const: 'reason' } : {}) } }, required: ['audit'] }]
         bp.protocol = { version: '1.0', required_capabilities: ['type', 'properties', 'required', 'additionalProperties', 'enum', 'allOf'] }
+        if (kind === 'allOfUnrelatedConst') bp.protocol.required_capabilities.push('const')
         bp.nodes.find(node => node.id === 'dispatch').output.schema.allOf = [{ type: 'object' }]
       }
       n.output[field] = '$.final.reason'
@@ -460,9 +462,13 @@ for (const field of ['outcomePath', 'completionPath']) {
       const before = clone(bp)
       const validBefore = core.validateBlueprint(bp)
       assert.equal(validBefore.ok, true, JSON.stringify(validBefore.errors))
+      const initialFinal = kind.startsWith('additionalProperties') ? { reason: 'DONE', other: kind === 'additionalPropertiesTrue' ? 1 : 'ok' } : { reason: 'DONE', audit: kind.startsWith('allOfUnrelated') ? 'reason' : 'ok' }
+      assert.equal(core.instanceValid(n.output.schema, { done: true, final: initialFinal }), true, '清空前的真实实例合法')
       const dsl = core.projectToVwf(bp)
       const editable = dsl.nodes.find(node => node.id === 'finish')
+      const prior = editable.output
       editable.output = ui.applyRoutingWrite(editable, '', undefined, field)
+      assert.notEqual(editable.output, prior, '合法清空不能因其它字段的枚举值同名而被拒绝')
       // 清空业务路由后，由调用方同时把业务出边改为普通成功边。
       if (field === 'outcomePath') {
         const edge = dsl.edges.find(edge => edge.from === 'finish')
@@ -477,10 +483,11 @@ for (const field of ['outcomePath', 'completionPath']) {
       assert.deepEqual(reopened.schema.properties.final, { ...group, required: [], properties: {} })
       assert.deepEqual(reopened.schema.required, ['done', 'final'])
       assert.deepEqual(reopened.schema.properties.done, before.nodes.find(node => node.id === 'finish').output.schema.properties.done)
-      const good = kind === 'additionalProperties' ? { other: 'ok' } : { audit: 'ok' }
-      const bad = kind === 'additionalProperties' ? { other: 1 } : { audit: 1 }
+      const good = kind === 'additionalProperties' ? { other: 'ok' } : kind === 'additionalPropertiesTrue' ? { other: 1 } : { audit: kind.startsWith('allOfUnrelated') ? 'reason' : 'ok' }
+      const bad = kind === 'additionalProperties' ? { other: 1 } : kind === 'additionalPropertiesTrue' ? 'not an object' : { audit: 1 }
       assert.equal(core.instanceValid(reopened.schema, { done: true, final: good }), true, '保留的业务结果仍可使用')
       assert.equal(core.instanceValid(reopened.schema, { done: true, final: bad }), false, '保留的业务约束仍会拒绝不合格结果')
+      assert.equal(core.instanceValid(reopened.schema, { done: true }), false, '有业务意义的必填分组不能消失')
       assert.deepEqual(bp, before, '编辑不改变输入蓝图')
     })
   }

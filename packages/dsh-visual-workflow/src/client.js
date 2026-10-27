@@ -77,7 +77,7 @@ return {
 
     // 共用类名常量减少动态载荷，实际 class 保持不变。
     const smallButtonClass = 'vwf-btn sm', monoInputClass = 'vwf-input vwf-mono'
-    const fieldLabelClass = 'vwf-field-label', rowClass = 'vwf-row'
+    const fieldLabelClass = 'vwf-field-label', rowClass = 'vwf-row', badgeClass = 'vwf-badge'
 
     // ── i18n：文案不进闭包。启动时按当前语言向宿主拉取 locales/<locale>.json ──
     let localeService
@@ -1573,7 +1573,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('span', { className: 'vwf-wb-step-seq' }, seqLabels[id] != null ? String(seqLabels[id]) : '·'),
             h('span', { className: 'vwf-wb-step-label' }, node.label || id),
             summaryIds[id] ? h('span', { className: 'vwf-badge accent' }, t('wbSummaryBadge')) : null,
-            node.kind === 'fanout' ? h('span', { className: 'vwf-badge' }, t('wbParallelBadge')) : null,
+            node.kind === 'fanout' ? h('span', { className: badgeClass }, t('wbParallelBadge')) : null,
             node.profile ? h('span', { className: 'vwf-wb-step-role' }, node.profile) : null
           )
         }),
@@ -2212,7 +2212,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         h('div', { className: rowClass },
           h('strong', null, t('nodeConfig')),
           h('span', { className: 'vwf-spacer' }),
-          h('span', { className: 'vwf-badge' }, isFanout ? 'fanout' : 'worker'),
+          h('span', { className: badgeClass }, isFanout ? 'fanout' : 'worker'),
           props.readOnlyStructure ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null
         ),
         props.readOnlyStructure
@@ -2526,7 +2526,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 
       const originBadge = (role) => {
         const origin = roleOriginOf(role)
-        return h('span', { className: 'vwf-badge' + (origin.builtin ? ' accent' : '') },
+        return h('span', { className: badgeClass + (origin.builtin ? ' accent' : '') },
           origin.builtin ? t('builtinRoleBadge') : t('customRoleBadge'))
       }
       // 列表行：名称 + 来源 badge + 最多两行摘要 + 操作组。摘要为显示层生成，
@@ -3164,7 +3164,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: 'vwf-card vwf-wb-steps-card' },
               h('div', { className: 'vwf-card-head' },
                 h('div', { className: 'vwf-card-title' }, t('wbSteps')),
-                h('span', { className: 'vwf-badge' }, (wf.nodes || []).length + '')
+                h('span', { className: badgeClass }, (wf.nodes || []).length + '')
               ),
               h(StepNavigator, {
                 dsl: wf, visibleTerminals, selectedNodeId,
@@ -3386,7 +3386,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // LOC-030：BLOCKED 同为可恢复等待态（统一受阻生命周期，非终态），不落 fail 色
       const tone = s === 'DONE' ? 'ok' : s === 'running' ? 'run' : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED' || s === 'BLOCKED') ? 'wait' : 'err'
       const label = s === 'WAITING_HUMAN' ? t('dashWaitHuman') : s === 'BLOCKED' ? t('dashBlocked') : s.indexOf('AWAITING_HUMAN_') === 0 ? t('dashHumanGate') : (displayWord(s) || '—')
-      return h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + label)
+      return h('span', { className: badgeClass, style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + label)
     }
     // FIX-107（B5 状态词 / C2 结束方式）：raw 取值到用户语言的展示映射——状态机取值、筛选口径
     // 与数据契约都不变，只换用户的读法；形状（STATUS_SHAPE）与颜色（STATUS_COLOR）编码也不变。
@@ -3582,7 +3582,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     function tierBadgeOf(lifecycleState) {
       const s = String(lifecycleState || '')
       const color = s === 'COMPLETED' ? STATUS_COLOR.pass : s === 'RUNNING' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s === 'PAUSED' || s === 'BLOCKED') ? STATUS_COLOR.human : STATUS_COLOR.fail
-      return h('span', { className: 'vwf-badge', style: { color: color } }, s || '—')
+      return h('span', { className: badgeClass, style: { color: color } }, s || '—')
     }
 
     // 运行看板：列表视图（分组 / 四类筛选 / 分页 / 返回位置保留）+ 详情视图（唯一详情出口）
@@ -3871,7 +3871,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       return order.map((key) => h('section', { key: key, className: 'vwf-run-group', 'aria-label': labelOf(key) },
         h('h3', { className: 'vwf-run-group-head' },
           h('span', null, labelOf(key)),
-          h('span', { className: 'vwf-badge' }, String(byWs.get(key).length))
+          h('span', { className: badgeClass }, String(byWs.get(key).length))
         ),
         byWs.get(key).slice().sort((a, b) => runOrderOf(a.bucket) - runOrderOf(b.bucket)).map((m) => {
           const gi = m.task.logicalRunId ? (gateIdx || new Map()).get(m.task.logicalRunId) : undefined
@@ -4266,9 +4266,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   h('span', { className: 'vwf-node-dir-no' }, String(ni + 1).padStart(2, '0')),
                   h('span', { className: 'vwf-node-dir-label' }, n.label || n.id),
                   h('span', { className: rowClass, style: { gap: 4 } },
-                    list.length ? h('span', { className: 'vwf-badge' }, t('rdAttemptPicker') + ' ' + list.length) : null,
-                    prev ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null,
-                    st[n.id] ? h('span', { className: 'vwf-badge', style: { color: st[n.id] === 'pass' ? STATUS_COLOR.pass : st[n.id] === 'fail' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, displayWord(st[n.id])) : null,
+                    list.length ? h('span', { className: badgeClass }, t('rdAttemptPicker') + ' ' + list.length) : null,
+                    prev ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null,
+                    st[n.id] ? h('span', { className: badgeClass, style: { color: st[n.id] === 'pass' ? STATUS_COLOR.pass : st[n.id] === 'fail' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, displayWord(st[n.id])) : null,
                     n.id === phaseNodeId ? h('span', { className: 'vwf-badge accent' }, t('rdCurrentNode')) : null
                   )
                 )
@@ -4285,7 +4285,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: 'vwf-rd-legend', style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '0 14px 6px' } },
               mutedSpan(t('dashLegend')),
               [['ok', 'rdStatusPassed'], ['err', 'rdStatusFailed'], ['run', 'rdStatusRunning'], ['wait', 'dashWaitHuman']].map(([tone, key]) =>
-                h('span', { key: tone, className: 'vwf-badge', style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + t(key)))
+                h('span', { key: tone, className: badgeClass, style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + t(key)))
             ),
             dsl ? h(Canvas, { dsl, readOnly: true, statusMap: st }) : mutedDiv(t('rdNoRecords'))
           ),
@@ -4296,8 +4296,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('div', { className: rowClass, style: { gap: 6 } },
                   h('span', { className: 'vwf-badge ' + (historical || isPrevRound ? 'accent' : '') }, historical || isPrevRound ? t('rdHistorical') : t('rdCurrentResult')),
                   // 结果信息也给出这次执行的状态结论，与执行记录 / 链路同一权威、同一措辞
-                  pickedVerdictRow ? h('span', { className: 'vwf-badge', 'data-vwf-verdict': pickedVerdict, style: { color: STATUS_COLOR[pickedVerdictRow[1]] } }, STATUS_SHAPE[pickedVerdictRow[2]] + ' ' + verdictTextOf(pickedVerdict)) : null,
-                  isPrevRound ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
+                  pickedVerdictRow ? h('span', { className: badgeClass, 'data-vwf-verdict': pickedVerdict, style: { color: STATUS_COLOR[pickedVerdictRow[1]] } }, STATUS_SHAPE[pickedVerdictRow[2]] + ' ' + verdictTextOf(pickedVerdict)) : null,
+                  isPrevRound ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
                 ),
                 mutedSpan((lr && lr.title ? String(lr.title) : (head.taskId || head.id)))
               ),
@@ -4356,8 +4356,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('span', { className: 'vwf-chain-main' },
                   h('span', { className: 'vwf-chain-head' },
                     h('strong', null, (e.seq ? e.seq + ' ' : '') + e.label + (e.child ? ' · ' + t('rdFanoutChild', { n: e.child }) : '')),
-                    e.attempt ? h('span', { className: 'vwf-badge' }, t('rdAttemptOption', { n: e.attempt, state: e.state }) + (e.latest ? t('rdAttemptLatest') : '')) : h('span', { className: 'vwf-badge' }, e.state),
-                    e.prev ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
+                    e.attempt ? h('span', { className: badgeClass }, t('rdAttemptOption', { n: e.attempt, state: e.state }) + (e.latest ? t('rdAttemptLatest') : '')) : h('span', { className: badgeClass }, e.state),
+                    e.prev ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
                   ),
                   e.note ? h('span', { className: 'vwf-chain-note' }, e.note) : null,
                   e.meta ? h('span', { className: 'vwf-muted-sm' }, e.meta) : null,
@@ -4414,7 +4414,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               return h('div', { key: v.attempt_id, className: 'vwf-fanout-item' },
                 h('div', { className: rowClass, style: { justifyContent: 'space-between' } },
                   h('strong', null, t('rdFanoutChild', { n: (Number(v.item_index) || 0) + 1 }) + (v.item ? ' · ' + String(v.item).slice(0, 80) : '')),
-                  h('span', { className: 'vwf-badge', style: { color: done ? STATUS_COLOR.pass : v.status === 'failed' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, done ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptReturned') : t('rdFanoutIncomplete')))
+                  h('span', { className: badgeClass, style: { color: done ? STATUS_COLOR.pass : v.status === 'failed' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, done ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptReturned') : t('rdFanoutIncomplete')))
                 ),
                 mutedDiv(t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model })),
                 v.result !== undefined && v.result !== null ? h('div', { className: 'vwf-code', style: { marginTop: 4 } }, typeof v.result === 'string' ? v.result : safeJson(v.result)) : null,
@@ -4437,7 +4437,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           rt.push(h('div', { key: 'inputs' },
             secDiv(t('rdFanoutSynth')),
             h('div', { className: rowClass, style: { gap: 6 } },
-              inputs.map((it, i) => h('span', { key: i, className: 'vwf-badge' }, t('rdFanoutInputFrom', { producer: String(it.producer || it.binding || '—') })))
+              inputs.map((it, i) => h('span', { key: i, className: badgeClass }, t('rdFanoutInputFrom', { producer: String(it.producer || it.binding || '—') })))
             )
           ))
         }
@@ -4524,7 +4524,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: rowClass, style: { gap: 8, marginTop: 6 } },
               h('button', { className: smallButtonClass, onClick: () => sendControl('pause') }, t('rdControlPause')),
               h('button', { className: smallButtonClass, onClick: () => sendControl('interrupt') }, t('rdControlInterrupt')),
-              head.pause_pending ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('ctlPending')) : null
+              head.pause_pending ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, t('ctlPending')) : null
             ),
             mutedDiv(t('rdControlPauseNote') + ' ' + t('rdControlInterruptNote'), { marginTop: 4 })
           ) : null,
@@ -4543,7 +4543,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
           h('div', { className: 'vwf-card-head' },
             h('div', { className: 'vwf-card-title' }, t('rdPausedTitle')),
-            h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, String(head.status || 'PAUSED'))
+            h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, String(head.status || 'PAUSED'))
           ),
           h('div', { style: { padding: '8px 14px 12px' } },
             mutedText(t('rdPausedWhy') + '：' + String(reason || '—')),
@@ -4564,7 +4564,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             ),
             h('div', { className: rowClass, style: { gap: 8, marginTop: 6 } },
               h('button', { className: 'vwf-btn sm primary', disabled: !guidanceText.trim(), onClick: () => sendControl('guidance', { text: guidanceText.trim() }) }, t('rdPausedGuidanceSubmit')),
-              guidanceMsg ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, guidanceMsg) : null,
+              guidanceMsg ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.pass } }, guidanceMsg) : null,
               mutedSpan(t('rdControlGuidanceNote'))
             ),
             secDiv(t('rdPausedResume'), { marginTop: 10 }),
@@ -4797,7 +4797,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('table', { className: 'vwf-table' },
             h('tbody', null, kv.map(([k, v]) => h('tr', { key: k },
               mutedTd(k, { width: 90 }),
-              h('td', null, v === null || v === undefined || v === '' ? h('span', { className: 'vwf-badge' }, t('rdWsUnknown')) : String(v))
+              h('td', null, v === null || v === undefined || v === '' ? h('span', { className: badgeClass }, t('rdWsUnknown')) : String(v))
             )))
           ),
           ws.refreshed_at ? mutedDiv(t('rdWsRefreshedAt', { at: fmtAt(ws.refreshed_at) })) : null
@@ -5177,8 +5177,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: rowClass, style: { justifyContent: 'space-between', gap: 6 } },
               h('div', { className: 'vwf-list-name' }, (n.label || n.id) + '（' + n.id + '）'),
               isOver
-                ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge'))
-                : h('span', { className: 'vwf-badge' }, t('modelOverrideDefaultBadge'))
+                ? h('span', { className: badgeClass, style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge'))
+                : h('span', { className: badgeClass }, t('modelOverrideDefaultBadge'))
             ),
             // 该节点预设即「默认」，覆盖后仍以此行为准（原型：默认：<供应商> / <模型>）
             h('div', { className: 'vwf-muted-sm vwf-mono' }, t('modelOverrideDefaultLine') + '：' + (eff ? eff.provider + ' / ' + eff.model : t('modelOverrideInherit'))),
@@ -5247,9 +5247,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h('div', { style: { minWidth: 0, flex: 1 } },
                 h('div', { className: rowClass, style: { gap: 6 } },
                   h('span', { className: 'vwf-list-name' }, w.name || w.id),
-                  h('span', { className: 'vwf-badge' }, w.id),
+                  h('span', { className: badgeClass }, w.id),
                   w.builtin ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null,
-                  w.modelOverridden ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge')) : null
+                  w.modelOverridden ? h('span', { className: badgeClass, style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge')) : null
                 ),
                 w.description ? h('div', { className: 'vwf-list-desc' }, w.description) : null
               ),
@@ -5270,9 +5270,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         wf ? h('dialog', bigDialogProps(editorDialogRef, t('title'), requestCloseEditor, closeEditor),
           h('div', { className: 'vwf-editor-head' },
             h('strong', null, (wf.name || wf.id) + ''),
-            editId ? h('span', { className: 'vwf-badge' }, editId) : h('span', { className: 'vwf-badge accent' }, t('newTemplate')),
+            editId ? h('span', { className: badgeClass }, editId) : h('span', { className: 'vwf-badge accent' }, t('newTemplate')),
             editingBuiltin ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null,
-            dirty ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-warn)' } }, t('unsavedDraft')) : null,
+            dirty ? h('span', { className: badgeClass, style: { color: 'var(--vwf-warn)' } }, t('unsavedDraft')) : null,
             h('span', { className: 'vwf-spacer' }),
             h('button', { className: smallButtonClass, onClick: requestCloseEditor }, t('close'))
           ),
@@ -5314,7 +5314,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         ovId && ovW ? h('dialog', bigDialogProps(ovDialogRef, t('modelOverride'), requestCloseOv, closeOv),
           h('div', { className: 'vwf-editor-head' },
             h('strong', null, t('modelOverrideTitle') + ' · ' + (ovW.name || ovW.id)),
-            h('span', { className: 'vwf-badge' }, ovW.id),
+            h('span', { className: badgeClass }, ovW.id),
             h('span', { className: 'vwf-spacer' }),
             h('button', { className: smallButtonClass, onClick: requestCloseOv }, t('close'))
           ),
@@ -5625,16 +5625,23 @@ function mappingEmpty(schema) {
     (schema.required && (!Array.isArray(schema.required) || schema.required.length)) || (schema.type && schema.type !== 'object')) return false
   return Object.keys(schema).every(k => /^(type|title|description|\$comment|examples|default|\$schema)$/.test(k) ||
     (array ? k === 'items' || (k === 'minItems' && schema.items?.additionalProperties === false) :
-      k === 'properties' || k === 'required' || (k === 'additionalProperties' && typeof schema[k] === 'boolean') || (k === 'minProperties' && schema.additionalProperties === false)))
+      k === 'properties' || k === 'required' || (k === 'additionalProperties' && schema[k] === false) || (k === 'minProperties' && schema.additionalProperties === false)))
 }
 
-// 组合约束中出现同名字段时无法安全推断其意图；保守拒绝并由界面提示。
+function mappingOwn(obj, key) { return Object.prototype.hasOwnProperty.call(obj || {}, key) }
+// 同一对象层的组合约束若引用待删除字段，不能推断其意图；拒绝并由界面提示。
+function mappingReferences(schema, key, branch) {
+  if (Array.isArray(schema)) return schema.some(s => mappingReferences(s, key, true))
+  if (!schema || typeof schema !== 'object') return false
+  const has = value => value && typeof value === 'object' && mappingOwn(value, key)
+  if ((branch && (mappingOwn(schema.properties, key) || (Array.isArray(schema.required) && schema.required.includes(key)))) || has(schema.const) || (Array.isArray(schema.enum) && schema.enum.some(has))) return true
+  return ['allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else'].some(k => mappingReferences(schema[k], key, true))
+}
 function mappingDeletionSafe(schema, parts) {
   const container = mappingContainer(schema)
   if (!container || typeof container !== 'object') return true
   const [key, ...tail] = parts
-  const constraints = [container.allOf, container.anyOf, container.oneOf, container.not, container.if, container.then, container.else, container.const, container.enum]
-  return !JSON.stringify(constraints).includes(JSON.stringify(key)) && (!tail.length || mappingDeletionSafe(container.properties?.[key], tail))
+  return !mappingReferences(container, key, false) && (!tail.length || mappingDeletionSafe(container.properties?.[key], tail))
 }
 
 function mappingLeaf(schema, name, writing) {
@@ -5643,7 +5650,7 @@ function mappingLeaf(schema, name, writing) {
   for (const key of name.split('.')) {
     const container = mappingContainer(cursor)
     // 未显式声明的原型键不能作为路径容器或写入目标。
-    if (writing && Object.prototype.hasOwnProperty.call(Object.prototype, key) && !Object.prototype.hasOwnProperty.call(container?.properties || {}, key)) return false
+    if (writing && mappingOwn(Object.prototype, key) && !mappingOwn(container?.properties, key)) return false
     // 写入前检查所有已有父级，不能在 string 等标量里生成 properties。
     if (writing && cursor && (!container || (container.type && container.type !== 'object') || enumerableValues(container) || container.oneOf)) return false
     cursor = container?.properties?.[key]

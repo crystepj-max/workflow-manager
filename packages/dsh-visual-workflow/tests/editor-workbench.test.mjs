@@ -1838,7 +1838,7 @@ test('WFM-83 UI 仅声明完成映射不启用业务结果路由，切换结果�
   assert.equal(state.saved[0].nodes[0].output.completionPath, '$.result.reason')
 })
 
-for (const kind of ['additionalProperties', 'allOf']) {
+for (const kind of ['additionalProperties', 'additionalPropertiesTrue', 'allOf', 'allOfUnrelatedEnum']) {
   test(`WFM-83 UI 清空完成映射后保存、投影重开保留 ${kind} 业务约束`, async () => {
     const dsl = nestedCompletionDsl()
     const out = dsl.nodes[0].output
@@ -1847,8 +1847,10 @@ for (const kind of ['additionalProperties', 'allOf']) {
     const details = { type: 'object', required: ['reason'], properties: { reason: { type: 'string', enum: ['DONE'] } } }
     const final = { type: 'object', required: ['details'], properties: { details } }
     if (kind === 'additionalProperties') details.additionalProperties = { type: 'string' }
+    else if (kind === 'additionalPropertiesTrue') details.additionalProperties = true
     else {
-      final.allOf = [{ properties: { audit: { type: 'string' } }, required: ['audit'] }]
+      const constrained = kind === 'allOfUnrelatedEnum' ? details : final
+      constrained.allOf = [{ properties: { audit: { type: 'string', ...(kind === 'allOfUnrelatedEnum' ? { enum: ['reason'] } : {}) } }, required: ['audit'] }]
       // 即使旧版错误删掉 final，协议中的 allOf 能力仍被另一个字段使用。
       out.schema.properties.result.allOf = [{ type: 'object' }]
       dsl.protocol = { version: '1.0', required_capabilities: ['type', 'properties', 'required', 'enum', 'allOf'] }
@@ -1867,15 +1869,15 @@ for (const kind of ['additionalProperties', 'allOf']) {
     assert.equal(after.ok, true, JSON.stringify(after.errors))
     const projected = validationCore.projectToVwf(savedBlueprint)
     const saved = projected.nodes[0].output
-    const expectedFinal = kind === 'additionalProperties'
+    const expectedFinal = kind.startsWith('additionalProperties') || kind === 'allOfUnrelatedEnum'
       ? { ...final, properties: { details: { ...details, properties: {}, required: [] } } }
       : { ...final, properties: {}, required: [] }
     assert.equal(saved.completionPath, undefined)
     assert.deepEqual(saved.schema.properties.final, expectedFinal)
     assert.deepEqual(saved.schema.required, ['result', 'final'])
     assert.deepEqual(saved.schema.properties.result, before.nodes[0].output.schema.properties.result)
-    const finalValue = kind === 'additionalProperties' ? { details: { other: 'ok' } } : { audit: 'ok' }
-    const badFinal = kind === 'additionalProperties' ? { details: { other: 42 } } : { audit: 42 }
+    const finalValue = kind === 'additionalProperties' ? { details: { other: 'ok' } } : kind === 'additionalPropertiesTrue' ? { details: { other: 42 } } : kind === 'allOfUnrelatedEnum' ? { details: { audit: 'reason' } } : { audit: 'ok' }
+    const badFinal = kind === 'additionalProperties' ? { details: { other: 42 } } : kind === 'additionalPropertiesTrue' ? { details: 'not an object' } : kind === 'allOfUnrelatedEnum' ? { details: { audit: 42 } } : { audit: 42 }
     const result = { decision: 'DONE', reason: 'CUSTOM_DONE' }
     assert.equal(validationCore.instanceValid(saved.schema, { result, final: finalValue }), true)
     assert.equal(validationCore.instanceValid(saved.schema, { result, final: badFinal }), false)
