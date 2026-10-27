@@ -1966,7 +1966,7 @@ test('WFM-83 UI 拒绝未声明的原型路径并提示，原字段可恢复并�
     const before = JSON.parse(JSON.stringify(dsl.nodes[0].output))
     const { container, state } = await mappingPage(dsl)
     await fillMappingInput(mappingOf(container, field).querySelector('input'), '__proto__.polluted')
-    assert.ok(mappingOf(container, field).textContent.includes('未声明的原型保留键'))
+    assert.ok(mappingOf(container, field).textContent.includes('未声明的保留字段名'))
     assert.ok(mappingOf(container, field).textContent.includes('本次无效修改未应用'))
     await fillMappingInput(mappingOf(container, field).querySelector('input'), before[field].slice(2))
     await saveMapping(container)
