@@ -1837,3 +1837,90 @@ test('WFM-83 UI 仅声明完成映射不启用业务结果路由，切换结果�
   await saveMapping(container)
   assert.equal(state.saved[0].nodes[0].output.completionPath, '$.result.reason')
 })
+
+for (const kind of ['additionalProperties', 'allOf']) {
+  test(`WFM-83 UI 清空完成映射后保存、投影重开保留 ${kind} 业务约束`, async () => {
+    const dsl = nestedCompletionDsl()
+    const out = dsl.nodes[0].output
+    out.completionPath = '$.final.details.reason'
+    out.schema.required.push('final')
+    const details = { type: 'object', required: ['reason'], properties: { reason: { type: 'string', enum: ['DONE'] } } }
+    const final = { type: 'object', required: ['details'], properties: { details } }
+    if (kind === 'additionalProperties') details.additionalProperties = { type: 'string' }
+    else {
+      final.allOf = [{ properties: { audit: { type: 'string' } }, required: ['audit'] }]
+      // 即使旧版错误删掉 final，协议中的 allOf 能力仍被另一个字段使用。
+      out.schema.properties.result.allOf = [{ type: 'object' }]
+      dsl.protocol = { version: '1.0', required_capabilities: ['type', 'properties', 'required', 'enum', 'allOf'] }
+    }
+    out.schema.properties.final = final
+    const before = JSON.parse(JSON.stringify(dsl))
+    const validate = d => validationCore.validateBlueprint(validationCore.projectToBlueprint(d))
+    assert.equal(validate(dsl).ok, true, JSON.stringify(validate(dsl).errors))
+    const { container, state } = await mappingPage(dsl)
+    assert.equal(mappingOf(container, 'completionPath').querySelector('input').value, 'final.details.reason')
+    await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), '')
+    await saveMapping(container)
+    assert.equal(state.saved.length, 1, '真实编辑器调用保存，且蓝图校验通过')
+    const savedBlueprint = validationCore.projectToBlueprint(state.saved[0])
+    const after = validationCore.validateBlueprint(savedBlueprint)
+    assert.equal(after.ok, true, JSON.stringify(after.errors))
+    const projected = validationCore.projectToVwf(savedBlueprint)
+    const saved = projected.nodes[0].output
+    const expectedFinal = kind === 'additionalProperties'
+      ? { ...final, properties: { details: { ...details, properties: {}, required: [] } } }
+      : { ...final, properties: {}, required: [] }
+    assert.equal(saved.completionPath, undefined)
+    assert.deepEqual(saved.schema.properties.final, expectedFinal)
+    assert.deepEqual(saved.schema.required, ['result', 'final'])
+    assert.deepEqual(saved.schema.properties.result, before.nodes[0].output.schema.properties.result)
+    const finalValue = kind === 'additionalProperties' ? { details: { other: 'ok' } } : { audit: 'ok' }
+    const badFinal = kind === 'additionalProperties' ? { details: { other: 42 } } : { audit: 42 }
+    const result = { decision: 'DONE', reason: 'CUSTOM_DONE' }
+    assert.equal(validationCore.instanceValid(saved.schema, { result, final: finalValue }), true)
+    assert.equal(validationCore.instanceValid(saved.schema, { result, final: badFinal }), false)
+    const reopened = await mappingPage(projected)
+    assert.equal(mappingOf(reopened.container, 'completionPath').querySelector('input').value, '')
+    await saveMapping(reopened.container)
+    assert.deepEqual(reopened.state.saved[0].nodes[0].output, saved, '重开再次保存不丢字段')
+    assert.deepEqual(dsl, before, '编辑不更改输入')
+  })
+}
+
+test('WFM-83 UI 清空被组合约束引用的字段时提示未应用，原结果可恢复并保存', async () => {
+  const dsl = nestedCompletionDsl()
+  const out = dsl.nodes[0].output
+  out.completionPath = '$.final.reason'
+  out.schema.required.push('final')
+  out.schema.properties.final = { type: 'object', additionalProperties: false, required: ['reason'], properties: {
+    reason: { type: 'string', enum: ['DONE'] },
+  }, allOf: [{ required: ['reason'] }] }
+  dsl.protocol = { version: '1.0', required_capabilities: ['type', 'properties', 'required', 'enum', 'additionalProperties', 'allOf'] }
+  const before = JSON.parse(JSON.stringify(out))
+  const validation = validationCore.validateBlueprint(validationCore.projectToBlueprint(dsl))
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors))
+  const { container, state } = await mappingPage(dsl)
+  await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), '')
+  assert.ok(mappingOf(container, 'completionPath').textContent.includes('本次无效修改未应用'))
+  assert.ok(mappingOf(container, 'completionPath').textContent.includes('旧字段仍被其他结果约束引用'))
+  await fillMappingInput(mappingOf(container, 'completionPath').querySelector('input'), 'final.reason')
+  await saveMapping(container)
+  assert.equal(state.saved.length, 1)
+  assert.deepEqual(state.saved[0].nodes[0].output, before)
+})
+
+test('WFM-83 UI 拒绝未声明的原型路径并提示，原字段可恢复并保存', async () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    const dsl = nestedCompletionDsl()
+    dsl.nodes[0].output.completionPath = '$.result.reason'
+    const before = JSON.parse(JSON.stringify(dsl.nodes[0].output))
+    const { container, state } = await mappingPage(dsl)
+    await fillMappingInput(mappingOf(container, field).querySelector('input'), '__proto__.polluted')
+    assert.ok(mappingOf(container, field).textContent.includes('未声明的原型保留键'))
+    assert.ok(mappingOf(container, field).textContent.includes('本次无效修改未应用'))
+    await fillMappingInput(mappingOf(container, field).querySelector('input'), before[field].slice(2))
+    await saveMapping(container)
+    assert.equal(state.saved.length, 1)
+    assert.deepEqual(state.saved[0].nodes[0].output, before)
+  }
+})
