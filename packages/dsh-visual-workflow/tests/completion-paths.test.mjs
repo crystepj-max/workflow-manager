@@ -50,8 +50,8 @@ test('WFM-83 显式改路径清理旧叶子和 required，保留兄弟字段并�
   assert.deepEqual(moved.schema.properties.final.required, ['reason'])
   assert.ok(moved.schema.properties.result.properties.decision)
   const flat = ui.applyRoutingWrite({ output: moved }, 'completion_type', ['CUSTOM'], 'completionPath')
-  assert.equal(flat.schema.properties.final, undefined, '空路径容器被清理')
-  assert.ok(!flat.schema.required.includes('final'), '空容器的 required 同步清理')
+  assert.deepEqual(flat.schema.properties.final, { type: 'object', properties: {}, required: [] }, '默认开放容器保留')
+  assert.ok(flat.schema.required.includes('final'), '开放容器仍保留 required')
   assert.equal(flat.completionPath, '$.completion_type')
 })
 
@@ -89,7 +89,10 @@ for (const field of ['outcomePath', 'completionPath']) {
         }
         const shared = preserved.at(-1)
         const abandoned = previous.split('.').slice(0, -1).join('.')
-        if (abandoned !== shared) assert.equal(core.schemaLeafAt(moved.schema, abandoned.split('.')), null, '真正离开的空分组被清理')
+        if (abandoned !== shared) {
+          const oldGroup = core.schemaLeafAt(before.output.schema, abandoned.split('.'))
+          assert.deepEqual(core.schemaLeafAt(moved.schema, abandoned.split('.')), { ...oldGroup, properties: {}, required: [] }, '额外未知关键字原样保留，不宣称受支持')
+        }
         assert.deepEqual(moved.schema.required, before.output.schema.required, '公共根分组仍必填且不换序')
         assert.deepEqual(moved.schema.properties.result, before.output.schema.properties.result, '其它业务分组不变')
         assert.deepEqual(moved.files, before.output.files)
@@ -98,6 +101,204 @@ for (const field of ['outcomePath', 'completionPath']) {
     }
   }
 }
+
+for (const field of ['outcomePath', 'completionPath']) {
+  for (const action of ['clear', 'move']) {
+    test(`WFM-83 protocol 1.0 数组 minItems ${field} ${action} 保留业务约束`, () => {
+      const bp = JSON.parse(readFileSync(new URL('../../../scripts/test/fixtures/hello-blueprint.json', import.meta.url), 'utf8'))
+      bp.protocol = { version: '1.0', required_capabilities: ['type', 'properties', 'required', 'additionalProperties', 'enum', 'items', 'minItems'] }
+      bp.nodes.find(node => node.id === 'dispatch').output.schema.properties.keepArray = { type: 'array', minItems: 1, items: { type: 'string' } }
+      const n = bp.nodes.find(node => node.id === 'finish')
+      const group = { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, properties: { reason: { type: 'string', enum: ['DONE'] } }, required: ['reason'] } }
+      n.output[field] = '$.final.reason'
+      n.output.schema.properties.final = group
+      n.output.schema.required.push('final')
+      if (field === 'outcomePath') {
+        const edge = bp.edges.find(e => e.from === 'finish')
+        delete edge.on
+        edge.outcome = 'DONE'
+      }
+      const before = clone(bp)
+      const vBefore = core.validateBlueprint(bp)
+      assert.equal(vBefore.ok, true, JSON.stringify(vBefore.errors))
+      assert.equal(core.instanceValid(n.output.schema, { done: true, final: [{ reason: 'DONE' }] }), true)
+      const dsl = core.projectToVwf(bp)
+      const editable = dsl.nodes.find(node => node.id === 'finish')
+      editable.output = ui.applyRoutingWrite(editable, action === 'move' ? 'moved' : '', undefined, field)
+      if (field === 'outcomePath' && action === 'clear') {
+        const edge = dsl.edges.find(e => e.from === 'finish')
+        delete edge.outcome
+        edge.on = 'success'
+      }
+      const saved = core.projectToBlueprint(dsl)
+      const vAfter = core.validateBlueprint(saved)
+      assert.equal(vAfter.ok, true, JSON.stringify(vAfter.errors))
+      const reopened = core.projectToVwf(saved).nodes.find(node => node.id === 'finish').output
+      assert.equal(reopened[field] || '', action === 'move' ? '$.moved' : '')
+      assert.deepEqual(reopened.schema.properties.final, { ...group, items: { ...group.items, properties: {}, required: [] } })
+      assert.ok(reopened.schema.required.includes('final'))
+      const result = { done: true, ...(action === 'move' ? { moved: 'DONE' } : {}) }
+      assert.equal(core.instanceValid(reopened.schema, { ...result, final: [{}] }), true)
+      assert.equal(core.instanceValid(reopened.schema, { ...result, final: [] }), false)
+      assert.equal(core.instanceValid(reopened.schema, result), false)
+      assert.deepEqual(bp, before)
+    })
+  }
+}
+
+for (const field of ['outcomePath', 'completionPath']) {
+  for (const explicit of [false, true]) {
+    for (const action of ['clear', 'move']) {
+      test(`WFM-83 开放组 ${explicit ? '显式' : '默认'} ${field} ${action} 保留业务结果与 required`, () => {
+        const bp = JSON.parse(readFileSync(new URL('../../../scripts/test/fixtures/hello-blueprint.json', import.meta.url), 'utf8'))
+        const n = bp.nodes.find(node => node.id === 'finish')
+        const group = { type: 'object', description: '开放业务组', properties: { reason: { type: 'string', enum: ['DONE'] } }, required: ['reason'] }
+        if (explicit) group.additionalProperties = true
+        n.output[field] = '$.final.reason'
+        n.output.schema.properties.final = group
+        n.output.schema.required.push('final')
+        if (field === 'outcomePath') {
+          const edge = bp.edges.find(e => e.from === 'finish')
+          delete edge.on
+          edge.outcome = 'DONE'
+        }
+        const before = clone(bp)
+        const vBefore = core.validateBlueprint(bp)
+        assert.equal(vBefore.ok, true, JSON.stringify(vBefore.errors))
+        assert.equal(core.instanceValid(n.output.schema, { done: true, final: { reason: 'DONE', other: 42 } }), true)
+        const dsl = core.projectToVwf(bp)
+        const editable = dsl.nodes.find(node => node.id === 'finish')
+        editable.output = ui.applyRoutingWrite(editable, action === 'move' ? 'moved' : '', undefined, field)
+        if (field === 'outcomePath' && action === 'clear') {
+          const edge = dsl.edges.find(e => e.from === 'finish')
+          delete edge.outcome
+          edge.on = 'success'
+        }
+        const saved = core.projectToBlueprint(dsl)
+        const vAfter = core.validateBlueprint(saved)
+        assert.equal(vAfter.ok, true, JSON.stringify(vAfter.errors))
+        const reopened = core.projectToVwf(saved).nodes.find(node => node.id === 'finish').output
+        assert.equal(reopened[field] || '', action === 'move' ? '$.moved' : '')
+        assert.deepEqual(reopened.schema.properties.final, { ...group, properties: {}, required: [] })
+        assert.ok(reopened.schema.required.includes('final'))
+        const result = { done: true, ...(action === 'move' ? { moved: 'DONE' } : {}) }
+        assert.equal(core.instanceValid(reopened.schema, { ...result, final: { other: 42 } }), true)
+        assert.equal(core.instanceValid(reopened.schema, result), false, '原来要求的业务组仍必填')
+        assert.deepEqual(bp, before)
+      })
+    }
+  }
+}
+
+test('WFM-83 两种映射清空深层叶子时保留兄弟、其余 required 和共享字段', () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    for (const shared of [false, true]) {
+      const n = seed()
+      const other = field === 'outcomePath' ? 'completionPath' : 'outcomePath'
+      n.output[field] = '$.final.details.reason'
+      if (shared) n.output[other] = n.output[field]
+      n.output.schema.required.push('final')
+      n.output.schema.properties.final = { type: 'object', required: ['details', 'evidence'], properties: {
+        details: { type: 'object', required: ['reason', 'audit'], additionalProperties: { type: 'string' }, properties: {
+          reason: { type: 'string', enum: ['DONE'] },
+        } },
+        evidence: { type: 'string' },
+      } }
+      const before = clone(n)
+      const out = ui.applyRoutingWrite(n, '', undefined, field)
+      assert.ok(!out[field])
+      assert.equal(out[other], before.output[other])
+      const final = out.schema.properties.final
+      assert.deepEqual(final.required, ['details', 'evidence'])
+      assert.deepEqual(final.properties.evidence, before.output.schema.properties.final.properties.evidence)
+      assert.deepEqual(final.properties.details, shared ? before.output.schema.properties.final.properties.details : {
+        type: 'object', required: ['audit'], additionalProperties: { type: 'string' }, properties: {},
+      })
+      assert.deepEqual(out.schema.properties.result, before.output.schema.properties.result)
+      assert.deepEqual(n, before)
+    }
+  }
+})
+
+test('WFM-83 清空两种映射仍递归删除真正的空分组并保留其它字段', () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    const n = seed()
+    n.output[field] = '$.final.details.reason'
+    n.output.schema.required.push('final')
+    n.output.schema.properties.final = { type: 'object', additionalProperties: false, required: ['details'], properties: {
+      details: { type: 'object', description: '普通空组', additionalProperties: false, required: ['reason'], properties: {
+        reason: { type: 'string', enum: ['DONE'] },
+      } },
+    } }
+    const before = clone(n)
+    const out = ui.applyRoutingWrite(n, '', undefined, field)
+    assert.equal(out.schema.properties.final, undefined)
+    assert.deepEqual(out.schema.required, ['result', 'summary'])
+    assert.deepEqual(out.schema.properties.result, before.output.schema.properties.result)
+    assert.deepEqual(n, before)
+  }
+})
+
+test('WFM-83 数组的独立约束和空 items 中的业务约束不能随映射清空', () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    for (const kind of ['items', 'array', 'bare']) {
+      const n = seed()
+      n.output[field] = '$.final.reason'
+      n.output.schema.required.push('final')
+      n.output.schema.properties.final = { type: 'array', items: {
+        type: 'object', required: ['reason'], properties: { reason: { type: 'string', enum: ['DONE'] } },
+        ...(kind === 'items' ? { additionalProperties: { type: 'string' } } : kind === 'bare' ? { additionalProperties: false } : {}),
+      }, ...(kind === 'array' ? { maxItems: 2 } : {}) }
+      const before = clone(n)
+      const out = ui.applyRoutingWrite(n, '', undefined, field)
+      assert.deepEqual(out.schema.properties.final, { ...before.output.schema.properties.final, items: {
+        ...before.output.schema.properties.final.items, required: [], properties: {},
+      } })
+      assert.ok(out.schema.required.includes('final'))
+      assert.deepEqual(n, before)
+    }
+  }
+})
+
+test('WFM-83 无 type 的封闭组仍允许非对象数据，清空映射不能删除该组', () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    const n = seed()
+    n.output[field] = '$.final.reason'
+    n.output.schema.required.push('final')
+    n.output.schema.properties.final = { additionalProperties: false, required: ['reason'], properties: {
+      reason: { type: 'string', enum: ['DONE'] },
+    } }
+    const before = clone(n)
+    const out = ui.applyRoutingWrite(n, '', undefined, field)
+    assert.deepEqual(out.schema.properties.final, { additionalProperties: false, required: [], properties: {} })
+    assert.ok(out.schema.required.includes('final'))
+    assert.equal(core.instanceValid(out.schema, { result: { decision: 'DONE', completion: 'DELIVERED', evidence: 'ok' }, summary: 'ok', final: 'other' }), true)
+    assert.deepEqual(n, before)
+  }
+})
+
+test('WFM-83 组合约束仍引用旧字段时拒绝清空或迁移，避免制造不可满足的 schema', () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    for (const constraint of [
+      { allOf: [{ properties: { reason: { type: 'string' } }, required: ['reason'] }] },
+      { anyOf: [{ required: ['reason'] }, { properties: { audit: { type: 'string' } } }] },
+      { not: { properties: { reason: { const: 'BLOCKED' } } } },
+      { enum: [{ reason: 'DONE' }] },
+    ]) {
+      const n = seed()
+      n.output[field] = '$.final.reason'
+      n.output.schema.required.push('final')
+      n.output.schema.properties.final = { type: 'object', additionalProperties: false, required: ['reason'], properties: {
+        reason: { type: 'string', enum: ['DONE'] },
+      }, ...constraint }
+      const before = clone(n)
+      for (const next of ['', 'other']) {
+        assert.equal(ui.applyRoutingWrite(n, next, undefined, field), n.output, '有歧义时原对象返回，界面可提示未应用')
+      }
+      assert.deepEqual(n, before)
+    }
+  }
+})
 
 test('WFM-83 R2 已有目标叶子与同路径写入各自保留元数据；无效修改返回原 output', () => {
   for (const field of ['outcomePath', 'completionPath']) {
@@ -160,6 +361,34 @@ test('WFM-83 A1 对象数组终点及穿过标量的路径不能破坏 schema', 
   }
 })
 
+test('WFM-83 原型继承键不能被误当作新路径，显式声明的同名字段仍可选择', () => {
+  for (const field of ['outcomePath', 'completionPath']) {
+    const n = seed(), before = clone(n)
+    for (const path of ['__proto__.polluted', 'constructor.prototype.polluted', 'toString.value', 'result.__proto__.polluted', 'result.constructor.value']) {
+      assert.equal(ui.applyRoutingWrite(n, path, ['DONE'], field), n.output, path + ' 被拒绝')
+    }
+    assert.deepEqual(n, before)
+    for (const path of ['new_group.new_field', 'new_group.prototype']) {
+      const ordinary = ui.applyRoutingWrite(n, path, undefined, field)
+      assert.equal(ordinary[field], '$.' + path)
+      assert.deepEqual(core.schemaLeafAt(ordinary.schema, path.split('.')), core.schemaLeafAt(n.output.schema, core.parseJsonPath(n.output[field])))
+    }
+    assert.deepEqual(n, before)
+    for (const name of ['__proto__', 'constructor', 'toString']) {
+      const own = seed()
+      own.output.schema.properties = JSON.parse('{"' + name + '":{"type":"object","properties":{"reason":{"type":"string","enum":["DONE"]}},"required":["reason"]}}')
+      delete own.output[field === 'outcomePath' ? 'completionPath' : 'outcomePath']
+      own.output[field] = ''
+      const out = ui.applyRoutingWrite(own, name + '.reason', undefined, field)
+      assert.equal(out[field], '$.' + name + '.reason')
+      assert.deepEqual(JSON.parse(JSON.stringify(out.schema.properties))[name], own.output.schema.properties[name])
+      const updated = ui.applyRoutingWrite(own, name + '.reason', ['CUSTOM'], field)
+      assert.deepEqual(JSON.parse(JSON.stringify(updated.schema.properties))[name].properties.reason.enum, ['CUSTOM'])
+      assert.deepEqual(own.output.schema.properties[name].properties.reason.enum, ['DONE'])
+    }
+  }
+})
+
 test('WFM-83 A1 给已映射的对象数组或非枚举数值加取值不能将其收成 string', () => {
   for (const field of ['outcomePath', 'completionPath']) {
     for (const target of [{ type: 'object', properties: {} }, { type: 'array', items: { type: 'string' } }, { type: 'number' }]) {
@@ -200,7 +429,12 @@ test('WFM-83 A2 带元数据的空容器递归清理及 required 同步，业务
         const moved = ui.applyRoutingWrite(n, 'completion_type', undefined, field)
         assert.deepEqual(moved.schema.properties.completion_type, before.output.schema.properties.final.properties.details.properties.reason)
         assert.deepEqual(moved.schema.properties.result, before.output.schema.properties.result, '未迁移的业务分组完整保留')
-        if (keepSibling) {
+        if (metadata.additionalProperties !== false) {
+          const details = { type: 'object', ...metadata, required: [], properties: {} }
+          const properties = { details, ...(keepSibling ? { evidence: before.output.schema.properties.final.properties.evidence } : {}) }
+          assert.deepEqual(moved.schema.properties.final, { type: 'object', ...metadata, required: Object.keys(properties), properties }, '默认开放容器仍可承载其它字段')
+          assert.ok(moved.schema.required.includes('final'))
+        } else if (keepSibling) {
           assert.deepEqual(moved.schema.properties.final, { type: 'object', ...metadata, required: ['evidence'], properties: { evidence: before.output.schema.properties.final.properties.evidence } })
           assert.ok(moved.schema.required.includes('final'), '还有业务字段的父级仍必填')
         } else {
@@ -215,7 +449,7 @@ test('WFM-83 A2 带元数据的空容器递归清理及 required 同步，业务
   }
 })
 
-test('WFM-83 A2 数组 items 还有业务兄弟时保留，迁出最后叶子后才清理数组及 required', () => {
+test('WFM-83 A2 数组 items 迁出映射后仍保留数组约束、required 和业务兄弟', () => {
   for (const keepSibling of [false, true]) {
     const n = seed()
     n.output.completionPath = '$.final.reason'
@@ -237,8 +471,10 @@ test('WFM-83 A2 数组 items 还有业务兄弟时保留，迁出最后叶子后
       } })
       assert.ok(moved.schema.required.includes('final'))
     } else {
-      assert.equal(moved.schema.properties.final, undefined)
-      assert.ok(!moved.schema.required.includes('final'))
+      assert.deepEqual(moved.schema.properties.final, { type: 'array', minItems: 1, description: '收口结果', items: {
+        type: 'object', additionalProperties: false, required: [], properties: {},
+      } })
+      assert.ok(moved.schema.required.includes('final'))
     }
     assert.deepEqual(moved.schema.properties.result, before.output.schema.properties.result)
     assert.deepEqual(n, before)
@@ -315,3 +551,59 @@ test('WFM-83 编辑已有错误 required 不抛异常，沿用旧编辑器的数
   assert.deepEqual(out.schema.required, ['result'])
   assert.deepEqual(out.schema.properties.result.properties.decision.enum, ['DONE'])
 })
+
+for (const field of ['outcomePath', 'completionPath']) {
+  for (const kind of ['additionalProperties', 'additionalPropertiesTrue', 'allOf', 'allOfUnrelatedEnum', 'allOfUnrelatedConst']) {
+    test(`WFM-83 清空 ${field} 保留 ${kind} 业务约束和完整蓝图往返`, () => {
+      const bp = JSON.parse(readFileSync(new URL('../../../scripts/test/fixtures/hello-blueprint.json', import.meta.url), 'utf8'))
+      const n = bp.nodes.find(node => node.id === 'finish')
+      const group = { type: 'object', description: '业务结果', required: ['reason'], properties: { reason: { type: 'string', enum: ['DONE'] } } }
+      if (kind === 'additionalProperties') group.additionalProperties = { type: 'string' }
+      else if (kind === 'additionalPropertiesTrue') group.additionalProperties = true
+      else {
+        group.allOf = [{ properties: { audit: { type: 'string', ...(kind === 'allOfUnrelatedEnum' ? { enum: ['reason'] } : kind === 'allOfUnrelatedConst' ? { const: 'reason' } : {}) } }, required: ['audit'] }]
+        bp.protocol = { version: '1.0', required_capabilities: ['type', 'properties', 'required', 'additionalProperties', 'enum', 'allOf'] }
+        if (kind === 'allOfUnrelatedConst') bp.protocol.required_capabilities.push('const')
+        bp.nodes.find(node => node.id === 'dispatch').output.schema.allOf = [{ type: 'object' }]
+      }
+      n.output[field] = '$.final.reason'
+      n.output.schema.properties.final = group
+      n.output.schema.required.push('final')
+      if (field === 'outcomePath') {
+        const edge = bp.edges.find(edge => edge.from === 'finish')
+        delete edge.on
+        edge.outcome = 'DONE'
+      }
+      const before = clone(bp)
+      const validBefore = core.validateBlueprint(bp)
+      assert.equal(validBefore.ok, true, JSON.stringify(validBefore.errors))
+      const initialFinal = kind.startsWith('additionalProperties') ? { reason: 'DONE', other: kind === 'additionalPropertiesTrue' ? 1 : 'ok' } : { reason: 'DONE', audit: kind.startsWith('allOfUnrelated') ? 'reason' : 'ok' }
+      assert.equal(core.instanceValid(n.output.schema, { done: true, final: initialFinal }), true, '清空前的真实实例合法')
+      const dsl = core.projectToVwf(bp)
+      const editable = dsl.nodes.find(node => node.id === 'finish')
+      const prior = editable.output
+      editable.output = ui.applyRoutingWrite(editable, '', undefined, field)
+      assert.notEqual(editable.output, prior, '合法清空不能因其它字段的枚举值同名而被拒绝')
+      // 清空业务路由后，由调用方同时把业务出边改为普通成功边。
+      if (field === 'outcomePath') {
+        const edge = dsl.edges.find(edge => edge.from === 'finish')
+        delete edge.outcome
+        edge.on = 'success'
+      }
+      const saved = core.projectToBlueprint(dsl)
+      const validAfter = core.validateBlueprint(saved)
+      assert.equal(validAfter.ok, true, JSON.stringify(validAfter.errors))
+      const reopened = core.projectToVwf(saved).nodes.find(node => node.id === 'finish').output
+      assert.ok(!reopened[field], '映射已清除')
+      assert.deepEqual(reopened.schema.properties.final, { ...group, required: [], properties: {} })
+      assert.deepEqual(reopened.schema.required, ['done', 'final'])
+      assert.deepEqual(reopened.schema.properties.done, before.nodes.find(node => node.id === 'finish').output.schema.properties.done)
+      const good = kind === 'additionalProperties' ? { other: 'ok' } : kind === 'additionalPropertiesTrue' ? { other: 1 } : { audit: kind.startsWith('allOfUnrelated') ? 'reason' : 'ok' }
+      const bad = kind === 'additionalProperties' ? { other: 1 } : kind === 'additionalPropertiesTrue' ? 'not an object' : { audit: 1 }
+      assert.equal(core.instanceValid(reopened.schema, { done: true, final: good }), true, '保留的业务结果仍可使用')
+      assert.equal(core.instanceValid(reopened.schema, { done: true, final: bad }), false, '保留的业务约束仍会拒绝不合格结果')
+      assert.equal(core.instanceValid(reopened.schema, { done: true }), false, '有业务意义的必填分组不能消失')
+      assert.deepEqual(bp, before, '编辑不改变输入蓝图')
+    })
+  }
+}
