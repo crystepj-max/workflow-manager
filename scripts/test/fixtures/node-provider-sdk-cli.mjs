@@ -6,6 +6,10 @@ const log = (entry) => appendFileSync(process.env.WFM_FIXTURE_LOG, JSON.stringif
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n')
 let initializeTimer
 
+// 只模拟迟到的准备阶段，不模拟操作系统或归因磁盘 I/O；实际等待不使用父进程虚拟时钟。
+if (process.env.WFM_FIXTURE_MODE === 'slow-boot-never') await new Promise((resolve) => setTimeout(resolve, 6000))
+if (process.env.WFM_FIXTURE_MODE === 'never-boot') await new Promise((resolve) => setTimeout(resolve, 30000))
+
 log({ event: 'boot', mode: process.env.WFM_FIXTURE_MODE, argv: process.argv.slice(2) })
 process.on('exit', (code) => log({ event: 'exit', code }))
 process.on('SIGTERM', () => {
@@ -18,7 +22,7 @@ lines.on('line', (line) => {
   const request = JSON.parse(line)
   log({ event: 'request', method: request.method, id: request.id })
   if (request.method === 'initialize') {
-    if (process.env.WFM_FIXTURE_MODE === 'never') return
+    if (process.env.WFM_FIXTURE_MODE === 'slow-boot-never') return
     const delay = process.env.WFM_FIXTURE_MODE === 'over-limit' ? 60001 : 11000
     initializeTimer = setTimeout(() => {
       log({ event: 'initialize-reply', delay })
