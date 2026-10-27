@@ -3,7 +3,7 @@
 > 状态：统一审查定稿基线  
 > 日期：2026-08-30  
 > 范围：建设 / 优化 / 诊断 / 探索四套正式工作流，以及共享 Blueprint、Logical Run、角色、版本、人工交互、模型配置和执行入口能力。
-> UI 范围与状态补注（2026-10-22）：本文保留 Target 语义；DT-00=C、DT-01=A、DT-02=B、DT-03=A 的正式裁定、当前归属和实现核对见 [`workflow-ui-v0.1-decisions.md`](workflow-ui-v0.1-decisions.md)。目标条文存在不代表已上线或已获产品验收。
+> UI 范围与状态补注（2026-10-28）：本文保留 Target 语义；DT-00=C、DT-01=A、DT-02=B、DT-03=A 的正式裁定、当前归属和实现核对见 [`workflow-ui-v0.1-decisions.md`](workflow-ui-v0.1-decisions.md)。目标条文存在不代表已上线或已获产品验收。
 
 ## 1. 产品定位
 

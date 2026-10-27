@@ -1,7 +1,9 @@
 # v0.1 UI 产品裁定与归属（正式归档）
 
-> 裁定基线：2026-10-17，DT-00=C、DT-01=A、DT-02=B、DT-03=A。  
-> 实现核对：2026-10-22，main `63bef81ef0a6b67dbf3ed0efba2a48e04c639298`。  
+> 裁定基线：2026-10-17，DT-00=C、DT-01=A、DT-02=B、DT-03=A。
+>
+> 实现核对：2026-10-28，main `1473149f7afc37e91fe14a409a2a34224ee7cf9d`。
+>
 > 归档任务：`WFM-82`（Task UUID `01a0e618-e9af-72a0-b230-c2472e3af510`）。本文记录产品范围、唯一承接和相应实现证据；不代替各任务验收或 [#213 产品模式发布验收](https://github.com/crystepj-max/workflow-manager/issues/213)。
 
 ## 1. 权威边界
@@ -40,7 +42,7 @@ DT-03 只排除观察功能，未取消 P9 对三类信息视角的评估，也�
 | P6 | PAUSED 支持 Run Guidance，多轮沟通形成 Guidance Record 后继续。 |
 | P7 | 支持 Safe Pause 与 Interrupt 两种运行干预。 |
 | P8 | Run Dashboard 围绕 Logical Run，不围绕底层 engine start。 |
-| P9 | Run Detail 至少评估“流程 / Timeline / 成果与证据”三类信息视角；不强制三个页签。 |
+| P9 | Run Detail 至少评估“流程 / Timeline / 成果与证据”三类信息视角。 |
 | P10 | Guidance 若实质改变正式基线，必须升级为 Baseline Revision，不能只作为聊天上下文。 |
 
 Node Business Outcome、Run Lifecycle、Completion Type 分层表达；技术执行完成不等于业务 PASS，控制动作不得改写已形成的专业结果。探索额度耗尽按目标规格 §5 / §9.4 的已确认口径收口为 `COMPLETED / INSUFFICIENT`，保留原 `NEEDS_RESEARCH`，不转人工、不弹决策卡；该结果不可被显示成仍待自动返工。
@@ -57,16 +59,16 @@ Node Business Outcome、Run Lifecycle、Completion Type 分层表达；技术执
 | 4 | 自定义 Workflow 渐进编辑 | 三段编辑器保留；多层字段与完成映射交给 **WFM-83**；FEAT-115 已取消。 | `InspectorTabs` 保持基础 / 结果与去向 / 高级。本基线的结果路径辅助仍限制单层，自定义多层路径及完成映射编辑待 WFM-83 交付；不恢复四段重排。 |
 | 5 | Outcome Preset + 自定义 Outcome | S-2a/S-2b 由 **WFM-446** 交付；自定义多层路径边界仍归 WFM-83。 | [PR #364](https://github.com/crystepj-max/workflow-manager/pull/364) 已合入：优化评价 `$.route`、探索评价 `$.verdict`、建设/诊断 review 路由分别定义；[Preset 数据](outcome-presets.json)、`planOutcomePresetApplication` 与选择器可查。PR 明确保留产品安装/E2E及与 WFM-83 联合回归，本文不代签。 |
 | 6 | Completion Mapping | 内核 / 内置声明为既有能力；自定义可视化声明与路径保真唯一归 **WFM-83**（原 FEAT-114 / #290）。 | [blueprint-schema.md](blueprint-schema.md) 与内置蓝图已有 `completionPath`；本基线缺自定义完成映射编辑入口，待 WFM-83 交付，不凭 GitHub 迁移关闭判完成。 |
-| 7 | Preflight / Snapshot Model 修改 | 既有 Probe / Snapshot 为底座；UI 改模型、Probe、恢复闭环唯一归 **WFM-67**。 | 只能修改当前 Run 的 Provider / Model 并生成 Snapshot Revision；模型替换后的真实恢复待该任务验收，不增加静默备用模型。 |
-| 8 | Logical Run Dashboard | S-4 由 **WFM-451** 交付；具体后续缺陷分别沿现行任务处理。 | [PR #370](https://github.com/crystepj-max/workflow-manager/pull/370) 已合入 [dashboardProjectionOf](../../scripts/dashboard-projection.cjs)、host 摘要和现有列表行：当前节点、最近业务结果、额度、唯一活动快照、最近事件；缺失/歧义保留未知。产品重启/E2E仍待独立留证；基线事件标签修正由 **WFM-463** 跟进，不重做 S-4。 |
-| 9 | Run Detail 三类信息视角 | **#75 保留核实施工承接 / 验收的唯一治理责任**；统一 Timeline 的历史需求源为 [LOC-016 V2 §7.1.2](../tasks/specs/LOC-016-logical-run-ui/task-spec-V2.md)，不是当前任务状态。 | main 已有结果/检查/活动、成果与记录；`renderActivityTab` 按事件类别显示，`chainEntries` 按节点展开，不能当作跨 Snapshot / Probe / Decision / Guidance 按时间合并的 Timeline。尚未核实该缺口的现行施工任务；不猜号、不在 WFM-82 新增 UI 施工或重复立卡。 |
+| 7 | Preflight / Snapshot Model 修改 | 既有 Probe / Snapshot 为底座；UI 改模型、Probe、恢复闭环唯一归 **WFM-67**。 | 运行中仅允许修改 Provider / Model 并生成 Snapshot Revision 是目标约束。main 的 `wf_run` 已有 `model_overrides`、快照修订和 Probe 底座；恢复卡仅编辑草稿，`rdBlockedSubmit` 仍禁用，UI 改模型 → Probe → 同 Run Resume 待 WFM-67 交付和验收，不增加静默备用模型。 |
+| 8 | Logical Run Dashboard | S-4 由 **WFM-451** 交付；具体后续缺陷分别沿现行任务处理。 | [PR #370](https://github.com/crystepj-max/workflow-manager/pull/370) 已合入 [dashboardProjectionOf](../../scripts/dashboard-projection.cjs)、host 摘要和现有列表行：当前节点、最近业务结果、额度、唯一活动快照、最近事件；缺失/歧义保留未知。**WFM-463** 的 [PR #376](https://github.com/crystepj-max/workflow-manager/pull/376) 已合入：仅 `evaluation_baseline_freeze_requested`、`evaluation_baseline_frozen` 和 `baseline_change` 归类为评价基线，其他未映射事件保留原类型，不把失败、恢复等事件误标为评价基线；该修正有其限定范围的产品验证。S-4 全场景与 #213 发布验收仍须另按证据核对。 |
+| 9 | Run Detail 三类信息视角 | **#75 保留父票 / 索引，现行施工承接与验收待核实**；统一 Timeline 的历史需求源为 [LOC-016 V2 §7 的 1.2 时间线](../tasks/specs/LOC-016-logical-run-ui/task-spec-V2.md#7-功能范围)，不是当前任务状态。 | main 已有结果/检查/活动、成果与记录；`renderActivityTab` 按事件类别显示，`chainEntries` 按节点展开，不能当作跨 Snapshot / Probe / Decision / Guidance 按时间合并的 Timeline。尚未核实该缺口的现行施工任务；不猜号、不在 WFM-82 新增 UI 施工或重复立卡。 |
 | 10 | PAUSED / Guidance | 既有控制与记录能力；P6/P7/P10 为持续回归边界。 | 暂停、Interrupt、指导记录和基线修订主体可在 `renderControlCard` / `renderPausedCard`、`vwf.run.control` 查到。真实控制路径按现有产品验收执行；不以“活动”分类列表替代统一 Timeline。 |
 | 11 | WAITING_HUMAN / Human Decision | 材料呈现为既有能力；提交续跑唯一归 **WFM-67**（原 FEAT-208 / #208）。 | 本基线 `rdDecisionSubmit` 仍禁用；不能称用户可通过 UI 决策续跑。沿原 Logical Run 追加段、提交失败可重试、幂等和来源留痕均由该任务验收。 |
 | 12 | BLOCKED / 模型替换 / Probe / Resume | 恢复卡呈现为既有能力；提交闭环唯一归 **WFM-67**。 | 本基线 `rdBlockedSubmit` 仍禁用；改模型 → Probe → 同 Run Resume 待交付。既有控制同 Runtime 原则不因 DT-01=A 取消。 |
 | 13 | 完成终态与 Observing | 已有 COMPLETED / STOPPED / FAILED 和真实 Completion Type 按对应产品证据验收；观察功能按 **DT-03=A** 排除。 | `OBSERVING` / `COMPLETED_OBSERVING` 没有本版正式生产者或 UI 交付；长期语义保留，当前未交付、不纳入验收，S-5 已取消。不得以新增 Lifecycle、手动标记或模拟结果补空验收项。 |
 | 14 | #54–#57 局部 UX 归属 | 保留既有局部 UX 的历史交付和回归责任，不由 #75 整体重做。 | [#54](https://github.com/crystepj-max/workflow-manager/issues/54)、[#55](https://github.com/crystepj-max/workflow-manager/issues/55)、[#56](https://github.com/crystepj-max/workflow-manager/issues/56)、[#57](https://github.com/crystepj-max/workflow-manager/issues/57) 已关闭；代码落点与历史核对见 [历史快照 §7](workflow-ui-interaction-architecture.md)。本次没有重做真机视觉签收；若发现具体回归，附复现沿独立缺陷处理。 |
 
-本轮只更新已确认裁定、交付归属和文档引用。WFM-69 / WFM-70 / WFM-77 / WFM-81 等各自的执行记录、起跑互斥、安装漂移和取证等级工作仍按原任务验收；其候选实现不能替代此表的 main 证据，也不由本归档扩大范围。
+本轮只更新已确认裁定、交付归属和文档引用。WFM-70 的起跑互斥已随 [PR #375](https://github.com/crystepj-max/workflow-manager/pull/375) 合入；WFM-69 / WFM-77 / WFM-81 的执行记录、安装漂移和取证等级工作仍按各自任务验收，其在飞候选不能替代此表的 main 证据，也不由本归档扩大范围。
 
 ## 5. 实现与验收的读取顺序
 
