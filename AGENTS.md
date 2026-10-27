@@ -13,7 +13,7 @@
 
 - `docs/design/workflow-design-principles.md` 是跨版本长期工作流设计原则的方法论权威。
 - `docs/design/workflow-manager-v0.1-final-product-spec.md` 是当前 v0.1 的 Target（目标规格）权威；目标规格不等于 main 已经实现。
-- [`docs/design/workflow-ui-v0.1-decisions.md`](docs/design/workflow-ui-v0.1-decisions.md) 是 #75 已确认 UI 产品裁定、P1–P10 与十四项唯一归属的仓库正式归档入口（DT-00=C、DT-01=A、DT-02=B、DT-03=A）；[GitHub #75](https://github.com/crystepj-max/workflow-manager/issues/75) 保持 Open 的父票和后续决策/归属索引角色。`docs/design/workflow-ui-interaction-architecture.md` 与 2026-09 本地决策票保留历史快照，不作为当前施工清单。归档、代码合入和产品验收分别核对；任务执行状态仍以 Multica 为准。
+- [`docs/design/workflow-ui-v0.1-decisions.md`](docs/design/workflow-ui-v0.1-decisions.md) 是 #75 UI 产品裁定、P1–P10 及十四项归属与待核实边界的仓库正式归档入口（DT-00=C、DT-01=A、DT-02=B、DT-03=A）；[GitHub #75](https://github.com/crystepj-max/workflow-manager/issues/75) 保持 Open 的父票和后续决策/归属索引角色。`docs/design/workflow-ui-interaction-architecture.md` 与 2026-09 本地决策票保留历史快照，不作为当前施工清单。归档、代码合入和产品验收分别核对；任务执行状态仍以 Multica 为准。
 - Current（当前实现）以实际 `main` 为准；`CONTEXT.md` 描述当前实现术语与兼容语义，`templates/` 只定义当前已实现的具体 Workflow。
 - `roadmap.md` 负责版本顺序、实施依赖和阶段主线，不替代产品规格，也不证明某项能力已经进入 main。
 - GitHub Issue / PR 负责具体施工范围、迁移、验收和状态记录，不得反向覆盖长期原则、版本目标规格或已进入 main 的事实。

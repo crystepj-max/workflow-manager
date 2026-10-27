@@ -74,7 +74,7 @@ M2 与 Portable 七阶段关系：**唯一权威** [`m2-vs-portable-delivery.md`
 
 ## UI 产品裁定与实现核对（2026-10-28）
 
-以上能力表保留各自原有核对范围；本次 UI 专项基线为 main `1473149f7afc37e91fe14a409a2a34224ee7cf9d`，不据此宣称全表重新验收。四项已确认 DT、P1–P10、十四项唯一归属、S-2/S-4 已合入与产品验收边界统一见 [`workflow-ui-v0.1-decisions.md`](workflow-ui-v0.1-decisions.md)，本索引不重复维护第二张 UI 对账表。OBSERVING 为本版非目标、未交付，不作 Current 能力。
+以上能力表保留各自原有核对范围；本次 UI 专项基线为 main `1473149f7afc37e91fe14a409a2a34224ee7cf9d`，不据此宣称全表重新验收。四项已确认 DT、P1–P10、十四项归属与待核实边界、S-2/S-4 已合入与产品验收边界统一见 [`workflow-ui-v0.1-decisions.md`](workflow-ui-v0.1-decisions.md)，本索引不重复维护第二张 UI 对账表。OBSERVING 为本版非目标、未交付，不作 Current 能力。
 
 ---
 

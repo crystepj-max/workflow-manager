@@ -172,7 +172,7 @@ Draft PR #70 已关闭且未合并；仅作为 #81/#82 探索素材，不得 reo
 
 ### Phase D — 产品呈现与 UI
 
-- [UI 正式归档](docs/design/workflow-ui-v0.1-decisions.md) 固定 DT-00=C、DT-01=A、DT-02=B、DT-03=A 与十四项唯一归属；#75 保持 Open 的父票/决策索引；
+- [UI 正式归档](docs/design/workflow-ui-v0.1-decisions.md) 记录 DT-00=C、DT-01=A、DT-02=B、DT-03=A 与十四项归属及待核实边界；#75 保持 Open 的父票/决策索引；
 - 模板库 + 画布编辑器继续复用，目标仍包括 Outcome、Completion、Snapshot、Workspace、Human Decision、Logical Run Timeline、Guidance 和成果/证据；是否实现及验收另按 main 和相应证据核对；
 - Preset（WFM-446 / PR #364）与 Run 列表摘要（WFM-451 / PR #370）已合入，正式产品验收另计；Completion Mapping / 多层路径归 WFM-83，原 Run 决策与受阻恢复提交归 WFM-67；
 - 本版新 Run 唯一正式入口为 Skill / Chat，不增加插件起跑按钮；既有 Run 控制/续跑仍进入同一 Runtime；

@@ -1,10 +1,10 @@
-# v0.1 UI 产品裁定与归属（正式归档）
+# v0.1 UI 产品裁定、归属与待核实边界（正式归档）
 
 > 裁定基线：2026-10-17，DT-00=C、DT-01=A、DT-02=B、DT-03=A。
 >
 > 实现核对：2026-10-28，main `1473149f7afc37e91fe14a409a2a34224ee7cf9d`。
 >
-> 归档任务：`WFM-82`（Task UUID `01a0e618-e9af-72a0-b230-c2472e3af510`）。本文记录产品范围、唯一承接和相应实现证据；不代替各任务验收或 [#213 产品模式发布验收](https://github.com/crystepj-max/workflow-manager/issues/213)。
+> 归档任务：`WFM-82`（Task UUID `01a0e618-e9af-72a0-b230-c2472e3af510`）。本文记录产品范围、各项归属、待核实边界和相应实现证据；不代替各任务验收或 [#213 产品模式发布验收](https://github.com/crystepj-max/workflow-manager/issues/213)。
 
 ## 1. 权威边界
 
@@ -47,11 +47,11 @@ DT-03 只排除观察功能，未取消 P9 对三类信息视角的评估，也�
 
 Node Business Outcome、Run Lifecycle、Completion Type 分层表达；技术执行完成不等于业务 PASS，控制动作不得改写已形成的专业结果。探索额度耗尽按目标规格 §5 / §9.4 的已确认口径收口为 `COMPLETED / INSUFFICIENT`，保留原 `NEEDS_RESEARCH`，不转人工、不弹决策卡；该结果不可被显示成仍待自动返工。
 
-## 4. 十四项原完成标准的唯一归属
+## 4. 十四项原完成标准的归属与待核实边界
 
 状态只覆盖文首 main 核对基线。“已合入”表示有 main 代码或 merge 证据；“待产品验收”表示本文未取得对应正式安装/真实使用签收；“待交付”不把在飞候选当成 Current。下表承接的是需求范围，不是新的派工清单。
 
-| 原编号 | 范围 | 唯一承接 / 现有边界 | Current 与待验事项 |
+| 原编号 | 范围 | 归属与待核实边界 | Current 与待验事项 |
 |---|---|---|---|
 | 1 | Built-in / Custom 模板信息架构 | 既有模板库；#75 仅保留 P1–P3 回归约束。 | 分区、内置只读和复制为 Custom 的主体已在 main；[PR #361](https://github.com/crystepj-max/workflow-manager/pull/361) 已删除旧 `default-workflow` / `dev-workflow-2-0` / `dispatcher`，不恢复为 Custom。代码见 [client.js](../../packages/dsh-visual-workflow/src/client.js) 与 [四模板真源](../../templates/)。本归档未重做产品回归。 |
 | 2 | Skill / Chat / 插件 Invocation 关系 | DT-01=A；S-1 已取消。 | 新 Run 由 Skill / Chat 经 `wf_run` 进入同一 Runtime；既有 Run 控制/续跑不在取消范围。正式入口说明见 [dsh/README.md](../../dsh/README.md)。本版不交付插件起跑按钮。 |
@@ -73,7 +73,7 @@ Node Business Outcome、Run Lifecycle、Completion Type 分层表达；技术执
 ## 5. 实现与验收的读取顺序
 
 1. 先看本文 §2 / §3，确认本版本的产品范围与持续规则。
-2. 再看 §4 对应唯一承接及 live Multica Task；合入事实以相应 GitHub PR / main 为证，迁移源票的 CLOSED 仅是迁移记录。
+2. 再看 §4 对应归属与待核实边界，已明确的承接再查 live Multica Task；合入事实以相应 GitHub PR / main 为证，迁移源票的 CLOSED 仅是迁移记录。
 3. 需要字段契约时看 [`blueprint-schema.md`](blueprint-schema.md)；需要具体蓝图时看 `templates/*.json`；不得用历史设计快照覆盖 Current 或 Target。
 4. 发布仍按 [`AGENTS.md`](../../AGENTS.md) 与 [#213](https://github.com/crystepj-max/workflow-manager/issues/213) 的产品模式证据逐项验收；单一模板成功、机器测试或本文归档均不能代签四模板发布。
 

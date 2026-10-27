@@ -249,7 +249,7 @@ Draft PR #70 已关闭且未合并；`feat/multi-perspective-exploration` 仅作
 
 当前真实路径仍是：模板库 -> 编辑器 -> 保存生成/更新 Skill -> Chat 调用 Skill。
 
-UI 产品裁定与唯一归属见 [`workflow-ui-v0.1-decisions.md`](workflow-ui-v0.1-decisions.md)；[#75](https://github.com/crystepj-max/workflow-manager/issues/75) 保持 Open 的父票及后续决策索引。必须保证 Lifecycle / Node Outcome / Completion Type 分层表达；一个 Logical Run 跨多个 Execution Segment 仍显示为一个 Run；Chat / Skill / 插件入口共享同一 Runtime。
+UI 产品裁定、归属与待核实边界见 [`workflow-ui-v0.1-decisions.md`](workflow-ui-v0.1-decisions.md)；[#75](https://github.com/crystepj-max/workflow-manager/issues/75) 保持 Open 的父票及后续决策索引。必须保证 Lifecycle / Node Outcome / Completion Type 分层表达；一个 Logical Run 跨多个 Execution Segment 仍显示为一个 Run；Chat / Skill / 插件入口共享同一 Runtime。
 
 实现核对基线见正式归档文首：Preset（WFM-446 / PR #364）与看板摘要（WFM-451 / PR #370）已合入，正式安装/真实使用验收另计；自定义 Completion Mapping / 多层路径由 WFM-83 承接，人工决定与受阻恢复提交由 WFM-67 承接。FEAT-115 四段重排、S-1 起跑入口、S-5 观察功能已取消。
 
@@ -281,7 +281,7 @@ UI 产品裁定与唯一归属见 [`workflow-ui-v0.1-decisions.md`](workflow-ui-
 
 ### Phase D — UI
 
-- [UI 正式归档](workflow-ui-v0.1-decisions.md) 固定已确认范围和十四项唯一承接；#75 保留父票/索引，各施工与验收沿现行 Multica Task，不再以四项 DT 未决为前置阻塞。
+- [UI 正式归档](workflow-ui-v0.1-decisions.md) 归档已确认范围、十四项归属与待核实边界；#75 保留父票/索引，已明确承接的施工与验收沿相应 Multica Task，不再以四项 DT 未决为前置阻塞。
 
 ## 13. 发布门槛
 
