@@ -75,6 +75,10 @@ return {
     const slots = ctx.get('slots')
     if (slots === undefined) return
 
+    // 共用类名常量减少动态载荷，实际 class 保持不变。
+    const smallButtonClass = 'vwf-btn sm', monoInputClass = 'vwf-input vwf-mono'
+    const fieldLabelClass = 'vwf-field-label', rowClass = 'vwf-row', badgeClass = 'vwf-badge'
+
     // ── i18n：文案不进闭包。启动时按当前语言向宿主拉取 locales/<locale>.json ──
     let localeService
     try { localeService = ctx.get('locale') } catch (e) { localeService = undefined }
@@ -549,7 +553,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // body / footer 都逐个展开为子节点（不传数组也不包一层容器），
       // 与原「标题、说明、正文、页脚同为大工作区层的直接子节点」的 DOM 形态一致。
       ...(o.body || []),
-      h('div', { className: 'vwf-row', style: o.gap ? { justifyContent: 'flex-end', gap: 8 } : { justifyContent: 'flex-end' } }, ...(o.footer || []))
+      h('div', { className: rowClass, style: o.gap ? { justifyContent: 'flex-end', gap: 8 } : { justifyContent: 'flex-end' } }, ...(o.footer || []))
     ))
     // 大工作区层 dialog 的公共属性（详情 / 编辑器 / 模型覆盖三处打开层共用）。
     // onClose 与「点遮罩 / Esc」的关闭不同：详情层只在自己仍处于详情视图时回列表。
@@ -988,7 +992,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     function Field(props) {
       const errs = props.errors || []
       return h('div', { className: 'vwf-field' },
-        h('div', { className: 'vwf-field-label' + (errs.length ? ' err' : '') },
+        h('div', { className: fieldLabelClass + (errs.length ? ' err' : '') },
           h('span', null, props.label),
           props.help ? h(HelpDot, { text: props.help }) : null,
           props.required ? h('span', { className: 'req' }, '*') : null
@@ -1481,9 +1485,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       }
       return h('div', { className: 'vwf-subsection' },
         h(Field, { label, help: t('artifactFilesHelp'), errors: errorsFor('output.files') },
-          entries.length ? entries.map(([path, kind]) => h('div', { key: path, className: 'vwf-row', style: { gap: 6, marginBottom: 6, flexWrap: 'wrap' } },
+          entries.length ? entries.map(([path, kind]) => h('div', { key: path, className: rowClass, style: { gap: 6, marginBottom: 6, flexWrap: 'wrap' } },
             h('input', {
-              className: 'vwf-input vwf-mono', style: { flex: 2, minWidth: 140 }, value: path, placeholder: 'contract.md',
+              className: monoInputClass, style: { flex: 2, minWidth: 140 }, value: path, placeholder: 'contract.md',
               disabled: !!props.readOnly,
               onChange: (ev) => updateEntry(path, ev.target.value, kind),
             }),
@@ -1495,7 +1499,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             }),
             props.readOnly ? null : h('button', { className: 'vwf-btn sm danger', type: 'button', onClick: () => removeEntry(path) }, t('removeArtifact'))
           )) : mutedDiv('—'),
-          props.readOnly ? null : h('button', { className: 'vwf-btn sm', type: 'button', style: { marginTop: 6 }, onClick: addEntry }, t('addArtifact'))
+          props.readOnly ? null : h('button', { className: smallButtonClass, type: 'button', style: { marginTop: 6 }, onClick: addEntry }, t('addArtifact'))
         )
       )
     }
@@ -1569,7 +1573,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('span', { className: 'vwf-wb-step-seq' }, seqLabels[id] != null ? String(seqLabels[id]) : '·'),
             h('span', { className: 'vwf-wb-step-label' }, node.label || id),
             summaryIds[id] ? h('span', { className: 'vwf-badge accent' }, t('wbSummaryBadge')) : null,
-            node.kind === 'fanout' ? h('span', { className: 'vwf-badge' }, t('wbParallelBadge')) : null,
+            node.kind === 'fanout' ? h('span', { className: badgeClass }, t('wbParallelBadge')) : null,
             node.profile ? h('span', { className: 'vwf-wb-step-role' }, node.profile) : null
           )
         }),
@@ -1631,7 +1635,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 className: 'vwf-wb-conn-row' + (props.selectedEdgeIndex === i ? ' on' : ''),
                 onClick: () => props.onPickEdge(i),
               },
-                h('span', { className: 'vwf-row', style: { gap: 6, flexWrap: 'nowrap' } },
+                h('span', { className: rowClass, style: { gap: 6, flexWrap: 'nowrap' } },
                   h('span', { className: 'vwf-wb-conn-kind ' + cls }, g.label),
                   h('span', { className: 'vwf-wb-conn-route' }, nodeLabel(e.from) + ' → ' + nodeLabel(e.to))
                 ),
@@ -1712,7 +1716,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       return h('div', { 'data-vwf-mapping': field },
         h(Field, { label, required: !completion, help: t(completion ? 'completionHelp' : 'routingFieldNameHelp'), errors },
           ro ? h('div', { className: 'vwf-mono' }, pathDraft || t('completionUndeclared')) : h('input', {
-            className: 'vwf-input vwf-mono', 'aria-label': label, value: pathDraft,
+            className: monoInputClass, 'aria-label': label, value: pathDraft,
             placeholder: completion ? 'result.completion_type' : 'route', list: listId,
             onChange: (ev) => { setPathDraft(ev.target.value); props.onDirty(true) },
             onBlur: () => {
@@ -1726,27 +1730,27 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         mutedDiv(t(completion ? 'completionHelp' : 'routingFieldNameHint')),
         shared ? mutedDiv(t('mappingShared')) : null,
         !name ? mutedDiv(t(out[field] ? 'mappingInvalid' : completion ? 'completionUndeclared' : 'routingNeedFieldName')) : h('div', { className: 'vwf-field' },
-          h('div', { className: 'vwf-field-label' }, t(completion ? 'completionValues' : 'routingValues')),
+          h('div', { className: fieldLabelClass }, t(completion ? 'completionValues' : 'routingValues')),
           values.map((v, i) => {
             const st = status.values.find(x => x.value === v)
             const state = st ? st.state : 'missing'
             const dest = completion ? [] : (dsl.edges || []).filter(e => e && e.from === node.id && String(e.outcome == null ? '' : e.outcome) === String(v).trim())
             return h('div', { key: i, className: 'vwf-row ' + (completion ? 'vwf-completion-row' : 'vwf-routing-row'), style: { marginTop: 4 } },
               ro ? h('span', { className: 'vwf-mono' }, v) : h('input', {
-                className: 'vwf-input vwf-mono', value: v, placeholder: 'pass', disabled: !!isBoolean,
+                className: monoInputClass, value: v, placeholder: 'pass', disabled: !!isBoolean,
                 onChange: (ev) => { const next = values.slice(); next[i] = ev.target.value; setValues(next); setDirty(true); props.onDirty(true) },
                 onBlur: () => { if (dirty) write(name, values) },
               }),
               completion ? null : h('span', { className: 'vwf-routing-badge', title: t(state === 'ok' ? 'routingEdgeExists' : state === 'duplicated' ? 'routingEdgeDuplicated' : 'routingEdgeMissing') }, state === 'ok' ? '✅' : state === 'duplicated' ? '❗' : '⚠️'),
               completion ? null : h('span', { className: 'vwf-wb-outcome-to', style: { flex: '0 1 auto', minWidth: 0 } }, dest.length ? '→ ' + dest.map(e => props.nodeLabelOf(e.to)).join('、') : t('wbOutcomeNoTarget')),
-              !completion && state !== 'ok' && props.onAddOutcomeEdge && !ro ? h('button', { className: 'vwf-btn sm', onClick: () => props.onAddOutcomeEdge(node.id, v) }, t('routingAddEdge')) : null,
+              !completion && state !== 'ok' && props.onAddOutcomeEdge && !ro ? h('button', { className: smallButtonClass, onClick: () => props.onAddOutcomeEdge(node.id, v) }, t('routingAddEdge')) : null,
               ro || isBoolean ? null : h('button', { className: 'vwf-btn sm ghost', title: t('routingRemoveValue'), onClick: () => {
                 if (st && st.state !== 'missing') { setNotice(t('routingRemoveBlocked')); return }
                 write(name, values.filter((_, j) => j !== i))
               } }, '−')
             )
           }),
-          ro || isBoolean ? null : h('button', { className: 'vwf-btn sm', style: { marginTop: 6 }, onClick: () => { setValues(values.concat([''])); setDirty(true); props.onDirty(true) } }, '＋ ' + t('routingAddValue')),
+          ro || isBoolean ? null : h('button', { className: smallButtonClass, style: { marginTop: 6 }, onClick: () => { setValues(values.concat([''])); setDirty(true); props.onDirty(true) } }, '＋ ' + t('routingAddValue')),
           !values.length ? mutedDiv(t(completion ? 'completionNoValues' : 'routingValuesEmpty')) : null,
           isBoolean && !completion ? mutedDiv(t('routingBooleanUnsupported')) : null,
           status.undeclared.length ? errLine(t('routingUndeclaredEdges') + status.undeclared.map(x => x.value + ' → ' + x.to).join('、')) : null
@@ -1891,7 +1895,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             onBlur: () => { if (!props.readOnlyStructure && schemaDirty) { commitSchema(schemaDraft); setSchemaDirty(false) } },
           }),
           props.readOnlyStructure ? null : h('button', {
-            className: 'vwf-btn sm', title: t('outputSchemaBeautify'),
+            className: smallButtonClass, title: t('outputSchemaBeautify'),
             style: { position: 'absolute', right: 6, top: 6 },
             onMouseDown: (ev) => ev.preventDefault(),
             onClick: beautifySchema,
@@ -1973,7 +1977,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const outEdges = (dsl.edges || []).map((e, i) => ({ e, i })).filter(x => x.e && x.e.from === node.id)
       const outgoingKindLabel = (cls) => cls === 'retry' ? t('wbConnRetry') : cls === 'loop' ? t('wbConnLoop') : t('wbConnNormal')
       const outgoingBlock = h('div', { className: 'vwf-field', style: { marginTop: 10 } },
-        h('div', { className: 'vwf-field-label' }, t('wbOutgoing'),
+        h('div', { className: fieldLabelClass }, t('wbOutgoing'),
           h('span', { className: 'vwf-help', title: t('wbOutgoingHelp') }, '?')),
         outEdges.length
           ? outEdges.map(({ e, i }) => {
@@ -1986,7 +1990,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               key: i, type: 'button', className: 'vwf-wb-outcome-row',
               onClick: () => { if (props.onPickEdge) props.onPickEdge(i) },
             },
-              h('span', { className: 'vwf-row', style: { gap: 6, flexWrap: 'nowrap' } },
+              h('span', { className: rowClass, style: { gap: 6, flexWrap: 'nowrap' } },
                 h('span', { className: 'vwf-wb-conn-kind ' + cls }, outgoingKindLabel(cls)),
                 h('span', { className: 'vwf-wb-outcome-name' }, nodeLabelOf(e.to))
               ),
@@ -2077,7 +2081,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           resultMode === 'manual' ? mutedDiv(t('manualCheckDescription'), { marginTop: 6 }) : null,
           resultMode === 'routing' ? mutedDiv(t('resultModeRoutingDescription'), { marginTop: 6 }) : null,
           resultMode === 'routing' && !ro ? h('div', { className: 'vwf-field', style: { marginTop: 6 } },
-            h('div', { className: 'vwf-field-label' }, t('presetSelectorLabel')),
+            h('div', { className: fieldLabelClass }, t('presetSelectorLabel')),
             presets === null
               ? mutedDiv(t('presetUnavailable'))
               : h('select', { className: 'vwf-input', value: presetId, onChange: (ev) => { setPresetId(ev.target.value); setPresetConfirming(false) } },
@@ -2105,7 +2109,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 presetPlan.status === 'DIRECT' || presetPlan.status === 'CONFIRM'
                   ? (presetConfirming
                     ? h('div', { style: { marginTop: 6 } },
-                      h('div', { className: 'vwf-field-label' }, t('presetConfirmTitle')),
+                      h('div', { className: fieldLabelClass }, t('presetConfirmTitle')),
                       mutedDiv(t('presetConfirmBody', {
                         before: (diff && diff.before) || '—', after: (diff && diff.after) || '—',
                         added: enumDiff && enumDiff.added.length ? enumDiff.added.join('、') : '—',
@@ -2114,9 +2118,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                       mutedDiv(t('presetEdgesUntouched')),
                       mutedDiv(t('presetCompletionUntouched')),
                       h('div', { className: 'vwf-confirm-actions', style: { marginTop: 6 } },
-                        h('button', { className: 'vwf-btn sm', onClick: () => setPresetConfirming(false) }, t('presetCancel')),
+                        h('button', { className: smallButtonClass, onClick: () => setPresetConfirming(false) }, t('presetCancel')),
                         h('button', { className: 'vwf-btn sm primary', onClick: applyPresetPlan }, t('presetConfirmOk'))))
-                    : h('button', { className: 'vwf-btn sm', style: { marginTop: 6 }, onClick: () => { if (presetPlan.status === 'CONFIRM') setPresetConfirming(true); else applyPresetPlan() } },
+                    : h('button', { className: smallButtonClass, style: { marginTop: 6 }, onClick: () => { if (presetPlan.status === 'CONFIRM') setPresetConfirming(true); else applyPresetPlan() } },
                       presetPlan.status === 'CONFIRM' ? t('presetApplyConfirm') : t('presetApply')))
                   : null,
                 presetId ? h('div', { style: { marginTop: 6 } },
@@ -2150,7 +2154,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         ),
         h(Field, { label: t('nodeId'), required: true, help: t('nodeIdHelp'), errors: errorsFor('id') },
           h('input', {
-            className: 'vwf-input vwf-mono' + (errorsFor('id').length ? ' err' : ''),
+            className: monoInputClass + (errorsFor('id').length ? ' err' : ''),
             value: idDraft, ...roDis,
             onChange: (ev) => { if (!ro) setIdDraft(ev.target.value) },
             onBlur: (ev) => { if (!ro) commitNodeId(ev.target.value) },
@@ -2161,7 +2165,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         ),
         isFanout ? h(Field, { label: t('fanoutItems'), required: true, help: t('fanoutItemsHelp'), errors: errorsFor('items') },
           h('input', {
-            className: 'vwf-input vwf-mono' + (errorsFor('items').length ? ' err' : ''),
+            className: monoInputClass + (errorsFor('items').length ? ' err' : ''),
             value: node.items || '', placeholder: '$.args.items', ...roDis,
             onChange: (ev) => { if (!ro) props.onUpdate(node.id, { items: ev.target.value }) },
           })
@@ -2196,7 +2200,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 : null,
               resultMode === 'ai' ? h(Field, { label: t('successCondition'), required: true, help: t('successConditionHelp'), errors: errorsFor('output.successCondition') },
                 h('input', {
-                  className: 'vwf-input vwf-mono' + (errorsFor('output.successCondition').length ? ' err' : ''),
+                  className: monoInputClass + (errorsFor('output.successCondition').length ? ' err' : ''),
                   value: (output && output.successCondition) || '', placeholder: '$.result == true', ...roDis,
                   onChange: (ev) => { if (!ro) { setSchemaNotice(null); props.onUpdate(node.id, { output: { ...(output || {}), successCondition: ev.target.value } }) } },
                 })
@@ -2205,10 +2209,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       )
 
       return h('div', { className: 'vwf-section' },
-        h('div', { className: 'vwf-row' },
+        h('div', { className: rowClass },
           h('strong', null, t('nodeConfig')),
           h('span', { className: 'vwf-spacer' }),
-          h('span', { className: 'vwf-badge' }, isFanout ? 'fanout' : 'worker'),
+          h('span', { className: badgeClass }, isFanout ? 'fanout' : 'worker'),
           props.readOnlyStructure ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null
         ),
         props.readOnlyStructure
@@ -2253,7 +2257,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const roDis = ro ? { disabled: true, title: t('wbBuiltinStructureReadonly') } : {}
       const roSel = ro ? { disabled: true, title: t('wbBuiltinStructureReadonly') } : {}
       return h('div', { className: 'vwf-section' },
-        h('div', { className: 'vwf-row' },
+        h('div', { className: rowClass },
           h('strong', null, t('edgeConfig')),
           h('span', { className: 'vwf-spacer' }),
           ro ? null : h('button', { className: 'vwf-btn sm danger', onClick: props.onDelete }, t('deleteEdge'))
@@ -2284,12 +2288,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               onChange: (v) => { if (!ro) props.onUpdate(index, { [outField]: v }) },
             })
             : h('input', {
-              className: 'vwf-input vwf-mono' + (errorsFor('outcome').length ? ' err' : ''),
+              className: monoInputClass + (errorsFor('outcome').length ? ' err' : ''),
               value: outValue, placeholder: 'PASS', ...roDis,
               onChange: (ev) => { if (!ro) props.onUpdate(index, { [outField]: ev.target.value }) },
             })
         ) : null,
-        kind === 'outcome' ? h('label', { className: 'vwf-field-label', style: { cursor: 'pointer' } },
+        kind === 'outcome' ? h('label', { className: fieldLabelClass, style: { cursor: 'pointer' } },
           h('input', { type: 'checkbox', checked: !!edge.countRound, style: { margin: 0 }, ...roDis, onChange: (ev) => { if (!ro) props.onUpdate(index, { countRound: ev.target.checked }) } }),
           t('edgeCountRound'),
           h('span', { className: 'vwf-help', title: t('edgeCountRoundHelp') }, '?')
@@ -2304,7 +2308,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         ),
         kind === 'success' ? h(Field, { label: t('edgeWhen'), help: t('edgeWhenHelp'), errors: errorsFor('when') },
           h('input', {
-            className: 'vwf-input vwf-mono' + (errorsFor('when').length ? ' err' : ''),
+            className: monoInputClass + (errorsFor('when').length ? ' err' : ''),
             value: edge.when || '', placeholder: '$.need_integration_test == true', ...roDis,
             onChange: (ev) => { if (!ro) props.onUpdate(index, { when: ev.target.value }) },
           })
@@ -2522,7 +2526,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
 
       const originBadge = (role) => {
         const origin = roleOriginOf(role)
-        return h('span', { className: 'vwf-badge' + (origin.builtin ? ' accent' : '') },
+        return h('span', { className: badgeClass + (origin.builtin ? ' accent' : '') },
           origin.builtin ? t('builtinRoleBadge') : t('customRoleBadge'))
       }
       // 列表行：名称 + 来源 badge + 最多两行摘要 + 操作组。摘要为显示层生成，
@@ -2543,11 +2547,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           summary ? h('div', { className: 'vwf-role-summary', title: summary }, summary) : null,
           h('div', { className: 'vwf-role-actions' },
             h('button', {
-              className: 'vwf-btn sm',
+              className: smallButtonClass,
               ref: (el) => { rowBtnRefs.current[role.id] = el },
               onClick: () => { if (origin.builtin) openView(role.id); else openEdit(role.id) },
             }, origin.builtin ? t('viewRole') : t('editRole')),
-            h('button', { className: 'vwf-btn sm', onClick: () => openCloneCustom(role) }, t('createFromRole')),
+            h('button', { className: smallButtonClass, onClick: () => openCloneCustom(role) }, t('createFromRole')),
             origin.builtin ? null : h('button', { className: 'vwf-btn sm danger', onClick: () => askDelete(role) }, t('deleteRole'))
           )
         )
@@ -2562,7 +2566,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const filterBtn = (key, label, n) => h('button', {
         type: 'button',
         'aria-pressed': filter === key ? 'true' : 'false',
-        className: 'vwf-btn sm' + (filter === key ? ' primary' : ''),
+        className: smallButtonClass + (filter === key ? ' primary' : ''),
         onClick: () => setFilter(key),
       }, label + ' ' + n)
 
@@ -2573,7 +2577,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         body = h('div', { className: 'vwf-role-empty', role: 'alert' }, loadError || t('roleLoading'))
       } else if (view === 'list') {
         body = h('div', null,
-          h('div', { className: 'vwf-row', role: 'group', 'aria-label': t('roleLibrary') },
+          h('div', { className: rowClass, role: 'group', 'aria-label': t('roleLibrary') },
             filterBtn('all', t('roleFilterAll'), allRows.length),
             filterBtn('builtin', t('roleBuiltinShort'), builtinRows.length),
             filterBtn('custom', t('roleCustomShort'), customRows.length)
@@ -2614,7 +2618,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         body = h('div', null,
           editingCustom ? mutedDiv(t('roleFromSource', { src: current.id })) : null,
           h('div', { className: 'vwf-field' },
-            h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-name' }, t('roleName'), h('span', { className: 'req' }, '*')),
+            h('label', { className: fieldLabelClass, htmlFor: 'vwf-role-name' }, t('roleName'), h('span', { className: 'req' }, '*')),
             h('input', {
               id: 'vwf-role-name',
               className: 'vwf-input', value: draftName, placeholder: t('roleNamePlaceholder'),
@@ -2630,7 +2634,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           ),
           h('div', { className: 'vwf-field' },
             // V-2：一句话简介（选填）——原型字段顺序为 名称 → 简介 → 完整职责
-            h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-summary' }, t('roleSummary')),
+            h('label', { className: fieldLabelClass, htmlFor: 'vwf-role-summary' }, t('roleSummary')),
             h('input', {
               id: 'vwf-role-summary',
               className: 'vwf-input', value: draftSummary, placeholder: t('roleSummaryPlaceholder'),
@@ -2639,7 +2643,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             mutedDiv(t('roleSummaryHelp'))
           ),
           h('div', { className: 'vwf-field' },
-            h('label', { className: 'vwf-field-label', htmlFor: 'vwf-role-content' }, t('roleContent'), h(HelpDot, { text: t('roleContentHelp') }), h('span', { className: 'req' }, '*')),
+            h('label', { className: fieldLabelClass, htmlFor: 'vwf-role-content' }, t('roleContent'), h(HelpDot, { text: t('roleContentHelp') }), h('span', { className: 'req' }, '*')),
             h('textarea', {
               id: 'vwf-role-content',
               className: 'vwf-textarea vwf-mono', rows: 12, value: draftContent, placeholder: t('roleContentPlaceholder'),
@@ -2703,17 +2707,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         // V-1（原型 settings-section-head）：标题与说明在左，「新建角色」在右——
         // 新建入口位置与原型一致，仍常驻（不随自定义角色数量消失）。
         view === 'list'
-          ? h('div', { className: 'vwf-row', style: { gap: 10, alignItems: 'flex-start' } },
+          ? h('div', { className: rowClass, style: { gap: 10, alignItems: 'flex-start' } },
               h('div', { style: { minWidth: 0, flex: 1 } },
                 h('div', { className: 'vwf-card-title' }, t('roleManager')),
                 mutedDiv(t('roleMgmtHint'), { marginTop: 2 })
               ),
-              h('div', { className: 'vwf-row', style: { gap: 6 } },
+              h('div', { className: rowClass, style: { gap: 6 } },
                 h('button', {
                   className: 'vwf-btn sm primary', ref: newBtnRef,
                   onClick: () => openCreate(null),
                 }, '＋ ' + t('newRole')),
-                h('button', { className: 'vwf-btn sm', onClick: refetch }, t('refresh'))
+                h('button', { className: smallButtonClass, onClick: refetch }, t('refresh'))
               )
             )
           : null,
@@ -2730,13 +2734,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 'aria-label': t('roleManager'),
                 onClick: (ev) => ev.stopPropagation(),
               },
-                h('div', { className: 'vwf-row' },
+                h('div', { className: rowClass },
                   // 浮层标题（原型 modal-head）：内置「内置角色 · 名称」；表单「新建角色 / 编辑角色 · 名称」
                   h('div', { className: 'vwf-dialog-title' }, view === 'view'
                     ? t('builtinRoleBadge') + (current ? ' · ' + (current.name || current.id) : '')
                     : (formMode === 'edit' ? t('editRole') + ' · ' + (current ? current.id : '') : t('newRole'))),
                   h('span', { className: 'vwf-spacer' }),
-                  h('button', { className: 'vwf-btn sm', onClick: backToList }, t('close'))
+                  h('button', { className: smallButtonClass, onClick: backToList }, t('close'))
                 ),
                 h('div', { className: 'vwf-role-mgr-body' }, body),
                 foot
@@ -3160,7 +3164,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: 'vwf-card vwf-wb-steps-card' },
               h('div', { className: 'vwf-card-head' },
                 h('div', { className: 'vwf-card-title' }, t('wbSteps')),
-                h('span', { className: 'vwf-badge' }, (wf.nodes || []).length + '')
+                h('span', { className: badgeClass }, (wf.nodes || []).length + '')
               ),
               h(StepNavigator, {
                 dsl: wf, visibleTerminals, selectedNodeId,
@@ -3228,17 +3232,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('div', null,
                   h('div', { className: 'vwf-card-title' }, t('title')),
                   // 模板信息：名称/ID 必填可编辑（编辑态 ID 变化 → 保存置灰，只能另存为）
-                  h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 8 } },
-                    h('span', { className: 'vwf-field-label' }, t('templateName'), h('span', { className: 'req' }, '*')),
+                  h('div', { className: rowClass, style: { gap: 8, marginTop: 8 } },
+                    h('span', { className: fieldLabelClass }, t('templateName'), h('span', { className: 'req' }, '*')),
                     h('input', {
                       className: 'vwf-input', style: { width: 220 },
                       value: wf.name || '', placeholder: t('templateName'),
                       disabled: readOnlyStructure, title: readOnlyStructure ? t('wbBuiltinStructureReadonly') : '',
                       onChange: (ev) => { if (!readOnlyStructure) syncWorkflow({ ...wf, name: ev.target.value }) },
                     }),
-                    h('span', { className: 'vwf-field-label' }, t('templateId'), h('span', { className: 'req' }, '*')),
+                    h('span', { className: fieldLabelClass }, t('templateId'), h('span', { className: 'req' }, '*')),
                     h('input', {
-                      className: 'vwf-input vwf-mono', style: { width: 180 },
+                      className: monoInputClass, style: { width: 180 },
                       value: wf.id || '', placeholder: 'my-workflow',
                       disabled: readOnlyStructure, title: readOnlyStructure ? t('wbBuiltinStructureReadonly') : '',
                       onChange: (ev) => { if (!readOnlyStructure) syncWorkflow({ ...wf, id: ev.target.value }) },
@@ -3246,21 +3250,21 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   ),
                   mutedDiv(t('subtitle'), { marginTop: 2 })
                 ),
-                h('div', { className: 'vwf-row', style: { gap: 6, alignItems: 'center' } },
+                h('div', { className: rowClass, style: { gap: 6, alignItems: 'center' } },
                   h('div', { className: 'vwf-history-group' },
                     h('button', { className: 'vwf-btn sm ghost vwf-history-btn', disabled: !canUndo, title: t('undo'), onClick: undo }, '↶'),
                     h('button', { className: 'vwf-btn sm ghost vwf-history-btn', disabled: !canRedo, title: t('redo'), onClick: redo }, '↷')
                   ),
-                  h('div', { className: 'vwf-row', style: { gap: 2 } },
-                    h('button', { className: 'vwf-btn sm' + (tab === 'canvas' ? ' primary' : ''), onClick: () => setTab('canvas') }, t('canvas')),
+                  h('div', { className: rowClass, style: { gap: 2 } },
+                    h('button', { className: smallButtonClass + (tab === 'canvas' ? ' primary' : ''), onClick: () => setTab('canvas') }, t('canvas')),
                     h('button', {
-                      className: 'vwf-btn sm' + (tab === 'json' ? ' primary' : ''),
+                      className: smallButtonClass + (tab === 'json' ? ' primary' : ''),
                       disabled: readOnlyStructure, title: readOnlyStructure ? t('wbBuiltinStructureReadonly') : '',
                       onClick: () => { if (!readOnlyStructure) setTab('json') },
                     }, 'JSON')
                   ),
                   h('button', {
-                    className: 'vwf-btn sm',
+                    className: smallButtonClass,
                     disabled: !!props.probing || !(wf.nodes || []).length,
                     title: t('oneClickCheckHelp'),
                     onClick: () => { void props.onOneClickCheck() },
@@ -3271,7 +3275,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                     title: t('probeForceRerunHint'),
                     onClick: () => { void props.onOneClickCheck(true) },
                   }, props.probing ? t('oneClickCheckRunning') : t('probeForceRerun')),
-                  idChanged ? h('button', { className: 'vwf-btn sm', onClick: () => { void handleSave() } }, t('saveAs')) : null,
+                  idChanged ? h('button', { className: smallButtonClass, onClick: () => { void handleSave() } }, t('saveAs')) : null,
                   h('button', {
                     className: 'vwf-btn sm primary',
                     disabled: props.saving || !(wf.nodes || []).length || idChanged || readOnlyStructure,
@@ -3382,7 +3386,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // LOC-030：BLOCKED 同为可恢复等待态（统一受阻生命周期，非终态），不落 fail 色
       const tone = s === 'DONE' ? 'ok' : s === 'running' ? 'run' : (s === 'WAITING_HUMAN' || s.indexOf('AWAITING_HUMAN_') === 0 || s === 'PAUSED' || s === 'BLOCKED') ? 'wait' : 'err'
       const label = s === 'WAITING_HUMAN' ? t('dashWaitHuman') : s === 'BLOCKED' ? t('dashBlocked') : s.indexOf('AWAITING_HUMAN_') === 0 ? t('dashHumanGate') : (displayWord(s) || '—')
-      return h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + label)
+      return h('span', { className: badgeClass, style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + label)
     }
     // FIX-107（B5 状态词 / C2 结束方式）：raw 取值到用户语言的展示映射——状态机取值、筛选口径
     // 与数据契约都不变，只换用户的读法；形状（STATUS_SHAPE）与颜色（STATUS_COLOR）编码也不变。
@@ -3576,7 +3580,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     function tierBadgeOf(lifecycleState) {
       const s = String(lifecycleState || '')
       const color = s === 'COMPLETED' ? STATUS_COLOR.pass : s === 'RUNNING' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s === 'PAUSED' || s === 'BLOCKED') ? STATUS_COLOR.human : STATUS_COLOR.fail
-      return h('span', { className: 'vwf-badge', style: { color: color } }, s || '—')
+      return h('span', { className: badgeClass, style: { color: color } }, s || '—')
     }
     function isolationBadge(v) {
       const g = v && v.isolation_guarantee
@@ -3768,9 +3772,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         h('div', { className: 'vwf-card', style: { marginBottom: 8 } },
           h('div', { className: 'vwf-card-head' },
             h('div', { className: 'vwf-card-title' }, t('dashRunList')),
-            h('div', { className: 'vwf-row', style: { gap: 8 } },
+            h('div', { className: rowClass, style: { gap: 8 } },
               mutedSpan(t('dashTaskCount', { n: visible.length })),
-              h('label', { className: 'vwf-row', style: { fontSize: 11 } },
+              h('label', { className: rowClass, style: { fontSize: 11 } },
                 h('input', { type: 'checkbox', checked: auto, onChange: (ev) => setAuto(ev.target.checked) }),
                 ' ' + t('dashAutoPoll')
               )
@@ -3811,10 +3815,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             pageModels.length ? groupTaskRows(pageModels, openDetail, gateIdx) : emptyDiv(t('dashNoMatch'))
           ),
           mutedDiv(t('dashSupersededFolded'), { padding: '6px 14px 0' }),
-          h('div', { className: 'vwf-row', style: { marginTop: 8, padding: '0 14px 12px', flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
+          h('div', { className: rowClass, style: { marginTop: 8, padding: '0 14px 12px', flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
             mutedSpan(t('dashPage', { page: safePage + 1, total: totalPages, n: visible.length })),
-            h('button', { className: 'vwf-btn sm', disabled: safePage === 0, onClick: () => setPage((p) => Math.max(0, p - 1)) }, t('dashPrev')),
-            h('button', { className: 'vwf-btn sm', disabled: safePage >= totalPages - 1, onClick: () => setPage((p) => Math.min(totalPages - 1, p + 1)) }, t('dashNext')),
+            h('button', { className: smallButtonClass, disabled: safePage === 0, onClick: () => setPage((p) => Math.max(0, p - 1)) }, t('dashPrev')),
+            h('button', { className: smallButtonClass, disabled: safePage >= totalPages - 1, onClick: () => setPage((p) => Math.min(totalPages - 1, p + 1)) }, t('dashNext')),
             mutedSpan(t('dashPerPage')),
             h('select', { className: 'vwf-input', style: { width: 70 }, value: pageSize, onChange: (ev) => setPageSize(Number(ev.target.value)) },
               [10, 20, 50, 100].map((n) => h('option', { key: n, value: n }, String(n)))
@@ -3826,7 +3830,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           mutedText(t('runModePrimary'), { marginTop: 4 }),
           mutedText(t('runModeEnhanced'), { marginTop: 2 })
         ),
-        h('div', { className: 'vwf-row' },
+        h('div', { className: rowClass },
           h('input', { className: 'vwf-input', style: { flex: 1 }, placeholder: t('dashRunIdPlaceholder'), value: runId, onChange: (ev) => setRunId(ev.target.value) }),
           h('button', { className: 'vwf-btn', onClick: openByRunId }, t('dashDetails')),
           h('button', { className: 'vwf-btn', onClick: refresh }, t('refresh'))
@@ -3869,7 +3873,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       return order.map((key) => h('section', { key: key, className: 'vwf-run-group', 'aria-label': labelOf(key) },
         h('h3', { className: 'vwf-run-group-head' },
           h('span', null, labelOf(key)),
-          h('span', { className: 'vwf-badge' }, String(byWs.get(key).length))
+          h('span', { className: badgeClass }, String(byWs.get(key).length))
         ),
         byWs.get(key).slice().sort((a, b) => runOrderOf(a.bucket) - runOrderOf(b.bucket)).map((m) => {
           const gi = m.task.logicalRunId ? (gateIdx || new Map()).get(m.task.logicalRunId) : undefined
@@ -3882,9 +3886,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             onClick: (ev) => openDetail(m.task.key, ev.currentTarget),
             'aria-label': (m.head.taskId || m.head.id) + ' ' + t('dashDetails'),
           },
-            h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
+            h('div', { className: rowClass, style: { justifyContent: 'space-between' } },
               h('strong', null, m.head.taskId || m.head.id),
-              h('div', { className: 'vwf-row', style: { gap: 6 } },
+              h('div', { className: rowClass, style: { gap: 6 } },
                 // 人工门禁位次（一次裁决一张）：并入列表后不丢这条信息
                 gi === undefined ? null : h('span', { className: 'vwf-badge accent' }, gi === 0 ? t('dashDeciding') : t('dashQueued', { n: gi + 1 })),
                 statusBadge(m.head.status),
@@ -3895,11 +3899,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             ),
           h('p', { className: 'vwf-run-row-note' }, m.lr && m.lr.title ? String(m.lr.title) : (m.head.name || m.head.workflowId || '—')),
           dashInfo ? h('small', { className: 'vwf-muted-sm' }, dashInfo) : null,
-          h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
+          h('div', { className: rowClass, style: { justifyContent: 'space-between' } },
             h('small', null, (m.head.name || m.head.workflowId || '—') + ' · ' + (m.lr ? reworkTextOf(m.lr) : t('dashRuntimeLabel'))),
             h('small', null, m.task.segmentCount > 1 ? t('dashSegment', { n: (m.head.segment || m.task.segmentCount), total: m.task.segmentCount }) + ' · ' : '')
           ),
-          h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
+          h('div', { className: rowClass, style: { justifyContent: 'space-between' } },
             mutedSmall(t('dashUpdatedAt', { at: fmtAt(m.updatedAt) })),
             mutedSmall(m.completionType ? displayWord(m.completionType) : '')
           ),
@@ -4212,9 +4216,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       // 运行级记录留在工作台下方。能力出口不变：唯一选中节点、三页签、决策卡、恢复卡、attempt 切换。
       return h(React.Fragment, null,
         h('div', { className: 'vwf-editor-head vwf-rd-head' },
-          h('button', { className: 'vwf-btn sm', onClick: props.onBack }, t('dashBackToList')),
+          h('button', { className: smallButtonClass, onClick: props.onBack }, t('dashBackToList')),
           h('div', { className: 'vwf-rd-head-main' },
-            h('div', { className: 'vwf-row', style: { gap: 8 } },
+            h('div', { className: rowClass, style: { gap: 8 } },
               h('h2', { className: 'vwf-rd-title' }, (lr && lr.title ? String(lr.title) : (head.taskId || head.id || '—'))),
               statusBadge(head.status),
               isolationBadge(lr || head)
@@ -4225,14 +4229,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           ),
           h('span', { className: 'vwf-spacer' }),
           mutedSpan(t('dashListRestored')),
-          !terminal && lstate === 'RUNNING' ? h('button', { className: 'vwf-btn sm', onClick: () => sendControl('pause') }, t('rdControlPause')) : null,
-          h('button', { className: 'vwf-btn sm', onClick: reload }, t('refresh')),
-          h('button', { className: 'vwf-btn sm', onClick: props.onBack }, t('close'))
+          !terminal && lstate === 'RUNNING' ? h('button', { className: smallButtonClass, onClick: () => sendControl('pause') }, t('rdControlPause')) : null,
+          h('button', { className: smallButtonClass, onClick: reload }, t('refresh')),
+          h('button', { className: smallButtonClass, onClick: props.onBack }, t('close'))
         ),
         h('div', { className: 'vwf-rd-strip' },
           h('span', null, reworkText
             + ' · ' + t('dashPhaseLabel', { phase: snapState ? (snapState.phase || '—') : '—' })),
-          h('button', { className: 'vwf-btn sm', ref: chainBtnRef, 'aria-haspopup': 'dialog', onClick: () => setChainOpen(true) }, t('rdFullHistory'))
+          h('button', { className: smallButtonClass, ref: chainBtnRef, 'aria-haspopup': 'dialog', onClick: () => setChainOpen(true) }, t('rdFullHistory'))
         ),
         h('div', { className: 'vwf-editor-body' },
         h('div', { className: 'vwf-rd-scroll' },
@@ -4240,9 +4244,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         lrError ? errLine(t('dashIntegrityFailed', { err: lrError })) : null,
         // B8（FIX-107）：降级说明读用户语言的文案，并保留就地重试入口——
         // 重试即重取逻辑运行摘要与记录（reload → wsTick），不新增 RPC、不改读取口径。
-        recErr ? warnNote(h('div', { className: 'vwf-row', style: { gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+        recErr ? warnNote(h('div', { className: rowClass, style: { gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
             h('span', null, t('rdRecordsUnavailable')),
-            h('button', { className: 'vwf-btn sm', onClick: reload }, t('rdRecordsRetry'))
+            h('button', { className: smallButtonClass, onClick: reload }, t('rdRecordsRetry'))
           )) : null,
         controlErr ? errLine(controlErr) : null,
         h('div', { className: 'vwf-rd-main' },
@@ -4251,10 +4255,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             // 运行定位（FEAT-103 V-5）：默认只给概要（定位用的基本事实）；「详细」展开全量，
             // 原页面底部的「工作空间信息」区块并入这里，两处不再各说一遍。
             h('div', { className: 'vwf-card', style: { padding: '10px 12px' } },
-              h('div', { className: 'vwf-row', style: { justifyContent: 'space-between', alignItems: 'center' } },
+              h('div', { className: rowClass, style: { justifyContent: 'space-between', alignItems: 'center' } },
                 h('div', { className: 'vwf-card-title' }, t('rdLocator')),
                 h('button', {
-                  className: 'vwf-btn sm', 'aria-expanded': locDetail ? 'true' : 'false',
+                  className: smallButtonClass, 'aria-expanded': locDetail ? 'true' : 'false',
                   onClick: () => setLocDetail(!locDetail),
                 }, locDetail ? t('rdCollapse') : t('rdDetail'))
               ),
@@ -4268,8 +4272,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               // 读取失败不藏进「详细」：定位本身已不可信，必须默认可见并给出重试
               lrError ? h('div', { key: 'wse' },
                 warnNote(t('rdWsReadFailed', { err: lrError })),
-                h('div', { className: 'vwf-row' },
-                  h('button', { className: 'vwf-btn sm', onClick: () => { setWsTick((n) => n + 1) } }, t('rdWsRetry')),
+                h('div', { className: rowClass },
+                  h('button', { className: smallButtonClass, onClick: () => { setWsTick((n) => n + 1) } }, t('rdWsRetry')),
                   mutedSpan(t('rdWsStaleNote'))
                 )
               ) : null,
@@ -4291,10 +4295,10 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 },
                   h('span', { className: 'vwf-node-dir-no' }, String(ni + 1).padStart(2, '0')),
                   h('span', { className: 'vwf-node-dir-label' }, n.label || n.id),
-                  h('span', { className: 'vwf-row', style: { gap: 4 } },
-                    list.length ? h('span', { className: 'vwf-badge' }, t(list.some((a) => isSegmentScan(a.value)) ? 'rdScanRecords' : 'rdAttemptPicker') + ' ' + list.length) : null,
-                    prev ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null,
-                    st[n.id] ? h('span', { className: 'vwf-badge', style: { color: st[n.id] === 'pass' ? STATUS_COLOR.pass : st[n.id] === 'fail' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, displayWord(st[n.id])) : null,
+                  h('span', { className: rowClass, style: { gap: 4 } },
+                    list.length ? h('span', { className: badgeClass }, t(list.some((a) => isSegmentScan(a.value)) ? 'rdScanRecords' : 'rdAttemptPicker') + ' ' + list.length) : null,
+                    prev ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null,
+                    st[n.id] ? h('span', { className: badgeClass, style: { color: st[n.id] === 'pass' ? STATUS_COLOR.pass : st[n.id] === 'fail' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, displayWord(st[n.id])) : null,
                     n.id === phaseNodeId ? h('span', { className: 'vwf-badge accent' }, t('rdCurrentNode')) : null
                   )
                 )
@@ -4311,26 +4315,26 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             h('div', { className: 'vwf-rd-legend', style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '0 14px 6px' } },
               mutedSpan(t('dashLegend')),
               [['ok', 'rdStatusPassed'], ['err', 'rdStatusFailed'], ['run', 'rdStatusRunning'], ['wait', 'dashWaitHuman']].map(([tone, key]) =>
-                h('span', { key: tone, className: 'vwf-badge', style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + t(key)))
+                h('span', { key: tone, className: badgeClass, style: { color: STATUS_COLOR[tone === 'ok' ? 'pass' : tone === 'err' ? 'fail' : tone === 'run' ? 'running' : 'human'] } }, STATUS_SHAPE[tone] + ' ' + t(key)))
             ),
             dsl ? h(Canvas, { dsl, readOnly: true, statusMap: st }) : mutedDiv(t('rdNoRecords'))
           ),
           // 右栏：唯一选中节点详情出口
           h('div', { className: 'vwf-rd-body' },
             selected ? h('div', { className: 'vwf-card', style: { padding: '10px 12px' } },
-              h('div', { className: 'vwf-row', style: { justifyContent: 'space-between', flexWrap: 'wrap' } },
-                h('div', { className: 'vwf-row', style: { gap: 6 } },
+              h('div', { className: rowClass, style: { justifyContent: 'space-between', flexWrap: 'wrap' } },
+                h('div', { className: rowClass, style: { gap: 6 } },
                   h('span', { className: 'vwf-badge ' + (historical || isPrevRound ? 'accent' : '') }, historical || isPrevRound ? t('rdHistorical') : t('rdCurrentResult')),
                   // 结果信息也给出这次执行的状态结论，与执行记录 / 链路同一权威、同一措辞
-                  pickedVerdictRow ? h('span', { className: 'vwf-badge', 'data-vwf-verdict': pickedVerdict, style: { color: STATUS_COLOR[pickedVerdictRow[1]] } }, STATUS_SHAPE[pickedVerdictRow[2]] + ' ' + verdictTextOf(pickedVerdict)) : null,
-                  isPrevRound ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
+                  pickedVerdictRow ? h('span', { className: badgeClass, 'data-vwf-verdict': pickedVerdict, style: { color: STATUS_COLOR[pickedVerdictRow[1]] } }, STATUS_SHAPE[pickedVerdictRow[2]] + ' ' + verdictTextOf(pickedVerdict)) : null,
+                  isPrevRound ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
                 ),
                 mutedSpan((lr && lr.title ? String(lr.title) : (head.taskId || head.id)))
               ),
               h('div', { className: 'vwf-card-title', style: { marginTop: 6 } }, selected.label || selected.id),
               isolationBadge(pickedIsolation),
               pickedIsolation && typeof pickedIsolation.independent_proof_eligible === 'boolean' ? mutedDiv(t(pickedIsolation.independent_proof_eligible ? 'isolationProofEligible' : 'isolationProofIneligible') + (pickedIsolation.independent_proof_block_reason ? '：' + pickedIsolation.independent_proof_block_reason : '')) : null,
-              selectedAttempts.length ? h('label', { className: 'vwf-row', style: { gap: 8, marginTop: 6 } },
+              selectedAttempts.length ? h('label', { className: rowClass, style: { gap: 8, marginTop: 6 } },
                 mutedSpan(t(isSegmentScan(pickedValue) ? 'rdScanRecords' : 'rdAttemptPicker')),
                 h('select', {
                   className: 'vwf-input', style: { maxWidth: 320 },
@@ -4384,15 +4388,15 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('span', { className: 'vwf-chain-main' },
                   h('span', { className: 'vwf-chain-head' },
                     h('strong', null, (e.seq ? e.seq + ' ' : '') + e.label + (e.child ? ' · ' + t('rdFanoutChild', { n: e.child }) : '')),
-                    e.attempt ? h('span', { className: 'vwf-badge' }, (e.scan || t('rdAttemptOption', { n: e.attempt, state: e.state })) + (e.latest ? t('rdAttemptLatest') : '')) : h('span', { className: 'vwf-badge' }, e.state),
-                    e.prev ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
+                    e.attempt ? h('span', { className: badgeClass }, (e.scan || t('rdAttemptOption', { n: e.attempt, state: e.state })) + (e.latest ? t('rdAttemptLatest') : '')) : h('span', { className: badgeClass }, e.state),
+                    e.prev ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
                   ),
                   e.note ? h('span', { className: 'vwf-chain-note' }, e.note) : null,
                   e.meta ? h('span', { className: 'vwf-muted-sm' }, e.meta) : null,
                   e.tone === 'todo' || !e.id ? null : h('span', { className: 'vwf-muted-sm' }, t('rdChainOpenResult'))
                 )
               )))),
-            h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end' } },
+            h('div', { className: rowClass, style: { justifyContent: 'flex-end' } },
               h('button', { className: 'vwf-btn', onClick: () => setChainOpen(false) }, t('close'))
             )
           )
@@ -4423,7 +4427,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           rt.push(h('div', { className: 'vwf-note', key: 'nobody' }, t('rdNoRecords')))
         }
         if (pickedValue && pickedValue.outcome !== undefined && pickedValue.outcome !== null) {
-          rt.push(h('div', { className: 'vwf-row', key: 'oc', style: { gap: 6, marginTop: 6 } },
+          rt.push(h('div', { className: rowClass, key: 'oc', style: { gap: 6, marginTop: 6 } },
             h('span', { className: 'vwf-badge accent' }, String(pickedValue.outcome)),
             mutedSpan(pickedValue.outcome_path ? t('rdOutcomePath', { path: pickedValue.outcome_path }) : '')
           ))
@@ -4440,9 +4444,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               const v = a.value
               const done = v.status === 'completed'
               return h('div', { key: v.attempt_id, className: 'vwf-fanout-item' },
-                h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
+                h('div', { className: rowClass, style: { justifyContent: 'space-between' } },
                   h('strong', null, t('rdFanoutChild', { n: (Number(v.item_index) || 0) + 1 }) + (v.item ? ' · ' + String(v.item).slice(0, 80) : '')),
-                  h('span', { className: 'vwf-badge', style: { color: done ? STATUS_COLOR.pass : v.status === 'failed' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, done ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptReturned') : t('rdFanoutIncomplete')))
+                  h('span', { className: badgeClass, style: { color: done ? STATUS_COLOR.pass : v.status === 'failed' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, done ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptReturned') : t('rdFanoutIncomplete')))
                 ),
                 mutedDiv(attemptMeta(v)),
                 v.result !== undefined && v.result !== null ? h('div', { className: 'vwf-code', style: { marginTop: 4 } }, typeof v.result === 'string' ? v.result : safeJson(v.result)) : null,
@@ -4464,8 +4468,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (inputs.length) {
           rt.push(h('div', { key: 'inputs' },
             secDiv(t('rdFanoutSynth')),
-            h('div', { className: 'vwf-row', style: { gap: 6 } },
-              inputs.map((it, i) => h('span', { key: i, className: 'vwf-badge' }, t('rdFanoutInputFrom', { producer: String(it.producer || it.binding || '—') })))
+            h('div', { className: rowClass, style: { gap: 6 } },
+              inputs.map((it, i) => h('span', { key: i, className: badgeClass }, t('rdFanoutInputFrom', { producer: String(it.producer || it.binding || '—') })))
             )
           ))
         }
@@ -4482,7 +4486,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const returns = returnsFor(seg)
         rt.push(secDiv((isSegmentScan(pickedValue) ? attemptText(pickedValue, 0, '') : t('rdAttemptPicker') + ' ' + pickedIdx) + ' · ' + t('rdSegmentLabel', { n: seg }), null, 'head'))
         rt.push(mutedDiv(attemptMeta(pickedValue), null, 'meta'))
-        rt.push(h('div', { key: 'own', className: 'vwf-row', style: { gap: 6, marginTop: 6 } },
+        rt.push(h('div', { key: 'own', className: rowClass, style: { gap: 6, marginTop: 6 } },
           mutedSpan(t('dashColResult') + '：'),
           pickedValue.outcome !== undefined && pickedValue.outcome !== null
             ? h('span', { className: 'vwf-badge accent' }, String(pickedValue.outcome))
@@ -4542,17 +4546,17 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         const lstate = lr && lr.lifecycle ? String(lr.lifecycle.state) : ''
         const badge = statusBadge(head.status)
         return h('div', { className: 'vwf-card', style: { marginTop: 8, padding: '10px 12px' } },
-          h('div', { className: 'vwf-row', style: { justifyContent: 'space-between' } },
+          h('div', { className: rowClass, style: { justifyContent: 'space-between' } },
             h('div', { className: 'vwf-card-title' }, t('rdControlTitle')),
             badge
           ),
           mutedDiv(t('dashStatusLabel', { status: displayWord(head.status) }) + ' · ' + t('rdLifecycleLabel') + '：' + (lstate || '—'), { marginTop: 4 }),
           terminal ? warnNote(t('rdControlTerminal', { state: lstate || head.status })) : null,
           !terminal && lstate === 'RUNNING' ? h('div', null,
-            h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 6 } },
-              h('button', { className: 'vwf-btn sm', onClick: () => sendControl('pause') }, t('rdControlPause')),
-              h('button', { className: 'vwf-btn sm', onClick: () => sendControl('interrupt') }, t('rdControlInterrupt')),
-              head.pause_pending ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, t('ctlPending')) : null
+            h('div', { className: rowClass, style: { gap: 8, marginTop: 6 } },
+              h('button', { className: smallButtonClass, onClick: () => sendControl('pause') }, t('rdControlPause')),
+              h('button', { className: smallButtonClass, onClick: () => sendControl('interrupt') }, t('rdControlInterrupt')),
+              head.pause_pending ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, t('ctlPending')) : null
             ),
             mutedDiv(t('rdControlPauseNote') + ' ' + t('rdControlInterruptNote'), { marginTop: 4 })
           ) : null,
@@ -4571,7 +4575,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
           h('div', { className: 'vwf-card-head' },
             h('div', { className: 'vwf-card-title' }, t('rdPausedTitle')),
-            h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.human } }, String(head.status || 'PAUSED'))
+            h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, String(head.status || 'PAUSED'))
           ),
           h('div', { style: { padding: '8px 14px 12px' } },
             mutedText(t('rdPausedWhy') + '：' + String(reason || '—')),
@@ -4587,12 +4591,12 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 )
               : mutedDiv(t('rdPausedGuidanceNone')),
             h('label', { style: { display: 'block', marginTop: 6 } },
-              h('span', { className: 'vwf-field-label' }, t('rdControlGuidance')),
+              h('span', { className: fieldLabelClass }, t('rdControlGuidance')),
               h('textarea', { className: 'vwf-textarea', rows: 2, style: { width: '100%' }, placeholder: t('rdPausedGuidancePlaceholder'), value: guidanceText, onChange: (ev) => setGuidanceText(ev.target.value) })
             ),
-            h('div', { className: 'vwf-row', style: { gap: 8, marginTop: 6 } },
+            h('div', { className: rowClass, style: { gap: 8, marginTop: 6 } },
               h('button', { className: 'vwf-btn sm primary', disabled: !guidanceText.trim(), onClick: () => sendControl('guidance', { text: guidanceText.trim() }) }, t('rdPausedGuidanceSubmit')),
-              guidanceMsg ? h('span', { className: 'vwf-badge', style: { color: STATUS_COLOR.pass } }, guidanceMsg) : null,
+              guidanceMsg ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.pass } }, guidanceMsg) : null,
               mutedSpan(t('rdControlGuidanceNote'))
             ),
             secDiv(t('rdPausedResume'), { marginTop: 10 }),
@@ -4637,9 +4641,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           const effects = pkg.subsequent_effects && typeof pkg.subsequent_effects === 'object' ? pkg.subsequent_effects : {}
           rows.push(h('div', { key: 'opt', style: { marginTop: 6 } },
             secDiv(t('rdDecisionOptions')),
-            opts.length ? h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap' } }, opts.map((id) => {
+            opts.length ? h('div', { className: rowClass, style: { gap: 8, flexWrap: 'wrap' } }, opts.map((id) => {
               return h('button', {
-                key: id, className: 'vwf-btn sm' + (decisionChoice === id ? ' primary' : ''),
+                key: id, className: smallButtonClass + (decisionChoice === id ? ' primary' : ''),
                 disabled: !!resumeState,
                 'aria-pressed': decisionChoice === id ? 'true' : 'false',
                 onClick: () => setDecisionChoice(id),
@@ -4674,7 +4678,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           }
         }
         rows.push(h('label', { key: 'reason', style: { display: 'block', marginTop: 6 } },
-          h('span', { className: 'vwf-field-label' }, t('rdDecisionReason')),
+          h('span', { className: fieldLabelClass }, t('rdDecisionReason')),
           h('textarea', { className: 'vwf-textarea', rows: 2, placeholder: t('rdDecisionReasonPlaceholder'), disabled: !!resumeState, value: decisionReason, onChange: (ev) => setDecisionReason(ev.target.value), style: { width: '100%' } })
         ))
         rows.push(h('div', { key: 'impact', className: 'vwf-note' }, t('rdDecisionImpact') + '：' + t('rdDecisionImpactNote')))
@@ -4704,7 +4708,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   return h('tr', { key: nid },
                     h('td', null, nid),
                     h('td', null, String(pm.provider || 'default') + ' / ' + String(pm.model || 'default')),
-                    h('td', null, h('div', { className: 'vwf-row', style: { gap: 4 } },
+                    h('td', null, h('div', { className: rowClass, style: { gap: 4 } },
                       h('select', { className: 'vwf-input', style: { width: 110 }, disabled: !!resumeState, value: String(draft.provider !== undefined ? draft.provider : pm.provider || ''), onChange: (ev) => updateModel(nid, { provider: ev.target.value, model: '' }) },
                         [h('option', { key: '', value: '' }, t('rdBlockedKeepDefault'))].concat(provs.map((p) => h('option', { key: p, value: p }, p)))),
                       h('select', { className: 'vwf-input', style: { width: 130 }, disabled: !!resumeState, value: String(draft.model !== undefined ? draft.model : pm.model || ''), onChange: (ev) => updateModel(nid, { model: ev.target.value }) },
@@ -4797,7 +4801,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('table', { className: 'vwf-table' },
             h('tbody', null, kv.map(([k, v]) => h('tr', { key: k },
               mutedTd(k, { width: 90 }),
-              h('td', null, v === null || v === undefined || v === '' ? h('span', { className: 'vwf-badge' }, t('rdWsUnknown')) : String(v))
+              h('td', null, v === null || v === undefined || v === '' ? h('span', { className: badgeClass }, t('rdWsUnknown')) : String(v))
             )))
           ),
           ws.refreshed_at ? mutedDiv(t('rdWsRefreshedAt', { at: fmtAt(ws.refreshed_at) })) : null
@@ -4811,7 +4815,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         return h('div', { key: 'arts' },
           secDiv(t('formalArtifacts')),
           arts.length ? arts.map((rec) => h('div', { key: rec.record_id + '@' + rec.record_revision, style: { marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--vwf-border)' } },
-            h('div', { className: 'vwf-row', style: { gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
+            h('div', { className: rowClass, style: { gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
               h('strong', null, artifactPathFromRecordId(rec.record_id)),
               h('span', { className: 'vwf-badge accent' }, t('artifactRevision') + ' ' + rec.record_revision),
               mutedSpan(rec.body && rec.body.media_type ? rec.body.media_type : ''),
@@ -4820,7 +4824,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             mutedDiv(rec.provenance
               ? t('rdArtifactSource', { segment: rec.provenance.attempt === undefined || rec.provenance.attempt === null ? '—' : rec.provenance.attempt, attempt: rec.record_revision, provider: String(rec.provenance.provider || 'default'), model: String(rec.provenance.model || 'default') })
               : t('rdArtifactSourceUnknown')),
-            h('div', { className: 'vwf-row', style: { gap: 6 } }, rec.provenance && rec.provenance.node_business_outcome ? h('span', { className: 'vwf-badge accent' }, String(rec.provenance.node_business_outcome)) : null),
+            h('div', { className: rowClass, style: { gap: 6 } }, rec.provenance && rec.provenance.node_business_outcome ? h('span', { className: 'vwf-badge accent' }, String(rec.provenance.node_business_outcome)) : null),
             renderArtifactBody(rec)
           )) : mutedDiv(t('noFormalArtifacts'))
         )
@@ -5169,16 +5173,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           const curProv = String(d.provider || '').trim() || (eff ? String(eff.provider || '') : '')
           const provCtl = provList.length
             ? h(VwfSelect, { value: d.provider || '', options: [{ value: '', label: provKeep }].concat(provList.map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(n.id, 'provider', v) })
-            : h('input', { className: 'vwf-input vwf-mono', value: d.provider || '', placeholder: provKeep, onChange: (ev) => ovSet(n.id, 'provider', ev.target.value) })
+            : h('input', { className: monoInputClass, value: d.provider || '', placeholder: provKeep, onChange: (ev) => ovSet(n.id, 'provider', ev.target.value) })
           const modelCtl = provList.length
             ? h(VwfSelect, { value: d.model || '', options: [{ value: '', label: modelKeep }].concat(modelsOfProv(curProv).map(id => ({ value: id, label: id }))), onChange: (v) => ovSet(n.id, 'model', v) })
-            : h('input', { className: 'vwf-input vwf-mono', value: d.model || '', placeholder: modelKeep, onChange: (ev) => ovSet(n.id, 'model', ev.target.value) })
+            : h('input', { className: monoInputClass, value: d.model || '', placeholder: modelKeep, onChange: (ev) => ovSet(n.id, 'model', ev.target.value) })
           return h('div', { key: 'ov-row-' + n.id, className: 'vwf-model-row', 'data-vwf-model-node': n.id },
-            h('div', { className: 'vwf-row', style: { justifyContent: 'space-between', gap: 6 } },
+            h('div', { className: rowClass, style: { justifyContent: 'space-between', gap: 6 } },
               h('div', { className: 'vwf-list-name' }, (n.label || n.id) + '（' + n.id + '）'),
               isOver
-                ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge'))
-                : h('span', { className: 'vwf-badge' }, t('modelOverrideDefaultBadge'))
+                ? h('span', { className: badgeClass, style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge'))
+                : h('span', { className: badgeClass }, t('modelOverrideDefaultBadge'))
             ),
             // 该节点预设即「默认」，覆盖后仍以此行为准（原型：默认：<供应商> / <模型>）
             h('div', { className: 'vwf-muted-sm vwf-mono' }, t('modelOverrideDefaultLine') + '：' + (eff ? eff.provider + ' / ' + eff.model : t('modelOverrideInherit'))),
@@ -5186,7 +5190,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h(Field, { label: t('modelOverrideProvider') }, provCtl),
               h(Field, { label: t('modelOverrideModel') }, modelCtl)
             ),
-            h('button', { className: 'vwf-btn sm', disabled: ovBusy || !isOver, onClick: () => ovClearRow(n.id) }, t('modelOverrideResetRow'))
+            h('button', { className: smallButtonClass, disabled: ovBusy || !isOver, onClick: () => ovClearRow(n.id) }, t('modelOverrideResetRow'))
           )
         })
       }
@@ -5219,7 +5223,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('button', { className: 'vwf-tab' + (tab === 'roles' ? ' on' : ''), 'data-vwf-nav': 'roles', role: 'tab', 'aria-selected': tab === 'roles' ? 'true' : 'false', onClick: () => setTab('roles') }, t('rolesTab'))
         ),
         tab === 'templates' ? h('div', { className: 'vwf-root' },
-          h('div', { className: 'vwf-row' },
+          h('div', { className: rowClass },
             h('button', { className: 'vwf-btn', onClick: onNew }, '＋ ' + t('newTemplate')),
             h('button', { className: 'vwf-btn', onClick: refresh }, t('refresh')),
             h('input', {
@@ -5230,7 +5234,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             !providers.length ? mutedSpan(t('noModels')) : null
           ),
           // V-2：流程库子页签 全部 / 内置 / 我的（默认全部）；真按钮，键盘可达
-          h('div', { className: 'vwf-row', role: 'tablist', 'aria-label': t('templates') },
+          h('div', { className: rowClass, role: 'tablist', 'aria-label': t('templates') },
             [['all', t('libFilterAll'), (list || []).length],
               ['builtin', t('libFilterBuiltin'), builtinCount],
               ['mine', t('libFilterMine'), mineCount]].map(([key, label, n]) => h('button', {
@@ -5238,26 +5242,26 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 role: 'tab',
                 'data-vwf-lib-filter': key,
                 'aria-selected': libFilter === key ? 'true' : 'false',
-                className: 'vwf-btn sm' + (libFilter === key ? ' primary' : ''),
+                className: smallButtonClass + (libFilter === key ? ' primary' : ''),
                 onClick: () => setLibFilter(key),
               }, label + ' ' + n))
           ),
           h('div', { className: 'vwf-list' },
             filteredList.map(w => h('div', { key: w.id, className: 'vwf-list-item' },
               h('div', { style: { minWidth: 0, flex: 1 } },
-                h('div', { className: 'vwf-row', style: { gap: 6 } },
+                h('div', { className: rowClass, style: { gap: 6 } },
                   h('span', { className: 'vwf-list-name' }, w.name || w.id),
-                  h('span', { className: 'vwf-badge' }, w.id),
+                  h('span', { className: badgeClass }, w.id),
                   w.builtin ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null,
-                  w.modelOverridden ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge')) : null
+                  w.modelOverridden ? h('span', { className: badgeClass, style: { color: 'var(--vwf-info)' } }, t('modelOverrideBadge')) : null
                 ),
                 w.description ? h('div', { className: 'vwf-list-desc' }, w.description) : null
               ),
               // V-6：内置记录只有「查看流程 / 模型设置」，不提供删除（含置灰态）；
               // 自定义记录仍是「编辑 / 删除」，不回退。
-              h('button', { className: 'vwf-btn sm', onClick: () => openEditor(w.id) }, t(w.builtin ? 'viewFlow' : 'editTemplate')),
+              h('button', { className: smallButtonClass, onClick: () => openEditor(w.id) }, t(w.builtin ? 'viewFlow' : 'editTemplate')),
               w.builtin
-                ? h('button', { className: 'vwf-btn sm', onClick: () => openOv(w) }, t('modelOverride'))
+                ? h('button', { className: smallButtonClass, onClick: () => openOv(w) }, t('modelOverride'))
                 : h('button', { className: 'vwf-btn sm danger', onClick: () => onRemove(w.id) }, t('deleteTemplate'))
             )),
             list && !list.length ? emptyDiv('—') : null,
@@ -5270,11 +5274,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         wf ? h('dialog', bigDialogProps(editorDialogRef, t('title'), requestCloseEditor, closeEditor),
           h('div', { className: 'vwf-editor-head' },
             h('strong', null, (wf.name || wf.id) + ''),
-            editId ? h('span', { className: 'vwf-badge' }, editId) : h('span', { className: 'vwf-badge accent' }, t('newTemplate')),
+            editId ? h('span', { className: badgeClass }, editId) : h('span', { className: 'vwf-badge accent' }, t('newTemplate')),
             editingBuiltin ? h('span', { className: 'vwf-badge accent' }, t('builtinBadge')) : null,
-            dirty ? h('span', { className: 'vwf-badge', style: { color: 'var(--vwf-warn)' } }, t('unsavedDraft')) : null,
+            dirty ? h('span', { className: badgeClass, style: { color: 'var(--vwf-warn)' } }, t('unsavedDraft')) : null,
             h('span', { className: 'vwf-spacer' }),
-            h('button', { className: 'vwf-btn sm', onClick: requestCloseEditor }, t('close'))
+            h('button', { className: smallButtonClass, onClick: requestCloseEditor }, t('close'))
           ),
           // 检测/探针结果同时显示在编辑器内：结果条若只渲染在外层主面板，
           // 会被全屏编辑器 dialog 完全遮挡（#74 UAT 反馈）
@@ -5314,9 +5318,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         ovId && ovW ? h('dialog', bigDialogProps(ovDialogRef, t('modelOverride'), requestCloseOv, closeOv),
           h('div', { className: 'vwf-editor-head' },
             h('strong', null, t('modelOverrideTitle') + ' · ' + (ovW.name || ovW.id)),
-            h('span', { className: 'vwf-badge' }, ovW.id),
+            h('span', { className: badgeClass }, ovW.id),
             h('span', { className: 'vwf-spacer' }),
-            h('button', { className: 'vwf-btn sm', onClick: requestCloseOv }, t('close'))
+            h('button', { className: smallButtonClass, onClick: requestCloseOv }, t('close'))
           ),
           h('div', { className: 'vwf-editor-body' },
             mutedDiv(t('modelOverrideHelp'), { marginBottom: 8 }),
@@ -5324,9 +5328,9 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           ),
           // 原型对话框底栏：全部还原默认 / 取消 / 保存节点设置。
           // 「全部还原默认」保持既有二次确认（破坏性动作不静默执行），清空走同一 clear RPC。
-          h('div', { className: 'vwf-row', style: { justifyContent: 'flex-end', gap: 8, padding: '8px 0' } },
-            h('button', { className: 'vwf-btn sm', disabled: ovBusy, onClick: () => setOvConfirm('clear') }, t('modelOverrideClear')),
-            h('button', { className: 'vwf-btn sm', disabled: ovBusy, onClick: requestCloseOv }, t('cancelAction')),
+          h('div', { className: rowClass, style: { justifyContent: 'flex-end', gap: 8, padding: '8px 0' } },
+            h('button', { className: smallButtonClass, disabled: ovBusy, onClick: () => setOvConfirm('clear') }, t('modelOverrideClear')),
+            h('button', { className: smallButtonClass, disabled: ovBusy, onClick: requestCloseOv }, t('cancelAction')),
             h('button', { className: 'vwf-btn sm primary', disabled: ovBusy, onClick: saveOv }, t('modelOverrideSave'))
           ),
           ovConfirm ? h('div', { className: 'vwf-confirm-mask', onClick: () => setOvConfirm(null) },
@@ -5619,8 +5623,25 @@ function mappingContainer(schema) {
 }
 
 function mappingEmpty(schema) {
-  if (Array.isArray(schema)) return schema.every(mappingEmpty)
-  return schema?.type === 'array' ? mappingEmpty(schema.items) : schema?.properties && !Object.keys(schema.properties).length
+  return schema?.type === 'object' && schema.additionalProperties === false && schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties) &&
+    !Object.keys(schema.properties).length && (schema.required === undefined || (Array.isArray(schema.required) && !schema.required.length)) &&
+    Object.keys(schema).every(k => /^(type|title|description|\$comment|examples|default|\$schema|properties|required|additionalProperties)$/.test(k))
+}
+
+function mappingOwn(obj, key) { return Object.prototype.hasOwnProperty.call(obj || {}, key) }
+// 同一对象层的组合约束若引用待删除字段，不能推断其意图；拒绝并由界面提示。
+function mappingReferences(schema, key, branch) {
+  if (Array.isArray(schema)) return schema.some(s => mappingReferences(s, key, true))
+  if (!schema || typeof schema !== 'object') return false
+  const has = value => value && typeof value === 'object' && mappingOwn(value, key)
+  if ((branch && (mappingOwn(schema.properties, key) || (Array.isArray(schema.required) && schema.required.includes(key)))) || has(schema.const) || (Array.isArray(schema.enum) && schema.enum.some(has))) return true
+  return ['allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else'].some(k => mappingReferences(schema[k], key, true))
+}
+function mappingDeletionSafe(schema, parts) {
+  const container = mappingContainer(schema)
+  if (!container || typeof container !== 'object') return true
+  const [key, ...tail] = parts
+  return !mappingReferences(container, key, false) && (!tail.length || mappingDeletionSafe(container.properties?.[key], tail))
 }
 
 function mappingLeaf(schema, name, writing) {
@@ -5628,6 +5649,8 @@ function mappingLeaf(schema, name, writing) {
   let cursor = schema
   for (const key of name.split('.')) {
     const container = mappingContainer(cursor)
+    // 未显式声明的原型键不能作为路径容器或写入目标。
+    if (writing && mappingOwn(Object.prototype, key) && !mappingOwn(container?.properties, key)) return false
     // 写入前检查所有已有父级，不能在 string 等标量里生成 properties。
     if (writing && cursor && (!container || (container.type && container.type !== 'object') || enumerableValues(container) || container.oneOf)) return false
     cursor = container?.properties?.[key]
@@ -5653,7 +5676,7 @@ function routingValuesOf(node, field) {
   return enumerableValues(mappingLeaf(out.schema, routingNameOf(out[field || 'outcomePath']))) || []
 }
 
-// 只沿修改路径复制；删叶子时同步 required，空容器连同注解递归清除。
+// 只沿修改路径复制；删叶子时同步 required，仅递归清除没有独立业务约束的空容器。
 function writeMappingLeaf(schema, parts, leaf) {
   if (Array.isArray(schema)) return [writeMappingLeaf(schema[0], parts, leaf), ...schema.slice(1)]
   const next = { ...(schema || { type: 'object' }) }
@@ -5680,6 +5703,8 @@ function applyRoutingWrite(node, name, values, field) {
   let leaf = target || mappingLeaf(out.schema, prev)
   // 无效修改整体拒绝：不先删旧叶子，也不把容器或其它标量收成 string。
   if (name && (target === false || prev.startsWith(name + '.') || (leaf && (Array.isArray(leaf) || leaf.type === 'object' || leaf.type === 'array' || leaf.properties || leaf.items || (values !== undefined && leaf.type !== 'string' && !enumerableValues(leaf)))))) return out
+  const removeOld = prev && prev !== name && !(other && (other === prev || other.startsWith(prev + '.') || prev.startsWith(other + '.')))
+  if (removeOld && !mappingDeletionSafe(out.schema, prev.split('.'))) return out
   let schema = out.schema
   if (name && values !== undefined) {
     const clean = values.map(v => String(v == null ? '' : v).trim()).filter(Boolean)
@@ -5691,7 +5716,7 @@ function applyRoutingWrite(node, name, values, field) {
   }
   if (name && leaf && (values !== undefined || !target)) schema = writeMappingLeaf(schema, name.split('.'), leaf)
   // 先写新叶以保留公共祖先的约束；另一映射仍引用旧字段时保留共用结果。
-  if (prev && prev !== name && !(other && (other === prev || other.startsWith(prev + '.') || prev.startsWith(other + '.')))) schema = writeMappingLeaf(schema, prev.split('.'), undefined)
+  if (removeOld) schema = writeMappingLeaf(schema, prev.split('.'), undefined)
   const next = { ...out }
   if (schema !== undefined) next.schema = schema
   if (field === 'completionPath' && !name) delete next[field]
@@ -5785,6 +5810,7 @@ function planOutcomePresetApplication(node, preset, edges, options) {
   if (identical) return result('NOOP', { warnings: missingEdgeWarnings() })
 
   const candidateOutput = applyRoutingWrite(node, name, preset.values)
+  if (candidateOutput === out) return blocked('UNSAFE_SCHEMA_CHANGE', { field: curName })
   // 候选不变量：required 不得引用已删除属性；completionPath 等其他 output 字段必须原样保留
   const candRequired = Array.isArray(candidateOutput.schema?.required) ? candidateOutput.schema.required : []
   const candProps = candidateOutput.schema?.properties || {}

@@ -114,6 +114,19 @@ test('改名同步清理 required，预设候选可供用户明确确认', () =>
   assert.deepEqual(plan.candidate.schema.properties.route.enum, optimize.values)
 })
 
+test('组合约束仍引用旧结果字段时预设不能绕过安全拒绝', () => {
+  const node = nodeWith({
+    outcomePath: '$.decision',
+    schema: { type: 'object', properties: { decision: { type: 'string', enum: ['PASS'] } }, required: ['decision'], allOf: [{ required: ['decision'] }] },
+  })
+  const before = deep(node)
+  const plan = planOutcomePresetApplication(node, optimize, [], {})
+  assert.equal(plan.status, 'BLOCKED')
+  assert.equal(plan.conflicts[0].code, 'UNSAFE_SCHEMA_CHANGE')
+  assert.equal(plan.candidate, null)
+  assert.deepEqual(node, before)
+})
+
 test('草稿未提交与只读上下文必须阻塞', () => {
   const node = freshRoutingNode()
   assert.equal(planOutcomePresetApplication(node, optimize, [], { dirtyDraft: true }).conflicts[0].code, 'DIRTY_DRAFT')
