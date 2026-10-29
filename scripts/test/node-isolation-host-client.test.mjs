@@ -4,7 +4,64 @@ import { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
-const { createNodeIsolationHostClient } = require('../node-isolation-host-client.cjs')
+const { createNodeIsolationHostClient, isolationFieldsOf, recordIsolation } = require('../node-isolation-host-client.cjs')
+
+test('WFM-81 metadata keeps missing history unknown and mirrors node-specific proof decisions', async () => {
+  assert.deepEqual(isolationFieldsOf(), { isolation_guarantee: 'unknown', isolation_probe: null, independent_proof_eligible: null, independent_proof_block_reason: null })
+  const { canIssueIndependentProof, resolveNodeCapabilities } = await import('../node-isolation.mjs')
+  const rec = {}
+  const probe = { guarantee: 'enforced', backend: 'fixture', evidence: { outsideBlocked: true } }
+  const calls = []
+  const dsl = { nodes: [{ id: 'dev', profile: 'dev' }, { id: 'review', profile: 'review' }, { id: 'mechanical', mechanical: true }] }
+  await recordIsolation(rec, probe, dsl, async (command, input) => {
+    calls.push(command)
+    return { ok: true, decision: canIssueIndependentProof(input.isolation_guarantee, resolveNodeCapabilities(input.profile, input.node_capabilities)) }
+  })
+  assert.deepEqual(calls, ['canIssueProof', 'canIssueProof'])
+  assert.equal(rec.node_isolation.review.independent_proof_eligible, true)
+  assert.equal(rec.node_isolation.dev.independent_proof_eligible, false)
+  assert.match(rec.node_isolation.dev.independent_proof_block_reason, /independent_proof/)
+  assert.equal(rec.node_isolation.mechanical, undefined)
+  probe.evidence.outsideBlocked = false
+  await recordIsolation(rec, { guarantee: 'unavailable', evidence: { reason: 'probe failed' } }, dsl, async () => { throw new Error('gate unavailable') })
+  assert.equal(rec.isolation_guarantee, 'unavailable')
+  assert.equal(rec.node_isolation.review.independent_proof_eligible, null, '查询失败不能猜成允许')
+  assert.equal(rec.node_isolation.review.independent_proof_block_reason, 'independent_proof_eligibility_unknown')
+  assert.equal(rec.isolation_history.length, 2)
+  assert.equal(rec.isolation_history[0].isolation_probe.evidence.outsideBlocked, true, '后续 Probe 不改历史快照')
+})
+
+test('WFM-81 isolation preparation commits current only after an actual new segment starts', async () => {
+  const rec = { segments: [] }
+  const dsl = { nodes: [{ id: 'review', profile: 'review' }] }
+  const hostCall = async () => ({ ok: true, decision: { ok: true } })
+  const firstCommit = await recordIsolation(rec, { guarantee: 'enforced', evidence: { marker: 'first' } }, dsl, hostCall)
+  assert.equal(rec.isolation_guarantee, 'enforced', '首次未执行的准备仍可观测')
+  assert.equal(typeof firstCommit, 'function', '准备回执提供显式提交边界')
+  firstCommit()
+  rec.segments.push({ run_id: 'engine-1' })
+  const previous = JSON.parse(JSON.stringify({ isolation_guarantee: rec.isolation_guarantee, isolation_probe: rec.isolation_probe, node_isolation: rec.node_isolation }))
+  const nextCommit = await recordIsolation(rec, { guarantee: 'unavailable', evidence: { marker: 'failed' } }, dsl, async () => ({ ok: true, decision: { ok: false, reason: 'unavailable' } }))
+  for (const key of Object.keys(previous)) assert.deepEqual(rec[key], previous[key], '尚未创建新段不能覆盖 ' + key)
+  assert.equal(rec.isolation_history.length, 2)
+  assert.equal(rec.isolation_history[1].isolation_guarantee, 'unavailable')
+  assert.equal(rec.isolation_history[1].node_isolation.review.independent_proof_eligible, false)
+  nextCommit()
+  assert.equal(rec.isolation_guarantee, 'unavailable', '只在调用者确认新段建立后提交')
+  assert.equal(rec.node_isolation.review.independent_proof_eligible, false)
+  assert.equal(rec.isolation_history.length, 2, '提交不重复写入历史')
+  assert.equal(rec.isolation_history[0].isolation_probe.evidence.marker, 'first')
+})
+
+test('WFM-81 legacy attempts without segments still prevent a failed preparation from rewriting unknown current', async () => {
+  const rec = { isolation_guarantee: 'unknown', isolation_probe: null, node_isolation: {}, node_attempts: [{ node: 'review' }] }
+  await recordIsolation(rec, { guarantee: 'enforced', evidence: { marker: 'new' } }, { nodes: [{ id: 'review', profile: 'review' }] }, async () => ({ ok: true, decision: { ok: true } }))
+  assert.equal(rec.isolation_guarantee, 'unknown')
+  assert.equal(rec.isolation_probe, null)
+  assert.deepEqual(rec.node_isolation, {})
+  assert.deepEqual(rec.node_attempts, [{ node: 'review' }])
+  assert.equal(rec.isolation_history[0].isolation_guarantee, 'enforced')
+})
 
 function subprocessHandle() {
   const stdout = new EventEmitter()

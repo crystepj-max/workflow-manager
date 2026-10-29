@@ -3584,6 +3584,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const color = s === 'COMPLETED' ? STATUS_COLOR.pass : s === 'RUNNING' ? STATUS_COLOR.running : (s === 'WAITING_HUMAN' || s === 'PAUSED' || s === 'BLOCKED') ? STATUS_COLOR.human : STATUS_COLOR.fail
       return h('span', { className: badgeClass, style: { color: color } }, s || '—')
     }
+    function isolationBadge(v) {
+      const g = v && v.isolation_guarantee
+      const level = g === 'enforced' || g === 'unavailable' ? g : 'unknown'
+      return h('span', { className: 'vwf-badge', 'data-vwf-isolation': level, role: level === 'unavailable' ? 'alert' : undefined, style: { color: STATUS_COLOR[level === 'unavailable' ? 'fail' : level === 'enforced' ? 'pass' : 'human'] } }, t('isolation' + level))
+    }
 
     // 运行看板：列表视图（分组 / 四类筛选 / 分页 / 返回位置保留）+ 详情视图（唯一详情出口）
     function Dashboard(props) {
@@ -3890,6 +3895,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 // 人工门禁位次（一次裁决一张）：并入列表后不丢这条信息
                 gi === undefined ? null : h('span', { className: 'vwf-badge accent' }, gi === 0 ? t('dashDeciding') : t('dashQueued', { n: gi + 1 })),
                 statusBadge(m.head.status),
+                isolationBadge(m.lr || m.head),
+                m.head.execution_not_started ? mutedSpan(t('isolationNotStarted')) : null,
                 // S-4：Lifecycle 以独立标签展示，不翻译为引擎技术状态
               )
             ),
@@ -3992,6 +3999,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const pickedIdx = selected && attemptSel[selected.id] ? Math.min(attemptSel[selected.id], latestIdx) : latestIdx
       const picked = pickedIdx > 0 ? selectedAttempts[pickedIdx - 1] : null
       const pickedValue = picked ? picked.value : null
+      const pickedIsolation = pickedValue || (lr && lr.node_isolation && lr.node_isolation[effectiveSel]) || lr
       // attempt 结局词表（蓝图派生）与「人工门禁已裁决到的段号」：三处视图共用同一份判据输入。
       // 门禁是否已裁决只认**这次执行之后**的裁决（人工退回后再次停在门禁时，新门禁还没有裁决，
       // 不能因为「这个运行曾经裁决过」就写成已裁决）。
@@ -4192,7 +4200,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('div', { className: 'vwf-rd-head-main' },
             h('div', { className: rowClass, style: { gap: 8 } },
               h('h2', { className: 'vwf-rd-title' }, (lr && lr.title ? String(lr.title) : (head.taskId || head.id || '—'))),
-              statusBadge(head.status)
+              statusBadge(head.status),
+              isolationBadge(lr || head)
             ),
             h('div', { className: 'vwf-rd-subline' },
               ((lr && lr.workspace && workspaceLabelOf(lr.workspace)) || '—') + ' / ' + (head.name || head.workflowId || '—')
@@ -4235,6 +4244,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               ),
               h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('rdWorkspaceLabel', { ws: (lr && lr.workspace && workspaceLabelOf(lr.workspace)) || '—' }))),
               h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('rdTemplateLabel') + '：' + (head.name || head.workflowId || '—'))),
+              lr && lr.isolation_probe ? h('details', null, h('summary', null, t('isolationProbe')), renderArtifactBody({ body: { value: lr.isolation_probe } })) : null,
               h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('dashPhaseLabel', { phase: snapState ? (snapState.phase || '—') : '—' }))),
               h('div', { className: 'vwf-rd-kv vwf-row', style: { gap: 6 } }, mutedSpan(t('rdLifecycleLabel')), tierBadgeOf(lr && lr.lifecycle ? lr.lifecycle.state : '')),
               h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('rdCompletionLabel') + '：' + (lr && lr.completion && lr.completion.type ? displayWord(lr.completion.type) : t('dashCompletionNone')))),
@@ -4302,6 +4312,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 mutedSpan((lr && lr.title ? String(lr.title) : (head.taskId || head.id)))
               ),
               h('div', { className: 'vwf-card-title', style: { marginTop: 6 } }, selected.label || selected.id),
+              isolationBadge(pickedIsolation),
+              pickedIsolation && typeof pickedIsolation.independent_proof_eligible === 'boolean' ? mutedDiv(t(pickedIsolation.independent_proof_eligible ? 'isolationProofEligible' : 'isolationProofIneligible') + (pickedIsolation.independent_proof_block_reason ? '：' + pickedIsolation.independent_proof_block_reason : '')) : null,
               selectedAttempts.length ? h('label', { className: rowClass, style: { gap: 8, marginTop: 6 } },
                 mutedSpan(t('rdAttemptPicker')),
                 h('select', {

@@ -633,7 +633,7 @@ return {
         const d = fs === undefined ? null : await homeDirs()
         if (!rec || !d) return
         if (touch) touch(rec)
-        await writeText(d[dirKey] + '/' + fileOf(id), JSON.stringify(serialize ? serialize(rec) : rec, null, 2) + '\n')
+        await writeText(d[dirKey] + '/' + fileOf(id), JSON.stringify(serialize ? await serialize(rec) : rec, null, 2) + '\n')
       }
       // fs 服务等待重试 + 目录列举；JSON 解析与水合留给调用方（错误文案各自保留）
       async function loadEntries() {
@@ -700,22 +700,13 @@ return {
         taskId: '', workflowId: '', startedAt: Date.now(), supersededBy: '',
         decision_id: '', reason: '', decision_package: null, control_event: null, blocked_edge: null, results: null, history: null,
         error_detail: '',
+        isolation_guarantee: 'unknown', isolation_probe: null,
         node: '', round: null, budgetUsed: null, maxRounds: null, decisionSeq: null, updatedAt: 0,
       }
     }
     function ensureRun(id) {
       let rec = runs.get(String(id))
       if (!rec) { rec = newRecord(id); runs.set(rec.id, rec) }
-      return rec
-    }
-    function fromDisk(data) {
-      const rec = newRecord(data.id)
-      for (const k of Object.keys(rec)) if (data[k] !== undefined && data[k] !== null) rec[k] = data[k]
-      rec.meta = { name: String((data.meta && data.meta.name) || ''), description: String((data.meta && data.meta.description) || '') }
-      rec.status = typeof data.status === 'string' && data.status ? data.status : 'unknown'
-      rec.logs = Array.isArray(rec.logs) ? rec.logs.map(String).slice(-50) : []
-      rec.agents = Array.isArray(rec.agents) ? rec.agents.filter((a) => a && typeof a === 'object') : []
-      rec.formalRecords = Array.isArray(rec.formalRecords) ? rec.formalRecords : []
       return rec
     }
     function applyHdValue(rec, val) {
@@ -755,7 +746,7 @@ return {
           const data = JSON.parse(text)
           if (!data || typeof data.id !== 'string' || !data.id) throw new Error('缺少 id 字段')
           if (runs.has(data.id)) continue
-          runs.set(data.id, fromDisk(data))
+          runs.set(data.id, (await loadDist('dashboard-projection.cjs')).runFromDisk(data, newRecord(data.id)))
           runFiles.set(data.id, name)
         } catch (e) { log('跳过损坏的运行记录：' + name + '（' + errMsg(e) + '）') }
       }
@@ -1032,6 +1023,7 @@ return {
           outcome: outcome === undefined ? null : outcome,
           completed_at: Date.now(),
         }
+        Object.assign(attempt, rec.node_isolation && rec.node_isolation[nodeId])
         rec.node_attempts.push(attempt)
         if (outcome !== undefined && outcome !== null) {
           rec.business_outcomes[String(nodeId)] = {
@@ -1047,44 +1039,8 @@ return {
       if (added) rec.updated_at = Date.now()
       return added
     }
-    function logicalRunPayload(rec) {
-      return {
-        logical_run_id: rec.logical_run_id,
-        schema: LOGICAL_RUN_SCHEMA,
-        task_id: rec.task_id,
-        template_id: rec.template_id,
-        title: rec.title,
-        derived_from: rec.derived_from,
-        created_at: rec.created_at,
-        updated_at: rec.updated_at,
-        lifecycle: { state: rec.lifecycle.state, reason: rec.lifecycle.reason },
-        terminal: rec.terminal === true,
-        completion: rec.completion || null,
-        segments: rec.segments.map((s) => {
-          const out = { index: s.index, run_id: s.run_id, trigger: s.trigger, started_at: s.started_at, ended_at: s.ended_at, status: s.status, active: s.active === true }
-          if (s.decision_id) out.decision_id = s.decision_id
-          return out
-        }),
-        snapshots: rec.snapshots,
-        node_attempts: rec.node_attempts,
-        business_outcomes: rec.business_outcomes,
-        artifact_manifests: rec.artifact_manifests || {},
-        guidance: rec.guidance || [],
-        control_events: rec.control_events || [],
-        baseline_revisions: rec.baseline_revisions || [],
-        baseline_applied_upto: rec.baseline_applied_upto || 0,
-        last_engine_error: rec.last_engine_error || null,
-        pause_state: rec.pause_state || null,
-        pause_resume: rec.pause_resume || null,
-        // LOC-027：活动评价基线引用与历史版本（不可变副本审计链）
-        evaluation_baseline: rec.evaluation_baseline || null,
-        evaluation_baselines: rec.evaluation_baselines || [],
-        formal_records: rec.formal_records || null,
-        workspace: rec.workspace || null,
-        human_decisions: rec.human_decisions || [],
-        consumed_decisions: rec.consumed_decisions || {},
-        human_waits: rec.human_waits || [],
-      }
+    async function logicalRunPayload(rec) {
+      return (await loadDist('dashboard-projection.cjs')).logicalRunPayload(rec)
     }
     // 队列实现收敛于 logicalStore（LOC-004）；保留原函数名作为薄委托，11 个调用点零改动
     function requestLogicalPersist(id) { logicalStore.persist(id) }
@@ -1097,6 +1053,10 @@ return {
         : { state: 'FAILED', reason: logicalReason('RECORD_CORRUPTED', 'lifecycle 缺失或非法') }
       const rec = {
         logical_run_id: id,
+        isolation_guarantee: asStr(data.isolation_guarantee, 'unknown'),
+        isolation_probe: asObj(data.isolation_probe),
+        node_isolation: asObj(data.node_isolation) || {},
+        isolation_history: asArr(data.isolation_history),
         schema: asNum(data.schema, LOGICAL_RUN_SCHEMA),
         task_id: asStr(data.task_id, ''),
         template_id: asStr(data.template_id, ''),
@@ -2034,6 +1994,7 @@ return {
     })
     const listRunSummaries = async () => {
       await runsHydration
+      await logicalRunsHydration
       // #75 S-4：同一逻辑运行的看板投影逐请求缓存，避免每个段重复遍历事件数组；
       // 投影逻辑在 dist/dashboard-projection.cjs 内核（载荷外），加载失败时行不带
       // dashboard 字段（客户端按缺失态呈现，不影响其余列表能力）
@@ -2057,7 +2018,9 @@ return {
           row.dashboard = dashOf(lj.logical_run_id)
         }
         return row
-      }).sort((a, b) => ((b.startedAt || 0) - (a.startedAt || 0)) || byId(b.id, a.id))
+      })
+      if (projKernel) out.push(...projKernel.unstartedIsolationRuns(logicalRuns.values()))
+      out.sort((a, b) => ((b.startedAt || 0) - (a.startedAt || 0)) || byId(b.id, a.id))
       return { runs: out }
     }
     registerRpc('vwf.runs.list', listRunSummaries)
@@ -2078,7 +2041,7 @@ return {
         }
       }
       if (!rec) return { found: false, record: null }
-      return { found: true, record: logicalRunPayload(rec) }
+      return { found: true, record: await logicalRunPayload(rec) }
     })
     // LOC-008：Formal Records 单一提交/查询通道（commit 同时供 wf_run 收尾与
     // 显式调用；list/get 按 logical_run_id 查询，重启后直读磁盘 Store）。
@@ -2494,6 +2457,11 @@ return {
         readTextIfExists, runNode, subprocess, resolveNode, credentials,
       })(cmd, input, opts)
     }
+    async function recordIsolation(rec, probe, dsl) {
+      const metadata = await (await loadDist('node-isolation-host-client.cjs')).recordIsolation(rec, probe, dsl, niHostCall)
+      requestLogicalPersist(rec.logical_run_id)
+      return metadata
+    }
     let isolationProbePromise = null
     async function probeIsolationGuarantee() {
       if (!isolationProbePromise) {
@@ -2511,12 +2479,15 @@ return {
     // 检查点恢复和集成门禁重跑不能沿用旧 scriptArgs.routes。
     async function startIsolatedSegment(gateEngine, request, logicalRunId, dsl, modelOverrides, ws) {
       const routeCore = await loadDist('route.cjs')
+      const logical = logicalRuns.get(logicalRunId)
+      const probe = ws ? await probeIsolationGuarantee() : null
+      const isolationMeta = await recordIsolation(logical, probe, dsl)
       const routes = await routeCore.issueRun(
         logicalRunId,
         dsl,
         modelOverrides,
         ws,
-        ws ? await probeIsolationGuarantee() : null,
+        probe,
         homeDirs,
         niHostCall,
         routeCore.runArtifactBinding(runArtifactCwd(ws), logicalRunId, request.args),
@@ -2524,8 +2495,8 @@ return {
       request.args = Object.assign({}, request.args || {}, { routes: routes, requireIsolatedNodes: true })
       request.subagentProvider = NODE_ISOLATED_PROVIDER
       const run = routeCore.startWorkflow(gateEngine, request, logicalRunId)
+      Object.assign(ensureRun(run.id), isolationMeta())
       const kernel = await amKernel()
-      const logical = logicalRuns.get(logicalRunId)
       if (kernel && logical) {
         amRuns.set(String(run.id), Object.assign({ kernel }, kernel.createHostContext(runArtifactCwd(ws), request.args.runDir, logicalRunId, logical.artifact_manifests)))
       }
@@ -2771,6 +2742,7 @@ return {
           model: String((snap && snap.provider_model && snap.provider_model[nodeId] && snap.provider_model[nodeId].model) || 'default'),
           produced_by: 'vwf:runtime',
           node_business_outcome: outcome === undefined ? null : outcome,
+          ...(logicalRec.node_isolation && logicalRec.node_isolation[nodeId] || {}),
         }
         entries.push({
           type: 'node_result',
@@ -3468,6 +3440,7 @@ return {
         else if (prepared.notFound) log('workspace 集成未部署（workspace-isolation-host.mjs 缺失）')
         const isolationProbe = ws ? await probeIsolationGuarantee() : null
         if (isolationProbe) log('node isolation probe: guarantee=' + isolationProbe.guarantee + (isolationProbe.backend ? (' backend=' + isolationProbe.backend) : ''))
+        const isolationMeta = await recordIsolation(logicalRec, isolationProbe, v.sanitized)
         const nodeProviderCore = await loadDist('route.cjs')
         let nodeRouteTokens
         try {
@@ -3588,6 +3561,7 @@ return {
         // 逐次 Proof 需要段 workspace 绑定（LOC-029）：与 workspace 生命周期同段登记
         attk().then((t) => t.setWs(runId, ws)).catch(() => {})
         const rec = ensureRun(runId)
+        Object.assign(rec, isolationMeta())
         rec.taskId = taskId
         rec.workflowId = String(args.templateId || v.sanitized.id || '')
         live.add(runId)
@@ -3678,6 +3652,7 @@ return {
               snapshot_revision: snap ? snap.revision : null,
               provider: String((eff && eff.provider) || 'default'), model: String((eff && eff.model) || 'default'),
               outcome: 'INTERRUPTED', completed_at: Date.now(),
+              ...(logicalRec.node_isolation && logicalRec.node_isolation[ck.entry] || {}),
             })
           }
           logicalSetState(logicalRec, 'PAUSED', logicalReason(pauseAction === 'interrupt' ? 'USER_INTERRUPT' : 'USER_PAUSE', ck.degraded ? '该段无可用检查点，恢复需人工指定 entry' : ''))
