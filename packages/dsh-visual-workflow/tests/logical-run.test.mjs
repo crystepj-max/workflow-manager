@@ -131,6 +131,31 @@ async function immediateReceipt(promise) {
 
 const isCompile = (spec) => spec.argv.includes('compile') && spec.argv.some((a) => a.endsWith('/generate.mjs'))
 
+test('WFM-67/70 UI 内核加载尚未结束时，同任务后到请求立即拒绝', async () => {
+  const eng = makeEngine()
+  const { events, definedTools, fs } = engineEnv(eng)
+  const wfRun = definedTools.find((tool) => tool.name === 'wf_run')
+  let release
+  let loads = 0
+  const gate = new Promise((resolve) => { release = resolve })
+  const readText = fs.readText.bind(fs)
+  fs.readText = async (target) => {
+    if (target.displayPath.endsWith('/dist/ui-resume.cjs')) { loads++; await gate }
+    return readText(target)
+  }
+  const first = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'kernel-starting' })
+  await until(() => loads > 0, '首次调用停在 UI 内核加载')
+  const second = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'kernel-starting' })
+  const receipt = await immediateReceipt(second)
+  release()
+  await until(() => eng.starts.length === 1, '唯一请求进入引擎')
+  settleRun(eng, events, 'run-1', 'DONE')
+  await Promise.all([first, second])
+  assert.equal(typeof receipt, 'string', '首次 await 前应已占位；内核加载挂起时后到请求也要立即返回')
+  assert.match(receipt, /kernel-starting.*已占用.*正在启动中/)
+  assert.equal(eng.starts.length, 1)
+})
+
 test('FIX-225 同 tick 新启动：只有一次进入引擎，健康启动不被判作崩溃残留', async () => {
   const eng = makeEngine()
   const { events, definedTools, fs } = engineEnv(eng)

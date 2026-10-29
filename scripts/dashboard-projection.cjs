@@ -106,6 +106,7 @@ function logicalRunPayload(rec) {
     segments: rec.segments.map((s) => {
       const out = { index: s.index, run_id: s.run_id, trigger: s.trigger, started_at: s.started_at, ended_at: s.ended_at, status: s.status, active: s.active === true }
       if (s.decision_id) out.decision_id = s.decision_id
+      if (s.initiator) out.initiator = s.initiator
       return out
     }),
     snapshots: rec.snapshots,

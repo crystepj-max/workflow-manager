@@ -57,6 +57,7 @@ const projectionCoreSrc = join(root, '..', '..', 'scripts', 'projection-core.cjs
 const validateCoreSrc = join(root, '..', '..', 'scripts', 'validate-core.cjs')
 const schemaProtocolCoreSrc = join(root, '..', '..', 'scripts', 'schema-protocol-core.cjs')
 const evaluationBaselineSrc = join(root, '..', '..', 'scripts', 'evaluation-baseline.cjs')
+const uiResumeSrc = join(root, '..', '..', 'scripts', 'ui-resume.cjs')
 const stateRecoveryCoreSrc = join(root, '..', '..', 'scripts', 'state-recovery-core.cjs')
 const artifactManifestSrc = join(root, '..', '..', 'scripts', 'artifact-manifest.cjs')
 const nodeProviderCoreSrc = join(root, '..', '..', 'scripts', 'node-provider-core.cjs')
@@ -89,6 +90,7 @@ const attemptLedgerBody = readFileSync(attemptLedgerSrc, 'utf8')
 const validateCoreBody = readFileSync(validateCoreSrc, 'utf8')
 const schemaProtocolCoreBody = readFileSync(schemaProtocolCoreSrc, 'utf8')
 const evaluationBaselineBody = readFileSync(evaluationBaselineSrc, 'utf8')
+const uiResumeBody = readFileSync(uiResumeSrc, 'utf8')
 const stateRecoveryCoreBody = readFileSync(stateRecoveryCoreSrc, 'utf8')
 const artifactManifestBody = readFileSync(artifactManifestSrc, 'utf8')
 const nodeProviderCoreBody = readFileSync(nodeProviderCoreSrc, 'utf8')
@@ -131,6 +133,7 @@ const stamp = {
   validateCore: sha256(validateCoreBody),
   schemaProtocolCore: sha256(schemaProtocolCoreBody),
   evaluationBaseline: sha256(evaluationBaselineBody),
+  uiResume: sha256(uiResumeBody),
   stateRecoveryCore: sha256(stateRecoveryCoreBody),
   artifactManifest: sha256(artifactManifestBody),
   nodeProviderCore: sha256(nodeProviderCoreBody),
@@ -165,6 +168,7 @@ const requiredArtifacts = [
   join(dist, 'validate-core.cjs'),
   join(dist, 'schema-protocol-core.cjs'),
   join(dist, 'evaluation-baseline.cjs'),
+  join(dist, 'ui-resume.cjs'),
   join(dist, 'state-recovery-core.cjs'),
   join(dist, 'artifact-manifest.cjs'),
   join(dist, 'route.cjs'),
@@ -267,6 +271,7 @@ copyFileSync(projectionCoreSrc, join(dist, 'projection-core.cjs'))
 // LOC-027 评价基线纯逻辑内核（冻结/核验子进程脚本文本与闸门判定），随 dist 分发
 copyFileSync(evaluationBaselineSrc, join(dist, 'evaluation-baseline.cjs'))
 // LOC-035 产物清单纯逻辑内核，随 dist 分发
+copyFileSync(uiResumeSrc, join(dist, 'ui-resume.cjs'))
 copyFileSync(stateRecoveryCoreSrc, join(dist, 'state-recovery-core.cjs'))
 copyFileSync(artifactManifestSrc, join(dist, 'artifact-manifest.cjs'))
 copyFileSync(nodeProviderCoreSrc, join(dist, 'route.cjs'))
