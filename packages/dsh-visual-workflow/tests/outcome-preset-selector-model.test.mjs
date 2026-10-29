@@ -102,15 +102,29 @@ test('四态：boolean 路由字段为 BLOCKED（UNSUPPORTED_SCHEMA）', () => {
   assert.equal(plan.conflicts[0].code, 'UNSUPPORTED_SCHEMA')
 })
 
-test('改名遗留 required 孤儿引用时候选被拒（INVALID_CANDIDATE，锁定写回契约现状）', () => {
+test('改名同步清理 required，预设候选可供用户明确确认', () => {
   const node = nodeWith({
     outcomePath: '$.decision',
     schema: { type: 'object', properties: { decision: { type: 'string', enum: ['PASS'] } }, required: ['decision'] },
   })
   const plan = planOutcomePresetApplication(node, optimize, [], {})
-  // applyRoutingWrite 改名删旧属性但保留旧 required —— 候选必须被拒，不允许有损写回
+  assert.equal(plan.status, 'CONFIRM')
+  assert.deepEqual(plan.candidate.schema.required, ['route'])
+  assert.equal(plan.candidate.schema.properties.decision, undefined)
+  assert.deepEqual(plan.candidate.schema.properties.route.enum, optimize.values)
+})
+
+test('组合约束仍引用旧结果字段时预设不能绕过安全拒绝', () => {
+  const node = nodeWith({
+    outcomePath: '$.decision',
+    schema: { type: 'object', properties: { decision: { type: 'string', enum: ['PASS'] } }, required: ['decision'], allOf: [{ required: ['decision'] }] },
+  })
+  const before = deep(node)
+  const plan = planOutcomePresetApplication(node, optimize, [], {})
   assert.equal(plan.status, 'BLOCKED')
-  assert.equal(plan.conflicts[0].code, 'INVALID_CANDIDATE')
+  assert.equal(plan.conflicts[0].code, 'UNSAFE_SCHEMA_CHANGE')
+  assert.equal(plan.candidate, null)
+  assert.deepEqual(node, before)
 })
 
 test('草稿未提交与只读上下文必须阻塞', () => {
