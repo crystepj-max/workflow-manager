@@ -144,7 +144,7 @@
 
 `projectToVwf(bp)`：字段映射为 vwf DSL 子集——`id`、`name = displayName`、`description`、`entry`、`control.maxRounds`；节点注入 `model = bindings.models[nodeId]`（无则省略）；保留 `output`（含 `outcomePath` / `completionPath`）/`manualCheck`/`verifyBranch`；边**条件装配** `on` / `when` / `result` / `outcome` / `countRound`（无 `on` 的业务边不得伪造 `on`）；**业务规则字段（候选二 Q7 修订）：`onMaxRounds` / `heteroCheck` 进入 DSL（编辑器可配置）**。正向与逆向投影统一由 `scripts/projection-core.cjs` 提供，产物可喂校验内核结构层（R-02/R-03）。
 
-fanout 节点的 `kind` / `items` / `failOn` 必须双向透传；新模式边字段与 `completionPath` 同样必须双向透传。编辑器保存、重开不得丢失。Inspector Preset 选择器不在本契约（#75）。
+fanout 节点的 `kind` / `items` / `failOn` 必须双向透传；新模式边字段与 `completionPath` 同样必须双向透传。编辑器保存、重开不得丢失。Inspector Preset 选择器不在本字段契约；产品范围、WFM-446 / PR #364 的交付及与 WFM-83 的分工见 [UI 正式归档](workflow-ui-v0.1-decisions.md)。
 
 > **编译语义（v1.1 候选一统一编译器，T-IMP-12）**：DSH 与 vwf 双入口共用单一编译器
 > `scripts/generate.mjs compileBlueprint`。宿主（`host.js`）经管道取译文：内置模板读

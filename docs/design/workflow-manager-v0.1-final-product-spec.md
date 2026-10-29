@@ -3,6 +3,7 @@
 > 状态：统一审查定稿基线  
 > 日期：2026-08-30  
 > 范围：建设 / 优化 / 诊断 / 探索四套正式工作流，以及共享 Blueprint、Logical Run、角色、版本、人工交互、模型配置和执行入口能力。
+> UI 范围与状态补注（2026-10-28）：本文保留 Target 语义；DT-00=C、DT-01=A、DT-02=B、DT-03=A 的正式裁定、当前归属和实现核对见 [`workflow-ui-v0.1-decisions.md`](workflow-ui-v0.1-decisions.md)。目标条文存在不代表已上线或已获产品验收。
 
 ## 1. 产品定位
 
@@ -32,6 +33,8 @@ Blueprint 至少定义 nodes / edges、role bindings、provider / model bindings
 ### 2.3 Invocation / Skill
 
 当前正式入口仍以 Skill / Chat 为核心。未来插件侧如增加“使用此工作流 / 运行”等入口，也只能作为新的 Invocation Adapter，最终进入同一个 Logical Run Runtime，不能形成第二套运行体系。
+
+> 本版范围：DT-01=A 已确认新 Logical Run 只通过 Skill / Chat 发起，S-1 已取消。上句关于未来插件入口保留长期约束，不构成本版起跑按钮需求；既有 Run 内控制和续跑仍保留。
 
 ### 2.4 Logical Workflow Run
 
@@ -77,6 +80,8 @@ Run 创建时冻结 Workflow、Role、Provider / Model 与关键运行配置。v
 
 权威事实来自终态 Node 的结构化结果；Run 层只镜像摘要用于搜索、筛选和看板。
 
+> 本版状态：上列 `COMPLETED_OBSERVING` 保留长期语义示例；当前四套正式模板没有该完成类型的生产者，观察 UI 未交付且不纳入本版验收（DT-03=A）。其他真实 Completion Type 仍按来源节点和当前实现核验。
+
 ## 4. 全局设计原则 R1–R6
 
 展开定义、四套模板方法论与新增角色/模板检查清单见长期方法论文档 [`workflow-design-principles.md`](workflow-design-principles.md)（#71）。本节只保留本版本规格需要的摘要。
@@ -119,6 +124,8 @@ PAUSED 表示条件具备但用户主动暂停。支持 Safe Pause、Interrupt �
 ### OBSERVING
 
 OBSERVING 不是 Lifecycle。缺陷可 `COMPLETED` 后显示“已完成 · 观察中”；复发创建新缺陷 Run，不重新打开旧 Run。
+
+> 本版范围：以上长期设计原则保留。按 [DT-03=A](workflow-ui-v0.1-decisions.md#2-已确认的产品裁定)，观察标签、人工标记、生产者及相关写入口均为**本版非目标、未交付、不纳入 UI/发布验收**；S-5 已取消，不新增 `OBSERVING` Lifecycle。
 
 ## 6. Snapshot、Model Override 与 Preflight
 
@@ -242,7 +249,9 @@ Draft PR #70 已关闭且未合并；`feat/multi-perspective-exploration` 仅作
 
 当前真实路径仍是：模板库 -> 编辑器 -> 保存生成/更新 Skill -> Chat 调用 Skill。
 
-#75 负责正式 UI/交互架构。必须保证 Lifecycle / Node Outcome / Completion Type 分层表达；一个 Logical Run 跨多个 Execution Segment 仍显示为一个 Run；Chat / Skill / 插件入口共享同一 Runtime。
+UI 产品裁定、归属与待核实边界见 [`workflow-ui-v0.1-decisions.md`](workflow-ui-v0.1-decisions.md)；[#75](https://github.com/crystepj-max/workflow-manager/issues/75) 保持 Open 的父票及后续决策索引。必须保证 Lifecycle / Node Outcome / Completion Type 分层表达；一个 Logical Run 跨多个 Execution Segment 仍显示为一个 Run；Chat / Skill / 插件入口共享同一 Runtime。
+
+实现核对基线见正式归档文首：Preset（WFM-446 / PR #364）与看板摘要（WFM-451 / PR #370）已合入，正式安装/真实使用验收另计；自定义 Completion Mapping / 多层路径由 WFM-83 承接，人工决定与受阻恢复提交由 WFM-67 承接。FEAT-115 四段重排、S-1 起跑入口、S-5 观察功能已取消。
 
 ## 12. 实施依赖
 
@@ -272,9 +281,11 @@ Draft PR #70 已关闭且未合并；`feat/multi-perspective-exploration` 仅作
 
 ### Phase D — UI
 
-- #75 整体 UI / 交互架构，定稿后再拆前端施工任务。
+- [UI 正式归档](workflow-ui-v0.1-decisions.md) 归档已确认范围、十四项归属与待核实边界；#75 保留父票/索引，已明确承接的施工与验收沿相应 Multica Task，不再以四项 DT 未决为前置阻塞。
 
 ## 13. 发布门槛
+
+> UI 实现状态补注：内核与内置蓝图已有 Completion Mapping 声明；自定义可视化完成映射/多层路径的实施与验收归 WFM-83。是否达到发布门槛须逐项查实际证据；不沿用历史 CHORE-113 中未经当前口径确认的“不阻塞发布”推断，也不把本版已排除的 OBSERVING 列为空验收项。[#213](https://github.com/crystepj-max/workflow-manager/issues/213) 保持独立产品模式验收角色。
 
 四套正式模板进入 Built-in 并发布 v0.1 前至少满足：
 
@@ -294,13 +305,15 @@ Draft PR #70 已关闭且未合并；`feat/multi-perspective-exploration` 仅作
 
 ## 14. 当前未决项
 
+UI 的 DT-00=C、DT-01=A、DT-02=B、DT-03=A 已于 2026-10-17 全部确认，原始确认与生效范围见 [正式归档 §2](workflow-ui-v0.1-decisions.md#2-已确认的产品裁定)。其余独立产品事项不由本次 UI 归档代裁。
+
 仅保留：**诊断模板默认自动回退额度的具体数值**。推荐 3，但实施前必须明确确认。
 
 探索轮次已经锁定：总研究轮次最多 3，首次 BROAD 计入总数，最多 2 次自动 `NEEDS_RESEARCH -> orchestrate` 回退；第 3 轮仍 NEEDS_RESEARCH 时保留评估原 Outcome，并由宿主收口为合法完成 `INSUFFICIENT`（不转人工、不弹决策卡）。该处置口径由 D-LOC-036（2026-09-16 确认）确立，crystepj-max 于 2026-09-20 复确认维持 A 方案；本文此前「保留 Outcome 并转人工」的表述属未回写的旧目标口径，已按裁定更正。
 
 ## 15. 历史 Issue / 文档边界
 
-- #3 已审计并关闭为 Historical / Superseded；当前正式产品总览由 #76、UI 由 #75 承接；
+- #3 已审计并关闭为 Historical / Superseded；当前正式产品总览由 #76 承接，UI 裁定与归属看 [正式归档](workflow-ui-v0.1-decisions.md)，#75 保留父票/后续索引；
 - #64–#68 已 superseded，不再作为施工依赖；
 - #40 保持 completed，不重新打开；
 - `CONTEXT.md` 与旧“开发工作流 2.0”文档当前继续描述 main 的兼容实现，待 #77/#79 等新语义真实进入 main 后再同步重写，避免文档先于代码。

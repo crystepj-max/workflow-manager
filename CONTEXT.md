@@ -255,7 +255,7 @@
 - **`$human-decision`（人工决策保留目标）**：与 `$end` 同类的框架点，不是 Role、无 LLM。入边 = 触发停机的业务结果；出边 = 决策结果路由（#77 校验接受，运行时不走）。#87。
 - **kind（节点种类）**：如 `worker`（工人节点）/ `fanout`（扇出）。人工决策不是一种 kind（#87 否决 Q4-B）。
 - **profile（角色档案）**：节点绑定的能力角色。人工决策按原则不是通用角色。
-- **Outcome Preset（业务结果预设）**：可选的推荐枚举+路径，机器可读 JSON（#91：`docs/design/outcome-presets.json`）。校验不强制选用；#75 做选择器。不扫描 goal / 角色文案。
+- **Outcome Preset（业务结果预设）**：可选的推荐枚举+路径，机器可读 JSON（#91：`docs/design/outcome-presets.json`）。校验不强制选用；内置 Preset 数据纠偏与选择器已由 PR #364 合入，适用范围及验收边界见 [UI 正式归档](docs/design/workflow-ui-v0.1-decisions.md)。不扫描 goal / 角色文案。
 - **可穷举（enumerable）**：新模式 `outcomePath` 指向的 schema 必须是 `enum` / `const` / `oneOf` 常量，或 `boolean`（视为 `{true, false}`）。自由字符串无法证明不悬空（#91）。
 - **expand–contract（扩缩兼容）**：新旧形态并存，旧蓝图零迁移仍可跑。
 
