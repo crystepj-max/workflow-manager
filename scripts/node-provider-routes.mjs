@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { exploreHandoffContract } from './explore-handoff.mjs'
 
 const DEFAULT_ROUTE_TTL_MS = 12 * 60 * 60 * 1000
 const MAX_ROUTE_TTL_MS = 24 * 60 * 60 * 1000
@@ -11,6 +12,7 @@ export function createProviderRoutes(input = {}) {
   const ttlMs = input.ttl_ms === undefined ? DEFAULT_ROUTE_TTL_MS : input.ttl_ms
   if (!Number.isSafeInteger(ttlMs) || ttlMs < 1 || ttlMs > MAX_ROUTE_TTL_MS) throw new Error('route ttl_ms must be between 1 and 86400000')
   const dsl = input.dsl
+  const handoffContract = exploreHandoffContract(dsl)
   const nodes = dsl && Array.isArray(dsl.nodes) ? dsl.nodes.filter((node) => node && typeof node.id === 'string' && node.id && !node.mechanical) : []
   if (!nodes.length || nodes.length > 1000) throw new Error('dsl must contain 1–1000 model nodes')
   const ids = new Set()
@@ -33,6 +35,7 @@ export function createProviderRoutes(input = {}) {
       nodeFolderId: 'route-' + token.slice(0, 24), attributionFolderId: 'route-' + token.slice(0, 24) + '-attribution',
       profile: node.profile, nodeCapabilities: node.node_capabilities || null, provider, model,
       isolationGuarantee: input.isolation_guarantee,
+      ...(handoffContract ? { handoffContract } : {}),
     })
     tokens.nodes[node.id] = token
     tokens.attribution[node.id] = token

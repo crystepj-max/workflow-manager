@@ -63,6 +63,8 @@ const nodeProviderCoreSrc = join(root, '..', '..', 'scripts', 'node-provider-cor
 const nodeIsolationHostClientSrc = join(root, '..', '..', 'scripts', 'node-isolation-host-client.cjs')
 const nodeIsolationSrc = join(root, '..', '..', 'scripts', 'node-isolation.mjs')
 const nodeArtifactsSrc = join(root, '..', '..', 'scripts', 'node-artifacts.mjs')
+const exploreHandoffSrc = join(repoRoot, 'scripts', 'explore-handoff.mjs')
+const exploreHandoffTemplateSrc = join(repoRoot, 'templates', 'wf-explore.json')
 const nodeIsolationLauncherSrc = join(root, '..', '..', 'scripts', 'node-isolation-launcher.mjs')
 const cwfValidateSrc = join(root, '..', '..', 'scripts', 'cwf-validate.mjs')
 const nodeIsolationSchemaSrc = join(root, '..', '..', 'docs', 'design', 'node-isolation', 'schema.json')
@@ -93,6 +95,8 @@ const nodeProviderCoreBody = readFileSync(nodeProviderCoreSrc, 'utf8')
 const nodeIsolationHostClientBody = readFileSync(nodeIsolationHostClientSrc, 'utf8')
 const nodeIsolationBody = readFileSync(nodeIsolationSrc, 'utf8')
 const nodeArtifactsBody = readFileSync(nodeArtifactsSrc, 'utf8')
+const exploreHandoffBody = readFileSync(exploreHandoffSrc, 'utf8')
+const exploreHandoffTemplateBody = readFileSync(exploreHandoffTemplateSrc, 'utf8')
 const nodeIsolationLauncherBody = readFileSync(nodeIsolationLauncherSrc, 'utf8')
 const cwfValidateBody = readFileSync(cwfValidateSrc, 'utf8')
 const nodeIsolationSchemaBody = readFileSync(nodeIsolationSchemaSrc, 'utf8')
@@ -133,6 +137,8 @@ const stamp = {
   nodeIsolationHostClient: sha256(nodeIsolationHostClientBody),
   nodeIsolation: sha256(nodeIsolationBody),
   nodeArtifacts: sha256(nodeArtifactsBody),
+  exploreHandoff: sha256(exploreHandoffBody),
+  exploreHandoffTemplate: sha256(exploreHandoffTemplateBody),
   nodeIsolationLauncher: sha256(nodeIsolationLauncherBody),
   cwfValidate: sha256(cwfValidateBody),
   nodeIsolationSchema: sha256(nodeIsolationSchemaBody),
@@ -165,6 +171,8 @@ const requiredArtifacts = [
   join(dist, 'node-isolation-host-client.cjs'),
   join(dist, 'node-isolation.mjs'),
   join(dist, 'node-artifacts.mjs'),
+  join(dist, 'explore-handoff.mjs'),
+  join(dist, 'explore-handoff-template.json'),
   join(dist, 'node-isolation-launcher.mjs'),
   join(dist, 'cwf-validate.mjs'),
   join(dist, 'node-isolation-schema.json'),
@@ -265,6 +273,8 @@ copyFileSync(nodeProviderCoreSrc, join(dist, 'route.cjs'))
 copyFileSync(nodeIsolationHostClientSrc, join(dist, 'node-isolation-host-client.cjs'))
 copyFileSync(nodeIsolationSrc, join(dist, 'node-isolation.mjs'))
 copyFileSync(nodeArtifactsSrc, join(dist, 'node-artifacts.mjs'))
+copyFileSync(exploreHandoffSrc, join(dist, 'explore-handoff.mjs'))
+copyFileSync(exploreHandoffTemplateSrc, join(dist, 'explore-handoff-template.json'))
 copyFileSync(nodeIsolationLauncherSrc, join(dist, 'node-isolation-launcher.mjs'))
 copyFileSync(cwfValidateSrc, join(dist, 'cwf-validate.mjs'))
 copyFileSync(nodeIsolationSchemaSrc, join(dist, 'node-isolation-schema.json'))
