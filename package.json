@@ -13,6 +13,7 @@
     "generate": "node scripts/generate.mjs",
     "install:builtin-skills": "node scripts/install-builtin-skills.mjs",
     "install:builtin-skills:pool": "node scripts/install-builtin-skills.mjs --pool",
+    "audit:builtin-skills": "node scripts/installed-skill-audit.mjs",
     "release:verify": "node scripts/release-verify.mjs",
     "validate": "node scripts/validate.mjs && node scripts/validate-workspace.mjs",
     "validate:workspace": "node scripts/validate-workspace.mjs",
