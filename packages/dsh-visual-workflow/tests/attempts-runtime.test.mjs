@@ -70,22 +70,22 @@ function attemptLine(runId, ev) {
   return '[vwf-attempt]' + JSON.stringify(ev)
 }
 
-function env({ value = null, recordsHost = null, seedRecordsHost = true } = {}) {
+function env({ value = null, recordsHost = null, seedRecordsHost = true, compileScript = '//MOCK-SCRIPT', blueprint = BP } = {}) {
   const seeds = {
     [REPO + '/scripts/validate-core.cjs']: validatorCoreSrc,
     [DIST + '/attempt-ledger.cjs']: attemptLedgerSrc,
-    [USER_DIR + '/attempt-spec.json']: JSON.stringify(BP, null, 2) + '\n',
-    [SKILL_ROOT + '/attempt-spec/script.mjs']: '//MOCK-SCRIPT',
+    [USER_DIR + '/attempt-spec.json']: JSON.stringify(blueprint, null, 2) + '\n',
+    [SKILL_ROOT + '/attempt-spec/script.mjs']: compileScript,
   }
   if (seedRecordsHost) seeds[REPO + '/scripts/records-host.mjs'] = recordsHostSrc
   const fs = makeFs(seeds)
-  const sub = makeIsolatedSubprocess({ fs, compileScript: '//MOCK-SCRIPT', recordsHost })
+  const sub = makeIsolatedSubprocess({ fs, compileScript, recordsHost })
   const engine = {
-    start: () => {
+    start: (request) => {
       const id = 'run-' + (engine.n = (engine.n || 0) + 1)
       let release = () => {}
       const result = new Promise((r) => { release = r })
-      engine.pending.push({ id, release })
+      engine.pending.push({ id, release, request })
       return { id, result }
     },
     pending: [],
@@ -276,4 +276,132 @@ test('同段重放同一事件行：提交键幂等，节点索引不重复生�
   const logical = readLogical(fs, 'task-replay')
   assert.equal(logical.node_attempts.length, 1, '索引只回填一次')
   assert.equal(logical.lifecycle.state, 'COMPLETED')
+})
+
+// FIX-224：实际执行无事件行的冻结脚本，只替换引擎进程边界；不靠构造最终
+// node_attempts 冒充脚本执行。模型调用以确定性函数代替，同节点确实调用两次。
+const LEGACY_SCRIPT = `
+const results = Object.assign({}, args.results || {})
+for (let i = 1; i <= 2; i++) {
+  calls.push('dev')
+  results.dev = { verdict: 'PASS', v: i }
+  log('[pw-ckpt]' + JSON.stringify({ c: 'review', r: results, h: [], rd: 0 }))
+}
+calls.push('review')
+results.review = { verdict: 'PASS', verified_branch: 'b', verified_head: 'h' }
+return { status: 'DONE', results, history: [] }
+`
+function runFrozen({ engine, events }, index) {
+  const { id, request } = engine.pending[index]
+  const calls = []
+  const logs = []
+  const value = new Function('args', 'log', 'calls', request.script)(request.args, (line) => {
+    logs.push(line)
+    events.get('workflow/log')({ id }, line)
+  }, calls)
+  assert.ok(logs.every((line) => !line.includes('[vwf-attempt]')), '冻结脚本只发旧检查点，无逐次事件')
+  return { value, calls }
+}
+
+test('FIX-224 无事件冻结脚本：同节点真实重入仍一扫描条目，段内连续序号且不扫描段首结果', async () => {
+  const context = env({ compileScript: LEGACY_SCRIPT })
+  const { wfRun, events, engine, fs, sub } = context
+  const p = wfRun.execute({ templateId: 'attempt-spec', taskId: 'legacy-scan', results: { gate: { verdict: 'PASS' } } })
+  await until(() => engine.pending.length === 1, '旧脚本启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'legacy' } })
+  const { value, calls } = runFrozen(context, 0)
+  assert.deepEqual(calls, ['dev', 'dev', 'review'], '同一节点实际调用两次，而不是夹具假称重入')
+  settleRun(events, engine, 'run-1', 'completed', value)
+  await p
+  await drain()
+  const rec = readLogical(fs, 'legacy-scan')
+  assert.deepEqual(rec.node_attempts.map((a) => [a.node, a.attempt_id, a.evidence_source]), [
+    ['dev', 'a1s1', 'segment_scan'], ['review', 'a1s2', 'segment_scan'],
+  ])
+  assert.equal(rec.node_attempts.filter((a) => a.node === 'dev').length, 1, '不重建已经丢失的调用次数')
+  assert.equal(rec.business_outcomes.dev.outcome, 'PASS')
+  assert.ok(!rec.node_attempts.some((a) => a.node === 'gate'), '段首已有结果不作为新增节点')
+  assert.equal(sub._calls.filter((a) => a.join(' ').includes('records-host.mjs attempt')).length, 0, '扫描摘要不伪造逐次 Store 提交')
+})
+
+test('FIX-224 合法业务结果 INTERRUPTED 不等于执行中断：完成扫描保持 completed', async () => {
+  const blueprint = structuredClone(BP)
+  blueprint.nodes.find((n) => n.id === 'dev').output.schema.properties.verdict.enum.push('INTERRUPTED')
+  blueprint.edges.push({ from: 'dev', to: 'review', outcome: 'INTERRUPTED' })
+  const compileScript = LEGACY_SCRIPT.replace("results.dev = { verdict: 'PASS', v: i }", "results.dev = { verdict: 'INTERRUPTED', v: i }")
+  const context = env({ blueprint, compileScript })
+  const { wfRun, events, engine, fs } = context
+  const p = wfRun.execute({ templateId: 'attempt-spec', taskId: 'business-interrupted' })
+  await until(() => engine.pending.length === 1, '允许 INTERRUPTED 业务枚举的旧脚本启动')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'legacy' } })
+  const { value } = runFrozen(context, 0)
+  settleRun(events, engine, 'run-1', 'completed', value)
+  await p
+  await drain()
+  const rec = readLogical(fs, 'business-interrupted')
+  const dev = rec.node_attempts.find((a) => a.node === 'dev')
+  assert.equal(dev.outcome, 'INTERRUPTED', '专业业务值按 schema 原样保留')
+  assert.equal(dev.status, 'completed', '业务字符串不能反推执行状态')
+  assert.equal(dev.evidence_source, 'segment_scan')
+  assert.equal(rec.business_outcomes.dev.outcome, 'INTERRUPTED')
+  assert.equal(rec.lifecycle.state, 'COMPLETED', '正常结束的生命周期与业务值分离')
+})
+
+test('FIX-224 旧脚本中断后续跑：中断也标扫描来源，段内编号重置，快照旧结果不重复入档', async () => {
+  const context = env({ compileScript: LEGACY_SCRIPT })
+  const { wfRun, ctl, events, engine, fs } = context
+  const p1 = wfRun.execute({ templateId: 'attempt-spec', taskId: 'legacy-resume' })
+  await until(() => engine.pending.length === 1, '旧脚本首段')
+  events.get('workflow/start')({ id: 'run-1', meta: { name: 'legacy' } })
+  ckptLog(events, 'run-1', 'review', { dev: { verdict: 'PASS' } })
+  assert.equal(JSON.parse(await ctl.execute({ action: 'interrupt', logical_run_id: 'legacy-resume' })).ok, true)
+  settleRun(events, engine, 'run-1', 'cancelled', null)
+  await p1
+  await drain()
+  const before = readLogical(fs, 'legacy-resume')
+  assert.deepEqual(before.node_attempts.map((a) => [a.node, a.attempt_id, a.evidence_source, a.outcome]), [
+    ['dev', 'a1s1', 'segment_scan', 'PASS'], ['review', 'a1s2', 'segment_scan', 'INTERRUPTED'],
+  ])
+  assert.equal(before.node_attempts.find((a) => a.node === 'dev').status, 'completed')
+  assert.equal(before.node_attempts.find((a) => a.node === 'review').status, 'interrupted', '真实 interrupt 的补录仍明确标中断')
+  for (const attempt of before.node_attempts) {
+    assert.equal(attempt.isolation_guarantee, 'enforced', 'WFM-69 扫描和中断补录均保留 WFM-81 隔离事实')
+    assert.equal(attempt.independent_proof_eligible, before.node_isolation[attempt.node].independent_proof_eligible)
+  }
+  assert.ok(!before.business_outcomes.review, '中断仍不生成成功业务结果')
+  const p2 = wfRun.execute({ templateId: 'attempt-spec', taskId: 'legacy-resume', resume_paused: true })
+  await until(() => engine.pending.length === 2, '旧脚本恢复段')
+  events.get('workflow/start')({ id: 'run-2', meta: { name: 'legacy' } })
+  assert.equal(engine.pending[1].request.script, LEGACY_SCRIPT, '续跑仍执行 Rev1 冻结脚本')
+  const { value } = runFrozen(context, 1)
+  settleRun(events, engine, 'run-2', 'completed', value)
+  await p2
+  await drain()
+  const after = readLogical(fs, 'legacy-resume')
+  assert.deepEqual(after.node_attempts.filter((a) => a.segment === 1), before.node_attempts, '历史条目不补偿、不翻转来源')
+  assert.deepEqual(after.node_attempts.filter((a) => a.segment === 2).map((a) => [a.node, a.attempt_id, a.evidence_source]), [['review', 'a2s1', 'segment_scan']])
+})
+
+test('FIX-224 空扫描段不追加记录，逐次事件段有额外结果也不触发扫描回退', async () => {
+  const empty = env()
+  const p1 = empty.wfRun.execute({ templateId: 'attempt-spec', taskId: 'legacy-empty', results: { gate: { verdict: 'PASS' } } })
+  await until(() => empty.engine.pending.length === 1, '空段')
+  settleRun(empty.events, empty.engine, 'run-1', 'completed', { status: 'DONE', results: { gate: { verdict: 'PASS' } } })
+  await p1
+  await drain()
+  assert.deepEqual(readLogical(empty.fs, 'legacy-empty').node_attempts, [])
+
+  const dir = mkdtempSync(join(tmpdir(), 'vwf-att-mixed-'))
+  const mixed = env({ recordsHost: realRecordsHost(dir) })
+  const p2 = mixed.wfRun.execute({ templateId: 'attempt-spec', taskId: 'event-authority' })
+  await until(() => mixed.engine.pending.length === 1, '逐次段')
+  mixed.events.get('workflow/log')({ id: 'run-1' }, attemptLine('run-1', { a: 'e', k: 1, n: 'dev', r: 0, t: 'call', s: 'completed', q: { verdict: 'PASS' }, o: 'PASS' }))
+  await drain()
+  settleRun(mixed.events, mixed.engine, 'run-1', 'completed', { status: 'DONE', results: { dev: { verdict: 'PASS' }, review: { verdict: 'PASS' } } })
+  await p2
+  await drain()
+  const rec = readLogical(mixed.fs, 'event-authority')
+  assert.deepEqual(rec.node_attempts.map((a) => a.attempt_id), ['a1k1'], '有逐次事件时不从额外结果补造扫描条目')
+  assert.ok(rec.node_attempts.every((a) => a.evidence_source !== 'segment_scan'))
+  assert.equal(mixed.sub._calls.filter((a) => a.join(' ').includes('records-host.mjs commit')).length, 0, '新脚本段仍零段末提交')
 })

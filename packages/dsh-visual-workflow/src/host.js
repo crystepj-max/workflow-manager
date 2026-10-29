@@ -887,11 +887,6 @@ return {
       rec.updated_at = now
       return next
     }
-    function effectiveProviderModel(rec, nodeId) {
-      const snap = activeSnapshot(rec)
-      const pm = (snap && snap.provider_model) || {}
-      return pm[nodeId] || null
-    }
     function trackHumanWait(rec, prevState, nextState) {
       rec.human_waits = Array.isArray(rec.human_waits) ? rec.human_waits : []
       const waitStates = ['WAITING_HUMAN', 'PAUSED', 'BLOCKED']
@@ -1003,27 +998,33 @@ return {
     // 段内新完成节点（段末 results − 段首 results）→ node_attempts 记录当时实际
     // Snapshot Revision / Provider / Model（段内修订冻结，逐节点准确）+ 声明了业务
     // 结果路径的节点入 business_outcomes（与 Lifecycle 分别持久化）。
-    function recordNodeAttempts(rec, dsl, beforeKeys, results, controlEvent) {
+    // 旧冻结脚本只能扫描段末快照；s 编号与逐次事件 k 编号分开，不推测调用次数。
+    // 执行状态只由调用路径提供，不能从专业业务值（即使同名 INTERRUPTED）推断。
+    function segmentScanAttempt(rec, nodeId, outcome, status = 'completed') {
       const snap = activeSnapshot(rec)
+      const eff = snap && snap.provider_model && snap.provider_model[nodeId]
+      const segment = rec.segments.length
+      const seq = rec.node_attempts.filter((a) => a.segment === segment && a.evidence_source === 'segment_scan').length + 1
+      return {
+        node: String(nodeId), segment,
+        attempt_id: 'a' + segment + 's' + seq, evidence_source: 'segment_scan',
+        status,
+        snapshot_revision: snap ? snap.revision : null,
+        provider: String((eff && eff.provider) || 'default'), model: String((eff && eff.model) || 'default'),
+        outcome: outcome === undefined ? null : outcome, completed_at: Date.now(),
+        ...(rec.node_isolation && rec.node_isolation[nodeId] || {}),
+      }
+    }
+    function recordNodeAttempts(rec, dsl, beforeKeys, results, controlEvent) {
       const segNo = rec.segments.length
       let added = 0
       for (const nodeId of Object.keys(results || {})) {
         if (beforeKeys && beforeKeys.has(nodeId)) continue
         const r = results[nodeId]
         if (r == null || typeof r !== 'object') continue
-        const eff = effectiveProviderModel(rec, nodeId)
         const path = outcomePathOf(dsl, nodeId)
         const outcome = businessOutcomeOf(dsl, nodeId, r, controlEvent)
-        const attempt = {
-          node: String(nodeId),
-          segment: segNo,
-          snapshot_revision: snap ? snap.revision : null,
-          provider: String((eff && eff.provider) || 'default'),
-          model: String((eff && eff.model) || 'default'),
-          outcome: outcome === undefined ? null : outcome,
-          completed_at: Date.now(),
-        }
-        Object.assign(attempt, rec.node_isolation && rec.node_isolation[nodeId])
+        const attempt = segmentScanAttempt(rec, nodeId, outcome)
         rec.node_attempts.push(attempt)
         if (outcome !== undefined && outcome !== null) {
           rec.business_outcomes[String(nodeId)] = {
@@ -3234,9 +3235,7 @@ return {
         // runsHydration 会与 loadLogicalRuns 竞速，重启窗口内误判"无前任"）。
         try { if (typeof logicalRunsHydration !== 'undefined' && logicalRunsHydration) await logicalRunsHydration } catch (e) { /* 回载失败已留痕 */ }
         const logicalTaskId = taskId
-        // LOC-027：基线恢复段以检查点现场为段首基线（beforeResultKeys 随恢复段更新，
-        // 保证逐节点入档只记恢复段新完成的节点）
-        let beforeResultKeys = new Set(Object.keys((args.results && typeof args.results === 'object' && !Array.isArray(args.results)) ? args.results : {}))
+        let beforeResultKeys = new Set(Object.keys(asObj(args.results) || {}))
         const logicalRunConfig = () => {
           const cfg = { runDir: args.runDir, baseBranch: args.baseBranch, roleDir: args.roleDir || c.roleDir, issueRef: args.issueRef, issueTitle: args.issueTitle }
           for (const k of Object.keys(cfg)) { if (cfg[k] === undefined || cfg[k] === null || cfg[k] === '') delete cfg[k] }
@@ -3297,6 +3296,8 @@ return {
             const prArgs = built.args
             if (prArgs.entry === undefined && args.entry === undefined) return '错误：暂停现场无检查点入口（降级现场），请人工确认续跑入口节点后改用 entry=<节点id> 续跑。'
             for (const k of Object.keys(prArgs)) if (args[k] === undefined || args[k] === null || (typeof args[k] === 'object' && !Array.isArray(args[k]) && args[k] !== null && Object.keys(args[k]).length === 0)) args[k] = prArgs[k]
+            // 普通恢复的检查点旧结果不算新增。显式基线整体重跑沿用 #80 的重新取证语义。
+            if (!built.pendingRebase) beforeResultKeys = new Set(Object.keys(asObj(args.results) || {}))
           }
           if (latest) {
             logicalRec = latest
@@ -3645,15 +3646,7 @@ return {
           // 结果，恢复后整体重跑）；降级现场（无检查点）无法定位节点，登记为已知限制。
           // 逐次提交段由 Store close 已把进行中 attempt 记为 interrupted，不重复入档。
           if (pauseAction === 'interrupt' && ck.entry && !attPause) {
-            const snap = activeSnapshot(logicalRec)
-            const eff = effectiveProviderModel(logicalRec, ck.entry)
-            logicalRec.node_attempts.push({
-              node: ck.entry, segment: logicalRec.segments.length,
-              snapshot_revision: snap ? snap.revision : null,
-              provider: String((eff && eff.provider) || 'default'), model: String((eff && eff.model) || 'default'),
-              outcome: 'INTERRUPTED', completed_at: Date.now(),
-              ...(logicalRec.node_isolation && logicalRec.node_isolation[ck.entry] || {}),
-            })
+            logicalRec.node_attempts.push(segmentScanAttempt(logicalRec, ck.entry, 'INTERRUPTED', 'interrupted'))
           }
           logicalSetState(logicalRec, 'PAUSED', logicalReason(pauseAction === 'interrupt' ? 'USER_INTERRUPT' : 'USER_PAUSE', ck.degraded ? '该段无可用检查点，恢复需人工指定 entry' : ''))
           controlEvent(logicalRec, pauseAction === 'interrupt' ? 'interrupted' : 'paused', { run_id: runId, checkpoint_entry: ck.entry || null, checkpoint_degraded: ck.degraded === true })

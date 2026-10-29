@@ -3480,26 +3480,24 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       }
       return tasks
     }
-    // 节点尝试索引：node → 按段号与完成时间升序（node_attempts 为宿主段末扫描的权威入档）
-    function attemptsByNode(list) {
-      const m = {}
-      for (const a of list || []) {
-        if (!a || !a.node) continue
-        const k = String(a.node)
-        if (!m[k]) m[k] = []
-        m[k].push(a)
-      }
-      for (const k of Object.keys(m)) {
-        m[k].sort((a, b) => (Number(a.segment) || 0) - (Number(b.segment) || 0) || ((a.completed_at || 0) - (b.completed_at || 0)))
-      }
-      return m
-    }
-    // 返工深度：同一节点被重复执行的最多次数减一
-    function reworkCountOf(record) {
-      const byNode = attemptsByNode(record && record.node_attempts)
+    const isSegmentScan = (a) => a && a.evidence_source === 'segment_scan'
+    const scanText = () => t('rdSegmentScan')
+    const attemptText = (v, n, state) => isSegmentScan(v)
+      ? t('rdScanEntry', { n: String(v.attempt_id).split('s').pop() }) + ' · ' + state
+      : t('rdAttemptOption', { n, state })
+    const attemptMeta = (v) => t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }) + (isSegmentScan(v) ? ' · ' + scanText() : '')
+    // 返工深度只对逐次证据计数；段末快照无法回答本段真实调用次数。
+    function reworkTextOf(record) {
+      const counts = new Map()
       let max = 0
-      for (const k of Object.keys(byNode)) max = Math.max(max, byNode[k].length)
-      return max > 0 ? max - 1 : 0
+      for (const a of (record && record.node_attempts) || []) {
+        if (isSegmentScan(a)) return scanText()
+        if (!a || !a.node) continue
+        const n = (counts.get(a.node) || 0) + 1
+        counts.set(a.node, n)
+        max = Math.max(max, n)
+      }
+      return max > 1 ? t('dashReworkCount', { n: max - 1 }) : t('dashFirstRun')
     }
     function outcomeValuesOf(record) {
       const bo = (record && record.business_outcomes) || {}
@@ -3510,7 +3508,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     // 执行顺序键：段号 + 结束/开始时间（与 logicalAttemptsOf 的排序同一口径，等值按记录
     // 追加序稳定兜底）。业务返工在**同一段内**回环重做（countRound 边不新开段），所以判断
     // 「本轮有没有重做过」只能靠真实执行先后，不能只看段号。
-    const ordOf = (v) => String(Number(v.segment) || 0).padStart(3, '0') + String(new Date(v.ended_at || v.started_at || 0).getTime() || 0).padStart(14, '0')
+    const ordOf = (v) => String(Number(v.segment) || 0).padStart(3, '0') + String(new Date(v.ended_at || v.started_at || v.completed_at || 0).getTime() || 0).padStart(14, '0')
     // 结局词表（全部由蓝图派生，不认节点名与取值名写法）：退回类 = countRound=true 的
     // 边（返工/补充回边）声明的 outcome；人工门禁类 = 指向人工裁决节点的边声明的 outcome。
     function verdictWordsOf(dsl) {
@@ -3677,7 +3675,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           wsLabel: workspaceLabelOf(ws),
           wsPending: !!task.logicalRunId && !lr && !lrErr[task.logicalRunId],
           wsError: task.logicalRunId && !lr ? (lrErr[task.logicalRunId] || '') : '',
-          rework: lr ? reworkCountOf(lr) : null,
           updatedAt: (lr && lr.updated_at) || head.startedAt || head.ts || 0,
           completionType: lr && lr.completion && lr.completion.type ? String(lr.completion.type) : '',
           outcomes: lr ? outcomeValuesOf(lr) : [],
@@ -3903,7 +3900,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('p', { className: 'vwf-run-row-note' }, m.lr && m.lr.title ? String(m.lr.title) : (m.head.name || m.head.workflowId || '—')),
           dashInfo ? h('small', { className: 'vwf-muted-sm' }, dashInfo) : null,
           h('div', { className: rowClass, style: { justifyContent: 'space-between' } },
-            h('small', null, (m.head.name || m.head.workflowId || '—') + ' · ' + (m.rework === null ? t('dashRuntimeLabel') : (m.rework > 0 ? t('dashReworkCount', { n: m.rework }) : t('dashFirstRun')))),
+            h('small', null, (m.head.name || m.head.workflowId || '—') + ' · ' + (m.lr ? reworkTextOf(m.lr) : t('dashRuntimeLabel'))),
             h('small', null, m.task.segmentCount > 1 ? t('dashSegment', { n: (m.head.segment || m.task.segmentCount), total: m.task.segmentCount }) + ' · ' : '')
           ),
           h('div', { className: rowClass, style: { justifyContent: 'space-between' } },
@@ -3966,9 +3963,18 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const dsl = (lr && lr.snapshots && lr.snapshots.length ? (lr.snapshots[lr.snapshots.length - 1].workflow || {}).dsl : null) || tplMap[head.workflowId] || null
       const st = snapState && dsl ? mapStatus(snapState, dsl) : {}
       const activeSeg = lr ? Math.max(1, ...((lr.segments || []).map((s) => Number(s.index) || 0).concat([1]))) : 1
-      const attempts = React.useMemo(() => latestAttemptBodies(recs && recs.records), [recs])
+      const attempts = React.useMemo(() => {
+        const out = latestAttemptBodies(recs && recs.records)
+        const perCallSegments = new Set(Array.from(out.values(), (a) => a.value.segment))
+        // 仅适配本次以后自然追加且有明确来源的扫描摘要，不回填旧数据、不写 Store。
+        // 同段异常混合时整个扫描段让位给 Store 逐次事实。
+        for (const a of (lr && lr.node_attempts) || []) {
+          if (isSegmentScan(a) && !perCallSegments.has(a.segment)) out.set(a.attempt_id, { value: a })
+        }
+        return out
+      }, [recs, lr])
       const nodeResults = React.useMemo(() => latestNodeResultBodies(recs && recs.records), [recs])
-      const byNode = React.useMemo(() => attemptsByNode(lr && lr.node_attempts), [lr])
+      const scanSegments = new Set(Array.from(attempts.values()).filter((a) => isSegmentScan(a.value)).map((a) => a.value.segment))
       // 目录：DSL 节点 + 该节点的逻辑尝试（kind=logical，排除 fanout 子项）
       const logicalAttemptsOf = React.useCallback((nodeId) => {
         const out = []
@@ -3977,7 +3983,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           if (!v || String(v.node) !== String(nodeId) || v.kind === 'item') continue
           out.push(a)
         }
-        out.sort((x, y) => (Number(x.value.segment) || 0) - (Number(y.value.segment) || 0) || (new Date(x.value.ended_at || x.value.started_at || 0) - new Date(y.value.ended_at || y.value.started_at || 0)))
+        out.sort((x, y) => (Number(x.value.segment) || 0) - (Number(y.value.segment) || 0) || (new Date(x.value.ended_at || x.value.started_at || x.value.completed_at || 0) - new Date(y.value.ended_at || y.value.started_at || y.value.completed_at || 0)))
         return out
       }, [attempts])
       const itemsOf = React.useCallback((nodeId) => {
@@ -4119,7 +4125,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               tone: ATTEMPT_VERDICT[verdict][0],
               state: verdictTextOf(verdict),
               note: String(v.error || ''),
-              meta: t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }),
+              meta: attemptMeta(v),
+              scan: isSegmentScan(v) ? attemptText(v, 0, verdictTextOf(verdict)) : '',
               latest: last,
               prev: i + 1 === prevEntry,
             }, base))
@@ -4133,7 +4140,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               tone: v.status === 'completed' ? 'done' : (v.status === 'failed' ? 'failed' : 'running'),
               state: v.status === 'completed' ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptReturned') : t('rdFanoutIncomplete')),
               note: String(v.error || '') || (v.item ? String(v.item).slice(0, 80) : ''),
-              meta: t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }),
+              meta: attemptMeta(v),
             }, base))
           })
         })
@@ -4190,7 +4197,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       )
       // 返工深度与生命周期状态：页头操作与状态条共用同一口径
       const lstate = lr && lr.lifecycle ? String(lr.lifecycle.state) : ''
-      const reworkN = lr ? reworkCountOf(lr) : 0
+      const reworkText = reworkTextOf(lr)
       const reload = () => { setWsTick((n) => n + 1) }
       // 详情域工作区层（原型 workspace-shell）：页头 + 状态条 + 三栏工作台（步骤 / 画布 / 详情），
       // 运行级记录留在工作台下方。能力出口不变：唯一选中节点、三页签、决策卡、恢复卡、attempt 切换。
@@ -4214,7 +4221,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           h('button', { className: smallButtonClass, onClick: props.onBack }, t('close'))
         ),
         h('div', { className: 'vwf-rd-strip' },
-          h('span', null, (reworkN > 0 ? t('dashReworkCount', { n: reworkN }) : t('dashFirstRun'))
+          h('span', null, reworkText
             + ' · ' + t('dashPhaseLabel', { phase: snapState ? (snapState.phase || '—') : '—' })),
           h('button', { className: smallButtonClass, ref: chainBtnRef, 'aria-haspopup': 'dialog', onClick: () => setChainOpen(true) }, t('rdFullHistory'))
         ),
@@ -4248,7 +4255,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('dashPhaseLabel', { phase: snapState ? (snapState.phase || '—') : '—' }))),
               h('div', { className: 'vwf-rd-kv vwf-row', style: { gap: 6 } }, mutedSpan(t('rdLifecycleLabel')), tierBadgeOf(lr && lr.lifecycle ? lr.lifecycle.state : '')),
               h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('rdCompletionLabel') + '：' + (lr && lr.completion && lr.completion.type ? displayWord(lr.completion.type) : t('dashCompletionNone')))),
-              h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('rdReworkLabel') + '：' + (lr ? (reworkCountOf(lr) > 0 ? t('dashReworkCount', { n: reworkCountOf(lr) }) : t('dashFirstRun')) : '—'))),
+              h('div', { className: 'vwf-rd-kv' }, mutedSpan(t('rdReworkLabel') + '：' + (lr ? reworkText : '—'))),
               // 读取失败不藏进「详细」：定位本身已不可信，必须默认可见并给出重试
               lrError ? h('div', { key: 'wse' },
                 warnNote(t('rdWsReadFailed', { err: lrError })),
@@ -4276,7 +4283,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   h('span', { className: 'vwf-node-dir-no' }, String(ni + 1).padStart(2, '0')),
                   h('span', { className: 'vwf-node-dir-label' }, n.label || n.id),
                   h('span', { className: rowClass, style: { gap: 4 } },
-                    list.length ? h('span', { className: badgeClass }, t('rdAttemptPicker') + ' ' + list.length) : null,
+                    list.length ? h('span', { className: badgeClass }, t(list.some((a) => isSegmentScan(a.value)) ? 'rdScanRecords' : 'rdAttemptPicker') + ' ' + list.length) : null,
                     prev ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null,
                     st[n.id] ? h('span', { className: badgeClass, style: { color: st[n.id] === 'pass' ? STATUS_COLOR.pass : st[n.id] === 'fail' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, displayWord(st[n.id])) : null,
                     n.id === phaseNodeId ? h('span', { className: 'vwf-badge accent' }, t('rdCurrentNode')) : null
@@ -4315,18 +4322,18 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
               isolationBadge(pickedIsolation),
               pickedIsolation && typeof pickedIsolation.independent_proof_eligible === 'boolean' ? mutedDiv(t(pickedIsolation.independent_proof_eligible ? 'isolationProofEligible' : 'isolationProofIneligible') + (pickedIsolation.independent_proof_block_reason ? '：' + pickedIsolation.independent_proof_block_reason : '')) : null,
               selectedAttempts.length ? h('label', { className: rowClass, style: { gap: 8, marginTop: 6 } },
-                mutedSpan(t('rdAttemptPicker')),
+                mutedSpan(t(isSegmentScan(pickedValue) ? 'rdScanRecords' : 'rdAttemptPicker')),
                 h('select', {
                   className: 'vwf-input', style: { maxWidth: 320 },
                   value: String(pickedIdx),
                   onChange: (ev) => setAttemptSel(Object.assign({}, attemptSel, { [selected.id]: Number(ev.target.value) })),
                 }, selectedAttempts.map((a, i) => {
                   const v = a.value
-                  const label = t('rdAttemptOption', { n: i + 1, state: verdictTextOf(verdictOf(v)) }) + (i + 1 === selectedAttempts.length ? t('rdAttemptLatest') : '')
+                  const label = attemptText(v, i + 1, verdictTextOf(verdictOf(v))) + (i + 1 === selectedAttempts.length ? t('rdAttemptLatest') : '')
                   return h('option', { key: v.attempt_id, value: String(i + 1) }, label)
                 }))
               ) : mutedDiv(t('rdNotStarted') + '：' + t('rdNotStartedNote'), { marginTop: 6 }),
-              pickedValue ? mutedDiv(t('rdAttemptMeta', { segment: pickedValue.segment, revision: pickedValue.snapshot_revision, provider: pickedValue.provider, model: pickedValue.model })
+              pickedValue ? mutedDiv(attemptMeta(pickedValue)
                 + (pickedValue.ended_at ? ' · ' + t('rdAttemptAt', { at: fmtAt(Date.parse(pickedValue.ended_at)) }) : ''), { marginTop: 4 }) : null,
               isPrevRound ? warnNote(t('rdPrevRoundNote')) : null,
               // 三页签：同一区域内切换，页面不同时重复展示同一节点详情
@@ -4354,7 +4361,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         chainOpen ? h('div', { className: 'vwf-dialog-mask', style: { zIndex: 970 } },
           h('div', { className: 'vwf-dialog vwf-chain-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('rdFullHistory') },
             h('div', { className: 'vwf-dialog-title' }, t('rdFullHistory') + ' · ' + (lr && lr.title ? String(lr.title) : (head.taskId || head.id || '—'))),
-            h('div', { className: 'vwf-dialog-desc' }, t('rdChainNote')),
+            h('div', { className: 'vwf-dialog-desc' }, scanSegments.size ? t('rdScanSegments', { segments: Array.from(scanSegments).join('、') }) : t('rdChainNote')),
             h('div', { className: 'vwf-chain' }, chainEntries().map((e) => (e.group
               ? h('div', { key: e.key, className: 'vwf-chain-group' }, e.group)
               : h('button', {
@@ -4368,7 +4375,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('span', { className: 'vwf-chain-main' },
                   h('span', { className: 'vwf-chain-head' },
                     h('strong', null, (e.seq ? e.seq + ' ' : '') + e.label + (e.child ? ' · ' + t('rdFanoutChild', { n: e.child }) : '')),
-                    e.attempt ? h('span', { className: badgeClass }, t('rdAttemptOption', { n: e.attempt, state: e.state }) + (e.latest ? t('rdAttemptLatest') : '')) : h('span', { className: badgeClass }, e.state),
+                    e.attempt ? h('span', { className: badgeClass }, (e.scan || t('rdAttemptOption', { n: e.attempt, state: e.state })) + (e.latest ? t('rdAttemptLatest') : '')) : h('span', { className: badgeClass }, e.state),
                     e.prev ? h('span', { className: badgeClass, style: { color: STATUS_COLOR.human } }, t('rdPrevRoundArtifact')) : null
                   ),
                   e.note ? h('span', { className: 'vwf-chain-note' }, e.note) : null,
@@ -4428,7 +4435,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   h('strong', null, t('rdFanoutChild', { n: (Number(v.item_index) || 0) + 1 }) + (v.item ? ' · ' + String(v.item).slice(0, 80) : '')),
                   h('span', { className: badgeClass, style: { color: done ? STATUS_COLOR.pass : v.status === 'failed' ? STATUS_COLOR.fail : STATUS_COLOR.running } }, done ? t('rdAttemptPassed') : (v.status === 'failed' ? t('rdAttemptReturned') : t('rdFanoutIncomplete')))
                 ),
-                mutedDiv(t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model })),
+                mutedDiv(attemptMeta(v)),
                 v.result !== undefined && v.result !== null ? h('div', { className: 'vwf-code', style: { marginTop: 4 } }, typeof v.result === 'string' ? v.result : safeJson(v.result)) : null,
                 v.error ? warnNote(String(v.error)) : null
               )
@@ -4464,8 +4471,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (!picked) return h('div', { className: 'vwf-tab-panel' }, mutedDiv(t('rdNodeNotRun')))
         const seg = Number(pickedValue.segment) || 0
         const returns = returnsFor(seg)
-        rt.push(secDiv(t('rdAttemptPicker') + ' ' + pickedIdx + ' · ' + t('rdSegmentLabel', { n: seg }), null, 'head'))
-        rt.push(mutedDiv(t('rdAttemptMeta', { segment: pickedValue.segment, revision: pickedValue.snapshot_revision, provider: pickedValue.provider, model: pickedValue.model }), null, 'meta'))
+        rt.push(secDiv((isSegmentScan(pickedValue) ? attemptText(pickedValue, 0, '') : t('rdAttemptPicker') + ' ' + pickedIdx) + ' · ' + t('rdSegmentLabel', { n: seg }), null, 'head'))
+        rt.push(mutedDiv(attemptMeta(pickedValue), null, 'meta'))
         rt.push(h('div', { key: 'own', className: rowClass, style: { gap: 6, marginTop: 6 } },
           mutedSpan(t('dashColResult') + '：'),
           pickedValue.outcome !== undefined && pickedValue.outcome !== null
@@ -4745,7 +4752,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('th', null, t('rdColStarted')), h('th', null, t('rdColEnded')), h('th', null, t('rdColDecision'))
               )),
               h('tbody', null, segs.map((s) => h('tr', { key: 'seg' + (s.index || s.id) },
-                h('td', null, String(s.index !== undefined ? s.index : (s.segment || '—')) + (s.active ? ' · ' + t('rdSegmentActive') : '')),
+                h('td', null, String(s.index !== undefined ? s.index : (s.segment || '—')) + (s.active ? ' · ' + t('rdSegmentActive') : '') + (scanSegments.has(s.index) ? ' · ' + t('rdSegmentScan') : '')),
                 h('td', null, String(s.trigger || '—')),
                 h('td', null, displayWord(String(s.status || head.status || '—'))),
                 h('td', null, fmtAt(s.started_at || s.startedAt)),
