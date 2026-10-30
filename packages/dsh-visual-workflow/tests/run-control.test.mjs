@@ -219,6 +219,8 @@ test('#80 Guidance：PAUSED 期间多轮 coach + baseline 配对修订（缺要�
   await until(() => eng.starts.length >= 2, 'HD 续跑启动')
   events.get('workflow/start')({ id: 'run-2', meta: { name: 'x' } })
   ckptLog(events, 'run-2', 'closeout', { explore: { verdict: 'PASS' } })
+  const latestBudget = { activations: { explore: 4 }, auto_ms: 1200 }
+  events.get('workflow/log')({ id: 'run-2' }, '[pw-ckpt]' + JSON.stringify({ c: 'closeout', r: { explore: { verdict: 'PASS' } }, tb: latestBudget }))
   assert.equal(JSON.parse(await ctl.execute({ action: 'pause', logical_run_id: 'issue-g' })).ok, true)
   settle(eng, events, 'run-2', 'cancelled', null)
   await p2
@@ -245,6 +247,7 @@ test('#80 Guidance：PAUSED 期间多轮 coach + baseline 配对修订（缺要�
   const p3 = wfRun.execute({ templateId: 'logical-run-spec', taskId: 'issue-g', resume_paused: true })
   await until(() => eng.starts.length >= 3, '暂停恢复启动')
   const req3 = eng.starts[2]
+  assert.deepEqual(req3.args.technical_budget, latestBudget, '取消无最终结果，暂停恢复使用最新检查点预算')
   assert.equal(req3.args.entry, 'explore', '改基线恢复应回跳基线负责节点')
   assert.equal(req3.args.results.explore.verdict, 'PASS')
   assert.ok(String(req3.args.guidance_text).includes('输出用中文'))

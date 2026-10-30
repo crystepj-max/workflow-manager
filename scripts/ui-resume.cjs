@@ -30,8 +30,9 @@ function submit(a, h) {
   if (!owner || !owner.session || owner.session.id !== ownerId || owner.id !== ownerId) return fail('原执行会话当前未加载或已退出，请先打开原会话，再重试；不会改用其他会话。')
   if (!first.workflow || !object(first.workflow.dsl)) return fail('原运行缺少冻结工作流，无法续跑。')
   const args = { ...config, dsl: JSON.parse(JSON.stringify(first.workflow.dsl)), taskId }
-  // 当前段检查点优先于首段配置，沿用暂停恢复的预算权威来源。
-  if (h.checkpoint && h.checkpoint.technical_budget) args.technical_budget = h.checkpoint.technical_budget
+  // 当前段最终结果预算优先；无结果时沿用暂停恢复的检查点预算。
+  const budget = h.parked && h.parked.technical_budget || h.checkpoint && h.checkpoint.technical_budget
+  if (budget) args.technical_budget = budget
   delete args.execution_session_id
   let decision = a
   if (a.action === 'recover') {

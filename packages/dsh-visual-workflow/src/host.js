@@ -675,7 +675,7 @@ return {
     const TERMINAL_STATUS_RE = () => (srcMod && srcMod.TERMINAL_STATUS_RE) || /^(DONE|STOPPED|WAITING_HUMAN|PAUSED|BLOCKED|AWAITING_HUMAN_.+|FAILED_AT_.+|FAILED_MAX_ROUNDS|FAILED_ITEM_CAP|FAILED_AGENT_CAP|TECHNICAL_FAILURE|ENDED_NO_SUCCESS_EDGE|ENDED_NO_FAILURE_EDGE|ENDED_NO_OUTCOME_EDGE|ROUTE_HALTED|ERROR)$/
     const HD_STRING_KEYS = ['decision_id', 'reason', 'node']
     const HD_NUMBER_KEYS = ['round', 'budgetUsed', 'maxRounds', 'decisionSeq']
-    const HD_OBJECT_KEYS = ['decision_package', 'control_event', 'blocked_edge', 'results']
+    const HD_OBJECT_KEYS = ['decision_package', 'control_event', 'blocked_edge', 'results', 'technical_budget']
     const runsStore = createRecordStore({
       label: '运行记录',
       dirKey: 'runsDir',
@@ -698,7 +698,7 @@ return {
       return {
         id: String(id), meta: { name: '', description: '' }, status: 'running', phase: '', logs: [], agents: [], formalRecords: [],
         taskId: '', workflowId: '', startedAt: Date.now(), supersededBy: '',
-        decision_id: '', reason: '', decision_package: null, control_event: null, blocked_edge: null, results: null, history: null,
+        decision_id: '', reason: '', decision_package: null, control_event: null, blocked_edge: null, results: null, history: null, technical_budget: null,
         error_detail: '',
         isolation_guarantee: 'unknown', isolation_probe: null,
         node: '', round: null, budgetUsed: null, maxRounds: null, decisionSeq: null, updatedAt: 0,
