@@ -30,6 +30,8 @@ function submit(a, h) {
   if (!owner || !owner.session || owner.session.id !== ownerId || owner.id !== ownerId) return fail('原执行会话当前未加载或已退出，请先打开原会话，再重试；不会改用其他会话。')
   if (!first.workflow || !object(first.workflow.dsl)) return fail('原运行缺少冻结工作流，无法续跑。')
   const args = { ...config, dsl: JSON.parse(JSON.stringify(first.workflow.dsl)), taskId }
+  // 当前段检查点优先于首段配置，沿用暂停恢复的预算权威来源。
+  if (h.checkpoint && h.checkpoint.technical_budget) args.technical_budget = h.checkpoint.technical_budget
   delete args.execution_session_id
   let decision = a
   if (a.action === 'recover') {
@@ -116,8 +118,9 @@ function execute(run, args, ui) {
 
 function config(args, parent, roleDir) {
   const value = { roleDir: args.roleDir || roleDir, execution_session_id: parent.session && parent.session.id }
-  for (const key of ['runDir', 'baseBranch', 'issueRef', 'issueTitle', 'issueBody', 'issueComments', 'requirement', 'resource_kind', 'issuePath', 'specPath']) if (args[key] !== undefined && args[key] !== null && args[key] !== '') value[key] = args[key]
-  return value
+  for (const key of ['runDir', 'baseBranch', 'issueRef', 'issueTitle', 'issueBody', 'issueComments', 'requirement', 'resource_kind', 'issuePath', 'specPath', 'technical_budget', 'retry_policy_overrides', 'run_baseline', 'env_store']) if (args[key] !== undefined && args[key] !== null && args[key] !== '') value[key] = args[key]
+  for (const [key, alias] of [['run_baseline', 'runBaseline'], ['env_store', 'envStore']]) if (args[key] || args[alias]) value[key] = args[key] || args[alias]
+  return JSON.parse(JSON.stringify(value))
 }
 
 // 与 WFM-81 的 isolation=unavailable 行互斥；这里只展示真正的“未开段、模型探针受阻”。

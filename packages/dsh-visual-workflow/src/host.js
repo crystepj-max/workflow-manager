@@ -2217,7 +2217,7 @@ return {
       const lrId = String((a && a.logical_run_id) || '')
       const rec = logicalRuns.get(lrId)
       if (!rec) return fail('逻辑运行不存在：' + lrId, '$.logical_run_id')
-      if (action === 'decision' || action === 'recover') return (await uiResume()).submit(a, { rec, latest: latestLogicalRunForTask(rec.task_id), parked: runs.get((rec.segments[rec.segments.length - 1] || {}).run_id), agents, execute: executeWorkflowRun, event: (type, extra) => { controlEvent(rec, type, extra); requestLogicalPersist(lrId) } })
+      if (action === 'decision' || action === 'recover') return (await uiResume()).submit(a, { rec, latest: latestLogicalRunForTask(rec.task_id), parked: runs.get((rec.segments[rec.segments.length - 1] || {}).run_id), checkpoint: extractCheckpoint(runs.get((rec.segments.at(-1) || {}).run_id)), agents, execute: executeWorkflowRun, event: (type, extra) => { controlEvent(rec, type, extra); requestLogicalPersist(lrId) } })
       if (rec.terminal) return fail('逻辑运行已终态（' + rec.lifecycle.state + '），控制面不可用：' + lrId)
       if (action === 'pause' || action === 'interrupt') {
         if (rec.lifecycle.state !== 'RUNNING') return fail('仅 RUNNING 的逻辑运行可' + (action === 'interrupt' ? '中断' : '暂停') + '；当前为 ' + rec.lifecycle.state + '（WAITING_HUMAN / BLOCKED / PAUSED 三态语义不混用）')
@@ -3509,8 +3509,6 @@ return {
             }
           }
           if (ui) Object.assign(hostDecisionRef, { initiator: ui.initiator, reason: args.feedback || '' })
-          logicalRec.human_decisions = (logicalRec.human_decisions || []).concat([hostDecisionRef])
-          controlEvent(logicalRec, 'human_decision_recorded', { decision_id: hostDecisionRef.decision_id, choice: hostDecisionRef.choice, candidate_digest: dig })
         }
 
         const scriptArgs = Object.assign({
@@ -3563,6 +3561,11 @@ return {
           return '错误：工作流引擎启动失败，workspace 已标 FAILED：' + errMsg(e)
         }
         // 启动边界自登记（workflow/start 事件不带 taskId）；续跑把同 taskId 前序门禁记录标记接管
+        // 引擎真正启动后才记录生效决定；启动失败仍可携原选择重试。
+        if (hostDecisionRef) {
+          logicalRec.human_decisions = (logicalRec.human_decisions || []).concat([hostDecisionRef])
+          controlEvent(logicalRec, 'human_decision_recorded', { decision_id: hostDecisionRef.decision_id, choice: hostDecisionRef.choice, candidate_digest: hostDecisionRef.candidate_ref && hostDecisionRef.candidate_ref.version && hostDecisionRef.candidate_ref.version.content_sha256 ? String(hostDecisionRef.candidate_ref.version.content_sha256) : null })
+        }
         const runId = String(run.id)
         if (segCtl) segmentCtrls.set(runId, segCtl)
         // 逐次 Proof 需要段 workspace 绑定（LOC-029）：与 workspace 生命周期同段登记

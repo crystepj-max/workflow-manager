@@ -54,7 +54,8 @@ async function env(t, { seed = {} } = {}) {
   const settle = (id, value) => { const resolve = pending.get(id); if (!resolve) return; pending.delete(id); resolve({ stopReason: 'completed', value, agentsStarted: 0 }); host.events.get('workflow/end')({ id }, { stopReason: 'completed' }) }
   t.after(async () => { releaseContexts(); for (const id of [...pending.keys()]) settle(id, doneValue); await drain(); detach(); await fiber.dispose() })
   return { fs, engine, owner, registry: ctx.agents, read, settle, streamModels, setFail: m => { failModel = m }, failStartOnce: message => { startError = Error(message) },
-    async start(value = waitValue) { const run = host.definedTools.find(t => t.name === 'wf_run'); const p = ctx.agents.withInitiator(owner, () => run.execute({ templateId: 'ui-resume-spec', taskId: 'task-ui', baseBranch: 'frozen-base' })); await until(() => engine.starts.length === 1); settle('ui-run-1', value); await p; await drain(); return read() },
+    async start(value = waitValue, checkpoints = [], args = {}) { const run = host.definedTools.find(t => t.name === 'wf_run'); const p = ctx.agents.withInitiator(owner, () => run.execute({ templateId: 'ui-resume-spec', taskId: 'task-ui', baseBranch: 'frozen-base', ...args })); await until(() => engine.starts.length === 1); for (const checkpoint of checkpoints) host.events.get('workflow/log')({ id: 'ui-run-1' }, '[pw-ckpt]' + JSON.stringify(checkpoint)); settle('ui-run-1', value); await p; await drain(); return read() },
+    checkpoint: (id, tb) => host.events.get('workflow/log')({ id }, '[pw-ckpt]' + JSON.stringify({ c: 'review', tb })),
     holdContext: () => { holdContext = true }, contextHeld: () => heldContexts.length > 0, releaseContexts,
     snapshot: async () => (await host.handlers.get('vwf.logicalRuns.get')({ logical_run_id: 'task-ui' })).record,
     list: () => host.handlers.get('vwf.runs.list')({}),
@@ -269,4 +270,94 @@ test('WFM-67/81 同时展示模型受阻与隔离不可用的未起段运行，�
   assert.equal(h.engine.starts.length, 0)
   assert.deepEqual(h.read().segments, [])
   assert.equal(h.fs._files.get(path), raw, '只读投影不得改写旧记录')
+})
+
+// A1 回归：真实 UI → wf_run → engine 参数链必须继承最新检查点的已耗预算。
+test('WFM-67 A1 UI decision preserves latest checkpoint technical budget', async t => {
+  const h = await env(t)
+  const earlier = { activations: { review: 1 }, auto_ms: 100 }
+  const latest = { activations: { review: 3 }, auto_ms: 900 }
+  const checkpoint = tb => ({ c: 'review', r: waitValue.results, h: [], rd: 1, bu: 1, mr: 2, ds: 1, tb })
+  await h.start({ ...waitValue, technical_budget: latest }, [checkpoint(earlier), checkpoint(latest)])
+  const out = await h.call({ action: 'decision', decision_id: 'd1', user_choice: 'USER_ACCEPTED' })
+  assert.equal(out.ok, true, JSON.stringify(out))
+  assert.deepEqual(h.engine.starts[1].args.technical_budget, latest, '续跑必须携带最新已耗预算，不能清零或退回较早检查点')
+})
+
+test('WFM-67 A2 engine start failure must not record an effective human decision', async t => {
+  const h = await env(t)
+  const budget = { activations: { review: 5 }, auto_ms: 1500 }
+  await h.start({ ...waitValue, technical_budget: budget }, [{ c: 'review', tb: budget }]); h.failStartOnce('A2 start channel unavailable')
+  const input = { action: 'decision', decision_id: 'd1', user_choice: 'STOP' }
+  const failed = await h.call(input)
+  assert.equal(failed.ok, false)
+  await drain()
+  const afterFailure = h.read()
+  const retry = await h.call(input)
+  assert.equal(retry.ok, true, JSON.stringify(retry))
+  h.settle('ui-run-2', { status: 'STOPPED' }); await drain()
+  const afterRetry = h.read()
+  assert.deepEqual(h.engine.starts[1].args.technical_budget, budget, '启动失败重试不得重置预算')
+  const decisions = rec => (rec.human_decisions || []).filter(d => d.decision_id === 'd1').length
+  const recorded = rec => rec.control_events.filter(e => e.type === 'human_decision_recorded' && e.decision_id === 'd1').length
+  const actual = {
+    failedState: afterFailure.lifecycle.state, failedSegments: afterFailure.segments.length,
+    failedConsumed: Object.keys(afterFailure.consumed_decisions).length,
+    failedDecisions: decisions(afterFailure), failedRecordedEvents: recorded(afterFailure),
+    retrySegments: afterRetry.segments.length, retryDecisions: decisions(afterRetry), retryRecordedEvents: recorded(afterRetry),
+  }
+  assert.deepEqual(actual, {
+    failedState: 'WAITING_HUMAN', failedSegments: 1, failedConsumed: 0,
+    failedDecisions: 0, failedRecordedEvents: 0,
+    retrySegments: 2, retryDecisions: 1, retryRecordedEvents: 1,
+  }, '未开段的失败只能留下提交/失败事实，不能留下生效决定；重试只能记录一次决定')
+})
+
+for (const code of ['MODEL_UNAVAILABLE', 'PROBE_FAILED']) test('WFM-67 A1 latest budget recover ' + code, async t => {
+  const h = await env(t)
+  const latest = { activations: { review: 4 }, auto_ms: 1200 }
+  const ck = tb => ({ c: 'review', r: {}, h: [], rd: 1, tb })
+  await h.start({ status: 'BLOCKED', node: 'review', termination: { business_outcome: 'CONFIRM', lifecycle: 'BLOCKED', reason_code: code, resume_node: 'review' } }, [ck({ auto_ms: 10 }), ck(latest)])
+  const out = await h.call({ action: 'recover', model_overrides: { review: { model: 'm2' } } })
+  assert.equal(out.ok, true, JSON.stringify(out))
+  assert.deepEqual(h.engine.starts[1].args.technical_budget, latest)
+})
+
+test('WFM-67 A1 frozen config aliases and nested values', () => {
+  const { config } = require('../../scripts/ui-resume.cjs')
+  const args = { retry_policy_overrides: { review: { timeout_ms: 3000 } }, runBaseline: { revision: 2 }, envStore: { key: { value: 'frozen' } } }
+  const frozen = config(args, { session: { id: 'owner' } }, 'roles')
+  args.retry_policy_overrides.review.timeout_ms = 1
+  args.runBaseline.revision = 3; args.envStore.key.value = 'mutated'
+  assert.deepEqual(frozen.retry_policy_overrides, { review: { timeout_ms: 3000 } })
+  assert.deepEqual(frozen.run_baseline, { revision: 2 })
+  assert.deepEqual(frozen.env_store, { key: { value: 'frozen' } })
+})
+
+test('WFM-67 frozen tool context survives caller mutation through UI engine chain', async t => {
+  const h = await env(t)
+  const args = { retry_policy_overrides: { review: { timeout_ms: 3000 } }, runBaseline: { revision: 2 }, envStore: { key: { value: 'frozen' } } }
+  await h.start(waitValue, [], args)
+  args.retry_policy_overrides.review.timeout_ms = 1; args.runBaseline.revision = 9; args.envStore.key.value = 'changed'
+  const out = await h.call({ action: 'decision', decision_id: 'd1', user_choice: 'STOP' })
+  assert.equal(out.ok, true, JSON.stringify(out))
+  const actual = h.engine.starts[1].args
+  assert.deepEqual(actual.retry_policy_overrides, { review: { timeout_ms: 3000 } })
+  assert.deepEqual(actual.run_baseline, { revision: 2 })
+  assert.deepEqual(actual.env_store, { key: { value: 'frozen' } })
+})
+
+test('WFM-67 consecutive UI segments use their own latest budget checkpoints', async t => {
+  const h = await env(t)
+  const first = { activations: { review: 2 }, auto_ms: 500 }
+  const second = { activations: { review: 6 }, auto_ms: 1800 }
+  await h.start({ ...waitValue, technical_budget: first }, [{ c: 'review', tb: first }])
+  assert.equal((await h.call({ action: 'decision', decision_id: 'd1', user_choice: 'STOP' })).ok, true)
+  assert.deepEqual(h.engine.starts[1].args.technical_budget, first)
+  h.checkpoint('ui-run-2', second)
+  h.settle('ui-run-2', { ...waitValue, decision_id: 'd2', technical_budget: second }); await drain()
+  const out = await h.call({ run_id: 'ui-run-2', action: 'decision', decision_id: 'd2', user_choice: 'STOP' })
+  assert.equal(out.ok, true, JSON.stringify(out))
+  assert.deepEqual(h.engine.starts[2].args.technical_budget, second)
+  await drain(); assert.equal(h.read().segments.length, 3)
 })
