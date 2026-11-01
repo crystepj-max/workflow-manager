@@ -158,7 +158,7 @@ export function createSdkOptions(payload, files, loopbackPort) {
     dshBin: join(dist, 'node-isolation-launcher.mjs'),
     profile: 'sdk',
     // 隔离 DSH 使用有限握手窗口；技术尝试数与外层预算仍由引擎管理。
-    initializeTimeoutMs: 60000,
+    initializeTimeoutMs: 90000,
     patches: files.patchPath ? [files.patchPath] : [],
     dshHome: files.dshHome,
     processCwd: payload.context.agent_cwd,
