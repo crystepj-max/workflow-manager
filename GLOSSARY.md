@@ -28,6 +28,14 @@ _Avoid_: Runtime、模型
 **Runtime**：运行 Agent 的执行环境。Runtime 表示任务在哪里执行，不等同于 Agent、模型或工作流运行。
 _Avoid_: Agent、模型、Run
 
+**`deepseek-v4-pro`**：提供方 `deepseek-official` 的模型接口名称，界面显示 DeepSeek-V4-Pro；四套内置模板中的六个验证节点（review / test / regression / evaluate）绑定此名称。它是模型名称，不是 Agent，也不是 Runtime。
+_Avoid_: Agent、Runtime、`deepseek-flash`
+
+**`deepseek-flash`**：提供方 `deepseek-official` 的模型接口名称，界面显示 DeepSeek-V41-Flash；四套内置模板中除上述六个验证节点以外的执行节点绑定此名称。它是模型名称，不是 Agent，也不是 Runtime。
+_Avoid_: Agent、Runtime、`deepseek-v4-pro`
+
+> 上述接口名称、界面显示名与节点分配来自 2026-10-08 的记录（`docs/tasks/FIX-234-template-default-model-gate.md`）；在线模型目录、服务端路由与费用核验按原决定跳过，本词汇表不表示这些项已核验通过。
+
 **dev-flow**：本地的任务计划与分派流程；它读取 Multica Task 状态，安排开发计划，并把符合条件的工作交给本地 Agent。
 _Avoid_: Multica 状态管理
 
