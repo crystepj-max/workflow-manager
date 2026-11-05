@@ -94,6 +94,9 @@ for (const [index, stage] of stages.entries()) {
     cwd: stage.cwd,
     env: process.env,
     stdio: 'inherit',
+    // Windows 上 npm 是 .cmd，直接 spawn 会 EINVAL；仅在 win32 借 shell 执行，
+    // 其它平台保持原有行为，不改变阶段清单与失败即停语义。
+    shell: process.platform === 'win32',
   })
   if (result.error) {
     console.error(`\n❌ ${stage.name}无法执行：${result.error.message}`)

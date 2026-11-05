@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFileSync } from 'node:child_process'
 
 const FIXTURE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../test/fixtures/conformance')
@@ -52,7 +52,7 @@ export function validateOptimizeFixture() {
 }
 
 export function validateDiagnoseFixture() {
-  const load = async (name) => (await import(join(FIXTURE_ROOT, 'diagnose', name))).sum
+  const load = async (name) => (await import(pathToFileURL(join(FIXTURE_ROOT, 'diagnose', name)).href)).sum
   return (async () => {
     const buggy = await load('sum-buggy.mjs')
     const fixed = await load('sum-fixed.mjs')
