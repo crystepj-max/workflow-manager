@@ -3483,7 +3483,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     const isSegmentScan = (a) => a && a.evidence_source === 'segment_scan'
     const scanText = () => t('rdSegmentScan')
     const attemptText = (v, n, state) => isSegmentScan(v)
-      ? t('rdScanEntry', { n: String(v.attempt_id).split('s').pop() }) + ' · ' + state
+      ? t('rdScanEntry', { n: String(v.attempt_id).split('s').pop() }) + (state ? ' · ' + state : '')
       : t('rdAttemptOption', { n, state })
     const attemptMeta = (v) => t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }) + (isSegmentScan(v) ? ' · ' + scanText() : '')
     // 返工深度只对逐次证据计数；段末快照无法回答本段真实调用次数。
