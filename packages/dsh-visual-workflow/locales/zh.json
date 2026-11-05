@@ -337,6 +337,7 @@
   "rdTabActivity": "活动",
   "rdAttemptPicker": "执行记录",
   "rdAttemptOption": "第 {n} 次 · {state}",
+  "rdAttemptOptionNoState": "第 {n} 次",
   "rdAttemptLatest": "（最新）",
   "rdAttemptReturned": "退回修改",
   "rdAttemptPassed": "已通过",

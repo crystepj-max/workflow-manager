@@ -3484,7 +3484,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     const scanText = () => t('rdSegmentScan')
     const attemptText = (v, n, state) => isSegmentScan(v)
       ? t('rdScanEntry', { n: String(v.attempt_id).split('s').pop() }) + (state ? ' · ' + state : '')
-      : t('rdAttemptOption', { n, state })
+      : state ? t('rdAttemptOption', { n, state }) : t('rdAttemptOptionNoState', { n })
     const attemptMeta = (v) => t('rdAttemptMeta', { segment: v.segment, revision: v.snapshot_revision, provider: v.provider, model: v.model }) + (isSegmentScan(v) ? ' · ' + scanText() : '')
     // 返工深度只对逐次证据计数；段末快照无法回答本段真实调用次数。
     function reworkTextOf(record) {

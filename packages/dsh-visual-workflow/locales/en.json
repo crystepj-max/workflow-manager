@@ -337,6 +337,7 @@
   "rdTabActivity": "Activity",
   "rdAttemptPicker": "Attempts",
   "rdAttemptOption": "Attempt {n} · {state}",
+  "rdAttemptOptionNoState": "Attempt {n}",
   "rdAttemptLatest": " (latest)",
   "rdAttemptReturned": "Returned for changes",
   "rdAttemptPassed": "Passed",

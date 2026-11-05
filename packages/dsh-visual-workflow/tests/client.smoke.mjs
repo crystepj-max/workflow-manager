@@ -3439,6 +3439,17 @@ for (const [level, label] of [['enforced', '强制隔离'], ['unavailable', '非
   })
 }
 
+test('WFM-832 空 state 文案模板：中英都不带尾部分隔符，有 state 模板保持不变', () => {
+  const zh = JSON.parse(readFileSync(join(here, '..', 'locales', 'zh.json'), 'utf8'))
+  const en = JSON.parse(readFileSync(join(here, '..', 'locales', 'en.json'), 'utf8'))
+  for (const [lang, pack] of [['zh', zh], ['en', en]]) {
+    assert.ok(pack.rdAttemptOptionNoState, `${lang} 缺少空 state 模板`)
+    assert.doesNotMatch(pack.rdAttemptOptionNoState, /·/, `${lang} 空 state 模板仍含分隔符`)
+    assert.match(pack.rdAttemptOption, /·/, `${lang} 有 state 模板必须保留分隔符`)
+  }
+  assert.match(src, /rdAttemptOptionNoState/, 'attemptText 非扫描分支必须按 state 分流到空 state 模板')
+})
+
 test('FIX-224 扫描摘要以段末扫描记录呈现，序号与逐次记录可辨，Store 逐次段优先', async () => {
   const original = runState.logical['lr-a']
   const records = runState.records['lr-a']
