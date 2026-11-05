@@ -3459,6 +3459,12 @@ test('FIX-224 扫描摘要以段末扫描记录呈现，序号与逐次记录可
     assert.match(detail.textContent, /段末扫描记录（不保证逐次）/)
     assert.match(attemptSelect().options[0].textContent, /扫描记录 #1/)
     assert.doesNotMatch(attemptSelect().options[0].textContent, /第 1 次/, '扫描序号不是实际调用次数')
+    // WFM-713：扫描来源的检查页标题不得出现重复分隔符，且保留扫描与段语义
+    await clickEl(detailTabs().find((t) => t.textContent.trim() === '检查'))
+    const scanCheckHead = container.querySelector('.vwf-tab-panel .vwf-sec')
+    assert.match(scanCheckHead.textContent, /扫描记录 #\d+ · 第 \d+ 轮/, '扫描来源标题保留扫描记录与轮次语义')
+    assert.doesNotMatch(scanCheckHead.textContent, /·\s*·/, '扫描来源标题不重复拼接分隔符')
+    await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))
     await clickEl(Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === '查看完整经过'))
     const chain = container.querySelector('.vwf-chain-dialog')
     assert.match(chain.querySelector('.vwf-dialog-desc').textContent, /段末扫描记录（不保证逐次）/, '整段说明醒目可见')
@@ -3480,6 +3486,12 @@ test('FIX-224 扫描摘要以段末扫描记录呈现，序号与逐次记录可
     assert.doesNotMatch(attemptSelect().textContent, /扫描记录/)
     assert.match(attemptSelect().textContent, /第 1 次/)
     assert.equal(attemptSelect().options.length, 2, '同段扫描不覆盖逐次记录或凭空加一条')
+    // WFM-713：逐次来源的检查页标题同样不出现重复分隔符
+    await clickEl(detailTabs().find((t) => t.textContent.trim() === '检查'))
+    const attemptCheckHead = container.querySelector('.vwf-tab-panel .vwf-sec')
+    assert.match(attemptCheckHead.textContent, /执行记录 \d+ · 第 \d+ 轮/, '逐次来源标题保留执行记录与轮次语义')
+    assert.doesNotMatch(attemptCheckHead.textContent, /·\s*·/, '逐次来源标题不重复拼接分隔符')
+    await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))
     await backToList()
   } finally {
     runState.logical['lr-a'] = original
