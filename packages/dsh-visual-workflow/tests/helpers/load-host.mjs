@@ -41,6 +41,7 @@ export const DIST_KERNEL_SEED = {
   [DIST + '/formal-artifacts.cjs']: formalArtifactsSrc,
   [DIST + '/evaluation-baseline.cjs']: evaluationBaselineSrc,
   [DIST + '/state-recovery-core.cjs']: stateRecoveryCoreSrc,
+  [DIST + '/ui-resume.cjs']: readFileSync(join(repoRoot, 'scripts', 'ui-resume.cjs'), 'utf8'),
   [DIST + '/route.cjs']: nodeProviderCoreSrc,
   [DIST + '/node-isolation-host-client.cjs']: nodeIsolationHostClientSrc,
   [DIST + '/dashboard-projection.cjs']: readFileSync(join(repoRoot, 'scripts', 'dashboard-projection.cjs'), 'utf8'),

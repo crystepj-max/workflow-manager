@@ -104,7 +104,7 @@ export function runtimeHelpersSource() {
     'function hcVerifiedAcceptDecision() {',
     '  const ref = A.decision_ref',
     '  if (!ref) return { ok: false, reason: "缺少宿主签发的 decision_ref" }',
-    '  const vrf = hcVerifyDecisionRef(ref, { logical_run_id: TASK, decision_id: A.decision_id, choice: "ACCEPT" })',
+    '  const vrf = hcVerifyDecisionRef(ref, { logical_run_id: A.logical_run_id || TASK, decision_id: A.decision_id, choice: "ACCEPT" })',
     '  if (!vrf.ok) return vrf',
     '  if (A.workspace_capability && ref.candidate_ref) {',
     '    const live = A.candidate_ref',

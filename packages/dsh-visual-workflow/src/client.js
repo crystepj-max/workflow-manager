@@ -3938,6 +3938,8 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const [guidanceText, setGuidanceText] = React.useState('')
       const [guidanceMsg, setGuidanceMsg] = React.useState('')
       const [controlErr, setControlErr] = React.useState('')
+      const [resumeState, setResumeState] = React.useState('')
+      const resumePending = React.useRef(false)
       const fetchLr = React.useCallback(() => {
         if (!lrId) return
         host.call('vwf.logicalRuns.get', { logical_run_id: lrId }).then((r) => {
@@ -4178,10 +4180,11 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (!lrId) return
         if (action === 'interrupt' && !window.confirm(t('ctlConfirmInterrupt'))) return
         setControlErr('')
-        host.call('vwf.run.control', Object.assign({ action, logical_run_id: lrId }, extra || {})).then((r) => {
+        return host.call('vwf.run.control', Object.assign({ action, logical_run_id: lrId }, extra || {})).then((r) => {
           if (r && r.ok) { if (extra && extra.text) { setGuidanceText(''); setGuidanceMsg(t('rdControlGuidance') + ' ✓') } fetchLr(); props.onRefresh && props.onRefresh() }
-          else setControlErr(String((r && r.error) || 'control failed'))
-        }).catch((e) => setControlErr(String((e && e.message) || e)))
+          else setControlErr(String((r && (r.error || (r.errors || []).map(e => e.message).join('; '))) || 'control failed'))
+          return r
+        }).catch((e) => { setControlErr(String((e && e.message) || e)); return { ok: false } })
       }
       const terminal = !!(lr && (lr.terminal === true || ['COMPLETED', 'STOPPED', 'FAILED'].indexOf(String(lr.lifecycle && lr.lifecycle.state)) >= 0))
       // 决策包与受阻现场：来自 vwf.state（宿主权威运行记录）
@@ -4191,6 +4194,16 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       const blockedEdge = snapState ? snapState.blocked_edge : null
       const lrWorkflow = lr && lr.snapshots && lr.snapshots.length ? lr.snapshots[lr.snapshots.length - 1] : null
       const lrProviderModel = (lrWorkflow && lrWorkflow.provider_model) || {}
+      React.useEffect(() => { resumePending.current = false; setResumeState(''); setDecisionChoice(''); setDecisionReason(''); setModelDraft({}) }, [head.id, decisionId])
+      const resume = (action, extra) => {
+        if (!lrId || resumePending.current) return
+        resumePending.current = true; setResumeState('pending')
+        sendControl(action, Object.assign({ run_id: ((lr && lr.segments || []).slice(-1)[0] || {}).run_id || '', snapshot_revision: lrWorkflow && lrWorkflow.revision }, extra)).then((r) => {
+          if (r && r.ok) setResumeState('running')
+          else { resumePending.current = false; setResumeState(''); fetchLr(); props.onRefresh && props.onRefresh() }
+        })
+      }
+      const resumeNote = !lrId ? t('rdResumeLegacy') : resumeState ? t(resumeState === 'running' ? 'rdDecisionSubmitting' : 'rdDecisionLocked') : t('rdDecisionNotYetLocked')
       const mappingRows = (rows) => h('table', { className: 'vwf-table' },
         h('thead', null, h('tr', null, h('th', null, t('dashColNode')), h('th', null, t('rdBlockedPrevValue')))),
         h('tbody', null, rows.map((r) => h('tr', { key: r.k }, h('td', null, r.k), h('td', null, r.v))))
@@ -4508,7 +4521,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (ce.length) {
           rt.push(h('div', { key: 'ce', style: { marginTop: 6 } },
             mutedDiv(t('rdActivityControl')),
-            h('div', null, ce.map((x, i) => mutedDiv(String(x.type || '—') + ' · ' + fmtAt(x.at) + (x.run_id ? ' · ' + t('rdSegmentLabel', { n: (x.run_id === head.id ? (head.segment || activeSeg) : '?') }) : ''), null, 'ce' + i)))))
+            h('div', null, ce.map((x, i) => mutedDiv((String(x.type || '').startsWith('ui_resume_') ? t(x.type) : String(x.type || '—')) + ' · ' + fmtAt(x.at) + (x.run_id ? ' · ' + t('rdSegmentLabel', { n: (x.run_id === head.id ? (head.segment || activeSeg) : '?') }) : ''), null, 'ce' + i)))))
         }
         if (hd.length) {
           rt.push(h('div', { key: 'hd', style: { marginTop: 6 } },
@@ -4598,10 +4611,19 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         )
       }
 
+      function runCard(title, content) {
+        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
+          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t(title))),
+          h('div', { style: { padding: '8px 14px 12px' } }, content))
+      }
+      function resumeActions(label, disabled, action, extra) {
+        return h('div', { key: 'act', className: 'vwf-row', style: { marginTop: 6, gap: 8 } },
+          h('button', { className: 'vwf-btn primary', disabled: !lrId || !!resumeState || disabled, onClick: () => resume(action, extra) }, t(label)), mutedSpan(resumeNote))
+      }
       // WAITING_HUMAN 结构化决策卡：选项 / 理由 / 影响说明 / 提交后锁定与续跑中；
-      // 提交路径受 DT-01 阻塞时只交界面与字段映射，不伪造成功状态。
+      // 仅宿主确认新段启动后显示续跑；失败保留选择与理由，允许重试。
       function renderDecisionCard() {
-        const status = String(head.status || '')
+        const status = lstate || String(head.status || '')
         if (status !== 'WAITING_HUMAN' && status.indexOf('AWAITING_HUMAN_') !== 0) return null
         const rows = []
         if (!pkg) {
@@ -4620,13 +4642,13 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
           rows.push(h('div', { key: 'opt', style: { marginTop: 6 } },
             secDiv(t('rdDecisionOptions')),
             opts.length ? h('div', { className: rowClass, style: { gap: 8, flexWrap: 'wrap' } }, opts.map((id) => {
-              const control = ['USER_ACCEPTED', 'ADD_BUDGET', 'STOP'].indexOf(id) >= 0
               return h('button', {
                 key: id, className: smallButtonClass + (decisionChoice === id ? ' primary' : ''),
+                disabled: !!resumeState,
                 'aria-pressed': decisionChoice === id ? 'true' : 'false',
                 onClick: () => setDecisionChoice(id),
                 title: effects[id] || '',
-              }, id + (control ? '' : ''))
+              }, id)
             })) : mutedDiv(t('rdDecisionUnknown'))
           ))
           if (opts.length) {
@@ -4657,37 +4679,22 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         }
         rows.push(h('label', { key: 'reason', style: { display: 'block', marginTop: 6 } },
           h('span', { className: fieldLabelClass }, t('rdDecisionReason')),
-          h('textarea', { className: 'vwf-textarea', rows: 2, placeholder: t('rdDecisionReasonPlaceholder'), value: decisionReason, onChange: (ev) => setDecisionReason(ev.target.value), style: { width: '100%' } })
+          h('textarea', { className: 'vwf-textarea', rows: 2, placeholder: t('rdDecisionReasonPlaceholder'), disabled: !!resumeState, value: decisionReason, onChange: (ev) => setDecisionReason(ev.target.value), style: { width: '100%' } })
         ))
         rows.push(h('div', { key: 'impact', className: 'vwf-note' }, t('rdDecisionImpact') + '：' + t('rdDecisionImpactNote')))
         if (consumed) rows.push(warnNote(t('rdDecisionConsumed', { id: decisionId }), null, 'cons'))
-        rows.push(warnNote(t('rdDecisionDt01'), null, 'dt01'))
-        const mapRows = [['decision_id', decisionId || '—'], ['user_choice', decisionChoice || '—']]
-        if (decisionReason.trim()) mapRows.push(['reason', decisionReason.trim()])
-        mapRows.push(['taskId', head.taskId || '—'])
-        mapRows.push(['templateId', head.workflowId || '—'])
-        rows.push(h('div', { key: 'map' },
-          secDiv(t('rdDecisionMapping')),
-          mappingRows(mapRows.map(([k, v]) => ({ k, v: String(v) })))
-        ))
-        rows.push(h('div', { key: 'act', className: rowClass, style: { marginTop: 6, gap: 8 } },
-          // 提交按钮在 DT-01 未裁定前锁定：不发起续跑，也不显示成功
-          h('button', { className: 'vwf-btn primary', disabled: true, 'aria-disabled': 'true' }, t('rdDecisionSubmit')),
-          mutedSpan(t('rdDecisionLocked') + ' · ' + t('rdDecisionNotYetLocked'))
-        ))
-        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
-          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdDecisionTitle'))),
-          h('div', { style: { padding: '8px 14px 12px' } }, rows)
-        )
+        rows.push(resumeActions('rdDecisionSubmit', !!consumed || !decisionId || !decisionChoice, 'decision', { decision_id: decisionId, user_choice: decisionChoice, reason: decisionReason.trim() }))
+        return runCard('rdDecisionTitle', rows)
       }
 
       // BLOCKED 恢复卡：阻塞原因 / 当前 Provider·Model / 修改后值 / 新修订与旧修订保留说明
       function renderRecoveryCard() {
-        if (String(head.status) !== 'BLOCKED') return null
+        if ((lstate || String(head.status)) !== 'BLOCKED') return null
         const rows = []
-        rows.push(warnNote(t('rdBlockedReason') + '：' + String(head.reason || '—'), null, 'r'))
+        rows.push(warnNote(t('rdBlockedReason') + '：' + String((lr && lr.lifecycle.reason && lr.lifecycle.reason.code) || head.reason || '—'), null, 'r'))
         rows.push(mutedDiv(t('rdBlockedResumeNode', { node: String(head.node || '—') }), null, 'n'))
         const nodeIds = Object.keys(lrProviderModel)
+        const updateModel = (nid, value) => setModelDraft({ ...modelDraft, [nid]: { ...modelDraft[nid], ...value } })
         rows.push(h('div', { key: 'pm', style: { marginTop: 6 } },
           secDiv(t('rdBlockedModel')),
           nodeIds.length
@@ -4697,14 +4704,14 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                   const pm = lrProviderModel[nid] || {}
                   const draft = modelDraft[nid] || {}
                   const provs = (providers || []).map((p) => String((p && (p.id || p.name)) || '')).filter(Boolean)
-                  const models = (providers || []).filter((p) => String((p && (p.id || p.name)) || '') === String(draft.provider || pm.provider)).flatMap((p) => (p.models || []).map((m) => String(m)))
+                  const models = (providers || []).filter((p) => String((p && (p.id || p.name)) || '') === String(draft.provider !== undefined ? draft.provider : pm.provider)).flatMap((p) => (p.models || []).map((m) => String(m)))
                   return h('tr', { key: nid },
                     h('td', null, nid),
                     h('td', null, String(pm.provider || 'default') + ' / ' + String(pm.model || 'default')),
                     h('td', null, h('div', { className: rowClass, style: { gap: 4 } },
-                      h('select', { className: 'vwf-input', style: { width: 110 }, value: String(draft.provider || pm.provider || ''), onChange: (ev) => setModelDraft(Object.assign({}, modelDraft, { [nid]: Object.assign({}, draft, { provider: ev.target.value, model: '' }) })) },
+                      h('select', { className: 'vwf-input', style: { width: 110 }, disabled: !!resumeState, value: String(draft.provider !== undefined ? draft.provider : pm.provider || ''), onChange: (ev) => updateModel(nid, { provider: ev.target.value, model: '' }) },
                         [h('option', { key: '', value: '' }, t('rdBlockedKeepDefault'))].concat(provs.map((p) => h('option', { key: p, value: p }, p)))),
-                      h('select', { className: 'vwf-input', style: { width: 130 }, value: String(draft.model || pm.model || ''), onChange: (ev) => setModelDraft(Object.assign({}, modelDraft, { [nid]: Object.assign({}, draft, { model: ev.target.value }) })) },
+                      h('select', { className: 'vwf-input', style: { width: 130 }, disabled: !!resumeState, value: String(draft.model !== undefined ? draft.model : pm.model || ''), onChange: (ev) => updateModel(nid, { model: ev.target.value }) },
                         [h('option', { key: '', value: '' }, t('rdBlockedKeepDefault'))].concat(models.map((m) => h('option', { key: m, value: m }, m))))
                     ))
                   )
@@ -4713,39 +4720,21 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
             : mutedDiv(t('rdBlockedNoProvider'))
         ))
         rows.push(h('div', { key: 'note', className: 'vwf-note' }, t('rdBlockedRestoreNote')))
-        rows.push(warnNote(t('rdBlockedDt01'), null, 'dt01'))
         const overrides = {}
         for (const nid of Object.keys(modelDraft)) {
           const d = modelDraft[nid] || {}
           if (!d.provider && !d.model) continue
-          overrides[nid] = { provider: d.provider || undefined, model: d.model || undefined }
+          overrides[nid] = Object.fromEntries(Object.entries(d).filter(([, v]) => v))
         }
-        rows.push(h('div', { key: 'map' },
-          secDiv(t('rdBlockedMapping')),
-          mappingRows([
-            { k: 'taskId', v: String(head.taskId || '—') },
-            { k: 'templateId', v: String(head.workflowId || '—') },
-            { k: 'entry', v: String(head.node || '—') },
-            { k: 'model_overrides', v: Object.keys(overrides).length ? safeJson(overrides) : '—' },
-          ])
-        ))
-        rows.push(h('div', { key: 'act', className: rowClass, style: { marginTop: 6, gap: 8 } },
-          h('button', { className: 'vwf-btn primary', disabled: true, 'aria-disabled': 'true' }, t('rdBlockedSubmit')),
-          mutedSpan(t('rdDecisionLocked'))
-        ))
-        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
-          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdBlockedTitle'))),
-          h('div', { style: { padding: '8px 14px 12px' } }, rows)
-        )
+        rows.push(resumeActions('rdBlockedSubmit', !Object.keys(overrides).length, 'recover', { model_overrides: overrides }))
+        return runCard('rdBlockedTitle', rows)
       }
 
       // 执行分段：一个 Logical Run 的每一段（多段折叠为一条任务的连续分段）
       function renderSegmentsCard() {
         const segs = (lr && lr.segments) || task.segments || []
         if (!segs.length) return null
-        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
-          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdSegments'))),
-          h('div', { style: { padding: '8px 14px 12px' } },
+        return runCard('rdSegments',
             h('table', { className: 'vwf-table' },
               h('thead', null, h('tr', null,
                 h('th', null, t('rdColSegment')), h('th', null, t('rdColTrigger')), h('th', null, t('rdColState')),
@@ -4760,7 +4749,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('td', null, String(s.decision_id || '—'))
               )))
             )
-          )
         )
       }
 
@@ -4778,9 +4766,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
       }
       function renderSnapshotsCard() {
         const snaps = (lr && lr.snapshots) || []
-        return h('div', { className: 'vwf-card', style: { marginTop: 8 } },
-          h('div', { className: 'vwf-card-head' }, h('div', { className: 'vwf-card-title' }, t('rdSnapshots'))),
-          h('div', { style: { padding: '8px 14px 12px' } },
+        return runCard('rdSnapshots',
             snaps.length ? h('table', { className: 'vwf-table' },
               h('thead', null, h('tr', null,
                 h('th', null, t('rdColRevision')), h('th', null, t('rdColActive')), h('th', null, t('rdColTime')), h('th', null, t('rdColProviderModel')), h('th', null, t('rdColRoles'))
@@ -4793,7 +4779,6 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
                 h('td', null, h('div', { className: 'vwf-muted-sm' }, roleEntriesText(s)))
               )))
             ) : mutedDiv(t('rdNoSnapshots'))
-          )
         )
       }
 

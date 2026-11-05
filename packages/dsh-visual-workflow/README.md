@@ -107,6 +107,14 @@ dsh --profile web --dump-config | grep visual-workflow   # 可见 patch 层
 ⚠️ 回退路径下脚本返回值只回到会话、插件拿不到，看板上该运行会是**退化记录**（单段、
 `completion=null`、不可从看板续跑）；回退时必须如实提示用户。
 
+## 在原运行中提交决定或改模型恢复
+
+- `WAITING_HUMAN` 决策卡选择当前决策包中的选项，可附理由；提交经 `vwf.run.control` 的 `decision` 动作继续同一 Logical Run，追加执行段。
+- `BLOCKED` 恢复卡修改模型后以 `recover` 动作执行原运行的 Probe → Resume。原版本保留；探针失败展示真实错误，不显示已恢复。首次探针失败且尚无执行段的运行也显示为未开始的受阻记录。
+- 提交期间锁定按钮；宿主确认新段启动后显示续跑中。上一段的证据与门禁后处理尚未收束时拒绝提前提交；状态、快照或决策已变化时拒绝旧提交，刷新后可重新选择；启动前通道失败保留等待现场并允许用户重试，不消费决定、不补造执行段或证明。
+- UI 来源和真实执行会话归属分别留在控制事件、决定及执行段。执行会话来自新运行冻结时的真实宿主 Agent；浏览器不能指定其他 Agent。宿主公开 `agents.get` / `withInitiator` 仅复用该精确 live Agent 的执行上下文。
+- 旧记录没有冻结执行会话归属时，或原会话未加载时，界面明确拒绝续跑；可在原会话恢复，或加载原会话后由用户重试。不会猜测归属、重写旧记录或派生新运行。暂停卡的原有恢复说明保持其既有范围。
+
 ## RPC 面（host 半）
 
 | RPC | 说明 |
@@ -114,6 +122,7 @@ dsh --profile web --dump-config | grep visual-workflow   # 可见 patch 层
 | `vwf.workflows.list / save / remove` | 模板库 CRUD：双根加载（内置 `.generated/` 只读 + 用户 `~/.dsh/visual-workflow/templates/` 可写）；save 撞名拒绝 + 同步编译 skill（save 即闭环）；remove 仅用户 + 同步删 skill。内置模板不经 save，其技能包由 `npm run install:builtin-skills` 单独安装到 `~/.dsh/skills/<id>/` |
 | `vwf.validate` | 统一校验管道（T-IMP-13）：sanitize → 逆投影蓝图 → 校验内核 validateBlueprint（含业务规则层与 requireModels），返回 `{ok, errors, fieldErrors, sanitized, warnings}`（fieldErrors 键形如 `node:<id>:<field>` / `edge:<i>:<field>` / `control:<field>`） |
 | `vwf.script` | 统一编译器管道（T-IMP-12）：DSL → `scripts/generate.mjs compileBlueprint` 译文（CLI 兜底），返回脚本全文、meta 与 engineAvailable。`vwf.compile` 已随统一编译器删除 |
+| `vwf.run.control` | 原 Run 控制：pause / interrupt / guidance 保持原语义；decision / recover 接收 logical_run_id、当前 run_id 与 snapshot_revision，决定额外携 decision_id / user_choice / reason，恢复额外携 model_overrides。来源由宿主确定 |
 | `vwf.state` | 运行状态（runId → status/phase/agents/logs） |
 | `vwf.models` | 对接 DSH 宿主 `llm` 服务的 provider/model 列表（编辑器的 Agent/模型下拉数据源） |
 | `vwf.roles / roles.get / roles.usage / roles.validate` | 角色库（issue-58/81）：内置 12 角色（清单事实源 `dsh/roles/builtin-roles.json`）+ 自定义（工作区 `dsh/roles/*.md`）+ 打包回退；决策内核 `scripts/role-library.cjs`（名称规则/来源优先级/摘要/引用统计/CRUD 裁决），`vwf.roles.validate` 为客户端权威名称校验；core 不可用时降级为内置只读清单 |

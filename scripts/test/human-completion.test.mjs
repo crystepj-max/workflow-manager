@@ -228,3 +228,18 @@ test('AC-04：同一决定重复恢复不重复收口；候选变化后拒绝', 
   assert.equal(changed.result.status, 'ERROR')
   assert.match(String(changed.result.detail || ''), /变化/)
 })
+
+
+test('WFM-67 派生 Logical Run：按真实逻辑身份核对 ACCEPT，其他 Run 与任务原 ID 不得冒充', async () => {
+  const args = {
+    taskId: 'hc-reused-task', logical_run_id: 'hc-reused-task#2', entry: 'closeout',
+    decision_id: 'derived-d1', user_choice: 'ACCEPT', results: { confirm: { route: 'READY', summary: 's', contract_digest: 'c1' }, execute: { route: 'READY', summary: 's', changed: 'a.md' }, evaluate: { route: 'CONFIRM', summary: '人工确认', contract_digest: 'c1', gaps: '' } },
+  }
+  const closeout = { 收口: { status: 'DELIVERED', completion_type: 'USER_ACCEPTED', summary: 'done', followups: '' } }
+  const accepted = await runBp(optimizeBp, closeout, { ...args, decision_ref: hostRef(args.logical_run_id, args.decision_id, 'ACCEPT') })
+  assert.equal(accepted.result.completion && accepted.result.completion.type, 'USER_ACCEPTED')
+  for (const wrong of [args.taskId, 'hc-reused-task#3']) {
+    const rejected = await runBp(optimizeBp, closeout, { ...args, decision_ref: hostRef(wrong, args.decision_id, 'ACCEPT') })
+    assert.equal(rejected.result.completion, null, '不得以另一逻辑运行决定放行：' + wrong)
+  }
+})

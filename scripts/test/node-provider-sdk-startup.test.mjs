@@ -105,7 +105,7 @@ test('固定 SDK 与生产选项允许本地 CLI 在原 10 秒窗口后完成初
 })
 
 for (const mode of ['slow-boot-never', 'over-limit']) {
-  test(`生产 60 秒握手上限在 ${mode} 情况有界失败并回收进程（SDK 真实 timer 使用虚拟时钟）`, async (t) => {
+  test(`生产 90 秒握手上限在 ${mode} 情况有界失败并回收进程（SDK 真实 timer 使用虚拟时钟）`, async (t) => {
     const { harness, readLog } = fixture(t, mode)
     let settled = false
     t.mock.timers.enable({ apis: ['setTimeout'] })
@@ -121,9 +121,12 @@ for (const mode of ['slow-boot-never', 'over-limit']) {
       const fixtureReadyWaitMs = performance.now() - preparingStarted
       if (mode === 'slow-boot-never') assert.ok(fixtureReadyWaitMs >= 6000, '夹具必须真实等待至少 6 秒才记录 boot 并读取 initialize')
       t.diagnostic(JSON.stringify({ synthetic: true, mode, phase: 'fixture-ready', fixtureReadyWaitMs }))
-      t.mock.timers.tick(59999)
+      t.mock.timers.tick(60000)
+      await delay(100)
+      assert.equal(settled, false, '60000ms 时 initialize 仍可等待，未耗尽新90秒窗口')
+      t.mock.timers.tick(29999)
       await delay(0)
-      assert.equal(settled, false, '59999ms 时 initialize 必须仍在等待')
+      assert.equal(settled, false, '89999ms 时 initialize 必须仍在等待')
       t.mock.timers.tick(1)
     } finally {
       // 超时回调已运行；恢复真实时钟，让 SDK 的公开 close 正常走协议/EOF 清理。
@@ -134,11 +137,11 @@ for (const mode of ['slow-boot-never', 'over-limit']) {
       const error = await Promise.race([
         outcome,
         new Promise((resolve, reject) => {
-          guard = realSetTimeout(() => reject(new Error('推进到 60000ms 后 SDK 应及时失败并完成清理')), 5000)
+          guard = realSetTimeout(() => reject(new Error('推进到 90000ms 后 SDK 应及时失败并完成清理')), 5000)
         }),
       ])
       assert.ok(error instanceof RequestTimeoutError)
-      assert.match(error.message, /initialize timed out after 60000ms/)
+      assert.match(error.message, /initialize timed out after 90000ms/)
       assert.equal(readLog().filter((entry) => entry.event === 'initialize-reply').length, 0)
     } finally {
       clearTimeout(guard)
