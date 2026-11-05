@@ -3461,7 +3461,7 @@ test('FIX-224 扫描摘要以段末扫描记录呈现，序号与逐次记录可
     assert.doesNotMatch(attemptSelect().options[0].textContent, /第 1 次/, '扫描序号不是实际调用次数')
     // WFM-713：扫描来源的检查页标题不得出现重复分隔符，且保留扫描与段语义
     await clickEl(detailTabs().find((t) => t.textContent.trim() === '检查'))
-    const scanCheckHead = container.querySelector('.vwf-tab-panel .vwf-sec')
+    const scanCheckHead = container.querySelector('[data-vwf-checks-head]')
     assert.match(scanCheckHead.textContent, /扫描记录 #\d+ · 第 \d+ 轮/, '扫描来源标题保留扫描记录与轮次语义')
     assert.doesNotMatch(scanCheckHead.textContent, /·\s*·/, '扫描来源标题不重复拼接分隔符')
     await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))
@@ -3488,7 +3488,7 @@ test('FIX-224 扫描摘要以段末扫描记录呈现，序号与逐次记录可
     assert.equal(attemptSelect().options.length, 2, '同段扫描不覆盖逐次记录或凭空加一条')
     // WFM-713：逐次来源的检查页标题同样不出现重复分隔符
     await clickEl(detailTabs().find((t) => t.textContent.trim() === '检查'))
-    const attemptCheckHead = container.querySelector('.vwf-tab-panel .vwf-sec')
+    const attemptCheckHead = container.querySelector('[data-vwf-checks-head]')
     assert.match(attemptCheckHead.textContent, /执行记录 \d+ · 第 \d+ 轮/, '逐次来源标题保留执行记录与轮次语义')
     assert.doesNotMatch(attemptCheckHead.textContent, /·\s*·/, '逐次来源标题不重复拼接分隔符')
     await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))

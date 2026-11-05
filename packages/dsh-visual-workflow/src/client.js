@@ -528,7 +528,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
     const mutedSmall = (x) => h('small', { className: 'vwf-muted-sm' }, x)
     const mutedTd = (x, st) => h('td', { className: 'vwf-muted-sm', style: st }, x)
     const mutedText = (x, st) => h('div', { className: 'vwf-muted', style: st }, x)
-    const secDiv = (x, st, key) => h('div', { className: 'vwf-sec', style: st, key: key }, x)
+    const secDiv = (x, st, key, attrs) => h('div', { className: 'vwf-sec', style: st, key: key, ...(attrs || {}) }, x)
     const warnNote = (x, st, key) => h('div', { className: 'vwf-note warn', style: st, key: key }, x)
     const errLine = (x, st, key) => h('div', { className: 'vwf-err-line', style: st, key: key }, x)
     const okLine = (x) => h('div', { className: 'vwf-ok-line' }, x)
@@ -4484,7 +4484,7 @@ g:hover > .vwf-handle { opacity:1; pointer-events:auto; fill:var(--vwf-accent); 
         if (!picked) return h('div', { className: 'vwf-tab-panel' }, mutedDiv(t('rdNodeNotRun')))
         const seg = Number(pickedValue.segment) || 0
         const returns = returnsFor(seg)
-        rt.push(secDiv((isSegmentScan(pickedValue) ? attemptText(pickedValue, 0, '') : t('rdAttemptPicker') + ' ' + pickedIdx) + ' · ' + t('rdSegmentLabel', { n: seg }), null, 'head'))
+        rt.push(secDiv((isSegmentScan(pickedValue) ? attemptText(pickedValue, 0, '') : t('rdAttemptPicker') + ' ' + pickedIdx) + ' · ' + t('rdSegmentLabel', { n: seg }), null, 'head', { 'data-vwf-checks-head': '' }))
         rt.push(mutedDiv(attemptMeta(pickedValue), null, 'meta'))
         rt.push(h('div', { key: 'own', className: rowClass, style: { gap: 6, marginTop: 6 } },
           mutedSpan(t('dashColResult') + '：'),
