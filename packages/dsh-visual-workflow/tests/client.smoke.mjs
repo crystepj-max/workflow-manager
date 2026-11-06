@@ -3450,6 +3450,22 @@ test('WFM-832 空 state 文案模板：中英都不带尾部分隔符，有 stat
   assert.match(src, /rdAttemptOptionNoState/, 'attemptText 非扫描分支必须按 state 分流到空 state 模板')
 })
 
+test('WFM-832 attemptText 实际文案：空 state 与有 state 两条分支都不带孤立分隔符', () => {
+  const zh = JSON.parse(readFileSync(join(here, '..', 'locales', 'zh.json'), 'utf8'))
+  const t = (key, params = {}) => String(zh[key] || key).replace(/\{(\w+)\}/g, (_, k) => String(params[k] ?? ''))
+  const isSegmentScan = (a) => Boolean(a && a.evidence_source === 'segment_scan')
+  // 从权威源码取出该闭包内函数并真正执行，而不是只复述实现或检查 key 存在。
+  const match = src.match(/const attemptText = \(v, n, state\) =>[\s\S]*?\n(?=\s*const attemptMeta)/)
+  assert.ok(match, '未能从 src/client.js 提取 attemptText 定义')
+  const attemptText = new Function('t', 'isSegmentScan', match[0] + '\nreturn attemptText')(t, isSegmentScan)
+  const scan = { attempt_id: 'a1s2', evidence_source: 'segment_scan' }
+  const attempt = { attempt_id: 'a1', evidence_source: 'store' }
+  assert.equal(attemptText(scan, 0, ''), '扫描记录 #2', '扫描来源空 state 不带尾部 ·')
+  assert.equal(attemptText(scan, 0, '通过'), '扫描记录 #2 · 通过', '扫描来源有 state 输出不变')
+  assert.equal(attemptText(attempt, 1, ''), '第 1 次', '逐次来源空 state 不带尾部 ·')
+  assert.equal(attemptText(attempt, 1, '通过'), '第 1 次 · 通过', '逐次来源有 state 输出不变')
+})
+
 test('FIX-224 扫描摘要以段末扫描记录呈现，序号与逐次记录可辨，Store 逐次段优先', async () => {
   const original = runState.logical['lr-a']
   const records = runState.records['lr-a']
