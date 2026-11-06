@@ -3439,6 +3439,33 @@ for (const [level, label] of [['enforced', '强制隔离'], ['unavailable', '非
   })
 }
 
+test('WFM-832 空 state 文案模板：中英都不带尾部分隔符，有 state 模板保持不变', () => {
+  const zh = JSON.parse(readFileSync(join(here, '..', 'locales', 'zh.json'), 'utf8'))
+  const en = JSON.parse(readFileSync(join(here, '..', 'locales', 'en.json'), 'utf8'))
+  for (const [lang, pack] of [['zh', zh], ['en', en]]) {
+    assert.ok(pack.rdAttemptOptionNoState, `${lang} 缺少空 state 模板`)
+    assert.doesNotMatch(pack.rdAttemptOptionNoState, /·/, `${lang} 空 state 模板仍含分隔符`)
+    assert.match(pack.rdAttemptOption, /·/, `${lang} 有 state 模板必须保留分隔符`)
+  }
+  assert.match(src, /rdAttemptOptionNoState/, 'attemptText 非扫描分支必须按 state 分流到空 state 模板')
+})
+
+test('WFM-832 attemptText 实际文案：空 state 与有 state 两条分支都不带孤立分隔符', () => {
+  const zh = JSON.parse(readFileSync(join(here, '..', 'locales', 'zh.json'), 'utf8'))
+  const t = (key, params = {}) => String(zh[key] || key).replace(/\{(\w+)\}/g, (_, k) => String(params[k] ?? ''))
+  const isSegmentScan = (a) => Boolean(a && a.evidence_source === 'segment_scan')
+  // 从权威源码取出该闭包内函数并真正执行，而不是只复述实现或检查 key 存在。
+  const match = src.match(/const attemptText = \(v, n, state\) =>[\s\S]*?\n(?=\s*const attemptMeta)/)
+  assert.ok(match, '未能从 src/client.js 提取 attemptText 定义')
+  const attemptText = new Function('t', 'isSegmentScan', match[0] + '\nreturn attemptText')(t, isSegmentScan)
+  const scan = { attempt_id: 'a1s2', evidence_source: 'segment_scan' }
+  const attempt = { attempt_id: 'a1', evidence_source: 'store' }
+  assert.equal(attemptText(scan, 0, ''), '扫描记录 #2', '扫描来源空 state 不带尾部 ·')
+  assert.equal(attemptText(scan, 0, '通过'), '扫描记录 #2 · 通过', '扫描来源有 state 输出不变')
+  assert.equal(attemptText(attempt, 1, ''), '第 1 次', '逐次来源空 state 不带尾部 ·')
+  assert.equal(attemptText(attempt, 1, '通过'), '第 1 次 · 通过', '逐次来源有 state 输出不变')
+})
+
 test('FIX-224 扫描摘要以段末扫描记录呈现，序号与逐次记录可辨，Store 逐次段优先', async () => {
   const original = runState.logical['lr-a']
   const records = runState.records['lr-a']
@@ -3461,7 +3488,7 @@ test('FIX-224 扫描摘要以段末扫描记录呈现，序号与逐次记录可
     assert.doesNotMatch(attemptSelect().options[0].textContent, /第 1 次/, '扫描序号不是实际调用次数')
     // WFM-713：扫描来源的检查页标题不得出现重复分隔符，且保留扫描与段语义
     await clickEl(detailTabs().find((t) => t.textContent.trim() === '检查'))
-    const scanCheckHead = container.querySelector('.vwf-tab-panel .vwf-sec')
+    const scanCheckHead = container.querySelector('[data-vwf-checks-head]')
     assert.match(scanCheckHead.textContent, /扫描记录 #\d+ · 第 \d+ 轮/, '扫描来源标题保留扫描记录与轮次语义')
     assert.doesNotMatch(scanCheckHead.textContent, /·\s*·/, '扫描来源标题不重复拼接分隔符')
     await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))
@@ -3488,7 +3515,7 @@ test('FIX-224 扫描摘要以段末扫描记录呈现，序号与逐次记录可
     assert.equal(attemptSelect().options.length, 2, '同段扫描不覆盖逐次记录或凭空加一条')
     // WFM-713：逐次来源的检查页标题同样不出现重复分隔符
     await clickEl(detailTabs().find((t) => t.textContent.trim() === '检查'))
-    const attemptCheckHead = container.querySelector('.vwf-tab-panel .vwf-sec')
+    const attemptCheckHead = container.querySelector('[data-vwf-checks-head]')
     assert.match(attemptCheckHead.textContent, /执行记录 \d+ · 第 \d+ 轮/, '逐次来源标题保留执行记录与轮次语义')
     assert.doesNotMatch(attemptCheckHead.textContent, /·\s*·/, '逐次来源标题不重复拼接分隔符')
     await clickEl(detailTabs().find((t) => t.textContent.trim() === '结果'))

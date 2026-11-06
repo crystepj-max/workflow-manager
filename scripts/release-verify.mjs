@@ -94,6 +94,11 @@ for (const [index, stage] of stages.entries()) {
     cwd: stage.cwd,
     env: process.env,
     stdio: 'inherit',
+    // Windows 上 npm 是 .cmd，直接 spawn 会 EINVAL；只给 npm.cmd 阶段借 shell。
+    // node 阶段必须保持直接 spawn：官方安装路径 "C:\Program Files\nodejs\node.exe"
+    // 带空格，shell 模式会把它拆成 C:\Program 而启动失败（PR #387 第 1 轮 A 类）。
+    // 其它平台与非 npm 阶段行为不变，阶段清单与失败即停语义不变。
+    shell: process.platform === 'win32' && stage.command === 'npm.cmd',
   })
   if (result.error) {
     console.error(`\n❌ ${stage.name}无法执行：${result.error.message}`)
